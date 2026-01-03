@@ -1,5 +1,4 @@
-@tailwind base;
-@tailwind components;
+@import "tailwindcss/preflight";
 @tailwind utilities;
 
 .logo.vite:hover {
@@ -9,6 +8,7 @@
 .logo.preact:hover {
   filter: drop-shadow(0 0 2em #673ab8);
 }
+
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -85,6 +85,7 @@ button {
 button:hover {
   border-color: #396cd8;
 }
+
 button:active {
   border-color: #396cd8;
   background-color: #e8e8e8;
@@ -97,6 +98,10 @@ button {
 
 #greet-input {
   margin-right: 5px;
+}
+
+.button-primary {
+  @apply px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -114,6 +119,7 @@ button {
     color: #ffffff;
     background-color: #0f0f0f98;
   }
+
   button:active {
     background-color: #0f0f0f69;
   }
