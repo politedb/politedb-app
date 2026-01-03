@@ -3,12 +3,9 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::engines::{self, EngineConnection};
 use crate::state::AppState;
-use crate::types::{ConnectionCreateInput, ConnectionInfo, EngineKind};
+use crate::types::{ConnectionCreateInput, ConnectionInfo};
 
-/// Create a runtime connection (in-memory) and return ConnectionInfo.
-/// This DOES insert into AppState.connections after successful connect.
 #[tauri::command]
 pub async fn connection_create(
     app: AppHandle,
@@ -17,70 +14,72 @@ pub async fn connection_create(
 ) -> Result<ConnectionInfo, String> {
     let id = Uuid::new_v4();
 
-    match input.engine {
-        EngineKind::Postgres => {
-            let pg = input.postgres.ok_or("POSTGRES_CONFIG_MISSING")?;
+    // 1) Resolve driver
+    let driver = state
+        .engines
+        .get(input.engine.clone())
+        .ok_or("ENGINE_NOT_SUPPORTED")?;
 
-            // Pass AppHandle down so keychain service name is correct
-            let conn = engines::postgres::driver::connect_pg(&app, id, input.label.clone(), pg)
-                .await
-                .map_err(|e| format!("POSTGRES_CONNECT_FAILED: {:#}", e))?;
+    // 2) Connect (do NOT mutate state before connect succeeds)
+    let label = input.label.clone();
+    let conn = driver.connect(&app, id, label.clone(), input).await?;
 
-            // Insert into runtime state only after successful connect
-            state
-                .connections
-                .insert(id, EngineConnection::Postgres(conn));
+    // 3) Insert runtime connection
+    state.connections.insert(id, conn);
 
-            Ok(ConnectionInfo {
-                id,
-                engine: EngineKind::Postgres,
-                label: input.label,
-            })
-        }
-    }
+    Ok(ConnectionInfo {
+        id,
+        engine: state
+            .connections
+            .get(&id)
+            .map(|c| c.value().engine_kind())
+            .unwrap_or_else(|| {
+                // Fallback (should never happen)
+                crate::types::EngineKind::Postgres
+            }),
+        label,
+    })
 }
 
-/// List current runtime connections (in-memory).
+#[tauri::command]
+pub async fn connection_test(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ConnectionCreateInput,
+) -> Result<(), String> {
+    let driver = state
+        .engines
+        .get(input.engine.clone())
+        .ok_or("ENGINE_NOT_SUPPORTED")?;
+
+    driver.test(&app, input).await
+}
+
 #[tauri::command]
 pub async fn connection_list(state: State<'_, AppState>) -> Result<Vec<ConnectionInfo>, String> {
-    let mut out = Vec::new();
+    Ok(state
+        .connections
+        .iter()
+        .map(|c| {
+            let engine = c.value().engine_kind();
 
-    for c in state.connections.iter() {
-        let id = *c.key();
-
-        let (engine, label) = match c.value() {
-            EngineConnection::Postgres(pg) => (EngineKind::Postgres, pg.label.clone()),
-        };
-
-        out.push(ConnectionInfo { id, engine, label });
-    }
-
-    Ok(out)
+            ConnectionInfo {
+                id: *c.key(),
+                engine,
+                label: c.value().label(),
+            }
+        })
+        .collect())
 }
 
-/// Remove a runtime connection (in-memory).
 #[tauri::command]
 pub async fn connection_remove(
     state: State<'_, AppState>,
     connection_id: Uuid,
 ) -> Result<(), String> {
+    // Optional: if you want to cancel/cleanup ops belonging to this connection,
+    // you need op->connection mapping (not in your current state).
+    // For now just remove runtime connection.
     state.connections.remove(&connection_id);
     Ok(())
-}
-
-/// Smoke test connection (no state mutation).
-#[tauri::command]
-pub async fn connection_test(app: AppHandle, input: ConnectionCreateInput) -> Result<(), String> {
-    match input.engine {
-        EngineKind::Postgres => {
-            let pg = input.postgres.ok_or("POSTGRES_CONFIG_MISSING")?;
-
-            // Test only. Do NOT insert into AppState.
-            engines::postgres::driver::connect_pg(&app, Uuid::new_v4(), "__test__".into(), pg)
-                .await
-                .map_err(|e| format!("POSTGRES_TEST_FAILED: {:#}", e))?;
-
-            Ok(())
-        }
-    }
 }

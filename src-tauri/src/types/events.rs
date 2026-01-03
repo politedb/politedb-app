@@ -1,0 +1,36 @@
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::types::cell::{CellValue, ColumnMeta};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationStarted {
+    pub op_id: Uuid,
+    pub connection_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationDone {
+    pub op_id: Uuid,
+    pub truncated: bool,
+    pub row_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationError {
+    pub op_id: Uuid,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationMeta {
+    pub op_id: Uuid,
+    pub columns: Vec<ColumnMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableChunk {
+    pub op_id: Uuid,
+    pub rows: Vec<Vec<CellValue>>,
+    pub row_offset: u64,
+}

@@ -1,4 +1,3 @@
-// src-tauri/src/engines/postgres/row_codec.rs
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use tokio_postgres::types::Type;
 use tokio_postgres::{Row, Statement};
