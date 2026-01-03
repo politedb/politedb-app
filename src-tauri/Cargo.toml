@@ -1,25 +1,53 @@
 [package]
 name = "politedb"
 version = "0.1.0"
-description = "A Tauri App"
+description = "PoliteDB - Modern Database Management Tool"
 authors = ["you"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.75"
 
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "politedb_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "=2.5.3", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+tauri = { version = "=2.9.5", features = [] }
+tauri-plugin-opener = "=2.5.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
+thiserror = "1"
+anyhow = "1"
+futures-util = "0.3"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+uuid = { version = "1", features = ["v4", "serde"] }
+dashmap = "5"
+
+# Security: store secrets in OS Keychain (macOS Keychain)
+keyring = "2"
+
+# ---- Postgres driver stack (prod) ----
+deadpool-postgres = { version = "0.14", optional = true }
+tokio-postgres = { version = "0.7", optional = true, features = ["with-uuid-1", "with-serde_json-1"] }
+native-tls = { version = "0.2", optional = true }
+postgres-native-tls = { version = "0.5", optional = true }
+
+[features]
+default = ["engine-postgres"]
+
+engine-postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
+pg-tls = ["dep:native-tls", "dep:postgres-native-tls"]
