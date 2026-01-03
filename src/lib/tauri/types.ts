@@ -3,7 +3,8 @@
  * ============================================================================
  */
 
-export type Engine = "postgres" | "mysql" | string;
+export type Engine = "postgres" | "mysql" | "redis" | string;
+
 export type SslMode =
   | "disable"
   | "prefer"
@@ -49,11 +50,36 @@ export type MySqlConnectInput = {
   ssl_ca_path?: string | null;
 };
 
+export type RedisConnectInput = {
+  host: string;
+  port: number;
+
+  // Redis ACL user is optional. If omitted => ":password@"
+  user?: string | null;
+
+  // Password is optional (some Redis instances allow no-auth)
+  password: SecretRef;
+
+  // default 0
+  db?: number | null;
+
+  // For Redis we only care disable / prefer / require.
+  // Still reuse SslMode union for FE convenience.
+  ssl_mode?: "disable" | "prefer" | "require" | (SslMode & string) | null;
+
+  connect_timeout_ms?: number | null;
+
+  // Default per-connection timeout for Redis commands
+  command_timeout_ms?: number | null;
+};
+
 export type ConnectionCreateInput = {
   engine: Engine;
   label: string;
+
   postgres?: PgConnectInput;
   mysql?: MySqlConnectInput;
+  redis?: RedisConnectInput;
 };
 
 export type ConnectionInfo = {
@@ -101,7 +127,7 @@ export type SaveAndConnectAction =
   | { mode: "update"; profileId: string };
 
 /* ============================================================================
- * Operations
+ * Operations (SQL + Redis)
  * ============================================================================
  */
 
@@ -109,23 +135,70 @@ export type SqlQueryPayload = {
   sql: string;
   batch_size?: number;
   max_rows?: number;
+
+  // optional overrides (backend may ignore if unsupported)
+  statement_timeout_ms?: number | null;
 };
 
-export type OperationExecuteInput = {
-  connection_id: string;
-  kind: "sql_query";
-  sql: SqlQueryPayload;
+export type RedisCommandPayload = {
+  // Example: "KEYS", "SCAN", "GET", "HGETALL", "LRANGE", ...
+  command: string;
+
+  // All args are strings; FE should stringify numbers itself.
+  args?: string[];
+
+  // optional override (fallback to connection.default_command_timeout_ms)
+  command_timeout_ms?: number | null;
+
+  // Optional: if backend supports selecting db per command (usually it won’t; it’s per-conn)
+  db?: number | null;
 };
+
+export type OperationExecuteInput =
+  | {
+      connection_id: string;
+      kind: "sql_query";
+      sql: SqlQueryPayload;
+    }
+  | {
+      connection_id: string;
+      kind: "redis_command";
+      redis: RedisCommandPayload;
+    };
 
 export type ColumnMeta = { name: string; db_type: string };
 
+/**
+ * TableChunk is used for SQL results (postgres/mysql) AND also can be reused
+ * for Redis “tabular outputs” if you decide (e.g. HGETALL => key/value rows).
+ *
+ * Note: columns is optional in some of your runtime events; keep it optional for safety.
+ */
 export type TableChunk = {
   op_id: string;
-  columns: ColumnMeta[];
+  columns?: ColumnMeta[];
   rows: any[][];
   row_offset: number;
 };
 
+/**
+ * Redis often returns:
+ * - single value (GET)
+ * - list of values (KEYS/SMEMBERS/LRANGE…)
+ * - map-ish (HGETALL)
+ *
+ * Keep the FE contract stable:
+ * - redis_result.kind tells FE how to render
+ * - values are CellValue-like, but FE can treat as `any` if you haven’t typed CellValue yet
+ */
+export type RedisResult =
+  | { op_id: string; kind: "value"; value: any }
+  | { op_id: string; kind: "list"; items: any[] }
+  | { op_id: string; kind: "table"; columns: ColumnMeta[]; rows: any[][] };
+
+/**
+ * OperationDone event stays shared.
+ */
 export type OperationDone = {
   op_id: string;
   truncated: boolean;

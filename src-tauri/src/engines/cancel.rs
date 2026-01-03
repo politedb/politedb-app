@@ -5,6 +5,7 @@ use tokio::sync::Notify;
 pub enum CancelHandle {
     Postgres(tokio_postgres::CancelToken),
     MySql { notify: Arc<Notify> },
+    Redis { notify: Arc<Notify> },
 }
 
 impl CancelHandle {
@@ -17,6 +18,9 @@ impl CancelHandle {
                 });
             }
             CancelHandle::MySql { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Redis { notify } => {
                 notify.notify_waiters();
             }
         }

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 pub enum EngineKind {
     Postgres,
     Mysql,
-    // Sqlite,
-    // Redis,
+    Redis,
     // Mongo,
+    // Sqlite,
 }
 
 use crate::types::secret::SecretRef;
@@ -19,10 +19,8 @@ pub struct PgConnectInput {
     pub database: String,
     pub user: String,
 
-    // Password có thể là inline (chỉ session) hoặc keychain ref
     pub password: SecretRef,
 
-    // SSL mode đơn giản hoá: "disable" | "prefer" | "require"
     pub ssl_mode: Option<String>,
     pub ssl_key_path: Option<String>,
     pub ssl_cert_path: Option<String>,
@@ -53,4 +51,23 @@ pub struct MySqlConnectInput {
     pub pool_max_size: Option<usize>,
     pub connect_timeout_ms: Option<u64>,
     pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedisConnectInput {
+    pub host: String,
+    pub port: u16,
+
+    pub user: Option<String>,
+
+    pub password: SecretRef,
+
+    // Redis database index: 0..=15
+    pub db: Option<u8>,
+
+    // "disable" | "prefer" | "require"
+    pub ssl_mode: Option<String>,
+
+    pub connect_timeout_ms: Option<u64>,
+    pub pool_max_size: Option<usize>,
 }

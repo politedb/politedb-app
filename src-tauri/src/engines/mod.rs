@@ -1,18 +1,22 @@
 pub mod cancel;
 pub mod driver;
+pub mod registry;
+
 pub mod mysql;
 pub mod postgres;
-pub mod registry;
+pub mod redis;
 
 use uuid::Uuid;
 
 use crate::operations::ctx::OperationCtx;
+use crate::types::RedisCommandInput;
 use crate::types::{EngineKind, SqlQueryInput};
 
 #[derive(Clone)]
 pub enum EngineConnection {
     Postgres(postgres::connection::PgConn),
     MySql(mysql::connection::MySqlConn),
+    Redis(redis::connection::RedisConn),
 }
 
 impl EngineConnection {
@@ -21,6 +25,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.id,
             EngineConnection::MySql(c) => c.id,
+            EngineConnection::Redis(c) => c.id,
         }
     }
 
@@ -28,6 +33,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.label.clone(),
             EngineConnection::MySql(c) => c.label.clone(),
+            EngineConnection::Redis(c) => c.label.clone(),
         }
     }
 
@@ -35,6 +41,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(_) => EngineKind::Postgres,
             EngineConnection::MySql(_) => EngineKind::Mysql,
+            EngineConnection::Redis(_) => EngineKind::Redis,
         }
     }
 
@@ -42,6 +49,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(_) => "postgres",
             EngineConnection::MySql(_) => "mysql",
+            EngineConnection::Redis(_) => "redis",
         }
     }
 
@@ -69,6 +77,33 @@ impl EngineConnection {
                 });
                 Ok(())
             }
+            EngineConnection::Redis(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
+        }
+    }
+
+    pub fn spawn_redis_command(
+        &self,
+        ctx: OperationCtx,
+        input: RedisCommandInput,
+    ) -> Result<(), String> {
+        match self {
+            EngineConnection::Redis(r) => {
+                let pool = r.pool.clone();
+                let default_timeout_ms = r.default_command_timeout_ms;
+
+                tokio::spawn(async move {
+                    crate::engines::redis::operation::run_redis_command(
+                        ctx,
+                        pool,
+                        default_timeout_ms,
+                        input,
+                    )
+                    .await;
+                });
+
+                Ok(())
+            }
+            _ => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
         }
     }
 }

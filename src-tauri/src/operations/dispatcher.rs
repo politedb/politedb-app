@@ -60,5 +60,15 @@ pub async fn dispatch_operation(
 
             Ok(op_id)
         }
+        OperationKind::RedisCommand => {
+            let cmd_input = input.redis.ok_or("REDIS_PAYLOAD_MISSING")?;
+
+            if let Err(e) = conn.spawn_redis_command(ctx, cmd_input) {
+                state.active_ops.remove(&op_id);
+                return Err(e);
+            }
+
+            Ok(op_id)
+        }
     }
 }
