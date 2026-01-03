@@ -1,58 +1,73 @@
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use deadpool_postgres::{Manager, Pool};
-use tokio_postgres::{Config, NoTls};
+use tauri::AppHandle;
+use tokio_postgres::NoTls;
 use uuid::Uuid;
 
+use crate::engines::postgres::config::build_pg_config;
+use crate::engines::postgres::PgConn;
 use crate::security::secrets;
 use crate::types::{PgConnectInput, SecretRefKind};
 
-use super::PgConn;
-
-fn build_pg_config(i: &PgConnectInput, password: &str) -> anyhow::Result<Config> {
-    let mut cfg = Config::new();
-    cfg.host(&i.host);
-    cfg.port(i.port);
-    cfg.dbname(&i.database);
-    cfg.user(&i.user);
-    cfg.password(password);
-
-    if let Some(ms) = i.connect_timeout_ms {
-        cfg.connect_timeout(std::time::Duration::from_millis(ms));
-    }
-
-    Ok(cfg)
-}
-
-async fn resolve_password(conn_id: Uuid, i: &PgConnectInput) -> anyhow::Result<String> {
+async fn resolve_password(
+    app: &AppHandle,
+    conn_id: Uuid,
+    i: &PgConnectInput,
+) -> anyhow::Result<String> {
     match i.password.kind {
-        SecretRefKind::Inline => Ok(i.password.value.clone()),
+        SecretRefKind::Inline => {
+            // Keep inline secret in memory only
+            Ok(i.password.value.clone())
+        }
         SecretRefKind::Keychain => {
-            let key = i.password.value.clone();
-            let pw = secrets::keychain_get(&key)
-                .with_context(|| format!("keychain_get failed for conn_id={}", conn_id))?;
+            let key = i.password.value.trim();
+            if key.is_empty() {
+                return Err(anyhow!("empty keychain key for conn_id={}", conn_id));
+            }
+
+            let pw = secrets::keychain_get(app, key)
+                .map_err(|e| anyhow!(e))
+                .with_context(|| {
+                    format!("keychain_get failed for conn_id={} key={}", conn_id, key)
+                })?;
+
+            if pw.is_empty() {
+                return Err(anyhow!(
+                    "empty password retrieved from keychain for conn_id={} key={}",
+                    conn_id,
+                    key
+                ));
+            }
+
             Ok(pw)
         }
     }
 }
 
 pub async fn connect_pg(
+    app: &AppHandle,
     conn_id: Uuid,
     label: String,
     input: PgConnectInput,
 ) -> anyhow::Result<PgConn> {
-    let password = resolve_password(conn_id, &input).await?;
+    // Resolve password (inline or keychain)
+    let password = resolve_password(app, conn_id, &input).await?;
 
+    // Build config WITHOUT logging password
     let cfg = build_pg_config(&input, &password)?;
 
-    // TLS: nếu bạn bật feature pg-tls thì có thể build connector ở đây.
-    // Hiện tại NoTls để đơn giản; khi bạn muốn SSL require, mình sẽ đưa bản pg-tls chuẩn.
+    // Manager + pool
     let mgr = Manager::from_config(cfg, NoTls, deadpool_postgres::ManagerConfig::default());
+
+    // Pool size: allow tuning via input (fallback = 10)
+    let max_size: usize = input.pool_max_size.unwrap_or(10).clamp(1, 50) as usize;
+
     let pool = Pool::builder(mgr)
-        .max_size(10)
+        .max_size(max_size)
         .build()
         .context("build pg pool failed")?;
 
-    // Smoke test: lấy 1 client ping nhẹ
+    // Smoke test: minimal ping to catch wrong host/port/auth early
     {
         let client = pool.get().await.context("pg pool get failed")?;
         client

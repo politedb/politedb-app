@@ -36,6 +36,12 @@ pub struct PgConnectInput {
 
     // SSL mode đơn giản hoá: "disable" | "prefer" | "require"
     pub ssl_mode: Option<String>,
+    pub ssl_key_path: Option<String>,
+    pub ssl_cert_path: Option<String>,
+    pub ssl_ca_path: Option<String>,
+
+    pub pool_max_size: Option<usize>,
+    // Optional client-side certificates (PEM-encoded)
 
     // Timeouts (ms)
     pub connect_timeout_ms: Option<u64>,

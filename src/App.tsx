@@ -1,4 +1,4 @@
-import { PostgresConnectionDialog } from "./components/PostgresConnectionForm";
+import { PostgresConnectionDialog } from "./components/PostgresConnectionExample";
 
 export default function App() {
   return <PostgresConnectionDialog />;
