@@ -3,8 +3,8 @@ import { useState, useEffect, useMemo } from "preact/hooks";
 import { PostgresConnectionDialog } from "./PostgresConnectionForm";
 import { Edit, Grid, Console, List, Search, Database, Key } from "./icons";
 import { ConnectionModal } from "./ConnectionModal";
-import { AppHeader } from "./AppHeader";
 import { ReactNode } from "preact/compat";
+import { Tab, useScreenStore } from "../stores/screen";
 
 type Connection = {
   id: string;
@@ -45,6 +45,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export function MainLayout() {
+  const { tabs, setTabs, activeScreen, setActiveScreen } = useScreenStore();
+
   const [connections, setConnections] = useState<Connection[]>([]);
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [showNewConnection, setShowNewConnection] = useState(false);
@@ -165,11 +167,29 @@ export function MainLayout() {
     }
   }
 
+  function openConnectionInTab(connectionId: string, connectionData: any) {
+    // Check if tab already exists
+    const existingTab = tabs.find((tab) => tab.connectionId === connectionId);
+    if (existingTab) {
+      setActiveScreen(existingTab.id);
+      return;
+    }
+
+    // Create new tab
+    const newTab: Tab = {
+      id: `tab-${Date.now()}-${Math.random()}`,
+      label: connectionData.name || "Unnamed Connection",
+      connectionId,
+      connectionData,
+    };
+
+    setTabs([...tabs, newTab]);
+    setActiveScreen(newTab.id);
+    setShowConnectionModal(false);
+  }
+
   return (
     <div class="h-screen flex flex-col bg-neutral-50">
-      {/* Custom App Header */}
-      <AppHeader />
-
       <div class="flex-1 flex overflow-hidden">
         {/* Left Navigation Sidebar */}
         <div class="w-60 bg-neutral-50 border-r border-neutral-200 flex flex-col shrink-0">
@@ -265,6 +285,7 @@ export function MainLayout() {
           </div>
 
           {/* Content Area */}
+
           <div class="flex-1 overflow-y-auto bg-neutral-100">
             {activeNav === "connections" ? (
               <div class="p-6">
@@ -342,6 +363,18 @@ export function MainLayout() {
                               ? "border-blue-600 bg-blue-50"
                               : "border-slate-200 bg-white"
                           }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            try {
+                              const data = localStorage.getItem(conn.id);
+                              if (data) {
+                                const parsed = JSON.parse(data);
+                                openConnectionInTab(conn.id, parsed);
+                              }
+                            } catch (err) {
+                              console.error("Failed to open connection:", err);
+                            }
+                          }}
                         >
                           <div class="flex items-center gap-3 flex-1 min-w-0">
                             <div class="relative">
@@ -374,7 +407,10 @@ export function MainLayout() {
 
                           <button
                             type="button"
-                            onClick={() => handleSelectConnection(conn.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectConnection(conn.id);
+                            }}
                             class="p-2 hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
                             title="Edit connection"
                           >

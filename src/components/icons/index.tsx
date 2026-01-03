@@ -7,3 +7,6 @@ export * from "./List";
 export * from "./Search";
 export * from "./Database";
 export * from "./Key";
+export * from "./Vault";
+export * from "./Folder";
+export * from "./Plug";
