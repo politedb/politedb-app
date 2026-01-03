@@ -75,6 +75,8 @@ pub struct SqlQueryInput {
     pub sql: String,
     pub max_rows: Option<u32>,
     pub batch_size: Option<u32>,
+    pub statement_timeout_ms: Option<u64>,
+    pub read_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,11 +98,16 @@ pub struct ColumnMeta {
     pub db_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TableChunk {
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationMeta {
     pub op_id: Uuid,
     pub columns: Vec<ColumnMeta>,
-    pub rows: Vec<Vec<serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TableChunk {
+    pub op_id: uuid::Uuid,
+    pub rows: Vec<Vec<CellValue>>,
     pub row_offset: u64,
 }
 
@@ -115,4 +122,20 @@ pub struct OperationDone {
 pub struct OperationError {
     pub op_id: Uuid,
     pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t", content = "v")]
+pub enum CellValue {
+    Null,
+    Bool(bool),
+    I64(i64),
+    F64(f64),
+    Str(String),
+
+    /// For JSON/JSONB: we send it as a compact JSON string (avoid nested Value allocations)
+    Json(String),
+
+    /// For bytea or unknown binary: base64 string
+    BytesB64(String),
 }

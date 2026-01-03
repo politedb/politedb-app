@@ -5,6 +5,7 @@ import { connectionCreate, connectionTest } from "../lib/tauri/connection";
 import { operationExecute } from "../lib/tauri/operation";
 import { listenOp } from "../lib/tauri/events";
 import { ConnectionCreateInput } from "../lib/tauri";
+import { cellToString } from "../utils/convert";
 
 type InputEvt = JSX.TargetedEvent<HTMLInputElement>;
 type SelectEvt = JSX.TargetedEvent<HTMLSelectElement>;
@@ -114,8 +115,8 @@ export function PostgresConnectionDialog() {
         () => {
           const parsed: TableItem[] = buffer
             .map((r) => ({
-              schema: String(r?.[0] ?? ""),
-              name: String(r?.[1] ?? ""),
+              schema: cellToString(r?.[0]),
+              name: cellToString(r?.[1]),
             }))
             .filter((t) => t.schema && t.name);
 
@@ -181,6 +182,8 @@ export function PostgresConnectionDialog() {
       `${t.schema}.${t.name}`.toLowerCase().includes(q)
     );
   }, [tables, filter]);
+
+  console.log({ tables });
 
   return (
     <div class="min-h-screen bg-slate-100 p-5">
