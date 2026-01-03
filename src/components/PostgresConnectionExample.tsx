@@ -42,7 +42,7 @@ function errText(e: any) {
   }
 }
 
-export function PostgresConnectionDialog() {
+export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("Mochi");
   const [host, setHost] = useState("127.0.0.1");
   const [port, setPort] = useState(5432);
@@ -64,8 +64,7 @@ export function PostgresConnectionDialog() {
   function validate(): string | null {
     if (!name.trim()) return "Name is required.";
     if (!host.trim()) return "Host is required.";
-    if (!Number.isFinite(port) || port <= 0 || port > 65535)
-      return "Port is invalid.";
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) return "Port is invalid.";
     if (!user.trim()) return "User is required.";
     if (!database.trim()) return "Database is required.";
     if (!password) return "Password is required.";
@@ -180,9 +179,7 @@ export function PostgresConnectionDialog() {
   const filteredTables = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return tables;
-    return tables.filter((t) =>
-      `${t.schema}.${t.name}`.toLowerCase().includes(q)
-    );
+    return tables.filter((t) => `${t.schema}.${t.name}`.toLowerCase().includes(q));
   }, [tables, filter]);
 
   console.log({ tables });
@@ -195,12 +192,8 @@ export function PostgresConnectionDialog() {
           <div class="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)] overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-200">
               <div class="flex items-center justify-between">
-                <div class="text-sm font-semibold text-slate-900">
-                  New Connection
-                </div>
-                <div class="text-[11px] font-semibold text-slate-500">
-                  PostgreSQL
-                </div>
+                <div class="text-sm font-semibold text-slate-900">New Connection</div>
+                <div class="text-[11px] font-semibold text-slate-500">PostgreSQL</div>
               </div>
             </div>
 
@@ -226,27 +219,20 @@ export function PostgresConnectionDialog() {
                   <Input
                     value={String(port)}
                     inputMode="numeric"
-                    onInput={(e: InputEvt) =>
-                      setPort(toNumber(e.currentTarget.value, 5432))
-                    }
+                    onInput={(e: InputEvt) => setPort(toNumber(e.currentTarget.value, 5432))}
                   />
                 </Field>
               </div>
 
               <div class="grid grid-cols-2 gap-2">
                 <Field label="User">
-                  <Input
-                    value={user}
-                    onInput={(e: InputEvt) => setUser(e.currentTarget.value)}
-                  />
+                  <Input value={user} onInput={(e: InputEvt) => setUser(e.currentTarget.value)} />
                 </Field>
 
                 <Field label="Database">
                   <Input
                     value={database}
-                    onInput={(e: InputEvt) =>
-                      setDatabase(e.currentTarget.value)
-                    }
+                    onInput={(e: InputEvt) => setDatabase(e.currentTarget.value)}
                   />
                 </Field>
               </div>
@@ -263,9 +249,7 @@ export function PostgresConnectionDialog() {
               <Field label="SSL">
                 <Select
                   value={sslMode}
-                  onChange={(e: SelectEvt) =>
-                    setSslMode(e.currentTarget.value as SslMode)
-                  }
+                  onChange={(e: SelectEvt) => setSslMode(e.currentTarget.value as SslMode)}
                 >
                   <option value="disable">Disable</option>
                   <option value="prefer">Prefer</option>
@@ -297,9 +281,7 @@ export function PostgresConnectionDialog() {
                   disabled={!!busy}
                   onClick={handleConnect}
                 >
-                  {busy === "connect" || busy === "tables"
-                    ? "Connecting…"
-                    : "Connect"}
+                  {busy === "connect" || busy === "tables" ? "Connecting…" : "Connect"}
                 </button>
               </div>
 
@@ -307,8 +289,7 @@ export function PostgresConnectionDialog() {
                 <div
                   class={cls(
                     "mt-2 rounded-xl border px-3 py-2 text-xs font-semibold",
-                    msg.toLowerCase().includes("failed") ||
-                      msg.toLowerCase().includes("error")
+                    msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")
                       ? "border-rose-200 bg-rose-50 text-rose-700"
                       : "border-slate-200 bg-slate-50 text-slate-700"
                   )}
@@ -319,15 +300,9 @@ export function PostgresConnectionDialog() {
 
               {connInfo ? (
                 <div class="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                  <div class="text-[11px] font-semibold text-emerald-800">
-                    Connected
-                  </div>
-                  <div class="text-xs font-medium text-emerald-900">
-                    {connInfo.label}
-                  </div>
-                  <div class="mt-1 text-[11px] font-mono text-emerald-800">
-                    {connInfo.id}
-                  </div>
+                  <div class="text-[11px] font-semibold text-emerald-800">Connected</div>
+                  <div class="text-xs font-medium text-emerald-900">{connInfo.label}</div>
+                  <div class="mt-1 text-[11px] font-mono text-emerald-800">{connInfo.id}</div>
                 </div>
               ) : null}
             </div>
@@ -343,9 +318,7 @@ export function PostgresConnectionDialog() {
                   <div class="relative">
                     <input
                       value={filter}
-                      onInput={(e: InputEvt) =>
-                        setFilter(e.currentTarget.value)
-                      }
+                      onInput={(e: InputEvt) => setFilter(e.currentTarget.value)}
                       placeholder="Search tables…"
                       class={cls(
                         "h-8 w-[260px] rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
@@ -382,9 +355,7 @@ export function PostgresConnectionDialog() {
                       <div class="group rounded-xl px-2 py-2 hover:bg-slate-50">
                         <div class="flex items-center justify-between">
                           <div class="min-w-0">
-                            <div class="text-[11px] font-semibold text-slate-500">
-                              {t.schema}
-                            </div>
+                            <div class="text-[11px] font-semibold text-slate-500">{t.schema}</div>
                             <div class="truncate text-sm font-semibold text-slate-900">
                               {t.name}
                             </div>
@@ -393,9 +364,7 @@ export function PostgresConnectionDialog() {
                             <button
                               type="button"
                               class="h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                              onClick={() =>
-                                setMsg(`Selected: ${t.schema}.${t.name}`)
-                              }
+                              onClick={() => setMsg(`Selected: ${t.schema}.${t.name}`)}
                             >
                               Open
                             </button>
@@ -417,18 +386,14 @@ export function PostgresConnectionDialog() {
             </div>
 
             <div class="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500 flex items-center justify-between">
-              <span>
-                {connInfo ? `${tables.length} tables` : "Disconnected"}
-              </span>
+              <span>{connInfo ? `${tables.length} tables` : "Disconnected"}</span>
               <span class="font-mono">{connInfo ? connInfo.label : "—"}</span>
             </div>
           </div>
         </div>
 
         <details class="mt-4">
-          <summary class="cursor-pointer text-xs font-semibold text-slate-700">
-            Debug
-          </summary>
+          <summary class="cursor-pointer text-xs font-semibold text-slate-700">Debug</summary>
           <pre class="mt-2 rounded-2xl bg-slate-900 p-4 text-xs text-slate-100 overflow-auto">
             {JSON.stringify(
               {
@@ -481,9 +446,7 @@ function Input(
   return <input {...props} class={c} />;
 }
 
-function Select(
-  props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }
-) {
+function Select(props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }) {
   const c = cls(
     "h-9 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
     "focus:border-slate-900 focus:ring-4 focus:ring-slate-200/60",
@@ -498,8 +461,7 @@ function EmptyState(props: { title: string; desc: string }) {
       <div class="text-sm font-semibold text-slate-900">{props.title}</div>
       <div class="mt-1 text-xs text-slate-600">{props.desc}</div>
       <div class="mt-4 text-xs text-slate-500">
-        Tip: Start with <span class="font-semibold">Test</span> to validate
-        credentials.
+        Tip: Start with <span class="font-semibold">Test</span> to validate credentials.
       </div>
     </div>
   );

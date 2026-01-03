@@ -1,5 +1,5 @@
-import { PostgresConnectionDialog } from "./components/PostgresConnectionExample";
+import { MainLayout } from "./layout";
 
 export default function App() {
-  return <PostgresConnectionDialog />;
+  return <MainLayout />;
 }
