@@ -22,7 +22,7 @@ type NavButton = {
 };
 
 const NAV_BUTTONS: NavButton[] = [
-  { id: "main", label: "Databases", icon: <Database className="size-3" /> },
+  { id: "main", label: "Databases", icon: <Database className="size-3.5" /> },
 ];
 
 export function AppHeader({
@@ -74,7 +74,7 @@ export function AppHeader({
   return (
     <div
       data-tauri-drag-region
-      class="h-10 bg-neutral-900/95 backdrop-blur-md flex items-center gap-2 px-2 shrink-0 select-none border-b border-neutral-800"
+      class="h-10 bg-neutral-900/95 backdrop-blur-md flex items-center gap-2 px-2 shrink-0 select-none border-b border-neutral-800 w-full z-10 rounded-t-xl"
     >
       {/* Left side - macOS window controls */}
       {showWindowControls && (
@@ -118,8 +118,8 @@ export function AppHeader({
             }}
             class={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeNav === nav.id
-                ? "bg-neutral-800 hover:bg-neutral-700 text-white"
-                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-800 hover:text-white"
+                ? "bg-neutral-700 hover:bg-neutral-700 text-white"
+                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
             }`}
           >
             {nav.icon}
@@ -133,10 +133,10 @@ export function AppHeader({
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            class={`group flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-lg transition-colors cursor-pointer min-w-0 shrink-0 ${
+            class={`group flex items-center gap-1.5 pl-4 pr-2 py-1.25 rounded-md transition-colors cursor-pointer ${
               activeScreen === tab.id
                 ? "bg-blue-500 text-white"
-                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-800 hover:text-white"
+                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >

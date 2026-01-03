@@ -17,7 +17,7 @@
         "height": 800,
         "decorations": false,
         "transparent": true,
-        "titleBarStyle": "overlay"
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {

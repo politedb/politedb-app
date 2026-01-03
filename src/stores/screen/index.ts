@@ -3,8 +3,9 @@ import { create } from "zustand";
 export type Tab = {
   id: string;
   label: string;
-  connectionId: string;
+  connectionId: string; // localStorage key
   connectionData: any;
+  runtimeConnectionId?: string; // Actual connection ID from connectionCreate
 };
 
 type ScreenState = {

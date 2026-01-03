@@ -1,6 +1,6 @@
 import { useMemo, useState } from "preact/hooks";
 import { Search, X } from "./icons";
-import { PostgresConnectionDialog } from "./PostgresConnectionForm";
+import { ConnectionFormDialog } from "./ConnectionFormDialog";
 
 type DatabaseType = {
   id: string;
@@ -18,13 +18,7 @@ const DATABASE_TYPES: DatabaseType[] = [
     color: "bg-blue-600",
     available: true,
   },
-  {
-    id: "redshift",
-    name: "Amazon Redshift",
-    abbreviation: "Rs",
-    color: "bg-blue-600",
-    available: false,
-  },
+  { id: "redis", name: "Redis", abbreviation: "Re", color: "bg-red-700", available: true },
   { id: "mysql", name: "MySQL", abbreviation: "Ms", color: "bg-orange-500", available: false },
   {
     id: "mariadb",
@@ -40,37 +34,9 @@ const DATABASE_TYPES: DatabaseType[] = [
     color: "bg-slate-600",
     available: false,
   },
-  { id: "cassandra", name: "Cassandra", abbreviation: "Cs", color: "bg-black", available: false },
-  {
-    id: "clickhouse",
-    name: "ClickHouse",
-    abbreviation: "Ch",
-    color: "bg-yellow-500",
-    available: false,
-  },
-  { id: "bigquery", name: "BigQuery", abbreviation: "Bq", color: "bg-blue-500", available: false },
-  {
-    id: "dynamodb",
-    name: "DynamoDB (Beta)",
-    abbreviation: "Dn",
-    color: "bg-slate-700",
-    available: false,
-  },
-  { id: "libsql", name: "LibSQL", abbreviation: "Ls", color: "bg-green-600", available: false },
-  { id: "d1", name: "Cloudflare D1", abbreviation: "D1", color: "bg-orange-600", available: false },
   { id: "mongo", name: "Mongo", abbreviation: "Mg", color: "bg-green-500", available: false },
-  { id: "snowflake", name: "Snowflake", abbreviation: "Nf", color: "bg-sky-400", available: false },
-  { id: "redis", name: "Redis", abbreviation: "Re", color: "bg-red-700", available: false },
   { id: "sqlite", name: "SQLite", abbreviation: "Sl", color: "bg-purple-600", available: false },
-  { id: "duckdb", name: "DuckDB", abbreviation: "Du", color: "bg-black", available: false },
   { id: "oracle", name: "Oracle", abbreviation: "Oc", color: "bg-red-600", available: false },
-  {
-    id: "cockroach",
-    name: "Cockroach",
-    abbreviation: "Cr",
-    color: "bg-green-600",
-    available: false,
-  },
 ];
 
 export function ConnectionModal({
@@ -104,7 +70,7 @@ export function ConnectionModal({
       <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
         <div class="flex-1 overflow-y-auto">
           {selectedDatabaseType === "postgresql" && (
-            <PostgresConnectionDialog onSaved={onSaved} onClose={onClose} />
+            <ConnectionFormDialog onSaved={onSaved} onClose={onClose} />
           )}
           {selectedDatabaseType !== "postgresql" && (
             <div class="p-6 text-center">
@@ -203,19 +169,19 @@ export function ConnectionModal({
               <button
                 type="button"
                 onClick={onClose}
-                class="p-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
+                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                class="p-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
+                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 Import from URL
               </button>
               <button
                 type="button"
-                class="p-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
+                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
               >
                 New Group
               </button>
@@ -238,7 +204,7 @@ export function ConnectionModal({
                 }
               }}
               disabled={!filteredDatabaseTypes.some((db) => db.available)}
-              class="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-4 py-1 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Create
             </button>

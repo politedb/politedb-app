@@ -1,31 +1,15 @@
-// src/components/PostgresConnectionDialog.tsx
 import { JSX } from "preact";
-import { useMemo, useState } from "preact/hooks";
-import {
-  connectionCreate,
-  connectionTest,
-  operationExecute,
-  listenOp,
-  type ConnectionCreateInput,
-} from "../lib/tauri";
+import { useCallback, useMemo, useState } from "preact/hooks";
+import { connectionCreate, connectionTest, type ConnectionCreateInput } from "../lib/tauri";
 import { X } from "./icons";
+import { Tab, useScreenStore } from "../stores/screen";
 
 type InputEvt = JSX.TargetedEvent<HTMLInputElement>;
 type SelectEvt = JSX.TargetedEvent<HTMLSelectElement>;
 
 type SslMode = "disable" | "prefer" | "require" | "verify-ca" | "verify-full";
 
-type TableItem = { schema: string; name: string };
-
 const COLORS = ["", "#CBD5E1", "#93C5FD", "#FDE68A", "#BBF7D0", "#FBCFE8"] as const;
-
-const LIST_TABLES_SQL = `
-select table_schema, table_name
-from information_schema.tables
-where table_type = 'BASE TABLE'
-  and table_schema not in ('pg_catalog', 'information_schema')
-order by table_schema, table_name;
-`.trim();
 
 function toNumber(v: string, fallback: number) {
   const x = Number(v);
@@ -33,6 +17,7 @@ function toNumber(v: string, fallback: number) {
 }
 
 type ConnectionData = {
+  key?: string;
   name?: string;
   tag?: string;
   statusColor?: string;
@@ -53,7 +38,7 @@ type ConnectionData = {
   sshKeyPath?: string;
 };
 
-export function PostgresConnectionDialog({
+export function ConnectionFormDialog({
   onSaved,
   onClose,
   initialData,
@@ -62,6 +47,7 @@ export function PostgresConnectionDialog({
   onClose?: () => void;
   initialData?: ConnectionData;
 } = {}) {
+  const { tabs, setTabs, setActiveScreen } = useScreenStore();
   const [name, setName] = useState(initialData?.name || "Mochi");
   const [tag, setTag] = useState(initialData?.tag || "local");
   const [statusColor, setStatusColor] = useState<string>(initialData?.statusColor || "");
@@ -72,7 +58,6 @@ export function PostgresConnectionDialog({
   const [password, setPassword] = useState(initialData?.password || "");
   const [database, setDatabase] = useState(initialData?.database || "postgres");
 
-  // NOTE: backend chưa expose keychain commands, nên hiện tại chỉ dùng inline.
   const [storeKeychain, setStoreKeychain] = useState(initialData?.storeKeychain || false);
 
   const [sslMode, setSslMode] = useState<SslMode>(initialData?.sslMode || "prefer");
@@ -91,12 +76,6 @@ export function PostgresConnectionDialog({
   const [busy, setBusy] = useState<null | "save" | "test" | "connect" | "tables">(null);
   const [msg, setMsg] = useState<string>("");
 
-  const [connInfo, setConnInfo] = useState<{
-    id: string;
-    label: string;
-  } | null>(null);
-  const [tables, setTables] = useState<TableItem[]>([]);
-
   function validate(): string | null {
     if (!name.trim()) return "Name is required.";
     if (!host.trim()) return "Host is required.";
@@ -104,7 +83,6 @@ export function PostgresConnectionDialog({
     if (!user.trim()) return "User is required.";
     if (!database.trim()) return "Database is required.";
 
-    // Backend hiện tại chưa có secrets/keychain, nên nếu storeKeychain bật thì vẫn cần password
     if (!password) return "Password is required.";
 
     return null;
@@ -116,7 +94,6 @@ export function PostgresConnectionDialog({
   }, [name]);
 
   const payload: ConnectionCreateInput = useMemo(() => {
-    // IMPORTANT: backend EngineKind là "Postgres" (PascalCase)
     return {
       engine: "postgres",
       label: name,
@@ -136,15 +113,10 @@ export function PostgresConnectionDialog({
     };
   }, [name, host, port, database, user, password, sslMode, sslKey, sslCert, sslCA]);
 
-  async function handleSave() {
-    const err = validate();
-    if (err) return setMsg(err);
-
-    setBusy("save");
-    setMsg("");
-
-    try {
+  const cacheToLocalStorage = useCallback(
+    (key?: string) => {
       const profile = {
+        id: `politedb:conn:${keychainKey}`,
         name,
         tag,
         statusColor,
@@ -152,6 +124,7 @@ export function PostgresConnectionDialog({
         port,
         user,
         database,
+        password: { kind: "inline", value: password },
         storeKeychain,
         keychainKey,
         sslMode,
@@ -165,7 +138,44 @@ export function PostgresConnectionDialog({
         sshKeyPath,
       };
 
-      localStorage.setItem(`politedb:conn:${keychainKey}`, JSON.stringify(profile));
+      const storeKey = key || `politedb:conn:${keychainKey}-${Date.now()}`;
+
+      localStorage.setItem(storeKey, JSON.stringify(profile));
+
+      return storeKey;
+    },
+    [
+      name,
+      tag,
+      statusColor,
+      host,
+      port,
+      user,
+      database,
+      password,
+      storeKeychain,
+      keychainKey,
+      sslMode,
+      sslKey,
+      sslCert,
+      sslCA,
+      sshEnabled,
+      sshHost,
+      sshPort,
+      sshUser,
+      sshKeyPath,
+    ]
+  );
+
+  async function handleSave() {
+    const err = validate();
+    if (err) return setMsg(err);
+
+    setBusy("save");
+    setMsg("");
+
+    try {
+      cacheToLocalStorage(initialData?.key);
       setMsg("Saved.");
       onSaved?.();
     } catch (e: any) {
@@ -183,56 +193,11 @@ export function PostgresConnectionDialog({
     setMsg("");
 
     try {
-      // NOTE: backend chưa có connection_test, nên test = create thật (in-memory state).
       await connectionTest(payload);
       setMsg("Test OK. (Created connection in state)");
     } catch (e: any) {
       setMsg(e?.message ? String(e.message) : String(e));
     } finally {
-      setBusy(null);
-    }
-  }
-
-  async function loadTables(connectionId: string) {
-    setBusy("tables");
-    setTables([]);
-
-    const buffer: any[][] = [];
-
-    try {
-      const opId = await operationExecute({
-        connection_id: connectionId,
-        kind: "sql_query",
-        sql: { sql: LIST_TABLES_SQL, batch_size: 500, max_rows: 50_000 },
-      });
-
-      const unsub = listenOp(
-        opId,
-        (chunk) => {
-          const rows: any[][] = chunk.rows || [];
-          buffer.push(...rows);
-        },
-        () => {
-          const parsed: TableItem[] = buffer
-            .map((r) => ({
-              schema: String(r?.[0] ?? ""),
-              name: String(r?.[1] ?? ""),
-            }))
-            .filter((t) => t.schema && t.name);
-
-          setTables(parsed);
-          setMsg(`Loaded ${parsed.length} tables.`);
-          setBusy(null);
-          unsub();
-        },
-        (err) => {
-          setMsg(`LIST_TABLES_FAILED: ${err?.error || JSON.stringify(err)}`);
-          setBusy(null);
-          unsub();
-        }
-      );
-    } catch (e: any) {
-      setMsg(e?.message ? String(e.message) : String(e));
       setBusy(null);
     }
   }
@@ -246,10 +211,19 @@ export function PostgresConnectionDialog({
 
     try {
       const res = await connectionCreate(payload);
-      setConnInfo({ id: res.id, label: res.label });
+      const storeKey = cacheToLocalStorage(initialData?.key);
       setMsg(`Connected ✅ ${res.label}`);
 
-      await loadTables(res.id);
+      // Create new tab
+      const newTab: Tab = {
+        id: `tab-${Date.now()}-conn#${storeKey}`,
+        label: payload.label || "Unnamed Connection",
+        connectionId: res.id,
+        connectionData: payload,
+      };
+
+      setTabs([...tabs, newTab]);
+      setActiveScreen(newTab.id);
     } catch (e: any) {
       setMsg(e?.message ? String(e.message) : String(e));
     } finally {
@@ -513,63 +487,6 @@ export function PostgresConnectionDialog({
             {msg}
           </div>
         ) : null}
-
-        {connInfo ? (
-          <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div class="flex items-center justify-between">
-              <div class="text-sm font-semibold text-slate-800">Tables ({connInfo.label})</div>
-              <button
-                type="button"
-                class="h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                disabled={busy === "tables"}
-                onClick={() => loadTables(connInfo.id)}
-              >
-                {busy === "tables" ? "Refreshing…" : "Refresh"}
-              </button>
-            </div>
-
-            <div class="mt-2 max-h-64 overflow-auto space-y-1">
-              {tables.map((t) => (
-                <div class="rounded-lg px-2 py-1 hover:bg-white">
-                  <span class="text-xs text-slate-500">{t.schema}</span>
-                  <span class="ml-2 text-sm font-medium text-slate-900">{t.name}</span>
-                </div>
-              ))}
-              {!tables.length ? <div class="text-xs text-slate-500">No tables loaded</div> : null}
-            </div>
-          </div>
-        ) : null}
-
-        <details class="pt-2">
-          <summary class="cursor-pointer text-sm font-semibold text-slate-700">Debug</summary>
-          <pre class="mt-2 rounded-2xl bg-slate-900 p-4 text-xs text-slate-100 overflow-auto">
-            {JSON.stringify(
-              {
-                name,
-                tag,
-                statusColor,
-                host,
-                port,
-                user,
-                password: "(hidden)",
-                database,
-                sslMode,
-                sslKey,
-                sslCert,
-                sslCA,
-                sshEnabled,
-                sshHost,
-                sshPort,
-                sshUser,
-                sshKeyPath,
-                connInfo,
-                tablesCount: tables.length,
-              },
-              null,
-              2
-            )}
-          </pre>
-        </details>
       </div>
     </div>
   );
@@ -577,7 +494,7 @@ export function PostgresConnectionDialog({
 
 function Row(props: { label: string; children: any }) {
   return (
-    <div class="grid grid-cols-[160px_1fr] items-center gap-3">
+    <div class="grid grid-cols-[100px_1fr] items-center gap-3">
       <div class="text-right text-sm font-medium text-slate-800">{props.label}</div>
       <div>{props.children}</div>
     </div>
