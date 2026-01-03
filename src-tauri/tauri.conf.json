@@ -12,10 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "politedb",
+        "title": "",
         "width": 1200,
         "height": 800,
-        "decorations": false,
+        "decorations": true,
         "transparent": true,
         "titleBarStyle": "Overlay"
       }
@@ -24,6 +24,7 @@
       "csp": null
     }
   },
+
   "bundle": {
     "active": true,
     "targets": "all",

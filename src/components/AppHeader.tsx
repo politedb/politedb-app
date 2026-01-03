@@ -1,8 +1,11 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Plus, X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
 import { Tab } from "../stores/screen";
 import { useScreenStore } from "../stores/screen";
+import { WindowControls } from "./WindowControls";
+
+const win = getCurrentWebviewWindow();
 
 type AppHeaderProps = {
   showWindowControls?: boolean;
@@ -33,6 +36,28 @@ export function AppHeader({
 }: AppHeaderProps) {
   const { tabs, setTabs, activeScreen, setActiveScreen } = useScreenStore();
 
+  let clickTimer: number | null = null;
+
+  async function handleHeaderClick() {
+    if (clickTimer) {
+      // double click detected
+      clearTimeout(clickTimer);
+      clickTimer = null;
+
+      const isMax = await win.isMaximized();
+      if (isMax) {
+        await win.unmaximize();
+      } else {
+        await win.maximize();
+      }
+      return;
+    }
+
+    clickTimer = window.setTimeout(() => {
+      clickTimer = null;
+    }, 250); // macOS double-click threshold
+  }
+
   function handleTabSelect(tabId: string) {
     setActiveScreen(tabId);
   }
@@ -51,63 +76,16 @@ export function AppHeader({
     }
   }
 
-  async function handleClose() {
-    const appWindow = getCurrentWindow();
-    await appWindow.close();
-  }
-
-  async function handleMinimize() {
-    const appWindow = getCurrentWindow();
-    await appWindow.minimize();
-  }
-
-  async function handleMaximize() {
-    const appWindow = getCurrentWindow();
-    const isMaximized = await appWindow.isMaximized();
-    if (isMaximized) {
-      await appWindow.unmaximize();
-    } else {
-      await appWindow.maximize();
-    }
-  }
-
   return (
     <div
-      data-tauri-drag-region
-      class="h-10 bg-neutral-900/95 backdrop-blur-md flex items-center gap-2 px-2 shrink-0 select-none border-b border-neutral-800 w-full z-10 rounded-t-xl"
+      class="titlebar h-10 bg-neutral-900/95 backdrop-blur-md flex items-center gap-2 px-2 shrink-0 select-none border-b border-neutral-800 w-full z-10 rounded-t-xl"
+      onMouseDown={handleHeaderClick}
     >
       {/* Left side - macOS window controls */}
-      {showWindowControls && (
-        <div class="flex items-center gap-2 shrink-0" data-tauri-drag-region>
-          <button
-            type="button"
-            class="w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff3b30] transition-colors cursor-pointer flex items-center justify-center group"
-            title="Close"
-            onClick={handleClose}
-          >
-            <span class="w-1 h-1 rounded-full bg-neutral-900 opacity-0 group-hover:opacity-100 transition-opacity"></span>
-          </button>
-          <button
-            type="button"
-            class="w-3 h-3 rounded-full bg-[#ffbd2e] hover:bg-[#ff9500] transition-colors cursor-pointer flex items-center justify-center group"
-            title="Minimize"
-            onClick={handleMinimize}
-          >
-            <span class="w-1 h-1 rounded-full bg-neutral-900 opacity-0 group-hover:opacity-100 transition-opacity"></span>
-          </button>
-          <button
-            type="button"
-            class="w-3 h-3 rounded-full bg-[#28c840] hover:bg-[#20d046] transition-colors cursor-pointer flex items-center justify-center group"
-            title="Maximize"
-            onClick={handleMaximize}
-          >
-            <span class="w-1 h-1 rounded-full bg-neutral-900 opacity-0 group-hover:opacity-100 transition-opacity"></span>
-          </button>
-        </div>
-      )}
+      {showWindowControls && <WindowControls />}
 
       {/* Navigation Buttons */}
-      <div class="flex items-center gap-1 shrink-0" data-tauri-drag-region>
+      <div class="flex items-center gap-1 shrink-0">
         {NAV_BUTTONS.map((nav) => (
           <button
             key={nav.id}
@@ -129,7 +107,7 @@ export function AppHeader({
       </div>
 
       {/* Tabs */}
-      <div class="flex-1 flex items-center gap-1 overflow-x-auto min-w-0" data-tauri-drag-region>
+      <div class="flex-1 flex items-center gap-1 overflow-x-auto min-w-0">
         {tabs.map((tab) => (
           <div
             key={tab.id}
@@ -140,7 +118,9 @@ export function AppHeader({
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >
-            <span class="text-xs font-medium truncate max-w-[150px]">{tab.label}</span>
+            <span class="text-xs font-medium truncate max-w-[150px]">
+              {tab.label}
+            </span>
             <button
               type="button"
               onClick={(e) => {
@@ -175,7 +155,12 @@ export function AppHeader({
           class="w-6 h-6 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer flex items-center justify-center"
           title="Notifications"
         >
-          <svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            class="size-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"

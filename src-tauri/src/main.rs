@@ -1,3 +1,7 @@
+#[cfg(target_os = "macos")]
+#[macro_use]
+extern crate objc;
+
 mod commands;
 mod engines;
 mod operations;
@@ -8,6 +12,7 @@ mod types;
 
 mod ssh_tunnel;
 
+mod window_chrome;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -30,6 +35,10 @@ fn main() {
 
     tauri::Builder::default()
         .manage(state::AppState::new(engines))
+        .setup(|app| {
+            window_chrome::apply(app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Connections
             commands::connection::connection_create,
