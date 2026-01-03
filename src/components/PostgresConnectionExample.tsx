@@ -74,9 +74,11 @@ export function PostgresConnectionDialog() {
 
   const payload: ConnectionCreateInput = useMemo(
     () => ({
-      engine: "postgres",
+      engine: "postgres", // or engine: "mysql",
+
       label: name,
       postgres: {
+        //  or mysql {
         host,
         port,
         database,

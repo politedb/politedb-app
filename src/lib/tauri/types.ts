@@ -3,6 +3,14 @@
  * ============================================================================
  */
 
+export type Engine = "postgres" | "mysql" | string;
+export type SslMode =
+  | "disable"
+  | "prefer"
+  | "require"
+  | "verify-ca"
+  | "verify-full";
+
 export type SecretRef =
   | { kind: "inline"; value: string }
   | { kind: "keychain"; value: string };
@@ -14,7 +22,7 @@ export type PgConnectInput = {
   user: string;
   password: SecretRef;
 
-  ssl_mode?: string | null;
+  ssl_mode?: SslMode;
   connect_timeout_ms?: number | null;
   statement_timeout_ms?: number | null;
 
@@ -23,15 +31,34 @@ export type PgConnectInput = {
   ssl_ca_path?: string | null;
 };
 
+export type MySqlConnectInput = {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: SecretRef;
+
+  ssl_mode?: SslMode | null;
+
+  connect_timeout_ms?: number | null;
+  statement_timeout_ms?: number | null;
+  pool_max_size?: number | null;
+
+  ssl_key_path?: string | null;
+  ssl_cert_path?: string | null;
+  ssl_ca_path?: string | null;
+};
+
 export type ConnectionCreateInput = {
-  engine: "postgres";
+  engine: Engine;
   label: string;
-  postgres: PgConnectInput;
+  postgres?: PgConnectInput;
+  mysql?: MySqlConnectInput;
 };
 
 export type ConnectionInfo = {
   id: string;
-  engine: "postgres" | string;
+  engine: Engine;
   label: string;
 };
 
@@ -42,7 +69,7 @@ export type ConnectionInfo = {
 
 export type ConnectionProfile = {
   id: string;
-  engine: "postgres" | string;
+  engine: Engine;
   label: string;
   input: ConnectionCreateInput;
   created_at: number;

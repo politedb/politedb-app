@@ -1,5 +1,3 @@
-// src-tauri/src/commands/connection.rs
-
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -14,31 +12,58 @@ pub async fn connection_create(
 ) -> Result<ConnectionInfo, String> {
     let id = Uuid::new_v4();
 
+    // ✅ safe debug context (NO password)
+    let engine = input.engine.clone();
+    let label = input.label.clone();
+
+    tracing::info!(
+        conn_id = %id,
+        engine = ?engine,
+        label = %label,
+        "connection_create: start"
+    );
+
     // 1) Resolve driver
     let driver = state
         .engines
-        .get(input.engine.clone())
+        .get(engine.clone())
         .ok_or("ENGINE_NOT_SUPPORTED")?;
 
+    tracing::info!(
+        conn_id = %id,
+        engine = ?engine,
+        driver_kind = ?driver.kind(),
+        "connection_create: driver resolved"
+    );
+
     // 2) Connect (do NOT mutate state before connect succeeds)
-    let label = input.label.clone();
-    let conn = driver.connect(&app, id, label.clone(), input).await?;
+    let conn = match driver.connect(&app, id, label.clone(), input).await {
+        Ok(c) => {
+            tracing::info!(conn_id = %id, engine = ?engine, "connection_create: connect ok");
+            c
+        }
+        Err(e) => {
+            // log error string (still should not include password if driver is clean)
+            tracing::error!(
+                conn_id = %id,
+                engine = ?engine,
+                error = %e,
+                "connection_create: connect failed"
+            );
+            return Err(e);
+        }
+    };
 
     // 3) Insert runtime connection
     state.connections.insert(id, conn);
 
-    Ok(ConnectionInfo {
-        id,
-        engine: state
-            .connections
-            .get(&id)
-            .map(|c| c.value().engine_kind())
-            .unwrap_or_else(|| {
-                // Fallback (should never happen)
-                crate::types::EngineKind::Postgres
-            }),
-        label,
-    })
+    tracing::info!(
+        conn_id = %id,
+        engine = ?engine,
+        "connection_create: inserted into runtime state"
+    );
+
+    Ok(ConnectionInfo { id, engine, label })
 }
 
 #[tauri::command]

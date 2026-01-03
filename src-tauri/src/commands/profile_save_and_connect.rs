@@ -6,7 +6,9 @@ use crate::commands::connection;
 use crate::profiles::store as profile_store;
 use crate::profiles::types::ConnectionProfile;
 use crate::state::AppState;
-use crate::types::{ConnectionCreateInput, ConnectionInfo, EngineKind, PgConnectInput};
+use crate::types::{
+    ConnectionCreateInput, ConnectionInfo, EngineKind, MySqlConnectInput, PgConnectInput,
+};
 
 /* ============================================================================
  * Payloads
@@ -55,6 +57,25 @@ fn validate_pg_input(pg: &PgConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_mysql_input(my: &MySqlConnectInput) -> Result<(), String> {
+    if my.host.trim().is_empty() {
+        return Err("MYSQL_HOST_REQUIRED".into());
+    }
+    if my.database.trim().is_empty() {
+        return Err("MYSQL_DATABASE_REQUIRED".into());
+    }
+    if my.user.trim().is_empty() {
+        return Err("MYSQL_USER_REQUIRED".into());
+    }
+    if my.port == 0 {
+        return Err("MYSQL_PORT_INVALID".into());
+    }
+    if my.password.value.trim().is_empty() {
+        return Err("MYSQL_PASSWORD_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
     if input.label.trim().is_empty() {
         return Err("LABEL_REQUIRED".into());
@@ -65,11 +86,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let pg = input.postgres.as_ref().ok_or("POSTGRES_CONFIG_MISSING")?;
             validate_pg_input(pg)
         }
-
-        // EngineKind::Mysql => {
-        //     let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
-        //     validate_mysql_input(my)
-        // }
+        EngineKind::Mysql => {
+            let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
+            validate_mysql_input(my)
+        }
         _ => Err("ENGINE_NOT_SUPPORTED_YET".into()),
     }
 }
@@ -88,20 +108,18 @@ pub async fn profile_save_and_connect(
     let (profile, input) = match payload {
         ProfileSaveAndConnectInput::Create { input } => {
             validate_input(&input)?;
-            let profile = profile_store::profile_create(&app, input.clone())?;
-            (profile, input)
+            let saved = profile_store::profile_create(&app, input.clone())?;
+            (saved, input)
         }
         ProfileSaveAndConnectInput::Update { profile_id, input } => {
             validate_input(&input)?;
-            let profile = profile_store::profile_update(&app, profile_id, input.clone())?;
-            (profile, input)
+            let saved = profile_store::profile_update(&app, profile_id, input.clone())?;
+            (saved, input)
         }
     };
 
-    // Connect runtime (creates a NEW runtime connection id each time)
-    // If later you want "one runtime conn per profile", you can add a mapping layer.
-    let connection: ConnectionInfo =
-        connection::connection_create(app.clone(), state, input).await?;
+    // Runtime connect (new connection id each call)
+    let connection = connection::connection_create(app.clone(), state, input).await?;
 
     Ok(ProfileSaveAndConnectResult {
         profile,
