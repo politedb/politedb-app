@@ -77,6 +77,8 @@ export type ConnectionCreateInput = {
   engine: Engine;
   label: string;
 
+  ssh?: SshTunnelInput;
+
   postgres?: PgConnectInput;
   mysql?: MySqlConnectInput;
   redis?: RedisConnectInput;
@@ -203,4 +205,38 @@ export type OperationDone = {
   op_id: string;
   truncated: boolean;
   row_count: number;
+};
+
+export type SshAuth =
+  | { kind: "password"; password: SecretRef }
+  | {
+      kind: "private_key";
+      private_key_path: string;
+      passphrase?: SecretRef | null;
+    };
+
+export type StrictHostKeyChecking = "accept-new" | "yes" | "no";
+
+export type SshTunnelInput = {
+  enabled: boolean;
+
+  ssh_host: string;
+  ssh_port?: number | null; // default 22
+  ssh_user: string;
+
+  // optional: jump host later (ProxyJump) - để sau
+  auth: SshAuth;
+
+  // forward target (db side)
+  target_host: string; // usually "127.0.0.1" if DB is on same server
+  target_port: number;
+
+  // optional: bind addr, default 127.0.0.1
+  local_bind_host?: string | null;
+  strict_host_key_checking: StrictHostKeyChecking;
+
+  // optional: request local port, 0 => auto-pick free port
+  local_bind_port?: number | null;
+
+  connect_timeout_ms?: number | null;
 };

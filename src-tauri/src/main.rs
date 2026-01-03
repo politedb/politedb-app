@@ -6,6 +6,8 @@ mod security;
 mod state;
 mod types;
 
+mod ssh_tunnel;
+
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
