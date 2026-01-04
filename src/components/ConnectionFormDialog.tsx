@@ -2,24 +2,18 @@ import { JSX } from "preact";
 import { useCallback, useState } from "preact/hooks";
 import { useForm } from "react-hook-form";
 
-import { connectionTest, profileSaveAndConnect } from "../lib/tauri";
-import type { ConnectionCreateInput } from "../lib/tauri/types";
+import { connectionTest, profileSaveAndConnect, type ConnectionCreateInput } from "../lib/tauri";
 import { X } from "./icons";
 import { Tab, useScreenStore } from "../stores/screen";
+import { Button } from "./common/Button";
+import { Select } from "./common/Select";
 
 type InputEvt = JSX.TargetedEvent<HTMLInputElement>;
 type SelectEvt = JSX.TargetedEvent<HTMLSelectElement>;
 
 type SslMode = "disable" | "prefer" | "require" | "verify-ca" | "verify-full";
 
-const COLORS = [
-  "",
-  "#CBD5E1",
-  "#93C5FD",
-  "#FDE68A",
-  "#BBF7D0",
-  "#FBCFE8",
-] as const;
+const COLORS = ["", "#CBD5E1", "#93C5FD", "#FDE68A", "#BBF7D0", "#FBCFE8"] as const;
 
 function toNumber(v: any, fallback: number) {
   const x = Number(v);
@@ -261,8 +255,7 @@ export function ConnectionFormDialog({
 
       const newTab: Tab = {
         id: `tab-${Date.now()}-conn#${storeKey}`,
-        label:
-          res.profile.label || connectionInput.label || "Unnamed Connection",
+        label: res.profile.label || connectionInput.label || "Unnamed Connection",
         connectionId: res.connection.id,
         connectionData: connectionInput,
       };
@@ -277,22 +270,20 @@ export function ConnectionFormDialog({
   });
 
   return (
-    <div class="mx-auto max-w-4xl rounded-2xl border border-neutral-200 bg-neutral-50 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
+    <div class="mx-auto max-w-2xl rounded-2xl border border-neutral-200 bg-neutral-50 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
       <div class="px-8 py-6 relative">
-        <div class="text-center text-xl font-semibold text-neutral-900">
-          PostgreSQL Connection
-        </div>
+        <div class="text-center text-xl font-semibold text-neutral-900">PostgreSQL Connection</div>
 
-        <button
-          type="button"
+        <Button
           onClick={onClose}
-          class="p-2 rounded-full hover:bg-neutral-50 flex items-center justify-center transition-colors cursor-pointer absolute top-3 right-3"
+          variant="ghost"
+          className="p-2 absolute top-3 right-3 rounded-full"
         >
           <X className="size-4 text-slate-600" />
-        </button>
+        </Button>
       </div>
 
-      <div class="px-8 pb-7 space-y-4">
+      <div class="px-8 pb-7 space-y-3">
         <Row label="Name">
           <Input
             value={watch("name")}
@@ -301,16 +292,14 @@ export function ConnectionFormDialog({
           />
         </Row>
 
-        <div class="grid grid-cols-2 gap-6">
+        <div class="grid grid-cols-2 gap-4">
           <Row label="Status color">
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
               {COLORS.map((c) => (
                 <button
                   type="button"
-                  class={`h-9 w-9 rounded-xl border border-slate-300 ${
-                    watch("statusColor") === c
-                      ? "ring-4 ring-blue-200 border-blue-400"
-                      : ""
+                  class={`size-8 rounded-lg border border-slate-300 ${
+                    watch("statusColor") === c ? "ring-3 ring-blue-200 border-blue-400" : ""
                   }`}
                   style={{ background: c || "transparent" }}
                   onClick={() => setValue("statusColor", c)}
@@ -323,9 +312,7 @@ export function ConnectionFormDialog({
           <Row label="Tag">
             <Select
               value={watch("tag")}
-              onChange={(e: SelectEvt) =>
-                setValue("tag", e.currentTarget.value)
-              }
+              onChange={(e: SelectEvt) => setValue("tag", e.currentTarget.value)}
             >
               <option value="local">local</option>
               <option value="dev">dev</option>
@@ -335,7 +322,7 @@ export function ConnectionFormDialog({
           </Row>
         </div>
 
-        <div class="grid grid-cols-2 gap-6">
+        <div class="grid grid-cols-2 gap-4">
           <Row label="Host/Socket">
             <Input
               value={watch("host")}
@@ -346,14 +333,12 @@ export function ConnectionFormDialog({
             <Input
               value={String(watch("port"))}
               inputMode="numeric"
-              onInput={(e: InputEvt) =>
-                setValue("port", toNumber(e.currentTarget.value, 5432))
-              }
+              onInput={(e: InputEvt) => setValue("port", toNumber(e.currentTarget.value, 5432))}
             />
           </Row>
         </div>
 
-        <div class="grid grid-cols-2 gap-6">
+        <div class="grid grid-cols-2 gap-4">
           <Row label="User">
             <Input
               value={watch("user")}
@@ -362,20 +347,18 @@ export function ConnectionFormDialog({
           </Row>
 
           <Row label="Other options">
-            <button
-              type="button"
-              class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-left font-medium text-slate-800 flex items-center justify-between hover:bg-slate-50"
+            <Button
+              variant="outline"
+              className="justify-between w-full text-sm hover:bg-neutral-100 border-neutral-300 text-neutral-600 px-2"
               onClick={() => setOpenOptions((x) => !x)}
             >
               <span>{openOptions ? "Hide" : "Show"}</span>
-              <span class={`transition ${openOptions ? "rotate-180" : ""}`}>
-                ▾
-              </span>
-            </button>
+              <span class={`transition ${openOptions ? "rotate-180" : ""}`}>▾</span>
+            </Button>
           </Row>
         </div>
 
-        <div class="grid grid-cols-2 gap-6">
+        <div class="grid grid-cols-2 gap-4">
           <Row label="Password">
             <Input
               type="password"
@@ -385,9 +368,7 @@ export function ConnectionFormDialog({
                   ? "Enter password (will be saved securely)"
                   : "Enter password (not saved)"
               }
-              onInput={(e: InputEvt) =>
-                setValue("password", e.currentTarget.value)
-              }
+              onInput={(e: InputEvt) => setValue("password", e.currentTarget.value)}
             />
 
             {storeKeychain && !watch("password") ? (
@@ -411,54 +392,38 @@ export function ConnectionFormDialog({
               }
             >
               <option value="session">Don’t save (ask every time)</option>
-              <option value="keychain">
-                Save securely on this device (Keychain)
-              </option>
+              <option value="keychain">Save securely on this device (Keychain)</option>
             </Select>
 
             <div class="mt-2 text-xs text-slate-500 leading-snug">
               {storeKeychain ? (
-                <>
-                  Password is encrypted and stored in your operating system’s
-                  secure keychain.
-                </>
+                <>Password is encrypted and stored in your operating system’s secure keychain.</>
               ) : (
-                <>
-                  Password is used for this connection only and will not be
-                  saved.
-                </>
+                <>Password is used for this connection only and will not be saved.</>
               )}
             </div>
           </Row>
         </div>
 
-        <div class="grid grid-cols-2 gap-6">
+        <div class="grid grid-cols-2 gap-4">
           <Row label="Database">
             <Input
               value={watch("database")}
-              onInput={(e: InputEvt) =>
-                setValue("database", e.currentTarget.value)
-              }
+              onInput={(e: InputEvt) => setValue("database", e.currentTarget.value)}
             />
           </Row>
 
           <Row label="">
-            <button
-              type="button"
-              class="py-2 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 text-sm text-slate-600 cursor-not-allowed"
-              disabled
-            >
+            <Button className="w-full" disabled>
               Bootstrap commands…
-            </button>
+            </Button>
           </Row>
         </div>
 
         <Row label="SSL mode">
           <Select
             value={watch("sslMode")}
-            onChange={(e: SelectEvt) =>
-              setValue("sslMode", e.currentTarget.value as SslMode)
-            }
+            onChange={(e: SelectEvt) => setValue("sslMode", e.currentTarget.value as SslMode)}
           >
             <option value="disable">DISABLE</option>
             <option value="prefer">PREFERRED</option>
@@ -469,31 +434,25 @@ export function ConnectionFormDialog({
         </Row>
 
         <Row label="SSL keys">
-          <div class="grid grid-cols-[1fr_1fr_1fr_40px] gap-3">
+          <div class="grid grid-cols-[1fr_1fr_1fr_34px] gap-2">
             <Input
               value={watch("sslKey")}
               placeholder="Key…"
-              onInput={(e: InputEvt) =>
-                setValue("sslKey", e.currentTarget.value)
-              }
+              onInput={(e: InputEvt) => setValue("sslKey", e.currentTarget.value)}
             />
             <Input
               value={watch("sslCert")}
               placeholder="Cert…"
-              onInput={(e: InputEvt) =>
-                setValue("sslCert", e.currentTarget.value)
-              }
+              onInput={(e: InputEvt) => setValue("sslCert", e.currentTarget.value)}
             />
             <Input
               value={watch("sslCA")}
               placeholder="CA Cert…"
-              onInput={(e: InputEvt) =>
-                setValue("sslCA", e.currentTarget.value)
-              }
+              onInput={(e: InputEvt) => setValue("sslCA", e.currentTarget.value)}
             />
-            <button
-              type="button"
-              class="h-10 w-10 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50"
+            <Button
+              variant="ghost"
+              className="size-8 rounded-lg border border-slate-300"
               onClick={() => {
                 setValue("sslKey", "");
                 setValue("sslCert", "");
@@ -502,101 +461,75 @@ export function ConnectionFormDialog({
               title="Clear"
             >
               –
-            </button>
+            </Button>
           </div>
         </Row>
 
         {sshEnabled ? (
-          <div class="grid grid-cols-2 gap-6">
+          <div class="grid grid-cols-2 gap-4">
             <Row label="SSH Host">
               <Input
                 value={watch("sshHost")}
                 placeholder="ssh.example.com"
-                onInput={(e: InputEvt) =>
-                  setValue("sshHost", e.currentTarget.value)
-                }
+                onInput={(e: InputEvt) => setValue("sshHost", e.currentTarget.value)}
               />
             </Row>
             <Row label="SSH Port">
               <Input
                 value={String(watch("sshPort"))}
                 inputMode="numeric"
-                onInput={(e: InputEvt) =>
-                  setValue("sshPort", toNumber(e.currentTarget.value, 22))
-                }
+                onInput={(e: InputEvt) => setValue("sshPort", toNumber(e.currentTarget.value, 22))}
               />
             </Row>
           </div>
         ) : null}
 
         {sshEnabled ? (
-          <div class="grid grid-cols-2 gap-6">
+          <div class="grid grid-cols-2 gap-4">
             <Row label="SSH User">
               <Input
                 value={watch("sshUser")}
                 placeholder="ubuntu"
-                onInput={(e: InputEvt) =>
-                  setValue("sshUser", e.currentTarget.value)
-                }
+                onInput={(e: InputEvt) => setValue("sshUser", e.currentTarget.value)}
               />
             </Row>
             <Row label="SSH Key path">
               <Input
                 value={watch("sshKeyPath")}
                 placeholder="~/.ssh/id_ed25519"
-                onInput={(e: InputEvt) =>
-                  setValue("sshKeyPath", e.currentTarget.value)
-                }
+                onInput={(e: InputEvt) => setValue("sshKeyPath", e.currentTarget.value)}
               />
             </Row>
           </div>
         ) : null}
 
         <div class="pt-2 flex items-center justify-between">
-          <button
-            type="button"
-            class={`px-4 py-2 cursor-pointer text-sm rounded-xl border border-slate-300 font-semibold ${
-              sshEnabled
-                ? "bg-blue-500 text-white hover:bg-blue-600"
-                : "bg-slate-50 text-slate-800 hover:bg-slate-100 "
-            }`}
+          <Button
+            variant={sshEnabled ? "default" : "shadow"}
             onClick={() => setValue("sshEnabled", !sshEnabled)}
           >
             Over SSH
-          </button>
+          </Button>
 
           <div class="flex gap-3">
-            <button
-              class="py-2 cursor-pointer text-sm rounded-xl border border-slate-300 bg-white px-6 font-semibold hover:bg-slate-50 disabled:opacity-60"
-              disabled={!!busy}
-              onClick={onSave}
-            >
+            <Button variant="shadow" disabled={!!busy} onClick={onSave}>
               {busy === "save" ? "Saving…" : "Save"}
-            </button>
+            </Button>
 
-            <button
-              class="py-2 cursor-pointer text-sm rounded-xl border border-slate-300 bg-white px-6 font-semibold hover:bg-slate-50 disabled:opacity-60"
-              disabled={!!busy}
-              onClick={onTest}
-            >
+            <Button variant="shadow" disabled={!!busy} onClick={onTest}>
               {busy === "test" ? "Testing…" : "Test"}
-            </button>
+            </Button>
 
-            <button
-              class="py-2 cursor-pointer text-sm rounded-xl bg-blue-600 px-5 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-              disabled={!!busy}
-              onClick={onConnect}
-            >
+            <Button variant="default" disabled={!!busy} onClick={onConnect}>
               {busy === "connect" ? "Connecting…" : "Connect"}
-            </button>
+            </Button>
           </div>
         </div>
 
         {msg ? (
           <div
             class={`mt-3 rounded-2xl border px-4 py-3 text-sm font-semibold ${
-              msg.toLowerCase().includes("failed") ||
-              msg.toLowerCase().includes("error")
+              msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")
                 ? "border-rose-200 bg-rose-50 text-rose-700"
                 : "border-slate-200 bg-slate-50 text-slate-700"
             }`}
@@ -612,9 +545,7 @@ export function ConnectionFormDialog({
 function Row(props: { label: string; children: any }) {
   return (
     <div class="grid grid-cols-[100px_1fr] items-center gap-3">
-      <div class="text-right text-sm font-medium text-slate-800">
-        {props.label}
-      </div>
+      <div class="text-right text-sm font-medium text-slate-800">{props.label}</div>
       <div>{props.children}</div>
     </div>
   );
@@ -628,8 +559,8 @@ function Input(
   }
 ) {
   const cls = [
-    "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
-    "focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60",
+    "py-1 w-full rounded-md border border-slate-300 bg-white px-2 text-sm font-medium text-slate-900 outline-none",
+    "focus:border-blue-400 focus:ring-2 focus:ring-blue-200/60",
     typeof props.class === "string" ? props.class : "",
   ]
     .filter(Boolean)
@@ -638,16 +569,14 @@ function Input(
   return <input {...props} class={cls} />;
 }
 
-function Select(
-  props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }
-) {
-  const cls = [
-    "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
-    "focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60",
-    typeof props.class === "string" ? props.class : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+// function Select(props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }) {
+//   const cls = [
+//     "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
+//     "focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60",
+//     typeof props.class === "string" ? props.class : "",
+//   ]
+//     .filter(Boolean)
+//     .join(" ");
 
-  return <select {...props} class={cls} />;
-}
+//   return <select {...props} class={cls} />;
+// }

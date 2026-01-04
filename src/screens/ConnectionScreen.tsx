@@ -2,8 +2,10 @@ import { useState, useMemo } from "preact/hooks";
 import { useLoadTables, type TableItem } from "../hooks/useLoadTables";
 import { useLoadTableData } from "../hooks/useLoadTableData";
 import { useScreenStore } from "../stores/screen";
-import { Database, Search, X } from "../components/icons";
-import { cellToString } from "../utils/convert";
+import { ChevronDown, ChevronRight, Database, Search, Table, X } from "../components/icons";
+import { EditableTable } from "../components/EditableTable";
+import { cn } from "../utils/cn";
+import { Button } from "../components/common/Button";
 
 type OpenTable = {
   id: string;
@@ -54,11 +56,11 @@ export function ConnectionScreen() {
 
     if (existingTable) {
       // Switch to existing table
-      setActiveTableId(existingTable.id);
+      setActiveTableId(`${table.schema}.${table.name}`);
     } else {
       // Open new table
       const newTable: OpenTable = {
-        id: `table-${Date.now()}-${Math.random()}`,
+        id: `${table.schema}.${table.name}`,
         table,
       };
       setOpenTables([...openTables, newTable]);
@@ -114,62 +116,72 @@ export function ConnectionScreen() {
   }
 
   return (
-    <div class="h-full flex-1 flex bg-neutral-100">
+    <div class="h-full flex-1 flex">
       {/* Left Sidebar */}
-      <div class="w-64 h-full bg-neutral-50 border-r border-neutral-200 flex flex-col shrink-0">
+      <div class="w-64 h-full bg-neutral-100 flex flex-col shrink-0 pt-1">
         {/* Search Bar */}
-        <div class="p-3 border-b border-neutral-100">
+        <div class="px-2 py-1 border-b border-neutral-100">
           <div class="relative">
             <input
               type="text"
               placeholder="Search for item..."
               value={tableSearchQuery}
               onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-              class="w-full pl-8 pr-8 py-2 rounded-md bg-neutral-50 border border-neutral-300 text-sm text-neutral-700 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full pl-8 pr-8 py-1 text-xs rounded-md bg-neutral-50 border border-neutral-200 text-neutral-700 placeholder:text-neutral-500 focus:outline-none"
             />
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-neutral-500" />
           </div>
         </div>
 
         {/* Collapsible Sections */}
         <div class="flex-1 overflow-y-auto p-2">
           {/* Functions Section */}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={() => setExpandedSections((prev) => ({ ...prev, functions: !prev.functions }))}
-            class="w-full px-3 py-2 rounded-md text-left flex items-center justify-between text-sm text-neutral-700 hover:bg-neutral-200 transition-colors cursor-pointer"
+            className="w-full justify-start px-2"
           >
+            {expandedSections.functions ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
             <span>Functions</span>
-            <span class="text-xs text-neutral-500">{expandedSections.functions ? "−" : "+"}</span>
-          </button>
+          </Button>
 
           {/* Tables Section */}
           <div class="mt-1">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => setExpandedSections((prev) => ({ ...prev, tables: !prev.tables }))}
-              class="w-full px-3 py-2 rounded-md text-left flex items-center justify-between text-sm text-neutral-700 hover:bg-neutral-200 transition-colors cursor-pointer"
+              className="w-full justify-start px-2"
             >
+              {expandedSections.tables ? (
+                <ChevronDown className="size-3" />
+              ) : (
+                <ChevronRight className="size-3" />
+              )}
               <span>Tables</span>
-              <span class="text-xs text-neutral-500">{expandedSections.tables ? "−" : "+"}</span>
-            </button>
+            </Button>
 
             {expandedSections.tables && (
-              <div class="mt-1 space-y-0.5">
+              <div class="mt-1 space-y-0.5 pl-4">
                 {filteredTables.length === 0 ? (
                   <div class="px-3 py-2 text-xs text-neutral-500">No tables found</div>
                 ) : (
                   filteredTables.map((table) => {
+                    const key = `${table.schema}.${table.name}`;
                     return (
-                      <button
-                        key={`${table.schema}.${table.name}`}
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        key={key}
                         onClick={() => handleSelectTable(table)}
-                        class={`w-full px-3 py-1.5 rounded-md text-left text-sm transition-colors cursor-pointer "text-neutral-700 hover:bg-neutral-200"
-                        }`}
+                        active={activeTableId === key}
+                        className="w-full px-3 py-1.5 rounded-md justify-start text-xs"
                       >
+                        <Table className="size-4" />
                         {table.name}
-                      </button>
+                      </Button>
                     );
                   })
                 )}
@@ -180,22 +192,35 @@ export function ConnectionScreen() {
       </div>
 
       {/* Main Content Area */}
-      <div class="flex-1 bg-white flex flex-col">
+      <div class="flex-1 flex flex-col pt-1 bg-neutral-100 overflow-x-auto">
         {openTables.length > 0 ? (
           <>
             {/* Table Tabs */}
-            <div class="flex items-center gap-1 px-1 pt-1 border-b border-neutral-200 bg-neutral-50 overflow-x-auto">
+            <div class="flex items-center gap-0.5 border-b border-neutral-100 bg-neutral-100 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
               {openTables.map((openTable) => (
                 <div
                   key={openTable.id}
                   onClick={() => setActiveTableId(openTable.id)}
-                  class={`group flex items-center gap-2 px-3 py-1.5 rounded-t-md transition-colors cursor-pointer shrink-0 ${
+                  class={`group flex items-center gap-2 px-2 py-1.5 rounded-t-md transition-colors cursor-pointer shrink-0 ${
                     activeTableId === openTable.id
-                      ? "bg-white border-t border-l border-r border-neutral-200 text-blue-600"
-                      : "text-neutral-600 hover:bg-neutral-100"
+                      ? "bg-white text-neutral-700"
+                      : "text-neutral-600 bg-neutral-200 hover:bg-slate-200"
                   }`}
                 >
-                  <span class="text-sm font-medium">{openTable.table.name}</span>
+                  <div class="flex items-center gap-2">
+                    <Table className="size-4" />
+                    <span
+                      class={cn(
+                        "text-xs",
+                        activeTableId === openTable.id
+                          ? "text-neutral-700 font-bold"
+                          : "text-neutral-600"
+                      )}
+                    >
+                      {openTable.table.name}
+                    </span>
+                  </div>
+
                   <button
                     type="button"
                     onClick={(e) => handleCloseTable(openTable.id, e)}
@@ -220,7 +245,7 @@ export function ConnectionScreen() {
 
                 {/* Table Content */}
                 {activeTableData.busy ? (
-                  <div class="flex items-center justify-center h-full">
+                  <div class="flex items-center justify-center h-full bg-white">
                     <div class="text-center">
                       <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
                       <p class="text-neutral-500">Loading table data...</p>
@@ -234,55 +259,15 @@ export function ConnectionScreen() {
                     </div>
                   </div>
                 ) : activeTableData.data ? (
-                  <div class="overflow-x-auto">
-                    <table class="w-full border-collapse">
-                      <thead class="bg-neutral-50 sticky top-0">
-                        <tr>
-                          {activeTableData.data.columns.map((col) => (
-                            <th
-                              key={col.name}
-                              class="px-4 py-2 text-left text-xs font-semibold text-neutral-700 border-b border-neutral-200"
-                            >
-                              {col.name}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {activeTableData.data.rows.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={activeTableData.data.columns.length}
-                              class="px-4 py-8 text-center text-neutral-500"
-                            >
-                              No data found
-                            </td>
-                          </tr>
-                        ) : (
-                          activeTableData.data.rows.map((row, rowIndex) => (
-                            <tr
-                              key={rowIndex}
-                              class={`border-b border-neutral-100 ${
-                                rowIndex % 2 === 0 ? "bg-white" : "bg-neutral-50"
-                              } hover:bg-blue-50`}
-                            >
-                              {row.map((cell, cellIndex) => (
-                                <td
-                                  key={cellIndex}
-                                  class="px-4 py-2 text-sm text-neutral-900 max-w-xs truncate"
-                                  title={cellToString(cell)}
-                                >
-                                  {cellToString(cell) || (
-                                    <span class="text-neutral-400 italic">NULL</span>
-                                  )}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  <EditableTable
+                    columns={activeTableData.data.columns}
+                    data={activeTableData.data.rows}
+                    onCellChange={(rowIndex, columnIndex, value) => {
+                      // Handle cell value change
+                      console.log("Cell changed:", rowIndex, columnIndex, value);
+                      // TODO: Implement save to database
+                    }}
+                  />
                 ) : null}
               </div>
             ) : (
@@ -292,7 +277,7 @@ export function ConnectionScreen() {
             )}
           </>
         ) : (
-          <div class="flex items-center justify-center h-full">
+          <div class="flex items-center justify-center h-full bg-white">
             <div class="text-center">
               <Database className="size-12 text-neutral-300 mx-auto mb-4" />
               <p class="text-neutral-500">Select a table from the sidebar to view data</p>

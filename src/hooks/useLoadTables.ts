@@ -41,6 +41,12 @@ export function useLoadTables() {
       const buffer: any[][] = [];
 
       try {
+        const storeKey = activeTab.id.split("#").pop() || "";
+        const localData = JSON.parse(localStorage.getItem(storeKey) || "{}");
+        if (localData.id) {
+          localStorage.setItem(storeKey, JSON.stringify({ ...localData, connectionId: res.id }));
+        }
+
         const opId = await operationExecute({
           connection_id: res.id,
           kind: "sql_query",
