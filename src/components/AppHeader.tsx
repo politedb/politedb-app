@@ -1,9 +1,10 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Plus, X, Database } from "./icons";
+import { Plus, X, Database, Bell } from "./icons";
 import { ReactNode } from "preact/compat";
 import { Tab } from "../stores/screen";
 import { useScreenStore } from "../stores/screen";
 import { WindowControls } from "./WindowControls";
+import { Button } from "./common/Button";
 
 const win = getCurrentWebviewWindow();
 
@@ -63,6 +64,7 @@ export function AppHeader({
   }
 
   function handleTabClose(tabId: string) {
+    const currentTab = tabs.find((tab) => tab.id === tabId);
     const newTabs = tabs.filter((tab) => tab.id !== tabId);
     setTabs(newTabs);
 
@@ -73,6 +75,12 @@ export function AppHeader({
       } else {
         setActiveScreen("main");
       }
+    }
+
+    const storeKey = currentTab?.id.split("#").pop() || "";
+    const localData = JSON.parse(localStorage.getItem(storeKey) || "{}");
+    if (localData?.connectionId) {
+      // connectionRemove(localData.connectionId);
     }
   }
 
@@ -87,53 +95,49 @@ export function AppHeader({
       {/* Navigation Buttons */}
       <div class="flex items-center gap-1 shrink-0">
         {NAV_BUTTONS.map((nav) => (
-          <button
+          <Button
+            variant="primary"
             key={nav.id}
-            type="button"
             onClick={() => {
               onNavChange?.(nav.id);
               setActiveScreen(nav.id);
             }}
-            class={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
-              activeNav === nav.id
-                ? "bg-neutral-700 hover:bg-neutral-700 text-white"
-                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
-            }`}
+            active={activeNav === nav.id}
+            className="py-1.5"
           >
             {nav.icon}
             <span>{nav.label}</span>
-          </button>
+          </Button>
         ))}
       </div>
 
       {/* Tabs */}
-      <div class="flex-1 flex items-center gap-1 overflow-x-auto min-w-0">
+      <div class="flex-1 flex items-center gap-1 overflow-x-auto min-w-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            class={`group flex items-center gap-1.5 pl-4 pr-2 py-1.25 rounded-md transition-colors cursor-pointer ${
+            class={`group max-w-44 w-full flex items-center justify-between gap-1.5 pl-4 pr-2 py-1.25 rounded-md transition-colors cursor-pointer ${
               activeScreen === tab.id
-                ? "bg-blue-500 text-white"
+                ? "bg-neutral-700 hover:bg-neutral-700 text-white"
                 : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >
-            <span class="text-xs font-medium truncate max-w-[150px]">
-              {tab.label}
-            </span>
-            <button
-              type="button"
+            <span class="text-xs font-medium truncate max-w-[150px]">{tab.label}</span>
+            <Button
+              variant="ghost"
               onClick={(e) => {
                 e.stopPropagation();
                 handleTabClose?.(tab.id);
               }}
-              class={`opacity-0 cursor-pointer group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-white/20 ${
+              active={activeScreen === tab.id}
+              class={`opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-white/20 text-white ${
                 activeScreen === tab.id ? "opacity-100" : ""
               }`}
               title="Close tab"
             >
               <X className="size-3.5" />
-            </button>
+            </Button>
           </div>
         ))}
       </div>
@@ -150,25 +154,13 @@ export function AppHeader({
             <Plus className="size-4" />
           </button>
         )}
-        <button
-          type="button"
-          class="w-6 h-6 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer flex items-center justify-center"
+        <Button
+          className="text-neutral-300 bg-transparent p-2 hover:bg-transparent hover:text-neutral-400"
+          variant="ghost"
           title="Notifications"
         >
-          <svg
-            class="size-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-            />
-          </svg>
-        </button>
+          <Bell className="size-4" />
+        </Button>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { Edit, Grid, Console, List, Search, Database, Key, Plus } from "../compo
 import { ConnectionModal } from "../components/ConnectionModal";
 import { ReactNode } from "preact/compat";
 import { Tab, useScreenStore } from "../stores/screen";
+import { Button } from "../components/common/Button";
 
 type Connection = {
   id: string;
@@ -192,7 +193,7 @@ export function MainScreen() {
     const newTab: Tab = {
       id: `tab-${Date.now()}-conn#${connectionId}`,
       label: connectionData.label || "Unnamed Connection",
-      connectionId,
+      connectionId: payload.id,
       connectionData,
     };
 
@@ -209,19 +210,15 @@ export function MainScreen() {
           <div class="p-2">
             <nav class="space-y-1">
               {NAV_ITEMS.map((item) => (
-                <button
+                <Button
+                  variant={activeNav === item.id ? "default" : "ghost"}
                   key={item.id}
-                  type="button"
                   onClick={() => setActiveNav(item.id)}
-                  class={`w-full px-3 py-2 rounded-lg text-left flex items-center gap-3 transition-colors cursor-pointer ${
-                    activeNav === item.id
-                      ? "bg-blue-500 text-white"
-                      : "text-neutral-700 hover:bg-neutral-100"
-                  }`}
+                  class={`w-full p-2 justify-start gap-3`}
                 >
-                  <span class="text-lg">{item.icon}</span>
-                  <span class="text-sm font-medium">{item.label}</span>
-                </button>
+                  {item.icon}
+                  <span class="text-[13px] font-medium">{item.label}</span>
+                </Button>
               ))}
             </nav>
           </div>
@@ -250,49 +247,46 @@ export function MainScreen() {
             {/* Action Buttons */}
             <div class="p-2 rounded-t-sm bg-slate-200 flex items-center justify-between shadow-sm">
               <div class="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="default"
                   onClick={handleNewConnection}
-                  class="p-1.5 px-2 rounded-md bg-blue-500 text-white text-xs font-medium hover:bg-blue-600 transition-colors flex items-center gap-2 cursor-pointer"
+                  class="p-1.5 px-2 rounded-md"
                 >
-                  <Plus className="size-3.5" />
-                  <span>NEW CONNECTION</span>
-                </button>
-                <button
-                  type="button"
-                  class="p-1.5 px-2 rounded-md border border-slate-300 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50 transition-colors flex items-center gap-2 cursor-pointer"
-                >
-                  <Console className="size-4" />
-                  <span>QUERY</span>
-                </button>
+                  <Plus className="size-3" />
+                  <span class="text-[11px] font-medium">NEW CONNECTION</span>
+                </Button>
+                <Button class="p-1.5 px-2 rounded-md">
+                  <Console className="size-3.5" />
+                  <span class="text-[11px] font-medium">QUERY</span>
+                </Button>
               </div>
 
               {/* View Options */}
               <div class="flex items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="outline"
                   onClick={() => setViewMode("grid")}
-                  class={`p-2 rounded-lg border transition-colors cursor-pointer ${
+                  class={`p-2 rounded-lg bg-white ${
                     viewMode === "grid"
-                      ? "border-blue-600 bg-blue-50 text-blue-600"
-                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                      ? "border-blue-600 text-blue-600"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-50"
                   }`}
                   title="Grid View"
                 >
                   <Grid className="size-4" />
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="outline"
                   onClick={() => setViewMode("list")}
-                  class={`p-2 rounded-lg border transition-colors cursor-pointer ${
+                  class={`p-2 rounded-lg bg-white ${
                     viewMode === "list"
-                      ? "border-blue-600 bg-blue-50 text-blue-600"
-                      : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                      ? "border-blue-600 text-blue-600"
+                      : "border-slate-300 text-slate-600 hover:bg-slate-50"
                   }`}
                   title="List View"
                 >
                   <List className="size-4" />
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -314,13 +308,13 @@ export function MainScreen() {
                       }
                     >
                       {groupedConnections.map((group) => (
-                        <button
+                        <Button
                           key={group.tag}
-                          type="button"
+                          variant="ghost"
                           onClick={() => {
                             setSearchQuery(group.tag);
                           }}
-                          class="w-full p-3 rounded-xl border border-transparent shadow-xs bg-white hover:bg-neutral-50 transition-all text-left cursor-pointer"
+                          class="w-full p-3 rounded-xl justify-start text-left bg-white shadow-sm hover:bg-neutral-50"
                         >
                           <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -334,7 +328,7 @@ export function MainScreen() {
                               </div>
                             </div>
                           </div>
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </div>
@@ -347,17 +341,17 @@ export function MainScreen() {
                   </h2>
                   {filteredConnections.length === 0 ? (
                     <div class="text-center py-12">
-                      <p class="text-slate-500 mb-2">
+                      <p class="text-sm text-slate-500 mb-2">
                         {searchQuery ? "No connections found" : "No connections yet"}
                       </p>
                       {!searchQuery && (
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
                           onClick={handleNewConnection}
-                          class="text-blue-600 hover:text-blue-700 text-sm font-medium cursor-pointer"
+                          class="text-blue-600 mx-auto hover:text-blue-700 hover:bg-transparent text-sm font-medium"
                         >
                           Create your first connection
-                        </button>
+                        </Button>
                       )}
                     </div>
                   ) : (
@@ -371,7 +365,7 @@ export function MainScreen() {
                       {filteredConnections.map((conn, index) => (
                         <div
                           key={index}
-                          class={`border-transparent shadow-xs bg-white hover:bg-neutral-50 text-left cursor-pointer flex items-center justify-between gap-3 px-3 py-2 rounded-xl border transition-all ${
+                          class={`border-transparent shadow-sm bg-white hover:bg-neutral-50 text-left cursor-pointer flex items-center justify-between gap-3 px-3 py-2 rounded-xl border transition-all ${
                             selectedConnectionId === conn.id
                               ? "border-blue-600 bg-blue-50"
                               : "border-slate-200 bg-white"
@@ -384,14 +378,14 @@ export function MainScreen() {
                           <div class="flex items-center gap-3 flex-1 min-w-0">
                             <div class="relative">
                               <div
-                                class={`p-2.5 rounded-full bg-blue-500 flex items-center justify-center text-white`}
+                                class={`p-2 rounded-full bg-blue-500 flex items-center justify-center text-white`}
                               >
                                 <Database className="size-6" />
                               </div>
                             </div>
                             <div class="flex-1 min-w-0">
-                              <div class="font-medium text-sm text-slate-900 truncate mb-1">
-                                {conn.name} <span class="text-sm text-green-500">({conn.tag})</span>
+                              <div class="font-semibold text-xs text-slate-900 truncate mb-1">
+                                {conn.name} <span class="text-xs text-green-500">({conn.tag})</span>
                               </div>
                               <div class="flex items-center gap-2">
                                 {conn.statusColor && (

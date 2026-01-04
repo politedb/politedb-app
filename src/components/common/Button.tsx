@@ -1,0 +1,67 @@
+import React from "preact/compat";
+import { cn } from "../../utils/cn";
+
+type ButtonVariant =
+  | "default"
+  | "shadow"
+  | "primary"
+  | "outline"
+  | "ghost"
+  | "destructive"
+  | "secondary";
+
+interface ButtonProps extends React.ComponentProps<"button"> {
+  className?: string;
+  class?: string;
+  variant?: ButtonVariant;
+  active?: boolean;
+}
+
+const variantStyles: Record<ButtonVariant, string> = {
+  default: "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700",
+  shadow: "border border-neutral-200 shadow-sm hover:bg-neutral-100",
+  primary: "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white",
+  outline:
+    "border border-neutral-400 text-neutral-600 bg-transparent hover:bg-neutral-100 active:bg-neutral-100",
+  ghost: "text-neutral-700 bg-transparent hover:bg-neutral-200 active:bg-neutral-100",
+  destructive: "bg-red-500 text-white hover:bg-red-600 active:bg-red-700",
+  secondary: "bg-gray-500 text-white hover:bg-gray-600 active:bg-gray-700",
+};
+
+const activeStyles: Record<ButtonVariant, string> = {
+  default: "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700",
+  shadow: "border border-neutral-200 shadow-md",
+  primary: "bg-neutral-700 hover:bg-neutral-700 text-white",
+  outline:
+    "border border-neutral-500 text-neutral-500 bg-transparent hover:bg-neutral-50 active:bg-neutral-100",
+  ghost: "text-blue-500 bg-transparent hover:bg-blue-50 active:bg-blue-100",
+  destructive: "bg-red-500 text-white hover:bg-red-600 active:bg-red-700",
+  secondary: "bg-gray-500 text-white hover:bg-gray-600 active:bg-gray-700",
+};
+
+export function Button({
+  children,
+  disabled,
+  className,
+  class: classNames,
+  variant = "default",
+  active = false,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={cn(
+        "px-4 py-1 cursor-pointer flex items-center gap-1 justify-center rounded-md text-xs font-medium transition-colors",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        variantStyles[variant],
+        active && activeStyles[variant],
+        className,
+        classNames
+      )}
+      disabled={disabled}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}

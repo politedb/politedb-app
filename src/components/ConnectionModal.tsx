@@ -1,6 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { Search, X } from "./icons";
 import { ConnectionFormDialog } from "./ConnectionFormDialog";
+import { Button } from "./common/Button";
 
 type DatabaseType = {
   id: string;
@@ -100,13 +101,9 @@ export function ConnectionModal({
       <div class="w-full max-w-4xl max-h-[90vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
           <h2 class="text-lg font-semibold text-slate-900">New Connection</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            class="h-8 w-8 rounded-lg hover:bg-slate-100 flex items-center justify-center transition-colors cursor-pointer"
-          >
+          <Button variant="ghost" className="p-2 rounded-full" onClick={onClose}>
             <X className="size-4 text-slate-600" />
-          </button>
+          </Button>
         </div>
 
         <div class="flex-1 overflow-y-auto bg-slate-50 p-6">
@@ -125,24 +122,24 @@ export function ConnectionModal({
           </div>
 
           {/* Database Type Grid */}
-          <div class="grid grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-4 mb-6">
+          <div class="grid grid-cols-4 md:grid-cols-6 gap-4 mb-6">
             {filteredDatabaseTypes.map((db) => {
               const isSelected = selectedDatabaseType === db.id;
               return (
-                <button
+                <Button
+                  variant="outline"
                   key={db.id}
-                  type="button"
                   onClick={() => {
                     if (db.available) {
                       setSelectedDatabaseType(db.id);
                     }
                   }}
                   disabled={!db.available}
-                  class={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                  class={`flex-col gap-2 p-3 rounded-xl transition-all ${
                     isSelected && db.available
-                      ? "border-blue-600 bg-blue-50 shadow-md cursor-pointer"
+                      ? "border-blue-600 bg-blue-50 shadow-md"
                       : db.available
-                      ? "border-slate-200 bg-white hover:border-blue-500 hover:shadow-md cursor-pointer"
+                      ? "border-slate-200 bg-white hover:border-blue-500 hover:shadow-md"
                       : "border-slate-100 bg-slate-50 opacity-50 cursor-not-allowed"
                   }`}
                 >
@@ -158,7 +155,7 @@ export function ConnectionModal({
                   <div class="text-xs text-center text-slate-700 font-medium leading-tight">
                     {db.name}
                   </div>
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -166,28 +163,13 @@ export function ConnectionModal({
           {/* Action Buttons */}
           <div class="flex items-center justify-between pt-4 border-t border-slate-200">
             <div class="flex gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
-              >
+              <Button variant="outline" onClick={onClose}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                Import from URL
-              </button>
-              <button
-                type="button"
-                class="px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                New Group
-              </button>
+              </Button>
+              <Button variant="outline">Import from URL</Button>
+              <Button variant="outline">New Group</Button>
             </div>
-            <button
-              type="button"
+            <Button
               onClick={() => {
                 if (selectedDatabaseType) {
                   // Proceed to form with selected database
@@ -204,10 +186,9 @@ export function ConnectionModal({
                 }
               }}
               disabled={!filteredDatabaseTypes.some((db) => db.available)}
-              class="px-4 py-1 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Create
-            </button>
+            </Button>
           </div>
         </div>
       </div>

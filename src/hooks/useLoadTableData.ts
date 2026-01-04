@@ -9,7 +9,6 @@ export type TableData = {
   rowCount: number;
 };
 
-
 type TableDataState = {
   [key: string]: {
     data: TableData | null;
@@ -97,6 +96,7 @@ export function useLoadTableData() {
             if (chunk.rows && chunk.rows.length > 0) {
               rows.push(...chunk.rows);
             }
+            console.log(rows);
           },
           (done) => {
             setTableDataMap((prev) => ({
