@@ -50,7 +50,7 @@ export async function profileUpdate(
 }
 
 export async function profileRemove(profileId: string): Promise<void> {
-  await invoke(CMD.profileRemove, { profile_id: profileId });
+  await invoke(CMD.profileRemove, { profileId });
 }
 
 /* ============================================================================

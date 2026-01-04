@@ -3,51 +3,54 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/ConnectionFormDialog";
-import { Tab, useScreenStore } from "src/stores/screen";
-import {
-  ConnectionCreateInput,
-  ConnectionProfile,
-  profileList,
-} from "src/lib/tauri";
+import { OverlayModal } from "src/components/modal/OverlayModal";
+
+import { useScreenStore, Tab } from "src/stores/screen";
+import { useProfileStore } from "src/stores/profile";
 
 import { LeftNav } from "./LeftNav";
 import { TopBar } from "./TopBar";
 import { GroupsSection } from "./GroupsSection";
 import { ConnectionsSection } from "./ConnectionsSection";
+
 import { filterConnections, groupConnections } from "src/utils/connection";
 import type { NavId, ViewMode } from "src/types";
-import { OverlayModal } from "src/components/modal/OverlayModal";
 
 export function MainScreen() {
-  const { tabs, addTab, setActiveScreen } = useScreenStore();
+  const { addTab, setActiveScreen } = useScreenStore();
 
-  const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    null
-  );
-  const [selectedProfile, setSelectedProfile] =
-    useState<ConnectionProfile | null>(null);
+  const {
+    loadProfiles,
+    getProfileById,
 
-  const [showNewConnection, setShowNewConnection] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showDatabaseForm, setShowDatabaseForm] = useState(false);
+    selectedProfileId,
+    selectProfile,
+
+    showNewConnection,
+    showEditProfile,
+    showDatabaseForm,
+    setShowDatabaseForm,
+
+    openNew,
+    closeNew,
+    openEdit,
+    closeEdit,
+  } = useProfileStore();
+
+  const profiles = useProfileStore((s) => s.profiles);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
 
   useEffect(() => {
-    void reloadProfiles();
-  }, []);
+    void loadProfiles();
+  }, [loadProfiles]);
 
-  async function reloadProfiles() {
-    try {
-      const list = await profileList();
-      setProfiles(list);
-    } catch (err) {
-      console.error("Failed to load profiles", err);
-    }
-  }
+  const selectedProfile = useMemo(() => {
+    if (!selectedProfileId) return null;
+    return getProfileById(selectedProfileId) ?? null;
+  }, [selectedProfileId, getProfileById]);
 
   const filteredProfiles = useMemo(
     () => filterConnections(profiles, searchQuery),
@@ -59,44 +62,17 @@ export function MainScreen() {
     [filteredProfiles]
   );
 
-  function resetSelection() {
-    setSelectedProfileId(null);
-    setSelectedProfile(null);
-  }
-
-  function handleNewConnection() {
-    setShowNewConnection(true);
+  async function handleProfileSaved() {
+    await loadProfiles();
+    closeNew();
+    closeEdit();
     setShowDatabaseForm(false);
-    resetSelection();
-  }
-
-  function handleProfileSaved() {
-    void reloadProfiles();
-    setShowNewConnection(false);
-    setShowProfileModal(false);
-    setShowDatabaseForm(false);
-    resetSelection();
-  }
-
-  function handleEditProfile(profileId: string) {
-    const found = profiles.find((p) => p.id === profileId) ?? null;
-    if (!found) return;
-
-    setSelectedProfileId(profileId);
-    setSelectedProfile(found);
-    setShowProfileModal(true);
-    setShowNewConnection(false);
+    selectProfile(null);
   }
 
   function openProfileInTab(profileId: string) {
-    const found = profiles.find((p) => p.id === profileId);
+    const found = getProfileById(profileId);
     if (!found) return;
-
-    const existing = tabs.find((t) => t.profileId === profileId);
-    if (existing) {
-      setActiveScreen(existing.id);
-      return;
-    }
 
     const newTab: Tab = {
       id: `tab-${uuid()}`,
@@ -107,7 +83,7 @@ export function MainScreen() {
 
     addTab(newTab);
     setActiveScreen(newTab.id);
-    setShowProfileModal(false);
+    closeEdit();
   }
 
   return (
@@ -119,7 +95,7 @@ export function MainScreen() {
           <TopBar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            onNew={handleNewConnection}
+            onNew={openNew}
             viewMode={viewMode}
             onViewMode={setViewMode}
           />
@@ -134,13 +110,19 @@ export function MainScreen() {
                 />
 
                 <ConnectionsSection
-                  connections={filteredProfiles}
+                  profiles={filteredProfiles}
                   selectedId={selectedProfileId}
                   viewMode={viewMode}
                   searchQuery={searchQuery}
-                  onCreate={handleNewConnection}
-                  onOpen={openProfileInTab}
-                  onEdit={handleEditProfile}
+                  onCreate={openNew}
+                  onOpen={(id) => {
+                    selectProfile(id);
+                    openProfileInTab(id);
+                  }}
+                  onEdit={(id) => {
+                    selectProfile(id);
+                    openEdit(id);
+                  }}
                 />
               </div>
             ) : (
@@ -156,29 +138,19 @@ export function MainScreen() {
         {showNewConnection ? (
           <ConnectionModal
             onSaved={handleProfileSaved}
-            onClose={() => {
-              setShowNewConnection(false);
-              resetSelection();
-              setShowDatabaseForm(false);
-            }}
+            onClose={closeNew}
             showDatabaseForm={showDatabaseForm}
             setShowDatabaseForm={setShowDatabaseForm}
           />
         ) : null}
 
         <OverlayModal
-          open={!!(showProfileModal && selectedProfile)}
-          onClose={() => {
-            setShowProfileModal(false);
-            resetSelection();
-          }}
+          open={!!(showEditProfile && selectedProfile)}
+          onClose={closeEdit}
         >
           <ConnectionFormDialog
             onSaved={handleProfileSaved}
-            onClose={() => {
-              setShowProfileModal(false);
-              resetSelection();
-            }}
+            onClose={closeEdit}
             initialData={selectedProfile as any}
           />
         </OverlayModal>

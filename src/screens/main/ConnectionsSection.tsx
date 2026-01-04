@@ -25,7 +25,7 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
 }
 
 export function ConnectionsSection(props: {
-  connections: ConnectionProfile[];
+  profiles: ConnectionProfile[];
   selectedId: string | null;
   viewMode: ViewMode;
   searchQuery: string;
@@ -34,7 +34,7 @@ export function ConnectionsSection(props: {
   onEdit: (id: string) => void;
 }) {
   const {
-    connections,
+    profiles,
     selectedId,
     viewMode,
     searchQuery,
@@ -49,7 +49,7 @@ export function ConnectionsSection(props: {
         Connections
       </h2>
 
-      {connections.length === 0 ? (
+      {profiles.length === 0 ? (
         <EmptyState hasSearch={!!searchQuery.trim()} onCreate={onCreate} />
       ) : (
         <div
@@ -59,13 +59,13 @@ export function ConnectionsSection(props: {
               : "space-y-2"
           }
         >
-          {connections.map((conn) => (
+          {profiles.map((profileConn) => (
             <ConnectionCard
-              key={conn.id}
-              conn={conn}
-              selected={selectedId === conn.id}
-              onOpen={() => onOpen(conn.id)}
-              onEdit={() => onEdit(conn.id)}
+              key={profileConn.id}
+              profileId={profileConn.id}
+              selected={selectedId === profileConn.id}
+              onOpen={() => onOpen(profileConn.id)}
+              onEdit={() => onEdit(profileConn.id)}
             />
           ))}
         </div>

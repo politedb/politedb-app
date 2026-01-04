@@ -167,32 +167,6 @@ pub fn profile_remove(app: &AppHandle, profile_id: Uuid) -> Result<(), String> {
     Ok(())
 }
 
-/* ============================================================================
- * Optional: generic updater helper (keep if you like)
- * ============================================================================
- */
-
-pub fn profile_update_with(
-    app: &AppHandle,
-    profile_id: Uuid,
-    updater: impl FnOnce(&mut ConnectionProfile),
-) -> Result<ConnectionProfile, String> {
-    let mut profiles = load_profiles(app)?;
-    let now = now_epoch_sec();
-
-    let p = profiles
-        .iter_mut()
-        .find(|p| p.id == profile_id)
-        .ok_or("PROFILE_NOT_FOUND")?;
-
-    updater(p);
-    p.updated_at = now;
-
-    let updated = p.clone();
-    save_profiles(app, &profiles)?;
-    Ok(updated)
-}
-
 pub fn profile_create_with_id(
     app: &AppHandle,
     id: Uuid,

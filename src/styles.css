@@ -1,6 +1,18 @@
 @import "tailwindcss";
 @tailwind utilities;
 
+:root {
+  --font-ui: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@supports (-apple-system: none) {
+  :root {
+    --font-ui:
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+      system-ui;
+  }
+}
+
 html,
 body,
 #root {
@@ -18,19 +30,35 @@ body,
 }
 
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  background: transparent !important;
-
+  /* App surfaces */
   color: #0f0f0f;
   background-color: #f6f6f6;
 
+  /* Native-ish typography */
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Inter",
+    Roboto,
+    Helvetica,
+    Arial,
+    "Apple Color Emoji",
+    "Segoe UI Emoji";
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 400;
+
+  /* Keep */
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+
+  /* Better defaults for app UI */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
+
+  /* Desktop feel */
+  color-scheme: light;
 }

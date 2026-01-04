@@ -78,7 +78,6 @@ export function ConnectionScreen() {
     }
   };
 
-  // Close a table
   const handleCloseTable = (tableId: string, e: MouseEvent) => {
     e.stopPropagation();
     const tableToClose = openTables.find((ot) => ot.id === tableId);
