@@ -111,11 +111,11 @@ export function MainScreen() {
   }
 
   return (
-    <div class="h-full flex flex-col bg-neutral-50">
-      <div class="flex-1 flex overflow-hidden">
+    <div class="flex h-full flex-col bg-neutral-50">
+      <div class="flex flex-1 overflow-hidden">
         <LeftNav active={activeNav} onChange={setActiveNav} />
 
-        <div class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex flex-1 flex-col overflow-hidden">
           <TopBar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
@@ -145,7 +145,7 @@ export function MainScreen() {
               </div>
             ) : (
               <div class="p-6">
-                <div class="text-center py-12">
+                <div class="py-12 text-center">
                   <p class="text-slate-500">Keychain feature coming soon</p>
                 </div>
               </div>

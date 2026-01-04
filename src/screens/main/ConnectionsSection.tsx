@@ -7,15 +7,15 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
   const { hasSearch, onCreate } = props;
 
   return (
-    <div class="text-center py-12">
-      <p class="text-sm text-slate-500 mb-2">
+    <div class="py-12 text-center">
+      <p class="mb-2 text-sm text-slate-500">
         {hasSearch ? "No connections found" : "No connections yet"}
       </p>
       {!hasSearch ? (
         <Button
           variant="ghost"
           onClick={onCreate}
-          class="text-blue-600 mx-auto hover:text-blue-700 hover:bg-transparent text-sm font-medium"
+          class="mx-auto text-sm font-medium text-blue-600 hover:bg-transparent hover:text-blue-700"
         >
           Create your first connection
         </Button>
@@ -45,7 +45,7 @@ export function ConnectionsSection(props: {
 
   return (
     <div>
-      <h2 class="text-sm font-semibold text-slate-800 tracking-wide mb-3">
+      <h2 class="mb-3 text-sm font-semibold tracking-wide text-slate-800">
         Connections
       </h2>
 
@@ -55,7 +55,7 @@ export function ConnectionsSection(props: {
         <div
           class={
             viewMode === "grid"
-              ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4"
+              ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
               : "space-y-2"
           }
         >

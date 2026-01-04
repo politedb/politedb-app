@@ -18,7 +18,7 @@ export function LeftNav(props: {
   const { active, onChange } = props;
 
   return (
-    <div class="w-60 bg-neutral-50 border-r border-neutral-200 flex flex-col shrink-0">
+    <div class="flex w-60 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50">
       <div class="p-2">
         <nav class="space-y-1">
           {NAV_ITEMS.map((item) => (
@@ -26,7 +26,7 @@ export function LeftNav(props: {
               key={item.id}
               variant={active === item.id ? "default" : "ghost"}
               onClick={() => onChange(item.id)}
-              class="w-full p-2 justify-start gap-3"
+              class="w-full justify-start gap-3 p-2"
             >
               {item.icon}
               <span class="text-[13px] font-medium">{item.label}</span>

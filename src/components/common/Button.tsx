@@ -20,10 +20,12 @@ interface ButtonProps extends React.ComponentProps<"button"> {
 const variantStyles: Record<ButtonVariant, string> = {
   default: "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700",
   shadow: "border border-neutral-200 shadow-sm hover:bg-neutral-100",
-  primary: "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white",
+  primary:
+    "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white",
   outline:
     "border border-neutral-400 text-neutral-600 bg-transparent hover:bg-neutral-100 active:bg-neutral-100",
-  ghost: "text-neutral-700 bg-transparent hover:bg-neutral-200 active:bg-neutral-100",
+  ghost:
+    "text-neutral-700 bg-transparent hover:bg-neutral-200 active:bg-neutral-100",
   destructive: "bg-red-500 text-white hover:bg-red-600 active:bg-red-700",
   secondary: "bg-gray-500 text-white hover:bg-gray-600 active:bg-gray-700",
 };
@@ -51,8 +53,8 @@ export function Button({
   return (
     <button
       className={cn(
-        "px-4 py-1 cursor-pointer flex items-center gap-1 justify-center rounded-md text-xs font-medium transition-colors",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "flex cursor-pointer items-center justify-center gap-1 rounded-md px-4 py-1 text-xs font-medium transition-colors",
+        "disabled:cursor-not-allowed disabled:opacity-50",
         variantStyles[variant],
         active && activeStyles[variant],
         className,

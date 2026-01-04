@@ -45,7 +45,7 @@ export const useScreenStore = create<ScreenState>((set) => ({
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
       const activeScreen =
-        s.activeScreen === id ? tabs[0]?.id ?? "main" : s.activeScreen;
+        s.activeScreen === id ? (tabs[0]?.id ?? "main") : s.activeScreen;
       return { tabs, activeScreen };
     }),
 

@@ -281,7 +281,7 @@ export function ConnectionFormDialog({
 
   return (
     <div class="mx-auto max-w-2xl rounded-2xl border border-neutral-200 bg-neutral-50 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
-      <div class="px-8 py-6 relative">
+      <div class="relative px-8 py-6">
         <div class="text-center text-xl font-semibold text-neutral-900">
           PostgreSQL Connection
         </div>
@@ -289,13 +289,13 @@ export function ConnectionFormDialog({
         <Button
           onClick={onClose}
           variant="ghost"
-          className="p-2 absolute top-3 right-3 rounded-full"
+          className="absolute top-3 right-3 rounded-full p-2"
         >
           <X className="size-4 text-slate-600" />
         </Button>
       </div>
 
-      <div class="px-8 pb-7 space-y-3">
+      <div class="space-y-3 px-8 pb-7">
         <Row label="Name">
           <Input
             value={watch("name")}
@@ -312,7 +312,7 @@ export function ConnectionFormDialog({
                   type="button"
                   class={`size-8 rounded-lg border border-slate-300 ${
                     watch("statusColor") === c
-                      ? "ring-3 ring-blue-200 border-blue-400"
+                      ? "border-blue-400 ring-3 ring-blue-200"
                       : ""
                   }`}
                   style={{ background: c || "transparent" }}
@@ -367,7 +367,7 @@ export function ConnectionFormDialog({
           <Row label="Other options">
             <Button
               variant="outline"
-              className="justify-between w-full text-sm hover:bg-neutral-100 border-neutral-300 text-neutral-600 px-2"
+              className="w-full justify-between border-neutral-300 px-2 text-sm text-neutral-600 hover:bg-neutral-100"
               onClick={() => setOpenOptions((x) => !x)}
             >
               <span>{openOptions ? "Hide" : "Show"}</span>
@@ -419,7 +419,7 @@ export function ConnectionFormDialog({
               </option>
             </Select>
 
-            <div class="mt-2 text-xs text-slate-500 leading-snug">
+            <div class="mt-2 text-xs leading-snug text-slate-500">
               {storeKeychain ? (
                 <>
                   Password is encrypted and stored in your operating system’s
@@ -551,7 +551,7 @@ export function ConnectionFormDialog({
           </div>
         ) : null}
 
-        <div class="pt-2 flex items-center justify-between">
+        <div class="flex items-center justify-between pt-2">
           <Button
             variant={sshEnabled ? "default" : "shadow"}
             onClick={() => setValue("sshEnabled", !sshEnabled)}

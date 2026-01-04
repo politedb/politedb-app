@@ -87,14 +87,14 @@ export function AppHeader({
 
   return (
     <div
-      class="titlebar h-10 bg-neutral-900/95 backdrop-blur-md flex items-center gap-2 px-2 shrink-0 select-none border-b border-neutral-800 w-full z-10 rounded-t-xl"
+      class="titlebar z-10 flex h-10 w-full shrink-0 items-center gap-2 rounded-t-xl border-b border-neutral-800 bg-neutral-900/95 px-2 backdrop-blur-md select-none"
       onMouseDown={handleHeaderClick}
     >
       {/* Left side - macOS window controls */}
       {showWindowControls && <WindowControls />}
 
       {/* Navigation Buttons */}
-      <div class="flex items-center gap-1 shrink-0">
+      <div class="flex shrink-0 items-center gap-1">
         {NAV_BUTTONS.map((nav) => (
           <Button
             variant="primary"
@@ -113,18 +113,18 @@ export function AppHeader({
       </div>
 
       {/* Tabs */}
-      <div class="flex-1 flex items-center gap-1 overflow-x-auto min-w-0 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            class={`group max-w-44 w-full flex items-center justify-between gap-1.5 pl-4 pr-2 py-1.25 rounded-md transition-colors cursor-pointer ${
+            class={`group flex w-full max-w-44 cursor-pointer items-center justify-between gap-1.5 rounded-md py-1.25 pr-2 pl-4 transition-colors ${
               activeScreen === tab.id
-                ? "bg-neutral-700 hover:bg-neutral-700 text-white"
+                ? "bg-neutral-700 text-white hover:bg-neutral-700"
                 : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >
-            <span class="text-xs font-medium truncate max-w-[150px]">
+            <span class="max-w-[150px] truncate text-xs font-medium">
               {tab.label}
             </span>
             <Button
@@ -134,7 +134,7 @@ export function AppHeader({
                 handleTabClose?.(tab.id);
               }}
               active={activeScreen === tab.id}
-              class={`opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded-full hover:bg-white/20 text-white ${
+              class={`rounded-full p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/20 ${
                 activeScreen === tab.id ? "opacity-100" : ""
               }`}
               title="Close tab"
@@ -146,19 +146,19 @@ export function AppHeader({
       </div>
 
       {/* Right side - New Tab button and Notifications */}
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex shrink-0 items-center gap-2">
         {onNewTab && (
           <button
             type="button"
             onClick={onNewTab}
-            class="w-6 h-6 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer flex items-center justify-center"
+            class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-neutral-800 text-neutral-300 transition-colors hover:bg-neutral-700"
             title="New Tab"
           >
             <Plus className="size-4" />
           </button>
         )}
         <Button
-          className="text-neutral-300 bg-transparent p-2 hover:bg-transparent hover:text-neutral-400"
+          className="bg-transparent p-2 text-neutral-300 hover:bg-transparent hover:text-neutral-400"
           variant="ghost"
           title="Notifications"
         >

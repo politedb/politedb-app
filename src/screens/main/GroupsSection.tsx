@@ -13,14 +13,14 @@ export function GroupsSection(props: {
 
   return (
     <div class="mb-6">
-      <h2 class="text-sm font-semibold text-slate-800 tracking-wide mb-3">
+      <h2 class="mb-3 text-sm font-semibold tracking-wide text-slate-800">
         Groups
       </h2>
 
       <div
         class={
           viewMode === "grid"
-            ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4"
+            ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
             : "space-y-2"
         }
       >
@@ -29,14 +29,14 @@ export function GroupsSection(props: {
             key={group.tag}
             variant="ghost"
             onClick={() => onPickTag(group.tag)}
-            class="w-full p-3 rounded-xl justify-start text-left bg-white shadow-sm hover:bg-neutral-50"
+            class="w-full justify-start rounded-xl bg-white p-3 text-left shadow-sm hover:bg-neutral-50"
           >
             <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
                 <Grid className="size-5 text-blue-500" />
               </div>
-              <div class="flex-1 flex flex-col min-w-0">
-                <div class="font-semibold text-slate-900 truncate">
+              <div class="flex min-w-0 flex-1 flex-col">
+                <div class="truncate font-semibold text-slate-900">
                   {group.tag}
                 </div>
                 <div class="text-xs text-slate-500">

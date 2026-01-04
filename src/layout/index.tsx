@@ -15,7 +15,7 @@ export function MainLayout() {
   }, [isTab, activeTab, setActiveScreen]);
 
   return (
-    <div class="h-screen flex flex-col bg-neutral-50 overflow-hidden rounded-t-xl">
+    <div class="flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50">
       <AppHeader
         activeTabId={activeScreen}
         activeNav={activeScreen || "main"}

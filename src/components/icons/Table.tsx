@@ -1,6 +1,11 @@
 export function Table({ className }: { className: string }) {
   return (
-    <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg
+      class={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
       <rect
         x="4"
         y="4"
@@ -20,4 +25,3 @@ export function Table({ className }: { className: string }) {
     </svg>
   );
 }
-

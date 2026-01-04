@@ -101,7 +101,7 @@ export function ConnectionScreen() {
 
   if (!activeTab) {
     return (
-      <div class="h-full flex items-center justify-center bg-neutral-100">
+      <div class="flex h-full items-center justify-center bg-neutral-100">
         <div class="text-center">
           <p class="text-neutral-500">No connection selected</p>
         </div>
@@ -111,9 +111,9 @@ export function ConnectionScreen() {
 
   if (busy && tables.length === 0) {
     return (
-      <div class="h-full flex items-center justify-center bg-neutral-100">
+      <div class="flex h-full items-center justify-center bg-neutral-100">
         <div class="text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+          <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
           <p class="text-neutral-500">Connecting to {activeTab.label}...</p>
         </div>
       </div>
@@ -121,20 +121,20 @@ export function ConnectionScreen() {
   }
 
   return (
-    <div class="h-full flex-1 flex">
+    <div class="flex h-full flex-1">
       {/* Left Sidebar */}
-      <div class="w-64 h-full bg-neutral-100 flex flex-col shrink-0 pt-1">
+      <div class="flex h-full w-64 shrink-0 flex-col bg-neutral-100 pt-1">
         {/* Search Bar */}
-        <div class="px-2 py-1 border-b border-neutral-100">
+        <div class="border-b border-neutral-100 px-2 py-1">
           <div class="relative">
             <input
               type="text"
               placeholder="Search for item..."
               value={tableSearchQuery}
               onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-              class="w-full pl-8 pr-8 py-1 text-xs rounded-md bg-neutral-50 border border-neutral-200 text-neutral-700 placeholder:text-neutral-500 focus:outline-none"
+              class="w-full rounded-md border border-neutral-200 bg-neutral-50 py-1 pr-8 pl-8 text-xs text-neutral-700 placeholder:text-neutral-500 focus:outline-none"
             />
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-neutral-500" />
+            <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-500" />
           </div>
         </div>
 
@@ -194,7 +194,7 @@ export function ConnectionScreen() {
                         key={key}
                         onClick={() => handleSelectTable(table)}
                         active={activeTableId === key}
-                        className="w-full px-3 py-1.5 rounded-md justify-start text-xs"
+                        className="w-full justify-start rounded-md px-3 py-1.5 text-xs"
                       >
                         <Table className="size-4" />
                         {table.name}
@@ -209,19 +209,19 @@ export function ConnectionScreen() {
       </div>
 
       {/* Main Content Area */}
-      <div class="flex-1 flex flex-col pt-1 bg-neutral-100 overflow-x-auto">
+      <div class="flex flex-1 flex-col overflow-x-auto bg-neutral-100 pt-1">
         {openTables.length > 0 ? (
           <>
             {/* Table Tabs */}
-            <div class="flex items-center gap-0.5 border-b border-neutral-100 bg-neutral-100 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            <div class="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-100 bg-neutral-100 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {openTables.map((openTable) => (
                 <div
                   key={openTable.id}
                   onClick={() => setActiveTableId(openTable.id)}
-                  class={`group flex items-center gap-2 px-2 py-1.5 rounded-t-md transition-colors cursor-pointer shrink-0 ${
+                  class={`group flex shrink-0 cursor-pointer items-center gap-2 rounded-t-md px-2 py-1.5 transition-colors ${
                     activeTableId === openTable.id
                       ? "bg-white text-neutral-700"
-                      : "text-neutral-600 bg-neutral-200 hover:bg-slate-200"
+                      : "bg-neutral-200 text-neutral-600 hover:bg-slate-200"
                   }`}
                 >
                   <div class="flex items-center gap-2">
@@ -230,7 +230,7 @@ export function ConnectionScreen() {
                       class={cn(
                         "text-xs",
                         activeTableId === openTable.id
-                          ? "text-neutral-700 font-bold"
+                          ? "font-bold text-neutral-700"
                           : "text-neutral-600"
                       )}
                     >
@@ -241,7 +241,7 @@ export function ConnectionScreen() {
                   <button
                     type="button"
                     onClick={(e) => handleCloseTable(openTable.id, e)}
-                    class={`opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-neutral-200 ${
+                    class={`rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-neutral-200 ${
                       activeTableId === openTable.id ? "opacity-100" : ""
                     }`}
                     title="Close table"
@@ -262,16 +262,16 @@ export function ConnectionScreen() {
 
                 {/* Table Content */}
                 {activeTableData.busy ? (
-                  <div class="flex items-center justify-center h-full bg-white">
+                  <div class="flex h-full items-center justify-center bg-white">
                     <div class="text-center">
-                      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                      <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
                       <p class="text-neutral-500">Loading table data...</p>
                     </div>
                   </div>
                 ) : activeTableData.error ? (
-                  <div class="flex items-center justify-center h-full">
+                  <div class="flex h-full items-center justify-center">
                     <div class="text-center">
-                      <p class="text-red-600 mb-2">Error loading table data</p>
+                      <p class="mb-2 text-red-600">Error loading table data</p>
                       <p class="text-sm text-neutral-500">
                         {activeTableData.error}
                       </p>
@@ -295,15 +295,15 @@ export function ConnectionScreen() {
                 ) : null}
               </div>
             ) : (
-              <div class="flex items-center justify-center h-full">
+              <div class="flex h-full items-center justify-center">
                 <p class="text-neutral-500">Select a table to view data</p>
               </div>
             )}
           </>
         ) : (
-          <div class="flex items-center justify-center h-full bg-white">
+          <div class="flex h-full items-center justify-center bg-white">
             <div class="text-center">
-              <Database className="size-12 text-neutral-300 mx-auto mb-4" />
+              <Database className="mx-auto mb-4 size-12 text-neutral-300" />
               <p class="text-neutral-500">
                 Select a table from the sidebar to view data
               </p>

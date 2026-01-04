@@ -205,8 +205,8 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
       <div class="mx-auto max-w-5xl">
         <div class="grid grid-cols-[360px_1fr] gap-4">
           {/* Left: Connection panel (TablePlus-ish compact) */}
-          <div class="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)] overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-200">
+          <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+            <div class="border-b border-slate-200 px-4 py-3">
               <div class="flex items-center justify-between">
                 <div class="text-sm font-semibold text-slate-900">
                   New Connection
@@ -217,7 +217,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
-            <div class="p-4 space-y-3">
+            <div class="space-y-3 p-4">
               <Field label="Name">
                 <Input
                   value={name}
@@ -288,7 +288,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
                 </Select>
               </Field>
 
-              <div class="pt-2 flex items-center gap-2">
+              <div class="flex items-center gap-2 pt-2">
                 <button
                   type="button"
                   class={cls(
@@ -338,7 +338,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
                   <div class="text-xs font-medium text-emerald-900">
                     {connInfo.label}
                   </div>
-                  <div class="mt-1 text-[11px] font-mono text-emerald-800">
+                  <div class="mt-1 font-mono text-[11px] text-emerald-800">
                     {connInfo.id}
                   </div>
                 </div>
@@ -347,8 +347,8 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* Right: Explorer (schemas/tables) */}
-          <div class="rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)] overflow-hidden">
-            <div class="px-4 py-3 border-b border-slate-200">
+          <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_rgba(15,23,42,0.08)]">
+            <div class="border-b border-slate-200 px-4 py-3">
               <div class="flex items-center justify-between">
                 <div class="text-sm font-semibold text-slate-900">Explorer</div>
 
@@ -389,7 +389,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
                   desc="Connect to a database to browse schemas and tables."
                 />
               ) : (
-                <div class="space-y-1 max-h-[520px] overflow-auto pr-1">
+                <div class="max-h-[520px] space-y-1 overflow-auto pr-1">
                   {filteredTables.length ? (
                     filteredTables.map((t) => (
                       <div class="group rounded-xl px-2 py-2 hover:bg-slate-50">
@@ -402,7 +402,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
                               {t.name}
                             </div>
                           </div>
-                          <div class="opacity-0 group-hover:opacity-100 transition">
+                          <div class="opacity-0 transition group-hover:opacity-100">
                             <button
                               type="button"
                               class="h-7 rounded-lg border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
@@ -421,15 +421,15 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
                       {busy === "tables"
                         ? "Loading tables…"
                         : filter.trim()
-                        ? "No results."
-                        : "No tables loaded."}
+                          ? "No results."
+                          : "No tables loaded."}
                     </div>
                   )}
                 </div>
               )}
             </div>
 
-            <div class="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500 flex items-center justify-between">
+            <div class="flex items-center justify-between border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
               <span>
                 {connInfo ? `${tables.length} tables` : "Disconnected"}
               </span>
@@ -442,7 +442,7 @@ export function PostgresConnectionDialog({ onClose }: { onClose: () => void }) {
           <summary class="cursor-pointer text-xs font-semibold text-slate-700">
             Debug
           </summary>
-          <pre class="mt-2 rounded-2xl bg-slate-900 p-4 text-xs text-slate-100 overflow-auto">
+          <pre class="mt-2 overflow-auto rounded-2xl bg-slate-900 p-4 text-xs text-slate-100">
             {JSON.stringify(
               {
                 name,

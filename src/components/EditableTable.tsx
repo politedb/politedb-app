@@ -1,5 +1,10 @@
 import { useMemo, useState, useEffect } from "preact/hooks";
-import { useReactTable, getCoreRowModel, flexRender, type ColumnDef } from "@tanstack/react-table";
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  type ColumnDef,
+} from "@tanstack/react-table";
 import { TableVirtuoso } from "react-virtuoso";
 import { cellToString } from "../utils/convert";
 import type { ColumnMeta } from "../lib/tauri/types";
@@ -38,11 +43,18 @@ function normalizeData(data: any[]): any[][] {
   });
 }
 
-export function EditableTable({ columns, data, onCellChange }: EditableTableProps) {
+export function EditableTable({
+  columns,
+  data,
+  onCellChange,
+}: EditableTableProps) {
   // Normalize data on mount and when it changes
   const normalizedData = useMemo(() => normalizeData(data), [data]);
 
-  const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
+  const [editingCell, setEditingCell] = useState<{
+    row: number;
+    col: number;
+  } | null>(null);
   const [editedData, setEditedData] = useState<any[][]>(normalizedData);
   const [editValue, setEditValue] = useState<string>("");
 
@@ -69,7 +81,8 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
         cell: ({ row }) => {
           const rowIndex = row.index;
           const cellValue = editedData[rowIndex]?.[colIndex];
-          const isEditing = editingCell?.row === rowIndex && editingCell?.col === colIndex;
+          const isEditing =
+            editingCell?.row === rowIndex && editingCell?.col === colIndex;
 
           if (isEditing) {
             return (
@@ -112,7 +125,7 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
                     setEditingCell(null);
                   }
                 }}
-                class="w-full px-2 py-1 border border-blue-500 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                class="w-full rounded border border-blue-500 bg-white px-2 py-1 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 autoFocus
               />
             );
@@ -120,11 +133,13 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
 
           return (
             <div
-              class="px-4 py-2 text-sm text-neutral-900 whitespace-nowrap cursor-pointer hover:bg-blue-50 min-h-8 flex items-center"
+              class="flex min-h-8 cursor-pointer items-center px-4 py-2 text-sm whitespace-nowrap text-neutral-900 hover:bg-blue-50"
               onClick={() => setEditingCell({ row: rowIndex, col: colIndex })}
               title="Click to edit"
             >
-              {cellToString(cellValue) || <span class="text-neutral-400 italic">NULL</span>}
+              {cellToString(cellValue) || (
+                <span class="text-neutral-400 italic">NULL</span>
+              )}
             </div>
           );
         },
@@ -141,10 +156,13 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
       const rowArray = Array.isArray(row) ? row : [];
 
       return {
-        ...rowArray.reduce((acc, cell, colIndex) => {
-          acc[colIndex.toString()] = cell;
-          return acc;
-        }, {} as Record<string, any>),
+        ...rowArray.reduce(
+          (acc, cell, colIndex) => {
+            acc[colIndex.toString()] = cell;
+            return acc;
+          },
+          {} as Record<string, any>
+        ),
         __rowIndex: index,
       };
     });
@@ -159,9 +177,14 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
   const { rows } = table.getRowModel();
 
   // Handle empty data
-  if (!normalizedData || normalizedData.length === 0 || !rows || rows.length === 0) {
+  if (
+    !normalizedData ||
+    normalizedData.length === 0 ||
+    !rows ||
+    rows.length === 0
+  ) {
     return (
-      <div class="h-full flex items-center justify-center bg-white">
+      <div class="flex h-full items-center justify-center bg-white">
         <p class="text-neutral-500">No data to display</p>
       </div>
     );
@@ -226,11 +249,14 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
             {table.getHeaderGroups()[0]?.headers.map((header) => (
               <th
                 key={header.id}
-                class="px-4 py-2 text-left text-xs font-semibold text-neutral-700 border-b border-neutral-200 whitespace-nowrap bg-white shadow-sm"
+                class="border-b border-neutral-200 bg-white px-4 py-2 text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
               >
                 {header.isPlaceholder
                   ? null
-                  : flexRender(header.column.columnDef.header, header.getContext())}
+                  : flexRender(
+                      header.column.columnDef.header,
+                      header.getContext()
+                    )}
               </th>
             ))}
           </tr>
@@ -240,16 +266,18 @@ export function EditableTable({ columns, data, onCellChange }: EditableTableProp
             <td
               key={index}
               class={cn(
-                "px-4 py-2 text-sm text-neutral-900 overflow-hidden border-b border-neutral-100",
+                "overflow-hidden border-b border-neutral-100 px-4 py-2 text-sm text-neutral-900",
                 index > 0 && "border-l border-neutral-100"
               )}
               style={{ maxWidth: "200px" }}
             >
               <p
-                class="truncate whitespace-nowrap overflow-hidden text-ellipsis"
+                class="truncate overflow-hidden text-ellipsis whitespace-nowrap"
                 title={String(cell.v || "")}
               >
-                {typeof cell === "object" && "v" in cell ? cellToString(cell) : ""}
+                {typeof cell === "object" && "v" in cell
+                  ? cellToString(cell)
+                  : ""}
               </p>
             </td>
           ));

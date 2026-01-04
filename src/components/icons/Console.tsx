@@ -1,6 +1,11 @@
 export function Console({ className }: { className: string }) {
   return (
-    <svg class={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <svg
+      class={className}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
       <path
         stroke-linecap="round"
         stroke-linejoin="round"

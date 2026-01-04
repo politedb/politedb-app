@@ -112,9 +112,7 @@ export function useLoadTableData() {
           }))
           .filter((c) => c.name);
 
-        const dataSql = `SELECT * FROM ${qIdent(schema)}.${qIdent(
-          tableName
-        )} LIMIT 1000;`;
+        const dataSql = `SELECT * FROM ${qIdent(schema)}.${qIdent(tableName)} LIMIT 1000;`;
         const dataRes = await runSqlQuery(connId, dataSql);
 
         setTableDataMap((prev) => ({

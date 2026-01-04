@@ -16,3 +16,4 @@ export * from "./ArrowDown";
 export * from "./ArrowUp";
 export * from "./ChevronDown";
 export * from "./ChevronRight";
+export * from "./Trash";
