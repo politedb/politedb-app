@@ -105,8 +105,18 @@ export type ConnectionProfile = {
 };
 
 export type ProfileSaveAndConnectInput =
-  | { mode: "create"; input: ConnectionCreateInput }
-  | { mode: "update"; profile_id: string; input: ConnectionCreateInput };
+  | {
+      mode: "create";
+      profile_id: string;
+      persist_secrets: boolean;
+      input: ConnectionCreateInput;
+    }
+  | {
+      mode: "update";
+      profile_id: string;
+      persist_secrets: boolean;
+      input: ConnectionCreateInput;
+    };
 
 export type ProfileSaveAndConnectResult = {
   profile: ConnectionProfile;
@@ -121,7 +131,7 @@ export type ProfileSaveAndConnectResult = {
 export type SaveAndConnectInput = ConnectionCreateInput & {
   storeKeychain: boolean;
   password?: string; // plaintext, FE only
-  keychainKey: string; // required when storeKeychain=true
+  //   keychainKey: string; // required when storeKeychain=true
 };
 
 export type SaveAndConnectAction =

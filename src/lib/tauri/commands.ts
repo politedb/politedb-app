@@ -13,6 +13,7 @@ export const CMD = {
   profileSaveAndConnect: "profile_save_and_connect",
 
   // Secrets
+  secretsGet: "secrets_get",
   secretsSet: "secrets_set",
   secretsDelete: "secrets_delete",
 

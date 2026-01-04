@@ -69,17 +69,17 @@ pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
     Ok(())
 }
 
-// #[tauri::command]
+#[tauri::command]
 pub async fn secrets_set(app: AppHandle, key: String, value: String) -> Result<(), String> {
     keychain_set(&app, &key, &value)
 }
 
-// #[tauri::command]
-// pub async fn secrets_get(app: AppHandle, key: String) -> Result<String, String> {
-//     keychain_get(&app, &key)
-// }
+#[tauri::command]
+pub async fn secrets_get(app: AppHandle, key: String) -> Result<String, String> {
+    keychain_get(&app, &key)
+}
 
-// #[tauri::command]
-// pub async fn secrets_delete(app: AppHandle, key: String) -> Result<(), String> {
-//     keychain_delete(&app, &key)
-// }
+#[tauri::command]
+pub async fn secrets_delete(app: AppHandle, key: String) -> Result<(), String> {
+    keychain_delete(&app, &key)
+}

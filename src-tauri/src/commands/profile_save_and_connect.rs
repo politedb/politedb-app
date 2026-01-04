@@ -1,3 +1,5 @@
+// src-tauri/src/commands/profiles.rs
+
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
@@ -5,9 +7,11 @@ use uuid::Uuid;
 use crate::commands::connection;
 use crate::profiles::store as profile_store;
 use crate::profiles::types::ConnectionProfile;
+use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
     ConnectionCreateInput, ConnectionInfo, EngineKind, MySqlConnectInput, PgConnectInput,
+    RedisConnectInput, SecretRef, SecretRefKind,
 };
 
 /* ============================================================================
@@ -19,10 +23,13 @@ use crate::types::{
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ProfileSaveAndConnectInput {
     Create {
+        profile_id: Uuid,
+        persist_secrets: bool,
         input: ConnectionCreateInput,
     },
     Update {
         profile_id: Uuid,
+        persist_secrets: bool,
         input: ConnectionCreateInput,
     },
 }
@@ -34,7 +41,7 @@ pub struct ProfileSaveAndConnectResult {
 }
 
 /* ============================================================================
- * Validation (engine-aware, extendable)
+ * Validation (engine-aware, cho phép NO password)
  * ============================================================================
  */
 
@@ -51,9 +58,8 @@ fn validate_pg_input(pg: &PgConnectInput) -> Result<(), String> {
     if pg.port == 0 {
         return Err("PG_PORT_INVALID".into());
     }
-    if pg.password.value.trim().is_empty() {
-        return Err("PG_PASSWORD_REQUIRED".into());
-    }
+
+    // allow no password => không check empty
     Ok(())
 }
 
@@ -70,9 +76,19 @@ fn validate_mysql_input(my: &MySqlConnectInput) -> Result<(), String> {
     if my.port == 0 {
         return Err("MYSQL_PORT_INVALID".into());
     }
-    if my.password.value.trim().is_empty() {
-        return Err("MYSQL_PASSWORD_REQUIRED".into());
+
+    // allow no password
+    Ok(())
+}
+
+fn validate_redis_input(r: &RedisConnectInput) -> Result<(), String> {
+    if r.host.trim().is_empty() {
+        return Err("REDIS_HOST_REQUIRED".into());
     }
+    if r.port == 0 {
+        return Err("REDIS_PORT_INVALID".into());
+    }
+    // allow no password
     Ok(())
 }
 
@@ -90,9 +106,116 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
             validate_mysql_input(my)
         }
+        EngineKind::Redis => {
+            let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
+            validate_redis_input(r)
+        }
         _ => Err("ENGINE_NOT_SUPPORTED_YET".into()),
     }
 }
+
+/* ============================================================================
+ * Secrets helpers
+ * ============================================================================
+ */
+
+fn engine_key(engine: EngineKind) -> &'static str {
+    match engine {
+        EngineKind::Postgres => "postgres",
+        EngineKind::Mysql => "mysql",
+        EngineKind::Redis => "redis",
+        _ => "unknown",
+    }
+}
+
+fn keychain_key_for_profile(profile_id: Uuid, engine: EngineKind) -> String {
+    format!("profile:{profile_id}:{}:password", engine_key(engine))
+}
+
+fn maybe_persist_secret_ref(
+    app: &AppHandle,
+    profile_id: Uuid,
+    engine: EngineKind,
+    persist_secrets: bool,
+    sr: &mut SecretRef,
+) -> Result<(), String> {
+    if !persist_secrets {
+        return Ok(());
+    }
+
+    // persist_secrets=true nhưng user để password rỗng => bỏ qua, giữ Inline "" để connect "no password"
+    if sr.kind == SecretRefKind::Inline {
+        let pw = sr.value.trim();
+        if pw.is_empty() {
+            return Ok(());
+        }
+
+        let key = keychain_key_for_profile(profile_id, engine);
+        secrets::keychain_set(app, &key, pw)?;
+
+        *sr = SecretRef {
+            kind: SecretRefKind::Keychain,
+            value: key,
+        };
+        return Ok(());
+    }
+
+    if sr.kind == SecretRefKind::Keychain && sr.value.trim().is_empty() {
+        return Err("KEYCHAIN_KEY_EMPTY".into());
+    }
+
+    Ok(())
+}
+
+pub fn persist_input_with_secrets(
+    app: &AppHandle,
+    profile_id: Uuid,
+    persist_secrets: bool,
+    mut input: ConnectionCreateInput,
+) -> Result<ConnectionCreateInput, String> {
+    match input.engine {
+        EngineKind::Postgres => {
+            let pg = input.postgres.as_mut().ok_or("POSTGRES_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Postgres,
+                persist_secrets,
+                &mut pg.password,
+            )?;
+        }
+
+        EngineKind::Mysql => {
+            let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Mysql,
+                persist_secrets,
+                &mut my.password,
+            )?;
+        }
+
+        EngineKind::Redis => {
+            let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Redis,
+                persist_secrets,
+                &mut r.password,
+            )?;
+        }
+        _ => {}
+    }
+
+    Ok(input)
+}
+
+/* ============================================================================
+ * Command
+ * ============================================================================
+ */
 
 /* ============================================================================
  * Command
@@ -105,21 +228,96 @@ pub async fn profile_save_and_connect(
     state: State<'_, AppState>,
     payload: ProfileSaveAndConnectInput,
 ) -> Result<ProfileSaveAndConnectResult, String> {
-    let (profile, input) = match payload {
-        ProfileSaveAndConnectInput::Create { input } => {
-            validate_input(&input)?;
-            let saved = profile_store::profile_create(&app, input.clone())?;
-            (saved, input)
-        }
-        ProfileSaveAndConnectInput::Update { profile_id, input } => {
-            validate_input(&input)?;
-            let saved = profile_store::profile_update(&app, profile_id, input.clone())?;
-            (saved, input)
-        }
+    let (mode, profile_id, persist_secrets, mut input, is_update) = match payload {
+        ProfileSaveAndConnectInput::Create {
+            profile_id,
+            persist_secrets,
+            input,
+        } => ("create", profile_id, persist_secrets, input, false),
+
+        ProfileSaveAndConnectInput::Update {
+            profile_id,
+            persist_secrets,
+            input,
+        } => ("update", profile_id, persist_secrets, input, true),
     };
 
-    // Runtime connect (new connection id each call)
-    let connection = connection::connection_create(app.clone(), state, input).await?;
+    tracing::info!(
+        step = "profile_save_and_connect",
+        mode,
+        profile_id = %profile_id,
+        persist_secrets = persist_secrets,
+        engine = ?input.engine,
+        label = %input.label,
+        "start"
+    );
+
+    // 1) Validate
+    validate_input(&input).map_err(|e| {
+        tracing::error!(
+            step = "validate",
+            mode,
+            profile_id = %profile_id,
+            error = %e,
+            "failed"
+        );
+        e
+    })?;
+
+    // 2) Persist secrets (Inline -> Keychain) if enabled
+    input = persist_input_with_secrets(&app, profile_id, persist_secrets, input).map_err(|e| {
+        tracing::error!(
+            step = "persist_secrets",
+            mode,
+            profile_id = %profile_id,
+            persist_secrets = persist_secrets,
+            error = %e,
+            "failed"
+        );
+        format!("PERSIST_SECRETS_FAILED: {e}")
+    })?;
+
+    // 3) Save profile (disk)
+    let profile = (|| -> Result<ConnectionProfile, String> {
+        if is_update {
+            profile_store::profile_update(&app, profile_id, input.clone())
+        } else {
+            profile_store::profile_create_with_id(&app, profile_id, input.clone())
+        }
+    })()
+    .map_err(|e| {
+        tracing::error!(
+            step = "save_profile",
+            mode,
+            profile_id = %profile_id,
+            is_update = is_update,
+            error = %e,
+            "failed"
+        );
+        format!("SAVE_PROFILE_FAILED: {e}")
+    })?;
+
+    // 4) Runtime connect
+    let connection: ConnectionInfo = connection::connection_create(app.clone(), state, input)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                step = "runtime_connect",
+                mode,
+                profile_id = %profile_id,
+                error = %e,
+                "failed"
+            );
+            format!("RUNTIME_CONNECT_FAILED: {e}")
+        })?;
+
+    tracing::info!(
+        step = "profile_save_and_connect",
+        mode,
+        profile_id = %profile_id,
+        connection_id = %connection.id,
+        "ok"
+    );
 
     Ok(ProfileSaveAndConnectResult {
         profile,

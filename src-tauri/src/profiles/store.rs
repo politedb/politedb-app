@@ -184,3 +184,25 @@ pub fn profile_update_with(
     save_profiles(app, &profiles)?;
     Ok(updated)
 }
+
+pub fn profile_create_with_id(
+    app: &AppHandle,
+    id: Uuid,
+    input: ConnectionCreateInput,
+) -> Result<ConnectionProfile, String> {
+    let mut profiles = load_profiles(app)?;
+    let now = now_epoch_sec();
+
+    let profile = ConnectionProfile {
+        id,
+        engine: input.engine,
+        label: input.label.clone(),
+        input,
+        created_at: now,
+        updated_at: now,
+    };
+
+    profiles.push(profile.clone());
+    save_profiles(app, &profiles)?;
+    Ok(profile)
+}

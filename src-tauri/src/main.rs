@@ -10,6 +10,8 @@ mod security;
 mod state;
 mod types;
 
+use crate::security::secrets;
+
 mod ssh_tunnel;
 
 mod window_chrome;
@@ -17,7 +19,7 @@ use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use engines::driver::EngineDriver;
-use engines::registry::EngineRegistry; // trait chung
+use engines::registry::EngineRegistry;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -55,6 +57,10 @@ fn main() {
             commands::profiles::profile_remove,
             // Profiles + connect
             commands::profile_save_and_connect::profile_save_and_connect,
+            // secrets
+            secrets::secrets_set,
+            secrets::secrets_get,
+            secrets::secrets_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

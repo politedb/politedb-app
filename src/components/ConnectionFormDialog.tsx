@@ -1,6 +1,9 @@
 import { JSX } from "preact";
-import { useCallback, useMemo, useState } from "preact/hooks";
-import { connectionCreate, connectionTest, type ConnectionCreateInput } from "../lib/tauri";
+import { useCallback, useState } from "preact/hooks";
+import { useForm } from "react-hook-form";
+
+import { connectionTest, profileSaveAndConnect } from "../lib/tauri";
+import type { ConnectionCreateInput } from "../lib/tauri/types";
 import { X } from "./icons";
 import { Tab, useScreenStore } from "../stores/screen";
 
@@ -9,9 +12,16 @@ type SelectEvt = JSX.TargetedEvent<HTMLSelectElement>;
 
 type SslMode = "disable" | "prefer" | "require" | "verify-ca" | "verify-full";
 
-const COLORS = ["", "#CBD5E1", "#93C5FD", "#FDE68A", "#BBF7D0", "#FBCFE8"] as const;
+const COLORS = [
+  "",
+  "#CBD5E1",
+  "#93C5FD",
+  "#FDE68A",
+  "#BBF7D0",
+  "#FBCFE8",
+] as const;
 
-function toNumber(v: string, fallback: number) {
+function toNumber(v: any, fallback: number) {
   const x = Number(v);
   return Number.isFinite(x) ? x : fallback;
 }
@@ -38,6 +48,31 @@ type ConnectionData = {
   sshKeyPath?: string;
 };
 
+type FormValues = {
+  name: string;
+  tag: string;
+  statusColor: string;
+
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
+
+  storeKeychain: boolean;
+
+  sslMode: SslMode;
+  sslKey: string;
+  sslCert: string;
+  sslCA: string;
+
+  sshEnabled: boolean;
+  sshHost: string;
+  sshPort: number;
+  sshUser: string;
+  sshKeyPath: string;
+};
+
 export function ConnectionFormDialog({
   onSaved,
   onClose,
@@ -48,132 +83,128 @@ export function ConnectionFormDialog({
   initialData?: ConnectionData;
 } = {}) {
   const { tabs, setTabs, setActiveScreen } = useScreenStore();
-  const [name, setName] = useState(initialData?.name || "Mochi");
-  const [tag, setTag] = useState(initialData?.tag || "local");
-  const [statusColor, setStatusColor] = useState<string>(initialData?.statusColor || "");
 
-  const [host, setHost] = useState(initialData?.host || "127.0.0.1");
-  const [port, setPort] = useState(initialData?.port || 5432);
-  const [user, setUser] = useState(initialData?.user || "postgres");
-  const [password, setPassword] = useState(initialData?.password || "");
-  const [database, setDatabase] = useState(initialData?.database || "postgres");
-
-  const [storeKeychain, setStoreKeychain] = useState(initialData?.storeKeychain || false);
-
-  const [sslMode, setSslMode] = useState<SslMode>(initialData?.sslMode || "prefer");
-  const [sslKey, setSslKey] = useState(initialData?.sslKey || "");
-  const [sslCert, setSslCert] = useState(initialData?.sslCert || "");
-  const [sslCA, setSslCA] = useState(initialData?.sslCA || "");
+  const isEditing = !!initialData?.key;
+  const profileId = initialData?.key ?? "";
 
   const [openOptions, setOpenOptions] = useState(false);
-
-  const [sshEnabled, setSshEnabled] = useState(initialData?.sshEnabled || false);
-  const [sshHost, setSshHost] = useState(initialData?.sshHost || "");
-  const [sshPort, setSshPort] = useState(initialData?.sshPort || 22);
-  const [sshUser, setSshUser] = useState(initialData?.sshUser || "");
-  const [sshKeyPath, setSshKeyPath] = useState(initialData?.sshKeyPath || "");
-
-  const [busy, setBusy] = useState<null | "save" | "test" | "connect" | "tables">(null);
+  const [busy, setBusy] = useState<null | "save" | "test" | "connect">(null);
   const [msg, setMsg] = useState<string>("");
 
-  function validate(): string | null {
-    if (!name.trim()) return "Name is required.";
-    if (!host.trim()) return "Host is required.";
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return "Port is invalid.";
-    if (!user.trim()) return "User is required.";
-    if (!database.trim()) return "Database is required.";
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    getValues,
+    formState: { errors },
+  } = useForm<FormValues>({
+    mode: "onSubmit",
+    defaultValues: {
+      name: initialData?.name || "Mochi",
+      tag: initialData?.tag || "local",
+      statusColor: initialData?.statusColor || "",
 
-    if (!password) return "Password is required.";
+      host: initialData?.host || "127.0.0.1",
+      port: initialData?.port ?? 5444,
+      user: initialData?.user || "politeai",
+      password: initialData?.password || "polite-assistant",
+      database: initialData?.database || "politeai",
 
-    return null;
-  }
+      storeKeychain: initialData?.storeKeychain || true,
 
-  const keychainKey = useMemo(() => {
-    const safe = name.trim().toLowerCase().replace(/\s+/g, "-") || "connection";
-    return `conn:${safe}`;
-  }, [name]);
+      sslMode: (initialData?.sslMode as SslMode) || "prefer",
+      sslKey: initialData?.sslKey || "",
+      sslCert: initialData?.sslCert || "",
+      sslCA: initialData?.sslCA || "",
 
-  const payload: ConnectionCreateInput = useMemo(() => {
-    return {
-      engine: "postgres",
-      label: name,
-      postgres: {
-        host,
-        port,
-        database,
-        user,
-        password: { kind: "inline", value: password },
-        ssl_mode: sslMode,
-        connect_timeout_ms: 5000,
-        statement_timeout_ms: 0,
-        ssl_key_path: sslKey || null,
-        ssl_cert_path: sslCert || null,
-        ssl_ca_path: sslCA || null,
-      },
-    };
-  }, [name, host, port, database, user, password, sslMode, sslKey, sslCert, sslCA]);
+      sshEnabled: initialData?.sshEnabled || false,
+      sshHost: initialData?.sshHost || "",
+      sshPort: initialData?.sshPort ?? 22,
+      sshUser: initialData?.sshUser || "",
+      sshKeyPath: initialData?.sshKeyPath || "",
+    },
+  });
+
+  const storeKeychain = watch("storeKeychain");
+  const sshEnabled = watch("sshEnabled");
 
   const cacheToLocalStorage = useCallback(
     (key?: string) => {
+      const v = getValues();
+
       const profile = {
-        id: `politedb:conn:${keychainKey}`,
-        name,
-        tag,
-        statusColor,
-        host,
-        port,
-        user,
-        database,
-        password: { kind: "inline", value: password },
-        storeKeychain,
-        keychainKey,
-        sslMode,
-        sslKey,
-        sslCert,
-        sslCA,
-        sshEnabled,
-        sshHost,
-        sshPort,
-        sshUser,
-        sshKeyPath,
+        id: initialData?.key ?? `temp:${Date.now()}`,
+        name: v.name,
+        tag: v.tag,
+        statusColor: v.statusColor,
+        host: v.host,
+        port: v.port,
+        user: v.user,
+        database: v.database,
+
+        // FE-only
+        password: v.password,
+        storeKeychain: v.storeKeychain,
+
+        sslMode: v.sslMode,
+        sslKey: v.sslKey,
+        sslCert: v.sslCert,
+        sslCA: v.sslCA,
+
+        sshEnabled: v.sshEnabled,
+        sshHost: v.sshHost,
+        sshPort: v.sshPort,
+        sshUser: v.sshUser,
+        sshKeyPath: v.sshKeyPath,
       };
 
-      const storeKey = key || `politedb:conn:${keychainKey}-${Date.now()}`;
-
+      const storeKey = key || `politedb:conn:${initialData?.key ?? Date.now()}`;
       localStorage.setItem(storeKey, JSON.stringify(profile));
-
       return storeKey;
     },
-    [
-      name,
-      tag,
-      statusColor,
-      host,
-      port,
-      user,
-      database,
-      password,
-      storeKeychain,
-      keychainKey,
-      sslMode,
-      sslKey,
-      sslCert,
-      sslCA,
-      sshEnabled,
-      sshHost,
-      sshPort,
-      sshUser,
-      sshKeyPath,
-    ]
+    [getValues, initialData?.key]
   );
 
-  async function handleSave() {
-    const err = validate();
-    if (err) return setMsg(err);
+  function buildConnectionInput(v: FormValues): ConnectionCreateInput {
+    const input: any = {
+      engine: "postgres",
+      label: v.name,
+      postgres: {
+        host: v.host,
+        port: toNumber(v.port, 5432),
+        database: v.database,
+        user: v.user,
+        password: v.storeKeychain
+          ? { kind: "keychain", value: "" } // lib/profileSaveAndConnect sẽ tự rewrite + resolve
+          : { kind: "inline", value: v.password },
+        ssl_mode: v.sslMode,
+        connect_timeout_ms: 5000,
+        statement_timeout_ms: 0,
+        ssl_key_path: v.sslKey || null,
+        ssl_cert_path: v.sslCert || null,
+        ssl_ca_path: v.sslCA || null,
+      },
+      ssh: v.sshEnabled
+        ? {
+            ssh_host: v.sshHost,
+            ssh_port: toNumber(v.sshPort, 22),
+            ssh_user: v.sshUser || null,
+            identity_file: v.sshKeyPath,
+            strict_host_key_checking: "accept-new",
+            connect_timeout_ms: 5000,
+            remote_host: v.host,
+            remote_port: toNumber(v.port, 5432),
+          }
+        : null,
+    };
 
+    return input as ConnectionCreateInput;
+  }
+
+  const onSave = handleSubmit(async (v) => {
     setBusy("save");
     setMsg("");
-
     try {
       cacheToLocalStorage(initialData?.key);
       setMsg("Saved.");
@@ -183,43 +214,57 @@ export function ConnectionFormDialog({
     } finally {
       setBusy(null);
     }
-  }
+  });
 
-  async function handleTest() {
-    const err = validate();
-    if (err) return setMsg(err);
-
+  const onTest = handleSubmit(async (v) => {
     setBusy("test");
     setMsg("");
-
     try {
-      await connectionTest(payload);
-      setMsg("Test OK. (Created connection in state)");
+      // NOTE: nếu storeKeychain=true mà password rỗng, test này có thể fail (vì connectionTest không resolve keychain).
+      // Flow chuẩn để test trong keychain mode là dùng profileSaveAndConnect.
+      const input = buildConnectionInput(v);
+      await connectionTest(input);
+      setMsg("Test OK.");
     } catch (e: any) {
       setMsg(e?.message ? String(e.message) : String(e));
     } finally {
       setBusy(null);
     }
-  }
+  });
 
-  async function handleConnect() {
-    const err = validate();
-    if (err) return setMsg(err);
-
+  const onConnect = handleSubmit(async (v) => {
     setBusy("connect");
     setMsg("");
-
     try {
-      const res = await connectionCreate(payload);
-      const storeKey = cacheToLocalStorage(initialData?.key);
-      setMsg(`Connected ✅ ${res.label}`);
+      const connectionInput = buildConnectionInput(v);
 
-      // Create new tab
+      const action = isEditing
+        ? ({
+            mode: "update",
+            profileId: profileId || (initialData?.key as string),
+          } as const)
+        : ({ mode: "create" } as const);
+
+      const res = await profileSaveAndConnect({
+        ...action,
+
+        // FE-only controls
+        storeKeychain: v.storeKeychain,
+        password: v.password,
+
+        // ConnectionCreateInput fields (phẳng)
+        ...connectionInput,
+      } as any);
+
+      const storeKey = cacheToLocalStorage(initialData?.key);
+      setMsg(`Connected ✅ ${res.profile.label}`);
+
       const newTab: Tab = {
         id: `tab-${Date.now()}-conn#${storeKey}`,
-        label: payload.label || "Unnamed Connection",
-        connectionId: res.id,
-        connectionData: payload,
+        label:
+          res.profile.label || connectionInput.label || "Unnamed Connection",
+        connectionId: res.connection.id,
+        connectionData: connectionInput,
       };
 
       setTabs([...tabs, newTab]);
@@ -229,12 +274,14 @@ export function ConnectionFormDialog({
     } finally {
       setBusy(null);
     }
-  }
+  });
 
   return (
     <div class="mx-auto max-w-4xl rounded-2xl border border-neutral-200 bg-neutral-50 shadow-[0_20px_60px_rgba(15,23,42,0.10)]">
       <div class="px-8 py-6 relative">
-        <div class="text-center text-xl font-semibold text-neutral-900">PostgreSQL Connection</div>
+        <div class="text-center text-xl font-semibold text-neutral-900">
+          PostgreSQL Connection
+        </div>
 
         <button
           type="button"
@@ -248,9 +295,9 @@ export function ConnectionFormDialog({
       <div class="px-8 pb-7 space-y-4">
         <Row label="Name">
           <Input
-            value={name}
+            value={watch("name")}
             placeholder="Mochi"
-            onInput={(e: InputEvt) => setName(e.currentTarget.value)}
+            onInput={(e: InputEvt) => setValue("name", e.currentTarget.value)}
           />
         </Row>
 
@@ -261,10 +308,12 @@ export function ConnectionFormDialog({
                 <button
                   type="button"
                   class={`h-9 w-9 rounded-xl border border-slate-300 ${
-                    statusColor === c ? "ring-4 ring-blue-200 border-blue-400" : ""
+                    watch("statusColor") === c
+                      ? "ring-4 ring-blue-200 border-blue-400"
+                      : ""
                   }`}
                   style={{ background: c || "transparent" }}
-                  onClick={() => setStatusColor(c)}
+                  onClick={() => setValue("statusColor", c)}
                   title={c ? c : "none"}
                 />
               ))}
@@ -272,7 +321,12 @@ export function ConnectionFormDialog({
           </Row>
 
           <Row label="Tag">
-            <Select value={tag} onChange={(e: SelectEvt) => setTag(e.currentTarget.value)}>
+            <Select
+              value={watch("tag")}
+              onChange={(e: SelectEvt) =>
+                setValue("tag", e.currentTarget.value)
+              }
+            >
               <option value="local">local</option>
               <option value="dev">dev</option>
               <option value="staging">staging</option>
@@ -283,30 +337,40 @@ export function ConnectionFormDialog({
 
         <div class="grid grid-cols-2 gap-6">
           <Row label="Host/Socket">
-            <Input value={host} onInput={(e: InputEvt) => setHost(e.currentTarget.value)} />
+            <Input
+              value={watch("host")}
+              onInput={(e: InputEvt) => setValue("host", e.currentTarget.value)}
+            />
           </Row>
           <Row label="Port">
             <Input
-              value={String(port)}
+              value={String(watch("port"))}
               inputMode="numeric"
-              onInput={(e: InputEvt) => setPort(toNumber(e.currentTarget.value, 5432))}
+              onInput={(e: InputEvt) =>
+                setValue("port", toNumber(e.currentTarget.value, 5432))
+              }
             />
           </Row>
         </div>
 
         <div class="grid grid-cols-2 gap-6">
           <Row label="User">
-            <Input value={user} onInput={(e: InputEvt) => setUser(e.currentTarget.value)} />
+            <Input
+              value={watch("user")}
+              onInput={(e: InputEvt) => setValue("user", e.currentTarget.value)}
+            />
           </Row>
 
           <Row label="Other options">
             <button
               type="button"
               class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-left font-medium text-slate-800 flex items-center justify-between hover:bg-slate-50"
-              onClick={() => setOpenOptions((v) => !v)}
+              onClick={() => setOpenOptions((x) => !x)}
             >
               <span>{openOptions ? "Hide" : "Show"}</span>
-              <span class={`transition ${openOptions ? "rotate-180" : ""}`}>▾</span>
+              <span class={`transition ${openOptions ? "rotate-180" : ""}`}>
+                ▾
+              </span>
             </button>
           </Row>
         </div>
@@ -315,31 +379,67 @@ export function ConnectionFormDialog({
           <Row label="Password">
             <Input
               type="password"
-              value={password}
-              placeholder="password"
-              onInput={(e: InputEvt) => setPassword(e.currentTarget.value)}
+              value={watch("password")}
+              placeholder={
+                storeKeychain
+                  ? "Enter password (will be saved securely)"
+                  : "Enter password (not saved)"
+              }
+              onInput={(e: InputEvt) =>
+                setValue("password", e.currentTarget.value)
+              }
             />
+
+            {storeKeychain && !watch("password") ? (
+              <div class="mt-1 text-xs text-slate-500">
+                Password is already saved. Leave empty to keep existing one.
+              </div>
+            ) : null}
+
+            {!storeKeychain && errors.password ? (
+              <div class="mt-1 text-xs text-rose-600">
+                {String(errors.password.message || "Password is required.")}
+              </div>
+            ) : null}
           </Row>
 
-          <Row label="Store">
+          <Row label="Password storage">
             <Select
-              value={storeKeychain ? "keychain" : "inline"}
-              onChange={(e: SelectEvt) => setStoreKeychain(e.currentTarget.value === "keychain")}
+              value={storeKeychain ? "keychain" : "session"}
+              onChange={(e: SelectEvt) =>
+                setValue("storeKeychain", e.currentTarget.value === "keychain")
+              }
             >
-              <option value="inline">Inline (current)</option>
-              <option value="keychain" disabled>
-                Keychain (soon)
+              <option value="session">Don’t save (ask every time)</option>
+              <option value="keychain">
+                Save securely on this device (Keychain)
               </option>
             </Select>
-            <div class="mt-2 text-xs text-slate-500">
-              Key: <span class="font-mono text-slate-900">{keychainKey}</span>
+
+            <div class="mt-2 text-xs text-slate-500 leading-snug">
+              {storeKeychain ? (
+                <>
+                  Password is encrypted and stored in your operating system’s
+                  secure keychain.
+                </>
+              ) : (
+                <>
+                  Password is used for this connection only and will not be
+                  saved.
+                </>
+              )}
             </div>
           </Row>
         </div>
 
         <div class="grid grid-cols-2 gap-6">
           <Row label="Database">
-            <Input value={database} onInput={(e: InputEvt) => setDatabase(e.currentTarget.value)} />
+            <Input
+              value={watch("database")}
+              onInput={(e: InputEvt) =>
+                setValue("database", e.currentTarget.value)
+              }
+            />
           </Row>
 
           <Row label="">
@@ -355,8 +455,10 @@ export function ConnectionFormDialog({
 
         <Row label="SSL mode">
           <Select
-            value={sslMode}
-            onChange={(e: SelectEvt) => setSslMode(e.currentTarget.value as SslMode)}
+            value={watch("sslMode")}
+            onChange={(e: SelectEvt) =>
+              setValue("sslMode", e.currentTarget.value as SslMode)
+            }
           >
             <option value="disable">DISABLE</option>
             <option value="prefer">PREFERRED</option>
@@ -369,27 +471,33 @@ export function ConnectionFormDialog({
         <Row label="SSL keys">
           <div class="grid grid-cols-[1fr_1fr_1fr_40px] gap-3">
             <Input
-              value={sslKey}
+              value={watch("sslKey")}
               placeholder="Key…"
-              onInput={(e: InputEvt) => setSslKey(e.currentTarget.value)}
+              onInput={(e: InputEvt) =>
+                setValue("sslKey", e.currentTarget.value)
+              }
             />
             <Input
-              value={sslCert}
+              value={watch("sslCert")}
               placeholder="Cert…"
-              onInput={(e: InputEvt) => setSslCert(e.currentTarget.value)}
+              onInput={(e: InputEvt) =>
+                setValue("sslCert", e.currentTarget.value)
+              }
             />
             <Input
-              value={sslCA}
+              value={watch("sslCA")}
               placeholder="CA Cert…"
-              onInput={(e: InputEvt) => setSslCA(e.currentTarget.value)}
+              onInput={(e: InputEvt) =>
+                setValue("sslCA", e.currentTarget.value)
+              }
             />
             <button
               type="button"
               class="h-10 w-10 rounded-xl border border-slate-300 bg-white font-bold text-slate-700 hover:bg-slate-50"
               onClick={() => {
-                setSslKey("");
-                setSslCert("");
-                setSslCA("");
+                setValue("sslKey", "");
+                setValue("sslCert", "");
+                setValue("sslCA", "");
               }}
               title="Clear"
             >
@@ -402,16 +510,20 @@ export function ConnectionFormDialog({
           <div class="grid grid-cols-2 gap-6">
             <Row label="SSH Host">
               <Input
-                value={sshHost}
+                value={watch("sshHost")}
                 placeholder="ssh.example.com"
-                onInput={(e: InputEvt) => setSshHost(e.currentTarget.value)}
+                onInput={(e: InputEvt) =>
+                  setValue("sshHost", e.currentTarget.value)
+                }
               />
             </Row>
             <Row label="SSH Port">
               <Input
-                value={String(sshPort)}
+                value={String(watch("sshPort"))}
                 inputMode="numeric"
-                onInput={(e: InputEvt) => setSshPort(toNumber(e.currentTarget.value, 22))}
+                onInput={(e: InputEvt) =>
+                  setValue("sshPort", toNumber(e.currentTarget.value, 22))
+                }
               />
             </Row>
           </div>
@@ -421,16 +533,20 @@ export function ConnectionFormDialog({
           <div class="grid grid-cols-2 gap-6">
             <Row label="SSH User">
               <Input
-                value={sshUser}
+                value={watch("sshUser")}
                 placeholder="ubuntu"
-                onInput={(e: InputEvt) => setSshUser(e.currentTarget.value)}
+                onInput={(e: InputEvt) =>
+                  setValue("sshUser", e.currentTarget.value)
+                }
               />
             </Row>
             <Row label="SSH Key path">
               <Input
-                value={sshKeyPath}
+                value={watch("sshKeyPath")}
                 placeholder="~/.ssh/id_ed25519"
-                onInput={(e: InputEvt) => setSshKeyPath(e.currentTarget.value)}
+                onInput={(e: InputEvt) =>
+                  setValue("sshKeyPath", e.currentTarget.value)
+                }
               />
             </Row>
           </div>
@@ -444,7 +560,7 @@ export function ConnectionFormDialog({
                 ? "bg-blue-500 text-white hover:bg-blue-600"
                 : "bg-slate-50 text-slate-800 hover:bg-slate-100 "
             }`}
-            onClick={() => setSshEnabled((prev) => !prev)}
+            onClick={() => setValue("sshEnabled", !sshEnabled)}
           >
             Over SSH
           </button>
@@ -453,7 +569,7 @@ export function ConnectionFormDialog({
             <button
               class="py-2 cursor-pointer text-sm rounded-xl border border-slate-300 bg-white px-6 font-semibold hover:bg-slate-50 disabled:opacity-60"
               disabled={!!busy}
-              onClick={handleSave}
+              onClick={onSave}
             >
               {busy === "save" ? "Saving…" : "Save"}
             </button>
@@ -461,7 +577,7 @@ export function ConnectionFormDialog({
             <button
               class="py-2 cursor-pointer text-sm rounded-xl border border-slate-300 bg-white px-6 font-semibold hover:bg-slate-50 disabled:opacity-60"
               disabled={!!busy}
-              onClick={handleTest}
+              onClick={onTest}
             >
               {busy === "test" ? "Testing…" : "Test"}
             </button>
@@ -469,9 +585,9 @@ export function ConnectionFormDialog({
             <button
               class="py-2 cursor-pointer text-sm rounded-xl bg-blue-600 px-5 font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
               disabled={!!busy}
-              onClick={handleConnect}
+              onClick={onConnect}
             >
-              {busy === "connect" || busy === "tables" ? "Connecting…" : "Connect"}
+              {busy === "connect" ? "Connecting…" : "Connect"}
             </button>
           </div>
         </div>
@@ -479,7 +595,8 @@ export function ConnectionFormDialog({
         {msg ? (
           <div
             class={`mt-3 rounded-2xl border px-4 py-3 text-sm font-semibold ${
-              msg.toLowerCase().includes("failed") || msg.toLowerCase().includes("error")
+              msg.toLowerCase().includes("failed") ||
+              msg.toLowerCase().includes("error")
                 ? "border-rose-200 bg-rose-50 text-rose-700"
                 : "border-slate-200 bg-slate-50 text-slate-700"
             }`}
@@ -495,7 +612,9 @@ export function ConnectionFormDialog({
 function Row(props: { label: string; children: any }) {
   return (
     <div class="grid grid-cols-[100px_1fr] items-center gap-3">
-      <div class="text-right text-sm font-medium text-slate-800">{props.label}</div>
+      <div class="text-right text-sm font-medium text-slate-800">
+        {props.label}
+      </div>
       <div>{props.children}</div>
     </div>
   );
@@ -519,7 +638,9 @@ function Input(
   return <input {...props} class={cls} />;
 }
 
-function Select(props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }) {
+function Select(
+  props: JSX.HTMLAttributes<HTMLSelectElement> & { value: string }
+) {
   const cls = [
     "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 outline-none",
     "focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60",

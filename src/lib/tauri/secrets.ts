@@ -14,7 +14,6 @@ export async function secretsDelete(key: string): Promise<void> {
   await invoke(CMD.secretsDelete, { key });
 }
 
-// (Optional)
-// export async function secretsGet(key: string): Promise<string> {
-//   return invoke<string>("secrets_get", { key });
-// }
+export async function secretsGet(key: string): Promise<string> {
+  return invoke<string>(CMD.secretsDelete, { key });
+}
