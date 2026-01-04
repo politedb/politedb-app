@@ -65,6 +65,7 @@ export function AppHeader({
   }
 
   function handleTabClose(tabId: string) {
+    console.log(tabId);
     const currentTab = tabs.find((tab) => tab.id === tabId);
     const newTabs = tabs.filter((tab) => tab.id !== tabId);
     removeTab(tabId);
@@ -78,10 +79,9 @@ export function AppHeader({
       }
     }
 
-    const storeKey = currentTab?.id.split("#").pop() || "";
-    const localData = JSON.parse(localStorage.getItem(storeKey) || "{}");
-    if (localData?.connectionId) {
-      connectionRemove(localData.connectionId);
+    if (currentTab?.runtimeConnectionId) {
+      // Clean up runtime connection
+      connectionRemove(currentTab?.runtimeConnectionId);
     }
   }
 

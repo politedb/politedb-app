@@ -13,6 +13,7 @@ import {
 import { EditableTable } from "../components/EditableTable";
 import { cn } from "../utils/cn";
 import { Button } from "../components/common/Button";
+import { connectionRemove } from "../lib/tauri";
 
 type OpenTable = {
   id: string;
@@ -78,11 +79,16 @@ export function ConnectionScreen() {
     }
   };
 
-  const handleCloseTable = (tableId: string, e: MouseEvent) => {
+  const handleCloseTable = async (tableId: string, e: MouseEvent) => {
     e.stopPropagation();
     const tableToClose = openTables.find((ot) => ot.id === tableId);
     if (tableToClose) {
       removeTableData(tableToClose.table.schema, tableToClose.table.name);
+      try {
+        await connectionRemove(tableToClose.table.connectionId);
+      } catch (error) {
+        console.error("Error removing connection:", error);
+      }
     }
 
     const newOpenTables = openTables.filter((ot) => ot.id !== tableId);

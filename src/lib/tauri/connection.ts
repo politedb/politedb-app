@@ -24,5 +24,5 @@ export async function connectionList(): Promise<ConnectionInfo[]> {
 }
 
 export async function connectionRemove(connectionId: string): Promise<void> {
-  await invoke(CMD.connectionRemove, { connection_id: connectionId });
+  await invoke(CMD.connectionRemove, { connectionId });
 }
