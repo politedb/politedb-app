@@ -1,7 +1,7 @@
-import { MainScreen } from "../screens/MainScreen";
-import { useScreenStore } from "../stores/screen";
-import { AppHeader } from "../components/AppHeader";
-import { ConnectionScreen } from "../screens/ConnectionScreen";
+import { MainScreen } from "src/screens/main/MainScreen";
+import { useScreenStore } from "src/stores/screen";
+import { AppHeader } from "src/components/AppHeader";
+import { ConnectionScreen } from "src/screens/ConnectionScreen";
 
 export function MainLayout() {
   const { activeScreen, setActiveScreen } = useScreenStore();
