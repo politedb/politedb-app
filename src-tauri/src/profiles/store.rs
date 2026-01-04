@@ -101,6 +101,14 @@ pub fn profile_list(app: &AppHandle) -> Result<Vec<ConnectionProfile>, String> {
     load_profiles(app)
 }
 
+pub fn profile_get(app: &AppHandle, profile_id: Uuid) -> Result<ConnectionProfile, String> {
+    let profiles = load_profiles(app)?;
+    profiles
+        .into_iter()
+        .find(|p| p.id == profile_id)
+        .ok_or_else(|| "PROFILE_NOT_FOUND".to_string())
+}
+
 pub fn profile_create(
     app: &AppHandle,
     input: ConnectionCreateInput,

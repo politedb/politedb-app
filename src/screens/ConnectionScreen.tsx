@@ -2,7 +2,14 @@ import { useState, useMemo } from "preact/hooks";
 import { useLoadTables, type TableItem } from "../hooks/useLoadTables";
 import { useLoadTableData } from "../hooks/useLoadTableData";
 import { useScreenStore } from "../stores/screen";
-import { ChevronDown, ChevronRight, Database, Search, Table, X } from "../components/icons";
+import {
+  ChevronDown,
+  ChevronRight,
+  Database,
+  Search,
+  Table,
+  X,
+} from "../components/icons";
 import { EditableTable } from "../components/EditableTable";
 import { cn } from "../utils/cn";
 import { Button } from "../components/common/Button";
@@ -32,7 +39,8 @@ export function ConnectionScreen() {
     const query = tableSearchQuery.toLowerCase();
     return tables.filter(
       (table) =>
-        table.name.toLowerCase().includes(query) || table.schema.toLowerCase().includes(query)
+        table.name.toLowerCase().includes(query) ||
+        table.schema.toLowerCase().includes(query)
     );
   }, [tables, tableSearchQuery]);
 
@@ -66,10 +74,7 @@ export function ConnectionScreen() {
       setOpenTables([...openTables, newTable]);
       setActiveTableId(newTable.id);
 
-      // Load table data
-      if (activeTab?.connectionData) {
-        await loadTableData(activeTab.connectionData, table.schema, table.name);
-      }
+      await loadTableData(table.schema, table.name);
     }
   };
 
@@ -138,7 +143,12 @@ export function ConnectionScreen() {
           {/* Functions Section */}
           <Button
             variant="ghost"
-            onClick={() => setExpandedSections((prev) => ({ ...prev, functions: !prev.functions }))}
+            onClick={() =>
+              setExpandedSections((prev) => ({
+                ...prev,
+                functions: !prev.functions,
+              }))
+            }
             className="w-full justify-start px-2"
           >
             {expandedSections.functions ? (
@@ -153,7 +163,12 @@ export function ConnectionScreen() {
           <div class="mt-1">
             <Button
               variant="ghost"
-              onClick={() => setExpandedSections((prev) => ({ ...prev, tables: !prev.tables }))}
+              onClick={() =>
+                setExpandedSections((prev) => ({
+                  ...prev,
+                  tables: !prev.tables,
+                }))
+              }
               className="w-full justify-start px-2"
             >
               {expandedSections.tables ? (
@@ -167,7 +182,9 @@ export function ConnectionScreen() {
             {expandedSections.tables && (
               <div class="mt-1 space-y-0.5 pl-4">
                 {filteredTables.length === 0 ? (
-                  <div class="px-3 py-2 text-xs text-neutral-500">No tables found</div>
+                  <div class="px-3 py-2 text-xs text-neutral-500">
+                    No tables found
+                  </div>
                 ) : (
                   filteredTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
@@ -255,7 +272,9 @@ export function ConnectionScreen() {
                   <div class="flex items-center justify-center h-full">
                     <div class="text-center">
                       <p class="text-red-600 mb-2">Error loading table data</p>
-                      <p class="text-sm text-neutral-500">{activeTableData.error}</p>
+                      <p class="text-sm text-neutral-500">
+                        {activeTableData.error}
+                      </p>
                     </div>
                   </div>
                 ) : activeTableData.data ? (
@@ -264,7 +283,12 @@ export function ConnectionScreen() {
                     data={activeTableData.data.rows}
                     onCellChange={(rowIndex, columnIndex, value) => {
                       // Handle cell value change
-                      console.log("Cell changed:", rowIndex, columnIndex, value);
+                      console.log(
+                        "Cell changed:",
+                        rowIndex,
+                        columnIndex,
+                        value
+                      );
                       // TODO: Implement save to database
                     }}
                   />
@@ -280,7 +304,9 @@ export function ConnectionScreen() {
           <div class="flex items-center justify-center h-full bg-white">
             <div class="text-center">
               <Database className="size-12 text-neutral-300 mx-auto mb-4" />
-              <p class="text-neutral-500">Select a table from the sidebar to view data</p>
+              <p class="text-neutral-500">
+                Select a table from the sidebar to view data
+              </p>
             </div>
           </div>
         )}

@@ -56,7 +56,8 @@ fn main() {
             commands::profiles::profile_update,
             commands::profiles::profile_remove,
             // Profiles + connect
-            commands::profile_save_and_connect::profile_save_and_connect,
+            commands::profile::profile_save_and_connect,
+            commands::profile::profile_connect,
             // secrets
             secrets::secrets_set,
             secrets::secrets_get,

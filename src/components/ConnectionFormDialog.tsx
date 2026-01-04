@@ -1,6 +1,7 @@
 import { JSX } from "preact";
 import { useCallback, useState } from "preact/hooks";
 import { useForm } from "react-hook-form";
+import { v4 as uuid } from "uuid";
 
 import {
   connectionTest,
@@ -87,7 +88,7 @@ export function ConnectionFormDialog({
   onClose?: () => void;
   initialData?: ConnectionData;
 } = {}) {
-  const { tabs, setTabs, setActiveScreen } = useScreenStore();
+  const { addTab, setActiveScreen } = useScreenStore();
 
   const isEditing = !!initialData?.key;
   const profileId = initialData?.key ?? "";
@@ -256,22 +257,20 @@ export function ConnectionFormDialog({
         storeKeychain: v.storeKeychain,
         password: v.password,
 
-        // ConnectionCreateInput fields (phẳng)
         ...connectionInput,
       } as any);
 
-      const storeKey = cacheToLocalStorage(initialData?.key);
       setMsg(`Connected ✅ ${res.profile.label}`);
 
       const newTab: Tab = {
-        id: `tab-${Date.now()}-conn#${storeKey}`,
+        id: `tab-${uuid()}`,
         label:
           res.profile.label || connectionInput.label || "Unnamed Connection",
-        connectionId: res.connection.id,
-        connectionData: connectionInput,
+        runtimeConnectionId: res.connection.id,
+        profileId,
       };
 
-      setTabs([...tabs, newTab]);
+      addTab(newTab);
       setActiveScreen(newTab.id);
     } catch (e: any) {
       setMsg(e?.message ? String(e.message) : String(e));

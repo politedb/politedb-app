@@ -11,6 +11,7 @@ export const CMD = {
   profileUpdate: "profile_update",
   profileRemove: "profile_remove",
   profileSaveAndConnect: "profile_save_and_connect",
+  profileConnect: "profile_connect",
 
   // Secrets
   secretsGet: "secrets_get",

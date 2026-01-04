@@ -1,17 +1,15 @@
-// src-tauri/src/commands/profiles.rs
-
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::commands::connection;
 use crate::profiles::store as profile_store;
-use crate::profiles::types::ConnectionProfile;
+use crate::profiles::types::{ConnectionProfile, ProfileConnectInput, ProfileConnectResult};
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    ConnectionCreateInput, ConnectionInfo, EngineKind, MySqlConnectInput, PgConnectInput,
-    RedisConnectInput, SecretRef, SecretRefKind,
+    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MySqlConnectInput,
+    PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
 };
 
 /* ============================================================================
@@ -37,7 +35,7 @@ pub enum ProfileSaveAndConnectInput {
 #[derive(serde::Serialize)]
 pub struct ProfileSaveAndConnectResult {
     pub profile: ConnectionProfile,
-    pub connection: ConnectionInfo,
+    pub connection: AppConnectionInfo,
 }
 
 /* ============================================================================
@@ -212,16 +210,6 @@ pub fn persist_input_with_secrets(
     Ok(input)
 }
 
-/* ============================================================================
- * Command
- * ============================================================================
- */
-
-/* ============================================================================
- * Command
- * ============================================================================
- */
-
 #[tauri::command]
 pub async fn profile_save_and_connect(
     app: AppHandle,
@@ -298,7 +286,7 @@ pub async fn profile_save_and_connect(
     })?;
 
     // 4) Runtime connect
-    let connection: ConnectionInfo = connection::connection_create(app.clone(), state, input)
+    let connection: AppConnectionInfo = connection::connection_create(app.clone(), state, input)
         .await
         .map_err(|e| {
             tracing::error!(
@@ -320,6 +308,60 @@ pub async fn profile_save_and_connect(
     );
 
     Ok(ProfileSaveAndConnectResult {
+        profile,
+        connection,
+    })
+}
+
+#[tauri::command]
+pub async fn profile_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    payload: ProfileConnectInput,
+) -> Result<ProfileConnectResult, String> {
+    let profile_id = payload.profile_id;
+
+    tracing::info!(
+        step = "profile_connect",
+        profile_id = %profile_id,
+        "start"
+    );
+
+    // 1) Load profile from store
+    let profile = profile_store::profile_get(&app, profile_id).map_err(|e| {
+        tracing::error!(
+            step = "load_profile",
+            profile_id = %profile_id,
+            error = %e,
+            "failed"
+        );
+        format!("PROFILE_NOT_FOUND: {e}")
+    })?;
+
+    // 2) Clone input (profile input MUST already contain SecretRef::Keychain)
+    let input = profile.input.clone();
+
+    // 3) Runtime connect
+    let connection = connection::connection_create(app.clone(), state, input)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                step = "runtime_connect",
+                profile_id = %profile_id,
+                error = %e,
+                "failed"
+            );
+            format!("RUNTIME_CONNECT_FAILED: {e}")
+        })?;
+
+    tracing::info!(
+        step = "profile_connect",
+        profile_id = %profile_id,
+        connection_id = %connection.id,
+        "ok"
+    );
+
+    Ok(ProfileConnectResult {
         profile,
         connection,
     })

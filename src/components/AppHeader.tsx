@@ -5,6 +5,7 @@ import { Tab } from "../stores/screen";
 import { useScreenStore } from "../stores/screen";
 import { WindowControls } from "./WindowControls";
 import { Button } from "./common/Button";
+import { connectionRemove } from "src/lib/tauri";
 
 const win = getCurrentWebviewWindow();
 
@@ -35,7 +36,7 @@ export function AppHeader({
   activeNav = "main",
   onNavChange,
 }: AppHeaderProps) {
-  const { tabs, setTabs, activeScreen, setActiveScreen } = useScreenStore();
+  const { tabs, removeTab, activeScreen, setActiveScreen } = useScreenStore();
 
   let clickTimer: number | null = null;
 
@@ -66,7 +67,7 @@ export function AppHeader({
   function handleTabClose(tabId: string) {
     const currentTab = tabs.find((tab) => tab.id === tabId);
     const newTabs = tabs.filter((tab) => tab.id !== tabId);
-    setTabs(newTabs);
+    removeTab(tabId);
 
     if (activeScreen === tabId) {
       // If closing active tab, switch to another tab or clear
@@ -80,7 +81,7 @@ export function AppHeader({
     const storeKey = currentTab?.id.split("#").pop() || "";
     const localData = JSON.parse(localStorage.getItem(storeKey) || "{}");
     if (localData?.connectionId) {
-      // connectionRemove(localData.connectionId);
+      connectionRemove(localData.connectionId);
     }
   }
 
@@ -123,7 +124,9 @@ export function AppHeader({
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >
-            <span class="text-xs font-medium truncate max-w-[150px]">{tab.label}</span>
+            <span class="text-xs font-medium truncate max-w-[150px]">
+              {tab.label}
+            </span>
             <Button
               variant="ghost"
               onClick={(e) => {

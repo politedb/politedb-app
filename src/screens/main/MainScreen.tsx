@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/ConnectionFormDialog";
@@ -18,17 +19,17 @@ import type { NavId, ViewMode } from "src/types";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 
 export function MainScreen() {
-  const { tabs, setTabs, setActiveScreen } = useScreenStore();
+  const { tabs, addTab, setActiveScreen } = useScreenStore();
 
-  const [connections, setConnections] = useState<ConnectionProfile[]>([]);
-  const [selectedConnectionId, setSelectedConnectionId] = useState<
-    string | null
-  >(null);
-  const [selectedConnectionData, setSelectedConnectionData] =
+  const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+    null
+  );
+  const [selectedProfile, setSelectedProfile] =
     useState<ConnectionProfile | null>(null);
 
   const [showNewConnection, setShowNewConnection] = useState(false);
-  const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showDatabaseForm, setShowDatabaseForm] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -42,21 +43,25 @@ export function MainScreen() {
   async function reloadProfiles() {
     try {
       const list = await profileList();
-      setConnections(list);
+      setProfiles(list);
     } catch (err) {
       console.error("Failed to load profiles", err);
     }
   }
 
-  const filtered = useMemo(
-    () => filterConnections(connections, searchQuery),
-    [connections, searchQuery]
+  const filteredProfiles = useMemo(
+    () => filterConnections(profiles, searchQuery),
+    [profiles, searchQuery]
   );
-  const groups = useMemo(() => groupConnections(filtered), [filtered]);
+
+  const profileGroups = useMemo(
+    () => groupConnections(filteredProfiles),
+    [filteredProfiles]
+  );
 
   function resetSelection() {
-    setSelectedConnectionId(null);
-    setSelectedConnectionData(null);
+    setSelectedProfileId(null);
+    setSelectedProfile(null);
   }
 
   function handleNewConnection() {
@@ -65,46 +70,44 @@ export function MainScreen() {
     resetSelection();
   }
 
-  function handleConnectionSaved() {
+  function handleProfileSaved() {
     void reloadProfiles();
     setShowNewConnection(false);
-    setShowConnectionModal(false);
+    setShowProfileModal(false);
     setShowDatabaseForm(false);
     resetSelection();
   }
 
-  function handleEditConnection(id: string) {
-    const found = connections.find((c) => c.id === id) ?? null;
+  function handleEditProfile(profileId: string) {
+    const found = profiles.find((p) => p.id === profileId) ?? null;
     if (!found) return;
 
-    setSelectedConnectionId(id);
-    setSelectedConnectionData(found);
-    setShowConnectionModal(true);
+    setSelectedProfileId(profileId);
+    setSelectedProfile(found);
+    setShowProfileModal(true);
     setShowNewConnection(false);
   }
 
-  function openConnectionInTab(profileId: string) {
-    const found = connections.find((c) => c.id === profileId);
+  function openProfileInTab(profileId: string) {
+    const found = profiles.find((p) => p.id === profileId);
     if (!found) return;
 
-    const existing = tabs.find((t) => t.connectionId === profileId);
+    const existing = tabs.find((t) => t.profileId === profileId);
     if (existing) {
       setActiveScreen(existing.id);
       return;
     }
 
-    const connectionData = found.input as unknown as ConnectionCreateInput;
-
     const newTab: Tab = {
-      id: `tab-${Date.now()}-conn#${profileId}`,
+      id: `tab-${uuid()}`,
       label: found.label || "Unnamed Connection",
-      connectionId: profileId,
-      connectionData,
+      profileId,
+      runtimeConnectionId: undefined,
     };
 
-    setTabs([...tabs, newTab]);
+    addTab(newTab);
     setActiveScreen(newTab.id);
-    setShowConnectionModal(false);
+    setShowProfileModal(false);
   }
 
   return (
@@ -125,19 +128,19 @@ export function MainScreen() {
             {activeNav === "connections" ? (
               <div class="p-6">
                 <GroupsSection
-                  groups={groups}
+                  groups={profileGroups}
                   viewMode={viewMode}
                   onPickTag={(tag) => setSearchQuery(tag)}
                 />
 
                 <ConnectionsSection
-                  connections={filtered}
-                  selectedId={selectedConnectionId}
+                  connections={filteredProfiles}
+                  selectedId={selectedProfileId}
                   viewMode={viewMode}
                   searchQuery={searchQuery}
                   onCreate={handleNewConnection}
-                  onOpen={openConnectionInTab}
-                  onEdit={handleEditConnection}
+                  onOpen={openProfileInTab}
+                  onEdit={handleEditProfile}
                 />
               </div>
             ) : (
@@ -152,7 +155,7 @@ export function MainScreen() {
 
         {showNewConnection ? (
           <ConnectionModal
-            onSaved={handleConnectionSaved}
+            onSaved={handleProfileSaved}
             onClose={() => {
               setShowNewConnection(false);
               resetSelection();
@@ -164,19 +167,19 @@ export function MainScreen() {
         ) : null}
 
         <OverlayModal
-          open={!!(showConnectionModal && selectedConnectionData)}
+          open={!!(showProfileModal && selectedProfile)}
           onClose={() => {
-            setShowConnectionModal(false);
+            setShowProfileModal(false);
             resetSelection();
           }}
         >
           <ConnectionFormDialog
-            onSaved={handleConnectionSaved}
+            onSaved={handleProfileSaved}
             onClose={() => {
-              setShowConnectionModal(false);
+              setShowProfileModal(false);
               resetSelection();
             }}
-            initialData={selectedConnectionData as any}
+            initialData={selectedProfile as any}
           />
         </OverlayModal>
       </div>

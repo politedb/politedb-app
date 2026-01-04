@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from "uuid";
 import type {
   ConnectionCreateInput,
   ConnectionProfile,
+  ProfileConnectInput,
+  ProfileConnectResult,
   ProfileSaveAndConnectInput,
   ProfileSaveAndConnectResult,
   SaveAndConnectAction,
@@ -20,6 +22,13 @@ import { CMD } from "./commands";
 
 export async function profileList(): Promise<ConnectionProfile[]> {
   return invoke<ConnectionProfile[]>(CMD.profileList);
+}
+
+export async function profileConnect(
+  profileId: string
+): Promise<ProfileConnectResult> {
+  const payload: ProfileConnectInput = { profile_id: profileId };
+  return invoke<ProfileConnectResult>(CMD.profileConnect, { payload });
 }
 
 export async function profileCreate(

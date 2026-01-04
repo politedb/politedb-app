@@ -95,6 +95,15 @@ export type ConnectionInfo = {
  * ============================================================================
  */
 
+export type ProfileConnectInput = {
+  profile_id: string;
+};
+
+export type ProfileConnectResult = {
+  profile: ConnectionProfile;
+  connection: ConnectionInfo;
+};
+
 export type ConnectionProfile = {
   id: string;
   engine: Engine;

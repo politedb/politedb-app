@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::types::ConnectionInfo as AppConnectionInfo;
 use crate::types::{ConnectionCreateInput, EngineKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,15 +17,13 @@ pub struct ConnectionProfile {
     pub updated_at: i64,
 }
 
-impl ConnectionProfile {
-    pub fn new_from_input(input: &crate::types::ConnectionCreateInput) -> Self {
-        Self {
-            id: uuid::Uuid::nil(), // sẽ được create_profile() overwrite
-            engine: input.engine.clone(),
-            label: input.label.clone(),
-            input: input.clone(),
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileConnectInput {
+    pub profile_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileConnectResult {
+    pub profile: ConnectionProfile,
+    pub connection: AppConnectionInfo,
 }

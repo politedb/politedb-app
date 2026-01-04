@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import { connectionCreate, listenOp, operationExecute } from "../lib/tauri";
+import { listenOp, operationExecute, profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 
-export type TableItem = {
-  schema: string;
-  name: string;
-};
+export type TableItem = { schema: string; name: string };
 
 const LIST_TABLES_SQL = `
 select table_schema, table_name
@@ -17,86 +14,91 @@ order by table_schema, table_name;
 `.trim();
 
 export function useLoadTables() {
-  const { tabs, activeScreen } = useScreenStore();
+  const { tabs, activeScreen, updateTab } = useScreenStore();
 
-  const [busy, setBusy] = useState<boolean>(false);
-  const [msg, setMsg] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
   const [tables, setTables] = useState<TableItem[]>([]);
-  const [sessionIdState, setSessionIdState] = useState<string | null>(null);
 
   const activeTab = useMemo(() => {
-    return tabs.find((tab) => tab.id === activeScreen);
-  }, [activeScreen]);
+    return tabs.find((t) => t.id === activeScreen) ?? null;
+  }, [tabs, activeScreen]);
 
-  const loadTables = useCallback(
-    async (connId: string) => {
-      if (!connId || !activeTab?.connectionData) return;
+  const ensureRuntimeConnection = useCallback(async () => {
+    if (!activeTab?.profileId) return null;
 
-      setBusy(true);
-      setTables([]);
-      setMsg("Loading tables...");
+    // reuse if exists
+    if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
 
-      const res = await connectionCreate(activeTab.connectionData);
+    // ask backend to connect from saved profile (resolve keychain inside backend)
+    const res = await profileConnect(activeTab.profileId);
+    const connId = res.connection.id;
 
-      const buffer: any[][] = [];
+    // persist to tab store
+    updateTab(activeTab.id, { runtimeConnectionId: connId });
 
-      try {
-        const storeKey = activeTab.id.split("#").pop() || "";
-        const localData = JSON.parse(localStorage.getItem(storeKey) || "{}");
-        if (localData.id) {
-          localStorage.setItem(storeKey, JSON.stringify({ ...localData, connectionId: res.id }));
-        }
+    return connId;
+  }, [activeTab, updateTab]);
 
-        const opId = await operationExecute({
-          connection_id: res.id,
-          kind: "sql_query",
-          sql: { sql: LIST_TABLES_SQL, batch_size: 500, max_rows: 50_000 },
-        });
+  const loadTables = useCallback(async () => {
+    if (!activeTab) return;
 
-        const unsub = listenOp(
-          opId,
-          (chunk) => {
-            const rows: any[][] = chunk.rows || [];
-            buffer.push(...rows);
-          },
-          () => {
-            const parsed: TableItem[] = buffer
-              .map((r) => ({
-                schema: cellToString(r?.[0]),
-                name: cellToString(r?.[1]),
-              }))
-              .filter((t) => t.schema && t.name);
+    setBusy(true);
+    setTables([]);
+    setMsg("Loading tables...");
 
-            setTables(parsed);
-            setMsg(`Loaded ${parsed.length} tables.`);
-            setBusy(false);
-            unsub();
-          },
-          (err) => {
-            setMsg(`Failed to load tables: ${err?.error || JSON.stringify(err)}`);
-            setBusy(false);
-            unsub();
-          }
-        );
-      } catch (e: any) {
-        setMsg(e?.message ? String(e.message) : String(e));
+    const buffer: any[][] = [];
+
+    try {
+      const connectionId = await ensureRuntimeConnection();
+      if (!connectionId) {
+        setMsg("No active connection.");
         setBusy(false);
+        return;
       }
-    },
-    [activeTab?.connectionData]
-  );
 
-  useEffect(() => {
-    if (activeTab?.connectionId && activeTab.connectionId !== sessionIdState) {
-      loadTables(activeTab.id);
-      setSessionIdState(activeTab.connectionId);
+      const opId = await operationExecute({
+        connection_id: connectionId,
+        kind: "sql_query",
+        sql: { sql: LIST_TABLES_SQL, batch_size: 500, max_rows: 50_000 },
+      });
+
+      const unsub = listenOp(
+        opId,
+        (chunk) => {
+          const rows: any[][] = chunk.rows || [];
+          buffer.push(...rows);
+        },
+        () => {
+          const parsed: TableItem[] = buffer
+            .map((r) => ({
+              schema: cellToString(r?.[0]),
+              name: cellToString(r?.[1]),
+            }))
+            .filter((t) => t.schema && t.name);
+
+          setTables(parsed);
+          setMsg(`Loaded ${parsed.length} tables.`);
+          setBusy(false);
+          unsub();
+        },
+        (err) => {
+          setMsg(`Failed to load tables: ${err?.error || JSON.stringify(err)}`);
+          setBusy(false);
+          unsub();
+        }
+      );
+    } catch (e: any) {
+      setMsg(e?.message ? String(e.message) : String(e));
+      setBusy(false);
     }
-  }, [activeTab?.connectionId]);
+  }, [activeTab, ensureRuntimeConnection]);
 
-  return {
-    tables,
-    msg,
-    busy,
-    loadTables: () => sessionIdState && loadTables(sessionIdState),
-  };
+  // Auto-load when switch tab (or when runtimeConnectionId changes)
+  useEffect(() => {
+    if (!activeTab) return;
+    void loadTables();
+  }, [activeTab?.id]); // tab switch => reload
+
+  return { tables, msg, busy, loadTables };
 }
