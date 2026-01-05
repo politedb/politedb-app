@@ -124,7 +124,7 @@ export function AppHeader({
             }`}
             onClick={() => handleTabSelect?.(tab.id)}
           >
-            <span class="max-w-[150px] truncate text-xs font-medium">
+            <span class="max-w-37.5 truncate text-xs font-medium">
               {tab.label}
             </span>
             <Button

@@ -47,7 +47,7 @@ body,
     Arial,
     "Apple Color Emoji",
     "Segoe UI Emoji";
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   font-weight: 400;
 
@@ -61,4 +61,11 @@ body,
 
   /* Desktop feel */
   color-scheme: light;
+}
+
+select,
+option {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
 }

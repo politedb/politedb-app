@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { v4 as uuid } from "uuid";
 
-import { ConnectionModal } from "src/components/ConnectionModal";
-import { ConnectionFormDialog } from "src/components/ConnectionFormDialog";
+import { ConnectionModal } from "src/components/SelectConnEngineModal";
+import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 
 import { useScreenStore, Tab } from "src/stores/screen";

@@ -199,7 +199,7 @@ export function ConnectionScreen() {
                         key={key}
                         onClick={() => handleSelectTable(table)}
                         active={activeTableId === key}
-                        className="w-full justify-start rounded-md px-3 py-1.5 text-xs"
+                        className="w-full justify-start rounded-md px-3 py-1.5 text-sm"
                       >
                         <Table className="size-4" />
                         {table.name}
