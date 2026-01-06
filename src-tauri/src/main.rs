@@ -1,6 +1,5 @@
 #[cfg(target_os = "macos")]
-#[macro_use]
-extern crate objc;
+extern crate objc2;
 
 mod commands;
 mod engines;

@@ -82,6 +82,7 @@ export function ConnectionFooter(props: {
           <div class="flex gap-3">
             <Button
               variant="shadow"
+              className="text-sm"
               disabled={busy || !requiredOk}
               onClick={onTest}
             >
@@ -90,6 +91,7 @@ export function ConnectionFooter(props: {
 
             <Button
               variant="default"
+              className="text-sm"
               disabled={busy || !requiredOk}
               onClick={onConnect}
             >

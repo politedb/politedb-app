@@ -1,8 +1,11 @@
 import { TargetedEvent } from "preact";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useController } from "react-hook-form";
 import { Field, Input } from "src/components/form";
 import { Button } from "../common/Button";
+import { FilePathPicker } from "../common/FilePathPicker";
 import type { SectionProps } from "./connectionForm.utils";
+import { Select } from "../common/Select";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
@@ -18,10 +21,24 @@ export function SSHSection(props: SectionProps) {
   const sshHost = useController({ control, name: "sshHost" });
   const sshPort = useController({ control, name: "sshPort" });
   const sshUser = useController({ control, name: "sshUser" });
+
+  const sshAuthType = useController({ control, name: "sshAuthType" });
   const sshKeyPath = useController({ control, name: "sshKeyPath" });
+  const sshPassword = useController({ control, name: "sshPassword" });
+  const sshPassphrase = useController({ control, name: "sshPassphrase" });
 
   function dirty() {
     onDirty?.();
+  }
+
+  async function pickSSHKeyPath(): Promise<string | null> {
+    const res = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "SSH Private Key", extensions: ["", "pem", "key"] }],
+    });
+    if (!res) return null;
+    return Array.isArray(res) ? (res[0] ?? null) : res;
   }
 
   return (
@@ -47,7 +64,8 @@ export function SSHSection(props: SectionProps) {
 
       {sshEnabled.field.value ? (
         <div class="mt-4 space-y-4">
-          <Field label="SSH Host / Port" alignTop>
+          {/* Host / Port */}
+          <Field label="SSH Host / Port">
             <div class="grid grid-cols-3 gap-3">
               <Input
                 class="col-span-2"
@@ -70,7 +88,8 @@ export function SSHSection(props: SectionProps) {
             </div>
           </Field>
 
-          <Field label="SSH User / Key" alignTop>
+          {/* User / Auth */}
+          <Field label="SSH User / Authentication">
             <div class="grid grid-cols-2 gap-3">
               <Input
                 value={sshUser.field.value}
@@ -80,16 +99,68 @@ export function SSHSection(props: SectionProps) {
                   dirty();
                 }}
               />
-              <Input
+              <Select
+                value={sshAuthType.field.value}
+                onChange={(e) => {
+                  sshAuthType.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              >
+                <option value="privateKey">Private Key (No password)</option>
+                <option value="privateKeyWithPassphrase">
+                  Private Key + Passphrase
+                </option>
+                <option value="password">Password</option>
+              </Select>
+            </div>
+          </Field>
+
+          {/* Private key */}
+          {(sshAuthType.field.value === "privateKey" ||
+            sshAuthType.field.value === "privateKeyWithPassphrase") && (
+            <Field label="SSH Private Key">
+              <FilePathPicker
                 value={sshKeyPath.field.value}
                 placeholder="~/.ssh/id_ed25519"
+                onPick={async () => {
+                  const p = await pickSSHKeyPath();
+                  if (p) sshKeyPath.field.onChange(p);
+                }}
+                onClear={() => sshKeyPath.field.onChange("")}
+              />
+            </Field>
+          )}
+
+          {/* Passphrase (no save option) */}
+          {sshAuthType.field.value === "privateKeyWithPassphrase" && (
+            <Field label="SSH Passphrase">
+              <Input
+                type="password"
+                value={sshPassphrase.field.value ?? ""}
+                placeholder="Private key passphrase"
                 onInput={(e: InputEvt) => {
-                  sshKeyPath.field.onChange(e.currentTarget.value);
+                  sshPassphrase.field.onChange(e.currentTarget.value);
                   dirty();
                 }}
               />
-            </div>
-          </Field>
+            </Field>
+          )}
+
+          {sshAuthType.field.value === "password" && (
+            <>
+              <Field label="SSH Password">
+                <Input
+                  type="password"
+                  value={sshPassword.field.value ?? ""}
+                  placeholder="SSH Password"
+                  onInput={(e: InputEvt) => {
+                    sshPassword.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                />
+              </Field>
+            </>
+          )}
         </div>
       ) : null}
     </section>

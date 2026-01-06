@@ -22,9 +22,9 @@ impl SshTunnelHandle {
         self.local_addr.port()
     }
 
-    pub fn local_addr(&self) -> SocketAddr {
-        self.local_addr
-    }
+    // pub fn local_addr(&self) -> SocketAddr {
+    //     self.local_addr
+    // }
 
     pub async fn close(&self) {
         let mut guard = self.child.lock().await;

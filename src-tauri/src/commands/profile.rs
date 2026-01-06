@@ -108,6 +108,7 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
             validate_redis_input(r)
         }
+        #[allow(unreachable_patterns)]
         _ => Err("ENGINE_NOT_SUPPORTED_YET".into()),
     }
 }
@@ -122,6 +123,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Postgres => "postgres",
         EngineKind::Mysql => "mysql",
         EngineKind::Redis => "redis",
+        #[allow(unreachable_patterns)]
         _ => "unknown",
     }
 }
@@ -204,6 +206,7 @@ pub fn persist_input_with_secrets(
                 &mut r.password,
             )?;
         }
+        #[allow(unreachable_patterns)]
         _ => {}
     }
 

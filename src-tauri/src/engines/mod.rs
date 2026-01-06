@@ -45,6 +45,7 @@ impl EngineConnection {
         }
     }
 
+    #[allow(dead_code)]
     pub fn engine_name(&self) -> &'static str {
         match self {
             EngineConnection::Postgres(_) => "postgres",

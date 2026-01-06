@@ -390,7 +390,6 @@ pub async fn run_redis_command(
 
                         for k in keys {
                             if row_count >= max_rows {
-                                cursor = 0;
                                 break;
                             }
                             rows.push(vec![CellValue::Str(k)]);
@@ -400,7 +399,6 @@ pub async fn run_redis_command(
                                 let chunk = TableChunk { op_id, rows: std::mem::take(&mut rows), row_offset };
                                 row_offset = row_count;
                                 if tx_chunk.send(Ok(chunk)).await.is_err() {
-                                    cursor = 0;
                                     break;
                                 }
                             }

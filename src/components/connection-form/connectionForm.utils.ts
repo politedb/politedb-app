@@ -20,14 +20,18 @@ export type FormValues = {
   sslCert: string;
   sslCA: string;
 
+  sshAuthType: "password" | "privateKey" | "privateKeyWithPassphrase";
   sshEnabled: boolean;
   sshHost: string;
   sshPort: number;
   sshUser: string;
   sshKeyPath: string;
+  sshPassword: string;
+  sshPasswordSaveMethod: "keychain" | "never";
+  sshPassphrase: string;
 };
 
-export type ConnectionData = {
+export type ProfileConnectionData = {
   key?: string;
   name?: string;
 
@@ -49,11 +53,15 @@ export type ConnectionData = {
   sslCert?: string;
   sslCA?: string;
 
+  sshAuthType?: "password" | "privateKey" | "privateKeyWithPassphrase";
   sshEnabled?: boolean;
   sshHost?: string;
   sshPort?: number;
   sshUser?: string;
   sshKeyPath?: string;
+  sshPassword?: string;
+  sshPasswordSaveMethod?: "keychain" | "never";
+  sshPassphrase?: string;
 };
 
 export type SectionProps = {
@@ -123,7 +131,9 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   return input as ConnectionCreateInput;
 }
 
-export function makeDefaultValues(initialData?: ConnectionData): FormValues {
+export function makeDefaultValues(
+  initialData?: ProfileConnectionData
+): FormValues {
   const initialTags = initialData?.tags?.length
     ? initialData.tags
     : initialData?.tag
@@ -149,10 +159,14 @@ export function makeDefaultValues(initialData?: ConnectionData): FormValues {
     sslCert: initialData?.sslCert || "",
     sslCA: initialData?.sslCA || "",
 
+    sshAuthType: initialData?.sshAuthType || "privateKey",
     sshEnabled: initialData?.sshEnabled || false,
     sshHost: initialData?.sshHost || "",
     sshPort: initialData?.sshPort ?? 22,
     sshUser: initialData?.sshUser || "",
     sshKeyPath: initialData?.sshKeyPath || "",
+    sshPassword: initialData?.sshPassword || "",
+    sshPasswordSaveMethod: initialData?.sshPasswordSaveMethod || "keychain",
+    sshPassphrase: initialData?.sshPassphrase || "",
   };
 }

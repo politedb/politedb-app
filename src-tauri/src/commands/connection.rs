@@ -26,6 +26,7 @@ fn rewrite_input_host_port(
             r.host = host.to_string();
             r.port = port;
         }
+        #[allow(unreachable_patterns)]
         _ => return Err("ENGINE_NOT_SUPPORTED_YET".into()),
     }
     Ok(input)

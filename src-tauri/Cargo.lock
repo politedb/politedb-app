@@ -3418,7 +3418,7 @@ dependencies = [
  "keyring",
  "mysql_async",
  "native-tls",
- "objc",
+ "objc2",
  "postgres-native-tls",
  "raw-window-handle",
  "redis",

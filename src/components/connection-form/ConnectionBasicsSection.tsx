@@ -1,4 +1,5 @@
 import { TargetedEvent } from "preact";
+import { useState } from "preact/hooks";
 import { useController, useWatch } from "react-hook-form";
 import { Field, Input } from "src/components/form";
 import { SSLSection } from "./SSLSection";
@@ -11,14 +12,8 @@ function toNumber(v: any, fallback: number) {
   return Number.isFinite(x) ? x : fallback;
 }
 
-export function ConnectionBasicsSection(
-  props: SectionProps & {
-    showPassword: boolean;
-    onToggleShowPassword: () => void;
-  }
-) {
-  const { control, errors, onDirty, showPassword, onToggleShowPassword } =
-    props;
+export function ConnectionBasicsSection(props: SectionProps) {
+  const { control, errors, onDirty } = props;
 
   // Watch only what is needed for this section UI
   const storeKeychain = useWatch({ control, name: "storeKeychain" });
@@ -34,6 +29,8 @@ export function ConnectionBasicsSection(
   const sslKey = useController({ control, name: "sslKey" });
   const sslCert = useController({ control, name: "sslCert" });
   const sslCA = useController({ control, name: "sslCA" });
+
+  const [showPassword, onToggleShowPassword] = useState(false);
 
   const passwordError =
     !storeKeychain && errors?.password
@@ -129,7 +126,7 @@ export function ConnectionBasicsSection(
 
               <button
                 type="button"
-                onClick={onToggleShowPassword}
+                onClick={() => onToggleShowPassword((x) => !x)}
                 class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                 title={showPassword ? "Hide" : "Show"}
               >

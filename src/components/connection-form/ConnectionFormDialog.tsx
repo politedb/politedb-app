@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import { useForm } from "react-hook-form";
 import { v4 as uuid } from "uuid";
 
@@ -17,7 +17,7 @@ import { ConnectionFooter } from "./ConnectionFooter";
 import {
   buildConnectionInput,
   makeDefaultValues,
-  type ConnectionData,
+  type ProfileConnectionData,
   type FormValues,
 } from "./connectionForm.utils";
 import { useConnectionStatus } from "./useConnectionStatus";
@@ -29,7 +29,7 @@ export function ConnectionFormDialog({
 }: {
   onSaved?: () => void;
   onClose?: () => void;
-  initialData?: ConnectionData;
+  initialData?: ProfileConnectionData;
 } = {}) {
   const { addTab, setActiveScreen } = useScreenStore();
 
@@ -44,8 +44,6 @@ export function ConnectionFormDialog({
     setSuccess,
     setError,
   } = useConnectionStatus();
-
-  const [showPassword, setShowPassword] = useState(false);
 
   const {
     handleSubmit,
@@ -146,8 +144,6 @@ export function ConnectionFormDialog({
           <ConnectionBasicsSection
             control={control}
             errors={errors}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword((x) => !x)}
             onDirty={onDirty}
           />
 
