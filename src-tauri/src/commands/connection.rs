@@ -13,23 +13,27 @@ fn rewrite_input_host_port(
     match input.engine {
         crate::types::EngineKind::Postgres => {
             let pg = input.postgres.as_mut().ok_or("POSTGRES_CONFIG_MISSING")?;
-            pg.host = host.to_string();
-            pg.port = port as u16;
+            pg.host = host.into();
+            pg.port = port;
         }
         crate::types::EngineKind::Mysql => {
             let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
-            my.host = host.to_string();
+            my.host = host.into();
             my.port = port;
         }
         crate::types::EngineKind::Redis => {
             let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
-            r.host = host.to_string();
+            r.host = host.into();
             r.port = port;
         }
         #[allow(unreachable_patterns)]
         _ => return Err("ENGINE_NOT_SUPPORTED_YET".into()),
     }
     Ok(input)
+}
+
+async fn close_tunnel_quietly(tunnel: crate::ssh_tunnel::handle::SshTunnelHandle) {
+    let _ = tunnel.close();
 }
 
 #[tauri::command]
@@ -40,7 +44,6 @@ pub async fn connection_create(
 ) -> Result<ConnectionInfo, String> {
     let id = Uuid::new_v4();
 
-    // ✅ safe debug context (NO password)
     let engine = input.engine.clone();
     let label = input.label.clone();
 
@@ -61,8 +64,13 @@ pub async fn connection_create(
             .await
             .map_err(|e| format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"))?;
 
-        let local_port = tunnel.local_port();
-        tracing::info!(conn_id = %id, local_port = %local_port, "connection_create: ssh tunnel opened");
+        let local_port = tunnel.local_addr().port();
+
+        tracing::info!(
+            conn_id = %id,
+            local_port = %local_port,
+            "connection_create: ssh tunnel opened"
+        );
 
         input = rewrite_input_host_port(input, "127.0.0.1", local_port)?;
         tunnel_opt = Some(tunnel);
@@ -95,8 +103,9 @@ pub async fn connection_create(
                 error = %e,
                 "connection_create: connect failed"
             );
-            if let Some(tunnel) = tunnel_opt {
-                tunnel.close().await;
+
+            if let Some(tunnel) = tunnel_opt.take() {
+                close_tunnel_quietly(tunnel).await;
             }
             return Err(e);
         }
@@ -105,8 +114,7 @@ pub async fn connection_create(
     // 3) Insert runtime connection
     state.connections.insert(id, conn);
 
-    // 3.1) Store tunnel only after success
-    if let Some(tunnel) = tunnel_opt {
+    if let Some(tunnel) = tunnel_opt.take() {
         state.ssh_tunnels.insert(id, tunnel);
     }
 
@@ -125,27 +133,156 @@ pub async fn connection_test(
     state: State<'_, AppState>,
     mut input: ConnectionCreateInput,
 ) -> Result<(), String> {
+    let engine = input.engine.clone();
+    let label = input.label.clone();
+
+    // Basic safe context (NO secrets)
+    tracing::info!(
+        engine = ?engine,
+        label = %label,
+        ssh = %input.ssh.is_some(),
+        "connection_test: start"
+    );
+
+    // Resolve driver
     let driver = state
         .engines
-        .get(input.engine.clone())
+        .get(engine.clone())
         .ok_or("ENGINE_NOT_SUPPORTED")?;
+
+    tracing::debug!(
+        engine = ?engine,
+        driver_kind = ?driver.kind(),
+        "connection_test: driver resolved"
+    );
 
     let mut tunnel_opt: Option<crate::ssh_tunnel::handle::SshTunnelHandle> = None;
 
+    // Optional SSH tunnel
     if let Some(ssh_in) = input.ssh.clone() {
-        let tunnel = ssh_tunnel::open_tunnel(&ssh_in)
-            .await
-            .map_err(|e| format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"))?;
+        tracing::info!(
+            engine = ?engine,
+            label = %label,
+            ssh_host = %ssh_in.ssh_host,
+            ssh_port = ssh_in.ssh_port,
+            ssh_user = ?ssh_in.ssh_user.as_deref().map(str::trim),
+            strict = ?ssh_in.strict_host_key_checking.as_deref(),
+            remote_host = %ssh_in.remote_host,
+            remote_port = ssh_in.remote_port,
+            "connection_test: opening ssh tunnel"
+        );
 
-        let local_port = tunnel.local_port();
-        input = rewrite_input_host_port(input, "127.0.0.1", local_port)?;
+        let t0 = std::time::Instant::now();
+        let tunnel = match ssh_tunnel::open_tunnel(&ssh_in).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!(
+                    engine = ?engine,
+                    label = %label,
+                    ssh_host = %ssh_in.ssh_host,
+                    ssh_port = ssh_in.ssh_port,
+                    remote_host = %ssh_in.remote_host,
+                    remote_port = ssh_in.remote_port,
+                    error = %format!("{e:#}"),
+                    "connection_test: ssh tunnel open failed"
+                );
+                return Err(format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"));
+            }
+        };
+
+        let local = tunnel.local_addr();
+        tracing::info!(
+            engine = ?engine,
+            label = %label,
+            local_bind = %local,
+            elapsed_ms = t0.elapsed().as_millis(),
+            "connection_test: ssh tunnel opened"
+        );
+
+        // Rewrite input to localhost:local_port
+        let before = (
+            // Only log host/port - never log password
+            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
+            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
+            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
+        );
+
+        input = rewrite_input_host_port(input, "127.0.0.1", local.port())?;
+
+        let after = (
+            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
+            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
+            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
+        );
+
+        tracing::debug!(
+            engine = ?engine,
+            before = ?before,
+            after = ?after,
+            "connection_test: input host/port rewritten for tunnel"
+        );
+
         tunnel_opt = Some(tunnel);
+    } else {
+        // No SSH: log direct target (safe)
+        let target = (
+            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
+            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
+            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
+        );
+        tracing::debug!(
+            engine = ?engine,
+            target = ?target,
+            "connection_test: no ssh, direct connect target"
+        );
     }
 
+    // Run test
+    tracing::info!(
+        engine = ?engine,
+        label = %label,
+        "connection_test: driver.test begin"
+    );
+
+    let t1 = std::time::Instant::now();
     let res = driver.test(&app, input).await;
 
-    if let Some(tunnel) = tunnel_opt {
-        tunnel.close().await;
+    match &res {
+        Ok(_) => {
+            tracing::info!(
+                engine = ?engine,
+                label = %label,
+                elapsed_ms = t1.elapsed().as_millis(),
+                "connection_test: driver.test ok"
+            );
+        }
+        Err(e) => {
+            tracing::error!(
+                engine = ?engine,
+                label = %label,
+                elapsed_ms = t1.elapsed().as_millis(),
+                error = %e,
+                "connection_test: driver.test failed"
+            );
+        }
+    }
+
+    // Always close tunnel
+    if let Some(tunnel) = tunnel_opt.take() {
+        let local = tunnel.local_addr();
+        tracing::debug!(
+            engine = ?engine,
+            label = %label,
+            local_bind = %local,
+            "connection_test: closing ssh tunnel"
+        );
+        close_tunnel_quietly(tunnel).await;
+        tracing::debug!(
+            engine = ?engine,
+            label = %label,
+            local_bind = %local,
+            "connection_test: ssh tunnel closed"
+        );
     }
 
     res
@@ -176,7 +313,6 @@ pub async fn connection_remove(
     // 1) Cancel all running ops of this connection (if any)
     for entry in state.running_ops.iter() {
         let op_id = *entry.key();
-        // nếu sau này có mapping op -> connection_id thì check ở đây
         entry.value().cancel();
         state.active_ops.remove(&op_id);
         state.cancel_requested.insert(op_id, ());
@@ -187,7 +323,7 @@ pub async fn connection_remove(
 
     // 3) Close SSH tunnel if exists
     if let Some((_, tunnel)) = state.ssh_tunnels.remove(&connection_id) {
-        tunnel.close().await;
+        close_tunnel_quietly(tunnel).await;
     }
 
     Ok(())

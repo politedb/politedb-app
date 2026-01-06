@@ -138,7 +138,7 @@ export type ProfileSaveAndConnectResult = {
  */
 
 export type SaveAndConnectInput = ConnectionCreateInput & {
-  storeKeychain: boolean;
+  storeKeychain?: boolean;
   password?: string; // plaintext, FE only
   //   keychainKey: string; // required when storeKeychain=true
 };
@@ -230,14 +230,14 @@ export type SshAuth =
   | { kind: "password"; password: SecretRef }
   | {
       kind: "private_key";
-      private_key_path: string;
+      identity_file: string;
       passphrase?: SecretRef | null;
     };
 
 export type StrictHostKeyChecking = "accept-new" | "yes" | "no";
 
 export type SshTunnelInput = {
-  enabled: boolean;
+  enabled?: boolean;
 
   ssh_host: string;
   ssh_port?: number | null; // default 22
@@ -247,13 +247,13 @@ export type SshTunnelInput = {
   auth: SshAuth;
 
   // forward target (db side)
-  target_host: string; // usually "127.0.0.1" if DB is on same server
-  target_port: number;
+  remote_host: string; // usually "127.0.0.1" if DB is on same server
+  remote_port: number;
+
+  strict_host_key_checking: StrictHostKeyChecking;
 
   // optional: bind addr, default 127.0.0.1
   local_bind_host?: string | null;
-  strict_host_key_checking: StrictHostKeyChecking;
-
   // optional: request local port, 0 => auto-pick free port
   local_bind_port?: number | null;
 

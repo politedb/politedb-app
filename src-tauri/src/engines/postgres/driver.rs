@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use deadpool_postgres::{Manager, Pool};
@@ -44,7 +46,7 @@ impl EngineDriver for PostgresDriver {
     async fn test(&self, app: &AppHandle, input: ConnectionCreateInput) -> Result<(), String> {
         let pg = input.postgres.ok_or("POSTGRES_CONFIG_MISSING")?;
 
-        test_pg(app, pg)
+        test_pg_direct(app, pg)
             .await
             .map_err(|e| format!("POSTGRES_TEST_FAILED: {:#}", e))?;
 
@@ -128,8 +130,37 @@ pub async fn connect_pg(
     })
 }
 
-/// Optional helper for "test connection" flow (no state mutation)
-pub async fn test_pg(app: &AppHandle, input: PgConnectInput) -> anyhow::Result<()> {
-    let _ = connect_pg(app, Uuid::new_v4(), "__test__".into(), input).await?;
+async fn test_pg_direct(app: &AppHandle, input: PgConnectInput) -> anyhow::Result<()> {
+    // 1) Resolve password (inline/keychain)
+    let conn_id = Uuid::new_v4();
+    let password = resolve_password(app, conn_id, &input).await?;
+
+    // 2) Build tokio_postgres::Config
+    let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
+
+    // 3) Connect + ping with timeout (avoid 30s hang)
+    let timeout_ms = input
+        .connect_timeout_ms
+        .unwrap_or(15_000)
+        .clamp(500, 30_000);
+    let timeout = Duration::from_millis(timeout_ms);
+
+    let (client, connection) = tokio::time::timeout(timeout, cfg.connect(NoTls))
+        .await
+        .map_err(|_| anyhow!("pg connect timeout after {}ms", timeout_ms))?
+        .context("pg connect failed")?;
+
+    // IMPORTANT: drive the connection in background
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            tracing::debug!(error = %e, "pg connection task ended");
+        }
+    });
+
+    tokio::time::timeout(timeout, client.simple_query("SELECT 1"))
+        .await
+        .map_err(|_| anyhow!("pg ping timeout after {}ms", timeout_ms))?
+        .context("pg ping failed")?;
+
     Ok(())
 }

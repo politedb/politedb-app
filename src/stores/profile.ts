@@ -1,14 +1,14 @@
 import { create } from "zustand";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { profileList, profileRemove } from "src/lib/tauri";
+import { profileList, profileRemove, profileUpdate } from "src/lib/tauri";
 
 type ProfileState = {
   profiles: ConnectionProfile[];
   busy: boolean;
   error: string | null;
 
-  selectedProfileId: string | null;
-
+  selectedProfileId: string | undefined;
+  saveProfile: (profile: ConnectionProfile) => Promise<void>;
   // UI state
   showNewConnection: boolean;
   showEditProfile: boolean;
@@ -19,7 +19,7 @@ type ProfileState = {
 
   getProfileById: (id: string) => ConnectionProfile | undefined;
 
-  selectProfile: (id: string | null) => void;
+  selectProfile: (id: string | undefined) => void;
 
   openNew: () => void;
   closeNew: () => void;
@@ -35,7 +35,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   busy: false,
   error: null,
 
-  selectedProfileId: null,
+  selectedProfileId: undefined,
 
   showNewConnection: false,
   showEditProfile: false,
@@ -63,7 +63,24 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         busy: false,
       }));
     } catch (e: any) {
-      console.log(e);
+      set({
+        busy: false,
+        error: e?.message ? String(e.message) : String(e),
+      });
+    }
+  },
+
+  saveProfile: async (profile: ConnectionProfile) => {
+    set({ busy: true, error: null });
+    try {
+      // Placeholder for save logic
+      await profileUpdate(profile.id, profile.input);
+
+      set((s) => ({
+        profiles: [...s.profiles.filter((p) => p.id !== profile.id), profile],
+        busy: false,
+      }));
+    } catch (e: any) {
       set({
         busy: false,
         error: e?.message ? String(e.message) : String(e),
@@ -79,14 +96,14 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({
       showNewConnection: true,
       showEditProfile: false,
-      selectedProfileId: null,
+      selectedProfileId: undefined,
       showDatabaseForm: false,
     }),
 
   closeNew: () =>
     set({
       showNewConnection: false,
-      selectedProfileId: null,
+      selectedProfileId: undefined,
       showDatabaseForm: false,
     }),
 
@@ -100,7 +117,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   closeEdit: () =>
     set({
       showEditProfile: false,
-      selectedProfileId: null,
+      selectedProfileId: undefined,
     }),
 
   setShowDatabaseForm: (v) => set({ showDatabaseForm: v }),

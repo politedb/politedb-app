@@ -2,7 +2,13 @@ import { useMemo } from "preact/hooks";
 import { useForm } from "react-hook-form";
 import { v4 as uuid } from "uuid";
 
-import { connectionTest, profileSaveAndConnect } from "src/lib/tauri";
+import {
+  ConnectionProfile,
+  connectionTest,
+  profileSaveAndConnect,
+  SaveAndConnectAction,
+  SaveAndConnectInput,
+} from "src/lib/tauri";
 
 import { X } from "../icons";
 import { Tab, useScreenStore } from "src/stores/screen";
@@ -17,7 +23,6 @@ import { ConnectionFooter } from "./ConnectionFooter";
 import {
   buildConnectionInput,
   makeDefaultValues,
-  type ProfileConnectionData,
   type FormValues,
 } from "./connectionForm.utils";
 import { useConnectionStatus } from "./useConnectionStatus";
@@ -27,14 +32,14 @@ export function ConnectionFormDialog({
   onSaved,
   initialData,
 }: {
-  onSaved?: () => void;
+  onSaved?: (v?: ConnectionProfile) => void;
   onClose?: () => void;
-  initialData?: ProfileConnectionData;
+  initialData?: ConnectionProfile;
 } = {}) {
   const { addTab, setActiveScreen } = useScreenStore();
 
-  const isEditing = !!initialData?.key;
-  const profileId = initialData?.key ?? "";
+  const isEditing = !!initialData;
+  const idProfileEditing = initialData?.id ?? undefined;
 
   const {
     status,
@@ -79,6 +84,16 @@ export function ConnectionFormDialog({
     }
   });
 
+  const onSave = handleSubmit(async (v) => {
+    if (!initialData || !idProfileEditing) return;
+
+    const input = buildConnectionInput(v);
+    initialData.input = input;
+    initialData.updated_at = Date.now();
+
+    onSaved?.(initialData);
+  });
+
   const onConnect = handleSubmit(async (v) => {
     setConnecting();
     try {
@@ -87,7 +102,7 @@ export function ConnectionFormDialog({
       const action = isEditing
         ? ({
             mode: "update",
-            profileId: profileId || (initialData?.key as string),
+            profileId: idProfileEditing,
           } as const)
         : ({ mode: "create" } as const);
 
@@ -99,7 +114,7 @@ export function ConnectionFormDialog({
         password: v.password,
 
         ...connectionInput,
-      } as any);
+      } as SaveAndConnectInput & SaveAndConnectAction);
 
       setSuccess(`Connected ✅ ${res.profile.label}`);
 
@@ -108,7 +123,7 @@ export function ConnectionFormDialog({
         label:
           res.profile.label || connectionInput.label || "Unnamed Connection",
         runtimeConnectionId: res.connection.id,
-        profileId,
+        profileId: res.profile.id,
       };
 
       addTab(newTab);
@@ -160,6 +175,7 @@ export function ConnectionFormDialog({
           storeKeychain={v.storeKeychain}
           onTest={onTest}
           onConnect={onConnect}
+          onSave={onSave}
         />
       </div>
     </div>

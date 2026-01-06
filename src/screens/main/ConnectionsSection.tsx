@@ -26,7 +26,7 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
 
 export function ConnectionsSection(props: {
   profiles: ConnectionProfile[];
-  selectedId: string | null;
+  selectedId?: string;
   viewMode: ViewMode;
   searchQuery: string;
   onCreate: () => void;

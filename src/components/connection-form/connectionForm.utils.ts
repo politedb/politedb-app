@@ -1,5 +1,14 @@
 import { Control, FieldErrors } from "react-hook-form";
-import type { ConnectionCreateInput, SslMode } from "src/lib/tauri";
+import type {
+  ConnectionCreateInput,
+  ConnectionProfile,
+  Engine,
+  SslMode,
+} from "src/lib/tauri";
+
+/* =============================================================================
+ * Types
+ * ============================================================================= */
 
 export type FormValues = {
   name: string;
@@ -27,41 +36,7 @@ export type FormValues = {
   sshUser: string;
   sshKeyPath: string;
   sshPassword: string;
-  sshPasswordSaveMethod: "keychain" | "never";
-  sshPassphrase: string;
-};
-
-export type ProfileConnectionData = {
-  key?: string;
-  name?: string;
-
-  tag?: string; // legacy
-  tags?: string[];
-
-  statusColor?: string;
-
-  host?: string;
-  port?: number;
-  user?: string;
-  password?: string;
-  database?: string;
-
-  storeKeychain?: boolean;
-
-  sslMode?: SslMode;
-  sslKey?: string;
-  sslCert?: string;
-  sslCA?: string;
-
-  sshAuthType?: "password" | "privateKey" | "privateKeyWithPassphrase";
-  sshEnabled?: boolean;
-  sshHost?: string;
-  sshPort?: number;
-  sshUser?: string;
-  sshKeyPath?: string;
-  sshPassword?: string;
-  sshPasswordSaveMethod?: "keychain" | "never";
-  sshPassphrase?: string;
+  sshPasswordSaveMethod: "keychain" | "inline";
 };
 
 export type SectionProps = {
@@ -69,6 +44,10 @@ export type SectionProps = {
   errors?: FieldErrors<FormValues>;
   onDirty?: () => void;
 };
+
+/* =============================================================================
+ * Small utils
+ * ============================================================================= */
 
 export function toNumber(v: any, fallback: number) {
   const x = Number(v);
@@ -95,78 +74,240 @@ export function dedupeKeepOrder(xs: string[]) {
   return out;
 }
 
-export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
-  const input: any = {
-    engine: "postgres",
-    label: v.name,
-    postgres: {
-      host: v.host,
-      port: toNumber(v.port, 5432),
-      database: v.database,
-      user: v.user,
-      password: v.storeKeychain
-        ? { kind: "keychain", value: "" }
-        : { kind: "inline", value: v.password },
-      ssl_mode: v.sslMode,
-      connect_timeout_ms: 5000,
-      statement_timeout_ms: 0,
-      ssl_key_path: v.sslKey || null,
-      ssl_cert_path: v.sslCert || null,
-      ssl_ca_path: v.sslCA || null,
-    },
-    ssh: v.sshEnabled
-      ? {
-          ssh_host: v.sshHost,
-          ssh_port: toNumber(v.sshPort, 22),
-          ssh_user: v.sshUser || null,
-          identity_file: v.sshKeyPath,
-          strict_host_key_checking: "accept-new",
-          connect_timeout_ms: 5000,
-          remote_host: v.host,
-          remote_port: toNumber(v.port, 5432),
-        }
-      : null,
-  };
-
-  return input as ConnectionCreateInput;
+function defaultPortForEngine(engine: Engine): number {
+  switch (engine) {
+    case "postgres":
+      return 5432;
+    case "mysql":
+      return 3306;
+    case "redis":
+      return 6379;
+    default:
+      return 5432;
+  }
 }
 
-export function makeDefaultValues(
-  initialData?: ProfileConnectionData
-): FormValues {
-  const initialTags = initialData?.tags?.length
-    ? initialData.tags
-    : initialData?.tag
-      ? [initialData.tag]
-      : ["local"];
+function defaultHostForEngine(_engine: Engine): string {
+  return "127.0.0.1";
+}
+
+function pickByEngine<T>(
+  engine: Engine,
+  by: { postgres?: T; mysql?: T; redis?: T }
+): T | undefined {
+  if (engine === "postgres") return by.postgres;
+  if (engine === "mysql") return by.mysql;
+  if (engine === "redis") return by.redis;
+  return undefined;
+}
+
+/* =============================================================================
+ * Build input (submit)
+ * ============================================================================= */
+
+function buildSshAuth(v: FormValues) {
+  if (v.sshAuthType === "privateKey") {
+    return { kind: "private_key" as const, identity_file: v.sshKeyPath };
+  }
+
+  // password
+  return {
+    kind: "password" as const,
+    password:
+      v.sshPasswordSaveMethod === "keychain"
+        ? { kind: "keychain" as const, value: v.sshPassword }
+        : { kind: "inline" as const, value: v.sshPassword },
+  };
+}
+
+function buildSshInput(
+  v: FormValues,
+  remote_host: string,
+  remote_port: number
+) {
+  if (!v.sshEnabled) return undefined;
 
   return {
-    name: initialData?.name || "Mochi",
+    ssh_host: v.sshHost,
+    ssh_port: toNumber(v.sshPort, 22),
+    ssh_user: v.sshUser?.trim() || "root",
+    auth: buildSshAuth(v),
+    strict_host_key_checking: "accept-new" as const,
+    connect_timeout_ms: 60_000,
+    remote_host,
+    remote_port,
+  };
+}
 
+export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 5432);
+
+  const postgres: ConnectionCreateInput["postgres"] = {
+    host: v.host,
+    port,
+    database: v.database,
+    user: v.user,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: "" }
+      : { kind: "inline", value: v.password },
+    ssl_mode: v.sslMode,
+    connect_timeout_ms: 60_000,
+    statement_timeout_ms: 0,
+    ssl_key_path: v.sslKey || null,
+    ssl_cert_path: v.sslCert || null,
+    ssl_ca_path: v.sslCA || null,
+  };
+
+  return {
+    engine: "postgres",
+    label: v.name,
+    postgres,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
+/* =============================================================================
+ * Defaults (load profile -> form)
+ * ============================================================================= */
+
+function getEngineFromProfile(p?: ConnectionProfile): Engine {
+  return (p?.input?.engine as Engine) || (p?.engine as Engine) || "postgres";
+}
+
+function makeDbDefaults(engine: Engine, input?: ConnectionCreateInput) {
+  const pg = input?.postgres;
+  const my = input?.mysql;
+  const rd = input?.redis;
+
+  const host =
+    pickByEngine(engine, {
+      postgres: pg?.host,
+      mysql: my?.host,
+      redis: rd?.host,
+    }) || defaultHostForEngine(engine);
+
+  const port =
+    pickByEngine(engine, {
+      postgres: pg?.port,
+      mysql: my?.port,
+      redis: rd?.port,
+    }) ?? defaultPortForEngine(engine);
+
+  const user =
+    pickByEngine(engine, { postgres: pg?.user, mysql: my?.user }) || "root";
+
+  const database =
+    pickByEngine(engine, { postgres: pg?.database, mysql: my?.database }) ||
+    "root";
+
+  const password =
+    engine === "postgres"
+      ? pg?.password?.kind === "inline"
+        ? (pg.password.value ?? "")
+        : ""
+      : engine === "mysql"
+        ? my?.password?.kind === "inline"
+          ? (my.password.value ?? "")
+          : ""
+        : "";
+
+  const storeKeychain =
+    engine === "postgres"
+      ? pg?.password?.kind !== "inline"
+      : engine === "mysql"
+        ? my?.password?.kind !== "inline"
+        : true;
+
+  return { host, port, user, database, password, storeKeychain };
+}
+
+function makeSslDefaults(engine: Engine, input?: ConnectionCreateInput) {
+  const pg = input?.postgres;
+  const my = input?.mysql;
+
+  const ssl_mode = pickByEngine(engine, {
+    postgres: pg?.ssl_mode as SslMode | undefined,
+    mysql: my?.ssl_mode as SslMode | undefined,
+  });
+
+  const ssl_key_path = pickByEngine(engine, {
+    postgres: pg?.ssl_key_path ?? undefined,
+    mysql: my?.ssl_key_path ?? undefined,
+  });
+
+  const ssl_cert_path = pickByEngine(engine, {
+    postgres: pg?.ssl_cert_path ?? undefined,
+    mysql: my?.ssl_cert_path ?? undefined,
+  });
+
+  const ssl_ca_path = pickByEngine(engine, {
+    postgres: pg?.ssl_ca_path ?? undefined,
+    mysql: my?.ssl_ca_path ?? undefined,
+  });
+
+  return {
+    sslMode: ssl_mode || "prefer",
+    sslKey: ssl_key_path || "",
+    sslCert: ssl_cert_path || "",
+    sslCA: ssl_ca_path || "",
+  };
+}
+
+function makeSshDefaults(input?: ConnectionCreateInput) {
+  const ssh = input?.ssh;
+
+  const sshAuthType: FormValues["sshAuthType"] =
+    ssh?.auth?.kind === "password" ? "password" : "privateKey";
+
+  const sshPasswordSaveMethod: FormValues["sshPasswordSaveMethod"] =
+    ssh?.auth?.kind === "password" && ssh.auth.password?.kind === "inline"
+      ? "inline"
+      : "keychain";
+
+  const sshPassword =
+    ssh?.auth?.kind === "password" && ssh.auth.password?.kind === "inline"
+      ? (ssh.auth.password.value ?? "")
+      : "";
+
+  const sshKeyPath =
+    ssh?.auth?.kind === "private_key" ? ssh.auth.identity_file || "" : "";
+
+  return {
+    sshEnabled: !!ssh,
+    sshHost: ssh?.ssh_host || "",
+    sshPort: ssh?.ssh_port ?? 22,
+    sshUser: ssh?.ssh_user || "",
+    sshAuthType,
+    sshKeyPath,
+    sshPassword,
+    sshPasswordSaveMethod,
+  };
+}
+
+export function makeDefaultValues(initialData?: ConnectionProfile): FormValues {
+  const input = initialData?.input;
+  const engine = getEngineFromProfile(initialData);
+
+  const db = makeDbDefaults(engine, input);
+  const ssl = makeSslDefaults(engine, input);
+  const ssh = makeSshDefaults(input);
+
+  const initialTags = ["local"]; // profile schema currently doesn't carry tags/statusColor
+
+  return {
+    name: input?.label || initialData?.label || "Mochi",
     tags: dedupeKeepOrder(initialTags.map(normalizeTag)),
-    statusColor: initialData?.statusColor || "",
+    statusColor: "",
 
-    host: initialData?.host || "127.0.0.1",
-    port: initialData?.port ?? 5444,
-    user: initialData?.user || "politeai",
-    password: initialData?.password || "polite-assistant",
-    database: initialData?.database || "politeai",
+    host: db.host,
+    port: db.port,
+    user: db.user,
+    password: db.password,
+    database: db.database,
 
-    storeKeychain: initialData?.storeKeychain ?? true,
+    storeKeychain: db.storeKeychain,
 
-    sslMode: (initialData?.sslMode as SslMode) || "prefer",
-    sslKey: initialData?.sslKey || "",
-    sslCert: initialData?.sslCert || "",
-    sslCA: initialData?.sslCA || "",
-
-    sshAuthType: initialData?.sshAuthType || "privateKey",
-    sshEnabled: initialData?.sshEnabled || false,
-    sshHost: initialData?.sshHost || "",
-    sshPort: initialData?.sshPort ?? 22,
-    sshUser: initialData?.sshUser || "",
-    sshKeyPath: initialData?.sshKeyPath || "",
-    sshPassword: initialData?.sshPassword || "",
-    sshPasswordSaveMethod: initialData?.sshPasswordSaveMethod || "keychain",
-    sshPassphrase: initialData?.sshPassphrase || "",
+    ...ssl,
+    ...ssh,
   };
 }

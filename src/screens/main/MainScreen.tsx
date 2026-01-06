@@ -15,6 +15,7 @@ import { ConnectionsSection } from "./ConnectionsSection";
 
 import { filterConnections, groupConnections } from "src/utils/connection";
 import type { NavId, ViewMode } from "src/types";
+import { ConnectionProfile } from "../../lib/tauri";
 
 export function MainScreen() {
   const { addTab, setActiveScreen } = useScreenStore();
@@ -22,7 +23,7 @@ export function MainScreen() {
   const {
     loadProfiles,
     getProfileById,
-
+    saveProfile,
     selectedProfileId,
     selectProfile,
 
@@ -48,8 +49,8 @@ export function MainScreen() {
   }, [loadProfiles]);
 
   const selectedProfile = useMemo(() => {
-    if (!selectedProfileId) return null;
-    return getProfileById(selectedProfileId) ?? null;
+    if (!selectedProfileId) return undefined;
+    return getProfileById(selectedProfileId) ?? undefined;
   }, [selectedProfileId, getProfileById]);
 
   const filteredProfiles = useMemo(
@@ -62,12 +63,23 @@ export function MainScreen() {
     [filteredProfiles]
   );
 
-  async function handleProfileSaved() {
+  async function handleProfileSaved(v?: ConnectionProfile) {
+    if (v) {
+      await saveProfile(v);
+
+      closeNew();
+      closeEdit();
+      setShowDatabaseForm(false);
+      selectProfile(undefined);
+    }
+  }
+
+  async function handleNewProfile() {
     await loadProfiles();
     closeNew();
     closeEdit();
     setShowDatabaseForm(false);
-    selectProfile(null);
+    selectProfile(undefined);
   }
 
   function openProfileInTab(profileId: string) {
@@ -137,7 +149,7 @@ export function MainScreen() {
 
         {showNewConnection ? (
           <ConnectionModal
-            onSaved={handleProfileSaved}
+            onSaved={handleNewProfile}
             onClose={closeNew}
             showDatabaseForm={showDatabaseForm}
             setShowDatabaseForm={setShowDatabaseForm}
@@ -149,9 +161,9 @@ export function MainScreen() {
           onClose={closeEdit}
         >
           <ConnectionFormDialog
-            onSaved={handleProfileSaved}
+            onSaved={selectedProfile ? handleProfileSaved : handleNewProfile}
             onClose={closeEdit}
-            initialData={selectedProfile as any}
+            initialData={selectedProfile}
           />
         </OverlayModal>
       </div>

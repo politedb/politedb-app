@@ -25,7 +25,7 @@ export function SSHSection(props: SectionProps) {
   const sshAuthType = useController({ control, name: "sshAuthType" });
   const sshKeyPath = useController({ control, name: "sshKeyPath" });
   const sshPassword = useController({ control, name: "sshPassword" });
-  const sshPassphrase = useController({ control, name: "sshPassphrase" });
+  // const sshPassphrase = useController({ control, name: "sshPassphrase" });
 
   function dirty() {
     onDirty?.();
@@ -35,8 +35,8 @@ export function SSHSection(props: SectionProps) {
     const res = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: "SSH Private Key", extensions: ["", "pem", "key"] }],
     });
+
     if (!res) return null;
     return Array.isArray(res) ? (res[0] ?? null) : res;
   }
@@ -107,9 +107,9 @@ export function SSHSection(props: SectionProps) {
                 }}
               >
                 <option value="privateKey">Private Key (No password)</option>
-                <option value="privateKeyWithPassphrase">
+                {/* <option value="privateKeyWithPassphrase">
                   Private Key + Passphrase
-                </option>
+                </option> */}
                 <option value="password">Password</option>
               </Select>
             </div>
@@ -132,7 +132,7 @@ export function SSHSection(props: SectionProps) {
           )}
 
           {/* Passphrase (no save option) */}
-          {sshAuthType.field.value === "privateKeyWithPassphrase" && (
+          {/* {sshAuthType.field.value === "privateKeyWithPassphrase" && (
             <Field label="SSH Passphrase">
               <Input
                 type="password"
@@ -145,7 +145,7 @@ export function SSHSection(props: SectionProps) {
               />
             </Field>
           )}
-
+ */}
           {sshAuthType.field.value === "password" && (
             <>
               <Field label="SSH Password">

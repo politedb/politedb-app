@@ -66,6 +66,8 @@ deadpool-redis = "0.22.0"
 redis = "0.32.2"
 raw-window-handle = "0.6.2"
 tauri-plugin-dialog = "2.0.0-rc.8"
+ssh2 = "0.9.5"
+dirs = "6.0.0"
 
 [features]
 default = ["engine-postgres"]

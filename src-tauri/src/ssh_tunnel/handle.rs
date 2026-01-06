@@ -1,36 +1,43 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
+use std::thread::JoinHandle;
 
-use tokio::process::Child;
-use tokio::sync::Mutex;
-
-#[derive(Clone)]
 pub struct SshTunnelHandle {
     local_addr: SocketAddr,
-    child: Arc<Mutex<Option<Child>>>,
+    shutdown: Arc<AtomicBool>,
+    accept_thread: Option<JoinHandle<()>>,
+    session_thread: Option<JoinHandle<()>>,
 }
 
 impl SshTunnelHandle {
-    pub fn new(local_addr: SocketAddr, child: Child) -> Self {
+    pub fn new(
+        local_addr: SocketAddr,
+        shutdown: Arc<AtomicBool>,
+        accept_thread: JoinHandle<()>,
+        session_thread: JoinHandle<()>,
+    ) -> Self {
         Self {
             local_addr,
-            child: Arc::new(Mutex::new(Some(child))),
+            shutdown,
+            accept_thread: Some(accept_thread),
+            session_thread: Some(session_thread),
         }
     }
 
-    pub fn local_port(&self) -> u16 {
-        self.local_addr.port()
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 
-    // pub fn local_addr(&self) -> SocketAddr {
-    //     self.local_addr
-    // }
+    pub async fn close(self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
-    pub async fn close(&self) {
-        let mut guard = self.child.lock().await;
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+        // Join threads (best-effort)
+        if let Some(t) = self.accept_thread {
+            let _ = t.join();
+        }
+        if let Some(t) = self.session_thread {
+            let _ = t.join();
         }
     }
 }
