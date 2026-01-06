@@ -44,7 +44,7 @@ export async function profileUpdate(
 ): Promise<ConnectionProfile> {
   const payload = sanitizePayload(input);
   return invoke<ConnectionProfile>(CMD.profileUpdate, {
-    profile_id: profileId,
+    profileId,
     input: payload,
   });
 }

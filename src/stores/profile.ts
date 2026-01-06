@@ -74,10 +74,10 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       // Placeholder for save logic
-      await profileUpdate(profile.id, profile.input);
+      const updated = await profileUpdate(profile.id, profile.input);
 
       set((s) => ({
-        profiles: [...s.profiles.filter((p) => p.id !== profile.id), profile],
+        profiles: [updated, ...s.profiles.filter((p) => p.id !== updated.id)],
         busy: false,
       }));
     } catch (e: any) {
