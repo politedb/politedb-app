@@ -81,7 +81,10 @@ export function ConnectionFormDialog({
 
       if (profileId) {
         // Profile exists: backend reads profile + resolves keychain
-        await profileConnectTest(input);
+        await profileConnectTest(profileId, input, {
+          dbPassword: v.password,
+          sshPassword: v.sshPassword,
+        });
       } else {
         // No profile yet: supply plaintext secrets (never stored)
         await connectionTest(input, {
@@ -92,6 +95,7 @@ export function ConnectionFormDialog({
 
       setSuccess("Test OK");
     } catch (e: any) {
+      console.log(e);
       setError(e?.message ? String(e.message) : String(e));
     }
   });

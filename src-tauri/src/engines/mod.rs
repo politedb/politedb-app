@@ -1,10 +1,11 @@
 pub mod cancel;
 pub mod driver;
-pub mod registry;
-
+pub mod merge;
 pub mod mysql;
 pub mod postgres;
 pub mod redis;
+pub mod registry;
+pub mod secrets_util;
 
 use uuid::Uuid;
 

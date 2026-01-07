@@ -4,8 +4,10 @@ import { v4 as uuidv4 } from "uuid";
 import type {
   ConnectionCreateInput,
   ConnectionProfile,
+  ConnectionTestSecrets,
   ProfileConnectInput,
   ProfileConnectResult,
+  ProfileConnectTestInput,
   ProfileSaveAndConnectInput,
   ProfileSaveAndConnectResult,
   ProfileSaveInput,
@@ -245,7 +247,6 @@ async function withKeychainRollback<T>(
     writeOps.push({ key, value: trimmed, old, touched });
 
     if (touched) {
-      console.log("Staging keychain set:", key);
       await secretsSet(key, trimmed);
     }
   }
@@ -261,7 +262,6 @@ async function withKeychainRollback<T>(
 
     return await fn();
   } catch (err) {
-    console.log(err);
     // Rollback only keys we actually wrote (touched=true)
     for (const op of writeOps) {
       if (!op.touched) continue;
@@ -414,4 +414,23 @@ export async function profileConnect(
 
 export async function profileRemove(profileId: string): Promise<void> {
   await invoke(CMD.profileRemove, { profileId });
+}
+
+export async function profileConnectTest(
+  profileId: string,
+  input: ConnectionCreateInput,
+  secrets?: { dbPassword?: string; sshPassword?: string }
+): Promise<void> {
+  const payload: ProfileConnectTestInput = {
+    profile_id: profileId,
+    input,
+    secrets: secrets
+      ? ({
+          db_password: secrets.dbPassword,
+          ssh_password: secrets.sshPassword,
+        } satisfies ConnectionTestSecrets)
+      : undefined,
+  };
+
+  await invoke(CMD.profileConnectTest, { payload });
 }

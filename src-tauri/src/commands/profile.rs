@@ -4,7 +4,9 @@ use uuid::Uuid;
 
 use crate::commands::connection;
 use crate::profiles::store as profile_store;
-use crate::profiles::types::{ConnectionProfile, ProfileConnectInput, ProfileConnectResult};
+use crate::profiles::types::{
+    ConnectionProfile, ProfileConnectInput, ProfileConnectResult, ProfileConnectTestInput,
+};
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
@@ -473,9 +475,17 @@ pub async fn profile_connect(
 pub async fn profile_connect_test(
     app: AppHandle,
     state: State<'_, AppState>,
-    payload: ProfileConnectInput,
+    payload: ProfileConnectTestInput,
 ) -> Result<(), String> {
-    let profile_id = payload.profile_id;
+    let profile_id = Uuid::parse_str(&payload.profile_id).map_err(|e| {
+        tracing::error!(
+            step = "parse_profile_id",
+            profile_id = %payload.profile_id,
+            error = %e,
+            "failed"
+        );
+        "PROFILE_ID_INVALID".to_string()
+    })?;
 
     tracing::info!(
         step = "profile_connect_test",
@@ -483,7 +493,7 @@ pub async fn profile_connect_test(
         "start"
     );
 
-    // 1) Load profile from store
+    // 1) Load base profile from store (base should already contain SecretRef::Keychain)
     let profile: ConnectionProfile = profile_store::profile_get(&app, profile_id).map_err(|e| {
         tracing::error!(
             step = "load_profile",
@@ -494,16 +504,41 @@ pub async fn profile_connect_test(
         format!("PROFILE_NOT_FOUND: {e}")
     })?;
 
-    // 2) Clone input from profile (profile input should already have SecretRef::Keychain)
-    let input = profile.input.clone();
+    let base = profile.input.clone();
+    let ov = payload.input;
+    let secrets = payload.secrets;
 
-    // 3) Reuse connection_test pipeline (handles SSH tunnel + rewrite + driver.test + close tunnel)
+    // 2) Resolve driver by base.engine (source of truth)
+    let driver = state.engines.get(base.engine.clone()).ok_or_else(|| {
+        tracing::error!(
+            step = "resolve_driver",
+            profile_id = %profile_id,
+            engine = ?base.engine,
+            "ENGINE_NOT_SUPPORTED"
+        );
+        "ENGINE_NOT_SUPPORTED".to_string()
+    })?;
+
+    // 3) Merge for test (engine-specific logic lives in driver)
+    let merged = driver
+        .merge_for_test(base, ov, secrets.clone())
+        .map_err(|e| {
+            tracing::error!(
+                step = "merge_for_test",
+                profile_id = %profile_id,
+                error = %e,
+                "failed"
+            );
+            format!("PROFILE_TEST_MERGE_FAILED: {e}")
+        })?;
+
+    // 4) Reuse connection_test pipeline (SSH tunnel + rewrite + driver.test + close tunnel)
     connection::connection_test(
         app.clone(),
         state,
         crate::types::ConnectionTestInput {
-            input,
-            secrets: None,
+            input: merged,
+            secrets,
         },
     )
     .await

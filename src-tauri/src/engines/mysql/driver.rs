@@ -6,14 +6,14 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::engines::driver::EngineDriver;
+use crate::engines::merge::{inline_db_pw, merge_secret_ref_for_test, merge_ssh_for_test};
 use crate::engines::mysql::{config::build_mysql_opts, connection::MySqlConn};
+use crate::engines::secrets_util::{resolve_secret_ref, resolve_secret_ref_for_test};
 use crate::engines::EngineConnection;
-use crate::security::secrets;
 use crate::types::{
     ConnectionCreateInput, ConnectionTestSecrets, EngineKind, MySqlConnectInput, SecretRef,
     SecretRefKind,
 };
-
 pub struct MySqlDriver;
 
 #[async_trait]
@@ -52,44 +52,65 @@ impl EngineDriver for MySqlDriver {
 
         Ok(())
     }
+
+    fn merge_for_test(
+        &self,
+        mut base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String> {
+        // common ssh merge (engine-agnostic)
+        base = merge_ssh_for_test(base, &ov, &secrets);
+
+        let mut b = base.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
+
+        if let Some(ov_my) = ov.mysql {
+            b = merge_mysql(b, ov_my, &secrets);
+        } else {
+            // even if no override, secrets may force inline pw for test
+            if let Some(pw) = inline_db_pw(&secrets) {
+                b.password = SecretRef {
+                    kind: SecretRefKind::Inline,
+                    value: pw,
+                };
+            }
+        }
+
+        base.mysql = Some(b);
+        Ok(base)
+    }
 }
 
 /* =============================================================================
- * Secrets resolving
- * - Rule: For TEST, if caller provides plaintext secret in `secrets_opt`, use it.
- * - Otherwise, fall back to SecretRef (inline/keychain) in the input.
+ * Merge helpers (engine-specific)
  * ============================================================================= */
 
-async fn resolve_secret_ref(app: &AppHandle, secret: &SecretRef) -> Result<String, String> {
-    match secret.kind {
-        SecretRefKind::Inline => Ok(secret.value.clone()),
-        SecretRefKind::Keychain => {
-            let key = secret.value.trim();
-            if key.is_empty() {
-                return Err("EMPTY_KEYCHAIN_KEY".into());
-            }
-            let v = secrets::keychain_get(app, key).map_err(|e| e.to_string())?;
-            if v.is_empty() {
-                return Err("EMPTY_SECRET_FROM_KEYCHAIN".into());
-            }
-            Ok(v)
-        }
-    }
-}
+fn merge_mysql(
+    mut base: MySqlConnectInput,
+    ov: MySqlConnectInput,
+    secrets: &Option<ConnectionTestSecrets>,
+) -> MySqlConnectInput {
+    // core identity
+    base.host = ov.host;
+    base.port = ov.port;
+    base.user = ov.user;
+    base.database = ov.database;
 
-async fn resolve_mysql_password_for_test(
-    app: &AppHandle,
-    input: &MySqlConnectInput,
-    secrets_opt: Option<&ConnectionTestSecrets>,
-) -> Result<String, String> {
-    if let Some(secrets) = secrets_opt {
-        if let Some(pw) = secrets.db_password.as_deref() {
-            // Plain password provided by caller (test-only)
-            return Ok(pw.to_string());
-        }
-    }
-    // Fallback to input secret ref (inline/keychain)
-    resolve_secret_ref(app, &input.password).await
+    // options
+    base.ssl_mode = ov.ssl_mode;
+    base.connect_timeout_ms = ov.connect_timeout_ms;
+    base.statement_timeout_ms = ov.statement_timeout_ms;
+    base.pool_max_size = ov.pool_max_size;
+    base.ssl_key_path = ov.ssl_key_path;
+    base.ssl_cert_path = ov.ssl_cert_path;
+    base.ssl_ca_path = ov.ssl_ca_path;
+
+    // password policy for test:
+    // secrets.db_password (inline) > ov.password (inline non-empty) > base.password (usually keychain)
+    let inline = inline_db_pw(secrets);
+    merge_secret_ref_for_test(&mut base.password, &ov.password, inline.as_ref());
+
+    base
 }
 
 /* =============================================================================
@@ -97,18 +118,15 @@ async fn resolve_mysql_password_for_test(
  * ============================================================================= */
 
 async fn smoke_mysql(pool: &Pool, input: &MySqlConnectInput) -> Result<(), String> {
-    let mut conn = if let Some(ms) = input.connect_timeout_ms {
-        if ms > 0 {
-            tokio::time::timeout(Duration::from_millis(ms), pool.get_conn())
-                .await
-                .map_err(|_| format!("MYSQL_CONNECT_TIMEOUT after {ms}ms"))?
-                .map_err(|e| e.to_string())?
-        } else {
-            pool.get_conn().await.map_err(|e| e.to_string())?
-        }
-    } else {
-        pool.get_conn().await.map_err(|e| e.to_string())?
-    };
+    let timeout_ms = input
+        .connect_timeout_ms
+        .unwrap_or(15_000)
+        .clamp(200, 60_000);
+
+    let mut conn = tokio::time::timeout(Duration::from_millis(timeout_ms), pool.get_conn())
+        .await
+        .map_err(|_| format!("MYSQL_CONNECT_TIMEOUT after {timeout_ms}ms"))?
+        .map_err(|e| e.to_string())?;
 
     if let Some(ms) = input.statement_timeout_ms {
         let ms = ms.clamp(100, 300_000);
@@ -131,7 +149,7 @@ pub async fn connect_mysql(
     label: String,
     input: MySqlConnectInput,
 ) -> Result<MySqlConn, String> {
-    // connect path: always respect SecretRef (inline/keychain) from saved profile input
+    // connect path: ALWAYS resolve from SecretRef (inline/keychain)
     let password = resolve_secret_ref(app, &input.password).await?;
     let plan = build_mysql_opts(&input, &password).map_err(|e| e.to_string())?;
 
@@ -169,15 +187,14 @@ pub async fn test_mysql_direct(
     input: MySqlConnectInput,
     secrets_opt: Option<ConnectionTestSecrets>,
 ) -> Result<(), String> {
-    // test path: allow plaintext password override from frontend
-    let password = resolve_mysql_password_for_test(app, &input, secrets_opt.as_ref()).await?;
+    // test path: allow plaintext override
+    let override_plain = secrets_opt.as_ref().and_then(|s| s.db_password.as_deref());
 
+    let password = resolve_secret_ref_for_test(app, &input.password, override_plain).await?;
     let plan = build_mysql_opts(&input, &password).map_err(|e| e.to_string())?;
 
-    // Keep test lightweight (no need to keep pool around)
+    // primary test
     let pool = Pool::new(plan.primary);
-
-    // If primary fails and fallback exists, try fallback
     match smoke_mysql(&pool, &input).await {
         Ok(_) => Ok(()),
         Err(primary_err) => {

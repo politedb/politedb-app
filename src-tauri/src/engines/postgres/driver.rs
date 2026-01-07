@@ -8,15 +8,15 @@ use tokio_postgres::NoTls;
 use uuid::Uuid;
 
 use crate::engines::driver::EngineDriver;
+use crate::engines::merge::{inline_db_pw, merge_secret_ref_for_test, merge_ssh_for_test};
 use crate::engines::postgres::config::build_pg_config;
 use crate::engines::postgres::connection::PgConn;
+use crate::engines::secrets_util::{resolve_secret_ref, resolve_secret_ref_for_test};
 use crate::engines::EngineConnection;
-use crate::security::secrets;
 use crate::types::{
     ConnectionCreateInput, ConnectionTestSecrets, EngineKind, PgConnectInput, SecretRef,
     SecretRefKind,
 };
-
 pub struct PostgresDriver;
 
 #[async_trait]
@@ -55,64 +55,71 @@ impl EngineDriver for PostgresDriver {
 
         Ok(())
     }
+
+    fn merge_for_test(
+        &self,
+        mut base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String> {
+        // 1) Common: SSH merge (handles ssh_password via secrets when auth=Password)
+        base = merge_ssh_for_test(base, &ov, &secrets);
+
+        // 2) Engine specific: Postgres merge
+        let mut b = base.postgres.ok_or("POSTGRES_CONFIG_MISSING")?;
+
+        if let Some(pov) = ov.postgres {
+            b = merge_pg_for_test(b, pov, &secrets);
+        } else if let Some(pw) = inline_db_pw(&secrets) {
+            // Even without override struct, secrets can still force plain password for test
+            b.password = SecretRef {
+                kind: SecretRefKind::Inline,
+                value: pw,
+            };
+        }
+
+        base.postgres = Some(b);
+        Ok(base)
+    }
 }
 
 /* =============================================================================
- * Low-level connector
+ * Postgres: merge policy (test)
  * ============================================================================= */
 
-async fn resolve_password_from_secret_ref(
-    app: &AppHandle,
-    secret: &SecretRef,
-) -> anyhow::Result<String> {
-    match secret.kind {
-        SecretRefKind::Inline => Ok(secret.value.clone()),
-        SecretRefKind::Keychain => {
-            let key = secret.value.trim();
-            if key.is_empty() {
-                return Err(anyhow!("empty keychain key"));
-            }
+fn merge_pg_for_test(
+    mut base: PgConnectInput,
+    ov: PgConnectInput,
+    secrets: &Option<ConnectionTestSecrets>,
+) -> PgConnectInput {
+    // connection fields always override
+    base.host = ov.host;
+    base.port = ov.port;
+    base.user = ov.user;
+    base.database = ov.database;
 
-            let pw = secrets::keychain_get(app, key)
-                .map_err(|e| anyhow!(e))
-                .with_context(|| format!("keychain_get failed key={}", key))?;
+    // optional tunables override (FE controls)
+    base.ssl_mode = ov.ssl_mode;
+    base.connect_timeout_ms = ov.connect_timeout_ms;
+    base.statement_timeout_ms = ov.statement_timeout_ms;
+    base.ssl_key_path = ov.ssl_key_path;
+    base.ssl_cert_path = ov.ssl_cert_path;
+    base.ssl_ca_path = ov.ssl_ca_path;
+    base.pool_max_size = ov.pool_max_size;
 
-            if pw.is_empty() {
-                return Err(anyhow!(
-                    "empty password retrieved from keychain key={}",
-                    key
-                ));
-            }
+    // password merge order:
+    // 1) secrets.db_password (plain) if provided
+    // 2) ov.password if it is meaningful (helper decides)
+    // 3) else keep base.password (usually keychain)
+    let inline = inline_db_pw(secrets);
+    merge_secret_ref_for_test(&mut base.password, &ov.password, inline.as_ref());
 
-            tracing::info!(
-                step = "resolved_password_from_keychain",
-                key = %key,
-                "done"
-            );
-
-            Ok(pw)
-        }
-    }
+    base
 }
 
-/// TEST password policy:
-/// - If secrets.db_password is Some(non-empty): use it (plain password for test)
-/// - else: fallback to input.password (inline/keychain)
-async fn resolve_password_for_test(
-    app: &AppHandle,
-    input_password: &SecretRef,
-    secrets: Option<&ConnectionTestSecrets>,
-) -> anyhow::Result<String> {
-    if let Some(s) = secrets {
-        if let Some(pw) = s.db_password.as_deref().map(str::trim) {
-            if !pw.is_empty() {
-                return Ok(pw.to_string());
-            }
-        }
-    }
-
-    resolve_password_from_secret_ref(app, input_password).await
-}
+/* =============================================================================
+ * Connect (pool)
+ * ============================================================================= */
 
 pub async fn connect_pg(
     app: &AppHandle,
@@ -120,9 +127,12 @@ pub async fn connect_pg(
     label: String,
     input: PgConnectInput,
 ) -> anyhow::Result<PgConn> {
-    // connect uses stored secret ref (profile/runtime semantics)
-    let password = resolve_password_from_secret_ref(app, &input.password).await?;
+    // Connect MUST use stored secret ref (profile/runtime semantics)
+    let password = resolve_secret_ref(app, &input.password)
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
 
+    // Build config WITHOUT logging password
     let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
 
     let mgr = Manager::from_config(cfg, NoTls, deadpool_postgres::ManagerConfig::default());
@@ -134,6 +144,7 @@ pub async fn connect_pg(
         .build()
         .context("build pg pool failed")?;
 
+    // Smoke test
     {
         let client = pool.get().await.context("pg pool get failed")?;
         client
@@ -149,14 +160,20 @@ pub async fn connect_pg(
     })
 }
 
-/// Direct test (no pool). Uses plain password if provided.
+/* =============================================================================
+ * Test (direct, no pool)
+ * ============================================================================= */
+
 async fn test_pg_direct(
     app: &AppHandle,
     input: PgConnectInput,
     secrets: Option<&ConnectionTestSecrets>,
 ) -> anyhow::Result<()> {
-    let password = resolve_password_for_test(app, &input.password, secrets).await?;
+    let override_plain = secrets.and_then(|s| s.db_password.as_deref());
 
+    let password = resolve_secret_ref_for_test(app, &input.password, override_plain)
+        .await
+        .map_err(|e| anyhow!("{e}"))?;
     let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
 
     let timeout_ms = input
@@ -170,6 +187,7 @@ async fn test_pg_direct(
         .map_err(|_| anyhow!("pg connect timeout after {}ms", timeout_ms))?
         .context("pg connect failed")?;
 
+    // Drive connection in background
     tokio::spawn(async move {
         if let Err(e) = connection.await {
             tracing::debug!(error = %e, "pg connection task ended");

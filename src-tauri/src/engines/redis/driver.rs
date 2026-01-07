@@ -5,14 +5,14 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::engines::driver::EngineDriver;
+use crate::engines::merge::{inline_db_pw, merge_secret_ref_for_test, merge_ssh_for_test};
 use crate::engines::redis::{config::build_redis_url, connection::RedisConn};
+use crate::engines::secrets_util::{resolve_secret_ref, resolve_secret_ref_for_test};
 use crate::engines::EngineConnection;
-use crate::security::secrets;
 use crate::types::{
     ConnectionCreateInput, ConnectionTestSecrets, EngineKind, RedisConnectInput, SecretRef,
     SecretRefKind,
 };
-
 pub struct RedisDriver;
 
 #[async_trait]
@@ -51,42 +51,58 @@ impl EngineDriver for RedisDriver {
 
         Ok(())
     }
+
+    fn merge_for_test(
+        &self,
+        mut base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String> {
+        // common ssh merge (engine-agnostic)
+        base = merge_ssh_for_test(base, &ov, &secrets);
+
+        let mut b = base.redis.ok_or("REDIS_CONFIG_MISSING")?;
+
+        if let Some(ov_rd) = ov.redis {
+            b = merge_redis(b, ov_rd, &secrets);
+        } else {
+            // even if no override, secrets may force inline pw for test
+            if let Some(pw) = inline_db_pw(&secrets) {
+                b.password = SecretRef {
+                    kind: SecretRefKind::Inline,
+                    value: pw,
+                };
+            }
+        }
+
+        base.redis = Some(b);
+        Ok(base)
+    }
 }
 
 /* =============================================================================
- * Secrets resolving
- * - Rule: For TEST, if caller provides plaintext secret in `secrets_opt`, use it.
- * - Otherwise, fall back to SecretRef (inline/keychain) in the input.
+ * Merge helpers (engine-specific)
  * ============================================================================= */
 
-async fn resolve_secret_ref(app: &AppHandle, secret: &SecretRef) -> Result<String, String> {
-    match secret.kind {
-        SecretRefKind::Inline => Ok(secret.value.clone()),
-        SecretRefKind::Keychain => {
-            let key = secret.value.trim();
-            if key.is_empty() {
-                return Err("EMPTY_KEYCHAIN_KEY".into());
-            }
-            let v = secrets::keychain_get(app, key).map_err(|e| e.to_string())?;
-            if v.is_empty() {
-                return Err("EMPTY_SECRET_FROM_KEYCHAIN".into());
-            }
-            Ok(v)
-        }
-    }
-}
+fn merge_redis(
+    mut base: RedisConnectInput,
+    ov: RedisConnectInput,
+    secrets: &Option<ConnectionTestSecrets>,
+) -> RedisConnectInput {
+    base.host = ov.host;
+    base.port = ov.port;
+    base.user = ov.user;
+    base.db = ov.db;
 
-async fn resolve_redis_password_for_test(
-    app: &AppHandle,
-    input: &RedisConnectInput,
-    secrets_opt: Option<&ConnectionTestSecrets>,
-) -> Result<String, String> {
-    if let Some(secrets) = secrets_opt {
-        if let Some(pw) = secrets.db_password.as_deref() {
-            return Ok(pw.to_string());
-        }
-    }
-    resolve_secret_ref(app, &input.password).await
+    base.ssl_mode = ov.ssl_mode;
+    base.connect_timeout_ms = ov.connect_timeout_ms;
+
+    // password policy for test:
+    // secrets.db_password (inline) > ov.password (inline non-empty) > base.password (usually keychain)
+    let inline = inline_db_pw(secrets);
+    merge_secret_ref_for_test(&mut base.password, &ov.password, inline.as_ref());
+
+    base
 }
 
 /* =============================================================================
@@ -131,16 +147,14 @@ pub async fn connect_redis(
 ) -> Result<RedisConn, String> {
     validate_redis_input(&input)?;
 
-    // connect path: always respect SecretRef (inline/keychain) from saved profile input
+    // connect path: ALWAYS respect SecretRef (inline/keychain)
     let password = resolve_secret_ref(app, &input.password).await?;
     if password.trim().is_empty() {
         return Err("REDIS_PASSWORD_REQUIRED".into());
     }
 
-    // Build URL (no logging)
     let url = build_redis_url(&input, &password).map_err(|e| e.to_string())?;
 
-    // deadpool_redis config
     let mut cfg = deadpool_redis::Config::from_url(url);
 
     let max_size = input.pool_max_size.unwrap_or(10).clamp(1, 50);
@@ -150,7 +164,6 @@ pub async fn connect_redis(
         .create_pool(Some(deadpool_redis::Runtime::Tokio1))
         .map_err(|e| format!("REDIS_CREATE_POOL_FAILED: {e}"))?;
 
-    // Smoke test: PING (timeout from input)
     let timeout_ms = input.connect_timeout_ms.unwrap_or(5_000).clamp(100, 60_000);
     ping_pool(&pool, timeout_ms).await?;
 
@@ -158,7 +171,7 @@ pub async fn connect_redis(
         id: conn_id,
         label,
         pool,
-        default_command_timeout_ms: input.connect_timeout_ms,
+        default_command_timeout_ms: input.connect_timeout_ms.clone(),
     })
 }
 
@@ -169,8 +182,10 @@ pub async fn test_redis_direct(
 ) -> Result<(), String> {
     validate_redis_input(&input)?;
 
-    // test path: allow plaintext password override from frontend
-    let password = resolve_redis_password_for_test(app, &input, secrets_opt.as_ref()).await?;
+    // test path: allow plaintext override
+    let override_plain = secrets_opt.as_ref().and_then(|s| s.db_password.as_deref());
+
+    let password = resolve_secret_ref_for_test(app, &input.password, override_plain).await?;
     if password.trim().is_empty() {
         return Err("REDIS_PASSWORD_REQUIRED".into());
     }
@@ -179,7 +194,6 @@ pub async fn test_redis_direct(
 
     let mut cfg = deadpool_redis::Config::from_url(url);
 
-    // For test we can keep it small; still allow custom max if you want
     let max_size = input.pool_max_size.unwrap_or(3).clamp(1, 20);
     cfg.pool = Some(deadpool_redis::PoolConfig::new(max_size));
 

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::types::ConnectionInfo as AppConnectionInfo;
 use crate::types::{ConnectionCreateInput, EngineKind};
+use crate::types::{ConnectionInfo as AppConnectionInfo, ConnectionTestSecrets};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionProfile {
@@ -26,4 +26,11 @@ pub struct ProfileConnectInput {
 pub struct ProfileConnectResult {
     pub profile: ConnectionProfile,
     pub connection: AppConnectionInfo,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ProfileConnectTestInput {
+    pub profile_id: String,
+    pub input: ConnectionCreateInput,           // override from form
+    pub secrets: Option<ConnectionTestSecrets>, // optional plain pw for test
 }

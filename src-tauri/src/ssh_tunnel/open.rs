@@ -110,6 +110,7 @@ fn is_ssh_wouldblock(e: &ssh2::Error) -> bool {
     match e.code() {
         ssh2::ErrorCode::Session(code) => code == -37,
         ssh2::ErrorCode::SFTP(code) => code == -37,
+        #[allow(unreachable_patterns)]
         _ => {
             // optional fallback, best-effort
             let msg = e.message();

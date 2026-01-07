@@ -193,6 +193,8 @@ export type ProfileConnectResult = {
 // Test by profile_id (backend loads profile and runs driver.test)
 export type ProfileConnectTestInput = {
   profile_id: string;
+  input: ConnectionCreateInput;
+  secrets?: ConnectionTestSecrets; // optional
 };
 
 // If your backend returns nothing for test, keep Promise<void> on FE.

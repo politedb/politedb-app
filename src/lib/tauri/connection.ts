@@ -23,17 +23,6 @@ export async function connectionTest(
   });
 }
 
-export async function profileConnectTest(
-  input: ConnectionCreateInput
-): Promise<void> {
-  await invoke(CMD.profileConnectTest, {
-    payload: {
-      input,
-      secrets: null,
-    },
-  });
-}
-
 export async function connectionList(): Promise<ConnectionInfo[]> {
   return invoke<ConnectionInfo[]>(CMD.connectionList);
 }

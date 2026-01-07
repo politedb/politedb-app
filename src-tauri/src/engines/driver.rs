@@ -1,7 +1,7 @@
 use tauri::AppHandle;
 use uuid::Uuid;
 
-use crate::types::{ConnectionCreateInput, EngineKind};
+use crate::types::{ConnectionCreateInput, ConnectionTestSecrets, EngineKind};
 
 #[async_trait::async_trait]
 pub trait EngineDriver: Send + Sync + 'static {
@@ -21,4 +21,11 @@ pub trait EngineDriver: Send + Sync + 'static {
         input: ConnectionCreateInput,
         secrets: Option<crate::types::ConnectionTestSecrets>,
     ) -> Result<(), String>;
+
+    fn merge_for_test(
+        &self,
+        base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String>;
 }
