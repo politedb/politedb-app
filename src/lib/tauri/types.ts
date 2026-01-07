@@ -1,9 +1,16 @@
 /* ============================================================================
  * Shared FE Types (contract with Rust)
+ * Keep this file “wire-format oriented”: only what we send/receive via Tauri.
+ * UI-only helpers/types live at the bottom.
  * ============================================================================
  */
 
-export type Engine = "postgres" | "mysql" | "redis" | string;
+/* ============================================================================
+ * Primitives
+ * ============================================================================
+ */
+
+export type Engine = "postgres" | "mysql" | "redis" | (string & {});
 
 export type SslMode =
   | "disable"
@@ -15,6 +22,51 @@ export type SslMode =
 export type SecretRef =
   | { kind: "inline"; value: string }
   | { kind: "keychain"; value: string };
+
+/* ============================================================================
+ * SSH
+ * ============================================================================
+ */
+
+export type StrictHostKeyChecking = "accept-new" | "yes" | "no";
+
+export type SshAuth =
+  | { kind: "password"; password: SecretRef }
+  | {
+      kind: "private_key";
+      identity_file: string;
+      passphrase?: SecretRef | null;
+    };
+
+export type SshTunnelInput = {
+  // Optional convenience flag for UI; backend ignores it if present
+  enabled?: boolean;
+
+  ssh_host: string;
+  ssh_port?: number | null; // default 22 (backend may default)
+  ssh_user: string;
+
+  auth: SshAuth;
+
+  // Forward target (DB side)
+  remote_host: string; // usually "127.0.0.1" if DB is on same server
+  remote_port: number;
+
+  strict_host_key_checking: StrictHostKeyChecking;
+
+  // Optional: bind addr, default 127.0.0.1 (backend may ignore)
+  local_bind_host?: string | null;
+
+  // Optional: request local port, 0 => auto-pick free port (backend may ignore)
+  local_bind_port?: number | null;
+
+  connect_timeout_ms?: number | null;
+};
+
+/* ============================================================================
+ * Engine connect inputs
+ * ============================================================================
+ */
 
 export type PgConnectInput = {
   host: string;
@@ -30,6 +82,8 @@ export type PgConnectInput = {
   ssl_key_path?: string | null;
   ssl_cert_path?: string | null;
   ssl_ca_path?: string | null;
+
+  pool_max_size?: number | null;
 };
 
 export type MySqlConnectInput = {
@@ -57,21 +111,29 @@ export type RedisConnectInput = {
   // Redis ACL user is optional. If omitted => ":password@"
   user?: string | null;
 
-  // Password is optional (some Redis instances allow no-auth)
+  // Password is optional (some Redis instances allow no-auth),
+  // but still modeled as SecretRef for uniformity.
   password: SecretRef;
 
-  // default 0
+  // Default 0
   db?: number | null;
 
-  // For Redis we only care disable / prefer / require.
-  // Still reuse SslMode union for FE convenience.
+  // Redis typically supports: disable / prefer / require.
+  // Reuse SslMode union for FE convenience.
   ssl_mode?: "disable" | "prefer" | "require" | (SslMode & string) | null;
 
   connect_timeout_ms?: number | null;
 
   // Default per-connection timeout for Redis commands
   command_timeout_ms?: number | null;
+
+  pool_max_size?: number | null;
 };
+
+/* ============================================================================
+ * Connection (runtime)
+ * ============================================================================
+ */
 
 export type ConnectionCreateInput = {
   engine: Engine;
@@ -91,18 +153,24 @@ export type ConnectionInfo = {
 };
 
 /* ============================================================================
- * Profiles (disk)
+ * Connection Test
  * ============================================================================
  */
 
-export type ProfileConnectInput = {
-  profile_id: string;
+export type ConnectionTestSecrets = {
+  db_password?: string;
+  ssh_password?: string;
 };
 
-export type ProfileConnectResult = {
-  profile: ConnectionProfile;
-  connection: ConnectionInfo;
+export type ConnectionTestInput = {
+  input: ConnectionCreateInput;
+  secrets?: ConnectionTestSecrets;
 };
+
+/* ============================================================================
+ * Profiles (disk)
+ * ============================================================================
+ */
 
 export type ConnectionProfile = {
   id: string;
@@ -113,6 +181,45 @@ export type ConnectionProfile = {
   updated_at: number;
 };
 
+export type ProfileConnectInput = {
+  profile_id: string;
+};
+
+export type ProfileConnectResult = {
+  profile: ConnectionProfile;
+  connection: ConnectionInfo;
+};
+
+// Test by profile_id (backend loads profile and runs driver.test)
+export type ProfileConnectTestInput = {
+  profile_id: string;
+};
+
+// If your backend returns nothing for test, keep Promise<void> on FE.
+// If you return extra info later, change this.
+export type ProfileConnectTestResult = void;
+
+/* ============================================================================
+ * Save flows
+ * ============================================================================
+ */
+
+// Save-only (no runtime connect)
+export type ProfileSaveInput =
+  | {
+      mode: "create";
+      profile_id: string;
+      persist_secrets: boolean;
+      input: ConnectionCreateInput;
+    }
+  | {
+      mode: "update";
+      profile_id: string;
+      persist_secrets: boolean;
+      input: ConnectionCreateInput;
+    };
+
+// Save + connect (runtime)
 export type ProfileSaveAndConnectInput =
   | {
       mode: "create";
@@ -133,21 +240,6 @@ export type ProfileSaveAndConnectResult = {
 };
 
 /* ============================================================================
- * UI-only types (never sent as-is to Rust)
- * ============================================================================
- */
-
-export type SaveAndConnectInput = ConnectionCreateInput & {
-  storeKeychain?: boolean;
-  password?: string; // plaintext, FE only
-  //   keychainKey: string; // required when storeKeychain=true
-};
-
-export type SaveAndConnectAction =
-  | { mode: "create"; profileId?: never }
-  | { mode: "update"; profileId: string };
-
-/* ============================================================================
  * Operations (SQL + Redis)
  * ============================================================================
  */
@@ -157,7 +249,7 @@ export type SqlQueryPayload = {
   batch_size?: number;
   max_rows?: number;
 
-  // optional overrides (backend may ignore if unsupported)
+  // Optional overrides (backend may ignore if unsupported)
   statement_timeout_ms?: number | null;
 };
 
@@ -168,10 +260,10 @@ export type RedisCommandPayload = {
   // All args are strings; FE should stringify numbers itself.
   args?: string[];
 
-  // optional override (fallback to connection.default_command_timeout_ms)
+  // Optional override (fallback to connection.default_command_timeout_ms)
   command_timeout_ms?: number | null;
 
-  // Optional: if backend supports selecting db per command (usually it won’t; it’s per-conn)
+  // Optional: if backend supports selecting db per command
   db?: number | null;
 };
 
@@ -189,12 +281,6 @@ export type OperationExecuteInput =
 
 export type ColumnMeta = { name: string; db_type: string };
 
-/**
- * TableChunk is used for SQL results (postgres/mysql) AND also can be reused
- * for Redis “tabular outputs” if you decide (e.g. HGETALL => key/value rows).
- *
- * Note: columns is optional in some of your runtime events; keep it optional for safety.
- */
 export type TableChunk = {
   op_id: string;
   columns?: ColumnMeta[];
@@ -202,60 +288,52 @@ export type TableChunk = {
   row_offset: number;
 };
 
-/**
- * Redis often returns:
- * - single value (GET)
- * - list of values (KEYS/SMEMBERS/LRANGE…)
- * - map-ish (HGETALL)
- *
- * Keep the FE contract stable:
- * - redis_result.kind tells FE how to render
- * - values are CellValue-like, but FE can treat as `any` if you haven’t typed CellValue yet
- */
 export type RedisResult =
   | { op_id: string; kind: "value"; value: any }
   | { op_id: string; kind: "list"; items: any[] }
   | { op_id: string; kind: "table"; columns: ColumnMeta[]; rows: any[][] };
 
-/**
- * OperationDone event stays shared.
- */
 export type OperationDone = {
   op_id: string;
   truncated: boolean;
   row_count: number;
 };
 
-export type SshAuth =
-  | { kind: "password"; password: SecretRef }
-  | {
-      kind: "private_key";
-      identity_file: string;
-      passphrase?: SecretRef | null;
-    };
+/* ============================================================================
+ * UI-only types (never sent as-is to Rust)
+ * ============================================================================
+ */
 
-export type StrictHostKeyChecking = "accept-new" | "yes" | "no";
+export type SaveAndConnectInput = ConnectionCreateInput & {
+  storeKeychain?: boolean;
 
-export type SshTunnelInput = {
-  enabled?: boolean;
+  // Plaintext, FE only
+  password?: string;
 
-  ssh_host: string;
-  ssh_port?: number | null; // default 22
-  ssh_user: string;
+  // Optional FE-only: allow SSH password in same UI form
+  ssh_password?: string;
 
-  // optional: jump host later (ProxyJump) - để sau
-  auth: SshAuth;
+  // Optional FE-only: passphrase for private key
+  ssh_passphrase?: string;
+};
 
-  // forward target (db side)
-  remote_host: string; // usually "127.0.0.1" if DB is on same server
-  remote_port: number;
+export type SaveAndConnectAction =
+  | { mode: "create"; profileId?: never }
+  | { mode: "update"; profileId: string };
 
-  strict_host_key_checking: StrictHostKeyChecking;
+export type PrepareSecretOptions = {
+  profileId: string;
+  persistSecrets: boolean;
 
-  // optional: bind addr, default 127.0.0.1
-  local_bind_host?: string | null;
-  // optional: request local port, 0 => auto-pick free port
-  local_bind_port?: number | null;
+  // Base key for DB secret. You can derive SSH key from it if you want.
+  keychainKey: string;
 
-  connect_timeout_ms?: number | null;
+  // Plain DB password used only when persistSecrets=false
+  passwordPlain: string;
+};
+
+// Optional convenience for your FE normalization layer
+export type NormalizeTestSecrets = {
+  dbPassword?: string;
+  sshPassword?: string;
 };

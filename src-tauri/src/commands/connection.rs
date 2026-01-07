@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::ssh_tunnel;
 use crate::state::AppState;
-use crate::types::{ConnectionCreateInput, ConnectionInfo};
+use crate::types::{ConnectionCreateInput, ConnectionInfo, ConnectionTestInput};
 
 fn rewrite_input_host_port(
     mut input: ConnectionCreateInput,
@@ -131,34 +131,85 @@ pub async fn connection_create(
 pub async fn connection_test(
     app: AppHandle,
     state: State<'_, AppState>,
-    mut input: ConnectionCreateInput,
+    payload: ConnectionTestInput,
 ) -> Result<(), String> {
+    // Unpack early (avoid repetitive payload.input.*)
+    let mut input = payload.input;
+    let secrets = payload.secrets;
+
     let engine = input.engine.clone();
     let label = input.label.clone();
+    let has_ssh = input.ssh.is_some();
 
-    // Basic safe context (NO secrets)
-    tracing::info!(
-        engine = ?engine,
-        label = %label,
-        ssh = %input.ssh.is_some(),
-        "connection_test: start"
-    );
+    tracing::info!(engine = ?engine, label = %label, ssh = %has_ssh, "connection_test: start");
 
-    // Resolve driver
     let driver = state
         .engines
         .get(engine.clone())
         .ok_or("ENGINE_NOT_SUPPORTED")?;
 
-    tracing::debug!(
-        engine = ?engine,
-        driver_kind = ?driver.kind(),
-        "connection_test: driver resolved"
-    );
+    // ---------------------------------------------------------------------
+    // TEST-ONLY: inject plaintext secrets (NO persist, NO logging)
+    // - DB: when UI is in keychain mode but profile not created yet,
+    //       FE often sends SecretRefKind::Keychain with empty value.
+    //       For test, we override to Inline using secrets.db_password.
+    // - SSH: when ssh auth is Password and we got secrets.ssh_password,
+    //        fill it in if the current password is empty.
+    // ---------------------------------------------------------------------
+    if let Some(sec) = secrets.as_ref() {
+        // DB password
+        if let Some(pw) = sec.db_password.as_deref() {
+            match engine {
+                crate::types::EngineKind::Postgres => {
+                    if let Some(pg) = input.postgres.as_mut() {
+                        if pg.password.kind == crate::types::SecretRefKind::Keychain
+                            && pg.password.value.trim().is_empty()
+                        {
+                            pg.password.kind = crate::types::SecretRefKind::Inline;
+                            pg.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Mysql => {
+                    if let Some(my) = input.mysql.as_mut() {
+                        if my.password.kind == crate::types::SecretRefKind::Keychain
+                            && my.password.value.trim().is_empty()
+                        {
+                            my.password.kind = crate::types::SecretRefKind::Inline;
+                            my.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Redis => {
+                    if let Some(rd) = input.redis.as_mut() {
+                        if rd.password.kind == crate::types::SecretRefKind::Keychain
+                            && rd.password.value.trim().is_empty()
+                        {
+                            rd.password.kind = crate::types::SecretRefKind::Inline;
+                            rd.password.value = pw.to_string();
+                        }
+                    }
+                }
+                #[allow(unreachable_patterns)]
+                _ => {}
+            }
+        }
 
-    let mut tunnel_opt: Option<crate::ssh_tunnel::handle::SshTunnelHandle> = None;
+        // SSH password
+        if let Some(pw) = sec.ssh_password.as_deref() {
+            if let Some(ssh) = input.ssh.as_mut() {
+                if let crate::ssh_tunnel::types::SshAuth::Password { password } = &mut ssh.auth {
+                    if password.trim().is_empty() {
+                        *password = pw.to_string();
+                    }
+                }
+            }
+        }
+    }
 
     // Optional SSH tunnel
+    let mut tunnel_opt: Option<crate::ssh_tunnel::handle::SshTunnelHandle> = None;
+
     if let Some(ssh_in) = input.ssh.clone() {
         tracing::info!(
             engine = ?engine,
@@ -166,29 +217,25 @@ pub async fn connection_test(
             ssh_host = %ssh_in.ssh_host,
             ssh_port = ssh_in.ssh_port,
             ssh_user = ?ssh_in.ssh_user.as_deref().map(str::trim),
-            strict = ?ssh_in.strict_host_key_checking.as_deref(),
             remote_host = %ssh_in.remote_host,
             remote_port = ssh_in.remote_port,
             "connection_test: opening ssh tunnel"
         );
 
         let t0 = std::time::Instant::now();
-        let tunnel = match ssh_tunnel::open_tunnel(&ssh_in).await {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!(
-                    engine = ?engine,
-                    label = %label,
-                    ssh_host = %ssh_in.ssh_host,
-                    ssh_port = ssh_in.ssh_port,
-                    remote_host = %ssh_in.remote_host,
-                    remote_port = ssh_in.remote_port,
-                    error = %format!("{e:#}"),
-                    "connection_test: ssh tunnel open failed"
-                );
-                return Err(format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"));
-            }
-        };
+        let tunnel = ssh_tunnel::open_tunnel(&ssh_in).await.map_err(|e| {
+            tracing::error!(
+                engine = ?engine,
+                label = %label,
+                ssh_host = %ssh_in.ssh_host,
+                ssh_port = ssh_in.ssh_port,
+                remote_host = %ssh_in.remote_host,
+                remote_port = ssh_in.remote_port,
+                error = %format!("{e:#}"),
+                "connection_test: ssh tunnel open failed"
+            );
+            format!("SSH_TUNNEL_OPEN_FAILED: {e:#}")
+        })?;
 
         let local = tunnel.local_addr();
         tracing::info!(
@@ -199,90 +246,35 @@ pub async fn connection_test(
             "connection_test: ssh tunnel opened"
         );
 
-        // Rewrite input to localhost:local_port
-        let before = (
-            // Only log host/port - never log password
-            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
-            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
-            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
-        );
-
         input = rewrite_input_host_port(input, "127.0.0.1", local.port())?;
-
-        let after = (
-            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
-            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
-            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
-        );
-
-        tracing::debug!(
-            engine = ?engine,
-            before = ?before,
-            after = ?after,
-            "connection_test: input host/port rewritten for tunnel"
-        );
-
         tunnel_opt = Some(tunnel);
-    } else {
-        // No SSH: log direct target (safe)
-        let target = (
-            input.postgres.as_ref().map(|p| (p.host.clone(), p.port)),
-            input.mysql.as_ref().map(|m| (m.host.clone(), m.port)),
-            input.redis.as_ref().map(|r| (r.host.clone(), r.port)),
-        );
-        tracing::debug!(
-            engine = ?engine,
-            target = ?target,
-            "connection_test: no ssh, direct connect target"
-        );
     }
 
-    // Run test
-    tracing::info!(
-        engine = ?engine,
-        label = %label,
-        "connection_test: driver.test begin"
-    );
+    tracing::info!(engine = ?engine, label = %label, "connection_test: driver.test begin");
 
     let t1 = std::time::Instant::now();
-    let res = driver.test(&app, input).await;
+    let res = driver.test(&app, input, secrets).await;
 
-    match &res {
-        Ok(_) => {
-            tracing::info!(
-                engine = ?engine,
-                label = %label,
-                elapsed_ms = t1.elapsed().as_millis(),
-                "connection_test: driver.test ok"
-            );
-        }
-        Err(e) => {
-            tracing::error!(
-                engine = ?engine,
-                label = %label,
-                elapsed_ms = t1.elapsed().as_millis(),
-                error = %e,
-                "connection_test: driver.test failed"
-            );
-        }
+    if let Err(e) = &res {
+        tracing::error!(
+            engine = ?engine,
+            label = %label,
+            elapsed_ms = t1.elapsed().as_millis(),
+            error = %e,
+            "connection_test: failed"
+        );
+    } else {
+        tracing::info!(
+            engine = ?engine,
+            label = %label,
+            elapsed_ms = t1.elapsed().as_millis(),
+            "connection_test: ok"
+        );
     }
 
-    // Always close tunnel
+    // Always close tunnel (best-effort)
     if let Some(tunnel) = tunnel_opt.take() {
-        let local = tunnel.local_addr();
-        tracing::debug!(
-            engine = ?engine,
-            label = %label,
-            local_bind = %local,
-            "connection_test: closing ssh tunnel"
-        );
         close_tunnel_quietly(tunnel).await;
-        tracing::debug!(
-            engine = ?engine,
-            label = %label,
-            local_bind = %local,
-            "connection_test: ssh tunnel closed"
-        );
     }
 
     res

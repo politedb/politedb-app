@@ -109,27 +109,6 @@ pub fn profile_get(app: &AppHandle, profile_id: Uuid) -> Result<ConnectionProfil
         .ok_or_else(|| "PROFILE_NOT_FOUND".to_string())
 }
 
-pub fn profile_create(
-    app: &AppHandle,
-    input: ConnectionCreateInput,
-) -> Result<ConnectionProfile, String> {
-    let mut profiles = load_profiles(app)?;
-    let now = now_epoch_sec();
-
-    let profile = ConnectionProfile {
-        id: Uuid::new_v4(),
-        engine: input.engine.clone(),
-        label: input.label.clone(),
-        input,
-        created_at: now,
-        updated_at: now,
-    };
-
-    profiles.push(profile.clone());
-    save_profiles(app, &profiles)?;
-    Ok(profile)
-}
-
 pub fn profile_update(
     app: &AppHandle,
     profile_id: Uuid,

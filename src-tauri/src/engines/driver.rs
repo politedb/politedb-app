@@ -15,5 +15,10 @@ pub trait EngineDriver: Send + Sync + 'static {
         input: ConnectionCreateInput,
     ) -> Result<crate::engines::EngineConnection, String>;
 
-    async fn test(&self, app: &AppHandle, input: ConnectionCreateInput) -> Result<(), String>;
+    async fn test(
+        &self,
+        app: &AppHandle,
+        input: ConnectionCreateInput,
+        secrets: Option<crate::types::ConnectionTestSecrets>,
+    ) -> Result<(), String>;
 }

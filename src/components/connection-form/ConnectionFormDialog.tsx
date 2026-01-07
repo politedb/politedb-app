@@ -5,6 +5,8 @@ import { v4 as uuid } from "uuid";
 import {
   ConnectionProfile,
   connectionTest,
+  profileConnectTest,
+  profileSave,
   profileSaveAndConnect,
   SaveAndConnectAction,
   SaveAndConnectInput,
@@ -38,8 +40,7 @@ export function ConnectionFormDialog({
 } = {}) {
   const { addTab, setActiveScreen } = useScreenStore();
 
-  const isEditing = !!initialData;
-  const idProfileEditing = initialData?.id ?? undefined;
+  const profileId = initialData?.id ?? undefined;
 
   const {
     status,
@@ -77,7 +78,18 @@ export function ConnectionFormDialog({
     setTesting();
     try {
       const input = buildConnectionInput(v);
-      await connectionTest(input);
+
+      if (profileId) {
+        // Profile exists: backend reads profile + resolves keychain
+        await profileConnectTest(input);
+      } else {
+        // No profile yet: supply plaintext secrets (never stored)
+        await connectionTest(input, {
+          db_password: v.password,
+          ssh_password: v.sshPassword,
+        });
+      }
+
       setSuccess("Test OK");
     } catch (e: any) {
       setError(e?.message ? String(e.message) : String(e));
@@ -85,13 +97,31 @@ export function ConnectionFormDialog({
   });
 
   const onSave = handleSubmit(async (v) => {
-    if (!initialData || !idProfileEditing) return;
+    // Save profile only (no connect)
+    setConnecting(); // reuse spinner state; or create setSaving() if you want distinct
+    try {
+      const connectionInput = buildConnectionInput(v);
 
-    const input = buildConnectionInput(v);
-    initialData.input = input;
-    initialData.updated_at = Date.now();
+      const action = profileId
+        ? ({ mode: "update", profileId } as const)
+        : ({ mode: "create" } as const);
 
-    onSaved?.(initialData);
+      const savedProfile = await profileSave({
+        ...action,
+
+        // FE-only
+        storeKeychain: v.storeKeychain,
+        password: v.password,
+        ssh_password: v.sshPassword, // FE-only: used for keychain persist when SSH auth=password
+
+        ...connectionInput,
+      } as SaveAndConnectInput & SaveAndConnectAction);
+
+      setSuccess(`Saved ✅ ${savedProfile.label}`);
+      onSaved?.(savedProfile);
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : String(e));
+    }
   });
 
   const onConnect = handleSubmit(async (v) => {
@@ -99,11 +129,8 @@ export function ConnectionFormDialog({
     try {
       const connectionInput = buildConnectionInput(v);
 
-      const action = isEditing
-        ? ({
-            mode: "update",
-            profileId: idProfileEditing,
-          } as const)
+      const action = profileId
+        ? ({ mode: "update", profileId } as const)
         : ({ mode: "create" } as const);
 
       const res = await profileSaveAndConnect({
@@ -112,6 +139,7 @@ export function ConnectionFormDialog({
         // FE-only
         storeKeychain: v.storeKeychain,
         password: v.password,
+        ssh_password: v.sshPassword, // FE-only if SSH auth=password
 
         ...connectionInput,
       } as SaveAndConnectInput & SaveAndConnectAction);
@@ -160,12 +188,11 @@ export function ConnectionFormDialog({
             control={control}
             errors={errors}
             onDirty={onDirty}
+            isCreateNewConnection={!profileId}
           />
 
           <IdentitySection control={control} onDirty={onDirty} />
-
           <SecuritySection control={control} onDirty={onDirty} />
-
           <SSHSection control={control} onDirty={onDirty} />
         </div>
 
@@ -174,8 +201,8 @@ export function ConnectionFormDialog({
           requiredOk={requiredOk}
           storeKeychain={v.storeKeychain}
           onTest={onTest}
-          onConnect={onConnect}
           onSave={onSave}
+          onConnect={onConnect}
         />
       </div>
     </div>

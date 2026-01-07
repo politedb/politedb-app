@@ -1,21 +1,18 @@
 import { TargetedEvent } from "preact";
-import { useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import { useController, useWatch } from "react-hook-form";
 import { Field, Input } from "src/components/form";
+import { toNumber } from "src/utils/convert";
 import { SSLSection } from "./SSLSection";
 import type { SectionProps } from "./connectionForm.utils";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
-function toNumber(v: any, fallback: number) {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : fallback;
-}
+export function ConnectionBasicsSection(
+  props: SectionProps & { isCreateNewConnection: boolean }
+) {
+  const { control, errors, onDirty, isCreateNewConnection } = props;
 
-export function ConnectionBasicsSection(props: SectionProps) {
-  const { control, errors, onDirty } = props;
-
-  // Watch only what is needed for this section UI
   const storeKeychain = useWatch({ control, name: "storeKeychain" });
 
   const name = useController({ control, name: "name" });
@@ -30,16 +27,26 @@ export function ConnectionBasicsSection(props: SectionProps) {
   const sslCert = useController({ control, name: "sslCert" });
   const sslCA = useController({ control, name: "sslCA" });
 
-  const [showPassword, onToggleShowPassword] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showTogglePassword, setShowTogglePassword] = useState(
+    !!password.field.value
+  );
+  const [editingPassword, setEditingPassword] = useState(isCreateNewConnection);
+
+  function dirty() {
+    onDirty?.();
+  }
 
   const passwordError =
     !storeKeychain && errors?.password
       ? String(errors.password.message || "Password is required.")
       : undefined;
 
-  function dirty() {
-    onDirty?.();
-  }
+  // Keychain saved => form value is empty AND user is not editing a new password
+  const shouldShowMasked = useMemo(() => {
+    const v = String(password.field.value ?? "");
+    return !!storeKeychain && v.length === 0 && !editingPassword;
+  }, [storeKeychain, password.field.value, editingPassword]);
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -108,41 +115,85 @@ export function ConnectionBasicsSection(props: SectionProps) {
 
         <Field label="Password" alignTop>
           <div>
-            <div class="relative">
-              <Input
-                type={showPassword ? "text" : "password"}
-                value={password.field.value}
-                placeholder={
-                  storeKeychain
-                    ? "Enter password (will be saved securely)"
-                    : "Enter password (not saved)"
-                }
-                onInput={(e: InputEvt) => {
-                  password.field.onChange(e.currentTarget.value);
-                  dirty();
-                }}
-                class="pr-12"
-              />
+            {shouldShowMasked ? (
+              <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-semibold text-slate-700">
+                    ••••••••
+                  </span>
+                  <span class="text-xs text-slate-500">Saved in Keychain</span>
+                </div>
 
-              <button
-                type="button"
-                onClick={() => onToggleShowPassword((x) => !x)}
-                class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                title={showPassword ? "Hide" : "Show"}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-
-            {storeKeychain && !password.field.value ? (
-              <div class="mt-2 text-xs text-slate-500">
-                Password is already saved. Leave empty to keep existing one.
+                <button
+                  type="button"
+                  class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  title="Replace password"
+                  onClick={() => {
+                    setEditingPassword(true);
+                    setShowPassword(false);
+                    // keep password value empty; user will type a new one
+                    dirty();
+                  }}
+                >
+                  Replace
+                </button>
               </div>
-            ) : null}
+            ) : (
+              <>
+                <div class="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={password.field.value}
+                    placeholder={
+                      storeKeychain
+                        ? "Enter password (save in Keychain)"
+                        : "Enter password (not saved)"
+                    }
+                    onInput={(e: InputEvt) => {
+                      const next = e.currentTarget.value;
+                      password.field.onChange(next);
 
-            {!storeKeychain && passwordError ? (
-              <div class="mt-2 text-xs text-rose-600">{passwordError}</div>
-            ) : null}
+                      setShowTogglePassword(!!next);
+                    }}
+                    class="pr-12"
+                  />
+
+                  {showTogglePassword && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((x) => !x)}
+                      class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      title={showPassword ? "Hide" : "Show"}
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  )}
+                </div>
+
+                {/* {storeKeychain && !password.field.value && editingPassword ? (
+                  <div class="mt-2 text-xs text-slate-500">
+                    Leave empty to keep the existing password.
+                    <button
+                      type="button"
+                      class="ml-2 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500"
+                      onClick={() => {
+                        // user cancels replacement, go back to masked state
+                        password.field.onChange("");
+                        setEditingPassword(false);
+                        setShowPassword(false);
+                        dirty();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : null} */}
+
+                {!storeKeychain && passwordError ? (
+                  <div class="mt-2 text-xs text-rose-600">{passwordError}</div>
+                ) : null}
+              </>
+            )}
           </div>
         </Field>
 

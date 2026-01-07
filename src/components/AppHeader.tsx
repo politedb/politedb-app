@@ -65,7 +65,6 @@ export function AppHeader({
   }
 
   function handleTabClose(tabId: string) {
-    console.log(tabId);
     const currentTab = tabs.find((tab) => tab.id === tabId);
     const newTabs = tabs.filter((tab) => tab.id !== tabId);
     removeTab(tabId);

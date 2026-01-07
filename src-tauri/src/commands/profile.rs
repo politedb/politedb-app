@@ -32,6 +32,21 @@ pub enum ProfileSaveAndConnectInput {
     },
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ProfileSaveInput {
+    Create {
+        profile_id: Uuid,
+        persist_secrets: bool,
+        input: ConnectionCreateInput,
+    },
+    Update {
+        profile_id: Uuid,
+        persist_secrets: bool,
+        input: ConnectionCreateInput,
+    },
+}
+
 #[derive(serde::Serialize)]
 pub struct ProfileSaveAndConnectResult {
     pub profile: ConnectionProfile,
@@ -317,6 +332,90 @@ pub async fn profile_save_and_connect(
 }
 
 #[tauri::command]
+pub async fn profile_save(
+    app: AppHandle,
+    payload: ProfileSaveInput,
+) -> Result<ConnectionProfile, String> {
+    let (mode, profile_id, persist_secrets, mut input, is_update) = match payload {
+        ProfileSaveInput::Create {
+            profile_id,
+            persist_secrets,
+            input,
+        } => ("create", profile_id, persist_secrets, input, false),
+
+        ProfileSaveInput::Update {
+            profile_id,
+            persist_secrets,
+            input,
+        } => ("update", profile_id, persist_secrets, input, true),
+    };
+
+    tracing::info!(
+        step = "profile_save",
+        mode,
+        profile_id = %profile_id,
+        persist_secrets = persist_secrets,
+        engine = ?input.engine,
+        label = %input.label,
+        "start"
+    );
+
+    // 1) Validate
+    validate_input(&input).map_err(|e| {
+        tracing::error!(
+            step = "validate",
+            mode,
+            profile_id = %profile_id,
+            error = %e,
+            "failed"
+        );
+        e
+    })?;
+
+    // 2) Persist secrets (Inline -> Keychain) if enabled
+    input = persist_input_with_secrets(&app, profile_id, persist_secrets, input).map_err(|e| {
+        tracing::error!(
+            step = "persist_secrets",
+            mode,
+            profile_id = %profile_id,
+            persist_secrets = persist_secrets,
+            error = %e,
+            "failed"
+        );
+        format!("PERSIST_SECRETS_FAILED: {e}")
+    })?;
+
+    // 3) Save profile (disk)
+    let profile = (|| -> Result<ConnectionProfile, String> {
+        if is_update {
+            profile_store::profile_update(&app, profile_id, input.clone())
+        } else {
+            profile_store::profile_create_with_id(&app, profile_id, input.clone())
+        }
+    })()
+    .map_err(|e| {
+        tracing::error!(
+            step = "save_profile",
+            mode,
+            profile_id = %profile_id,
+            is_update = is_update,
+            error = %e,
+            "failed"
+        );
+        format!("SAVE_PROFILE_FAILED: {e}")
+    })?;
+
+    tracing::info!(
+        step = "profile_save",
+        mode,
+        profile_id = %profile_id,
+        "ok"
+    );
+
+    Ok(profile)
+}
+
+#[tauri::command]
 pub async fn profile_connect(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -368,4 +467,84 @@ pub async fn profile_connect(
         profile,
         connection,
     })
+}
+
+#[tauri::command]
+pub async fn profile_connect_test(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    payload: ProfileConnectInput,
+) -> Result<(), String> {
+    let profile_id = payload.profile_id;
+
+    tracing::info!(
+        step = "profile_connect_test",
+        profile_id = %profile_id,
+        "start"
+    );
+
+    // 1) Load profile from store
+    let profile: ConnectionProfile = profile_store::profile_get(&app, profile_id).map_err(|e| {
+        tracing::error!(
+            step = "load_profile",
+            profile_id = %profile_id,
+            error = %e,
+            "failed"
+        );
+        format!("PROFILE_NOT_FOUND: {e}")
+    })?;
+
+    // 2) Clone input from profile (profile input should already have SecretRef::Keychain)
+    let input = profile.input.clone();
+
+    // 3) Reuse connection_test pipeline (handles SSH tunnel + rewrite + driver.test + close tunnel)
+    connection::connection_test(
+        app.clone(),
+        state,
+        crate::types::ConnectionTestInput {
+            input,
+            secrets: None,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(
+            step = "test_profile_connection",
+            profile_id = %profile_id,
+            error = %e,
+            "failed"
+        );
+        format!("PROFILE_TEST_FAILED: {e}")
+    })?;
+
+    tracing::info!(
+        step = "profile_connect_test",
+        profile_id = %profile_id,
+        "ok"
+    );
+
+    Ok(())
+}
+
+// ============================
+// Profile store commands
+// ============================
+
+#[tauri::command]
+pub fn profile_list(app: AppHandle) -> Result<Vec<ConnectionProfile>, String> {
+    profile_store::profile_list(&app)
+}
+
+#[tauri::command]
+pub fn profile_update(
+    app: AppHandle,
+    profile_id: Uuid,
+    input: ConnectionCreateInput,
+) -> Result<ConnectionProfile, String> {
+    profile_store::profile_update(&app, profile_id, input)
+}
+
+#[tauri::command]
+pub fn profile_remove(app: AppHandle, profile_id: Uuid) -> Result<(), String> {
+    profile_store::profile_remove(&app, profile_id)
 }

@@ -8,17 +8,398 @@ import type {
   ProfileConnectResult,
   ProfileSaveAndConnectInput,
   ProfileSaveAndConnectResult,
-  SaveAndConnectAction,
+  ProfileSaveInput,
   SaveAndConnectInput,
-  SecretRef,
 } from "./types";
-import { secretsDelete, secretsGet, secretsSet } from "./secrets";
 import { CMD } from "./commands";
+import { secretsDelete, secretsGet, secretsSet } from "./secrets";
 
 /* ============================================================================
- * Profiles (disk)
+ * Local types
  * ============================================================================
  */
+
+type SaveMode = "create" | "update";
+type SaveAction = { mode: "create" } | { mode: "update"; profileId: string };
+
+type SaveResultMap = {
+  save: ConnectionProfile;
+  save_and_connect: ProfileSaveAndConnectResult;
+};
+
+type SaveKind = keyof SaveResultMap; // "save" | "save_and_connect"
+
+type PersistPlan = {
+  mode: SaveMode;
+  profileId: string;
+  persistSecrets: boolean;
+
+  // DB secret key
+  dbKey: string;
+
+  // Optional SSH secret key (only used if ssh auth is password)
+  sshKey?: string;
+
+  // Plain secrets from UI (FE-only)
+  dbPasswordPlain: string;
+  sshPasswordPlain: string;
+};
+
+/* ============================================================================
+ * Keychain key helpers
+ * ============================================================================
+ * You can change these formats anytime, as long as FE+Rust agree.
+ */
+
+function keychainKeyForProfileDb(profileId: string, engine: string) {
+  return `politedb/profile/${profileId}/${engine}/db_password`;
+}
+
+function keychainKeyForProfileSsh(profileId: string) {
+  return `politedb/profile/${profileId}/ssh_password`;
+}
+
+/* ============================================================================
+ * SecretRef helpers
+ * ============================================================================
+ */
+
+function secretRefForDb(
+  persistSecrets: boolean,
+  key: string,
+  plain: string
+): { kind: "keychain"; value: string } | { kind: "inline"; value: string } {
+  return persistSecrets
+    ? { kind: "keychain", value: key }
+    : { kind: "inline", value: plain };
+}
+
+function shouldPersistSshPassword(input: SaveAndConnectInput) {
+  const auth = input.ssh?.auth;
+  return !!auth && auth.kind === "password";
+}
+
+function secretRefForSshPassword(
+  persistSecrets: boolean,
+  key: string,
+  plain: string
+): { kind: "keychain"; value: string } | { kind: "inline"; value: string } {
+  return persistSecrets
+    ? { kind: "keychain", value: key }
+    : { kind: "inline", value: plain };
+}
+
+/* ============================================================================
+ * preparePayloadWithSecret
+ * - Convert FE UI input (which may include plaintext) into Rust contract input
+ * - Rule:
+ *   - persistSecrets=true => NEVER embed plaintext; SecretRef must be Keychain
+ *   - persistSecrets=false => SecretRef can be Inline (plaintext allowed)
+ * ============================================================================
+ */
+
+export function preparePayloadWithSecret(
+  input: SaveAndConnectInput,
+  plan: Pick<
+    PersistPlan,
+    | "persistSecrets"
+    | "profileId"
+    | "dbKey"
+    | "sshKey"
+    | "dbPasswordPlain"
+    | "sshPasswordPlain"
+  >
+): ConnectionCreateInput {
+  const engine = String(input.engine || "");
+  const label = String(input.label || "");
+
+  const persistSecrets = plan.persistSecrets;
+
+  // SSH: keep as-is, but normalize password ref if needed
+  const ssh =
+    input.ssh && input.ssh.enabled !== false
+      ? (() => {
+          const base = { ...input.ssh };
+          if (base.auth?.kind === "password") {
+            const sshKey =
+              plan.sshKey || keychainKeyForProfileSsh(plan.profileId);
+            const plain = (plan.sshPasswordPlain ?? "").toString();
+            return {
+              ...base,
+              auth: {
+                kind: "password" as const,
+                password: secretRefForSshPassword(
+                  persistSecrets,
+                  sshKey,
+                  plain
+                ),
+              },
+            };
+          }
+          // private_key: passphrase secret (if you later want to persist it, add key + rollout)
+          return base;
+        })()
+      : undefined;
+
+  // Engine-specific: convert db password SecretRef
+  if (engine === "postgres") {
+    const pg = input.postgres;
+    if (!pg) throw new Error("POSTGRES_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      ssh,
+      postgres: {
+        ...pg,
+        password: dbRef,
+      },
+    };
+  }
+
+  if (engine === "mysql") {
+    const my = input.mysql;
+    if (!my) throw new Error("MYSQL_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      ssh,
+      mysql: {
+        ...my,
+        password: dbRef,
+      },
+    };
+  }
+
+  if (engine === "redis") {
+    const rd = input.redis;
+    if (!rd) throw new Error("REDIS_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      ssh,
+      redis: {
+        ...rd,
+        password: dbRef,
+      },
+    };
+  }
+
+  // Unknown engine: keep payload but still respect secret rule if a known field exists
+  // (You can tighten this later by throwing.)
+  return {
+    engine,
+    label,
+    ssh,
+    postgres: input.postgres,
+    mysql: input.mysql,
+    redis: input.redis,
+  };
+}
+
+/* ============================================================================
+ * Keychain rollback helper (supports DB + optional SSH password)
+ * ============================================================================
+ */
+
+async function withKeychainRollback<T>(
+  plan: PersistPlan,
+  fn: () => Promise<T>
+): Promise<T> {
+  if (!plan.persistSecrets) return fn();
+
+  const writeOps: Array<{
+    key: string;
+    value: string;
+    old: string | null;
+    touched: boolean;
+  }> = [];
+
+  async function stageKey(key: string, value: string) {
+    const old =
+      plan.mode === "update" ? await secretsGet(key).catch(() => null) : null;
+
+    const trimmed = value.trim();
+    const touched = trimmed.length > 0;
+
+    writeOps.push({ key, value: trimmed, old, touched });
+
+    if (touched) {
+      console.log("Staging keychain set:", key);
+      await secretsSet(key, trimmed);
+    }
+  }
+
+  try {
+    // DB password: only store non-empty
+    await stageKey(plan.dbKey, plan.dbPasswordPlain);
+
+    // SSH password: only if ssh auth is password
+    if (plan.sshKey) {
+      await stageKey(plan.sshKey, plan.sshPasswordPlain);
+    }
+
+    return await fn();
+  } catch (err) {
+    console.log(err);
+    // Rollback only keys we actually wrote (touched=true)
+    for (const op of writeOps) {
+      if (!op.touched) continue;
+
+      if (plan.mode === "create") {
+        await secretsDelete(op.key).catch(() => {});
+        continue;
+      }
+
+      // update: restore old if exists else delete
+      if (op.old != null && op.old.trim().length > 0) {
+        await secretsSet(op.key, op.old).catch(() => {});
+      } else {
+        await secretsDelete(op.key).catch(() => {});
+      }
+    }
+
+    throw err;
+  }
+}
+
+/* ============================================================================
+ * Build plan / payload / command payload
+ * ============================================================================
+ */
+
+function buildSavePlan(input: SaveAndConnectInput & SaveAction): PersistPlan {
+  const mode = input.mode;
+  console.log("Profile save mode:", mode);
+  const profileId = mode === "create" ? uuidv4() : input.profileId;
+
+  const persistSecrets = !!input.storeKeychain;
+  const engine = String(input.engine || "");
+
+  const dbKey = keychainKeyForProfileDb(profileId, engine);
+
+  const sshKey = shouldPersistSshPassword(input)
+    ? keychainKeyForProfileSsh(profileId)
+    : undefined;
+
+  return {
+    mode,
+    profileId,
+    persistSecrets,
+
+    dbKey,
+    sshKey,
+
+    dbPasswordPlain: (input.password ?? "").toString(),
+    sshPasswordPlain: (input.ssh_password ?? "").toString(),
+  };
+}
+
+function buildProfilePayload(
+  input: SaveAndConnectInput,
+  plan: PersistPlan
+): ConnectionCreateInput {
+  return preparePayloadWithSecret(input, {
+    profileId: plan.profileId,
+    persistSecrets: plan.persistSecrets,
+    dbKey: plan.dbKey,
+    sshKey: plan.sshKey,
+    dbPasswordPlain: plan.dbPasswordPlain,
+    sshPasswordPlain: plan.sshPasswordPlain,
+  });
+}
+
+function buildCmdPayload(
+  kind: SaveKind,
+  plan: PersistPlan,
+  payload: ConnectionCreateInput
+): ProfileSaveInput | ProfileSaveAndConnectInput {
+  // Both commands share the same shape; only command name differs.
+  const base = {
+    mode: plan.mode,
+    profile_id: plan.profileId,
+    persist_secrets: plan.persistSecrets,
+    input: payload,
+  } as const;
+
+  // Keep explicit return types stable
+  if (kind === "save_and_connect") {
+    return base as unknown as ProfileSaveAndConnectInput;
+  }
+  return base as unknown as ProfileSaveInput;
+}
+
+/**
+ * Unified core for:
+ * - profileSave
+ * - profileSaveAndConnect
+ */
+async function profileSaveCore<K extends SaveKind>(
+  kind: K,
+  input: SaveAndConnectInput & SaveAction
+): Promise<SaveResultMap[K]> {
+  const plan = buildSavePlan(input);
+
+  return withKeychainRollback(plan, async () => {
+    const payload = buildProfilePayload(input, plan);
+    const cmdPayload = buildCmdPayload(kind, plan, payload);
+
+    if (kind === "save_and_connect") {
+      console.log({ cmdPayload });
+      return (await invoke<ProfileSaveAndConnectResult>(
+        CMD.profileSaveAndConnect,
+        {
+          payload: cmdPayload as ProfileSaveAndConnectInput,
+        }
+      )) as SaveResultMap[K];
+    }
+
+    return (await invoke<ConnectionProfile>(CMD.profileSave, {
+      payload: cmdPayload as ProfileSaveInput,
+    })) as SaveResultMap[K];
+  });
+}
+
+/* ============================================================================
+ * Public API
+ * ============================================================================
+ */
+
+// Save profile only (no runtime connect)
+export async function profileSave(
+  input: SaveAndConnectInput & SaveAction
+): Promise<ConnectionProfile> {
+  const res = await profileSaveCore("save", input);
+
+  return res;
+}
+
+// Save profile + runtime connect
+export function profileSaveAndConnect(
+  input: SaveAndConnectInput & SaveAction
+): Promise<ProfileSaveAndConnectResult> {
+  return profileSaveCore("save_and_connect", input);
+}
 
 export async function profileList(): Promise<ConnectionProfile[]> {
   return invoke<ConnectionProfile[]>(CMD.profileList);
@@ -31,189 +412,6 @@ export async function profileConnect(
   return invoke<ProfileConnectResult>(CMD.profileConnect, { payload });
 }
 
-export async function profileCreate(
-  input: SaveAndConnectInput
-): Promise<ConnectionProfile> {
-  const payload = sanitizePayload(input);
-  return invoke<ConnectionProfile>(CMD.profileCreate, { input: payload });
-}
-
-export async function profileUpdate(
-  profileId: string,
-  input: SaveAndConnectInput
-): Promise<ConnectionProfile> {
-  const payload = sanitizePayload(input);
-  return invoke<ConnectionProfile>(CMD.profileUpdate, {
-    profileId,
-    input: payload,
-  });
-}
-
 export async function profileRemove(profileId: string): Promise<void> {
   await invoke(CMD.profileRemove, { profileId });
-}
-
-/* ============================================================================
- * Save & Connect (primary flow)
- * - Supports BOTH:
- *   (A) no password (empty) + no keychain
- *   (B) save to keychain (storeKeychain=true)
- * - NEVER sends plaintext password to Rust when storeKeychain=true
- * - When storeKeychain=false, it DOES send inline password (can be empty) so Rust can connect now
- * ============================================================================
- */
-
-export async function profileSaveAndConnect(
-  input: SaveAndConnectInput & SaveAndConnectAction
-): Promise<ProfileSaveAndConnectResult> {
-  const mode = input.mode;
-  const profileId = mode === "create" ? uuidv4() : input.profileId;
-
-  const persistSecrets = !!input.storeKeychain;
-  const engine = String(input.engine || "");
-  const keychainKey = keychainKeyForProfile(profileId, engine);
-
-  let oldSecret: string | null = null;
-  let didTouchKeychain = false;
-
-  try {
-    if (persistSecrets) {
-      // Update: backup old secret for rollback
-      if (mode === "update") {
-        oldSecret = await secretsGet(keychainKey).catch(() => null);
-      }
-
-      // Allow "no password" globally:
-      // - if password empty => we do NOT write keychain (avoid storing empty)
-      // - payload will still point to keychain key; backend should treat missing key as "no password"
-      const pw = (input.password ?? "").toString();
-
-      if (pw.trim().length > 0) {
-        await secretsSet(keychainKey, pw);
-        didTouchKeychain = true;
-      }
-    }
-
-    // Build payload sent to backend (engine-aware + ssh included)
-    // Rule:
-    // - persistSecrets=true => password ref MUST be Keychain (never plaintext)
-    // - persistSecrets=false => password ref MUST be Inline (plaintext allowed, can be empty)
-    const payload = preparePayloadWithSecret(input, {
-      profileId,
-      persistSecrets,
-      keychainKey,
-      passwordPlain: (input.password ?? "").toString(),
-    });
-
-    const cmdPayload: ProfileSaveAndConnectInput =
-      mode === "create"
-        ? {
-            mode: "create",
-            profile_id: profileId,
-            persist_secrets: persistSecrets,
-            input: payload,
-          }
-        : {
-            mode: "update",
-            profile_id: profileId,
-            persist_secrets: persistSecrets,
-            input: payload,
-          };
-
-    return await invoke<ProfileSaveAndConnectResult>(
-      CMD.profileSaveAndConnect,
-      {
-        payload: cmdPayload,
-      }
-    );
-  } catch (err) {
-    // Rollback keychain only if we actually wrote anything
-    if (persistSecrets && didTouchKeychain) {
-      if (mode === "create") {
-        await secretsDelete(keychainKey).catch(() => {});
-      } else {
-        if (oldSecret != null && oldSecret.trim().length > 0) {
-          await secretsSet(keychainKey, oldSecret).catch(() => {});
-        } else {
-          await secretsDelete(keychainKey).catch(() => {});
-        }
-      }
-    }
-    throw err;
-  }
-}
-
-/* ============================================================================
- * Internal helpers
- * ============================================================================
- */
-
-function keychainKeyForProfile(profileId: string, engine: string) {
-  // MUST match backend: profile:{profile_id}:{engine}:password
-  // engine should be: postgres | mysql | redis
-  return `profile:${profileId}:${engine}:password`;
-}
-
-function secretInline(value: string): SecretRef {
-  return { kind: "inline", value };
-}
-
-function secretKeychain(key: string): SecretRef {
-  return { kind: "keychain", value: key };
-}
-
-/**
- * sanitizePayload:
- * - Strip FE-only fields (storeKeychain/password/...)
- * - Keep ALL engine config + ssh as-is
- * - Do NOT try to rewrite password here (that's preparePayloadWithSecret's job)
- */
-function sanitizePayload(input: SaveAndConnectInput): ConnectionCreateInput {
-  const {
-    storeKeychain,
-    password,
-    // optional legacy field if you still have it somewhere
-    keychainKey,
-    ...payload
-  } = input as any;
-
-  return payload as ConnectionCreateInput;
-}
-
-function preparePayloadWithSecret(
-  input: SaveAndConnectInput,
-  opts: {
-    profileId: string;
-    persistSecrets: boolean;
-    keychainKey: string;
-    passwordPlain: string;
-  }
-): ConnectionCreateInput {
-  const payload = sanitizePayload(input);
-  const engine = String(payload.engine || "");
-
-  // Always enforce correct secret ref shape per mode
-  const ref = opts.persistSecrets
-    ? secretKeychain(opts.keychainKey)
-    : secretInline(opts.passwordPlain);
-
-  if (engine === "postgres") {
-    const pg = (payload.postgres ??= {} as any);
-    pg.password = ref;
-  }
-
-  if (engine === "mysql") {
-    const my = (payload.mysql ??= {} as any);
-    my.password = ref;
-  }
-
-  if (engine === "redis") {
-    const p: any = payload as any;
-    const r = (p.redis ??= {} as any);
-    // If your Rust Redis input uses SecretRef (not Option), assign directly
-    // If Rust uses Option<SecretRef>, change to: r.password = opts.persistSecrets ? ref : (opts.passwordPlain ? ref : null)
-    r.password = ref;
-  }
-
-  return payload;
 }

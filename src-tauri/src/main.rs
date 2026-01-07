@@ -25,7 +25,6 @@ fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    // ✅ Engine drivers (postgres now, mysql later)
     let drivers: Vec<Arc<dyn EngineDriver>> = vec![
         Arc::new(engines::postgres::driver::PostgresDriver),
         Arc::new(engines::mysql::driver::MySqlDriver),
@@ -43,7 +42,6 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             // Connections
-            commands::connection::connection_create,
             commands::connection::connection_list,
             commands::connection::connection_remove,
             commands::connection::connection_test,
@@ -51,13 +49,15 @@ fn main() {
             commands::operation::operation_execute,
             commands::operation::operation_cancel,
             // Profiles
-            commands::profiles::profile_list,
-            commands::profiles::profile_create,
-            commands::profiles::profile_update,
-            commands::profiles::profile_remove,
+            commands::profile::profile_list,
+            commands::profile::profile_update,
+            commands::profile::profile_save,
+            commands::profile::profile_remove,
             // Profiles + connect
+            commands::profile::profile_save,
             commands::profile::profile_save_and_connect,
             commands::profile::profile_connect,
+            commands::profile::profile_connect_test,
             // secrets
             secrets::secrets_set,
             secrets::secrets_get,

@@ -4,7 +4,6 @@ const win = getCurrentWebviewWindow();
 
 export function WindowControls() {
   async function onClose() {
-    console.log("close");
     await win.close();
   }
 

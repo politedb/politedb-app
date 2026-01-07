@@ -1,17 +1,16 @@
 export const CMD = {
   // Connection
-  connectionCreate: "connection_create",
   connectionTest: "connection_test",
   connectionList: "connection_list",
   connectionRemove: "connection_remove",
 
   // Profiles
-  profileCreate: "profile_create",
   profileList: "profile_list",
-  profileUpdate: "profile_update",
   profileRemove: "profile_remove",
+  profileSave: "profile_save",
   profileSaveAndConnect: "profile_save_and_connect",
   profileConnect: "profile_connect",
+  profileConnectTest: "profile_connect_test",
 
   // Secrets
   secretsGet: "secrets_get",

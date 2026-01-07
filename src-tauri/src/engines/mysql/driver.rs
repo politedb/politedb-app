@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
-use mysql_async::Pool;
+use mysql_async::{prelude::Queryable, Pool};
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -7,7 +9,10 @@ use crate::engines::driver::EngineDriver;
 use crate::engines::mysql::{config::build_mysql_opts, connection::MySqlConn};
 use crate::engines::EngineConnection;
 use crate::security::secrets;
-use crate::types::{ConnectionCreateInput, EngineKind, MySqlConnectInput, SecretRefKind};
+use crate::types::{
+    ConnectionCreateInput, ConnectionTestSecrets, EngineKind, MySqlConnectInput, SecretRef,
+    SecretRefKind,
+};
 
 pub struct MySqlDriver;
 
@@ -25,35 +30,99 @@ impl EngineDriver for MySqlDriver {
         input: ConnectionCreateInput,
     ) -> Result<EngineConnection, String> {
         let my = input.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
-        let conn = connect_mysql(app, conn_id, label, my).await?;
+
+        let conn = connect_mysql(app, conn_id, label, my)
+            .await
+            .map_err(|e| format!("MYSQL_CONNECT_FAILED: {e}"))?;
+
         Ok(EngineConnection::MySql(conn))
     }
 
-    async fn test(&self, app: &AppHandle, input: ConnectionCreateInput) -> Result<(), String> {
+    async fn test(
+        &self,
+        app: &AppHandle,
+        input: ConnectionCreateInput,
+        secrets_opt: Option<ConnectionTestSecrets>,
+    ) -> Result<(), String> {
         let my = input.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
-        test_mysql(app, my).await
+
+        test_mysql_direct(app, my, secrets_opt)
+            .await
+            .map_err(|e| format!("MYSQL_TEST_FAILED: {e}"))?;
+
+        Ok(())
     }
 }
 
-async fn resolve_password(
-    app: &AppHandle,
-    conn_id: Uuid,
-    input: &MySqlConnectInput,
-) -> Result<String, String> {
-    match input.password.kind {
-        SecretRefKind::Inline => Ok(input.password.value.clone()),
+/* =============================================================================
+ * Secrets resolving
+ * - Rule: For TEST, if caller provides plaintext secret in `secrets_opt`, use it.
+ * - Otherwise, fall back to SecretRef (inline/keychain) in the input.
+ * ============================================================================= */
+
+async fn resolve_secret_ref(app: &AppHandle, secret: &SecretRef) -> Result<String, String> {
+    match secret.kind {
+        SecretRefKind::Inline => Ok(secret.value.clone()),
         SecretRefKind::Keychain => {
-            let key = input.password.value.trim();
+            let key = secret.value.trim();
             if key.is_empty() {
-                return Err(format!("EMPTY_KEYCHAIN_KEY: conn_id={conn_id}"));
+                return Err("EMPTY_KEYCHAIN_KEY".into());
             }
-            let pw = secrets::keychain_get(app, key).map_err(|e| e.to_string())?;
-            if pw.is_empty() {
-                return Err("EMPTY_PASSWORD_FROM_KEYCHAIN".into());
+            let v = secrets::keychain_get(app, key).map_err(|e| e.to_string())?;
+            if v.is_empty() {
+                return Err("EMPTY_SECRET_FROM_KEYCHAIN".into());
             }
-            Ok(pw)
+            Ok(v)
         }
     }
+}
+
+async fn resolve_mysql_password_for_test(
+    app: &AppHandle,
+    input: &MySqlConnectInput,
+    secrets_opt: Option<&ConnectionTestSecrets>,
+) -> Result<String, String> {
+    if let Some(secrets) = secrets_opt {
+        if let Some(pw) = secrets.db_password.as_deref() {
+            // Plain password provided by caller (test-only)
+            return Ok(pw.to_string());
+        }
+    }
+    // Fallback to input secret ref (inline/keychain)
+    resolve_secret_ref(app, &input.password).await
+}
+
+/* =============================================================================
+ * Low-level connector
+ * ============================================================================= */
+
+async fn smoke_mysql(pool: &Pool, input: &MySqlConnectInput) -> Result<(), String> {
+    let mut conn = if let Some(ms) = input.connect_timeout_ms {
+        if ms > 0 {
+            tokio::time::timeout(Duration::from_millis(ms), pool.get_conn())
+                .await
+                .map_err(|_| format!("MYSQL_CONNECT_TIMEOUT after {ms}ms"))?
+                .map_err(|e| e.to_string())?
+        } else {
+            pool.get_conn().await.map_err(|e| e.to_string())?
+        }
+    } else {
+        pool.get_conn().await.map_err(|e| e.to_string())?
+    };
+
+    if let Some(ms) = input.statement_timeout_ms {
+        let ms = ms.clamp(100, 300_000);
+        let _ = conn
+            .query_drop(format!("SET SESSION max_execution_time = {}", ms))
+            .await;
+    }
+
+    conn.query_drop("SELECT 1")
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = conn.disconnect().await;
+    Ok(())
 }
 
 pub async fn connect_mysql(
@@ -62,54 +131,28 @@ pub async fn connect_mysql(
     label: String,
     input: MySqlConnectInput,
 ) -> Result<MySqlConn, String> {
-    let password = resolve_password(app, conn_id, &input).await?;
-
+    // connect path: always respect SecretRef (inline/keychain) from saved profile input
+    let password = resolve_secret_ref(app, &input.password).await?;
     let plan = build_mysql_opts(&input, &password).map_err(|e| e.to_string())?;
 
-    // ✅ Pool must be created from Opts (primary/fallback), NOT from MysqlOptsPlan
     let mut pool = Pool::new(plan.primary);
 
-    // smoke test function
-    async fn smoke(pool: &Pool, input: &MySqlConnectInput) -> Result<(), String> {
-        use mysql_async::prelude::Queryable;
-
-        let mut conn = if let Some(ms) = input.connect_timeout_ms {
-            if ms > 0 {
-                tokio::time::timeout(std::time::Duration::from_millis(ms), pool.get_conn())
-                    .await
-                    .map_err(|_| "MYSQL_CONNECT_TIMEOUT".to_string())?
-                    .map_err(|e| e.to_string())?
+    match smoke_mysql(&pool, &input).await {
+        Ok(_) => {}
+        Err(primary_err) => {
+            if let Some(fallback) = plan.fallback {
+                let pool2 = Pool::new(fallback);
+                match smoke_mysql(&pool2, &input).await {
+                    Ok(_) => pool = pool2,
+                    Err(fallback_err) => {
+                        return Err(format!(
+                            "MYSQL_CONNECT_FAILED: primary={primary_err}; fallback={fallback_err}"
+                        ));
+                    }
+                }
             } else {
-                pool.get_conn().await.map_err(|e| e.to_string())?
+                return Err(format!("MYSQL_CONNECT_FAILED: {primary_err}"));
             }
-        } else {
-            pool.get_conn().await.map_err(|e| e.to_string())?
-        };
-
-        if let Some(ms) = input.statement_timeout_ms {
-            let ms = ms.clamp(100, 300_000);
-            let _ = conn
-                .query_drop(format!("SET SESSION max_execution_time = {}", ms))
-                .await;
-        }
-
-        conn.query_drop("SELECT 1")
-            .await
-            .map_err(|e| e.to_string())?;
-        let _ = conn.disconnect().await;
-        Ok(())
-    }
-
-    // try primary
-    let primary_ok = smoke(&pool, &input).await.is_ok();
-
-    // if prefer + primary failed => retry fallback
-    if !primary_ok {
-        if let Some(fallback) = plan.fallback {
-            pool = Pool::new(fallback);
-            smoke(&pool, &input).await?; // fallback fail => real fail
-        } else {
-            smoke(&pool, &input).await?; // re-run to return the original error text
         }
     }
 
@@ -121,7 +164,32 @@ pub async fn connect_mysql(
     })
 }
 
-pub async fn test_mysql(app: &AppHandle, input: MySqlConnectInput) -> Result<(), String> {
-    let _ = connect_mysql(app, Uuid::new_v4(), "__test__".into(), input).await?;
-    Ok(())
+pub async fn test_mysql_direct(
+    app: &AppHandle,
+    input: MySqlConnectInput,
+    secrets_opt: Option<ConnectionTestSecrets>,
+) -> Result<(), String> {
+    // test path: allow plaintext password override from frontend
+    let password = resolve_mysql_password_for_test(app, &input, secrets_opt.as_ref()).await?;
+
+    let plan = build_mysql_opts(&input, &password).map_err(|e| e.to_string())?;
+
+    // Keep test lightweight (no need to keep pool around)
+    let pool = Pool::new(plan.primary);
+
+    // If primary fails and fallback exists, try fallback
+    match smoke_mysql(&pool, &input).await {
+        Ok(_) => Ok(()),
+        Err(primary_err) => {
+            if let Some(fallback) = plan.fallback {
+                let pool2 = Pool::new(fallback);
+                smoke_mysql(&pool2, &input).await.map_err(|fallback_err| {
+                    format!("MYSQL_TEST_FAILED: primary={primary_err}; fallback={fallback_err}")
+                })?;
+                Ok(())
+            } else {
+                Err(format!("MYSQL_TEST_FAILED: {primary_err}"))
+            }
+        }
+    }
 }

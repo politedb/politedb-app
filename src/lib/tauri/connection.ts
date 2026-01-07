@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ConnectionCreateInput, ConnectionInfo } from "./types";
+import type {
+  ConnectionCreateInput,
+  ConnectionInfo,
+  ConnectionTestSecrets,
+} from "./types";
 import { CMD } from "./commands";
 
 /* ============================================================================
@@ -8,15 +12,26 @@ import { CMD } from "./commands";
  */
 
 export async function connectionTest(
-  input: ConnectionCreateInput
+  input: ConnectionCreateInput,
+  secrets?: ConnectionTestSecrets
 ): Promise<void> {
-  await invoke(CMD.connectionTest, { input });
+  await invoke(CMD.connectionTest, {
+    payload: {
+      input,
+      secrets,
+    },
+  });
 }
 
-export async function connectionCreate(
+export async function profileConnectTest(
   input: ConnectionCreateInput
-): Promise<ConnectionInfo> {
-  return invoke<ConnectionInfo>(CMD.connectionCreate, { input });
+): Promise<void> {
+  await invoke(CMD.profileConnectTest, {
+    payload: {
+      input,
+      secrets: null,
+    },
+  });
 }
 
 export async function connectionList(): Promise<ConnectionInfo[]> {

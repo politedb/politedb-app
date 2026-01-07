@@ -6,13 +6,9 @@ import { Button } from "../common/Button";
 import { FilePathPicker } from "../common/FilePathPicker";
 import type { SectionProps } from "./connectionForm.utils";
 import { Select } from "../common/Select";
+import { toNumber } from "src/utils/convert";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
-
-function toNumber(v: any, fallback: number) {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : fallback;
-}
 
 export function SSHSection(props: SectionProps) {
   const { control, onDirty } = props;

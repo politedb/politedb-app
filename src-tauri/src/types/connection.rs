@@ -27,3 +27,15 @@ pub struct ConnectionInfo {
     pub engine: EngineKind,
     pub label: String,
 }
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ConnectionTestSecrets {
+    pub db_password: Option<String>,
+    pub ssh_password: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ConnectionTestInput {
+    pub input: ConnectionCreateInput,
+    pub secrets: Option<ConnectionTestSecrets>,
+}

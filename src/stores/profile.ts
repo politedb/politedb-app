@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { profileList, profileRemove, profileUpdate } from "src/lib/tauri";
+import { profileList, profileRemove } from "src/lib/tauri";
 
 type ProfileState = {
   profiles: ConnectionProfile[];
@@ -73,11 +73,8 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   saveProfile: async (profile: ConnectionProfile) => {
     set({ busy: true, error: null });
     try {
-      // Placeholder for save logic
-      const updated = await profileUpdate(profile.id, profile.input);
-
       set((s) => ({
-        profiles: [updated, ...s.profiles.filter((p) => p.id !== updated.id)],
+        profiles: [...s.profiles.filter((p) => p.id !== profile.id), profile],
         busy: false,
       }));
     } catch (e: any) {

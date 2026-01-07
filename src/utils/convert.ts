@@ -29,3 +29,8 @@ export function cellToString(cell: any): string {
 
   return "";
 }
+
+export function toNumber(v: any, fallback: number) {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : fallback;
+}

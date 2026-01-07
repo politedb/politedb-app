@@ -5,6 +5,7 @@ import type {
   Engine,
   SslMode,
 } from "src/lib/tauri";
+import { toNumber } from "src/utils/convert";
 
 /* =============================================================================
  * Types
@@ -48,11 +49,6 @@ export type SectionProps = {
 /* =============================================================================
  * Small utils
  * ============================================================================= */
-
-export function toNumber(v: any, fallback: number) {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : fallback;
-}
 
 export function normalizeTag(s: string) {
   return s
@@ -148,7 +144,7 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
     database: v.database,
     user: v.user,
     password: v.storeKeychain
-      ? { kind: "keychain", value: "" }
+      ? { kind: "keychain", value: v.password } // still use password field to carry keychain key
       : { kind: "inline", value: v.password },
     ssl_mode: v.sslMode,
     connect_timeout_ms: 60_000,
