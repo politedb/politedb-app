@@ -4,6 +4,7 @@ import type { ColumnMeta, TableChunk } from "../lib/tauri/types";
 import { cellToString } from "../utils/convert";
 import { useScreenStore } from "../stores/screen";
 import { profileConnect } from "../lib/tauri/profile";
+import { TableSizeInfo } from "../types";
 
 export type TableData = {
   columns: ColumnMeta[];
@@ -15,6 +16,7 @@ type TableDataState = Record<
   string,
   {
     data: TableData | null;
+    sizeInfo: TableSizeInfo | null;
     connectionId: string | null;
     busy: boolean;
     error: string | null;
@@ -33,7 +35,7 @@ function qLiteral(v: string) {
   return `'${String(v).replace(/"/g, `""`)}'`;
 }
 
-type QueryResult = { rows: any[][]; rowCount: number };
+type QueryResult = { rows: any; rowCount: number };
 
 type Pagination = {
   page: number;
@@ -103,7 +105,13 @@ export function useLoadTableData() {
 
       setTableDataMap((prev) => ({
         ...prev,
-        [key]: { data: null, connectionId: null, busy: true, error: null },
+        [key]: {
+          data: null,
+          sizeInfo: null,
+          connectionId: null,
+          busy: true,
+          error: null,
+        },
       }));
 
       try {
@@ -120,11 +128,11 @@ export function useLoadTableData() {
         const colRes = await runSqlQuery(connId, columnsSql);
 
         const columns: ColumnMeta[] = colRes.rows
-          .map((r) => ({
+          .map((r: any) => ({
             name: cellToString(r?.[0]),
             db_type: cellToString(r?.[1]),
           }))
-          .filter((c) => c.name);
+          .filter((c: any) => c.name);
 
         const limit = pagination?.pageSize ?? 1000;
         const offset = (pagination?.page ?? 0) * limit;
@@ -132,10 +140,20 @@ export function useLoadTableData() {
         const dataSql = `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`;
         const dataRes = await runSqlQuery(connId, dataSql);
 
+        // const sizeInfoSql = `
+        //   SELECT
+        //     pg_size_pretty(pg_total_relation_size(${tableIdent})) as total_size,
+        //     pg_size_pretty(pg_relation_size(${tableIdent})) as table_size,
+        //     pg_size_pretty(pg_total_relation_size(${tableIdent}) - pg_relation_size(${tableIdent})) as indexes_size;
+        // `.trim();
+        // const sizeInfoRes = await runSqlQuery(connId, sizeInfoSql);
+
         setTableDataMap((prev) => ({
           ...prev,
           [key]: {
             data: { columns, rows: dataRes.rows, rowCount: dataRes.rowCount },
+            // sizeInfo: sizeInfoRes.rows,
+            sizeInfo: null,
             connectionId: connId,
             busy: false,
             error: null,
@@ -149,7 +167,13 @@ export function useLoadTableData() {
 
         setTableDataMap((prev) => ({
           ...prev,
-          [key]: { data: null, connectionId: null, busy: false, error: msg },
+          [key]: {
+            data: null,
+            sizeInfo: null,
+            connectionId: null,
+            busy: false,
+            error: msg,
+          },
         }));
       }
     },
@@ -162,6 +186,7 @@ export function useLoadTableData() {
       return (
         tableDataMap[key] || {
           data: null,
+          sizeInfo: null,
           connectionId: null,
           busy: false,
           error: null,

@@ -1,18 +1,20 @@
 import { Button } from "../common/Button";
 import { ChevronLeft, ChevronRight } from "../icons";
 
-type Props = {
-  pagination: {
-    startIndex: number;
-    endIndex: number;
-    totalRows: number;
-    totalPages: number;
-  };
+export type Pagination = {
+  startIndex: number;
+  endIndex: number;
+  totalRows: number;
+  totalPages: number;
+};
+
+interface Props {
+  pagination: Pagination;
   page: number;
   pageSize: number;
   setPage: (page: number) => void;
   setPageSize: (pageSize: number) => void;
-};
+}
 
 export function TablePagination({
   pagination,
@@ -34,6 +36,26 @@ export function TablePagination({
 
   return (
     <div class="flex items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-3">
+      <div class="flex items-center gap-0.5">
+        <div class="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
+          <Button
+            variant="default"
+            onClick={() => handlePageChange(page - 1)}
+            className="px-3 py-1"
+          >
+            Data
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={() => handlePageChange(page + 1)}
+            disabled
+            className="px-3 py-1"
+          >
+            Structure
+          </Button>
+        </div>
+      </div>
+
       <div class="flex items-center gap-2">
         <span class="text-sm text-neutral-600">
           Showing {pagination.startIndex + 1} to{" "}
@@ -42,7 +64,7 @@ export function TablePagination({
         </span>
       </div>
 
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-0.5">
         <Button
           variant="outline"
           onClick={() => handlePageChange(page - 1)}
@@ -51,7 +73,6 @@ export function TablePagination({
         >
           <ChevronLeft className="size-3" />
         </Button>
-
         <Button
           variant="outline"
           onClick={() => handlePageChange(page + 1)}
@@ -60,10 +81,6 @@ export function TablePagination({
         >
           <ChevronRight className="size-3" />
         </Button>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <span class="text-sm text-neutral-600">Rows per page:</span>
         <select
           value={pageSize}
           onChange={(e: any) => handlePageSizeChange(Number(e.target.value))}

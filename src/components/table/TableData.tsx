@@ -47,11 +47,13 @@ export function TableData({ columns, data, onCellChange }: Props) {
         accessorFn: (row) => row[col.name]?.v,
         header: col.name,
         cell: ({ cell, row, table }) => {
+          const originalValue = tableData[row.index]?.[cell.column.id];
           return (
             <TableCell
               cell={cell}
               row={row}
               table={table}
+              originalValue={originalValue}
               onCellChange={onCellChange}
               setEditingCell={setEditingCell}
             />
@@ -110,6 +112,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
     data: editedData,
     columns: tableColumns,
     getCoreRowModel: getCoreRowModel(),
+    columnResizeMode: "onChange",
     meta: {
       updateData: (rowIndex: number, columnId: string, value: any) => {
         setEditedData((prev) =>
@@ -150,13 +153,20 @@ export function TableData({ columns, data, onCellChange }: Props) {
           <th
             key={header.id}
             class={cn(
-              "min-w-8 border border-neutral-200 bg-neutral-50 px-4 py-2",
+              "relative min-w-8 border border-neutral-200 bg-neutral-50 px-4 py-2",
               "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
           >
             {header.isPlaceholder
               ? null
               : flexRender(header.column.columnDef.header, header.getContext())}
+            {header.column.getCanResize() && (
+              <div
+                onMouseDown={header.getResizeHandler()}
+                onTouchStart={header.getResizeHandler()}
+                className="absolute top-0 right-0 h-full w-[4px] cursor-col-resize"
+              />
+            )}
           </th>
         ))}
       </tr>
@@ -173,6 +183,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
           <td
             key={cell.id}
             tabIndex={0}
+            style={{ width: cell.column.getSize() }}
             class={cn(
               "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
               isSelectingRow ? "bg-blue-200" : "hover:bg-blue-50",

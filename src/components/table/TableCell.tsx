@@ -15,6 +15,7 @@ interface Props {
   cell: Cell<any, any>;
   row: Row<any>;
   table: Table<any>;
+  originalValue: any;
   onCellChange?: (rowIndex: number, colIdx: number, value: any) => void;
   setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
 }
@@ -23,6 +24,7 @@ export const TableCell = memo(function TableCell({
   cell,
   row,
   table,
+  originalValue,
   onCellChange,
   setEditingCell,
 }: Props) {
@@ -105,9 +107,14 @@ export const TableCell = memo(function TableCell({
       onBlur={onInputBlur}
       onKeyDown={onInputKeyDown}
       class={cn(
-        "h-full w-full border-0 bg-transparent p-2 text-sm text-neutral-900",
+        "h-full w-full border-0 p-2 text-sm text-neutral-900",
         "outline-none hover:cursor-default focus:outline-none",
-        "overflow-x-auto"
+        "whitespace-nowrap",
+        "overflow-hidden text-ellipsis",
+        "focus:overflow-x-auto focus:text-ellipsis",
+        cellToString(originalValue) !== cellValue
+          ? "bg-amber-200"
+          : "bg-transparent"
       )}
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     />

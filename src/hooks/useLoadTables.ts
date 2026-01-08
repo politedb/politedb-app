@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { listenOp, operationExecute, profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
-
-export type TableItem = { schema: string; name: string };
+import { TableItem } from "../types";
 
 const LIST_TABLES_SQL = `
 select table_schema, table_name
