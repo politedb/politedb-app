@@ -111,6 +111,10 @@ export function TableData({ columns, data, onCellChange }: Props) {
   const table = useReactTable({
     data: editedData,
     columns: tableColumns,
+    defaultColumn: {
+      minSize: 60,
+      maxSize: 800,
+    },
     getCoreRowModel: getCoreRowModel(),
     columnResizeMode: "onChange",
     meta: {
@@ -129,6 +133,17 @@ export function TableData({ columns, data, onCellChange }: Props) {
       },
     },
   });
+
+  const columnSizeVars = useMemo(() => {
+    const headers = table.getFlatHeaders();
+    const colSizes: { [key: string]: number } = {};
+    for (let i = 0; i < headers.length; i++) {
+      const header = headers[i]!;
+      colSizes[`--header-${header.id}-size`] = header.getSize();
+      colSizes[`--col-${header.column.id}-size`] = header.column.getSize();
+    }
+    return colSizes;
+  }, [table.getState().columnSizingInfo, table.getState().columnSizing]);
 
   const tableRows = useMemo(() => table.getRowModel().rows ?? [], [editedData]);
 
@@ -153,9 +168,10 @@ export function TableData({ columns, data, onCellChange }: Props) {
           <th
             key={header.id}
             class={cn(
-              "relative min-w-8 bg-neutral-50 px-4 py-2",
+              "relative border-r border-neutral-200 bg-neutral-50 px-4 py-2 select-none",
               "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
+            style={{ width: `calc(var(--header-${header?.id}-size) * 1px)` }}
           >
             {header.isPlaceholder
               ? null
@@ -164,7 +180,8 @@ export function TableData({ columns, data, onCellChange }: Props) {
               <div
                 onMouseDown={header.getResizeHandler()}
                 onTouchStart={header.getResizeHandler()}
-                className="absolute top-0 right-0 h-full w-[4px] cursor-col-resize"
+                onDblClick={() => header.column.resetSize()}
+                className="absolute top-0 right-0 h-full w-[6px] cursor-col-resize"
               />
             )}
           </th>
@@ -203,7 +220,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
           key={`table-${tableRows.length}-${columns.length}-${page}`}
-          style={{ height: "100%" }}
+          style={{ ...columnSizeVars, height: "100%" }}
           data={tableRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}

@@ -20,13 +20,26 @@ type PatchMap = {
 };
 
 export function ConnectionScreen() {
-  const { activeScreen, tabs } = useScreenStore();
-  const activeTab = tabs.find((tab) => tab.id === activeScreen);
+  const {
+    activeScreen,
+    tabs,
+    tabOpenTables,
+    setTabOpenTables,
+    activeTableId,
+    setActiveTableId,
+  } = useScreenStore();
+
+  const activeTab = useMemo(
+    () => tabs.find((tab) => tab.id === activeScreen),
+    [tabs, activeScreen]
+  );
+  const openTables = useMemo(
+    () => tabOpenTables[activeScreen] || [],
+    [tabOpenTables, activeScreen]
+  );
 
   const [, setPatchMap] = useState<PatchMap>({});
   const [tableSearchQuery, setTableSearchQuery] = useState("");
-  const [openTables, setOpenTables] = useState<OpenTable[]>([]);
-  const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<TabViewMode[]>(["left"]);
   const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
   const [activeSchema, setActiveSchema] = useState("public");
@@ -59,8 +72,8 @@ export function ConnectionScreen() {
 
   // Get active table
   const activeTable = useMemo(() => {
-    return openTables.find((ot) => ot.id === activeTableId);
-  }, [openTables, activeTableId]);
+    return openTables.find((ot) => ot.id === activeTableId[activeScreen]);
+  }, [tabOpenTables, activeTableId, activeScreen]);
 
   // Get table data for active table
   const activeTableData = useMemo(() => {
@@ -71,57 +84,71 @@ export function ConnectionScreen() {
   }, [activeTable, getTableData]);
 
   // Load table data when a table is selected
-  const handleSelectTable = async (table: TableItem) => {
-    // Check if table is already open
-    const existingTable = openTables.find(
-      (ot) => ot.table.schema === table.schema && ot.table.name === table.name
-    );
+  const handleSelectTable = useCallback(
+    async (table: TableItem) => {
+      // Check if table is already open
+      const existingTable = openTables.find(
+        (ot) => ot.table.schema === table.schema && ot.table.name === table.name
+      );
 
-    if (existingTable) {
-      // Switch to existing table
-      setActiveTableId(`${table.schema}.${table.name}`);
-    } else {
-      // Open new table
-      const newTable: OpenTable = {
-        id: `${table.schema}.${table.name}`,
-        table,
-      };
-      setOpenTables([...openTables, newTable]);
-      setActiveTableId(newTable.id);
-
-      await loadTableData(table.schema, table.name);
-    }
-  };
-
-  const handleCloseTable = async (tableId: string, e: MouseEvent) => {
-    e.stopPropagation();
-    const tableToClose = openTables.find((ot) => ot.id === tableId);
-    if (tableToClose) {
-      const { schema, name } = tableToClose.table;
-      const { connectionId } = getTableData(schema, name);
-      removeTableData(schema, name);
-
-      try {
-        if (connectionId) {
-          await connectionRemove(connectionId);
-        }
-      } catch (error) {
-        console.error("Error removing connection:", error);
-      }
-    }
-
-    const newOpenTables = openTables.filter((ot) => ot.id !== tableId);
-    setOpenTables(newOpenTables);
-
-    // If closing active table, switch to another or clear
-    if (activeTableId === tableId) {
-      if (newOpenTables.length > 0) {
-        setActiveTableId(newOpenTables[newOpenTables.length - 1].id);
+      if (existingTable) {
+        // Switch to existing table
+        setActiveTableId(activeScreen, `${table.schema}.${table.name}`);
       } else {
-        setActiveTableId(null);
+        // Open new table
+        const newTable: OpenTable = {
+          id: `${table.schema}.${table.name}`,
+          table,
+        };
+        setTabOpenTables(activeScreen, [...(openTables || []), newTable]);
+        setActiveTableId(activeScreen, newTable.id);
+
+        await loadTableData(table.schema, table.name);
       }
-    }
-  };
+    },
+    [activeScreen, openTables, setTabOpenTables, loadTableData]
+  );
+
+  const handleCloseTable = useCallback(
+    async (tableId: string, e: MouseEvent) => {
+      e.stopPropagation();
+      const tableToClose = openTables.find((ot) => ot.id === tableId);
+      if (tableToClose) {
+        const { schema, name } = tableToClose.table;
+        const { connectionId } = getTableData(schema, name);
+        removeTableData(schema, name);
+
+        try {
+          if (connectionId) {
+            await connectionRemove(connectionId);
+          }
+        } catch (error) {
+          console.error("Error removing connection:", error);
+        }
+      }
+
+      const newOpenTables = openTables.filter((ot) => ot.id !== tableId);
+      setTabOpenTables(activeScreen, newOpenTables);
+
+      // If closing active table, switch to another or clear
+      if (activeTableId[activeScreen] === tableId) {
+        if (newOpenTables.length > 0) {
+          setActiveTableId(
+            activeScreen,
+            newOpenTables[newOpenTables.length - 1].id
+          );
+        } else {
+          setActiveTableId(activeScreen, null);
+        }
+      }
+    },
+    [
+      activeTableId[activeScreen],
+      openTables,
+      setTabOpenTables,
+      setActiveTableId,
+    ]
+  );
 
   const handleCellChange = useCallback(
     (rowIndex: number, columnIndex: number, value: any) => {
@@ -245,7 +272,7 @@ export function ConnectionScreen() {
             setExpandedSections={setExpandedSections}
             filteredTables={filteredTables}
             handleSelectTable={handleSelectTable}
-            activeTableId={activeTableId}
+            activeTableId={activeTableId[activeScreen]}
           />
         )}
 
@@ -265,8 +292,8 @@ export function ConnectionScreen() {
               >
                 <NavigationTabs
                   openTables={openTables}
-                  setActiveTableId={setActiveTableId}
-                  activeTableId={activeTableId}
+                  setActiveTableId={(id) => setActiveTableId(activeScreen, id)}
+                  activeTableId={activeTableId[activeScreen]}
                   handleCloseTable={handleCloseTable}
                 />
               </div>

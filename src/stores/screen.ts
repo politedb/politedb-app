@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { OpenTable } from "../types";
 
 export type Tab = {
   id: string;
@@ -14,8 +15,12 @@ export type Tab = {
 type ScreenState = {
   activeScreen: string;
   tabs: Tab[];
+  tabOpenTables: { [tabId: string]: OpenTable[] };
+  activeTableId: { [tabId: string]: string | null };
 
   setActiveScreen: (screen: string) => void;
+  setTabOpenTables: (tabId: string, tables: OpenTable[]) => void;
+  setActiveTableId: (tabId: string, id: string | null) => void;
 
   addTab: (tab: Tab) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
@@ -27,8 +32,26 @@ type ScreenState = {
 export const useScreenStore = create<ScreenState>((set) => ({
   activeScreen: "main",
   tabs: [],
+  tabOpenTables: {},
+  activeTableId: {},
 
   setActiveScreen: (screen) => set({ activeScreen: screen }),
+
+  setTabOpenTables: (tabId, openTables) =>
+    set((s) => ({
+      tabOpenTables: {
+        ...s.tabOpenTables,
+        [tabId]: openTables,
+      },
+    })),
+
+  setActiveTableId: (tabId, activeTableId) =>
+    set((s) => ({
+      activeTableId: {
+        ...s.activeTableId,
+        [tabId]: activeTableId,
+      },
+    })),
 
   addTab: (tab) =>
     set((s) => ({
