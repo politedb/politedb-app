@@ -114,6 +114,8 @@ export function preparePayloadWithSecret(
 ): ConnectionCreateInput {
   const engine = String(input.engine || "");
   const label = String(input.label || "");
+  const tags = input.tags;
+  const indicator_color = input.indicator_color || "";
 
   const persistSecrets = plan.persistSecrets;
 
@@ -157,6 +159,8 @@ export function preparePayloadWithSecret(
     return {
       engine,
       label,
+      tags,
+      indicator_color,
       ssh,
       postgres: {
         ...pg,
@@ -178,6 +182,8 @@ export function preparePayloadWithSecret(
     return {
       engine,
       label,
+      tags,
+      indicator_color,
       ssh,
       mysql: {
         ...my,
@@ -199,6 +205,8 @@ export function preparePayloadWithSecret(
     return {
       engine,
       label,
+      tags,
+      indicator_color,
       ssh,
       redis: {
         ...rd,
@@ -211,6 +219,8 @@ export function preparePayloadWithSecret(
   // (You can tighten this later by throwing.)
   return {
     engine,
+    tags,
+    indicator_color,
     label,
     ssh,
     postgres: input.postgres,
@@ -290,7 +300,6 @@ async function withKeychainRollback<T>(
 
 function buildSavePlan(input: SaveAndConnectInput & SaveAction): PersistPlan {
   const mode = input.mode;
-  console.log("Profile save mode:", mode);
   const profileId = mode === "create" ? uuidv4() : input.profileId;
 
   const persistSecrets = !!input.storeKeychain;
@@ -364,8 +373,9 @@ async function profileSaveCore<K extends SaveKind>(
     const payload = buildProfilePayload(input, plan);
     const cmdPayload = buildCmdPayload(kind, plan, payload);
 
+    console.log({ cmdPayload });
+
     if (kind === "save_and_connect") {
-      console.log({ cmdPayload });
       return (await invoke<ProfileSaveAndConnectResult>(
         CMD.profileSaveAndConnect,
         {

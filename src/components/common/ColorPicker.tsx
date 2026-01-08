@@ -22,7 +22,7 @@ export function ColorPicker(props: {
     <div class="flex items-center gap-2">
       {/* Preset colors */}
       {PRESET_COLORS.map((c) => {
-        const selected = value === c;
+        const selected = value.toUpperCase() === c.toUpperCase();
         return (
           <button
             key={c || "none"}

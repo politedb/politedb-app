@@ -13,7 +13,10 @@ export function FilePathPicker(props: {
   placeholder?: string;
   onPick: () => void | Promise<void>;
   onClear?: () => void;
+
   disabled?: boolean;
+  error?: boolean;
+
   className?: string;
 }) {
   const {
@@ -22,32 +25,45 @@ export function FilePathPicker(props: {
     onPick,
     onClear,
     disabled,
+    error,
     className,
   } = props;
 
   const hasValue = !!value?.trim();
   const display = hasValue ? basename(value) : placeholder;
 
+  const borderCls = error
+    ? "border-rose-300 focus:border-rose-400 focus:ring-rose-200/60"
+    : "border-slate-300 focus:border-blue-400 focus:ring-blue-200/60";
+
   return (
     <div
-      class={cn(
-        "group relative w-full",
-        disabled && "pointer-events-none opacity-60",
-        className
-      )}
-      title={hasValue ? value : undefined} // tooltip native = full path
+      class={cn("relative w-full", disabled && "opacity-60", className)}
+      title={hasValue ? value : undefined}
     >
-      <button
-        onClick={onPick}
-        type="button"
+      {/* Clickable main area */}
+      <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled ? "true" : "false"}
+        onClick={() => {
+          if (disabled) return;
+          void onPick();
+        }}
+        onKeyDown={(e) => {
+          if (disabled) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void onPick();
+          }
+        }}
         class={cn(
-          "flex h-10 w-full min-w-0 items-center gap-2",
-          "rounded-lg border border-slate-300 bg-white px-3",
-          "text-sm hover:bg-slate-50",
-          "focus:ring-2 focus:ring-blue-200 focus:outline-none"
+          "flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm outline-none",
+          borderCls,
+          "focus:ring-2",
+          disabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-slate-50"
         )}
       >
-        {/* Filename / placeholder */}
         <span
           class={cn(
             "min-w-0 flex-1 truncate text-left",
@@ -57,27 +73,35 @@ export function FilePathPicker(props: {
           {display}
         </span>
 
-        {/* Clear */}
-        {hasValue && onClear ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onClear();
-            }}
-            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-            title="Clear"
-          >
-            <X className="size-3" />
-          </button>
-        ) : null}
-
-        {/* Folder icon */}
         {!hasValue ? (
           <Folder className="size-4 shrink-0 text-slate-500" />
         ) : null}
-      </button>
+      </div>
+
+      {/* Clear button sits OUTSIDE the clickable div to avoid nested buttons */}
+      {hasValue && onClear ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClear();
+          }}
+          class={cn(
+            "absolute top-1/2 right-2 -translate-y-1/2",
+            "flex h-6 w-6 items-center justify-center rounded-md transition",
+            error
+              ? "text-rose-400 hover:bg-rose-100 hover:text-rose-700"
+              : "text-slate-400 hover:bg-slate-200 hover:text-slate-700",
+            disabled && "cursor-not-allowed"
+          )}
+          title="Clear"
+          aria-label="Clear file path"
+        >
+          <X className="size-3" />
+        </button>
+      ) : null}
     </div>
   );
 }

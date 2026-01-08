@@ -14,6 +14,13 @@ pub struct ConnectionCreateInput {
     pub engine: EngineKind,
     pub label: String,
 
+    #[serde(default)]
+    pub tags: Vec<String>,
+
+    /// UI accent / indicator color (hex, e.g. "#22c55e")
+    #[serde(default)]
+    pub indicator_color: Option<String>,
+
     pub postgres: Option<PgConnectInput>,
     pub mysql: Option<MySqlConnectInput>,
     pub redis: Option<RedisConnectInput>,

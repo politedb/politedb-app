@@ -13,14 +13,63 @@ export function ConnectionBasicsSection(
 ) {
   const { control, errors, onDirty, isCreateNewConnection } = props;
 
+  // storeKeychain needs to be controlled (for radio)
+  const storeKeychainCtl = useController({
+    control,
+    name: "storeKeychain",
+    defaultValue: true as any,
+  });
   const storeKeychain = useWatch({ control, name: "storeKeychain" });
 
-  const name = useController({ control, name: "name" });
-  const host = useController({ control, name: "host" });
-  const port = useController({ control, name: "port" });
-  const database = useController({ control, name: "database" });
-  const user = useController({ control, name: "user" });
-  const password = useController({ control, name: "password" });
+  const name = useController({
+    control,
+    name: "name",
+    rules: { required: "Name is required." },
+  });
+
+  const host = useController({
+    control,
+    name: "host",
+    rules: { required: "Host is required." },
+  });
+
+  const port = useController({
+    control,
+    name: "port",
+    rules: {
+      required: "Port is required.",
+      validate: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return "Port is invalid.";
+        if (n <= 0 || n > 65535) return "Port must be 1..65535.";
+        return true;
+      },
+    },
+  });
+
+  const database = useController({
+    control,
+    name: "database",
+    rules: { required: "Database is required." },
+  });
+
+  const user = useController({
+    control,
+    name: "user",
+    rules: { required: "User is required." },
+  });
+
+  // Password: required ONLY when storeKeychain=false
+  const password = useController({
+    control,
+    name: "password",
+    rules: {
+      validate: (v) => {
+        if (storeKeychain) return true;
+        return String(v ?? "").trim().length > 0 || "Password is required.";
+      },
+    },
+  });
 
   const sslMode = useController({ control, name: "sslMode" });
   const sslKey = useController({ control, name: "sslKey" });
@@ -28,9 +77,6 @@ export function ConnectionBasicsSection(
   const sslCA = useController({ control, name: "sslCA" });
 
   const [showPassword, setShowPassword] = useState(false);
-  const [showTogglePassword, setShowTogglePassword] = useState(
-    !!password.field.value
-  );
   const [editingPassword, setEditingPassword] = useState(isCreateNewConnection);
 
   function dirty() {
@@ -42,11 +88,23 @@ export function ConnectionBasicsSection(
       ? String(errors.password.message || "Password is required.")
       : undefined;
 
-  // Keychain saved => form value is empty AND user is not editing a new password
+  // Keychain saved => password value empty AND user is not editing a new password
   const shouldShowMasked = useMemo(() => {
     const v = String(password.field.value ?? "");
     return !!storeKeychain && v.length === 0 && !editingPassword;
   }, [storeKeychain, password.field.value, editingPassword]);
+
+  const showTogglePassword = useMemo(() => {
+    const v = String(password.field.value ?? "");
+    return v.trim().length > 0;
+  }, [password.field.value]);
+
+  const nameErr = !!errors?.name;
+  const hostErr = !!errors?.host;
+  const portErr = !!errors?.port;
+  const dbErr = !!errors?.database;
+  const userErr = !!errors?.user;
+  const pwErr = !storeKeychain && !!errors?.password;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -62,6 +120,7 @@ export function ConnectionBasicsSection(
           <Input
             value={name.field.value}
             placeholder="Mochi"
+            error={nameErr}
             onInput={(e: InputEvt) => {
               name.field.onChange(e.currentTarget.value);
               dirty();
@@ -75,6 +134,7 @@ export function ConnectionBasicsSection(
               class="col-span-2"
               value={host.field.value}
               placeholder="127.0.0.1 or /tmp/..."
+              error={hostErr}
               onInput={(e: InputEvt) => {
                 host.field.onChange(e.currentTarget.value);
                 dirty();
@@ -84,6 +144,7 @@ export function ConnectionBasicsSection(
               value={String(port.field.value ?? "")}
               inputMode="numeric"
               placeholder="5432"
+              error={portErr}
               onInput={(e: InputEvt) => {
                 port.field.onChange(toNumber(e.currentTarget.value, 5432));
                 dirty();
@@ -97,6 +158,7 @@ export function ConnectionBasicsSection(
             <Input
               value={database.field.value}
               placeholder="database"
+              error={dbErr}
               onInput={(e: InputEvt) => {
                 database.field.onChange(e.currentTarget.value);
                 dirty();
@@ -105,6 +167,7 @@ export function ConnectionBasicsSection(
             <Input
               value={user.field.value}
               placeholder="user"
+              error={userErr}
               onInput={(e: InputEvt) => {
                 user.field.onChange(e.currentTarget.value);
                 dirty();
@@ -113,8 +176,10 @@ export function ConnectionBasicsSection(
           </div>
         </Field>
 
+        {/* Password + Storage (merged) */}
         <Field label="Password" alignTop>
-          <div>
+          <div class="space-y-2">
+            {/* Password row */}
             {shouldShowMasked ? (
               <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div class="flex items-center gap-2">
@@ -131,7 +196,7 @@ export function ConnectionBasicsSection(
                   onClick={() => {
                     setEditingPassword(true);
                     setShowPassword(false);
-                    // keep password value empty; user will type a new one
+                    // keep password empty; user will type a new one
                     dirty();
                   }}
                 >
@@ -139,61 +204,97 @@ export function ConnectionBasicsSection(
                 </button>
               </div>
             ) : (
-              <>
-                <div class="relative">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={password.field.value}
-                    placeholder={
-                      storeKeychain
-                        ? "Enter password (save in Keychain)"
-                        : "Enter password (not saved)"
-                    }
-                    onInput={(e: InputEvt) => {
-                      const next = e.currentTarget.value;
-                      password.field.onChange(next);
+              <div class="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={password.field.value}
+                  error={pwErr}
+                  placeholder={
+                    storeKeychain
+                      ? "Enter password (save in Keychain)"
+                      : "Enter password (not saved)"
+                  }
+                  onInput={(e: InputEvt) => {
+                    password.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                  class="pr-12"
+                />
 
-                      setShowTogglePassword(!!next);
-                    }}
-                    class="pr-12"
-                  />
-
-                  {showTogglePassword && (
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((x) => !x)}
-                      class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                      title={showPassword ? "Hide" : "Show"}
-                    >
-                      {showPassword ? "Hide" : "Show"}
-                    </button>
-                  )}
-                </div>
-
-                {/* {storeKeychain && !password.field.value && editingPassword ? (
-                  <div class="mt-2 text-xs text-slate-500">
-                    Leave empty to keep the existing password.
-                    <button
-                      type="button"
-                      class="ml-2 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-500"
-                      onClick={() => {
-                        // user cancels replacement, go back to masked state
-                        password.field.onChange("");
-                        setEditingPassword(false);
-                        setShowPassword(false);
-                        dirty();
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : null} */}
-
-                {!storeKeychain && passwordError ? (
-                  <div class="mt-2 text-xs text-rose-600">{passwordError}</div>
+                {showTogglePassword ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((x) => !x)}
+                    class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    title={showPassword ? "Hide" : "Show"}
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
                 ) : null}
-              </>
+              </div>
             )}
+
+            {/* Storage radio */}
+            <div
+              class={`flex flex-wrap items-center gap-4 rounded-xl border px-3 py-2 ${
+                storeKeychain
+                  ? "border-slate-200 bg-white"
+                  : "border-slate-200 bg-white"
+              }`}
+            >
+              <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="password-storage"
+                  checked={!!storeKeychain}
+                  onChange={() => {
+                    storeKeychainCtl.field.onChange(true);
+                    // if switching to keychain, user might keep password empty to mean "keep existing"
+                    dirty();
+                  }}
+                />
+                Save in Keychain
+              </label>
+
+              <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="password-storage"
+                  checked={!storeKeychain}
+                  onChange={() => {
+                    storeKeychainCtl.field.onChange(false);
+
+                    // If they turn off keychain while we were masked, force editing mode
+                    // because we now need an inline password to test/connect.
+                    if (shouldShowMasked) {
+                      setEditingPassword(true);
+                      setShowPassword(false);
+                    }
+
+                    dirty();
+                  }}
+                />
+                Do not save
+              </label>
+
+              <div class="w-full text-xs leading-snug text-slate-500">
+                {storeKeychain ? (
+                  <>
+                    Stored securely in OS keychain. You can leave password empty
+                    to keep the existing one.
+                  </>
+                ) : (
+                  <>
+                    Password is used for this session only and will not be
+                    saved.
+                  </>
+                )}
+              </div>
+            </div>
+
+            {!storeKeychain && passwordError ? (
+              <div class="text-xs text-rose-600">{passwordError}</div>
+            ) : null}
           </div>
         </Field>
 

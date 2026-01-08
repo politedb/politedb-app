@@ -13,6 +13,14 @@ pub struct ConnectionProfile {
     /// Raw connection input (password may be SecretRef)
     pub input: ConnectionCreateInput,
 
+    /// UI metadata (persisted)
+    #[serde(default)]
+    pub tags: Vec<String>,
+
+    /// UI accent / indicator color (hex, e.g. "#22c55e")
+    #[serde(default)]
+    pub indicator_color: Option<String>,
+
     pub created_at: i64,
     pub updated_at: i64,
 }

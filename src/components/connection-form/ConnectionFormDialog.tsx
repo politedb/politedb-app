@@ -18,7 +18,6 @@ import { Button } from "../common/Button";
 
 import { ConnectionBasicsSection } from "./ConnectionBasicsSection";
 import { IdentitySection } from "./IdentitySection";
-import { SecuritySection } from "./SecuritySection";
 import { SSHSection } from "./SshSection";
 import { ConnectionFooter } from "./ConnectionFooter";
 
@@ -194,10 +193,10 @@ export function ConnectionFormDialog({
             onDirty={onDirty}
             isCreateNewConnection={!profileId}
           />
-
-          <IdentitySection control={control} onDirty={onDirty} />
-          <SecuritySection control={control} onDirty={onDirty} />
-          <SSHSection control={control} onDirty={onDirty} />
+          <div class="space-y-3">
+            <IdentitySection control={control} onDirty={onDirty} />
+            <SSHSection control={control} onDirty={onDirty} />
+          </div>
         </div>
 
         <ConnectionFooter

@@ -15,7 +15,7 @@ export type FormValues = {
   name: string;
 
   tags: string[];
-  statusColor: string;
+  indicator_color: string;
 
   host: string;
   port: number;
@@ -157,6 +157,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   return {
     engine: "postgres",
     label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
     postgres,
     ssh: buildSshInput(v, v.host, port),
   };
@@ -288,12 +290,13 @@ export function makeDefaultValues(initialData?: ConnectionProfile): FormValues {
   const ssl = makeSslDefaults(engine, input);
   const ssh = makeSshDefaults(input);
 
-  const initialTags = ["local"]; // profile schema currently doesn't carry tags/statusColor
+  const initialTags =
+    input?.tags.length == 0 ? ["local"] : (input?.tags ?? ["local"]);
 
   return {
     name: input?.label || initialData?.label || "Mochi",
     tags: dedupeKeepOrder(initialTags.map(normalizeTag)),
-    statusColor: "",
+    indicator_color: input?.indicator_color || "",
 
     host: db.host,
     port: db.port,

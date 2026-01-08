@@ -95,7 +95,7 @@ export function SSLSection(props: {
       </Field>
 
       {modeSupportsTls ? (
-        <div class="mt-3">
+        <div class="mt-5">
           <div class="mb-2 text-xs text-slate-500">
             Optional. Leave empty if you don’t use client certificates.
           </div>

@@ -1,28 +1,39 @@
 import React from "preact/compat";
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
 
 interface SelectProps extends React.ComponentProps<"select"> {
-  className?: string;
-  class?: string;
+  error?: boolean;
 }
 
 export function Select({
   children,
+  error,
   className,
   class: classNames,
+  disabled,
   ...props
 }: SelectProps) {
   return (
     <select
+      {...props}
+      disabled={disabled}
       className={cn(
-        "h-8 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-900 outline-none",
-        "focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        "cursor-pointer",
+        // base
+        "h-9 w-full rounded-lg border px-3 text-sm font-medium outline-none",
+        "bg-white text-slate-900",
+        "placeholder:text-slate-400",
+
+        // state
+        error
+          ? "border-rose-300 bg-rose-50 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/60"
+          : "border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200/60",
+
+        // disabled
+        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+
         className,
         classNames
       )}
-      {...props}
     >
       {children}
     </select>

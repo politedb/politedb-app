@@ -156,8 +156,10 @@ pub fn profile_create_with_id(
 
     let profile = ConnectionProfile {
         id,
-        engine: input.engine,
+        engine: input.engine.clone(),
         label: input.label.clone(),
+        tags: input.tags.clone(),
+        indicator_color: input.indicator_color.clone(),
         input,
         created_at: now,
         updated_at: now,

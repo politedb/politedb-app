@@ -139,6 +139,9 @@ export type ConnectionCreateInput = {
   engine: Engine;
   label: string;
 
+  tags: string[];
+  indicator_color: string;
+
   ssh?: SshTunnelInput;
 
   postgres?: PgConnectInput;
