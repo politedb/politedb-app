@@ -19,8 +19,10 @@ type ScreenState = {
   activeTableId: { [tabId: string]: string | null };
 
   setActiveScreen: (screen: string) => void;
-  setTabOpenTables: (tabId: string, tables: OpenTable[]) => void;
   setActiveTableId: (tabId: string, id: string | null) => void;
+
+  addTabOpenTable: (tabId: string, table: OpenTable) => void;
+  removeTabOpenTable: (tabId: string, tableId: string) => void;
 
   addTab: (tab: Tab) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
@@ -37,19 +39,27 @@ export const useScreenStore = create<ScreenState>((set) => ({
 
   setActiveScreen: (screen) => set({ activeScreen: screen }),
 
-  setTabOpenTables: (tabId, openTables) =>
-    set((s) => ({
-      tabOpenTables: {
-        ...s.tabOpenTables,
-        [tabId]: openTables,
-      },
-    })),
-
   setActiveTableId: (tabId, activeTableId) =>
     set((s) => ({
       activeTableId: {
         ...s.activeTableId,
         [tabId]: activeTableId,
+      },
+    })),
+
+  addTabOpenTable: (tabId, table) =>
+    set((s) => ({
+      tabOpenTables: {
+        ...s.tabOpenTables,
+        [tabId]: [...(s.tabOpenTables[tabId] || []), table],
+      },
+    })),
+
+  removeTabOpenTable: (tabId, tableId) =>
+    set((s) => ({
+      tabOpenTables: {
+        ...s.tabOpenTables,
+        [tabId]: s.tabOpenTables[tabId].filter((t) => t.id !== tableId),
       },
     })),
 

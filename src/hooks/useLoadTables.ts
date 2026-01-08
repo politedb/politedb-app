@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo } from "preact/hooks";
 import { profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 import { TableItem } from "../types";
 import { listTablesQuery } from "./queries";
 import { runSqlQuery } from "../utils/query";
+import { useConnectionStore } from "../stores/connection";
 
 export function useLoadTables() {
   const { tabs, activeScreen, updateTab } = useScreenStore();
-
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [tables, setTables] = useState<TableItem[]>([]);
+  const { setTables } = useConnectionStore();
 
   const activeTab = useMemo(() => {
     return tabs.find((t) => t.id === activeScreen) ?? null;
@@ -37,15 +35,16 @@ export function useLoadTables() {
     async (schema: string = "public") => {
       if (!activeTab) return;
 
-      setBusy(true);
-      setTables([]);
-      // setMsg("Loading tables...");
+      setTables(activeScreen, { data: [], busy: true, error: null });
 
       try {
         const connectionId = await ensureRuntimeConnection();
         if (!connectionId) {
-          setMsg("No active connection.");
-          setBusy(false);
+          setTables(activeScreen, {
+            data: [],
+            busy: false,
+            error: "No active connection.",
+          });
           return;
         }
 
@@ -61,12 +60,13 @@ export function useLoadTables() {
           }))
           .filter((t: any) => t.schema && t.name);
 
-        setTables(tables);
-
-        setBusy(false);
+        setTables(activeScreen, { data: tables, busy: false, error: null });
       } catch (e: any) {
-        setMsg(e?.message ? String(e.message) : String(e));
-        setBusy(false);
+        setTables(activeScreen, {
+          data: [],
+          busy: false,
+          error: e?.message ? String(e.message) : String(e),
+        });
       }
     },
     [activeTab, ensureRuntimeConnection]
@@ -78,5 +78,5 @@ export function useLoadTables() {
     void loadTables("public");
   }, [activeTab?.id, loadTables]); // tab switch => reload
 
-  return { tables, msg, busy, loadTables };
+  return { loadTables };
 }

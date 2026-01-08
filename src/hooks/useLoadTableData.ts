@@ -1,29 +1,18 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import { useCallback, useMemo } from "preact/hooks";
 import type { ColumnMeta } from "../lib/tauri/types";
 import { cellToString } from "../utils/convert";
 import { useScreenStore } from "../stores/screen";
 import { profileConnect } from "../lib/tauri/profile";
-import { TableData, TableSizeInfo } from "../types";
 import {
   tableColumnsQuery,
   tableDataQuery,
   tableSizeInfoQuery,
 } from "./queries";
 import { runSqlQuery } from "../utils/query";
+import { useConnectionStore } from "../stores/connection";
 
-type TableDataState = Record<
-  string,
-  {
-    data: TableData | null;
-    sizeInfo: TableSizeInfo | null;
-    connectionId: string | null;
-    busy: boolean;
-    error: string | null;
-  }
->;
-
-function tableKey(schema: string, tableName: string) {
-  return `${schema}.${tableName}`;
+function tableKey(activeScreen: string, schema: string, tableName: string) {
+  return `${activeScreen}.${schema}.${tableName}`;
 }
 
 type Pagination = {
@@ -32,8 +21,8 @@ type Pagination = {
 };
 
 export function useLoadTableData() {
-  const [tableDataMap, setTableDataMap] = useState<TableDataState>({});
-
+  const { tableDataMap, addTableDataMap, removeTableDataMap } =
+    useConnectionStore();
   const { tabs, activeScreen, setRuntimeConnectionId } = useScreenStore();
 
   const activeTab = useMemo(() => {
@@ -58,18 +47,15 @@ export function useLoadTableData() {
 
   const loadTableData = useCallback(
     async (schema: string, tableName: string, pagination?: Pagination) => {
-      const key = tableKey(schema, tableName);
+      const key = tableKey(activeScreen, schema, tableName);
 
-      setTableDataMap((prev) => ({
-        ...prev,
-        [key]: {
-          data: null,
-          sizeInfo: null,
-          connectionId: null,
-          busy: true,
-          error: null,
-        },
-      }));
+      addTableDataMap(key, {
+        data: null,
+        sizeInfo: null,
+        connectionId: null,
+        busy: true,
+        error: null,
+      });
 
       try {
         const connId = await ensureRuntimeConn(key);
@@ -98,44 +84,38 @@ export function useLoadTableData() {
           tableSizeInfoQuery(schema, tableName)
         );
 
-        setTableDataMap((prev) => ({
-          ...prev,
-          [key]: {
-            data: { columns, rows: dataRes.rows, rowCount: dataRes.rowCount },
-            sizeInfo: {
-              totalSize: cellToString(sizeInfoRes.rows[0][0]),
-              dataSize: cellToString(sizeInfoRes.rows[0][1]),
-              indexSize: cellToString(sizeInfoRes.rows[0][2]),
-            },
-            connectionId: connId,
-            busy: false,
-            error: null,
+        addTableDataMap(key, {
+          data: { columns, rows: dataRes.rows, rowCount: dataRes.rowCount },
+          sizeInfo: {
+            totalSize: cellToString(sizeInfoRes.rows[0][0]),
+            dataSize: cellToString(sizeInfoRes.rows[0][1]),
+            indexSize: cellToString(sizeInfoRes.rows[0][2]),
           },
-        }));
+          connectionId: connId,
+          busy: false,
+          error: null,
+        });
       } catch (e: any) {
         const msg =
           e?.error ||
           (e?.message ? String(e.message) : String(e)) ||
           "UNKNOWN_ERROR";
 
-        setTableDataMap((prev) => ({
-          ...prev,
-          [key]: {
-            data: null,
-            sizeInfo: null,
-            connectionId: null,
-            busy: false,
-            error: msg,
-          },
-        }));
+        addTableDataMap(key, {
+          data: null,
+          sizeInfo: null,
+          connectionId: null,
+          busy: false,
+          error: msg,
+        });
       }
     },
-    [ensureRuntimeConn]
+    [activeScreen, ensureRuntimeConn]
   );
 
   const getTableData = useCallback(
-    (schema: string, tableName: string) => {
-      const key = tableKey(schema, tableName);
+    (activeScreen: string, schema: string, tableName: string) => {
+      const key = tableKey(activeScreen, schema, tableName);
       return (
         tableDataMap[key] || {
           data: null,
@@ -146,18 +126,16 @@ export function useLoadTableData() {
         }
       );
     },
-    [tableDataMap]
+    [activeScreen, tableDataMap]
   );
 
-  const removeTableData = useCallback((schema: string, tableName: string) => {
-    const key = tableKey(schema, tableName);
-    setTableDataMap((prev) => {
-      if (!prev[key]) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
+  const removeTableData = useCallback(
+    (schema: string, tableName: string) => {
+      const key = tableKey(activeScreen, schema, tableName);
+      removeTableDataMap(key);
+    },
+    [activeScreen]
+  );
 
   return {
     loadTableData,

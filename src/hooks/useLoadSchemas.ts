@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo } from "preact/hooks";
 import { profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 import { dbSchemasQuery } from "./queries";
 import { runSqlQuery } from "../utils/query";
+import { useConnectionStore } from "../stores/connection";
 
 export function useLoadSchemas() {
   const { tabs, activeScreen, updateTab } = useScreenStore();
-
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [schemas, setSchemas] = useState<string[]>([]);
+  const { setSchemas } = useConnectionStore();
 
   const activeTab = useMemo(() => {
     return tabs.find((t) => t.id === activeScreen) ?? null;
@@ -35,14 +33,16 @@ export function useLoadSchemas() {
   const loadSchemas = useCallback(async () => {
     if (!activeTab) return;
 
-    setBusy(true);
-    setSchemas([]);
+    setSchemas(activeScreen, { data: [], busy: true, error: null });
 
     try {
       const connectionId = await ensureRuntimeConnection();
       if (!connectionId) {
-        setMsg("No active connection.");
-        setBusy(false);
+        setSchemas(activeScreen, {
+          data: [],
+          busy: false,
+          error: "No active connection.",
+        });
         return;
       }
 
@@ -51,12 +51,13 @@ export function useLoadSchemas() {
         .map((r: any) => cellToString(r?.[0]))
         .filter((s: any) => s);
 
-      setSchemas(schemas);
-
-      setBusy(false);
+      setSchemas(activeScreen, { data: schemas, busy: false, error: null });
     } catch (e: any) {
-      setMsg(e?.message ? String(e.message) : String(e));
-      setBusy(false);
+      setSchemas(activeScreen, {
+        data: [],
+        busy: false,
+        error: e?.message ? String(e.message) : String(e),
+      });
     }
   }, [activeTab, ensureRuntimeConnection]);
 
@@ -66,5 +67,5 @@ export function useLoadSchemas() {
     void loadSchemas();
   }, [activeTab?.id, loadSchemas]); // tab switch => reload
 
-  return { schemas, msg, busy, loadSchemas };
+  return { loadSchemas };
 }

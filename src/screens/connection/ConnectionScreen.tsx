@@ -14,6 +14,7 @@ import { Box } from "../../components/common/Box";
 import { cn } from "../../utils/cn";
 import { TabViewMode, SqlQuery, OpenTable, TableItem } from "../../types";
 import { useLoadSchemas } from "../../hooks/useLoadSchemas";
+import { useConnectionStore } from "../../stores/connection";
 
 type PatchMap = {
   [tableId: string]: { [rowId: string]: { [column: string]: any } };
@@ -24,10 +25,13 @@ export function ConnectionScreen() {
     activeScreen,
     tabs,
     tabOpenTables,
-    setTabOpenTables,
+    addTabOpenTable,
+    removeTabOpenTable,
     activeTableId,
     setActiveTableId,
   } = useScreenStore();
+
+  const { tables, schemas } = useConnectionStore();
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeScreen),
@@ -48,22 +52,16 @@ export function ConnectionScreen() {
     tables: true,
   });
 
-  const {
-    tables,
-    busy: tableBusy,
-    msg: tableMsg,
-    loadTables,
-  } = useLoadTables();
-
-  const { schemas, msg: schemaMsg, busy: schemaBusy } = useLoadSchemas();
-
+  const { loadTables } = useLoadTables();
+  const { loadSchemas } = useLoadSchemas();
   const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
   // Filter tables by search query
   const filteredTables = useMemo(() => {
-    if (!tableSearchQuery.trim()) return tables;
+    if (!tables[activeScreen]) return [];
+    if (!tableSearchQuery.trim()) return tables[activeScreen].data;
     const query = tableSearchQuery.toLowerCase();
-    return tables.filter(
+    return tables[activeScreen].data.filter(
       (table) =>
         table.name.toLowerCase().includes(query) ||
         table.schema.toLowerCase().includes(query)
@@ -80,8 +78,12 @@ export function ConnectionScreen() {
     if (!activeTable) {
       return { data: null, sizeInfo: null, busy: false, error: null };
     }
-    return getTableData(activeTable.table.schema, activeTable.table.name);
-  }, [activeTable, getTableData]);
+    return getTableData(
+      activeScreen,
+      activeTable.table.schema,
+      activeTable.table.name
+    );
+  }, [activeScreen, activeTable, getTableData]);
 
   // Load table data when a table is selected
   const handleSelectTable = useCallback(
@@ -100,13 +102,13 @@ export function ConnectionScreen() {
           id: `${table.schema}.${table.name}`,
           table,
         };
-        setTabOpenTables(activeScreen, [...(openTables || []), newTable]);
+        addTabOpenTable(activeScreen, newTable);
         setActiveTableId(activeScreen, newTable.id);
 
         await loadTableData(table.schema, table.name);
       }
     },
-    [activeScreen, openTables, setTabOpenTables, loadTableData]
+    [activeScreen, addTabOpenTable, loadTableData]
   );
 
   const handleCloseTable = useCallback(
@@ -115,7 +117,7 @@ export function ConnectionScreen() {
       const tableToClose = openTables.find((ot) => ot.id === tableId);
       if (tableToClose) {
         const { schema, name } = tableToClose.table;
-        const { connectionId } = getTableData(schema, name);
+        const { connectionId } = getTableData(activeScreen, schema, name);
         removeTableData(schema, name);
 
         try {
@@ -128,7 +130,7 @@ export function ConnectionScreen() {
       }
 
       const newOpenTables = openTables.filter((ot) => ot.id !== tableId);
-      setTabOpenTables(activeScreen, newOpenTables);
+      removeTabOpenTable(activeScreen, tableId);
 
       // If closing active table, switch to another or clear
       if (activeTableId[activeScreen] === tableId) {
@@ -143,9 +145,10 @@ export function ConnectionScreen() {
       }
     },
     [
+      activeScreen,
       activeTableId[activeScreen],
       openTables,
-      setTabOpenTables,
+      removeTabOpenTable,
       setActiveTableId,
     ]
   );
@@ -176,10 +179,11 @@ export function ConnectionScreen() {
   );
 
   const handleRefresh = useCallback(async () => {
+    await loadSchemas();
     await loadTables(activeSchema);
     if (!activeTable) return;
     await loadTableData(activeTable.table.schema, activeTable.table.name);
-  }, [activeTable, activeSchema, loadTables, loadTableData]);
+  }, [activeTable, activeSchema, loadSchemas, loadTables, loadTableData]);
 
   const handleSchemaChange = useCallback(
     async (schema: string) => {
@@ -198,8 +202,8 @@ export function ConnectionScreen() {
   }
 
   if (
-    (tableBusy && tables.length === 0) ||
-    (schemaBusy && schemas.length === 0)
+    (tables[activeScreen]?.busy && tables[activeScreen]?.data?.length === 0) ||
+    (schemas[activeScreen]?.busy && schemas[activeScreen]?.data?.length === 0)
   ) {
     return (
       <Box className="bg-neutral-100 text-center">
@@ -255,7 +259,11 @@ export function ConnectionScreen() {
         activeSchema={activeTable?.table.schema}
         activeTable={activeTable?.table.name}
         viewMode={viewMode}
-        loadTableError={tableMsg || schemaMsg || activeTableData.error}
+        loadTableError={
+          tables[activeScreen]?.error ||
+          schemas[activeScreen]?.error ||
+          activeTableData.error
+        }
         onViewModeChange={handleViewModeChange}
         onRefresh={handleRefresh}
       />
@@ -263,7 +271,7 @@ export function ConnectionScreen() {
       <div class="flex h-full flex-1 overflow-hidden">
         {viewMode.includes("left") && (
           <LeftNav
-            schemas={schemas}
+            schemas={schemas[activeScreen]?.data ?? []}
             currSchema={activeSchema}
             onSchemaChange={handleSchemaChange}
             tableSearchQuery={tableSearchQuery}
@@ -307,9 +315,11 @@ export function ConnectionScreen() {
                 viewMode.includes("bottom") && "animate-slide-in-up"
               )}
             >
-              {tableMsg ? (
+              {tables[activeScreen]?.error ? (
                 <Box className="text-center">
-                  <p class="text-sm text-red-500">{tableMsg}</p>
+                  <p class="text-sm text-red-500">
+                    {tables[activeScreen]?.error}
+                  </p>
                 </Box>
               ) : openTables.length > 0 ? (
                 renderTableContent()
