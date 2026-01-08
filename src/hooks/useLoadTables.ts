@@ -3,7 +3,7 @@ import { listenOp, operationExecute, profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 
-export type TableItem = { schema: string; name: string; connectionId: string };
+export type TableItem = { schema: string; name: string };
 
 const LIST_TABLES_SQL = `
 select table_schema, table_name
@@ -74,7 +74,6 @@ export function useLoadTables() {
             .map((r) => ({
               schema: cellToString(r?.[0]),
               name: cellToString(r?.[1]),
-              connectionId,
             }))
             .filter((t) => t.schema && t.name);
 

@@ -13,7 +13,12 @@ export type TableData = {
 
 type TableDataState = Record<
   string,
-  { data: TableData | null; busy: boolean; error: string | null }
+  {
+    data: TableData | null;
+    connectionId: string | null;
+    busy: boolean;
+    error: string | null;
+  }
 >;
 
 function tableKey(schema: string, tableName: string) {
@@ -29,6 +34,11 @@ function qLiteral(v: string) {
 }
 
 type QueryResult = { rows: any[][]; rowCount: number };
+
+type Pagination = {
+  page: number;
+  pageSize: number;
+};
 
 function runSqlQuery(connection_id: string, sql: string) {
   return new Promise<QueryResult>(async (resolve, reject) => {
@@ -72,28 +82,32 @@ export function useLoadTableData() {
     return tabs.find((t) => t.id === activeScreen) ?? null;
   }, [tabs, activeScreen]);
 
-  const ensureRuntimeConn = useCallback(async () => {
-    if (!activeTab) throw new Error("NO_ACTIVE_TAB");
-    if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
+  const ensureRuntimeConn = useCallback(
+    async (tableKey: string) => {
+      if (!activeTab) throw new Error("NO_ACTIVE_TAB");
 
-    const res = await profileConnect(activeTab.profileId);
-    const runtimeId = res.connection.id;
+      const tableData = tableDataMap[tableKey];
+      if (tableData?.connectionId) return tableData.connectionId;
 
-    setRuntimeConnectionId(activeTab.id, runtimeId);
-    return runtimeId;
-  }, [activeTab, setRuntimeConnectionId]);
+      const res = await profileConnect(activeTab.profileId);
+      const runtimeId = res.connection.id;
+
+      return runtimeId;
+    },
+    [activeTab, setRuntimeConnectionId]
+  );
 
   const loadTableData = useCallback(
-    async (schema: string, tableName: string) => {
+    async (schema: string, tableName: string, pagination?: Pagination) => {
       const key = tableKey(schema, tableName);
 
       setTableDataMap((prev) => ({
         ...prev,
-        [key]: { data: null, busy: true, error: null },
+        [key]: { data: null, connectionId: null, busy: true, error: null },
       }));
 
       try {
-        const connId = await ensureRuntimeConn();
+        const connId = await ensureRuntimeConn(key);
 
         const columnsSql = `
           SELECT column_name, data_type
@@ -112,13 +126,17 @@ export function useLoadTableData() {
           }))
           .filter((c) => c.name);
 
-        const dataSql = `SELECT * FROM ${qIdent(schema)}.${qIdent(tableName)} LIMIT 1000;`;
+        const limit = pagination?.pageSize ?? 1000;
+        const offset = (pagination?.page ?? 0) * limit;
+        const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+        const dataSql = `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`;
         const dataRes = await runSqlQuery(connId, dataSql);
 
         setTableDataMap((prev) => ({
           ...prev,
           [key]: {
             data: { columns, rows: dataRes.rows, rowCount: dataRes.rowCount },
+            connectionId: connId,
             busy: false,
             error: null,
           },
@@ -131,7 +149,7 @@ export function useLoadTableData() {
 
         setTableDataMap((prev) => ({
           ...prev,
-          [key]: { data: null, busy: false, error: msg },
+          [key]: { data: null, connectionId: null, busy: false, error: msg },
         }));
       }
     },
@@ -141,7 +159,14 @@ export function useLoadTableData() {
   const getTableData = useCallback(
     (schema: string, tableName: string) => {
       const key = tableKey(schema, tableName);
-      return tableDataMap[key] || { data: null, busy: false, error: null };
+      return (
+        tableDataMap[key] || {
+          data: null,
+          connectionId: null,
+          busy: false,
+          error: null,
+        }
+      );
     },
     [tableDataMap]
   );

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "preact/hooks";
+import { useState, useMemo, useCallback } from "preact/hooks";
 import { useLoadTables, type TableItem } from "../hooks/useLoadTables";
 import { useLoadTableData } from "../hooks/useLoadTableData";
 import { useScreenStore } from "../stores/screen";
@@ -10,10 +10,14 @@ import {
   Table,
   X,
 } from "../components/icons";
-import { EditableTable } from "../components/EditableTable";
+import { TableData } from "../components/table/TableData";
 import { cn } from "../utils/cn";
 import { Button } from "../components/common/Button";
 import { connectionRemove } from "../lib/tauri";
+
+type PatchMap = {
+  [tableId: string]: { [rowId: string]: { [column: string]: any } };
+};
 
 type OpenTable = {
   id: string;
@@ -23,6 +27,8 @@ type OpenTable = {
 export function ConnectionScreen() {
   const { activeScreen, tabs } = useScreenStore();
   const activeTab = tabs.find((tab) => tab.id === activeScreen);
+
+  const [patchMap, setPatchMap] = useState<PatchMap>({});
   const [tableSearchQuery, setTableSearchQuery] = useState("");
   const [openTables, setOpenTables] = useState<OpenTable[]>([]);
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
@@ -83,9 +89,14 @@ export function ConnectionScreen() {
     e.stopPropagation();
     const tableToClose = openTables.find((ot) => ot.id === tableId);
     if (tableToClose) {
-      removeTableData(tableToClose.table.schema, tableToClose.table.name);
+      const { schema, name } = tableToClose.table;
+      const { connectionId } = getTableData(schema, name);
+      removeTableData(schema, name);
+
       try {
-        await connectionRemove(tableToClose.table.connectionId);
+        if (connectionId) {
+          await connectionRemove(connectionId);
+        }
       } catch (error) {
         console.error("Error removing connection:", error);
       }
@@ -103,6 +114,19 @@ export function ConnectionScreen() {
       }
     }
   };
+
+  const handleCellChange = useCallback(
+    (rowIndex: number, columnIndex: number, value: any) => {
+      setPatchMap((prev) => ({
+        ...prev,
+        [rowIndex]: {
+          ...prev[rowIndex],
+          [columnIndex]: value,
+        },
+      }));
+    },
+    []
+  );
 
   if (!activeTab) {
     return (
@@ -218,7 +242,7 @@ export function ConnectionScreen() {
         {openTables.length > 0 ? (
           <>
             {/* Table Tabs */}
-            <div class="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-100 bg-neutral-100 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div class="flex items-center gap-0.5 overflow-x-auto border-b border-neutral-200 bg-neutral-100 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {openTables.map((openTable) => (
                 <div
                   key={openTable.id}
@@ -274,7 +298,7 @@ export function ConnectionScreen() {
                     </div>
                   </div>
                 ) : activeTableData.error ? (
-                  <div class="flex h-full items-center justify-center">
+                  <div class="flex h-full items-center justify-center bg-white">
                     <div class="text-center">
                       <p class="mb-2 text-red-600">Error loading table data</p>
                       <p class="text-sm text-neutral-500">
@@ -283,19 +307,11 @@ export function ConnectionScreen() {
                     </div>
                   </div>
                 ) : activeTableData.data ? (
-                  <EditableTable
+                  <TableData
+                    key={activeTable.id}
                     columns={activeTableData.data.columns}
                     data={activeTableData.data.rows}
-                    onCellChange={(rowIndex, columnIndex, value) => {
-                      // Handle cell value change
-                      console.log(
-                        "Cell changed:",
-                        rowIndex,
-                        columnIndex,
-                        value
-                      );
-                      // TODO: Implement save to database
-                    }}
+                    onCellChange={handleCellChange}
                   />
                 ) : null}
               </div>
