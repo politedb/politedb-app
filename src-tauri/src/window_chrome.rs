@@ -73,7 +73,7 @@ fn hide_traffic_lights(win: &tauri::WebviewWindow) {
         let new_mask: u64 = style_mask | NSWINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW;
         let _: () = msg_send![ns_win, setStyleMask: new_mask];
 
-        let _: () = msg_send![ns_win, setMovableByWindowBackground: Bool::YES];
+        let _: () = msg_send![ns_win, setMovableByWindowBackground: Bool::NO];
 
         let close_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_CLOSE];
         let mini_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_MINIMIZE];

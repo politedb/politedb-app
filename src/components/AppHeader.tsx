@@ -40,7 +40,13 @@ export function AppHeader({
 
   let clickTimer: number | null = null;
 
-  async function handleHeaderClick() {
+  async function handleHeaderClick(e: MouseEvent) {
+    if (e.button !== 0) return;
+    const el = e.target as HTMLElement;
+    if (el.closest('[data-tauri-drag-region="false"]')) return;
+
+    win.startDragging();
+
     if (clickTimer) {
       // double click detected
       clearTimeout(clickTimer);
@@ -86,7 +92,7 @@ export function AppHeader({
 
   return (
     <div
-      class="titlebar z-10 flex h-10 w-full shrink-0 items-center gap-2 rounded-t-xl border-b border-neutral-800 bg-neutral-900/95 px-2 backdrop-blur-md select-none"
+      class="z-10 flex h-10 w-full shrink-0 items-center gap-2 rounded-t-xl border-b border-neutral-800 bg-neutral-900/95 px-2 backdrop-blur-md select-none"
       onMouseDown={handleHeaderClick}
     >
       {/* Left side - macOS window controls */}

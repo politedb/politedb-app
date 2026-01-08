@@ -52,21 +52,16 @@ export function ConnectionsSection(props: {
       {profiles.length === 0 ? (
         <EmptyState hasSearch={!!searchQuery.trim()} onCreate={onCreate} />
       ) : (
-        <div
-          class={
-            viewMode === "grid"
-              ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
-              : "space-y-2"
-          }
-        >
+        <div class={viewMode === "grid" ? "flex flex-wrap gap-4" : "space-y-2"}>
           {profiles.map((profileConn) => (
-            <ConnectionCard
-              key={profileConn.id}
-              profileId={profileConn.id}
-              selected={selectedId === profileConn.id}
-              onOpen={() => onOpen(profileConn.id)}
-              onEdit={() => onEdit(profileConn.id)}
-            />
+            <div class="w-full max-w-145" key={profileConn.id}>
+              <ConnectionCard
+                profileId={profileConn.id}
+                selected={selectedId === profileConn.id}
+                onOpen={() => onOpen(profileConn.id)}
+                onEdit={() => onEdit(profileConn.id)}
+              />
+            </div>
           ))}
         </div>
       )}
