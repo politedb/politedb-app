@@ -119,7 +119,7 @@ export function ConnectionBasicsSection(
         <Field label="Name">
           <Input
             value={name.field.value}
-            placeholder="Mochi"
+            placeholder="Local Postgres, Production DB..."
             error={nameErr}
             onInput={(e: InputEvt) => {
               name.field.onChange(e.currentTarget.value);

@@ -1,50 +1,35 @@
+// src/screens/main/GroupsSection.tsx
 import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
-import { Grid } from "src/components/icons";
-import type { ViewMode } from "src/types";
 
 export function GroupsSection(props: {
   groups: Array<{ tag: string; connections: ConnectionProfile[] }>;
-  viewMode: ViewMode;
   onPickTag: (tag: string) => void;
 }) {
-  const { groups, viewMode, onPickTag } = props;
+  const { groups, onPickTag } = props;
   if (!groups.length) return null;
 
   return (
-    <div class="mb-6">
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-slate-800">
-        Groups
-      </h2>
+    <div class="mb-5">
+      <div class="mb-2 flex items-center justify-between">
+        <h2 class="text-xs font-semibold tracking-wide text-slate-600">
+          Groups
+        </h2>
+        <div class="text-xs text-slate-400">{groups.length}</div>
+      </div>
 
-      <div
-        class={
-          viewMode === "grid"
-            ? "grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
-            : "space-y-2"
-        }
-      >
-        {groups.map((group) => (
+      <div class="flex flex-wrap gap-2">
+        {groups.map((g) => (
           <Button
-            key={group.tag}
-            variant="ghost"
-            onClick={() => onPickTag(group.tag)}
-            class="w-full justify-start rounded-xl bg-white p-3 text-left shadow-sm hover:bg-neutral-50"
+            key={g.tag}
+            variant="outline"
+            onClick={() => onPickTag(g.tag)}
+            class="h-9 rounded-full bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
-            <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100">
-                <Grid className="size-5 text-blue-500" />
-              </div>
-              <div class="flex min-w-0 flex-1 flex-col">
-                <div class="truncate font-semibold text-slate-900">
-                  {group.tag}
-                </div>
-                <div class="text-xs text-slate-500">
-                  {group.connections.length} Connection
-                  {group.connections.length !== 1 ? "s" : ""}
-                </div>
-              </div>
-            </div>
+            <span class="max-w-55 truncate">{g.tag}</span>
+            <span class="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+              {g.connections.length}
+            </span>
           </Button>
         ))}
       </div>

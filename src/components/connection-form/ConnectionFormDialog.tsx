@@ -27,16 +27,20 @@ import {
   type FormValues,
 } from "./connectionForm.utils";
 import { useConnectionStatus } from "./useConnectionStatus";
+import { DatabaseEngine } from "../../types";
+import { SUPPORTED_DATABASES } from "../../constant";
 
 export function ConnectionFormDialog({
   onClose,
   onSaved,
   initialData,
+  engine,
 }: {
   onSaved?: (v?: ConnectionProfile) => void;
   onClose?: () => void;
   initialData?: ConnectionProfile;
-} = {}) {
+  engine: DatabaseEngine;
+}) {
   const { addTab, setActiveScreen } = useScreenStore();
 
   const profileId = initialData?.id ?? undefined;
@@ -57,7 +61,7 @@ export function ConnectionFormDialog({
     control,
   } = useForm<FormValues>({
     mode: "onSubmit",
-    defaultValues: makeDefaultValues(initialData),
+    defaultValues: makeDefaultValues(initialData, engine),
   });
 
   function onDirty() {
@@ -172,7 +176,8 @@ export function ConnectionFormDialog({
       <div class="relative border-b border-slate-200 px-6 py-4">
         <div class="text-center">
           <div class="text-lg font-semibold text-slate-900">
-            PostgreSQL Connection
+            {SUPPORTED_DATABASES.find((d) => d.engine === engine)?.label}{" "}
+            Connection
           </div>
         </div>
 

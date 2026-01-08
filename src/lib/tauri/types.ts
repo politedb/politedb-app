@@ -5,12 +5,12 @@
  * ============================================================================
  */
 
+import { DatabaseEngine } from "../../types";
+
 /* ============================================================================
  * Primitives
  * ============================================================================
  */
-
-export type Engine = "postgres" | "mysql" | "redis" | (string & {});
 
 export type SslMode =
   | "disable"
@@ -136,7 +136,7 @@ export type RedisConnectInput = {
  */
 
 export type ConnectionCreateInput = {
-  engine: Engine;
+  engine: DatabaseEngine;
   label: string;
 
   tags: string[];
@@ -151,7 +151,7 @@ export type ConnectionCreateInput = {
 
 export type ConnectionInfo = {
   id: string;
-  engine: Engine;
+  engine: DatabaseEngine;
   label: string;
 };
 
@@ -177,7 +177,7 @@ export type ConnectionTestInput = {
 
 export type ConnectionProfile = {
   id: string;
-  engine: Engine;
+  engine: DatabaseEngine;
   label: string;
   input: ConnectionCreateInput;
   created_at: number;

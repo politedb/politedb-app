@@ -1,18 +1,20 @@
 export function OverlayModal(props: {
   open: boolean;
   onClose: () => void;
-  children: React.ReactNode;
+  children: preact.ComponentChildren;
 }) {
-  const { open, onClose, children } = props;
-  if (!open) return null;
+  if (!props.open) return null;
 
   return (
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={onClose}
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={props.onClose}
     >
-      <div class="flex-1 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        {children}
+      <div
+        class="max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {props.children}
       </div>
     </div>
   );

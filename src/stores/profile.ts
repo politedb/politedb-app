@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { profileList, profileRemove } from "src/lib/tauri";
+import { DatabaseEngine } from "../types";
 
 type ProfileState = {
   profiles: ConnectionProfile[];
@@ -12,7 +13,7 @@ type ProfileState = {
   // UI state
   showNewConnection: boolean;
   showEditProfile: boolean;
-  showDatabaseForm: boolean;
+  showDatabaseForm: DatabaseEngine | undefined;
 
   loadProfiles: () => Promise<void>;
   removeProfile: (profileId: string) => Promise<void>;
@@ -27,7 +28,7 @@ type ProfileState = {
   openEdit: (id: string) => void;
   closeEdit: () => void;
 
-  setShowDatabaseForm: (v: boolean) => void;
+  setShowDatabaseForm: (v: DatabaseEngine | undefined) => void;
 };
 
 export const useProfileStore = create<ProfileState>((set, get) => ({
@@ -39,7 +40,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
 
   showNewConnection: false,
   showEditProfile: false,
-  showDatabaseForm: false,
+  showDatabaseForm: undefined,
 
   loadProfiles: async () => {
     set({ busy: true, error: null });
@@ -94,14 +95,14 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       showNewConnection: true,
       showEditProfile: false,
       selectedProfileId: undefined,
-      showDatabaseForm: false,
+      showDatabaseForm: undefined,
     }),
 
   closeNew: () =>
     set({
       showNewConnection: false,
       selectedProfileId: undefined,
-      showDatabaseForm: false,
+      showDatabaseForm: undefined,
     }),
 
   openEdit: (id) =>

@@ -2,10 +2,11 @@ import { Control, FieldErrors } from "react-hook-form";
 import type {
   ConnectionCreateInput,
   ConnectionProfile,
-  Engine,
   SslMode,
 } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
+import { DatabaseEngine } from "src/types";
+import { SUPPORTED_DATABASES } from "../../constant";
 
 /* =============================================================================
  * Types
@@ -70,7 +71,7 @@ export function dedupeKeepOrder(xs: string[]) {
   return out;
 }
 
-function defaultPortForEngine(engine: Engine): number {
+function defaultPortForEngine(engine: DatabaseEngine): number {
   switch (engine) {
     case "postgres":
       return 5432;
@@ -83,12 +84,12 @@ function defaultPortForEngine(engine: Engine): number {
   }
 }
 
-function defaultHostForEngine(_engine: Engine): string {
+function defaultHostForEngine(_engine: DatabaseEngine): string {
   return "127.0.0.1";
 }
 
 function pickByEngine<T>(
-  engine: Engine,
+  engine: DatabaseEngine,
   by: { postgres?: T; mysql?: T; redis?: T }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
@@ -168,11 +169,15 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
  * Defaults (load profile -> form)
  * ============================================================================= */
 
-function getEngineFromProfile(p?: ConnectionProfile): Engine {
-  return (p?.input?.engine as Engine) || (p?.engine as Engine) || "postgres";
+function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
+  return (
+    (p?.input?.engine as DatabaseEngine) ||
+    (p?.engine as DatabaseEngine) ||
+    "postgres"
+  );
 }
 
-function makeDbDefaults(engine: Engine, input?: ConnectionCreateInput) {
+function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const pg = input?.postgres;
   const my = input?.mysql;
   const rd = input?.redis;
@@ -219,7 +224,10 @@ function makeDbDefaults(engine: Engine, input?: ConnectionCreateInput) {
   return { host, port, user, database, password, storeKeychain };
 }
 
-function makeSslDefaults(engine: Engine, input?: ConnectionCreateInput) {
+function makeSslDefaults(
+  engine: DatabaseEngine,
+  input?: ConnectionCreateInput
+) {
   const pg = input?.postgres;
   const my = input?.mysql;
 
@@ -282,9 +290,12 @@ function makeSshDefaults(input?: ConnectionCreateInput) {
   };
 }
 
-export function makeDefaultValues(initialData?: ConnectionProfile): FormValues {
+export function makeDefaultValues(
+  initialData?: ConnectionProfile,
+  initialEngine?: DatabaseEngine
+): FormValues {
   const input = initialData?.input;
-  const engine = getEngineFromProfile(initialData);
+  const engine = initialEngine || getEngineFromProfile(initialData);
 
   const db = makeDbDefaults(engine, input);
   const ssl = makeSslDefaults(engine, input);
@@ -294,7 +305,7 @@ export function makeDefaultValues(initialData?: ConnectionProfile): FormValues {
     input?.tags.length == 0 ? ["local"] : (input?.tags ?? ["local"]);
 
   return {
-    name: input?.label || initialData?.label || "Mochi",
+    name: input?.label || initialData?.label || pickDefaultLabel(engine),
     tags: dedupeKeepOrder(initialTags.map(normalizeTag)),
     indicator_color: input?.indicator_color || "",
 
@@ -309,4 +320,14 @@ export function makeDefaultValues(initialData?: ConnectionProfile): FormValues {
     ...ssl,
     ...ssh,
   };
+}
+
+export function pickDefaultLabel(engine?: DatabaseEngine): string {
+  const FALLBACK_LABEL = "Aether";
+  if (!engine) return FALLBACK_LABEL;
+
+  const db = SUPPORTED_DATABASES.find((d) => d.engine === engine);
+  if (!db || !db.defaultLabels?.length) return FALLBACK_LABEL;
+
+  return db.defaultLabels[0];
 }

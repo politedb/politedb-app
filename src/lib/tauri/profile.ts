@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { CMD } from "./commands";
 import { secretsDelete, secretsGet, secretsSet } from "./secrets";
+import { DatabaseEngine } from "src/types";
 
 /* ============================================================================
  * Local types
@@ -112,7 +113,7 @@ export function preparePayloadWithSecret(
     | "sshPasswordPlain"
   >
 ): ConnectionCreateInput {
-  const engine = String(input.engine || "");
+  const engine = String(input.engine || "") as DatabaseEngine;
   const label = String(input.label || "");
   const tags = input.tags;
   const indicator_color = input.indicator_color || "";

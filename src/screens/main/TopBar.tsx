@@ -1,6 +1,6 @@
-import type { JSX } from "preact";
+import type { TargetedEvent } from "preact";
 import { Button } from "src/components/common/Button";
-import { Console, Grid, List, Plus, Search } from "src/components/icons";
+import { Grid, List, Plus, Search } from "src/components/icons";
 import type { ViewMode } from "src/types";
 
 export function TopBar(props: {
@@ -13,66 +13,63 @@ export function TopBar(props: {
   const { searchQuery, onSearchChange, onNew, viewMode, onViewMode } = props;
 
   return (
-    <div class="shrink-0 bg-neutral-50 shadow-md">
-      <div class="p-2">
-        <div class="relative">
-          <input
-            type="text"
-            placeholder="Find a connection or postgres://user@hostname..."
-            value={searchQuery}
-            onInput={(e: JSX.TargetedEvent<HTMLInputElement>) =>
-              onSearchChange(e.currentTarget.value)
-            }
-            class="w-full rounded-lg border border-slate-300 bg-white py-2 pr-4 pl-10 text-[13px] text-slate-900 transition-colors placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-          />
-          <Search className="absolute top-1/2 left-3.5 h-5 w-5 -translate-y-1/2 text-slate-400" />
-        </div>
+    <div class="flex shrink-0 items-center gap-2 bg-white px-3 py-2">
+      {/* Search */}
+      <div class="relative min-w-0 flex-1">
+        <input
+          type="text"
+          placeholder="Search connections or paste a URL…"
+          value={searchQuery}
+          onInput={(e: TargetedEvent<HTMLInputElement>) =>
+            onSearchChange(e.currentTarget.value)
+          }
+          class="h-9 w-full rounded-lg border border-slate-300 bg-white py-2 pr-3 pl-9 text-[13px] text-slate-900 transition-colors outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+        <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
       </div>
 
-      <div class="flex items-center justify-between rounded-t-sm bg-slate-200 p-2 shadow-sm">
-        <div class="flex items-center gap-2">
-          <Button
-            variant="default"
-            onClick={onNew}
-            class="rounded-md p-1.5 px-2"
-          >
-            <Plus className="size-3" />
-            <span class="text-[11px] font-medium">NEW CONNECTION</span>
-          </Button>
+      {/* Primary actions */}
+      <Button
+        variant="default"
+        onClick={onNew}
+        class="h-9 rounded-lg px-3"
+        title="New connection"
+      >
+        <Plus className="size-3.5" />
+        <span class="text-[12px] font-semibold">New Connection</span>
+      </Button>
 
-          <Button class="rounded-md p-1.5 px-2">
-            <Console className="size-3.5" />
-            <span class="text-[11px] font-medium">QUERY</span>
-          </Button>
-        </div>
+      {/* View mode */}
+      <div class="ml-1 flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+        <button
+          type="button"
+          onClick={() => onViewMode("grid")}
+          class={`flex h-9 w-9 items-center justify-center ${
+            viewMode === "grid"
+              ? "bg-blue-50 text-blue-600"
+              : "text-slate-600 hover:bg-slate-50"
+          }`}
+          title="Grid view"
+          aria-label="Grid view"
+        >
+          <Grid className="size-4" />
+        </button>
 
-        <div class="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => onViewMode("grid")}
-            class={`rounded-lg bg-white p-2 ${
-              viewMode === "grid"
-                ? "border-blue-600 text-blue-600"
-                : "border-slate-300 text-slate-600 hover:bg-slate-50"
-            }`}
-            title="Grid View"
-          >
-            <Grid className="size-4" />
-          </Button>
+        <div class="h-5 w-px bg-slate-200" />
 
-          <Button
-            variant="outline"
-            onClick={() => onViewMode("list")}
-            class={`rounded-lg bg-white p-2 ${
-              viewMode === "list"
-                ? "border-blue-600 text-blue-600"
-                : "border-slate-300 text-slate-600 hover:bg-slate-50"
-            }`}
-            title="List View"
-          >
-            <List className="size-4" />
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={() => onViewMode("list")}
+          class={`flex h-9 w-9 items-center justify-center ${
+            viewMode === "list"
+              ? "bg-blue-50 text-blue-600"
+              : "text-slate-600 hover:bg-slate-50"
+          }`}
+          title="List view"
+          aria-label="List view"
+        >
+          <List className="size-4" />
+        </button>
       </div>
     </div>
   );

@@ -7,18 +7,22 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
   const { hasSearch, onCreate } = props;
 
   return (
-    <div class="py-12 text-center">
-      <p class="mb-2 text-sm text-slate-500">
-        {hasSearch ? "No connections found" : "No connections yet"}
-      </p>
+    <div class="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+      <div class="text-sm font-semibold text-slate-900">
+        {hasSearch ? "No matching connections" : "No connections yet"}
+      </div>
+      <div class="mt-1 text-sm text-slate-500">
+        {hasSearch
+          ? "Try a different keyword."
+          : "Create a connection to start querying databases."}
+      </div>
+
       {!hasSearch ? (
-        <Button
-          variant="ghost"
-          onClick={onCreate}
-          class="mx-auto text-sm font-medium text-blue-600 hover:bg-transparent hover:text-blue-700"
-        >
-          Create your first connection
-        </Button>
+        <div class="mt-5">
+          <Button variant="default" onClick={onCreate}>
+            + New Connection
+          </Button>
+        </div>
       ) : null}
     </div>
   );
@@ -43,25 +47,42 @@ export function ConnectionsSection(props: {
     onEdit,
   } = props;
 
+  const hasSearch = !!searchQuery.trim();
+
   return (
-    <div>
-      <h2 class="mb-3 text-sm font-semibold tracking-wide text-slate-800">
-        Connections
-      </h2>
+    <div class="min-w-0">
+      {/* Header row */}
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-sm font-semibold tracking-wide text-slate-800">
+          Connections ({profiles.length})
+        </h2>
+      </div>
 
       {profiles.length === 0 ? (
-        <EmptyState hasSearch={!!searchQuery.trim()} onCreate={onCreate} />
-      ) : (
-        <div class={viewMode === "grid" ? "flex flex-wrap gap-4" : "space-y-2"}>
-          {profiles.map((profileConn) => (
-            <div class="w-full max-w-145" key={profileConn.id}>
+        <EmptyState hasSearch={hasSearch} onCreate={onCreate} />
+      ) : viewMode === "grid" ? (
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3">
+          {profiles.map((p) => (
+            <div key={p.id} class="min-w-0">
               <ConnectionCard
-                profileId={profileConn.id}
-                selected={selectedId === profileConn.id}
-                onOpen={() => onOpen(profileConn.id)}
-                onEdit={() => onEdit(profileConn.id)}
+                profileId={p.id}
+                selected={selectedId === p.id}
+                onOpen={() => onOpen(p.id)}
+                onEdit={() => onEdit(p.id)}
               />
             </div>
+          ))}
+        </div>
+      ) : (
+        <div class="space-y-2">
+          {profiles.map((p) => (
+            <ConnectionCard
+              key={p.id}
+              profileId={p.id}
+              selected={selectedId === p.id}
+              onOpen={() => onOpen(p.id)}
+              onEdit={() => onEdit(p.id)}
+            />
           ))}
         </div>
       )}
