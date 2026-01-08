@@ -1,7 +1,7 @@
 import { MainScreen } from "src/screens/main/MainScreen";
 import { useScreenStore } from "src/stores/screen";
 import { AppHeader } from "src/components/AppHeader";
-import { ConnectionScreen } from "src/screens/ConnectionScreen";
+import { ConnectionScreen } from "src/screens/connection/ConnectionScreen";
 import { useEffect } from "preact/hooks";
 
 export function MainLayout() {

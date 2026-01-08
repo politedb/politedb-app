@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { OpenTable } from "../types";
 
 export type Tab = {
   id: string;
@@ -14,8 +15,14 @@ export type Tab = {
 type ScreenState = {
   activeScreen: string;
   tabs: Tab[];
+  tabOpenTables: { [tabId: string]: OpenTable[] };
+  activeTableId: { [tabId: string]: string | null };
 
   setActiveScreen: (screen: string) => void;
+  setActiveTableId: (tabId: string, id: string | null) => void;
+
+  addTabOpenTable: (tabId: string, table: OpenTable) => void;
+  removeTabOpenTable: (tabId: string, tableId: string) => void;
 
   addTab: (tab: Tab) => void;
   updateTab: (id: string, patch: Partial<Tab>) => void;
@@ -27,8 +34,34 @@ type ScreenState = {
 export const useScreenStore = create<ScreenState>((set) => ({
   activeScreen: "main",
   tabs: [],
+  tabOpenTables: {},
+  activeTableId: {},
 
   setActiveScreen: (screen) => set({ activeScreen: screen }),
+
+  setActiveTableId: (tabId, activeTableId) =>
+    set((s) => ({
+      activeTableId: {
+        ...s.activeTableId,
+        [tabId]: activeTableId,
+      },
+    })),
+
+  addTabOpenTable: (tabId, table) =>
+    set((s) => ({
+      tabOpenTables: {
+        ...s.tabOpenTables,
+        [tabId]: [...(s.tabOpenTables[tabId] || []), table],
+      },
+    })),
+
+  removeTabOpenTable: (tabId, tableId) =>
+    set((s) => ({
+      tabOpenTables: {
+        ...s.tabOpenTables,
+        [tabId]: s.tabOpenTables[tabId].filter((t) => t.id !== tableId),
+      },
+    })),
 
   addTab: (tab) =>
     set((s) => ({
