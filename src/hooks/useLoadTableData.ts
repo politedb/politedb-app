@@ -11,7 +11,11 @@ import {
 import { runSqlQuery } from "../utils/query";
 import { useConnectionStore } from "../stores/connection";
 
-function tableKey(activeScreen: string, schema: string, tableName: string) {
+export function tableKey(
+  activeScreen: string,
+  schema: string,
+  tableName: string
+) {
   return `${activeScreen}.${schema}.${tableName}`;
 }
 
@@ -23,7 +27,7 @@ type Pagination = {
 export function useLoadTableData() {
   const { tableDataMap, addTableDataMap, removeTableDataMap } =
     useConnectionStore();
-  const { tabs, activeScreen, setRuntimeConnectionId } = useScreenStore();
+  const { tabs, activeScreen } = useScreenStore();
 
   const activeTab = useMemo(() => {
     if (!activeScreen || activeScreen === "main") return null;
@@ -42,7 +46,7 @@ export function useLoadTableData() {
 
       return runtimeId;
     },
-    [activeTab, setRuntimeConnectionId]
+    [activeTab]
   );
 
   const loadTableData = useCallback(
@@ -126,7 +130,7 @@ export function useLoadTableData() {
         }
       );
     },
-    [activeScreen, tableDataMap]
+    [tableDataMap]
   );
 
   const removeTableData = useCallback(

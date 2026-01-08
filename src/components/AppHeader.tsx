@@ -6,6 +6,8 @@ import { useScreenStore } from "../stores/screen";
 import { WindowControls } from "./WindowControls";
 import { Button } from "./common/Button";
 import { connectionRemove } from "src/lib/tauri";
+import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
+import { useConnectionStore } from "../stores/connection";
 
 const win = getCurrentWebviewWindow();
 
@@ -36,7 +38,10 @@ export function AppHeader({
   activeNav = "main",
   onNavChange,
 }: AppHeaderProps) {
-  const { tabs, removeTab, activeScreen, setActiveScreen } = useScreenStore();
+  const { tabs, removeTab, activeScreen, setActiveScreen, tabOpenTables } =
+    useScreenStore();
+  const { tableDataMap } = useConnectionStore();
+  const { removeTableData } = useLoadTableData();
 
   let clickTimer: number | null = null;
 
@@ -87,6 +92,20 @@ export function AppHeader({
     if (currentTab?.runtimeConnectionId) {
       // Clean up runtime connection
       connectionRemove(currentTab?.runtimeConnectionId);
+    }
+    if (tabOpenTables[tabId]?.length > 0) {
+      Promise.all(
+        tabOpenTables[tabId].map((t) => {
+          const { schema, name } = t.table;
+          const key = tableKey(activeScreen, schema, name);
+          const { connectionId } = tableDataMap[key] || { connectionId: null };
+          removeTableData(schema, name);
+
+          if (connectionId) {
+            connectionRemove(connectionId);
+          }
+        })
+      );
     }
   }
 

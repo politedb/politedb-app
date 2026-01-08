@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo } from "preact/hooks";
+import { useCallback, useMemo } from "preact/hooks";
 import { profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 import { TableItem } from "../types";
-import { listTablesQuery } from "./queries";
+import { dbSchemasQuery, listTablesQuery } from "./queries";
 import { runSqlQuery } from "../utils/query";
 import { useConnectionStore } from "../stores/connection";
 
 export function useLoadTables() {
   const { tabs, activeScreen, updateTab } = useScreenStore();
-  const { setTables } = useConnectionStore();
+  const { setTables, setSchemas } = useConnectionStore();
 
   const activeTab = useMemo(() => {
     return tabs.find((t) => t.id === activeScreen) ?? null;
@@ -31,16 +31,17 @@ export function useLoadTables() {
     return connId;
   }, [activeTab, updateTab]);
 
-  const loadTables = useCallback(
+  const loadSchemaAndTables = useCallback(
     async (schema: string = "public") => {
       if (!activeTab) return;
 
-      setTables(activeScreen, { data: [], busy: true, error: null });
+      setTables(activeTab.id, { data: [], busy: true, error: null });
+      setSchemas(activeTab.id, { data: [], busy: true, error: null });
 
       try {
         const connectionId = await ensureRuntimeConnection();
         if (!connectionId) {
-          setTables(activeScreen, {
+          setTables(activeTab.id, {
             data: [],
             busy: false,
             error: "No active connection.",
@@ -60,23 +61,62 @@ export function useLoadTables() {
           }))
           .filter((t: any) => t.schema && t.name);
 
-        setTables(activeScreen, { data: tables, busy: false, error: null });
+        setTables(activeTab.id, { data: tables, busy: false, error: null });
+
+        const schemasRes = await runSqlQuery(connectionId, dbSchemasQuery());
+        const schemas: string[] = schemasRes.rows
+          .map((r: any) => cellToString(r?.[0]))
+          .filter((s: any) => s);
+
+        setSchemas(activeTab.id, { data: schemas, busy: false, error: null });
       } catch (e: any) {
-        setTables(activeScreen, {
+        setTables(activeTab.id, {
+          data: [],
+          busy: false,
+          error: e?.message ? String(e.message) : String(e),
+        });
+        setSchemas(activeTab.id, {
           data: [],
           busy: false,
           error: e?.message ? String(e.message) : String(e),
         });
       }
     },
-    [activeTab, ensureRuntimeConnection]
+    [activeTab, activeScreen, ensureRuntimeConnection]
   );
 
-  // Auto-load when switch tab (or when runtimeConnectionId changes)
-  useEffect(() => {
+  const loadSchemas = useCallback(async () => {
     if (!activeTab) return;
-    void loadTables("public");
-  }, [activeTab?.id, loadTables]); // tab switch => reload
 
-  return { loadTables };
+    setSchemas(activeTab.id, { data: [], busy: true, error: null });
+
+    try {
+      const connectionId = await ensureRuntimeConnection();
+      console.log("loadSchemas connectionId", activeTab, connectionId);
+
+      if (!connectionId) {
+        setSchemas(activeTab.id, {
+          data: [],
+          busy: false,
+          error: "No active connection.",
+        });
+        return;
+      }
+
+      const schemasRes = await runSqlQuery(connectionId, dbSchemasQuery());
+      const schemas: string[] = schemasRes.rows
+        .map((r: any) => cellToString(r?.[0]))
+        .filter((s: any) => s);
+
+      setSchemas(activeTab.id, { data: schemas, busy: false, error: null });
+    } catch (e: any) {
+      setSchemas(activeTab.id, {
+        data: [],
+        busy: false,
+        error: e?.message ? String(e.message) : String(e),
+      });
+    }
+  }, [activeTab, ensureRuntimeConnection]);
+
+  return { loadSchemaAndTables, loadSchemas };
 }

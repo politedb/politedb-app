@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback } from "preact/hooks";
+import { useState, useMemo, useCallback, useEffect } from "preact/hooks";
 import { useLoadTables } from "../../hooks/useLoadTables";
-import { useLoadTableData } from "../../hooks/useLoadTableData";
+import { tableKey, useLoadTableData } from "../../hooks/useLoadTableData";
 import { useScreenStore } from "../../stores/screen";
 import { Database } from "../../components/icons";
 import { TableData } from "../../components/table/TableData";
@@ -13,7 +13,6 @@ import { QueryHistory } from "./QueryHistory";
 import { Box } from "../../components/common/Box";
 import { cn } from "../../utils/cn";
 import { TabViewMode, SqlQuery, OpenTable, TableItem } from "../../types";
-import { useLoadSchemas } from "../../hooks/useLoadSchemas";
 import { useConnectionStore } from "../../stores/connection";
 
 type PatchMap = {
@@ -31,7 +30,7 @@ export function ConnectionScreen() {
     setActiveTableId,
   } = useScreenStore();
 
-  const { tables, schemas } = useConnectionStore();
+  const { tables, schemas, tableDataMap } = useConnectionStore();
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeScreen),
@@ -52,8 +51,7 @@ export function ConnectionScreen() {
     tables: true,
   });
 
-  const { loadTables } = useLoadTables();
-  const { loadSchemas } = useLoadSchemas();
+  const { loadSchemaAndTables } = useLoadTables();
   const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
   // Filter tables by search query
@@ -108,7 +106,7 @@ export function ConnectionScreen() {
         await loadTableData(table.schema, table.name);
       }
     },
-    [activeScreen, addTabOpenTable, loadTableData]
+    [activeScreen, openTables, addTabOpenTable, loadTableData, setActiveTableId]
   );
 
   const handleCloseTable = useCallback(
@@ -117,7 +115,8 @@ export function ConnectionScreen() {
       const tableToClose = openTables.find((ot) => ot.id === tableId);
       if (tableToClose) {
         const { schema, name } = tableToClose.table;
-        const { connectionId } = getTableData(activeScreen, schema, name);
+        const key = tableKey(activeScreen, schema, name);
+        const { connectionId } = tableDataMap[key] || { connectionId: null };
         removeTableData(schema, name);
 
         try {
@@ -147,6 +146,7 @@ export function ConnectionScreen() {
     [
       activeScreen,
       activeTableId[activeScreen],
+      tableDataMap,
       openTables,
       removeTabOpenTable,
       setActiveTableId,
@@ -179,19 +179,23 @@ export function ConnectionScreen() {
   );
 
   const handleRefresh = useCallback(async () => {
-    await loadSchemas();
-    await loadTables(activeSchema);
+    await loadSchemaAndTables(activeSchema);
     if (!activeTable) return;
     await loadTableData(activeTable.table.schema, activeTable.table.name);
-  }, [activeTable, activeSchema, loadSchemas, loadTables, loadTableData]);
+  }, [activeTable, activeSchema, loadSchemaAndTables, loadTableData]);
 
   const handleSchemaChange = useCallback(
     async (schema: string) => {
       setActiveSchema(schema);
-      await loadTables(schema);
+      await loadSchemaAndTables(schema);
     },
-    [loadTables]
+    [loadSchemaAndTables, setActiveSchema]
   );
+
+  useEffect(() => {
+    if (!activeTab) return;
+    void loadSchemaAndTables(activeSchema);
+  }, [activeTab?.id, activeSchema, loadSchemaAndTables]);
 
   if (!activeTab) {
     return (
