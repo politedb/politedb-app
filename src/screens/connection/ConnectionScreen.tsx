@@ -6,13 +6,14 @@ import { Database } from "../../components/icons";
 import { TableData } from "../../components/table/TableData";
 import { connectionRemove } from "../../lib/tauri";
 import { MenuBar } from "./MenuBar";
-import { LeftTab } from "./LeftTab";
+import { LeftNav } from "./LeftNav";
 import { NavigationTabs } from "./NavigationTabs";
-import { TableSize } from "./TableSize";
+import { RightNav } from "./RightNav";
 import { QueryHistory } from "./QueryHistory";
 import { Box } from "../../components/common/Box";
 import { cn } from "../../utils/cn";
 import { TabViewMode, SqlQuery, OpenTable, TableItem } from "../../types";
+import { useLoadSchemas } from "../../hooks/useLoadSchemas";
 
 type PatchMap = {
   [tableId: string]: { [rowId: string]: { [column: string]: any } };
@@ -28,12 +29,21 @@ export function ConnectionScreen() {
   const [activeTableId, setActiveTableId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<TabViewMode[]>(["left"]);
   const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
+  const [activeSchema, setActiveSchema] = useState("public");
   const [expandedSections, setExpandedSections] = useState({
     functions: false,
     tables: true,
   });
 
-  const { tables, busy } = useLoadTables();
+  const {
+    tables,
+    busy: tableBusy,
+    msg: tableMsg,
+    loadTables,
+  } = useLoadTables();
+
+  const { schemas, msg: schemaMsg, busy: schemaBusy } = useLoadSchemas();
+
   const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
   // Filter tables by search query
@@ -138,6 +148,20 @@ export function ConnectionScreen() {
     [setViewMode]
   );
 
+  const handleRefresh = useCallback(async () => {
+    await loadTables(activeSchema);
+    if (!activeTable) return;
+    await loadTableData(activeTable.table.schema, activeTable.table.name);
+  }, [activeTable, activeSchema, loadTables, loadTableData]);
+
+  const handleSchemaChange = useCallback(
+    async (schema: string) => {
+      setActiveSchema(schema);
+      await loadTables(schema);
+    },
+    [loadTables]
+  );
+
   if (!activeTab) {
     return (
       <Box className="bg-neutral-100 text-center">
@@ -146,7 +170,10 @@ export function ConnectionScreen() {
     );
   }
 
-  if (busy && tables.length === 0) {
+  if (
+    (tableBusy && tables.length === 0) ||
+    (schemaBusy && schemas.length === 0)
+  ) {
     return (
       <Box className="bg-neutral-100 text-center">
         <p class="text-neutral-500">Connecting to {activeTab.label}...</p>
@@ -154,7 +181,7 @@ export function ConnectionScreen() {
     );
   }
 
-  const renderTableContent = () => {
+  const renderTableContent = useCallback(() => {
     if (!activeTable) {
       return (
         <Box>
@@ -193,7 +220,7 @@ export function ConnectionScreen() {
     }
 
     return null;
-  };
+  }, [activeTable, activeTableData, handleCellChange]);
 
   return (
     <div class="flex h-full flex-1 flex-col">
@@ -201,12 +228,17 @@ export function ConnectionScreen() {
         activeSchema={activeTable?.table.schema}
         activeTable={activeTable?.table.name}
         viewMode={viewMode}
+        loadTableError={tableMsg || schemaMsg || activeTableData.error}
         onViewModeChange={handleViewModeChange}
+        onRefresh={handleRefresh}
       />
 
       <div class="flex h-full flex-1 overflow-hidden">
         {viewMode.includes("left") && (
-          <LeftTab
+          <LeftNav
+            schemas={schemas}
+            currSchema={activeSchema}
+            onSchemaChange={handleSchemaChange}
             tableSearchQuery={tableSearchQuery}
             setTableSearchQuery={setTableSearchQuery}
             expandedSections={expandedSections}
@@ -223,15 +255,11 @@ export function ConnectionScreen() {
             viewMode.includes("right") && "flex-row!"
           )}
         >
-          <div
-            class={cn(
-              "transition-smooth flex flex-1 flex-col overflow-hidden bg-neutral-100"
-            )}
-          >
+          <div class="transition-smooth flex flex-1 flex-col overflow-hidden">
             {openTables.length > 0 && (
               <div
                 class={cn(
-                  "flex shrink-0 items-center gap-0.5 overflow-x-auto bg-neutral-100 pt-1 transition-all duration-300 ease-in-out",
+                  "flex shrink-0 items-center gap-0.5 overflow-x-auto pt-1 pb-0.5 transition-all duration-300 ease-in-out",
                   "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 )}
               >
@@ -252,7 +280,11 @@ export function ConnectionScreen() {
                 viewMode.includes("bottom") && "animate-slide-in-up"
               )}
             >
-              {openTables.length > 0 ? (
+              {tableMsg ? (
+                <Box className="text-center">
+                  <p class="text-sm text-red-500">{tableMsg}</p>
+                </Box>
+              ) : openTables.length > 0 ? (
                 renderTableContent()
               ) : (
                 <Box className="text-center">
@@ -282,7 +314,7 @@ export function ConnectionScreen() {
           {/* Right Tab: Table Size */}
           {viewMode.includes("right") && (
             <div class="animate-slide-in-left w-64 shrink-0 border-l border-neutral-200">
-              <TableSize sizeInfo={activeTableData.sizeInfo} />
+              <RightNav sizeInfo={activeTableData.sizeInfo} />
             </div>
           )}
         </div>

@@ -153,7 +153,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
           <th
             key={header.id}
             class={cn(
-              "relative min-w-8 border border-neutral-200 bg-neutral-50 px-4 py-2",
+              "relative min-w-8 bg-neutral-50 px-4 py-2",
               "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
           >
@@ -200,7 +200,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
 
   return (
     <div class="flex h-full flex-col overflow-hidden bg-white">
-      <div class="flex-1 overflow-hidden">
+      <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
           key={`table-${tableRows.length}-${columns.length}-${page}`}
           style={{ height: "100%" }}

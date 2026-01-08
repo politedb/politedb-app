@@ -12,6 +12,9 @@ import { cn } from "../../utils/cn";
 import { TableItem } from "../../types";
 
 interface Props {
+  schemas: string[];
+  currSchema: string;
+  onSchemaChange: (schema: string) => void;
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<SetStateAction<string>>;
   expandedSections: { functions: boolean; tables: boolean };
@@ -23,7 +26,10 @@ interface Props {
   activeTableId: string | null;
 }
 
-export function LeftTab({
+export function LeftNav({
+  schemas,
+  currSchema,
+  onSchemaChange,
   tableSearchQuery,
   setTableSearchQuery,
   expandedSections,
@@ -104,7 +110,7 @@ export function LeftTab({
                       key={key}
                       onClick={() => handleSelectTable(table)}
                       active={activeTableId === key}
-                      className="w-full justify-start rounded-md px-3 py-1.5 text-sm"
+                      className="w-full justify-start gap-1.5 rounded-md px-3 py-1.5 text-sm"
                     >
                       <Table className="size-4" />
                       {table.name}
@@ -129,8 +135,12 @@ export function LeftTab({
             "flex h-6 w-full border-neutral-300 text-center",
             "text-xs! font-medium! text-neutral-700 focus:border-neutral-300 focus:ring-0"
           )}
+          defaultValue={currSchema}
+          onChange={(e) => onSchemaChange(e.currentTarget.value)}
         >
-          <option value="disconnect">public</option>
+          {schemas.map((schema) => (
+            <option value={schema}>{schema}</option>
+          ))}
         </Select>
       </div>
     </div>

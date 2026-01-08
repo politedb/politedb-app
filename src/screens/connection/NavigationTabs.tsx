@@ -19,7 +19,7 @@ export function NavigationTabs({
   return (
     <div
       class={cn(
-        "flex items-center gap-0.5 overflow-x-auto border-b border-neutral-200 bg-neutral-100 pt-1",
+        "flex items-center gap-0.5 overflow-x-auto bg-neutral-100 pt-1",
         "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       )}
     >

@@ -1,26 +1,16 @@
 export function Table({ className }: { className: string }) {
   return (
     <svg
-      class={className}
+      className={className}
+      width="28"
+      height="28"
+      viewBox="0 0 28 28"
       fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
     >
-      <rect
-        x="4"
-        y="4"
-        width="16"
-        height="16"
-        stroke-width="2"
-        stroke="currentColor"
-        fill="none"
-        rx="1"
-      />
       <path
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        stroke-width="2"
-        d="M4 12h16M12 4v16"
+        d="M24.4997 2.33331H3.49967C2.79967 2.33331 2.33301 2.79998 2.33301 3.49998V8.16665H25.6663V3.49998C25.6663 2.79998 25.1997 2.33331 24.4997 2.33331ZM2.33301 17.5H12.833V10.5H2.33301V17.5ZM2.33301 24.5C2.33301 25.2 2.79967 25.6666 3.49967 25.6666H12.833V19.8333H2.33301V24.5ZM15.1663 17.5H25.6663V10.5H15.1663V17.5ZM15.1663 25.6666H24.4997C25.1997 25.6666 25.6663 25.2 25.6663 24.5V19.8333H15.1663V25.6666Z"
+        fill="currentColor"
       />
     </svg>
   );

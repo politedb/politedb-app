@@ -5,7 +5,7 @@ interface Props {
   sizeInfo: TableSizeInfo | null;
 }
 
-export function TableSize({ sizeInfo }: Props) {
+export function RightNav({ sizeInfo }: Props) {
   if (!sizeInfo) {
     return (
       <Box className="p-4 text-center">

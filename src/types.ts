@@ -1,4 +1,5 @@
 import type { JSX } from "preact";
+import { ColumnMeta } from "./lib/tauri";
 
 export type NavId = "connections" | "keychain";
 export type ViewMode = "grid" | "list";
@@ -22,6 +23,12 @@ export type TableItem = { schema: string; name: string };
 export type OpenTable = {
   id: string;
   table: TableItem;
+};
+
+export type TableData = {
+  columns: ColumnMeta[];
+  rows: any[][];
+  rowCount: number;
 };
 
 export type DatabaseEngine =

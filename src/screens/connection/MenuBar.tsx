@@ -20,14 +20,18 @@ interface Props {
   activeSchema?: string;
   activeTable?: string;
   viewMode?: TabViewMode[];
+  loadTableError?: string | null;
   onViewModeChange?: (mode: TabViewMode) => void;
+  onRefresh?: () => void;
 }
 
 export function MenuBar({
   activeSchema,
   activeTable,
   viewMode = ["left"],
+  loadTableError,
   onViewModeChange,
+  onRefresh,
 }: Props) {
   const { activeScreen, tabs } = useScreenStore();
   const activeTab = tabs.find((tab) => tab.id === activeScreen);
@@ -66,7 +70,7 @@ export function MenuBar({
       <div class="mr-30 flex items-center gap-2">
         <Button
           variant="ghost"
-          class="p-2 hover:bg-neutral-100"
+          className="p-2 hover:bg-neutral-50"
           disabled
           title="Unlock"
         >
@@ -74,13 +78,13 @@ export function MenuBar({
         </Button>
         <Button
           variant="ghost"
-          class="p-2 hover:bg-neutral-100"
+          className="p-2 hover:bg-neutral-50"
           disabled
           title="Database"
         >
           <Database className="size-4 text-neutral-600" />
         </Button>
-        <Button variant="ghost" class="p-2 hover:bg-neutral-100" disabled>
+        <Button variant="ghost" className="p-2 hover:bg-neutral-50" disabled>
           <span class="text-xs font-medium text-neutral-600">SQL</span>
         </Button>
       </div>
@@ -92,8 +96,9 @@ export function MenuBar({
           value={connectionString}
           readOnly
           class={cn(
-            "h-8 w-full rounded-md border border-neutral-200 bg-neutral-50 px-3",
-            "text-xs font-semibold text-neutral-700 focus:outline-none"
+            "h-8 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-3",
+            "text-xs font-semibold text-neutral-700 focus:outline-none",
+            loadTableError && "border-red-300 bg-red-300/80"
           )}
           placeholder="No connection"
         />
@@ -103,31 +108,32 @@ export function MenuBar({
       <div class="flex items-center gap-2">
         <Button
           variant="ghost"
-          class="p-2 hover:bg-neutral-100"
+          className="p-1.5 hover:bg-neutral-50"
           title="Refresh"
+          onClick={onRefresh}
         >
-          <RefreshCw className="size-4 text-neutral-600" />
+          <RefreshCw className="size-5 text-neutral-600" />
         </Button>
-        <Button variant="ghost" class="p-2 hover:bg-neutral-100" title="Search">
+        <Button
+          variant="ghost"
+          className="p-2 hover:bg-neutral-50"
+          title="Search"
+        >
           <Search className="size-4 text-neutral-600" />
         </Button>
         <Button
           variant="ghost"
-          class="p-2 hover:bg-neutral-100"
+          className="p-2 hover:bg-neutral-50"
           title="More Options"
         >
           <MoreVertical className="size-4 text-neutral-600" />
         </Button>
+
         {/* View Mode Icons */}
         <div class="ml-1 flex items-center gap-0.5">
           <Button
             variant="ghost"
-            class={cn(
-              "p-2 transition-colors",
-              viewMode.includes("left")
-                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                : "hover:bg-neutral-100"
-            )}
+            className={cn("p-2 transition-colors hover:bg-neutral-50")}
             title="Tab Left"
             onClick={() => onViewModeChange?.("left")}
           >
@@ -140,12 +146,7 @@ export function MenuBar({
           </Button>
           <Button
             variant="ghost"
-            class={cn(
-              "p-2 transition-colors",
-              viewMode.includes("bottom")
-                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                : "hover:bg-neutral-100"
-            )}
+            className={cn("p-2 transition-colors hover:bg-neutral-50")}
             title="Tab Bottom"
             onClick={() => onViewModeChange?.("bottom")}
           >
@@ -160,12 +161,7 @@ export function MenuBar({
           </Button>
           <Button
             variant="ghost"
-            class={cn(
-              "p-2 transition-colors",
-              viewMode.includes("right")
-                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                : "hover:bg-neutral-100"
-            )}
+            className={cn("p-2 transition-colors hover:bg-neutral-50")}
             title="Tab Right"
             onClick={() => onViewModeChange?.("right")}
           >

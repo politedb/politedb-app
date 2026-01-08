@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import { listenOp, operationExecute, profileConnect } from "../lib/tauri";
+import { profileConnect } from "../lib/tauri";
 import { useScreenStore } from "../stores/screen";
 import { cellToString } from "../utils/convert";
 import { TableItem } from "../types";
-
-const LIST_TABLES_SQL = `
-select table_schema, table_name
-from information_schema.tables
-where table_type = 'BASE TABLE'
-  and table_schema not in ('pg_catalog', 'information_schema')
-order by table_schema, table_name;
-`.trim();
+import { listTablesQuery } from "./queries";
+import { runSqlQuery } from "../utils/query";
 
 export function useLoadTables() {
   const { tabs, activeScreen, updateTab } = useScreenStore();
@@ -39,65 +33,50 @@ export function useLoadTables() {
     return connId;
   }, [activeTab, updateTab]);
 
-  const loadTables = useCallback(async () => {
-    if (!activeTab) return;
+  const loadTables = useCallback(
+    async (schema: string = "public") => {
+      if (!activeTab) return;
 
-    setBusy(true);
-    setTables([]);
-    setMsg("Loading tables...");
+      setBusy(true);
+      setTables([]);
+      // setMsg("Loading tables...");
 
-    const buffer: any[][] = [];
-
-    try {
-      const connectionId = await ensureRuntimeConnection();
-      if (!connectionId) {
-        setMsg("No active connection.");
-        setBusy(false);
-        return;
-      }
-
-      const opId = await operationExecute({
-        connection_id: connectionId,
-        kind: "sql_query",
-        sql: { sql: LIST_TABLES_SQL, batch_size: 500, max_rows: 50_000 },
-      });
-
-      const unsub = listenOp(
-        opId,
-        (chunk) => {
-          const rows: any[][] = chunk.rows || [];
-          buffer.push(...rows);
-        },
-        () => {
-          const parsed: TableItem[] = buffer
-            .map((r) => ({
-              schema: cellToString(r?.[0]),
-              name: cellToString(r?.[1]),
-            }))
-            .filter((t) => t.schema && t.name);
-
-          setTables(parsed);
-          setMsg(`Loaded ${parsed.length} tables.`);
+      try {
+        const connectionId = await ensureRuntimeConnection();
+        if (!connectionId) {
+          setMsg("No active connection.");
           setBusy(false);
-          unsub();
-        },
-        (err) => {
-          setMsg(`Failed to load tables: ${err?.error || JSON.stringify(err)}`);
-          setBusy(false);
-          unsub();
+          return;
         }
-      );
-    } catch (e: any) {
-      setMsg(e?.message ? String(e.message) : String(e));
-      setBusy(false);
-    }
-  }, [activeTab, ensureRuntimeConnection]);
+
+        const tablesRes = await runSqlQuery(
+          connectionId,
+          listTablesQuery(schema)
+        );
+
+        const tables: TableItem[] = tablesRes.rows
+          .map((r: any) => ({
+            schema: cellToString(r?.[0]),
+            name: cellToString(r?.[1]),
+          }))
+          .filter((t: any) => t.schema && t.name);
+
+        setTables(tables);
+
+        setBusy(false);
+      } catch (e: any) {
+        setMsg(e?.message ? String(e.message) : String(e));
+        setBusy(false);
+      }
+    },
+    [activeTab, ensureRuntimeConnection]
+  );
 
   // Auto-load when switch tab (or when runtimeConnectionId changes)
   useEffect(() => {
     if (!activeTab) return;
-    void loadTables();
-  }, [activeTab?.id]); // tab switch => reload
+    void loadTables("public");
+  }, [activeTab?.id, loadTables]); // tab switch => reload
 
   return { tables, msg, busy, loadTables };
 }
