@@ -220,7 +220,11 @@ export function TableData({ columns, data, onCellChange }: Props) {
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
           key={`table-${tableRows.length}-${columns.length}-${page}`}
-          style={{ ...columnSizeVars, height: "100%" }}
+          style={{
+            ...columnSizeVars,
+            height: "100%",
+            width: table.getTotalSize(),
+          }}
           data={tableRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
