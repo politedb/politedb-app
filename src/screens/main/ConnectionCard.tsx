@@ -1,10 +1,14 @@
-import { memo } from "preact/compat";
+import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { ConfirmPopover } from "src/components/modal/ConfirmPopover";
+
 import { DbIcon } from "src/components/icons/DbIcon";
-import { Edit, Trash } from "src/components/icons";
+import { Edit, Ssh, Trash, MoreVertical } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
+import { ConfirmPopover } from "src/components/modal/ConfirmPopover";
 import { useProfileStore } from "src/stores/profile";
+
+/* -------------------------------------------------- */
+/* utils */
 
 function firstNonEmpty(...xs: Array<string | undefined | null>) {
   for (const x of xs) {
@@ -33,8 +37,8 @@ function getEngineInput(profile: ConnectionProfile): {
 function buildSubtitle(profile: ConnectionProfile) {
   const { engine, input } = getEngineInput(profile);
 
-  const host = (input as any)?.host as string | undefined;
-  const port = (input as any)?.port as number | undefined;
+  const host = input?.host as string | undefined;
+  const port = input?.port as number | undefined;
 
   const database =
     engine === "postgres"
@@ -56,21 +60,158 @@ function buildSubtitle(profile: ConnectionProfile) {
   return { engine, subtitle, hasSsh: !!profile.input?.ssh };
 }
 
-function ConnectionStatusDot({ online }: { online: boolean }) {
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/* -------------------------------------------------- */
+/* Kebab button */
+
+const KebabButton = memo(function KebabButton(props: {
+  menuOpen: boolean;
+  onClick: (e: MouseEvent) => void;
+  buttonRef: RefObject<HTMLButtonElement>;
+}) {
+  const { menuOpen, onClick, buttonRef } = props;
+
   return (
-    <span
-      class={`relative inline-flex h-3 w-3 rounded-full border border-white ${
-        online ? "bg-emerald-500" : "bg-slate-300"
-      }`}
-      title={online ? "Connected" : "Not connected"}
-      aria-label={online ? "Connected" : "Not connected"}
+    <button
+      ref={buttonRef}
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onClick(e);
+      }}
+      aria-label="Open menu"
+      class={[
+        "cursor-pointer rounded-full p-2 text-slate-400 transition",
+        "hover:bg-slate-100 hover:text-slate-700",
+        menuOpen
+          ? "opacity-100"
+          : "opacity-0 group-hover:opacity-100 focus:opacity-100",
+      ].join(" ")}
     >
-      {online ? (
-        <span class="pointer-events-none absolute inset-0 animate-ping rounded-full bg-emerald-500/40" />
-      ) : null}
-    </span>
+      <MoreVertical className="size-5" />
+    </button>
+  );
+});
+
+/* -------------------------------------------------- */
+/* Card menu */
+const MENU_WIDTH = 176; // ~w-44
+
+function CardMenu(props: {
+  open: boolean;
+  anchorEl: HTMLElement | null;
+  point: { x: number; y: number } | null;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { open, anchorEl, point, onClose, onEdit, onDelete } = props;
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onMouseDown(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onClose, true);
+
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onClose, true);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  let top = 0;
+  let left = 0;
+
+  if (point) {
+    top = point.y + 6;
+    left = point.x + 6;
+  } else if (anchorEl) {
+    const r = anchorEl.getBoundingClientRect();
+    top = r.bottom + 6;
+    left = r.right - MENU_WIDTH;
+  }
+
+  // Keep inside viewport (basic clamp)
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  left = clamp(left, 8, Math.max(8, vw - MENU_WIDTH - 8));
+  top = clamp(top, 8, Math.max(8, vh - 120)); // menu height-ish
+
+  return (
+    <div
+      ref={ref}
+      style={{ top, left }}
+      class="fixed z-50 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+      role="menu"
+    >
+      <button
+        type="button"
+        class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 active:bg-slate-200"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onClose();
+          onEdit();
+        }}
+      >
+        <Edit className="size-4 text-slate-500" />
+        <span>Edit</span>
+      </button>
+      <ConfirmPopover
+        variant="danger"
+        title="Delete connection?"
+        description="This will remove the saved connection."
+        confirmText="Delete"
+        onConfirm={() => {
+          onClose();
+          onDelete();
+        }}
+      >
+        {({ open, triggerRef }) => (
+          <button
+            ref={triggerRef}
+            type="button"
+            class="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 hover:text-red-700 active:bg-red-100"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              open();
+            }}
+          >
+            <Trash className="size-4 text-red-500" />
+            <span class="font-medium">Delete</span>
+          </button>
+        )}
+      </ConfirmPopover>{" "}
+    </div>
   );
 }
+
+/* -------------------------------------------------- */
+/* Connection card */
+const DEFAULT_INDICATOR_COLOR = "#94A3B8"; // slate-300
 
 export const ConnectionCard = memo(function ConnectionCard(props: {
   profileId: string;
@@ -85,6 +226,12 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   );
   const removeProfile = useProfileStore((s) => s.removeProfile);
 
+  const kebabRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(
+    null
+  );
+
   if (!profile) return null;
 
   const label = profile.label || "Unnamed";
@@ -92,26 +239,38 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
   const tags = profile.input?.tags;
 
-  // only tint when user actually picked a color
-  const indicator_color = String(profile.input.indicator_color ?? "").trim();
+  const rawIndicator = String(profile.input.indicator_color ?? "").trim();
+  const hasCustomIndicator = rawIndicator.length > 0;
+  const indicatorColor = hasCustomIndicator
+    ? rawIndicator
+    : DEFAULT_INDICATOR_COLOR;
 
-  const hasTint = indicator_color.length > 0;
+  function openMenuAtAnchor() {
+    setMenuPoint(null);
+    setMenuOpen(true);
+  }
 
-  const connected = !!(profile as any).connected;
+  function openMenuAtPoint(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuPoint({ x: e.clientX, y: e.clientY });
+    setMenuOpen(true);
+  }
 
-  async function onDeleteProfile() {
+  function closeMenu() {
+    setMenuOpen(false);
+    setMenuPoint(null);
+  }
+
+  async function onDelete() {
     if (!profile) return;
     await removeProfile(profile.id);
   }
 
-  // Make gradient longer + softer
-  const tintBg = hasTint
-    ? `linear-gradient(90deg,
-      ${indicator_color} 0%,
-      ${indicator_color} 38%,
-      ${indicator_color} 48%,
-      rgba(255,255,255,0) 82%)`
-    : undefined;
+  useEffect(() => {
+    if (!menuOpen) return;
+    return () => closeMenu();
+  }, [profileId]);
 
   return (
     <div
@@ -121,57 +280,61 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         e.stopPropagation();
         onOpen();
       }}
+      onContextMenu={(e) => openMenuAtPoint(e)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onOpen();
         }
+        if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") {
+          e.preventDefault();
+          openMenuAtAnchor();
+        }
       }}
-      class={`group relative flex cursor-pointer items-center justify-between gap-3 rounded-2xl border px-3.5 py-3 shadow-sm transition-all ${
+      class={[
+        "group relative flex items-center justify-between gap-3",
+        "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
         selected
           ? "border-blue-600 bg-blue-50"
-          : "border-slate-200 bg-white hover:bg-neutral-50"
-      }`}
+          : "border-slate-200 bg-white hover:bg-neutral-50",
+      ].join(" ")}
     >
-      {/* Animated tint (only if indicator_color exists) */}
-      {hasTint ? (
-        <div
-          class={`pointer-events-none absolute inset-0 -translate-x-2.5 rounded-2xl opacity-0 transition-[opacity,transform] duration-200 ease-out ${selected ? "translate-x-0 opacity-[0.09]" : "group-hover:translate-x-0 group-hover:opacity-[0.07]"}`}
-          style={{ background: tintBg }}
-          aria-hidden="true"
-        />
-      ) : null}
-
       {/* LEFT */}
-      <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3 pl-1">
-        {/* Avatar + status dot */}
-        <div class="relative shrink-0">
-          <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200">
-            <DbIcon engine={engine} px={28} className="h-7 w-7" />
-          </div>
-
-          <div class="absolute -right-1.5 -bottom-2 rounded-full bg-white p-px">
-            <ConnectionStatusDot online={connected} />
-          </div>
+      <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200">
+          <DbIcon engine={engine} px={28} className="h-7 w-7" />
         </div>
 
-        {/* Text */}
         <div class="min-w-0 flex-1">
+          {/* Title row */}
           <div class="flex min-w-0 items-center gap-2">
-            <span class="truncate text-sm font-semibold text-slate-900">
+            {/* Indicator */}
+            <span
+              class={[
+                "h-2.5 w-2.5 shrink-0 rounded-full",
+                hasCustomIndicator ? "" : "opacity-60",
+              ].join(" ")}
+              style={{ backgroundColor: indicatorColor }}
+              title={hasCustomIndicator ? "Indicator color" : "Default color"}
+            />
+
+            <span class="min-w-0 truncate text-sm font-semibold text-slate-900">
               {label}
             </span>
 
             {tags?.length ? (
-              <TagChips
-                tags={tags}
-                max={2}
-                size="sm"
-                className="min-w-0 flex-nowrap overflow-hidden"
-              />
+              <div class="min-w-0 shrink-0">
+                <TagChips
+                  className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap"
+                  tags={tags}
+                  max={2}
+                  size="sm"
+                />
+              </div>
             ) : null}
           </div>
 
+          {/* Subtitle row */}
           <div class="mt-1 flex min-w-0 items-center gap-2 text-xs text-slate-500">
             {subtitle ? (
               <span class="min-w-0 truncate" title={subtitle}>
@@ -182,52 +345,41 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
             )}
 
             {hasSsh ? (
-              <span class="shrink-0 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">
-                SSH
-              </span>
+              <>
+                <span class="text-slate-300">•</span>
+                <span
+                  class="inline-flex items-center gap-1 font-mono text-xs font-semibold tracking-wide text-indigo-500"
+                  title="Connected via SSH tunnel"
+                >
+                  <Ssh className="h-3.5 w-3.5 text-slate-400" />
+                  SSH
+                </span>
+              </>
             ) : null}
           </div>
         </div>
       </div>
 
       {/* RIGHT */}
-      <div class="relative z-10 flex shrink-0 items-center gap-1">
-        <ConfirmPopover
-          variant="danger"
-          title="Delete connection?"
-          description="This will remove the saved connection."
-          confirmText="Delete"
-          onConfirm={onDeleteProfile}
-        >
-          {({ open }) => (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                open();
-              }}
-              class="rounded-full p-2 text-slate-400 transition hover:bg-red-100 hover:text-red-700 active:bg-red-200"
-              aria-label="Delete connection"
-              title="Delete"
-            >
-              <Trash className="size-5" />
-            </button>
-          )}
-        </ConfirmPopover>
+      <KebabButton
+        menuOpen={menuOpen}
+        onClick={() => openMenuAtAnchor()}
+        buttonRef={kebabRef}
+      />
 
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-          class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-          aria-label="Edit connection"
-          title="Edit"
-        >
-          <Edit className="size-5" />
-        </button>
-      </div>
+      <CardMenu
+        open={menuOpen}
+        anchorEl={kebabRef.current}
+        point={menuPoint}
+        onClose={closeMenu}
+        onEdit={() => {
+          closeMenu();
+          onEdit();
+        }}
+        onDelete={() => {
+          onDelete();
+        }}
+      />
     </div>
   );
 });

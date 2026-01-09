@@ -1,34 +1,33 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
+import { createPortal } from "preact/compat";
 
 type ConfirmVariant = "default" | "danger";
 
+type Point = { top: number; left: number; placement: "top" | "bottom" };
+
 export function ConfirmPopover(props: {
-  // trigger
   children: (api: {
     open: () => void;
     close: () => void;
     isOpen: boolean;
+    triggerRef: (el: HTMLElement | null) => void;
   }) => JSX.Element;
 
-  // content
   title?: string;
   description?: string;
 
-  // buttons
   confirmText?: string;
   cancelText?: string;
   variant?: ConfirmVariant;
 
-  // behavior
   disabled?: boolean;
   confirmDisabled?: boolean;
-  closeOnConfirm?: boolean; // default true
-  closeOnCancel?: boolean; // default true
-  closeOnOutside?: boolean; // default true
-  closeOnEsc?: boolean; // default true
+  closeOnConfirm?: boolean;
+  closeOnCancel?: boolean;
+  closeOnOutside?: boolean;
+  closeOnEsc?: boolean;
 
-  // callbacks
   onConfirm: () => void | Promise<void>;
   onCancel?: () => void;
 }) {
@@ -51,7 +50,14 @@ export function ConfirmPopover(props: {
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<Point | null>(null);
+
+  const triggerElRef = useRef<HTMLElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  function setTriggerEl(el: HTMLElement | null) {
+    triggerElRef.current = el;
+  }
 
   function apiOpen() {
     if (disabled) return;
@@ -61,14 +67,52 @@ export function ConfirmPopover(props: {
     setOpen(false);
   }
 
+  // compute position when open
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const el = triggerElRef.current;
+    if (!el) return;
+
+    const r = el.getBoundingClientRect();
+
+    // default: open below
+    const W = 240; // popover width
+    const GAP = 8;
+
+    let left = Math.min(
+      Math.max(8, r.right - W), // right align to trigger
+      window.innerWidth - W - 8
+    );
+
+    let top = r.bottom + GAP;
+    let placement: Point["placement"] = "bottom";
+
+    // flip up if near bottom
+    const estimatedH = 110; // approximate popover height
+    if (top + estimatedH > window.innerHeight - 8) {
+      top = Math.max(8, r.top - GAP - estimatedH);
+      placement = "top";
+    }
+
+    setPos({ top, left, placement });
+  }, [open]);
+
+  // outside / esc
   useEffect(() => {
     if (!open) return;
 
     function onDocMouseDown(e: MouseEvent) {
       if (!closeOnOutside) return;
-      const el = rootRef.current;
-      if (!el) return;
-      if (!el.contains(e.target as Node)) setOpen(false);
+
+      const pop = popoverRef.current;
+      const trg = triggerElRef.current;
+      const t = e.target as Node;
+
+      // click inside popover or trigger => ignore
+      if ((pop && pop.contains(t)) || (trg && trg.contains(t))) return;
+
+      setOpen(false);
     }
 
     function onKeyDown(e: KeyboardEvent) {
@@ -76,11 +120,16 @@ export function ConfirmPopover(props: {
       if (e.key === "Escape") setOpen(false);
     }
 
-    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("mousedown", onDocMouseDown, true); // capture to beat menus
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", apiClose);
+    window.addEventListener("scroll", apiClose, true);
+
     return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("mousedown", onDocMouseDown, true);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", apiClose);
+      window.removeEventListener("scroll", apiClose, true);
     };
   }, [open, closeOnOutside, closeOnEsc]);
 
@@ -90,55 +139,66 @@ export function ConfirmPopover(props: {
       : "bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60";
 
   return (
-    <div ref={rootRef} class="relative inline-block">
-      {children({ open: apiOpen, close: apiClose, isOpen: open })}
+    <>
+      {children({
+        open: apiOpen,
+        close: apiClose,
+        isOpen: open,
+        triggerRef: setTriggerEl,
+      })}
 
-      {open && (
-        <div
-          class="absolute right-0 z-50 mt-2 w-56 rounded-lg border border-slate-200 bg-white shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-          role="dialog"
-          aria-modal="true"
-        >
-          <div class="px-3 py-2">
-            <div class="text-sm font-medium text-slate-900">{title}</div>
-            {description ? (
-              <div class="mt-1 text-xs text-slate-600">{description}</div>
-            ) : null}
-          </div>
-
-          <div class="flex justify-end gap-2 px-3 pb-3">
-            <button
-              type="button"
-              class="rounded px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-60"
-              disabled={busy}
-              onClick={() => {
-                if (closeOnCancel) setOpen(false);
-                onCancel?.();
-              }}
+      {open && pos
+        ? createPortal(
+            <div
+              ref={popoverRef}
+              class="fixed z-9999 w-60 rounded-lg border border-slate-200 bg-white shadow-lg"
+              style={{ top: pos.top, left: pos.left }}
+              onMouseDown={(e) => e.stopPropagation()} // don’t bubble to card/menu
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
             >
-              {cancelText}
-            </button>
+              <div class="px-3 py-2">
+                <div class="text-sm font-medium text-slate-900">{title}</div>
+                {description ? (
+                  <div class="mt-1 text-xs text-slate-600">{description}</div>
+                ) : null}
+              </div>
 
-            <button
-              type="button"
-              class={`rounded px-2 py-1 text-xs ${confirmBtnClass}`}
-              disabled={busy || confirmDisabled}
-              onClick={async () => {
-                try {
-                  setBusy(true);
-                  await onConfirm();
-                  if (closeOnConfirm) setOpen(false);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {busy ? "..." : confirmText}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+              <div class="flex justify-end gap-2 px-3 pb-3">
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-60"
+                  disabled={busy}
+                  onClick={() => {
+                    if (closeOnCancel) setOpen(false);
+                    onCancel?.();
+                  }}
+                >
+                  {cancelText}
+                </button>
+
+                <button
+                  type="button"
+                  class={`rounded px-2 py-1 text-xs ${confirmBtnClass}`}
+                  disabled={busy || confirmDisabled}
+                  onClick={async () => {
+                    try {
+                      setBusy(true);
+                      await onConfirm();
+                      if (closeOnConfirm) setOpen(false);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? "..." : confirmText}
+                </button>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }

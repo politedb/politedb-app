@@ -15,4 +15,3 @@ export function Clock({ className }: { className: string }) {
     </svg>
   );
 }
-

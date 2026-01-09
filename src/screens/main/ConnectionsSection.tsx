@@ -61,7 +61,7 @@ export function ConnectionsSection(props: {
       {profiles.length === 0 ? (
         <EmptyState hasSearch={hasSearch} onCreate={onCreate} />
       ) : viewMode === "grid" ? (
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-3">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {profiles.map((p) => (
             <div key={p.id} class="min-w-0">
               <ConnectionCard

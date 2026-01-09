@@ -27,3 +27,5 @@ export * from "./TabBottom";
 export * from "./TabLeft";
 export * from "./TabRight";
 export * from "./Clock";
+export * from "./Ssh";
+export * from "./Kebab";
