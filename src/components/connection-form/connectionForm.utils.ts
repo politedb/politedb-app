@@ -13,6 +13,7 @@ import { SUPPORTED_DATABASES } from "../../constant";
  * ============================================================================= */
 
 export type FormValues = {
+  engine: DatabaseEngine;
   name: string;
 
   tags: string[];
@@ -136,7 +137,36 @@ function buildSshInput(
   };
 }
 
-export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
+// export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
+//   const port = toNumber(v.port, 5432);
+
+//   const postgres: ConnectionCreateInput["postgres"] = {
+//     host: v.host,
+//     port,
+//     database: v.database,
+//     user: v.user,
+//     password: v.storeKeychain
+//       ? { kind: "keychain", value: v.password } // still use password field to carry keychain key
+//       : { kind: "inline", value: v.password },
+//     ssl_mode: v.sslMode,
+//     connect_timeout_ms: 60_000,
+//     statement_timeout_ms: 0,
+//     ssl_key_path: v.sslKey || null,
+//     ssl_cert_path: v.sslCert || null,
+//     ssl_ca_path: v.sslCA || null,
+//   };
+
+//   return {
+//     engine: "postgres",
+//     label: v.name,
+//     tags: v.tags.map(normalizeTag),
+//     indicator_color: v.indicator_color,
+//     postgres,
+//     ssh: buildSshInput(v, v.host, port),
+//   };
+// }
+
+function buildPostgresInput(v: FormValues): ConnectionCreateInput {
   const port = toNumber(v.port, 5432);
 
   const postgres: ConnectionCreateInput["postgres"] = {
@@ -145,7 +175,7 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
     database: v.database,
     user: v.user,
     password: v.storeKeychain
-      ? { kind: "keychain", value: v.password } // still use password field to carry keychain key
+      ? { kind: "keychain", value: v.password }
       : { kind: "inline", value: v.password },
     ssl_mode: v.sslMode,
     connect_timeout_ms: 60_000,
@@ -163,6 +193,66 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
     postgres,
     ssh: buildSshInput(v, v.host, port),
   };
+}
+
+function buildMySqlInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 3306);
+
+  const mysql: ConnectionCreateInput["mysql"] = {
+    host: v.host,
+    port,
+    database: v.database,
+    user: v.user,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    connect_timeout_ms: 60_000,
+    ssl_mode: v.sslMode,
+  };
+
+  return {
+    engine: "mysql",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    mysql,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
+function buildRedisInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 6379);
+
+  const redis: ConnectionCreateInput["redis"] = {
+    host: v.host,
+    port,
+    db: toNumber(v.database, 0),
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+  };
+
+  return {
+    engine: "redis",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    redis,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
+export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
+  switch (v.engine) {
+    case "postgres":
+      return buildPostgresInput(v);
+    case "mysql":
+      return buildMySqlInput(v);
+    case "redis":
+      return buildRedisInput(v);
+    default:
+      throw new Error(`Unsupported engine: ${String(v.engine)}`);
+  }
 }
 
 /* =============================================================================
@@ -305,6 +395,7 @@ export function makeDefaultValues(
     input?.tags.length == 0 ? ["local"] : (input?.tags ?? ["local"]);
 
   return {
+    engine,
     name: input?.label || initialData?.label || pickDefaultLabel(engine),
     tags: dedupeKeepOrder(initialTags.map(normalizeTag)),
     indicator_color: input?.indicator_color || "",
