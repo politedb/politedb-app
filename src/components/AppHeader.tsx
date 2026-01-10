@@ -1,13 +1,14 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Plus, X, Database, Bell } from "./icons";
+import { X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
-import { Tab } from "../stores/screen";
-import { useScreenStore } from "../stores/screen";
-import { WindowControls } from "./WindowControls";
+import { useRef } from "preact/hooks";
+
+import { Tab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
 import { connectionRemove } from "src/lib/tauri";
 import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
 import { useConnectionStore } from "../stores/connection";
+import { DbIcon } from "./icons/DbIcon";
 
 const win = getCurrentWebviewWindow();
 
@@ -32,43 +33,48 @@ const NAV_BUTTONS: NavButton[] = [
   { id: "main", label: "Databases", icon: <Database className="size-3.5" /> },
 ];
 
-export function AppHeader({
-  showWindowControls = true,
-  onNewTab,
-  activeNav = "main",
-  onNavChange,
-}: AppHeaderProps) {
+export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const { tabs, removeTab, activeScreen, setActiveScreen, tabOpenTables } =
     useScreenStore();
   const { tableDataMap } = useConnectionStore();
   const { removeTableData } = useLoadTableData();
 
-  let clickTimer: number | null = null;
+  // Stable refs to avoid re-render issues.
+  const lastClickAtRef = useRef<number>(0);
 
-  async function handleHeaderClick(e: MouseEvent) {
+  // macOS double-click threshold is ~250ms-ish; 280ms is a safe UX middle.
+  const DOUBLE_CLICK_MS = 280;
+
+  async function handleHeaderMouseDown(e: MouseEvent) {
     if (e.button !== 0) return;
+
     const el = e.target as HTMLElement;
+
+    // Any element marked as not draggable should cancel header drag logic.
     if (el.closest('[data-tauri-drag-region="false"]')) return;
 
-    win.startDragging();
+    const now = Date.now();
+    const isDouble = now - lastClickAtRef.current < DOUBLE_CLICK_MS;
+    lastClickAtRef.current = now;
 
-    if (clickTimer) {
-      // double click detected
-      clearTimeout(clickTimer);
-      clickTimer = null;
-
-      const isMax = await win.isMaximized();
-      if (isMax) {
-        await win.unmaximize();
-      } else {
-        await win.maximize();
+    // IMPORTANT: Detect double-click first; do NOT start dragging on double-click.
+    if (isDouble) {
+      try {
+        const isMax = await win.isMaximized();
+        if (isMax) await win.unmaximize();
+        else await win.maximize();
+      } catch {
+        // ignore
       }
       return;
     }
 
-    clickTimer = window.setTimeout(() => {
-      clickTimer = null;
-    }, 250); // macOS double-click threshold
+    // Single click => allow dragging
+    try {
+      await win.startDragging();
+    } catch {
+      // ignore
+    }
   }
 
   function handleTabSelect(tabId: string) {
@@ -78,10 +84,10 @@ export function AppHeader({
   function handleTabClose(tabId: string) {
     const currentTab = tabs.find((tab) => tab.id === tabId);
     const newTabs = tabs.filter((tab) => tab.id !== tabId);
+
     removeTab(tabId);
 
     if (activeScreen === tabId) {
-      // If closing active tab, switch to another tab or clear
       if (newTabs.length > 0) {
         setActiveScreen(newTabs[newTabs.length - 1].id);
       } else {
@@ -90,15 +96,16 @@ export function AppHeader({
     }
 
     if (currentTab?.runtimeConnectionId) {
-      // Clean up runtime connection
-      connectionRemove(currentTab?.runtimeConnectionId);
+      connectionRemove(currentTab.runtimeConnectionId);
     }
+
     if (tabOpenTables[tabId]?.length > 0) {
       Promise.all(
         tabOpenTables[tabId].map((t) => {
           const { schema, name } = t.table;
           const key = tableKey(activeScreen, schema, name);
           const { connectionId } = tableDataMap[key] || { connectionId: null };
+
           removeTableData(schema, name);
 
           if (connectionId) {
@@ -111,83 +118,124 @@ export function AppHeader({
 
   return (
     <div
-      class="z-10 flex h-10 w-full shrink-0 items-center gap-2 rounded-t-xl border-b border-neutral-800 bg-neutral-900/95 px-2 backdrop-blur-md select-none"
-      onMouseDown={handleHeaderClick}
+      class="relative z-10 h-10 w-full shrink-0 border-b border-slate-200 backdrop-blur-md select-none"
+      onMouseDown={handleHeaderMouseDown}
     >
-      {/* Left side - macOS window controls */}
-      {showWindowControls && <WindowControls />}
+      {/* Traffic lights slot (overlay) */}
+      <div
+        class="absolute top-0 left-0 flex h-full items-center"
+        style={{ width: "var(--titlebar-left-padding)" }}
+      />
 
-      {/* Navigation Buttons */}
-      <div class="flex shrink-0 items-center gap-1">
-        {NAV_BUTTONS.map((nav) => (
-          <Button
-            variant="primary"
-            key={nav.id}
-            onClick={() => {
-              onNavChange?.(nav.id);
-              setActiveScreen(nav.id);
-            }}
-            active={activeNav === nav.id}
-            className="py-1.5"
-          >
-            {nav.icon}
-            <span>{nav.label}</span>
-          </Button>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {tabs.map((tab) => (
-          <div
-            key={tab.id}
-            class={`group flex w-full max-w-44 cursor-pointer items-center justify-between gap-1.5 rounded-md py-1.25 pr-2 pl-4 transition-colors ${
-              activeScreen === tab.id
-                ? "bg-neutral-700 text-white hover:bg-neutral-700"
-                : "bg-neutral-800/50 text-neutral-300 hover:bg-neutral-700 hover:text-white"
-            }`}
-            onClick={() => handleTabSelect?.(tab.id)}
-          >
-            <span class="max-w-37.5 truncate text-xs font-medium">
-              {tab.label}
-            </span>
-            <Button
-              variant="ghost"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTabClose?.(tab.id);
-              }}
-              active={activeScreen === tab.id}
-              class={`rounded-full p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/20 ${
-                activeScreen === tab.id ? "opacity-100" : ""
-              }`}
-              title="Close tab"
-            >
-              <X className="size-3.5" />
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      {/* Right side - New Tab button and Notifications */}
-      <div class="flex shrink-0 items-center gap-2">
-        {onNewTab && (
-          <button
-            type="button"
-            onClick={onNewTab}
-            class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-neutral-800 text-neutral-300 transition-colors hover:bg-neutral-700"
-            title="New Tab"
-          >
-            <Plus className="size-4" />
-          </button>
-        )}
-        <Button
-          className="bg-transparent p-2 text-neutral-300 hover:bg-transparent hover:text-neutral-400"
-          variant="ghost"
-          title="Notifications"
+      {/* Header content */}
+      <div
+        class="flex h-full items-center"
+        style={{ paddingLeft: "var(--titlebar-left-padding)" }}
+      >
+        {/* LEFT: App context (align with LeftNav) */}
+        <div
+          class="flex h-full shrink-0 items-center gap-2 px-4"
+          style={{
+            width: "calc(var(--sidebar-width) - var(--titlebar-left-padding))",
+          }}
+          data-tauri-drag-region="false"
         >
-          <Bell className="size-4" />
-        </Button>
+          {NAV_BUTTONS.map((nav) => {
+            const isActive = activeNav === nav.id;
+
+            return (
+              <button
+                key={nav.id}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onNavChange?.(nav.id);
+                  setActiveScreen(nav.id);
+                }}
+                class={[
+                  // App context pill (Blue = "where you are")
+                  "inline-flex cursor-pointer items-center gap-1.5",
+                  "h-7 rounded-lg px-2.5",
+                  "border text-xs font-semibold transition-colors",
+                  isActive
+                    ? "border-blue-300 bg-blue-100 text-blue-500"
+                    : "border-slate-200 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                ].join(" ")}
+                aria-current={isActive ? "page" : undefined}
+                data-tauri-drag-region="false"
+              >
+                <span class={isActive ? "text-blue-500" : "text-slate-400"}>
+                  {nav.icon}
+                </span>
+                <span class="leading-none">Databases</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* MIDDLE: Tabs rail (Neutral container, quiet) */}
+        <div
+          class="flex min-w-0 flex-1 items-center"
+          data-tauri-drag-region="false"
+        >
+          <div class="flex items-center gap-1 overflow-x-auto rounded-lg p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {tabs.map((tab) => {
+              const isActive = activeScreen === tab.id;
+
+              return (
+                <div
+                  key={tab.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTabSelect(tab.id);
+                  }}
+                  data-tauri-drag-region="false"
+                  class={[
+                    "group w-44 shrink-0 cursor-pointer",
+                    "flex items-center justify-between gap-2",
+                    "rounded-md border px-3 py-1 transition-all",
+                    isActive
+                      ? "border-slate-300 bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04),0_2px_8px_rgba(0,0,0,0.06)]"
+                      : "border-transparent bg-slate-100 text-slate-600 hover:border-slate-200 hover:bg-slate-50",
+                  ].join(" ")}
+                >
+                  <div class="flex min-w-0 items-center gap-2">
+                    {/* Active-only icon pill (neutral) */}
+                    <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+                      {/* <Database className="h-3 w-3" /> */}
+                      <DbIcon engine={tab.engine} px={16} />
+                    </span>
+
+                    <span class="truncate text-xs font-medium">
+                      {tab.label}
+                    </span>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    title="Close tab"
+                    data-tauri-drag-region="false"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTabClose(tab.id);
+                    }}
+                    class={[
+                      "rounded-full p-0.5 transition",
+                      isActive
+                        ? "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                        : "text-slate-400 opacity-60 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700",
+                    ].join(" ")}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

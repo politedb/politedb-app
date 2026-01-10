@@ -4,6 +4,7 @@ import { OpenTable } from "../types";
 export type Tab = {
   id: string;
   label: string;
+  engine: string;
 
   // Persistent identity (profile)
   profileId: string; // uuid (backend) OR legacy id mapped

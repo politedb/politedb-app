@@ -68,6 +68,7 @@ raw-window-handle = "0.6.2"
 tauri-plugin-dialog = "2.0.0-rc.8"
 ssh2 = "0.9.5"
 dirs = "6.0.0"
+tauri-plugin-os = "2.0.0-rc.1"
 
 [features]
 default = ["engine-postgres"]
@@ -77,6 +78,7 @@ pg-tls = ["dep:native-tls", "dep:postgres-native-tls"]
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
 objc2 = "0.6.3"
+objc2-foundation="0.3.2"
 core-foundation = "0.10.1"
 security-framework-sys = "2.15.0"
 core-foundation-sys = "0.8.7"

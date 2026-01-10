@@ -1,5 +1,5 @@
 {
-  "cSpell.words": ["tauri"],
+  "cSpell.words": ["tauri", "unmaximize"],
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnPaste": true,
   "editor.codeActionsOnSave": {},

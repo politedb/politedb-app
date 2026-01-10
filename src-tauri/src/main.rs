@@ -36,6 +36,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state::AppState::new(engines))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .setup(|app| {
             window_chrome::apply(app);
             Ok(())

@@ -157,6 +157,7 @@ export function ConnectionFormDialog({
         id: `tab-${uuid()}`,
         label:
           res.profile.label || connectionInput.label || "Unnamed Connection",
+        engine: connectionInput.engine,
         runtimeConnectionId: res.connection.id,
         profileId: res.profile.id,
       };

@@ -84,6 +84,7 @@ export function MainScreen() {
       id: `tab-${uuid()}`,
       label: found.label || "Unnamed Connection",
       profileId,
+      engine: found.engine,
       runtimeConnectionId: undefined,
     };
 

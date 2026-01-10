@@ -28,24 +28,31 @@ fn get_main_webview_window(app: &tauri::App) -> tauri::WebviewWindow {
 
 #[cfg(target_os = "macos")]
 fn macos_apply(win: &tauri::WebviewWindow) {
-    // Requires tauri.conf.json: decorations=true + titleBarStyle=Overlay for native rounded corners.
-    hide_traffic_lights(win);
+    // pass 1: immediate
+    macos_tune_titlebar(win);
+
+    // pass 2: after layout (must be on main thread)
+    let win2 = win.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(160)).await;
+
+        // IMPORTANT: AppKit calls should run on main thread
+        let win3 = win2.clone();
+        let _ = win2.run_on_main_thread(move || {
+            macos_tune_titlebar(&win3);
+        });
+    });
 }
 
 #[cfg(target_os = "macos")]
-fn hide_traffic_lights(win: &tauri::WebviewWindow) {
+fn macos_tune_titlebar(win: &tauri::WebviewWindow) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    // objc2 replaces cocoa::base::{id, YES}
     use objc2::msg_send;
     use objc2::runtime::{AnyObject, Bool};
 
     unsafe {
         // AppKit NSWindowButton:
-        // 0 = close, 1 = minimize, 2 = zoom
-        const NS_WINDOW_CLOSE: i64 = 0;
-        const NS_WINDOW_MINIMIZE: i64 = 1;
-        const NS_WINDOW_ZOOM: i64 = 2;
 
         let Ok(handle) = win.window_handle() else {
             return;
@@ -73,27 +80,61 @@ fn hide_traffic_lights(win: &tauri::WebviewWindow) {
         let new_mask: u64 = style_mask | NSWINDOW_STYLE_MASK_FULL_SIZE_CONTENT_VIEW;
         let _: () = msg_send![ns_win, setStyleMask: new_mask];
 
+        // IMPORTANT: don't allow dragging anywhere
         let _: () = msg_send![ns_win, setMovableByWindowBackground: Bool::NO];
 
-        let close_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_CLOSE];
-        let mini_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_MINIMIZE];
-        let zoom_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_ZOOM];
-
-        if !close_btn.is_null() {
-            let _: () = msg_send![close_btn, setHidden: Bool::YES];
-        }
-        if !mini_btn.is_null() {
-            let _: () = msg_send![mini_btn, setHidden: Bool::YES];
-        }
-        if !zoom_btn.is_null() {
-            let _: () = msg_send![zoom_btn, setHidden: Bool::YES];
-        }
+        // ✅ Move the *container* of traffic lights (more stable than moving each button)
+        offset_traffic_lights_container(ns_win, -2.0);
 
         // Optional: clean overlay titlebar
         // NSWindowTitleVisibilityHidden = 1
         let _: () = msg_send![ns_win, setTitleVisibility: 1i64];
         let _: () = msg_send![ns_win, setTitlebarAppearsTransparent: Bool::YES];
     }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn offset_traffic_lights_container(ns_win: *mut objc2::runtime::AnyObject, dy: f64) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use objc2_foundation::{NSPoint, NSRect};
+
+    const NS_WINDOW_CLOSE: i64 = 0;
+
+    // 1) Get close button (exists if decorations enabled)
+    let close_btn: *mut AnyObject = msg_send![ns_win, standardWindowButton: NS_WINDOW_CLOSE];
+    if close_btn.is_null() {
+        tracing::warn!("traffic_lights: close button is null");
+
+        return;
+    }
+
+    // 2) Superview of close button usually hosts the 3 traffic lights
+    let container: *mut AnyObject = msg_send![close_btn, superview];
+    if container.is_null() {
+        tracing::warn!("traffic_lights: container(superview) is null");
+
+        return;
+    }
+
+    // 3) Move container frame origin Y by dy
+    let frame_before: NSRect = msg_send![container, frame];
+
+    // Try moving DOWN by dy. If you still don't see it, try dy = +2.0
+    let new_origin = NSPoint::new(frame_before.origin.x, frame_before.origin.y + dy);
+    let _: () = msg_send![container, setFrameOrigin: new_origin];
+
+    let frame_after: NSRect = msg_send![container, frame];
+
+    tracing::info!(
+        "traffic_lights: moved container y {} -> {} (dy={})",
+        frame_before.origin.y,
+        frame_after.origin.y,
+        dy
+    );
+
+    let _: () = msg_send![container, setNeedsLayout: objc2::runtime::Bool::YES];
+    let _: () = msg_send![container, layoutSubtreeIfNeeded];
 }
 
 #[cfg(target_os = "windows")]

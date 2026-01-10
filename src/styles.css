@@ -13,6 +13,15 @@
   }
 }
 
+:root {
+  --titlebar-left-padding: 12px;
+  --sidebar-width: 15rem;
+}
+
+html[data-platform="macos"] {
+  --titlebar-left-padding: 72px; /* add space for traffic lights */
+}
+
 html,
 body,
 #root {
