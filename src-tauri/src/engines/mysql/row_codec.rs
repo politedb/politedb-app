@@ -45,47 +45,129 @@ fn decode_value(v: Option<&Value>, ty: ColumnType) -> CellValue {
 
     match v {
         Value::NULL => CellValue::Null,
+
+        // mysql_async already parsed numeric binary protocol values
         Value::Int(x) => CellValue::I64(*x),
+
         Value::UInt(x) => {
             if *x <= i64::MAX as u64 {
                 CellValue::I64(*x as i64)
             } else {
+                // Avoid overflow in UI; show as string (lossless)
                 CellValue::Str(x.to_string())
             }
         }
+
         Value::Float(x) => CellValue::F64(*x as f64),
         Value::Double(x) => CellValue::F64(*x),
 
-        Value::Date(y, m, d, hh, mm, ss, micros) => CellValue::Str(format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
-            y, m, d, hh, mm, ss, micros
-        )),
+        // MySQL date/datetime/timestamp delivered in structured form here
+        Value::Date(y, m, d, hh, mm, ss, micros) => {
+            // Distinguish DATE vs DATETIME/TIMESTAMP using column type
+            match ty {
+                ColumnType::MYSQL_TYPE_DATE => {
+                    CellValue::Str(format!("{:04}-{:02}-{:02}", y, m, d))
+                }
+                ColumnType::MYSQL_TYPE_TIMESTAMP
+                | ColumnType::MYSQL_TYPE_DATETIME
+                | ColumnType::MYSQL_TYPE_NEWDATE => {
+                    // NEWDATE is legacy; treat as datetime-ish representation
+                    CellValue::Str(format!(
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
+                        y, m, d, hh, mm, ss, micros
+                    ))
+                }
+                _ => {
+                    // Fallback: keep full precision
+                    CellValue::Str(format!(
+                        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
+                        y, m, d, hh, mm, ss, micros
+                    ))
+                }
+            }
+        }
 
+        // MySQL TIME can exceed 24h; represent as [-]HH:MM:SS[.micros] with hours extended
         Value::Time(is_neg, days, hours, minutes, seconds, micros) => {
             let sign = if *is_neg { "-" } else { "" };
+            let total_hours: u64 = (*days as u64) * 24 + (*hours as u64);
+
+            // Keep micros always to preserve precision (consistent formatting)
             CellValue::Str(format!(
-                "{}{} {:02}:{:02}:{:02}.{:06}",
-                sign, days, hours, minutes, seconds, micros
+                "{}{:02}:{:02}:{:02}.{:06}",
+                sign, total_hours, minutes, seconds, micros
             ))
         }
 
-        Value::Bytes(b) => {
-            if ty == ColumnType::MYSQL_TYPE_JSON {
-                return match std::str::from_utf8(b) {
-                    Ok(s) => CellValue::Json(s.to_string()),
-                    Err(_) => CellValue::BytesB64(B64.encode(b)),
-                };
-            }
+        // Everything byte-based (includes strings, decimals, json, blobs, geometry, bit, enum/set, etc.)
+        Value::Bytes(b) => decode_bytes(b, ty),
+    }
+}
 
-            if is_blob_type(ty) {
-                return CellValue::BytesB64(B64.encode(b));
-            }
+fn decode_bytes(b: &[u8], ty: ColumnType) -> CellValue {
+    // 1) JSON: keep as JSON string when UTF-8, else base64
+    if ty == ColumnType::MYSQL_TYPE_JSON {
+        return match std::str::from_utf8(b) {
+            Ok(s) => CellValue::Json(s.to_string()),
+            Err(_) => CellValue::BytesB64(B64.encode(b)),
+        };
+    }
 
-            match std::str::from_utf8(b) {
-                Ok(s) => CellValue::Str(s.to_string()),
-                Err(_) => CellValue::BytesB64(B64.encode(b)),
+    // 2) GEOMETRY: binary WKB; do not try to UTF-8
+    if ty == ColumnType::MYSQL_TYPE_GEOMETRY {
+        return CellValue::BytesB64(B64.encode(b));
+    }
+
+    // 3) BIT: MySQL can return packed bits; show as 0/1 string if small, else base64
+    if ty == ColumnType::MYSQL_TYPE_BIT {
+        // Common UI-friendly representation: interpret as big-endian integer when <= 8 bytes
+        if b.len() <= 8 {
+            let mut acc: u64 = 0;
+            for &x in b {
+                acc = (acc << 8) | x as u64;
             }
+            return CellValue::Str(acc.to_string());
         }
+        return CellValue::BytesB64(B64.encode(b));
+    }
+
+    // 4) BLOB family: always base64 (avoid corrupting arbitrary binary)
+    if is_blob_type(ty) {
+        return CellValue::BytesB64(B64.encode(b));
+    }
+
+    // 5) DECIMAL/NEWDECIMAL: keep as string (lossless)
+    if matches!(
+        ty,
+        ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL
+    ) {
+        return match std::str::from_utf8(b) {
+            Ok(s) => CellValue::Str(s.to_string()),
+            Err(_) => CellValue::BytesB64(B64.encode(b)),
+        };
+    }
+
+    // 6) ENUM/SET: returned as string (bytes). Keep UTF-8 else base64.
+    if matches!(ty, ColumnType::MYSQL_TYPE_ENUM | ColumnType::MYSQL_TYPE_SET) {
+        return match std::str::from_utf8(b) {
+            Ok(s) => CellValue::Str(s.to_string()),
+            Err(_) => CellValue::BytesB64(B64.encode(b)),
+        };
+    }
+
+    // 7) YEAR: often returned as bytes depending on protocol/settings; prefer string
+    if ty == ColumnType::MYSQL_TYPE_YEAR {
+        return match std::str::from_utf8(b) {
+            Ok(s) => CellValue::Str(s.to_string()),
+            Err(_) => CellValue::BytesB64(B64.encode(b)),
+        };
+    }
+
+    // 8) TEXT/STRING/VARCHAR/VAR_STRING/CHAR and most other “text-ish”:
+    // Try UTF-8; if not, keep bytes base64 (do not lose data).
+    match std::str::from_utf8(b) {
+        Ok(s) => CellValue::Str(s.to_string()),
+        Err(_) => CellValue::BytesB64(B64.encode(b)),
     }
 }
 
