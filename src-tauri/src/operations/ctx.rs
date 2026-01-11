@@ -12,6 +12,7 @@ pub struct OperationCtx {
     pub running_ops: Arc<dashmap::DashMap<Uuid, CancelHandle>>,
     pub cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
     pub active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
+    pub op_to_conn: Arc<dashmap::DashMap<Uuid, Uuid>>,
 }
 
 /// Always clean active marker + pending cancel request,

@@ -14,12 +14,14 @@ pub struct OperationDone {
     pub op_id: Uuid,
     pub truncated: bool,
     pub row_count: u64,
+    pub elapsed_ms: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationError {
     pub op_id: Uuid,
     pub error: String,
+    pub elapsed_ms: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

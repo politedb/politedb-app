@@ -19,23 +19,25 @@ pub fn emit_meta(app: &AppHandle, op_id: Uuid, columns: Vec<crate::types::Column
     let _ = app.emit("op:meta", OperationMeta { op_id, columns });
 }
 
-pub fn emit_done(app: &AppHandle, op_id: Uuid, truncated: bool, row_count: u64) {
+pub fn emit_done(app: &AppHandle, op_id: Uuid, truncated: bool, row_count: u64, elapsed_ms: u128) {
     let _ = app.emit(
         "op:done",
         OperationDone {
             op_id,
             truncated,
             row_count,
+            elapsed_ms,
         },
     );
 }
 
-pub fn emit_error(app: &AppHandle, op_id: Uuid, msg: impl Into<String>) {
+pub fn emit_error(app: &AppHandle, op_id: Uuid, msg: impl Into<String>, elapsed_ms: u128) {
     let _ = app.emit(
         "op:error",
         OperationError {
             op_id,
             error: msg.into(),
+            elapsed_ms,
         },
     );
 }

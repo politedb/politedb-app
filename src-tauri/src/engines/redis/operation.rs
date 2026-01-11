@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use deadpool_redis::Pool;
@@ -18,10 +18,21 @@ use crate::types::{CellValue, ColumnMeta, RedisCommandInput, TableChunk};
  * ============================================================================= */
 
 fn bytes_to_cell(b: Vec<u8>) -> CellValue {
-    // UTF-8 best-effort, fallback base64
     match String::from_utf8(b.clone()) {
         Ok(s) => CellValue::Str(s),
         Err(_) => CellValue::BytesB64(base64::engine::general_purpose::STANDARD.encode(b)),
+    }
+}
+
+fn cell_to_string(c: CellValue) -> String {
+    match c {
+        CellValue::Null => "null".into(),
+        CellValue::Bool(b) => if b { "true" } else { "false" }.into(),
+        CellValue::I64(i) => i.to_string(),
+        CellValue::F64(f) => f.to_string(),
+        CellValue::Str(s) => format!("{:?}", s),
+        CellValue::Json(s) => s,
+        CellValue::BytesB64(s) => format!("{:?}", s),
     }
 }
 
@@ -34,16 +45,10 @@ fn value_to_cell(v: redis::Value) -> CellValue {
         Value::Double(f) => CellValue::F64(f),
         Value::Boolean(b) => CellValue::Bool(b),
 
-        // RESP2 bulk string / RESP3 bulk string
         Value::BulkString(b) => bytes_to_cell(b),
-
-        // RESP3 simple string
         Value::SimpleString(s) => CellValue::Str(s),
-
-        // "OK"
         Value::Okay => CellValue::Str("OK".to_string()),
 
-        // Arrays / Sets => JSON-ish string (giữ FE stable)
         Value::Array(items) | Value::Set(items) => {
             let mut out = Vec::with_capacity(items.len());
             for it in items {
@@ -52,7 +57,6 @@ fn value_to_cell(v: redis::Value) -> CellValue {
             CellValue::Json(format!("[{}]", out.join(",")))
         }
 
-        // Map / Attribute / Push => JSON-ish string (best-effort)
         Value::Map(pairs) => {
             let mut out = Vec::with_capacity(pairs.len());
             for (k, val) in pairs {
@@ -64,7 +68,6 @@ fn value_to_cell(v: redis::Value) -> CellValue {
         }
 
         Value::Attribute { data, attributes } => {
-            // gói lại cho FE: {"data":..., "attr":{...}}
             let data_s = cell_to_string(value_to_cell(*data));
             let mut out = Vec::with_capacity(attributes.len());
             for (k, val) in attributes {
@@ -88,26 +91,11 @@ fn value_to_cell(v: redis::Value) -> CellValue {
 
         Value::VerbatimString { format: _, text } => CellValue::Str(text),
 
-        // ServerError => string (ServerError doesn't implement Display)
         Value::ServerError(e) => CellValue::Str(format!("{e:?}")),
-
-        // BigNumber (feature-gated) => string
         Value::BigNumber(x) => CellValue::Str(format!("{x:?}")),
     }
 }
 
-// helper cho JSON-ish string
-fn cell_to_string(c: CellValue) -> String {
-    match c {
-        CellValue::Null => "null".into(),
-        CellValue::Bool(b) => if b { "true" } else { "false" }.into(),
-        CellValue::I64(i) => i.to_string(),
-        CellValue::F64(f) => f.to_string(),
-        CellValue::Str(s) => format!("{:?}", s), // quote string
-        CellValue::Json(s) => s,                 // assume already json-ish
-        CellValue::BytesB64(s) => format!("{:?}", s), // quote
-    }
-}
 /* =============================================================================
  * Emit helpers
  * ============================================================================= */
@@ -115,18 +103,19 @@ fn cell_to_string(c: CellValue) -> String {
 async fn emit_table_chunks(
     app: tauri::AppHandle,
     op_id: Uuid,
+    started_at: Instant,
     mut rx_chunk: mpsc::Receiver<Result<TableChunk, String>>,
 ) {
     while let Some(item) = rx_chunk.recv().await {
         match item {
             Ok(chunk) => {
-                let _ = app.emit("op:chunk_table", chunk);
+                // If FE is gone / app reload => stop
+                if app.emit("op:chunk_table", chunk).is_err() {
+                    break;
+                }
             }
             Err(err) => {
-                let _ = app.emit(
-                    "op:error",
-                    crate::types::OperationError { op_id, error: err },
-                );
+                emit_error(&app, op_id, err, started_at.elapsed().as_millis());
                 break;
             }
         }
@@ -144,6 +133,7 @@ pub async fn run_redis_command(
     input: RedisCommandInput,
 ) {
     let op_id = ctx.op_id;
+    let started_at = Instant::now();
 
     // Ensure active_ops/cancel_requested cleaned even if we fail early
     let _active_guard = ActiveGuard::new(
@@ -176,27 +166,29 @@ pub async fn run_redis_command(
 
     // Backpressure channel (inflight chunks)
     let (tx_chunk, rx_chunk) = mpsc::channel::<Result<TableChunk, String>>(2);
-    let app_emit = ctx.app.clone();
-    let emit_task = tokio::spawn(emit_table_chunks(app_emit, op_id, rx_chunk));
+    let emit_task = tokio::spawn(emit_table_chunks(
+        ctx.app.clone(),
+        op_id,
+        started_at,
+        rx_chunk,
+    ));
 
     // Get redis connection
     let mut conn = match pool.get().await {
         Ok(c) => c,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("REDIS_GET_CONN_FAILED: {e}"));
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("REDIS_GET_CONN_FAILED: {e}"),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
     };
 
     let cmd = input.cmd.trim().to_uppercase();
 
-    // ----------------------------
-    // Command-specific table shapes
-    // ----------------------------
-
-    // Default: 2 cols (idx, value) for multi/arrays, or 1 row 1 col for scalar.
-    // Meta is ALWAYS emitted.
-    // NOTE: FE should render ColumnMeta consistently across engines.
     match cmd.as_str() {
         "GET" => {
             emit_meta(
@@ -216,7 +208,12 @@ pub async fn run_redis_command(
 
             let key = input.args.get(0).cloned().unwrap_or_default();
             if key.is_empty() {
-                emit_error(&ctx.app, op_id, "REDIS_KEY_REQUIRED".to_string());
+                emit_error(
+                    &ctx.app,
+                    op_id,
+                    "REDIS_KEY_REQUIRED".to_string(),
+                    started_at.elapsed().as_millis(),
+                );
                 return;
             }
 
@@ -229,7 +226,12 @@ pub async fn run_redis_command(
                 Some(t) => match tokio::time::timeout(t, fut).await {
                     Ok(r) => r,
                     Err(_) => {
-                        emit_error(&ctx.app, op_id, "REDIS_COMMAND_TIMEOUT".to_string());
+                        emit_error(
+                            &ctx.app,
+                            op_id,
+                            "REDIS_COMMAND_TIMEOUT".to_string(),
+                            started_at.elapsed().as_millis(),
+                        );
                         return;
                     }
                 },
@@ -247,13 +249,29 @@ pub async fn run_redis_command(
                         rows: vec![row],
                         row_offset: 0,
                     };
-                    let _ = tx_chunk.send(Ok(chunk)).await;
+
+                    if tx_chunk.send(Ok(chunk)).await.is_err() {
+                        emit_error(
+                            &ctx.app,
+                            op_id,
+                            "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
+                            started_at.elapsed().as_millis(),
+                        );
+                        return;
+                    }
+
                     drop(tx_chunk);
                     let _ = emit_task.await;
-                    emit_done(&ctx.app, op_id, false, 1);
+
+                    emit_done(&ctx.app, op_id, false, 1, started_at.elapsed().as_millis());
                 }
                 Err(e) => {
-                    emit_error(&ctx.app, op_id, format!("REDIS_GET_FAILED: {e}"));
+                    emit_error(
+                        &ctx.app,
+                        op_id,
+                        format!("REDIS_GET_FAILED: {e}"),
+                        started_at.elapsed().as_millis(),
+                    );
                 }
             }
         }
@@ -276,12 +294,16 @@ pub async fn run_redis_command(
 
             let key = input.args.get(0).cloned().unwrap_or_default();
             if key.is_empty() {
-                emit_error(&ctx.app, op_id, "REDIS_KEY_REQUIRED".to_string());
+                emit_error(
+                    &ctx.app,
+                    op_id,
+                    "REDIS_KEY_REQUIRED".to_string(),
+                    started_at.elapsed().as_millis(),
+                );
                 return;
             }
 
             let fut = async {
-                // Returns HashMap<String, Vec<u8>> typically, but Redis can store bytes.
                 let map: std::collections::HashMap<String, Vec<u8>> = conn.hgetall(key).await?;
                 Ok::<_, redis::RedisError>(map)
             };
@@ -290,7 +312,12 @@ pub async fn run_redis_command(
                 Some(t) => match tokio::time::timeout(t, fut).await {
                     Ok(r) => r,
                     Err(_) => {
-                        emit_error(&ctx.app, op_id, "REDIS_COMMAND_TIMEOUT".to_string());
+                        emit_error(
+                            &ctx.app,
+                            op_id,
+                            "REDIS_COMMAND_TIMEOUT".to_string(),
+                            started_at.elapsed().as_millis(),
+                        );
                         return;
                     }
                 },
@@ -307,6 +334,7 @@ pub async fn run_redis_command(
                         if row_count >= max_rows {
                             break;
                         }
+
                         rows.push(vec![CellValue::Str(f), bytes_to_cell(v)]);
                         row_count += 1;
 
@@ -317,8 +345,15 @@ pub async fn run_redis_command(
                                 row_offset,
                             };
                             row_offset = row_count;
+
                             if tx_chunk.send(Ok(chunk)).await.is_err() {
-                                break;
+                                emit_error(
+                                    &ctx.app,
+                                    op_id,
+                                    "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
+                                    started_at.elapsed().as_millis(),
+                                );
+                                return;
                             }
                         }
                     }
@@ -336,9 +371,22 @@ pub async fn run_redis_command(
                     let _ = emit_task.await;
 
                     let truncated = row_count >= max_rows;
-                    emit_done(&ctx.app, op_id, truncated, row_count);
+                    emit_done(
+                        &ctx.app,
+                        op_id,
+                        truncated,
+                        row_count,
+                        started_at.elapsed().as_millis(),
+                    );
                 }
-                Err(e) => emit_error(&ctx.app, op_id, format!("REDIS_HGETALL_FAILED: {e}")),
+                Err(e) => {
+                    emit_error(
+                        &ctx.app,
+                        op_id,
+                        format!("REDIS_HGETALL_FAILED: {e}"),
+                        started_at.elapsed().as_millis(),
+                    );
+                }
             }
         }
 
@@ -366,12 +414,18 @@ pub async fn run_redis_command(
                     _ = notify.notified() => {
                         drop(tx_chunk);
                         let _ = emit_task.await;
-                        emit_done(&ctx.app, op_id, false, row_count);
+
+                        emit_done(
+                            &ctx.app,
+                            op_id,
+                            false,
+                            row_count,
+                            started_at.elapsed().as_millis(),
+                        );
                         return;
                     }
 
                     res = async {
-                        // SCAN cursor MATCH pattern COUNT count
                         let reply: (u64, Vec<String>) = redis::cmd("SCAN")
                             .arg(cursor)
                             .arg("MATCH").arg(&pattern)
@@ -389,25 +443,33 @@ pub async fn run_redis_command(
                         };
 
                         for k in keys {
-                            if row_count >= max_rows {
-                                break;
-                            }
+                            if row_count >= max_rows { break; }
+
                             rows.push(vec![CellValue::Str(k)]);
                             row_count += 1;
 
                             if rows.len() >= batch_size {
-                                let chunk = TableChunk { op_id, rows: std::mem::take(&mut rows), row_offset };
+                                let chunk = TableChunk {
+                                    op_id,
+                                    rows: std::mem::take(&mut rows),
+                                    row_offset,
+                                };
                                 row_offset = row_count;
+
                                 if tx_chunk.send(Ok(chunk)).await.is_err() {
-                                    break;
+                                    emit_error(
+                                        &ctx.app,
+                                        op_id,
+                                        "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
+                                        started_at.elapsed().as_millis(),
+                                    );
+                                    return;
                                 }
                             }
                         }
 
                         cursor = next_cursor;
-                        if cursor == 0 || row_count >= max_rows {
-                            break;
-                        }
+                        if cursor == 0 || row_count >= max_rows { break; }
                     }
                 }
             }
@@ -425,7 +487,13 @@ pub async fn run_redis_command(
             let _ = emit_task.await;
 
             let truncated = row_count >= max_rows;
-            emit_done(&ctx.app, op_id, truncated, row_count);
+            emit_done(
+                &ctx.app,
+                op_id,
+                truncated,
+                row_count,
+                started_at.elapsed().as_millis(),
+            );
         }
 
         // Fallback: raw command -> one-cell result as string/json-ish
@@ -453,7 +521,12 @@ pub async fn run_redis_command(
                 Some(t) => match tokio::time::timeout(t, fut).await {
                     Ok(r) => r,
                     Err(_) => {
-                        emit_error(&ctx.app, op_id, "REDIS_COMMAND_TIMEOUT".to_string());
+                        emit_error(
+                            &ctx.app,
+                            op_id,
+                            "REDIS_COMMAND_TIMEOUT".to_string(),
+                            started_at.elapsed().as_millis(),
+                        );
                         return;
                     }
                 },
@@ -467,12 +540,30 @@ pub async fn run_redis_command(
                         rows: vec![vec![value_to_cell(v)]],
                         row_offset: 0,
                     };
-                    let _ = tx_chunk.send(Ok(chunk)).await;
+
+                    if tx_chunk.send(Ok(chunk)).await.is_err() {
+                        emit_error(
+                            &ctx.app,
+                            op_id,
+                            "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
+                            started_at.elapsed().as_millis(),
+                        );
+                        return;
+                    }
+
                     drop(tx_chunk);
                     let _ = emit_task.await;
-                    emit_done(&ctx.app, op_id, false, 1);
+
+                    emit_done(&ctx.app, op_id, false, 1, started_at.elapsed().as_millis());
                 }
-                Err(e) => emit_error(&ctx.app, op_id, format!("REDIS_COMMAND_FAILED: {e}")),
+                Err(e) => {
+                    emit_error(
+                        &ctx.app,
+                        op_id,
+                        format!("REDIS_COMMAND_FAILED: {e}"),
+                        started_at.elapsed().as_millis(),
+                    );
+                }
             }
         }
     }

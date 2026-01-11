@@ -13,12 +13,18 @@ use ssh2::{CheckResult, HostKeyType, Session};
 use super::handle::SshTunnelHandle;
 use super::types::{SshAuth, SshTunnelInput};
 
-const MAX_CHANNELS: usize = 256;
-const IO_BUF_CAP: usize = 256 * 1024; // per-direction pending cap (tune)
+const MAX_CHANNELS: usize = 1024;
+const IO_BUF_CAP: usize = 256 * 1024; // per-direction pending cap
 const LOCAL_READ_CHUNK: usize = 32 * 1024;
 const SSH_READ_CHUNK: usize = 32 * 1024;
 const OPEN_CHANNEL_TIMEOUT: Duration = Duration::from_millis(3_000);
-const TICK_SLEEP: Duration = Duration::from_millis(1);
+
+// Adaptive sleep
+const TICK_SLEEP_IDLE: Duration = Duration::from_millis(3);
+const TICK_SLEEP_ACTIVE: Duration = Duration::from_millis(0);
+
+// If accept queue is full, we drop the local socket (backpressure)
+const ACCEPT_QUEUE_CAP: usize = 1024;
 
 fn pick_free_local_addr() -> anyhow::Result<(TcpListener, SocketAddr)> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
@@ -45,7 +51,7 @@ fn known_host_format_from_hostkey_type(t: HostKeyType) -> ssh2::KnownHostKeyForm
         HostKeyType::Ecdsa521 => ssh2::KnownHostKeyFormat::Ecdsa521,
         HostKeyType::Rsa => ssh2::KnownHostKeyFormat::SshRsa,
         HostKeyType::Dss => ssh2::KnownHostKeyFormat::SshDss,
-        _ => ssh2::KnownHostKeyFormat::SshRsa,
+        _ => ssh2::KnownHostKeyFormat::Unknown,
     }
 }
 
@@ -65,7 +71,7 @@ fn apply_hostkey_policy(
     }
 
     let Some(path) = known_hosts_path() else {
-        // If no known_hosts path, degrade gracefully.
+        // Degrade gracefully if no home dir
         return Ok(());
     };
 
@@ -89,6 +95,7 @@ fn apply_hostkey_policy(
             let hostport = format!("[{}]:{}", ssh_host.trim(), ssh_port);
             let fmt = known_host_format_from_hostkey_type(key_type);
 
+            // fmt may be Unknown; ssh2 still allows adding, but this is best-effort.
             kh.add(&hostport, key, "", fmt)?;
 
             if let Some(dir) = path.parent() {
@@ -112,7 +119,6 @@ fn is_ssh_wouldblock(e: &ssh2::Error) -> bool {
         ssh2::ErrorCode::SFTP(code) => code == -37,
         #[allow(unreachable_patterns)]
         _ => {
-            // optional fallback, best-effort
             let msg = e.message();
             msg.contains("EAGAIN") || msg.contains("would block")
         }
@@ -134,6 +140,8 @@ fn connect_ssh_session_blocking(input: &SshTunnelInput) -> anyhow::Result<Sessio
 
     let mut sess = Session::new()?;
     sess.set_tcp_stream(tcp);
+
+    // blocking for handshake + auth
     sess.set_blocking(true);
     sess.handshake()?;
 
@@ -197,13 +205,11 @@ impl Pending {
         if src.is_empty() {
             return;
         }
-
-        // Prevent unbounded growth
         if self.len() >= cap {
             return;
         }
 
-        // If consumed a lot, compact
+        // compact
         if self.off > 0 && self.off >= (self.buf.len() / 2) {
             self.buf.drain(0..self.off);
             self.off = 0;
@@ -233,9 +239,8 @@ struct Pipe {
     local: TcpStream,
     ch: ssh2::Channel,
 
-    // pending data
-    l2r: Pending, // local -> ssh
-    r2l: Pending, // ssh -> local
+    l2r: Pending,
+    r2l: Pending,
 
     local_eof: bool,
     ssh_eof: bool,
@@ -269,11 +274,12 @@ fn open_direct_channel_nonblocking(
     }
 }
 
-fn pump_pipe(sess: &Session, p: &mut Pipe) {
+/// Returns true if this pipe made progress this tick.
+fn pump_pipe(sess: &Session, p: &mut Pipe) -> bool {
     let now = Instant::now();
     let mut progressed = false;
 
-    // 1) Read from local into l2r
+    // 1) local -> l2r
     if !p.local_eof && p.l2r.len() < IO_BUF_CAP {
         let mut tmp = [0u8; LOCAL_READ_CHUNK];
         match p.local.read(&mut tmp) {
@@ -294,13 +300,12 @@ fn pump_pipe(sess: &Session, p: &mut Pipe) {
         }
     }
 
-    // 2) Write l2r to ssh channel
+    // 2) l2r -> ssh
     if !p.l2r.is_empty() {
         match p.ch.write(p.l2r.slice()) {
             Ok(0) => {}
             Ok(n) => {
                 p.l2r.advance(n);
-                // flush() might also EAGAIN; ignore
                 let _ = p.ch.flush();
                 p.last_active = now;
                 progressed = true;
@@ -313,7 +318,7 @@ fn pump_pipe(sess: &Session, p: &mut Pipe) {
         }
     }
 
-    // 3) If local eof and all l2r flushed => send EOF to ssh once
+    // 3) local eof -> send_eof
     if p.local_eof && p.l2r.is_empty() && !p.sent_ssh_eof {
         match p.ch.send_eof() {
             Ok(_) => {
@@ -328,7 +333,7 @@ fn pump_pipe(sess: &Session, p: &mut Pipe) {
         }
     }
 
-    // 4) Read ssh -> r2l
+    // 4) ssh -> r2l
     if !p.ssh_eof && p.r2l.len() < IO_BUF_CAP {
         let mut tmp = [0u8; SSH_READ_CHUNK];
         match p.ch.read(&mut tmp) {
@@ -343,20 +348,18 @@ fn pump_pipe(sess: &Session, p: &mut Pipe) {
             }
             Err(e) => {
                 if !is_io_wouldblock(&e) {
-                    // other errors => treat as EOF/broken
                     p.ssh_eof = true;
                 }
             }
         }
     }
 
-    // 5) Write r2l to local
+    // 5) r2l -> local
     if !p.r2l.is_empty() {
         match p.local.write(p.r2l.slice()) {
             Ok(0) => {}
             Ok(n) => {
                 p.r2l.advance(n);
-                // no need to flush a TcpStream
                 p.last_active = now;
                 progressed = true;
             }
@@ -368,18 +371,19 @@ fn pump_pipe(sess: &Session, p: &mut Pipe) {
         }
     }
 
-    // 6) If ssh eof and all r2l flushed => shutdown local write once
+    // 6) ssh eof -> shutdown local write
     if p.ssh_eof && p.r2l.is_empty() && !p.closed_local_write {
         let _ = p.local.shutdown(std::net::Shutdown::Write);
         p.closed_local_write = true;
         progressed = true;
     }
 
-    // Note: with libssh2 nonblocking, progress happens via read/write calls above.
-    // Keeping sess in signature lets you extend with socket polling later.
+    // keep sess in signature for future poll integration
     if progressed {
         let _ = sess;
     }
+
+    progressed
 }
 
 fn should_remove(p: &Pipe) -> bool {
@@ -398,12 +402,16 @@ fn spawn_session_thread(
         // Switch session to nonblocking for multiplex
         sess.set_blocking(false);
 
-        let mut next_id: u64 = 1;
         let mut pipes: HashMap<u64, Pipe> = HashMap::new();
+        let mut next_id: u64 = 1;
 
         while !shutdown.load(Ordering::SeqCst) {
-            // Drain new locals (bounded channel gives backpressure)
+            let mut any_activity = false;
+
+            // Drain locals
             while let Ok(local) = rx.try_recv() {
+                any_activity = true;
+
                 if pipes.len() >= MAX_CHANNELS {
                     let _ = local.shutdown(std::net::Shutdown::Both);
                     continue;
@@ -411,7 +419,6 @@ fn spawn_session_thread(
 
                 set_local_nonblocking(&local);
 
-                // Open direct-tcpip channel (nonblocking retry)
                 let ch = match open_direct_channel_nonblocking(
                     &sess,
                     input.remote_host.trim(),
@@ -445,16 +452,19 @@ fn spawn_session_thread(
                 );
             }
 
-            // Pump each pipe
+            // Pump pipes
             let mut remove_ids: Vec<u64> = Vec::new();
             for (id, p) in pipes.iter_mut() {
-                pump_pipe(&sess, p);
+                let progressed = pump_pipe(&sess, p);
+                if progressed {
+                    any_activity = true;
+                }
                 if should_remove(p) {
                     remove_ids.push(*id);
                 }
             }
 
-            // Cleanup
+            // Cleanup removed pipes
             for id in remove_ids {
                 if let Some(mut p) = pipes.remove(&id) {
                     let _ = p.ch.close();
@@ -463,8 +473,14 @@ fn spawn_session_thread(
                 }
             }
 
-            // Avoid busy spin
-            std::thread::sleep(TICK_SLEEP);
+            // Sleep (adaptive)
+            if any_activity {
+                if !TICK_SLEEP_ACTIVE.is_zero() {
+                    std::thread::sleep(TICK_SLEEP_ACTIVE);
+                }
+            } else {
+                std::thread::sleep(TICK_SLEEP_IDLE);
+            }
         }
 
         // Best-effort cleanup
@@ -481,25 +497,32 @@ fn spawn_session_thread(
 pub async fn open_tunnel(input: &SshTunnelInput) -> anyhow::Result<SshTunnelHandle> {
     input.validate().map_err(|e| anyhow!(e))?;
 
-    // 0) Fail-fast: verify we can open one channel and touch remote target
+    tracing::warn!(
+        ssh_host = %input.ssh_host,
+        ssh_port = input.ssh_port,
+        remote = %format!("{}:{}", input.remote_host, input.remote_port),
+        "ssh_tunnel: OPEN_TUNNEL CALLED"
+    );
+
+    // 0) Connect ONCE (blocking), and do fail-fast using the SAME session
+    let sess = connect_ssh_session_blocking(input)?;
+
     {
-        let sess = connect_ssh_session_blocking(input)?;
+        // still in blocking mode here
         let _ = sess.channel_direct_tcpip(input.remote_host.trim(), input.remote_port, None)?;
-        let _ = sess.disconnect(None, "bye", None);
     }
 
     // 1) Bind local listener
     let (listener, local_addr) = pick_free_local_addr()?;
 
-    // 2) Establish one authenticated SSH session (blocking auth), then hand it to session thread
-    let sess = connect_ssh_session_blocking(input)?;
-
-    // 3) Multiplex threads wiring
+    // 2) Multiplex threads wiring
     let shutdown = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::sync_channel::<TcpStream>(1024); // bounded for backpressure
+    let (tx, rx) = mpsc::sync_channel::<TcpStream>(ACCEPT_QUEUE_CAP);
 
     let input_for_session = input.clone();
     let shutdown_session = shutdown.clone();
+
+    // move the already-connected session into session thread
     let session_thread = spawn_session_thread(sess, input_for_session, rx, shutdown_session);
 
     let shutdown_accept = shutdown.clone();
@@ -508,8 +531,18 @@ pub async fn open_tunnel(input: &SshTunnelInput) -> anyhow::Result<SshTunnelHand
             match listener.accept() {
                 Ok((local_stream, _peer)) => {
                     set_local_nonblocking(&local_stream);
-                    if tx.send(local_stream).is_err() {
-                        break;
+
+                    // IMPORTANT: do not block accept thread if queue is full
+                    match tx.try_send(local_stream) {
+                        Ok(_) => {}
+                        Err(mpsc::TrySendError::Full(s)) => {
+                            // backpressure: drop connection
+                            let _ = s.shutdown(std::net::Shutdown::Both);
+                        }
+                        Err(mpsc::TrySendError::Disconnected(s)) => {
+                            let _ = s.shutdown(std::net::Shutdown::Both);
+                            break;
+                        }
                     }
                 }
                 Err(e) if is_io_wouldblock(&e) => {

@@ -1,28 +1,47 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicUsize, Arc};
 
 use dashmap::DashMap;
+use futures_util::lock::Mutex;
 use uuid::Uuid;
 
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TunnelKey {
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub ssh_user: String,
+    pub strict: String,
+
+    // auth fingerprint (NO plaintext secret)
+    pub auth_fp: String,
+
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+#[derive(Debug)]
+pub struct SharedTunnel {
+    pub local_addr: std::net::SocketAddr,
+    pub handle: Mutex<Option<SshTunnelHandle>>,
+    pub refs: AtomicUsize,
+}
+
 pub struct AppState {
-    /// Engine registry (drivers)
     pub engines: EngineRegistry,
 
-    /// Runtime DB connections (in-memory)
     pub connections: Arc<DashMap<Uuid, EngineConnection>>,
 
-    /// SSH tunnels bound to runtime connections (conn_id -> tunnel)
-    pub ssh_tunnels: Arc<DashMap<Uuid, SshTunnelHandle>>,
+    // ✅ shared tunnel pool
+    pub ssh_tunnel_pool: Arc<DashMap<TunnelKey, Arc<SharedTunnel>>>,
 
-    /// Running operations (engine-agnostic cancel handles)
+    // ✅ conn_id -> tunnel key (for releasing on remove),
+    pub conn_to_tunnel: Arc<DashMap<Uuid, TunnelKey>>,
+    pub op_to_conn: Arc<DashMap<Uuid, Uuid>>,
+
     pub running_ops: Arc<DashMap<Uuid, CancelHandle>>,
-
-    /// Cancellation requests (op_id -> ())
     pub cancel_requested: Arc<DashMap<Uuid, ()>>,
-
-    /// Active operations marker (op_id -> ())
     pub active_ops: Arc<DashMap<Uuid, ()>>,
 }
 
@@ -31,7 +50,9 @@ impl AppState {
         Self {
             engines,
             connections: Arc::new(DashMap::new()),
-            ssh_tunnels: Arc::new(DashMap::new()),
+            ssh_tunnel_pool: Arc::new(DashMap::new()),
+            op_to_conn: Arc::new(DashMap::new()),
+            conn_to_tunnel: Arc::new(DashMap::new()),
             running_ops: Arc::new(DashMap::new()),
             cancel_requested: Arc::new(DashMap::new()),
             active_ops: Arc::new(DashMap::new()),

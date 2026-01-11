@@ -32,6 +32,7 @@ pub async fn run_pg_sql_query(
     sql_input: SqlQueryInput,
 ) {
     let op_id = ctx.op_id;
+    let started_at = Instant::now();
 
     // Always clean active marker + pending cancel request, even if runner fails early.
     let _active_guard = ActiveGuard::new(
@@ -48,7 +49,8 @@ pub async fn run_pg_sql_query(
     let mut client = match pool.get().await {
         Ok(c) => c,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("POOL_GET_FAILED: {e}"));
+            let elapsed_ms = started_at.elapsed().as_millis();
+            emit_error(&ctx.app, op_id, format!("POOL_GET_FAILED: {e}"), elapsed_ms);
             return;
         }
     };
@@ -70,7 +72,8 @@ pub async fn run_pg_sql_query(
     let tx = match client.transaction().await {
         Ok(t) => t,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("TX_BEGIN_FAILED: {e}"));
+            let elapsed_ms = started_at.elapsed().as_millis();
+            emit_error(&ctx.app, op_id, format!("TX_BEGIN_FAILED: {e}"), elapsed_ms);
             return;
         }
     };
@@ -81,7 +84,14 @@ pub async fn run_pg_sql_query(
             .batch_execute("SET LOCAL default_transaction_read_only = on")
             .await
         {
-            emit_error(&ctx.app, op_id, format!("SET_READ_ONLY_FAILED: {e}"));
+            let elapsed_ms = started_at.elapsed().as_millis();
+
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("SET_READ_ONLY_FAILED: {e}"),
+                elapsed_ms,
+            );
             return;
         }
     }
@@ -99,10 +109,13 @@ pub async fn run_pg_sql_query(
         ))
         .await
     {
+        let elapsed_ms = started_at.elapsed().as_millis();
+
         emit_error(
             &ctx.app,
             op_id,
             format!("SET_STATEMENT_TIMEOUT_FAILED: {e}"),
+            elapsed_ms,
         );
         return;
     }
@@ -111,7 +124,9 @@ pub async fn run_pg_sql_query(
     let stmt = match tx.prepare(&sql_input.sql).await {
         Ok(s) => s,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("PREPARE_FAILED: {e}"));
+            let elapsed_ms = started_at.elapsed().as_millis();
+
+            emit_error(&ctx.app, op_id, format!("PREPARE_FAILED: {e}"), elapsed_ms);
             return;
         }
     };
@@ -125,14 +140,21 @@ pub async fn run_pg_sql_query(
 
     // Serialize event emission on one task
     let app_emit = ctx.app.clone();
+    let op_id2 = op_id;
+
     let emit_task = tokio::spawn(async move {
         while let Some(item) = rx_chunk.recv().await {
             match item {
                 Ok(chunk) => {
-                    let _ = app_emit.emit("op:chunk_table", chunk);
+                    // If FE is gone / window reloaded => stop consuming to backpressure producer
+                    if app_emit.emit("op:chunk_table", chunk).is_err() {
+                        break;
+                    }
                 }
                 Err(err) => {
-                    emit_error(&app_emit, op_id, err);
+                    let elapsed_ms = started_at.elapsed().as_millis();
+
+                    emit_error(&app_emit, op_id2, err, elapsed_ms);
                     break;
                 }
             }
@@ -144,11 +166,14 @@ pub async fn run_pg_sql_query(
         Ok(s) => s,
         Err(e) => {
             if is_cancelled(&e) {
-                emit_done(&ctx.app, op_id, false, 0);
+                let elapsed_ms = started_at.elapsed().as_millis();
+                emit_done(&ctx.app, op_id, false, 0, elapsed_ms);
+
                 drop(tx_chunk);
                 let _ = emit_task.await;
                 return;
             }
+
             let _ = tx_chunk.send(Err(format!("QUERY_FAILED: {e}"))).await;
             drop(tx_chunk);
             let _ = emit_task.await;
@@ -172,11 +197,14 @@ pub async fn run_pg_sql_query(
             Ok(r) => r,
             Err(e) => {
                 if is_cancelled(&e) {
-                    emit_done(&ctx.app, op_id, false, row_count);
+                    let elapsed_ms = started_at.elapsed().as_millis();
+                    emit_done(&ctx.app, op_id, false, row_count, elapsed_ms);
+
                     drop(tx_chunk);
                     let _ = emit_task.await;
                     return;
                 }
+
                 let _ = tx_chunk.send(Err(format!("ROW_STREAM_FAILED: {e}"))).await;
                 drop(tx_chunk);
                 let _ = emit_task.await;
@@ -240,5 +268,6 @@ pub async fn run_pg_sql_query(
     let _ = emit_task.await;
 
     let truncated = row_count == max_rows;
-    emit_done(&ctx.app, op_id, truncated, row_count);
+    let elapsed_ms = started_at.elapsed().as_millis();
+    emit_done(&ctx.app, op_id, truncated, row_count, elapsed_ms);
 }

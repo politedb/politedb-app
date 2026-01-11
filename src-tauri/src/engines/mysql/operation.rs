@@ -23,6 +23,7 @@ pub async fn run_mysql_sql_query(
     default_statement_timeout_ms: Option<u64>,
 ) {
     let op_id = ctx.op_id;
+    let started_at = Instant::now();
 
     // Ensure active_ops/cancel_requested cleaned even if we fail early
     let _active_guard = ActiveGuard::new(
@@ -56,7 +57,12 @@ pub async fn run_mysql_sql_query(
     let mut conn = match pool.get_conn().await {
         Ok(c) => c,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("MYSQL_GET_CONN_FAILED: {e}"));
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("MYSQL_GET_CONN_FAILED: {e}"),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
     };
@@ -81,7 +87,12 @@ pub async fn run_mysql_sql_query(
     let mut result = match conn.query_iter(sql_input.sql).await {
         Ok(r) => r,
         Err(e) => {
-            emit_error(&ctx.app, op_id, format!("MYSQL_QUERY_FAILED: {e}"));
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("MYSQL_QUERY_FAILED: {e}"),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
     };
@@ -94,19 +105,21 @@ pub async fn run_mysql_sql_query(
     // Backpressure channel (inflight chunks)
     let (tx_chunk, mut rx_chunk) = mpsc::channel::<Result<TableChunk, String>>(2);
 
-    // Serialize event emission on one task
+    // Serialize chunk emission on one task
+    // NOTE: error emission also includes elapsed_ms via emit_error helper.
     let app_emit = ctx.app.clone();
+    let emit_started_at = started_at; // Instant is Copy
     let emit_task = tokio::spawn(async move {
         while let Some(item) = rx_chunk.recv().await {
             match item {
                 Ok(chunk) => {
-                    let _ = app_emit.emit("op:chunk_table", chunk);
+                    // If FE is gone / window reloaded => stop consuming
+                    if app_emit.emit("op:chunk_table", chunk).is_err() {
+                        break;
+                    }
                 }
                 Err(err) => {
-                    let _ = app_emit.emit(
-                        "op:error",
-                        crate::types::OperationError { op_id, error: err },
-                    );
+                    emit_error(&app_emit, op_id, err, emit_started_at.elapsed().as_millis());
                     break;
                 }
             }
@@ -126,7 +139,15 @@ pub async fn run_mysql_sql_query(
     loop {
         tokio::select! {
             _ = notify.notified() => {
-                emit_done(&ctx.app, op_id, false, row_count);
+                // Cancelled
+                emit_done(
+                    &ctx.app,
+                    op_id,
+                    false,
+                    row_count,
+                    started_at.elapsed().as_millis(),
+                );
+
                 drop(tx_chunk);
                 let _ = emit_task.await;
                 return;
@@ -137,6 +158,7 @@ pub async fn run_mysql_sql_query(
                 let row_opt = match next {
                     Ok(r) => r,
                     Err(e) => {
+                        // Send to emit_task (will call emit_error with elapsed)
                         let _ = tx_chunk.send(Err(format!("MYSQL_ROW_STREAM_FAILED: {e}"))).await;
                         drop(tx_chunk);
                         let _ = emit_task.await;
@@ -144,7 +166,9 @@ pub async fn run_mysql_sql_query(
                     }
                 };
 
-                let Some(row) = row_opt else { break; };
+                let Some(row) = row_opt else {
+                    break; // EOF
+                };
 
                 if row_count >= max_rows {
                     break;
@@ -167,6 +191,7 @@ pub async fn run_mysql_sql_query(
                     let dt = t0.elapsed();
 
                     if sent.is_err() {
+                        // FE gone / emitter stopped
                         drop(tx_chunk);
                         let _ = emit_task.await;
                         return;
@@ -197,5 +222,12 @@ pub async fn run_mysql_sql_query(
     let _ = emit_task.await;
 
     let truncated = row_count == max_rows;
-    emit_done(&ctx.app, op_id, truncated, row_count);
+
+    emit_done(
+        &ctx.app,
+        op_id,
+        truncated,
+        row_count,
+        started_at.elapsed().as_millis(),
+    );
 }

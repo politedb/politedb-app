@@ -2,6 +2,7 @@ use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::ssh_tunnel;
+use crate::ssh_tunnel::pool::{acquire_shared_tunnel, release_shared_tunnel_by_conn};
 use crate::state::AppState;
 use crate::types::{ConnectionCreateInput, ConnectionInfo, ConnectionTestInput};
 
@@ -33,7 +34,7 @@ fn rewrite_input_host_port(
 }
 
 async fn close_tunnel_quietly(tunnel: crate::ssh_tunnel::handle::SshTunnelHandle) {
-    let _ = tunnel.close();
+    let _ = tunnel.close().await;
 }
 
 #[tauri::command]
@@ -54,26 +55,27 @@ pub async fn connection_create(
         "connection_create: start"
     );
 
-    // 0) Optional SSH tunnel
-    let mut tunnel_opt: Option<crate::ssh_tunnel::handle::SshTunnelHandle> = None;
+    let mut acquired_key: Option<crate::state::app_state::TunnelKey> = None;
 
+    // 0) Optional SSH tunnel
     if let Some(ssh_in) = input.ssh.clone() {
         tracing::info!(conn_id = %id, "connection_create: opening ssh tunnel");
 
-        let tunnel = ssh_tunnel::open_tunnel(&ssh_in)
+        let (key, shared) = acquire_shared_tunnel(&state, &ssh_in)
             .await
             .map_err(|e| format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"))?;
 
-        let local_port = tunnel.local_addr().port();
-
         tracing::info!(
             conn_id = %id,
-            local_port = %local_port,
-            "connection_create: ssh tunnel opened"
+            ssh_key = ?key,
+            local_bind = %shared.local_addr,
+            "connection_create: ssh tunnel acquired"
         );
 
+        let local_port = shared.local_addr.port();
         input = rewrite_input_host_port(input, "127.0.0.1", local_port)?;
-        tunnel_opt = Some(tunnel);
+        // map conn -> tunnel (only if later DB connect succeeds; but we keep key for rollback)
+        acquired_key = Some(key);
     }
 
     // 1) Resolve driver
@@ -91,22 +93,18 @@ pub async fn connection_create(
 
     // 2) Connect (do NOT mutate state before connect succeeds)
     let conn = match driver.connect(&app, id, label.clone(), input).await {
-        Ok(c) => {
-            tracing::info!(conn_id = %id, engine = ?engine, "connection_create: connect ok");
-            c
-        }
+        Ok(c) => c,
         Err(e) => {
-            // log error string (still should not include password if driver is clean)
-            tracing::error!(
-                conn_id = %id,
-                engine = ?engine,
-                error = %e,
-                "connection_create: connect failed"
-            );
+            tracing::error!(conn_id=%id, engine=?engine, error=%e, "connection_create: connect failed");
 
-            if let Some(tunnel) = tunnel_opt.take() {
-                close_tunnel_quietly(tunnel).await;
+            // rollback tunnel ref if acquired
+            if acquired_key.is_some() {
+                // temporarily register mapping so release can find it
+                // (or you can write a release_by_key() helper)
+                state.conn_to_tunnel.insert(id, acquired_key.unwrap());
+                release_shared_tunnel_by_conn(&state, id).await;
             }
+
             return Err(e);
         }
     };
@@ -114,8 +112,8 @@ pub async fn connection_create(
     // 3) Insert runtime connection
     state.connections.insert(id, conn);
 
-    if let Some(tunnel) = tunnel_opt.take() {
-        state.ssh_tunnels.insert(id, tunnel);
+    if let Some(key) = acquired_key.take() {
+        state.conn_to_tunnel.insert(id, key);
     }
 
     tracing::info!(
@@ -302,21 +300,29 @@ pub async fn connection_remove(
     state: State<'_, AppState>,
     connection_id: Uuid,
 ) -> Result<(), String> {
-    // 1) Cancel all running ops of this connection (if any)
-    for entry in state.running_ops.iter() {
-        let op_id = *entry.key();
-        entry.value().cancel();
+    // 1) cancel ops of this connection only
+    let op_ids: Vec<Uuid> = state
+        .op_to_conn
+        .iter()
+        .filter(|e| *e.value() == connection_id)
+        .map(|e| *e.key())
+        .collect();
+
+    for op_id in op_ids {
+        if let Some(h) = state.running_ops.get(&op_id) {
+            h.value().cancel();
+        }
         state.active_ops.remove(&op_id);
         state.cancel_requested.insert(op_id, ());
+        state.running_ops.remove(&op_id);
+        state.op_to_conn.remove(&op_id);
     }
 
     // 2) Remove runtime connection
     state.connections.remove(&connection_id);
 
-    // 3) Close SSH tunnel if exists
-    if let Some((_, tunnel)) = state.ssh_tunnels.remove(&connection_id) {
-        close_tunnel_quietly(tunnel).await;
-    }
+    // 3) Release SSH tunnel ref (shared)
+    crate::ssh_tunnel::pool::release_shared_tunnel_by_conn(&state, connection_id).await;
 
     Ok(())
 }
