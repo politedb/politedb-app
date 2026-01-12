@@ -22,6 +22,7 @@ interface Props {
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
   onViewModeChange?: (mode: TabViewMode) => void;
+  openSQLWindow?: () => void;
   onRefresh?: () => void;
 }
 
@@ -32,9 +33,10 @@ export function MenuBar({
   loadTableError,
   onViewModeChange,
   onRefresh,
+  openSQLWindow,
 }: Props) {
-  const { activeScreen, tabs } = useScreenStore();
-  const activeTab = tabs.find((tab) => tab.id === activeScreen);
+  const { activeProfileScreen, profileTabs } = useScreenStore();
+  const activeTab = profileTabs.find((tab) => tab.id === activeProfileScreen);
   const { getProfileById } = useProfileStore();
 
   const profile = useMemo(() => {
@@ -84,7 +86,11 @@ export function MenuBar({
         >
           <Database className="size-4 text-neutral-600" />
         </Button>
-        <Button variant="ghost" className="p-2 hover:bg-neutral-50" disabled>
+        <Button
+          variant="ghost"
+          className="p-2 hover:bg-neutral-50"
+          onClick={openSQLWindow}
+        >
           <span class="text-xs font-medium text-neutral-600">SQL</span>
         </Button>
       </div>

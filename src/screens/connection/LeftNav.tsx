@@ -1,15 +1,11 @@
 import { SetStateAction } from "preact/compat";
 import { Dispatch } from "preact/hooks";
-import {
-  ChevronDown,
-  ChevronRight,
-  Search,
-  Table,
-} from "../../components/icons";
-import { Button } from "../../components/common/Button";
-import { Select } from "../../components/common/Select";
-import { cn } from "../../utils/cn";
-import { TableItem } from "../../types";
+import { ChevronDown, ChevronRight, Search, Table } from "src/components/icons";
+import { Button } from "src/components/common/Button";
+import { Select } from "src/components/common/Select";
+import { cn } from "src/utils/cn";
+import { TableItem } from "src/types";
+import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 
 interface Props {
   schemas: string[];
@@ -23,7 +19,46 @@ interface Props {
   >;
   filteredTables: TableItem[];
   handleSelectTable: (table: TableItem) => void;
-  activeTableId: string | null;
+  activeWindowId: string | null;
+}
+
+function SectionHeader(props: {
+  title: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { title, expanded, onToggle } = props;
+
+  return (
+    <Button
+      variant="ghost"
+      onClick={onToggle}
+      className={cn("w-full px-2 py-1.5 hover:bg-neutral-200/60")}
+      title={title}
+    >
+      {/* Force left alignment even if Button defaults to justify-center */}
+      <div class="flex w-full items-center justify-start gap-2">
+        {expanded ? (
+          <ChevronDown className="size-3 shrink-0 text-neutral-500" />
+        ) : (
+          <ChevronRight className="size-3 shrink-0 text-neutral-500" />
+        )}
+
+        <span class="min-w-0 truncate text-start text-[11px] font-semibold tracking-wide text-neutral-600">
+          {title}
+        </span>
+      </div>
+    </Button>
+  );
+}
+
+function TableName({ name }: { name: string }) {
+  const { ref, value } = useMiddleEllipsisByWidth({ text: name });
+  return (
+    <span ref={ref} class="min-w-0 flex-1 overflow-hidden">
+      {value}
+    </span>
+  );
 }
 
 export function LeftNav({
@@ -36,113 +71,149 @@ export function LeftNav({
   setExpandedSections,
   filteredTables,
   handleSelectTable,
-  activeTableId,
+  activeWindowId,
 }: Props) {
   return (
-    <div class="flex h-full w-64 shrink-0 flex-col bg-neutral-100 pt-1">
-      {/* Search Bar */}
-      <div class="border-b border-neutral-100 px-2 py-1">
+    <aside
+      class={cn(
+        "flex h-full w-64 shrink-0 flex-col",
+        "bg-neutral-100",
+        "border-r border-neutral-200"
+      )}
+    >
+      {/* Top: Search */}
+      <div class="p-2">
         <div class="relative">
+          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-500" />
           <input
             type="text"
-            placeholder="Search for item..."
+            placeholder="Search tables…"
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-            class="w-full rounded-md border border-neutral-200 bg-neutral-50 py-1 pr-8 pl-8 text-xs text-neutral-700 placeholder:text-neutral-500 focus:outline-none"
+            class={cn(
+              "w-full rounded-lg",
+              "border border-neutral-200 bg-white",
+              "py-1.5 pr-2 pl-8",
+              "text-xs text-neutral-800 placeholder:text-neutral-500",
+              "outline-none",
+              "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
+            )}
           />
-          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-500" />
         </div>
       </div>
 
-      {/* Collapsible Sections */}
-      <div class="flex-1 overflow-y-auto p-2">
-        {/* Functions Section */}
-        <Button
-          variant="ghost"
-          onClick={() =>
-            setExpandedSections((prev) => ({
-              ...prev,
-              functions: !prev.functions,
-            }))
-          }
-          className="w-full justify-start px-2"
-        >
-          {expandedSections.functions ? (
-            <ChevronDown className="size-3" />
-          ) : (
-            <ChevronRight className="size-3" />
-          )}
-          <span>Functions</span>
-        </Button>
+      {/* Middle: Sections */}
+      <div class="flex-1 overflow-y-auto px-2 pb-2">
+        {/* Functions */}
+        <div class="mb-2">
+          <SectionHeader
+            title="Functions"
+            expanded={expandedSections.functions}
+            onToggle={() =>
+              setExpandedSections((prev) => ({
+                ...prev,
+                functions: !prev.functions,
+              }))
+            }
+          />
 
-        {/* Tables Section */}
-        <div class="mt-1">
-          <Button
-            variant="ghost"
-            onClick={() =>
+          {expandedSections.functions && (
+            <div class="mt-1 rounded-lg bg-white/60 p-2 text-xs text-neutral-500"></div>
+          )}
+        </div>
+
+        {/* Tables */}
+        <div>
+          <SectionHeader
+            title="Tables"
+            expanded={expandedSections.tables}
+            onToggle={() =>
               setExpandedSections((prev) => ({
                 ...prev,
                 tables: !prev.tables,
               }))
             }
-            className="w-full justify-start px-2"
-          >
-            {expandedSections.tables ? (
-              <ChevronDown className="size-3" />
-            ) : (
-              <ChevronRight className="size-3" />
-            )}
-            <span>Tables</span>
-          </Button>
+          />
 
           {expandedSections.tables && (
-            <div class="mt-1 space-y-0.5 pl-4">
+            <div class="mt-1">
               {filteredTables.length === 0 ? (
-                <div class="px-3 py-2 text-xs text-neutral-500">
+                <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
                   No tables found
                 </div>
               ) : (
-                filteredTables.map((table) => {
-                  const key = `${table.schema}.${table.name}`;
-                  return (
-                    <Button
-                      variant="ghost"
-                      key={key}
-                      onClick={() => handleSelectTable(table)}
-                      active={activeTableId === key}
-                      className="w-full justify-start gap-1.5 rounded-md px-3 py-1.5 text-sm"
-                    >
-                      <Table className="size-4" />
-                      {table.name}
-                    </Button>
-                  );
-                })
+                <div class="space-y-1 pl-1">
+                  {filteredTables.map((table) => {
+                    const key = `${table.schema}.${table.name}`;
+                    const isActive = activeWindowId === key;
+
+                    return (
+                      <Button
+                        variant="ghost"
+                        key={key}
+                        onClick={() => handleSelectTable(table)}
+                        active={isActive}
+                        className={cn(
+                          "w-full justify-start",
+                          "rounded-lg px-2.5 py-1.5",
+                          "gap-2",
+                          "text-left text-sm",
+                          "overflow-hidden",
+                          isActive
+                            ? "bg-white shadow-sm ring-1 ring-black/5"
+                            : "hover:bg-neutral-200/60"
+                        )}
+                        title={key}
+                      >
+                        <Table className="size-4 shrink-0 text-neutral-500" />
+                        <TableName name={table.name} />
+
+                        {/* Optional tiny schema chip if you want */}
+                        {/* <span class="shrink-0 rounded bg-neutral-200/70 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">
+                          {table.schema}
+                        </span> */}
+                      </Button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
         </div>
       </div>
 
-      <div class="flex gap-1 px-2 py-2.5">
-        <Button
-          variant="shadow"
-          className="size-6 border-neutral-300 bg-white p-2"
-        >
-          +
-        </Button>
-        <Select
-          className={cn(
-            "flex h-6 w-full border-neutral-300 text-center",
-            "text-xs! font-medium! text-neutral-700 focus:border-neutral-300 focus:ring-0"
-          )}
-          defaultValue={currSchema}
-          onChange={(e) => onSchemaChange(e.currentTarget.value)}
-        >
-          {schemas.map((schema) => (
-            <option value={schema}>{schema}</option>
-          ))}
-        </Select>
+      {/* Bottom: Toolbar */}
+      <div class="border-t border-neutral-200 bg-neutral-100 p-2">
+        <div class="flex items-center gap-2">
+          <Button
+            variant="shadow"
+            className={cn(
+              "h-8 w-8",
+              "rounded-lg",
+              "border-neutral-300 bg-white",
+              "p-0",
+              "text-neutral-800"
+            )}
+            title="New"
+          >
+            +
+          </Button>
+
+          <Select
+            className={cn(
+              "h-8 w-full rounded-lg border-neutral-300 bg-white",
+              "text-xs! font-medium! text-neutral-800",
+              "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
+            )}
+            defaultValue={currSchema}
+            onChange={(e) => onSchemaChange(e.currentTarget.value)}
+          >
+            {schemas.map((schema) => (
+              <option value={schema}>{schema}</option>
+            ))}
+          </Select>
+        </div>
       </div>
-    </div>
+    </aside>
   );
 }

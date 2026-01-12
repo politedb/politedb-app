@@ -13,7 +13,7 @@ import {
 } from "src/lib/tauri";
 
 import { X } from "../icons";
-import { Tab, useScreenStore } from "src/stores/screen";
+import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { Button } from "../common/Button";
 
 import { ConnectionBasicsSection } from "./ConnectionBasicsSection";
@@ -41,7 +41,7 @@ export function ConnectionFormDialog({
   initialData?: ConnectionProfile;
   engine: DatabaseEngine;
 }) {
-  const { addTab, setActiveScreen } = useScreenStore();
+  const { addTab, setActiveProfileScreen } = useScreenStore();
 
   const profileId = initialData?.id ?? undefined;
 
@@ -153,7 +153,7 @@ export function ConnectionFormDialog({
 
       setSuccess(`Connected ✅ ${res.profile.label}`);
 
-      const newTab: Tab = {
+      const newTab: ProfileTab = {
         id: `tab-${uuid()}`,
         label:
           res.profile.label || connectionInput.label || "Unnamed Connection",
@@ -163,7 +163,7 @@ export function ConnectionFormDialog({
       };
 
       addTab(newTab);
-      setActiveScreen(newTab.id);
+      setActiveProfileScreen(newTab.id);
       onSaved?.();
     } catch (e: any) {
       setError(e?.message ? String(e.message) : String(e));

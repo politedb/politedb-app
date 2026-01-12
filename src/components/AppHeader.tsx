@@ -3,7 +3,7 @@ import { X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
 import { useRef } from "preact/hooks";
 
-import { Tab, useScreenStore } from "../stores/screen";
+import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
 import { connectionRemove } from "src/lib/tauri";
 import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
@@ -15,7 +15,7 @@ const win = getCurrentWebviewWindow();
 type AppHeaderProps = {
   showWindowControls?: boolean;
   onNewTab?: () => void;
-  tabs?: Tab[];
+  profileTabs?: ProfileTab[];
   activeTabId?: string | null;
   onTabSelect?: (tabId: string) => void;
   onTabClose?: (tabId: string) => void;
@@ -34,8 +34,13 @@ const NAV_BUTTONS: NavButton[] = [
 ];
 
 export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
-  const { tabs, removeTab, activeScreen, setActiveScreen, tabOpenTables } =
-    useScreenStore();
+  const {
+    profileTabs,
+    removeTab,
+    activeProfileScreen,
+    setActiveProfileScreen,
+    openWindows,
+  } = useScreenStore();
   const { tableDataMap } = useConnectionStore();
   const { removeTableData } = useLoadTableData();
 
@@ -78,42 +83,56 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   }
 
   function handleTabSelect(tabId: string) {
-    setActiveScreen(tabId);
+    setActiveProfileScreen(tabId);
   }
 
-  function handleTabClose(tabId: string) {
-    const currentTab = tabs.find((tab) => tab.id === tabId);
-    const newTabs = tabs.filter((tab) => tab.id !== tabId);
+  async function handleTabClose(tabId: string) {
+    const currentTab = profileTabs.find((tab) => tab.id === tabId);
+    const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
 
+    // Switch active first (UI)
     removeTab(tabId);
 
-    if (activeScreen === tabId) {
-      if (newTabs.length > 0) {
-        setActiveScreen(newTabs[newTabs.length - 1].id);
-      } else {
-        setActiveScreen("main");
+    if (activeProfileScreen === tabId) {
+      setActiveProfileScreen(
+        newTabs.length > 0 ? newTabs[newTabs.length - 1].id : "main"
+      );
+    }
+
+    // Remove runtime connection of the tab
+    if (currentTab?.runtimeConnectionId) {
+      try {
+        await connectionRemove(currentTab.runtimeConnectionId);
+      } catch (err) {
+        console.error("Error removing runtime connection:", err);
       }
     }
 
-    if (currentTab?.runtimeConnectionId) {
-      connectionRemove(currentTab.runtimeConnectionId);
-    }
+    const windows = openWindows[tabId] ?? [];
+    if (windows.length === 0) return;
 
-    if (tabOpenTables[tabId]?.length > 0) {
-      Promise.all(
-        tabOpenTables[tabId].map((t) => {
-          const { schema, name } = t.table;
-          const key = tableKey(activeScreen, schema, name);
-          const { connectionId } = tableDataMap[key] || { connectionId: null };
+    // Cleanup only table windows
+    const tableWindows = windows.filter((w) => w.type === "table");
 
-          removeTableData(schema, name);
+    await Promise.all(
+      tableWindows.map(async (w) => {
+        const { schema, name } = w.table;
 
-          if (connectionId) {
-            connectionRemove(connectionId);
+        // IMPORTANT: use tabId (the tab being closed), not activeProfileScreen
+        const key = tableKey(tabId, schema, name);
+        const { connectionId } = tableDataMap[key] || { connectionId: null };
+
+        removeTableData(schema, name);
+
+        if (connectionId) {
+          try {
+            await connectionRemove(connectionId);
+          } catch (err) {
+            console.error("Error removing table connection:", err);
           }
-        })
-      );
-    }
+        }
+      })
+    );
   }
 
   return (
@@ -151,7 +170,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   e.preventDefault();
                   e.stopPropagation();
                   onNavChange?.(nav.id);
-                  setActiveScreen(nav.id);
+                  setActiveProfileScreen(nav.id);
                 }}
                 class={[
                   // App context pill (Blue = "where you are")
@@ -175,13 +194,10 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         </div>
 
         {/* MIDDLE: Tabs rail (Neutral container, quiet) */}
-        <div
-          class="flex min-w-0 flex-1 items-center"
-          data-tauri-drag-region="false"
-        >
+        <div class="flex min-w-0 flex-1 items-center">
           <div class="flex items-center gap-1 overflow-x-auto rounded-lg p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {tabs.map((tab) => {
-              const isActive = activeScreen === tab.id;
+            {profileTabs.map((tab) => {
+              const isActive = activeProfileScreen === tab.id;
 
               return (
                 <div

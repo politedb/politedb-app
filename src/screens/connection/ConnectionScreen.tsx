@@ -1,47 +1,60 @@
 import { useState, useMemo, useCallback, useEffect } from "preact/hooks";
-import { useLoadTables } from "../../hooks/useLoadTables";
-import { tableKey, useLoadTableData } from "../../hooks/useLoadTableData";
-import { useScreenStore } from "../../stores/screen";
-import { Database } from "../../components/icons";
-import { TableData } from "../../components/table/TableData";
-import { connectionRemove } from "../../lib/tauri";
+import { v4 as uuid } from "uuid";
+import { useLoadTables } from "src/hooks/useLoadTables";
+import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
+import { useScreenStore } from "src/stores/screen";
+import { useConnectionStore } from "src/stores/connection";
+import { connectionRemove } from "src/lib/tauri";
 import { MenuBar } from "./MenuBar";
 import { LeftNav } from "./LeftNav";
 import { NavigationTabs } from "./NavigationTabs";
 import { RightNav } from "./RightNav";
 import { QueryHistory } from "./QueryHistory";
-import { Box } from "../../components/common/Box";
-import { cn } from "../../utils/cn";
-import { TabViewMode, SqlQuery, OpenTable, TableItem } from "../../types";
-import { useConnectionStore } from "../../stores/connection";
+import { Box } from "src/components/common/Box";
+import { cn } from "src/utils/cn";
+import {
+  TabViewMode,
+  SqlQuery,
+  OpenWindow,
+  TableWindow,
+  SqlEditorWindow,
+  TableItem,
+} from "src/types";
+import { ActiveWindowContent } from "./ActiveWindowContent";
 
-type PatchMap = {
-  [tableId: string]: { [rowId: string]: { [column: string]: any } };
-};
+type PatchMap = Record<string, Record<string, Record<string, any>>>;
+
+function makeTableKeyLocal(table: Pick<TableItem, "schema" | "name">) {
+  return `${table.schema}.${table.name}`;
+}
+
+// window instance id must be unique
+function makeTableWindowId(table: Pick<TableItem, "schema" | "name">) {
+  return `table:${makeTableKeyLocal(table)}:${uuid()}`;
+}
+
+function isTableWindow(w: OpenWindow | undefined): w is TableWindow {
+  return !!w && w.type === "table";
+}
+
+function isSqlWindow(w: OpenWindow | undefined): w is SqlEditorWindow {
+  return !!w && w.type === "sql";
+}
 
 export function ConnectionScreen() {
   const {
-    activeScreen,
-    tabs,
-    tabOpenTables,
-    addTabOpenTable,
-    removeTabOpenTable,
-    activeTableId,
-    setActiveTableId,
+    activeProfileScreen,
+    profileTabs,
+    openWindows,
+    addWindow,
+    removeWindow,
+    activeWindowId,
+    setActiveWindowId,
   } = useScreenStore();
 
   const { tables, schemas, tableDataMap } = useConnectionStore();
 
-  const activeTab = useMemo(
-    () => tabs.find((tab) => tab.id === activeScreen),
-    [tabs, activeScreen]
-  );
-  const openTables = useMemo(
-    () => tabOpenTables[activeScreen] || [],
-    [tabOpenTables, activeScreen]
-  );
-
-  const [, setPatchMap] = useState<PatchMap>({});
+  const [_patchMap, setPatchMap] = useState<PatchMap>({});
   const [tableSearchQuery, setTableSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<TabViewMode[]>(["left"]);
   const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
@@ -54,148 +67,221 @@ export function ConnectionScreen() {
   const { loadSchemaAndTables } = useLoadTables();
   const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
-  // Filter tables by search query
-  const filteredTables = useMemo(() => {
-    if (!tables[activeScreen]) return [];
-    if (!tableSearchQuery.trim()) return tables[activeScreen].data;
-    const query = tableSearchQuery.toLowerCase();
-    return tables[activeScreen].data.filter(
-      (table) =>
-        table.name.toLowerCase().includes(query) ||
-        table.schema.toLowerCase().includes(query)
-    );
-  }, [tables, tableSearchQuery]);
+  const activeTab = useMemo(
+    () => profileTabs.find((tab) => tab.id === activeProfileScreen) ?? null,
+    [profileTabs, activeProfileScreen]
+  );
 
-  // Get active table
-  const activeTable = useMemo(() => {
-    return openTables.find((ot) => ot.id === activeTableId[activeScreen]);
-  }, [tabOpenTables, activeTableId, activeScreen]);
+  const activeWindows = useMemo<OpenWindow[]>(
+    () => openWindows[activeProfileScreen] || [],
+    [openWindows, activeProfileScreen]
+  );
 
-  // Get table data for active table
+  const activeWindow = useMemo<OpenWindow | undefined>(() => {
+    const id = activeWindowId[activeProfileScreen];
+    if (!id) return undefined;
+    return activeWindows.find((w) => w.id === id);
+  }, [activeWindows, activeProfileScreen, activeWindowId]);
+
+  const activeTableWindow = useMemo<TableWindow | undefined>(() => {
+    return isTableWindow(activeWindow) ? activeWindow : undefined;
+  }, [activeWindow]);
+
+  const activeSqlWindow = useMemo<SqlEditorWindow | undefined>(() => {
+    return isSqlWindow(activeWindow) ? activeWindow : undefined;
+  }, [activeWindow]);
+
   const activeTableData = useMemo(() => {
-    if (!activeTable) {
+    if (!activeTableWindow) {
       return { data: null, sizeInfo: null, busy: false, error: null };
     }
     return getTableData(
-      activeScreen,
-      activeTable.table.schema,
-      activeTable.table.name
+      activeProfileScreen,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
     );
-  }, [activeScreen, activeTable, getTableData]);
+  }, [activeProfileScreen, activeTableWindow, getTableData]);
 
-  // Load table data when a table is selected
-  const handleSelectTable = useCallback(
-    async (table: TableItem) => {
-      // Check if table is already open
-      const existingTable = openTables.find(
-        (ot) => ot.table.schema === table.schema && ot.table.name === table.name
-      );
+  const filteredTables = useMemo(() => {
+    const list = tables[activeProfileScreen]?.data ?? [];
+    const q = tableSearchQuery.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
+    );
+  }, [tables, activeProfileScreen, tableSearchQuery]);
 
-      if (existingTable) {
-        // Switch to existing table
-        setActiveTableId(activeScreen, `${table.schema}.${table.name}`);
-      } else {
-        // Open new table
-        const newTable: OpenTable = {
-          id: `${table.schema}.${table.name}`,
-          table,
-        };
-        addTabOpenTable(activeScreen, newTable);
-        setActiveTableId(activeScreen, newTable.id);
+  const isConnecting = useMemo(() => {
+    const t = tables[activeProfileScreen];
+    const s = schemas[activeProfileScreen];
+    return (
+      (t?.busy && (t?.data?.length ?? 0) === 0) ||
+      (s?.busy && (s?.data?.length ?? 0) === 0)
+    );
+  }, [tables, schemas, activeProfileScreen]);
 
-        await loadTableData(table.schema, table.name);
-      }
-    },
-    [activeScreen, openTables, addTabOpenTable, loadTableData, setActiveTableId]
-  );
+  const loadError = useMemo(() => {
+    return (
+      tables[activeProfileScreen]?.error ||
+      schemas[activeProfileScreen]?.error ||
+      (activeTableWindow ? activeTableData.error : null)
+    );
+  }, [
+    tables,
+    schemas,
+    activeProfileScreen,
+    activeTableWindow,
+    activeTableData.error,
+  ]);
 
-  const handleCloseTable = useCallback(
-    async (tableId: string, e: MouseEvent) => {
-      e.stopPropagation();
-      const tableToClose = openTables.find((ot) => ot.id === tableId);
-      if (tableToClose) {
-        const { schema, name } = tableToClose.table;
-        const key = tableKey(activeScreen, schema, name);
-        const { connectionId } = tableDataMap[key] || { connectionId: null };
-        removeTableData(schema, name);
-
-        try {
-          if (connectionId) {
-            await connectionRemove(connectionId);
-          }
-        } catch (error) {
-          console.error("Error removing connection:", error);
-        }
-      }
-
-      const newOpenTables = openTables.filter((ot) => ot.id !== tableId);
-      removeTabOpenTable(activeScreen, tableId);
-
-      // If closing active table, switch to another or clear
-      if (activeTableId[activeScreen] === tableId) {
-        if (newOpenTables.length > 0) {
-          setActiveTableId(
-            activeScreen,
-            newOpenTables[newOpenTables.length - 1].id
-          );
-        } else {
-          setActiveTableId(activeScreen, null);
-        }
-      }
-    },
-    [
-      activeScreen,
-      activeTableId[activeScreen],
-      tableDataMap,
-      openTables,
-      removeTabOpenTable,
-      setActiveTableId,
-    ]
-  );
-
-  const handleCellChange = useCallback(
-    (rowIndex: number, columnIndex: number, value: any) => {
-      setPatchMap((prev) => ({
-        ...prev,
-        [rowIndex]: {
-          ...prev[rowIndex],
-          [columnIndex]: value,
-        },
-      }));
-    },
-    []
-  );
-
-  const handleViewModeChange = useCallback(
-    (mode: TabViewMode) => {
-      setViewMode((prev) => {
-        if (prev.includes(mode)) {
-          return prev.filter((m) => m !== mode);
-        }
-        return [...prev, mode];
-      });
-    },
-    [setViewMode]
-  );
-
-  const handleRefresh = useCallback(async () => {
-    await loadSchemaAndTables(activeSchema);
-    if (!activeTable) return;
-    await loadTableData(activeTable.table.schema, activeTable.table.name);
-  }, [activeTable, activeSchema, loadSchemaAndTables, loadTableData]);
+  useEffect(() => {
+    if (!activeTab) return;
+    void loadSchemaAndTables(activeSchema);
+  }, [activeTab?.id, activeSchema, loadSchemaAndTables]);
 
   const handleSchemaChange = useCallback(
     async (schema: string) => {
       setActiveSchema(schema);
       await loadSchemaAndTables(schema);
     },
-    [loadSchemaAndTables, setActiveSchema]
+    [loadSchemaAndTables]
   );
 
-  useEffect(() => {
-    if (!activeTab) return;
-    void loadSchemaAndTables(activeSchema);
-  }, [activeTab?.id, activeSchema, loadSchemaAndTables]);
+  const handleViewModeChange = useCallback((mode: TabViewMode) => {
+    setViewMode((prev) =>
+      prev.includes(mode) ? prev.filter((m) => m !== mode) : [...prev, mode]
+    );
+  }, []);
+
+  const handleOpenSqlEditor = useCallback(() => {
+    const id = `sql:${uuid()}`;
+    const win: SqlEditorWindow = {
+      id,
+      type: "sql",
+      title: "SQL Query",
+      content: "",
+    };
+    addWindow(activeProfileScreen, win);
+    setActiveWindowId(activeProfileScreen, win.id);
+  }, [activeProfileScreen, addWindow, setActiveWindowId]);
+
+  const handleSelectTable = useCallback(
+    async (table: TableItem) => {
+      const existing = activeWindows.find(
+        (w) =>
+          w.type === "table" &&
+          w.table.schema === table.schema &&
+          w.table.name === table.name
+      );
+
+      if (existing) {
+        setActiveWindowId(activeProfileScreen, existing.id);
+        return;
+      }
+
+      const win: TableWindow = {
+        id: makeTableWindowId(table),
+        type: "table",
+        table,
+      };
+
+      addWindow(activeProfileScreen, win);
+      setActiveWindowId(activeProfileScreen, win.id);
+
+      await loadTableData(table.schema, table.name);
+    },
+    [
+      activeProfileScreen,
+      activeWindows,
+      addWindow,
+      setActiveWindowId,
+      loadTableData,
+    ]
+  );
+
+  const handleCloseWindow = useCallback(
+    async (windowId: string, e: MouseEvent) => {
+      e.stopPropagation();
+
+      const toClose = activeWindows.find((w) => w.id === windowId);
+
+      if (toClose?.type === "table") {
+        const { schema, name } = toClose.table;
+        const key = tableKey(activeProfileScreen, schema, name);
+        const { connectionId } = tableDataMap[key] || { connectionId: null };
+
+        removeTableData(schema, name);
+
+        if (connectionId) {
+          try {
+            await connectionRemove(connectionId);
+          } catch (err) {
+            console.error("Error removing connection:", err);
+          }
+        }
+      }
+
+      removeWindow(activeProfileScreen, windowId);
+
+      const currActive = activeWindowId[activeProfileScreen];
+      if (currActive === windowId) {
+        const remaining = activeWindows.filter((w) => w.id !== windowId);
+        setActiveWindowId(
+          activeProfileScreen,
+          remaining.length ? remaining[remaining.length - 1].id : null
+        );
+      }
+
+      setPatchMap((prev) => {
+        if (!prev[windowId]) return prev;
+        const next = { ...prev };
+        delete next[windowId];
+        return next;
+      });
+    },
+    [
+      activeWindows,
+      activeProfileScreen,
+      tableDataMap,
+      removeTableData,
+      removeWindow,
+      activeWindowId,
+      setActiveWindowId,
+    ]
+  );
+
+  const handleCellChange = useCallback(
+    (rowIndex: number, columnIndex: number, value: any) => {
+      if (!activeTableWindow) return;
+
+      const windowId = activeTableWindow.id;
+      const rowKey = String(rowIndex);
+      const columnKey = String(columnIndex);
+
+      setPatchMap((prev) => ({
+        ...prev,
+        [windowId]: {
+          ...(prev[windowId] ?? {}),
+          [rowKey]: {
+            ...((prev[windowId] ?? {})[rowKey] ?? {}),
+            [columnKey]: value,
+          },
+        },
+      }));
+    },
+    [activeTableWindow]
+  );
+
+  const handleRefresh = useCallback(async () => {
+    await loadSchemaAndTables(activeSchema);
+    if (!activeTableWindow) return;
+
+    await loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+  }, [activeSchema, activeTableWindow, loadSchemaAndTables, loadTableData]);
 
   if (!activeTab) {
     return (
@@ -205,10 +291,7 @@ export function ConnectionScreen() {
     );
   }
 
-  if (
-    (tables[activeScreen]?.busy && tables[activeScreen]?.data?.length === 0) ||
-    (schemas[activeScreen]?.busy && schemas[activeScreen]?.data?.length === 0)
-  ) {
+  if (isConnecting) {
     return (
       <Box className="bg-neutral-100 text-center">
         <p class="text-neutral-500">Connecting to {activeTab.label}...</p>
@@ -216,66 +299,22 @@ export function ConnectionScreen() {
     );
   }
 
-  const renderTableContent = useCallback(() => {
-    if (!activeTable) {
-      return (
-        <Box>
-          <p class="text-neutral-500">Select a table to view data</p>
-        </Box>
-      );
-    }
-
-    if (activeTableData.busy) {
-      return (
-        <Box className="text-center">
-          <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
-          <p class="text-neutral-500">Loading table data...</p>
-        </Box>
-      );
-    }
-
-    if (activeTableData.error) {
-      return (
-        <Box className="text-center">
-          <p class="mb-2 text-red-600">Error loading table data</p>
-          <p class="text-sm text-neutral-500">{activeTableData.error}</p>
-        </Box>
-      );
-    }
-
-    if (activeTableData.data) {
-      return (
-        <TableData
-          key={activeTable.id}
-          columns={activeTableData.data.columns}
-          data={activeTableData.data.rows}
-          onCellChange={handleCellChange}
-        />
-      );
-    }
-
-    return null;
-  }, [activeTable, activeTableData, handleCellChange]);
-
   return (
     <div class="flex h-full flex-1 flex-col">
       <MenuBar
-        activeSchema={activeTable?.table.schema}
-        activeTable={activeTable?.table.name}
+        activeSchema={activeTableWindow?.table.schema}
+        activeTable={activeTableWindow?.table.name}
         viewMode={viewMode}
-        loadTableError={
-          tables[activeScreen]?.error ||
-          schemas[activeScreen]?.error ||
-          activeTableData.error
-        }
+        loadTableError={loadError}
         onViewModeChange={handleViewModeChange}
+        openSQLWindow={handleOpenSqlEditor}
         onRefresh={handleRefresh}
       />
 
       <div class="flex h-full flex-1 overflow-hidden">
         {viewMode.includes("left") && (
           <LeftNav
-            schemas={schemas[activeScreen]?.data ?? []}
+            schemas={schemas[activeProfileScreen]?.data ?? []}
             currSchema={activeSchema}
             onSchemaChange={handleSchemaChange}
             tableSearchQuery={tableSearchQuery}
@@ -284,7 +323,7 @@ export function ConnectionScreen() {
             setExpandedSections={setExpandedSections}
             filteredTables={filteredTables}
             handleSelectTable={handleSelectTable}
-            activeTableId={activeTableId[activeScreen]}
+            activeWindowId={activeWindowId[activeProfileScreen]}
           />
         )}
 
@@ -295,18 +334,20 @@ export function ConnectionScreen() {
           )}
         >
           <div class="transition-smooth flex flex-1 flex-col overflow-hidden">
-            {openTables.length > 0 && (
+            {activeWindows.length > 0 && (
               <div
                 class={cn(
-                  "flex shrink-0 items-center gap-0.5 overflow-x-auto pt-1 pb-0.5 transition-all duration-300 ease-in-out",
-                  "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  "flex shrink-0 items-end overflow-x-auto pt-1",
+                  "overflow-hidden"
                 )}
               >
                 <NavigationTabs
-                  openTables={openTables}
-                  setActiveTableId={(id) => setActiveTableId(activeScreen, id)}
-                  activeTableId={activeTableId[activeScreen]}
-                  handleCloseTable={handleCloseTable}
+                  openWindows={activeWindows}
+                  setActiveWindowId={(id) =>
+                    setActiveWindowId(activeProfileScreen, id)
+                  }
+                  activeWindowId={activeWindowId[activeProfileScreen]}
+                  handleCloseWindow={handleCloseWindow}
                 />
               </div>
             )}
@@ -319,32 +360,24 @@ export function ConnectionScreen() {
                 viewMode.includes("bottom") && "animate-slide-in-up"
               )}
             >
-              {tables[activeScreen]?.error ? (
-                <Box className="text-center">
-                  <p class="text-sm text-red-500">
-                    {tables[activeScreen]?.error}
-                  </p>
-                </Box>
-              ) : openTables.length > 0 ? (
-                renderTableContent()
-              ) : (
-                <Box className="text-center">
-                  <Database className="mx-auto mb-4 size-12 text-neutral-300" />
-                  <p class="text-neutral-500">
-                    Select a table from the sidebar to view data
-                  </p>
-                </Box>
-              )}
+              <ActiveWindowContent
+                activeWindow={activeWindow}
+                activeSqlWindow={activeSqlWindow}
+                activeTableWindow={activeTableWindow}
+                activeTableData={activeTableData}
+                loadError={loadError}
+                hasAnyWindow={activeWindows.length > 0}
+                onNewSql={handleOpenSqlEditor}
+                onCellChange={handleCellChange}
+              />
             </div>
 
-            {/* Bottom Tab: SQL History */}
             {viewMode.includes("bottom") && (
               <div class="animate-slide-in-up h-64 shrink-0 border-t border-neutral-200">
                 <QueryHistory
                   queries={sqlHistory}
                   onClear={() => setSqlHistory([])}
                   onSelectQuery={(query) => {
-                    // TODO: Handle query selection (e.g., open in SQL editor)
                     console.log("Selected query:", query);
                   }}
                 />
@@ -352,7 +385,6 @@ export function ConnectionScreen() {
             )}
           </div>
 
-          {/* Right Tab: Table Size */}
           {viewMode.includes("right") && (
             <div class="animate-slide-in-left w-64 shrink-0 border-l border-neutral-200">
               <RightNav sizeInfo={activeTableData.sizeInfo} />

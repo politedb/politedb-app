@@ -27,12 +27,12 @@ type Pagination = {
 export function useLoadTableData() {
   const { tableDataMap, addTableDataMap, removeTableDataMap } =
     useConnectionStore();
-  const { tabs, activeScreen } = useScreenStore();
+  const { profileTabs, activeProfileScreen } = useScreenStore();
 
   const activeTab = useMemo(() => {
-    if (!activeScreen || activeScreen === "main") return null;
-    return tabs.find((t) => t.id === activeScreen) ?? null;
-  }, [tabs, activeScreen]);
+    if (!activeProfileScreen || activeProfileScreen === "main") return null;
+    return profileTabs.find((t) => t.id === activeProfileScreen) ?? null;
+  }, [profileTabs, activeProfileScreen]);
 
   const ensureRuntimeConn = useCallback(
     async (tableKey: string) => {
@@ -51,7 +51,7 @@ export function useLoadTableData() {
 
   const loadTableData = useCallback(
     async (schema: string, tableName: string, pagination?: Pagination) => {
-      const key = tableKey(activeScreen, schema, tableName);
+      const key = tableKey(activeProfileScreen, schema, tableName);
 
       addTableDataMap(key, {
         data: null,
@@ -114,7 +114,7 @@ export function useLoadTableData() {
         });
       }
     },
-    [activeScreen, ensureRuntimeConn]
+    [activeProfileScreen, ensureRuntimeConn]
   );
 
   const getTableData = useCallback(
@@ -135,10 +135,10 @@ export function useLoadTableData() {
 
   const removeTableData = useCallback(
     (schema: string, tableName: string) => {
-      const key = tableKey(activeScreen, schema, tableName);
+      const key = tableKey(activeProfileScreen, schema, tableName);
       removeTableDataMap(key);
     },
-    [activeScreen]
+    [activeProfileScreen]
   );
 
   return {

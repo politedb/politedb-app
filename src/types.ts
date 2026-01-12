@@ -4,6 +4,7 @@ import { ColumnMeta } from "./lib/tauri";
 export type NavId = "connections" | "keychain";
 export type ViewMode = "grid" | "list";
 export type TabViewMode = "left" | "right" | "bottom";
+export type WindowType = "table" | "sql" | "explain" | "erd";
 
 export type SqlQuery = {
   id: string;
@@ -24,6 +25,26 @@ export type OpenTable = {
   id: string;
   table: TableItem;
 };
+
+export type OpenWindowBase = {
+  id: string;
+  type: WindowType;
+  connectionId?: string;
+};
+
+export type TableWindow = OpenWindowBase & {
+  type: "table";
+  table: TableItem;
+};
+
+export type SqlEditorWindow = OpenWindowBase & {
+  type: "sql";
+  title?: string; // "Query 1", "Untitled SQL", ...
+  content: string; // SQL text
+  lastRunAt?: number;
+};
+
+export type OpenWindow = TableWindow | SqlEditorWindow;
 
 export type TableData = {
   columns: ColumnMeta[];

@@ -8,12 +8,12 @@ import { runSqlQuery } from "../utils/query";
 import { useConnectionStore } from "../stores/connection";
 
 export function useLoadTables() {
-  const { tabs, activeScreen, updateTab } = useScreenStore();
+  const { profileTabs, activeProfileScreen, updateTab } = useScreenStore();
   const { setTables, setSchemas } = useConnectionStore();
 
   const activeTab = useMemo(() => {
-    return tabs.find((t) => t.id === activeScreen) ?? null;
-  }, [tabs, activeScreen]);
+    return profileTabs.find((t) => t.id === activeProfileScreen) ?? null;
+  }, [profileTabs, activeProfileScreen]);
 
   const ensureRuntimeConnection = useCallback(async () => {
     if (!activeTab?.profileId) return null;
@@ -82,7 +82,7 @@ export function useLoadTables() {
         });
       }
     },
-    [activeTab, activeScreen, ensureRuntimeConnection]
+    [activeTab, activeProfileScreen, ensureRuntimeConnection]
   );
 
   const loadSchemas = useCallback(async () => {

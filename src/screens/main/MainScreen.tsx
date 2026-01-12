@@ -5,7 +5,7 @@ import { ConnectionModal } from "src/components/SelectConnEngineModal";
 import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 
-import { useScreenStore, type Tab } from "src/stores/screen";
+import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 
 import { LeftNav } from "./LeftNav";
@@ -17,7 +17,7 @@ import type { DatabaseEngine, NavId, ViewMode } from "src/types";
 import type { ConnectionProfile } from "src/lib/tauri";
 
 export function MainScreen() {
-  const { addTab, setActiveScreen } = useScreenStore();
+  const { addTab, setActiveProfileScreen } = useScreenStore();
 
   const {
     loadProfiles,
@@ -80,7 +80,7 @@ export function MainScreen() {
     const found = profiles.find((p) => p.id === profileId);
     if (!found) return;
 
-    const newTab: Tab = {
+    const newTab: ProfileTab = {
       id: `tab-${uuid()}`,
       label: found.label || "Unnamed Connection",
       profileId,
@@ -89,7 +89,7 @@ export function MainScreen() {
     };
 
     addTab(newTab);
-    setActiveScreen(newTab.id);
+    setActiveProfileScreen(newTab.id);
   }
 
   return (
