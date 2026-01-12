@@ -1,7 +1,16 @@
 import { Box } from "src/components/common/Box";
 import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
-import type { OpenWindow, SqlEditorWindow, TableWindow } from "src/types";
+import type {
+  OpenWindow,
+  SqlEditorWindow,
+  TableItem,
+  TableWindow,
+} from "src/types";
+import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
+import { useMemo } from "preact/hooks";
+import { SplitPane } from "src/components/SplitPane";
+import { QueryResult } from "../../lib/tauri";
 
 type ActiveTableData = {
   data: any;
@@ -40,7 +49,7 @@ function ErrorState(props: { error: string }) {
 function LoadingTableState() {
   return (
     <Box className="text-center">
-      <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600"></div>
+      <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
       <p class="text-neutral-500">Loading table data...</p>
     </Box>
   );
@@ -62,10 +71,26 @@ export function ActiveWindowContent(props: {
 
   activeTableData: ActiveTableData;
 
+  activeSqlResult?: QueryResult | null;
+  activeSqlBusy?: boolean;
+  activeSqlError?: string | null;
+
   loadError: string | null;
   hasAnyWindow: boolean;
 
+  runtimeConnectionId: string | null;
+  schemas: string[];
+  tables: TableItem[];
+
   onNewSql: () => void;
+
+  onSqlChangeContent: (windowId: string, next: string) => void;
+  onRunSql: (args: {
+    windowId: string;
+    connectionId: string;
+    sql: string;
+  }) => void;
+
   onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
 }) {
   const {
@@ -73,11 +98,32 @@ export function ActiveWindowContent(props: {
     activeSqlWindow,
     activeTableWindow,
     activeTableData,
+
+    activeSqlResult,
+    activeSqlBusy,
+    activeSqlError,
+
     loadError,
     hasAnyWindow,
+
+    runtimeConnectionId,
+    schemas,
+    tables,
+
     onNewSql,
+    onSqlChangeContent,
+    onRunSql,
     onCellChange,
   } = props;
+
+  const columnsByTable = useMemo(() => {
+    if (!activeTableWindow || !activeTableData?.data?.columns) return undefined;
+
+    const k = `${activeTableWindow.table.schema}.${activeTableWindow.table.name}`;
+    return {
+      [k]: activeTableData.data.columns.map((c: any) => c.name).filter(Boolean),
+    };
+  }, [activeTableWindow, activeTableData?.data?.columns]);
 
   if (loadError) return <ErrorState error={loadError} />;
   if (!hasAnyWindow) return <EmptyState onNewSql={onNewSql} />;
@@ -90,15 +136,73 @@ export function ActiveWindowContent(props: {
     );
   }
 
-  // SQL window rendering (replace with your SqlEditor component)
+  // SQL window rendering (Editor + Result with draggable splitter)
   if (activeSqlWindow) {
     return (
-      <Box>
-        <p class="text-neutral-500">
-          SQL Editor: {activeSqlWindow.title || "Untitled SQL"}
-        </p>
-        {/* TODO: render your editor here */}
-      </Box>
+      <div class="h-full min-h-0 overflow-hidden">
+        <SplitPane
+          direction="vertical"
+          initialRatio={0.45}
+          minFirstPx={180}
+          minSecondPx={160}
+          splitterPx={8}
+          first={
+            <div class="h-full min-h-0">
+              <SqlEditorPane
+                win={activeSqlWindow}
+                tables={tables}
+                schemas={schemas}
+                onChangeContent={onSqlChangeContent}
+                columnsByTable={columnsByTable}
+                onRunSql={({ windowId, sql }) => {
+                  if (!runtimeConnectionId) return;
+                  onRunSql({
+                    windowId,
+                    connectionId: runtimeConnectionId,
+                    sql,
+                  });
+                }}
+              />
+
+              {!runtimeConnectionId ? (
+                <div class="border-t border-neutral-200 bg-white px-3 py-2">
+                  <p class="text-xs text-neutral-500">
+                    Connect to a profile to run SQL.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          }
+          second={
+            <div class="h-full min-h-0 bg-white">
+              {activeSqlBusy ? (
+                <Box className="text-center">
+                  <div class="mb-2 inline-block h-6 w-6 animate-spin rounded-full border-b-2 border-blue-600" />
+                  <p class="text-neutral-500">Running query...</p>
+                </Box>
+              ) : activeSqlError ? (
+                <Box className="text-center">
+                  <p class="mb-2 text-red-600">Query error</p>
+                  <p class="text-sm text-neutral-500">{activeSqlError}</p>
+                </Box>
+              ) : activeSqlResult ? (
+                <TableData
+                  key={activeSqlWindow.id}
+                  columns={activeSqlResult.columns}
+                  data={activeSqlResult.rows}
+                  onCellChange={() => {}}
+                />
+              ) : (
+                <Box className="text-center">
+                  <p class="text-sm text-neutral-500">
+                    Run a query to see results here.
+                  </p>
+                </Box>
+              )}
+            </div>
+          }
+        />
+      </div>
     );
   }
 

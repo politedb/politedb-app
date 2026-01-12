@@ -304,6 +304,12 @@ export type OperationDone = {
   row_count: number;
 };
 
+export type QueryResult = {
+  columns: ColumnMeta[];
+  rows: any[][];
+  rowCount: number;
+};
+
 /* ============================================================================
  * UI-only types (never sent as-is to Rust)
  * ============================================================================

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { OpenWindow } from "../types";
+import { OpenWindow, SqlEditorWindow } from "../types";
 
 /**
  * A "Profile Tab" represents one connected workspace/profile in the UI.
@@ -39,6 +39,11 @@ type ScreenState = {
   removeWindow: (tabId: string, windowId: string) => void;
   replaceWindows: (tabId: string, windows: OpenWindow[]) => void;
   clearWindows: (tabId: string) => void;
+  updateSqlWindowContent: (
+    tabId: string,
+    windowId: string,
+    patch: Pick<SqlEditorWindow, "content" | "title">
+  ) => void;
 
   // Tabs lifecycle
   addTab: (tab: ProfileTab) => void;
@@ -124,6 +129,31 @@ export const useScreenStore = create<ScreenState>((set) => ({
       openWindows: { ...s.openWindows, [tabId]: [] },
       activeWindowId: { ...s.activeWindowId, [tabId]: null },
     })),
+
+  updateSqlWindowContent: (tabId, windowId, patch) =>
+    set((s) => {
+      const list = s.openWindows[tabId];
+      if (!list || list.length === 0) return s;
+
+      let changed = false;
+
+      const nextList = list.map((w) => {
+        if (w.id !== windowId) return w;
+        if (w.type !== "sql") return w;
+
+        if ("content" in patch && w.content === (patch as any).content)
+          return w;
+
+        changed = true;
+        return { ...w, ...patch } as OpenWindow;
+      });
+
+      if (!changed) return s;
+
+      return {
+        openWindows: { ...s.openWindows, [tabId]: nextList },
+      };
+    }),
 
   /* -------------------------------------------------------------------------- */
   /* Tabs lifecycle                                                             */

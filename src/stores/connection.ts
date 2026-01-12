@@ -1,10 +1,18 @@
 import { create } from "zustand";
-import { TableData, TableItem, TableSizeInfo } from "../types";
+import { TableData, TableItem, TableSizeInfo } from "src/types";
+import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 
 type SchemaState = {
   data: string[];
   busy: boolean;
   error: string | null;
+};
+
+export type SqlResultState = {
+  busy: boolean;
+  error: string | null;
+  result: QueryResult | null;
+  lastRunAt?: number;
 };
 
 type TableState = {
@@ -16,52 +24,113 @@ type TableState = {
 type TableDataState = {
   data: TableData | null;
   sizeInfo: TableSizeInfo | null;
-  connectionId: string | null;
+  connectionId: string | null; // profile / DB connection
   busy: boolean;
   error: string | null;
 } | null;
 
 type ConnectionState = {
+  // key = windowId
   tables: Record<string, TableState>;
   schemas: Record<string, SchemaState>;
-  tableDataMap: Record<string, TableDataState>;
-  setTables: (schema: string, tables: TableState) => void;
-  setSchemas: (schema: string, schemas: SchemaState) => void;
-  addTableDataMap: (key: string, tableData: TableDataState) => void;
-  removeTableDataMap: (key: string) => void;
-};
 
+  // cache key = `${connectionId}.${schema}.${table}`
+  columnsCache: Record<string, ColumnMeta[]>;
+  sizeInfoCache: Record<string, TableSizeInfo>;
+
+  // key = windowId
+  tableDataMap: Record<string, TableDataState>;
+  sqlResults: Record<string, SqlResultState>;
+
+  setSqlResult: (windowId: string, patch: Partial<SqlResultState>) => void;
+  clearSqlResult: (windowId: string) => void;
+
+  setTables: (windowId: string, data: TableState) => void;
+  setSchemas: (tabIwindowId: string, data: SchemaState) => void;
+
+  addTableDataMap: (windowId: string, data: TableDataState) => void;
+  removeTableDataMap: (windowId: string) => void;
+
+  setColumnsCache: (key: string, cols: ColumnMeta[]) => void;
+  setSizeInfoCache: (key: string, info: TableSizeInfo) => void;
+};
 export const useConnectionStore = create<ConnectionState>((set) => ({
   tables: {},
-  tableDataMap: {},
   schemas: {},
+  tableDataMap: {},
+  sqlResults: {},
 
-  setSchemas: (schema: string, data: SchemaState) =>
+  columnsCache: {},
+  sizeInfoCache: {},
+
+  setSqlResult: (windowId, patch) =>
+    set((s) => {
+      const prev = s.sqlResults[windowId] ?? {
+        busy: false,
+        error: null,
+        result: null,
+      };
+
+      const next = { ...prev, ...patch };
+
+      // avoid useless rerender
+      if (
+        prev.busy === next.busy &&
+        prev.error === next.error &&
+        prev.result === next.result &&
+        prev.lastRunAt === next.lastRunAt
+      ) {
+        return s;
+      }
+
+      return {
+        sqlResults: {
+          ...s.sqlResults,
+          [windowId]: next,
+        },
+      };
+    }),
+
+  clearSqlResult: (windowId) =>
+    set((s) => {
+      if (!s.sqlResults[windowId]) return s;
+      const { [windowId]: _, ...rest } = s.sqlResults;
+      return { sqlResults: rest };
+    }),
+
+  setSchemas: (windowId, data) =>
     set((s) => ({
       schemas: {
         ...s.schemas,
-        [schema]: data,
+        [windowId]: data,
       },
     })),
 
-  setTables: (key: string, data: TableState) =>
+  setTables: (windowId, data) =>
     set((s) => ({
       tables: {
         ...s.tables,
-        [key]: data,
+        [windowId]: data,
       },
     })),
 
-  addTableDataMap: (key: string, tableData: TableDataState) =>
+  addTableDataMap: (windowId, tableData) =>
     set((s) => ({
       tableDataMap: {
         ...s.tableDataMap,
-        [key]: tableData,
+        [windowId]: tableData,
       },
     })),
 
-  removeTableDataMap: (key: string) =>
-    set((s) => ({
-      tableDataMap: { ...s.tableDataMap, [key]: null },
-    })),
+  removeTableDataMap: (windowId) =>
+    set((s) => {
+      const { [windowId]: _, ...rest } = s.tableDataMap;
+      return { tableDataMap: rest };
+    }),
+
+  setColumnsCache: (key, cols) =>
+    set((s) => ({ columnsCache: { ...s.columnsCache, [key]: cols } })),
+
+  setSizeInfoCache: (key, info) =>
+    set((s) => ({ sizeInfoCache: { ...s.sizeInfoCache, [key]: info } })),
 }));

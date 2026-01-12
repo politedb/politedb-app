@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
-import { useRef } from "preact/hooks";
+import { useMemo, useRef, useCallback } from "preact/hooks";
 
 import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
@@ -10,7 +10,9 @@ import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
 import { useConnectionStore } from "../stores/connection";
 import { DbIcon } from "./icons/DbIcon";
 
-const win = getCurrentWebviewWindow();
+function isTauriRuntime() {
+  return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+}
 
 type AppHeaderProps = {
   showWindowControls?: boolean;
@@ -44,114 +46,130 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const { tableDataMap } = useConnectionStore();
   const { removeTableData } = useLoadTableData();
 
-  // Stable refs to avoid re-render issues.
-  const lastClickAtRef = useRef<number>(0);
+  // ✅ create window handle only in Tauri runtime
+  const win = useMemo(() => {
+    if (!isTauriRuntime()) return null;
+    try {
+      return getCurrentWebviewWindow();
+    } catch {
+      return null;
+    }
+  }, []);
 
-  // macOS double-click threshold is ~250ms-ish; 280ms is a safe UX middle.
+  const lastClickAtRef = useRef<number>(0);
   const DOUBLE_CLICK_MS = 280;
 
-  async function handleHeaderMouseDown(e: MouseEvent) {
-    if (e.button !== 0) return;
+  const handleHeaderMouseDown = useCallback(
+    async (e: MouseEvent) => {
+      if (!win) return; // ✅ in browser => no-op
+      if (e.button !== 0) return;
 
-    const el = e.target as HTMLElement;
+      const el = e.target as HTMLElement;
+      if (el.closest('[data-tauri-drag-region="false"]')) return;
 
-    // Any element marked as not draggable should cancel header drag logic.
-    if (el.closest('[data-tauri-drag-region="false"]')) return;
+      const now = Date.now();
+      const isDouble = now - lastClickAtRef.current < DOUBLE_CLICK_MS;
+      lastClickAtRef.current = now;
 
-    const now = Date.now();
-    const isDouble = now - lastClickAtRef.current < DOUBLE_CLICK_MS;
-    lastClickAtRef.current = now;
+      if (isDouble) {
+        try {
+          const isMax = await win.isMaximized();
+          if (isMax) await win.unmaximize();
+          else await win.maximize();
+        } catch {
+          // ignore
+        }
+        return;
+      }
 
-    // IMPORTANT: Detect double-click first; do NOT start dragging on double-click.
-    if (isDouble) {
       try {
-        const isMax = await win.isMaximized();
-        if (isMax) await win.unmaximize();
-        else await win.maximize();
+        await win.startDragging();
       } catch {
         // ignore
       }
-      return;
-    }
+    },
+    [win]
+  );
 
-    // Single click => allow dragging
-    try {
-      await win.startDragging();
-    } catch {
-      // ignore
-    }
-  }
+  const handleTabSelect = useCallback(
+    (tabId: string) => {
+      setActiveProfileScreen(tabId);
+    },
+    [setActiveProfileScreen]
+  );
 
-  function handleTabSelect(tabId: string) {
-    setActiveProfileScreen(tabId);
-  }
+  const handleTabClose = useCallback(
+    async (tabId: string) => {
+      const currentTab = profileTabs.find((tab) => tab.id === tabId);
+      const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
 
-  async function handleTabClose(tabId: string) {
-    const currentTab = profileTabs.find((tab) => tab.id === tabId);
-    const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
+      removeTab(tabId);
 
-    // Switch active first (UI)
-    removeTab(tabId);
-
-    if (activeProfileScreen === tabId) {
-      setActiveProfileScreen(
-        newTabs.length > 0 ? newTabs[newTabs.length - 1].id : "main"
-      );
-    }
-
-    // Remove runtime connection of the tab
-    if (currentTab?.runtimeConnectionId) {
-      try {
-        await connectionRemove(currentTab.runtimeConnectionId);
-      } catch (err) {
-        console.error("Error removing runtime connection:", err);
+      if (activeProfileScreen === tabId) {
+        setActiveProfileScreen(
+          newTabs.length > 0 ? newTabs[newTabs.length - 1].id : "main"
+        );
       }
-    }
 
-    const windows = openWindows[tabId] ?? [];
-    if (windows.length === 0) return;
-
-    // Cleanup only table windows
-    const tableWindows = windows.filter((w) => w.type === "table");
-
-    await Promise.all(
-      tableWindows.map(async (w) => {
-        const { schema, name } = w.table;
-
-        // IMPORTANT: use tabId (the tab being closed), not activeProfileScreen
-        const key = tableKey(tabId, schema, name);
-        const { connectionId } = tableDataMap[key] || { connectionId: null };
-
-        removeTableData(schema, name);
-
-        if (connectionId) {
-          try {
-            await connectionRemove(connectionId);
-          } catch (err) {
-            console.error("Error removing table connection:", err);
-          }
+      if (currentTab?.runtimeConnectionId) {
+        try {
+          await connectionRemove(currentTab.runtimeConnectionId);
+        } catch (err) {
+          console.error("Error removing runtime connection:", err);
         }
-      })
-    );
-  }
+      }
+
+      const windows = openWindows[tabId] ?? [];
+      if (windows.length === 0) return;
+
+      const tableWindows = windows.filter((w) => w.type === "table");
+
+      await Promise.all(
+        tableWindows.map(async (w) => {
+          const { schema, name } = w.table;
+
+          const key = tableKey(tabId, schema, name);
+          const { connectionId } = tableDataMap[key] || { connectionId: null };
+
+          // ⚠️
+          // Recommend removeTableData signature: removeTableData(screenId, schema, name)
+          removeTableData(schema, name);
+
+          if (connectionId) {
+            try {
+              await connectionRemove(connectionId);
+            } catch (err) {
+              console.error("Error removing table connection:", err);
+            }
+          }
+        })
+      );
+    },
+    [
+      profileTabs,
+      removeTab,
+      activeProfileScreen,
+      setActiveProfileScreen,
+      openWindows,
+      tableDataMap,
+      removeTableData,
+    ]
+  );
 
   return (
     <div
       class="relative z-10 h-10 w-full shrink-0 border-b border-slate-200 backdrop-blur-md select-none"
       onMouseDown={handleHeaderMouseDown}
     >
-      {/* Traffic lights slot (overlay) */}
       <div
         class="absolute top-0 left-0 flex h-full items-center"
         style={{ width: "var(--titlebar-left-padding)" }}
       />
 
-      {/* Header content */}
       <div
         class="flex h-full items-center"
         style={{ paddingLeft: "var(--titlebar-left-padding)" }}
       >
-        {/* LEFT: App context (align with LeftNav) */}
         <div
           class="flex h-full shrink-0 items-center gap-2 px-4"
           style={{
@@ -173,7 +191,6 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   setActiveProfileScreen(nav.id);
                 }}
                 class={[
-                  // App context pill (Blue = "where you are")
                   "inline-flex cursor-pointer items-center gap-1.5",
                   "h-7 rounded-lg px-2.5",
                   "border text-xs font-semibold transition-colors",
@@ -193,7 +210,6 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
           })}
         </div>
 
-        {/* MIDDLE: Tabs rail (Neutral container, quiet) */}
         <div class="flex min-w-0 flex-1 items-center">
           <div class="flex items-center gap-1 overflow-x-auto rounded-lg p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {profileTabs.map((tab) => {
@@ -219,12 +235,9 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   ].join(" ")}
                 >
                   <div class="flex min-w-0 items-center gap-2">
-                    {/* Active-only icon pill (neutral) */}
                     <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-600">
-                      {/* <Database className="h-3 w-3" /> */}
                       <DbIcon engine={tab.engine} px={16} />
                     </span>
-
                     <span class="truncate text-xs font-medium">
                       {tab.label}
                     </span>

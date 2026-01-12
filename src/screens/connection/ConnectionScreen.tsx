@@ -21,6 +21,7 @@ import {
   TableItem,
 } from "src/types";
 import { ActiveWindowContent } from "./ActiveWindowContent";
+import { runSqlQuery } from "src/utils/query";
 
 type PatchMap = Record<string, Record<string, Record<string, any>>>;
 
@@ -50,9 +51,13 @@ export function ConnectionScreen() {
     removeWindow,
     activeWindowId,
     setActiveWindowId,
+    // updateSqlWindowContent,
   } = useScreenStore();
 
-  const { tables, schemas, tableDataMap } = useConnectionStore();
+  // ✅ only select tab-scoped data + active table entry (avoid rerender storms)
+  const tabTables = useConnectionStore((s) => s.tables[activeProfileScreen]);
+  const tabSchemas = useConnectionStore((s) => s.schemas[activeProfileScreen]);
+  const setSqlResult = useConnectionStore((s) => s.setSqlResult);
 
   const [_patchMap, setPatchMap] = useState<PatchMap>({});
   const [tableSearchQuery, setTableSearchQuery] = useState("");
@@ -91,9 +96,19 @@ export function ConnectionScreen() {
     return isSqlWindow(activeWindow) ? activeWindow : undefined;
   }, [activeWindow]);
 
+  const activeSqlState = useConnectionStore((s) =>
+    activeSqlWindow ? s.sqlResults[activeSqlWindow.id] : undefined
+  );
+
   const activeTableData = useMemo(() => {
     if (!activeTableWindow) {
-      return { data: null, sizeInfo: null, busy: false, error: null };
+      return {
+        data: null,
+        sizeInfo: null,
+        busy: false,
+        error: null,
+        connectionId: null,
+      };
     }
     return getTableData(
       activeProfileScreen,
@@ -102,35 +117,43 @@ export function ConnectionScreen() {
     );
   }, [activeProfileScreen, activeTableWindow, getTableData]);
 
+  // ✅ pull active table entry only (connectionId) for SQL editor fallback
+  const activeTableMapEntry = useConnectionStore((s) => {
+    if (!activeTableWindow) return null;
+    const k = tableKey(
+      activeProfileScreen,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+    return s.tableDataMap[k] ?? null;
+  });
+
   const filteredTables = useMemo(() => {
-    const list = tables[activeProfileScreen]?.data ?? [];
+    const list = tabTables?.data ?? [];
     const q = tableSearchQuery.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
       (t) =>
         t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
     );
-  }, [tables, activeProfileScreen, tableSearchQuery]);
+  }, [tabTables, tableSearchQuery]);
 
   const isConnecting = useMemo(() => {
-    const t = tables[activeProfileScreen];
-    const s = schemas[activeProfileScreen];
     return (
-      (t?.busy && (t?.data?.length ?? 0) === 0) ||
-      (s?.busy && (s?.data?.length ?? 0) === 0)
+      (tabTables?.busy && (tabTables?.data?.length ?? 0) === 0) ||
+      (tabSchemas?.busy && (tabSchemas?.data?.length ?? 0) === 0)
     );
-  }, [tables, schemas, activeProfileScreen]);
+  }, [tabTables, tabSchemas]);
 
   const loadError = useMemo(() => {
     return (
-      tables[activeProfileScreen]?.error ||
-      schemas[activeProfileScreen]?.error ||
+      tabTables?.error ||
+      tabSchemas?.error ||
       (activeTableWindow ? activeTableData.error : null)
     );
   }, [
-    tables,
-    schemas,
-    activeProfileScreen,
+    tabTables?.error,
+    tabSchemas?.error,
     activeTableWindow,
     activeTableData.error,
   ]);
@@ -208,8 +231,9 @@ export function ConnectionScreen() {
 
       if (toClose?.type === "table") {
         const { schema, name } = toClose.table;
-        const key = tableKey(activeProfileScreen, schema, name);
-        const { connectionId } = tableDataMap[key] || { connectionId: null };
+        const k = tableKey(activeProfileScreen, schema, name);
+        const entry = useConnectionStore.getState().tableDataMap[k];
+        const connectionId = entry?.connectionId ?? null;
 
         removeTableData(schema, name);
 
@@ -220,6 +244,11 @@ export function ConnectionScreen() {
             console.error("Error removing connection:", err);
           }
         }
+      }
+
+      if (toClose?.type === "sql") {
+        const clearSqlResult = useConnectionStore.getState().clearSqlResult;
+        clearSqlResult(windowId);
       }
 
       removeWindow(activeProfileScreen, windowId);
@@ -243,7 +272,6 @@ export function ConnectionScreen() {
     [
       activeWindows,
       activeProfileScreen,
-      tableDataMap,
       removeTableData,
       removeWindow,
       activeWindowId,
@@ -283,6 +311,70 @@ export function ConnectionScreen() {
     );
   }, [activeSchema, activeTableWindow, loadSchemaAndTables, loadTableData]);
 
+  // =========================
+  // ✅ Inject SQL editor props into ActiveWindowContent
+  // =========================
+
+  const runtimeConnectionId = useMemo(() => {
+    if (activeTab?.runtimeConnectionId) return activeTab.runtimeConnectionId;
+    return activeTableMapEntry?.connectionId ?? null;
+  }, [activeTab?.runtimeConnectionId, activeTableMapEntry?.connectionId]);
+
+  const schemasForEditor = useMemo(() => tabSchemas?.data ?? [], [tabSchemas]);
+  const tablesForEditor = useMemo(() => tabTables?.data ?? [], [tabTables]);
+
+  const handleSqlChangeContent = useCallback(
+    (windowId: string, next: string) => {
+      // TODO - Save SQL content change
+      // updateSqlWindowContent(activeProfileScreen, windowId, { content: next });
+    },
+    [activeProfileScreen]
+  );
+
+  const handleRunSql = useCallback(
+    async ({
+      windowId,
+      connectionId,
+      sql,
+    }: {
+      windowId: string;
+      connectionId: string;
+      sql: string;
+    }) => {
+      setSqlResult(windowId, {
+        busy: true,
+        error: null,
+        result: null,
+        lastRunAt: Date.now(),
+      });
+
+      try {
+        const res = await runSqlQuery(connectionId, sql);
+        setSqlResult(windowId, {
+          busy: false,
+          error: null,
+          result: res,
+          lastRunAt: Date.now(),
+        });
+      } catch (e: any) {
+        setSqlResult(windowId, {
+          busy: false,
+          result: null,
+          error: e?.message ? String(e.message) : String(e),
+          lastRunAt: Date.now(),
+        });
+      }
+
+      setSqlHistory((prev) => [
+        { id: uuid(), sql, createdAt: Date.now() } as unknown as SqlQuery,
+        ...prev,
+      ]);
+    },
+    []
+  );
+
+  // =========================
+
   if (!activeTab) {
     return (
       <Box className="bg-neutral-100 text-center">
@@ -314,7 +406,7 @@ export function ConnectionScreen() {
       <div class="flex h-full flex-1 overflow-hidden">
         {viewMode.includes("left") && (
           <LeftNav
-            schemas={schemas[activeProfileScreen]?.data ?? []}
+            schemas={tabSchemas?.data ?? []}
             currSchema={activeSchema}
             onSchemaChange={handleSchemaChange}
             tableSearchQuery={tableSearchQuery}
@@ -369,6 +461,14 @@ export function ConnectionScreen() {
                 hasAnyWindow={activeWindows.length > 0}
                 onNewSql={handleOpenSqlEditor}
                 onCellChange={handleCellChange}
+                runtimeConnectionId={runtimeConnectionId}
+                schemas={schemasForEditor}
+                tables={tablesForEditor}
+                onSqlChangeContent={handleSqlChangeContent}
+                onRunSql={handleRunSql}
+                activeSqlResult={activeSqlState?.result ?? null}
+                activeSqlBusy={activeSqlState?.busy ?? false}
+                activeSqlError={activeSqlState?.error ?? null}
               />
             </div>
 

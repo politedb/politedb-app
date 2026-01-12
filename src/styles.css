@@ -164,3 +164,66 @@ table {
 .animate-slide-in-up {
   animation: slide-in-up 0.3s ease-out;
 }
+
+/* container */
+.split-pane {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* divider hit area (invisible but clickable) */
+.split-pane__divider {
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+/* vertical */
+.split-pane--vertical .split-pane__divider {
+  height: 8px; /* 👈 hit area */
+  cursor: row-resize;
+}
+
+/* horizontal */
+.split-pane--horizontal .split-pane__divider {
+  width: 8px; /* 👈 hit area */
+  cursor: col-resize;
+}
+
+/* actual visible line */
+.split-pane__divider::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  background: var(--divider-color, #e5e7eb);
+}
+
+/* vertical line */
+.split-pane--vertical .split-pane__divider::before {
+  width: 100%;
+  height: 1px; /* 👈 mảnh */
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* horizontal line */
+.split-pane--horizontal .split-pane__divider::before {
+  width: 1px;
+  height: 100%;
+}
+
+/* hover */
+.split-pane__divider:hover::before {
+  background: #9ca3af;
+}
+
+/* dragging */
+.split-pane__divider.is-dragging::before {
+  background: #2563eb;
+}
