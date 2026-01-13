@@ -19,7 +19,11 @@ export type NavItem = {
   icon: JSX.Element;
 };
 
-export type TableItem = { schema: string; name: string };
+export type TableItem = {
+  schema: string;
+  name: string;
+  kind?: "table" | "view";
+};
 
 export type OpenTable = {
   id: string;

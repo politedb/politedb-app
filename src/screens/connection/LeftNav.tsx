@@ -37,14 +37,14 @@ function SectionHeader(props: {
       title={title}
     >
       {/* Force left alignment even if Button defaults to justify-center */}
-      <div class="flex w-full items-center justify-start gap-2">
+      <div class="flex w-full items-center justify-start gap-1">
         {expanded ? (
-          <ChevronDown className="size-3 shrink-0 text-neutral-500" />
+          <ChevronDown className="size-3.5 shrink-0 text-neutral-500" />
         ) : (
-          <ChevronRight className="size-3 shrink-0 text-neutral-500" />
+          <ChevronRight className="size-3.5 shrink-0 text-neutral-500" />
         )}
 
-        <span class="min-w-0 truncate text-start text-[11px] font-semibold tracking-wide text-neutral-600">
+        <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
           {title}
         </span>
       </div>
@@ -142,7 +142,7 @@ export function LeftNav({
                   No tables found
                 </div>
               ) : (
-                <div class="space-y-1 pl-1">
+                <div class="space-y-1 pl-3">
                   {filteredTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
                     const isActive = activeWindowId === key;

@@ -32,8 +32,14 @@ export function useSqlRunner(args: {
   activeSqlWindowId?: string;
   runtimeConnectionId?: string;
   onRunSql: RunSqlFn;
+  stopOnError?: boolean;
 }) {
-  const { activeSqlWindowId, runtimeConnectionId, onRunSql } = args;
+  const {
+    activeSqlWindowId,
+    runtimeConnectionId,
+    onRunSql,
+    stopOnError = false,
+  } = args;
 
   // Persist results per window id (so switching tabs keeps results)
   const stateByWindowIdRef = useRef<Map<string, WindowState>>(new Map());
@@ -202,7 +208,8 @@ export function useSqlRunner(args: {
           });
 
           // stop-on-error
-          break;
+          if (stopOnError) break;
+          continue;
         }
       }
     },

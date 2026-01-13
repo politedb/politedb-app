@@ -158,7 +158,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
 
   return (
     <div
-      class="relative z-10 h-10 w-full shrink-0 border-b border-slate-200 backdrop-blur-md select-none"
+      class="relative z-10 h-11 w-full shrink-0 border-b border-slate-200 select-none"
       onMouseDown={handleHeaderMouseDown}
     >
       <div

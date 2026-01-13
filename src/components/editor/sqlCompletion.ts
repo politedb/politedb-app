@@ -361,10 +361,24 @@ const kw = (range: monaco.Range, t: string) => ({
   range,
 });
 
-const tableItem = (range: monaco.Range, label: string, insert: string) => ({
+function tableKind(t: TableItem) {
+  // default: table
+  if ((t as any).kind === "view") {
+    return monaco.languages.CompletionItemKind.Class;
+  }
+  return monaco.languages.CompletionItemKind.Struct;
+}
+
+const tableItem = (
+  range: monaco.Range,
+  label: string,
+  insert: string,
+  kind: monaco.languages.CompletionItemKind = monaco.languages
+    .CompletionItemKind.Struct
+) => ({
   label,
   filterText: label,
-  kind: monaco.languages.CompletionItemKind.Struct,
+  kind,
   insertText: insert,
   range,
 });
@@ -434,7 +448,12 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
               suggestions: ctx.tables
                 .filter((t) => t.schema === base)
                 .map((t) =>
-                  tableItem(range, t.name, `${base}.${quoteIdent(ctx, t.name)}`)
+                  tableItem(
+                    range,
+                    t.name,
+                    `${base}.${quoteIdent(ctx, t.name)}`,
+                    tableKind(t)
+                  )
                 ),
             };
           }
@@ -464,7 +483,7 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
               ? quoteIdent(ctx, name)
               : quotePath(ctx, `${schema}.${name}`);
 
-            return tableItem(range, label, insert);
+            return tableItem(range, label, insert, tableKind(t));
           }),
         };
       }

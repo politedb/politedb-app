@@ -96,11 +96,18 @@ export function useDatabaseMetadata() {
           // Tables (10 -> 25)
           const tablesRes = await runSqlQuery(connectionId, q.tablesQuery);
           const tables: TableItem[] = (tablesRes.rows ?? [])
-            .map((r: any) => ({
-              schema: cellToString(r?.[0]),
-              name: cellToString(r?.[1]),
-            }))
-            .filter((t: any) => t.schema && t.name);
+            .map((r: any): TableItem => {
+              const rawKind = cellToString(r?.[2]).toUpperCase();
+              const kind: TableItem["kind"] =
+                rawKind === "VIEW" ? "view" : "table";
+
+              return {
+                schema: cellToString(r?.[0]),
+                name: cellToString(r?.[1]),
+                kind,
+              };
+            })
+            .filter((t: TableItem) => Boolean(t.schema && t.name));
           setCache(metaKey, { tables, progress: 25, stage: "columns" });
 
           // Columns (25 -> 100)

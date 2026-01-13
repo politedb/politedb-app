@@ -14,11 +14,11 @@ const PG: MetadataQueries = {
     ORDER BY schema_name;
   `,
   tablesQuery: `
-    SELECT table_schema, table_name
+    SELECT table_schema, table_name, table_type
     FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE'
-      AND table_schema NOT IN ('pg_catalog', 'information_schema')
-    ORDER BY table_schema, table_name;
+    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+      AND table_type IN ('BASE TABLE', 'VIEW')
+    ORDER BY table_schema, table_type, table_name;
   `,
   columnsQuery: `
     SELECT table_schema, table_name, column_name
@@ -36,11 +36,16 @@ const MYSQL: MetadataQueries = {
     ORDER BY schema_name;
   `,
   tablesQuery: `
-    SELECT table_schema, table_name
+    SELECT table_schema, table_name, table_type
     FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE'
-      AND table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-    ORDER BY table_schema, table_name;
+    WHERE table_schema NOT IN (
+      'information_schema',
+      'mysql',
+      'performance_schema',
+      'sys'
+    )
+      AND table_type IN ('BASE TABLE', 'VIEW')
+    ORDER BY table_schema, table_type, table_name;
   `,
   columnsQuery: `
     SELECT table_schema, table_name, column_name
