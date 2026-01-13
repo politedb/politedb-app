@@ -319,23 +319,29 @@ function detectDotContext(ctx: string): DotContext | null {
 function detectPostTableContext(ctx: string): PostTableCtx | null {
   const s = normalizeCtx(ctx);
 
-  const reNoAlias = /\b(FROM|JOIN)\s+([a-zA-Z0-9_.]+)$/i;
+  // Match the LAST table-like token after the LAST FROM/JOIN (including join types)
+  // Example matches (end of string):
+  //  - "... FROM users"
+  //  - "... FROM public.users u"
+  //  - "... LEFT JOIN users"
+  //  - "... JOIN public.users AS u"
+  //
+  // Note: still unquoted-only as original note.
   const reWithAlias =
-    /\b(FROM|JOIN)\s+([a-zA-Z0-9_.]+)\s+(?:AS\s+)?([a-zA-Z0-9_]+)$/i;
+    /\b(FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN)\s+([a-zA-Z0-9_.]+)\s+(?:AS\s+)?([a-zA-Z0-9_]+)\s*$/i;
 
-  if (reWithAlias.test(s)) {
-    return s.toUpperCase().includes("FROM")
-      ? { kind: "postFrom", hasAlias: true }
-      : { kind: "postJoin", hasAlias: true };
-  }
+  const reNoAlias =
+    /\b(FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN)\s+([a-zA-Z0-9_.]+)\s*$/i;
 
-  if (reNoAlias.test(s)) {
-    return s.toUpperCase().includes("FROM")
-      ? { kind: "postFrom", hasAlias: false }
-      : { kind: "postJoin", hasAlias: false };
-  }
+  const m = s.match(reWithAlias) ?? s.match(reNoAlias);
+  if (!m) return null;
 
-  return null;
+  const kw = m[1].toUpperCase().replace(/\s+/g, " "); // normalize join types
+  const hasAlias = m.length >= 4 && !!m[3];
+
+  // FROM => postFrom, any JOIN variant => postJoin
+  if (kw === "FROM") return { kind: "postFrom", hasAlias };
+  return { kind: "postJoin", hasAlias };
 }
 
 function resolveState(p: ParsedCtx): EditorState {
