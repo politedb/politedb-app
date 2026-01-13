@@ -5,7 +5,7 @@ import type {
   DatabaseEngine,
   OpenWindow,
   SqlEditorWindow,
-  TableItem,
+  TableData as TableDataType,
   TableWindow,
 } from "src/types";
 import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
@@ -14,12 +14,14 @@ import { SplitPane } from "src/components/SplitPane";
 import type { QueryResult } from "src/lib/tauri";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
+import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 
-type ActiveTableData = {
-  data: any;
+export type ActiveTableData = {
+  data: TableDataType | null;
   sizeInfo: any;
   busy: boolean;
-  error: any;
+  error: string | null;
+  connectionId: string | null;
 };
 
 type PatchMap = Record<string, Record<string, Record<string, any>>>;
@@ -73,15 +75,12 @@ export function ActiveWindowContent(props: {
   activeWindow?: OpenWindow;
   activeSqlWindow?: SqlEditorWindow;
   activeTableWindow?: TableWindow;
-
   activeTableData: ActiveTableData;
 
   loadError: string | null;
   hasAnyWindow: boolean;
 
-  runtimeConnectionId: string | null;
-  schemas: string[];
-  tables: TableItem[];
+  runtimeConnectionId: string | undefined;
 
   onNewSql: () => void;
 
@@ -93,7 +92,11 @@ export function ActiveWindowContent(props: {
 
   onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
   patchMap: PatchMap;
+
   engine: DatabaseEngine;
+
+  metadata: MetadataApi;
+  metaKey: string;
 }) {
   const {
     activeWindow,
@@ -103,13 +106,13 @@ export function ActiveWindowContent(props: {
     loadError,
     hasAnyWindow,
     runtimeConnectionId,
-    schemas,
-    tables,
     onNewSql,
     onRunSql,
     onCellChange,
     patchMap,
     engine,
+    metadata,
+    metaKey,
   } = props;
 
   const tablePatches = useMemo(() => {
@@ -128,16 +131,14 @@ export function ActiveWindowContent(props: {
     });
 
   /* =========================
-   * Columns autocomplete
+   * Database Meta for autocomplete (from injected cache)
    * ========================= */
-  const columnsByTable = useMemo(() => {
-    if (!activeTableWindow || !activeTableData?.data?.columns) return undefined;
-
-    const k = `${activeTableWindow.table.schema}.${activeTableWindow.table.name}`;
-    return {
-      [k]: activeTableData.data.columns.map((c: any) => c.name).filter(Boolean),
-    };
-  }, [activeTableWindow, activeTableData?.data?.columns]);
+  const meta = metadata.get({
+    metaKey,
+    engine,
+    connectionId: runtimeConnectionId,
+    lazy: true,
+  });
 
   /* =========================
    * Global guards
@@ -169,10 +170,10 @@ export function ActiveWindowContent(props: {
             <div class="h-full min-h-0">
               <SqlEditorPane
                 win={activeSqlWindow}
-                tables={tables}
-                schemas={schemas}
+                schemas={meta.schemas}
+                tables={meta.tables}
+                columnsByTable={meta.columnsByTable}
                 engine={engine}
-                columnsByTable={columnsByTable}
                 onRunSql={({ windowId, sql }) =>
                   void startRun({ windowId, sql })
                 }

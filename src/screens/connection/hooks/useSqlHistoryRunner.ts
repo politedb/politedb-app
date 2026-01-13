@@ -1,10 +1,19 @@
 import { useCallback, useState } from "preact/hooks";
 import { v4 as uuid } from "uuid";
-import type { SqlQuery } from "src/types";
+import type { SqlQuery, DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { runSqlQuery } from "src/utils/query";
+import { isDDLStatement } from "src/utils/detect";
+import { MetadataApi } from "src/hooks/useDatabaseMetadata";
 
-export function useSqlHistoryRunner() {
+type Options = {
+  profileId: string;
+  engine?: DatabaseEngine;
+
+  metadata?: MetadataApi;
+};
+
+export function useSqlHistoryRunner(opts?: Options) {
   const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
 
   const run = useCallback(
@@ -19,9 +28,25 @@ export function useSqlHistoryRunner() {
         ...prev,
       ]);
 
-      return await runSqlQuery(connectionId, sql);
+      const res = await runSqlQuery(connectionId, sql);
+
+      // ✅ invalidate metadata if DDL succeeded
+      if (opts?.metadata && isDDLStatement(sql)) {
+        const metaKey = `${opts.engine}:${opts.profileId}`;
+        opts.metadata.invalidate({ metaKey });
+
+        // background reload (don’t await)
+        void opts.metadata.load({
+          metaKey,
+          engine: opts.engine,
+          connectionId,
+          force: true,
+        });
+      }
+
+      return res;
     },
-    []
+    [opts?.engine, opts?.metadata]
   );
 
   const clear = useCallback(() => setSqlHistory([]), []);

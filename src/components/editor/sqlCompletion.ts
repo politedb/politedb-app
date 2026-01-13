@@ -102,6 +102,85 @@ const FUNCTIONS = ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE"];
  * Utils
  * ========================= */
 
+function isStatementBoundary(around: string) {
+  const s = around.trimEnd();
+  if (!s) return true;
+  if (!s.endsWith(";")) return false;
+
+  let inSingle = false;
+  let inDouble = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    const next = s[i + 1] ?? "";
+
+    // End line comment on newline (normalizeCtx collapses spaces but keeps no \n,
+    // so we still handle it just in case getContextText includes \n)
+    if (inLineComment) {
+      if (ch === "\n") inLineComment = false;
+      continue;
+    }
+
+    // End block comment
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+
+    // Inside single-quoted string
+    if (inSingle) {
+      // SQL escape: '' inside string
+      if (ch === "'" && next === "'") {
+        i++;
+        continue;
+      }
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+
+    // Inside double-quoted identifier
+    if (inDouble) {
+      // escape: "" inside identifier
+      if (ch === `"` && next === `"`) {
+        i++;
+        continue;
+      }
+      if (ch === `"`) inDouble = false;
+      continue;
+    }
+
+    // Not in any state: detect comment starts
+    if (ch === "-" && next === "-") {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+
+    // Detect string / identifier starts
+    if (ch === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (ch === `"`) {
+      inDouble = true;
+      continue;
+    }
+  }
+
+  // boundary only if semicolon is outside strings/comments
+  return !inSingle && !inDouble && !inLineComment && !inBlockComment;
+}
+
 function makeKey(schema: string, table: string) {
   return `${schema}.${table}`;
 }
@@ -304,7 +383,7 @@ const colItem = (range: monaco.Range, label: string, insert: string) => ({
 
 export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
   return monaco.languages.registerCompletionItemProvider("sql", {
-    triggerCharacters: [".", "_", " "],
+    triggerCharacters: [".", "_", " ", ";"],
 
     provideCompletionItems(model, position) {
       const ctx = getCtx();
@@ -327,6 +406,10 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
       })();
 
       const state = resolveState(parsed);
+
+      if (isStatementBoundary(around)) {
+        return { suggestions: KW_LIGHT.map((k) => kw(range, k)) };
+      }
 
       /* ---------- DOT ---------- */
       if (state === "DOT" && parsed.dot) {
@@ -372,11 +455,15 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
       if (state === "EXPECT_TABLE") {
         return {
           suggestions: ctx.tables.map((t) => {
+            const schema = String(t.schema);
+            const name = String(t.name);
+
             const isSameSchema = t.schema === ctx.activeSchema;
             const label = isSameSchema ? t.name : `${t.schema}.${t.name}`;
             const insert = isSameSchema
-              ? quoteIdent(ctx, t.name)
-              : quotePath(ctx, `${t.schema}.${t.name}`);
+              ? quoteIdent(ctx, name)
+              : quotePath(ctx, `${schema}.${name}`);
+
             return tableItem(range, label, insert);
           }),
         };

@@ -15,6 +15,8 @@ import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useViewMode } from "./hooks/useViewMode";
 import { useSqlHistoryRunner } from "./hooks/useSqlHistoryRunner";
 import { useSchemaTablesPanel } from "./hooks/useSchemaTablesPanel";
+import { useDatabaseMetadata } from "src/hooks/useDatabaseMetadata";
+import { useEnsureRuntimeConnection } from "../../hooks/useEnsureRuntimeConnection";
 
 type PatchMap = Record<string, Record<string, Record<string, any>>>;
 
@@ -24,7 +26,6 @@ export function ConnectionScreen() {
   const [patchMap, setPatchMap] = useState<PatchMap>({});
   const { loadTableData, getTableData } = useLoadTableData();
   const { viewMode, toggleViewMode } = useViewMode(["left"]);
-  const { sqlHistory, runSqlWithHistory, clearHistory } = useSqlHistoryRunner();
 
   /* =========================
    * Windows orchestration
@@ -43,27 +44,16 @@ export function ConnectionScreen() {
     closeWindow,
   } = useConnectionWindows(activeProfileScreen);
 
-  /* =========================
-   * Left panel: schemas/tables/search/filter/load
-   * ========================= */
-  const {
-    tabTables,
-    tabSchemas,
-    activeSchema,
-    onSchemaChange,
-    tableSearchQuery,
-    setTableSearchQuery,
-    expandedSections,
-    setExpandedSections,
-    filteredTables,
-    schemasForEditor,
-    tablesForEditor,
-    isConnecting,
-    refreshSchemaAndTables,
-  } = useSchemaTablesPanel({
-    activeProfileScreen,
-    activeTabId: activeTab?.id,
-  });
+  const { connecting: connectingRuntime } =
+    useEnsureRuntimeConnection(activeTab);
+
+  const engine = activeTab?.engine;
+
+  // Stable metaKey (NOT runtimeConnectionId)
+  const metaKey = useMemo(() => {
+    if (!activeTab?.profileId) return "";
+    return `${engine ?? "postgres"}:${activeTab.profileId}`;
+  }, [engine, activeTab?.profileId]);
 
   /* =========================
    * Active table data
@@ -85,7 +75,7 @@ export function ConnectionScreen() {
     );
   }, [activeProfileScreen, activeTableWindow, getTableData]);
 
-  // Active table entry (connectionId fallback)
+  // runtime connection fallback (table window may have its own runtime conn)
   const activeTableMapEntry = useConnectionStore((s) => {
     if (!activeTableWindow) return null;
     const k = tableKey(
@@ -96,18 +86,54 @@ export function ConnectionScreen() {
     return s.tableDataMap[k] ?? null;
   });
 
+  const runtimeConnectionId = useMemo(() => {
+    if (activeTab?.runtimeConnectionId) return activeTab.runtimeConnectionId;
+    return activeTableMapEntry?.connectionId || undefined;
+  }, [activeTab?.runtimeConnectionId, activeTableMapEntry?.connectionId]);
+
+  /* =========================
+   * Metadata (single instance) + Left panel
+   * ========================= */
+  const metadata = useDatabaseMetadata();
+
+  const {
+    meta, // includes loading/progress/error
+    activeSchema,
+    onSchemaChange,
+    refreshSchemaAndTables,
+
+    tableSearchQuery,
+    setTableSearchQuery,
+
+    expandedSections,
+    setExpandedSections,
+
+    filteredTables,
+
+    // ✅ for editor completion (full metadata)
+    schemasForEditor,
+
+    isConnecting,
+  } = useSchemaTablesPanel({
+    metadata, // ✅ IMPORTANT: use the same instance
+    metaKey,
+    engine,
+    connectionId: runtimeConnectionId,
+    defaultSchema: "public",
+  });
+
   const loadError = useMemo(() => {
-    return (
-      tabTables?.error ||
-      tabSchemas?.error ||
-      (activeTableWindow ? activeTableData.error : null)
-    );
-  }, [
-    tabTables?.error,
-    tabSchemas?.error,
-    activeTableWindow,
-    activeTableData.error,
-  ]);
+    return meta.error || (activeTableWindow ? activeTableData.error : null);
+  }, [meta.error, activeTableWindow, activeTableData.error]);
+
+  /* =========================
+   * SQL execution + history + DDL invalidate
+   * ========================= */
+  const { sqlHistory, runSqlWithHistory, clearHistory } = useSqlHistoryRunner({
+    engine,
+    metadata, // ✅ same instance (DDL invalidation will affect panel/editor)
+    profileId: activeProfileScreen,
+  });
 
   /* =========================
    * Actions
@@ -123,7 +149,6 @@ export function ConnectionScreen() {
     [openTable]
   );
 
-  // Wrap close to cleanup local patchMap
   const handleCloseWindow = useCallback(
     async (windowId: string, e: MouseEvent) => {
       await closeWindow(windowId, e);
@@ -161,8 +186,10 @@ export function ConnectionScreen() {
   );
 
   const handleRefresh = useCallback(async () => {
+    // refresh metadata (schemas/tables/columns) without changing UI state
     await refreshSchemaAndTables();
 
+    // refresh active table data (rows)
     if (!activeTableWindow) return;
 
     await loadTableData(
@@ -170,12 +197,6 @@ export function ConnectionScreen() {
       activeTableWindow.table.name
     );
   }, [refreshSchemaAndTables, activeTableWindow, loadTableData]);
-
-  // connectionId for SQL editor
-  const runtimeConnectionId = useMemo(() => {
-    if (activeTab?.runtimeConnectionId) return activeTab.runtimeConnectionId;
-    return activeTableMapEntry?.connectionId ?? null;
-  }, [activeTab?.runtimeConnectionId, activeTableMapEntry?.connectionId]);
 
   /* =========================
    * Guards
@@ -188,7 +209,7 @@ export function ConnectionScreen() {
     );
   }
 
-  if (isConnecting) {
+  if (isConnecting || connectingRuntime) {
     return (
       <Box className="bg-neutral-100 text-center">
         <p class="text-neutral-500">Connecting to {activeTab.label}...</p>
@@ -214,7 +235,7 @@ export function ConnectionScreen() {
       <div class="flex h-full flex-1 overflow-hidden">
         {viewMode.includes("left") && (
           <LeftNav
-            schemas={tabSchemas?.data ?? []}
+            schemas={schemasForEditor}
             currSchema={activeSchema}
             onSchemaChange={onSchemaChange}
             tableSearchQuery={tableSearchQuery}
@@ -255,7 +276,7 @@ export function ConnectionScreen() {
             >
               <ActiveWindowContent
                 activeWindow={activeWindow}
-                engine={activeTab?.engine || "postgres"}
+                engine={engine || "postgres"}
                 activeSqlWindow={activeSqlWindow}
                 activeTableWindow={activeTableWindow}
                 activeTableData={activeTableData}
@@ -264,10 +285,10 @@ export function ConnectionScreen() {
                 onNewSql={handleOpenSqlEditor}
                 onCellChange={handleCellChange}
                 runtimeConnectionId={runtimeConnectionId}
-                schemas={schemasForEditor}
-                tables={tablesForEditor}
                 onRunSql={runSqlWithHistory}
                 patchMap={patchMap}
+                metadata={metadata}
+                metaKey={metaKey}
               />
             </div>
 

@@ -1,74 +1,98 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import type { TableItem } from "src/types";
-import { useLoadTables } from "src/hooks/useLoadTables";
-import { useConnectionStore } from "src/stores/connection";
+import { useCallback, useMemo, useState } from "preact/hooks";
+import type { DatabaseEngine, TableItem } from "src/types";
+import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 
 export function useSchemaTablesPanel(args: {
-  activeProfileScreen: string;
-  activeTabId?: string;
+  metadata: MetadataApi;
+
+  // stable cache key (NOT runtime connectionId)
+  metaKey: string;
+  engine?: DatabaseEngine;
+
+  // runtime connection id used for executing metadata queries (can change)
+  connectionId?: string | null;
+
+  // optional initial schema for UI filter
+  defaultSchema?: string;
 }) {
-  const { activeProfileScreen, activeTabId } = args;
+  const {
+    metadata,
+    metaKey,
+    engine,
+    connectionId,
+    defaultSchema = "public",
+  } = args;
 
-  const tabTables = useConnectionStore((s) => s.tables[activeProfileScreen]);
-  const tabSchemas = useConnectionStore((s) => s.schemas[activeProfileScreen]);
-
-  const { loadSchemaAndTables } = useLoadTables();
+  // Lazy: first get() triggers load() if connectionId is available
+  const meta = metadata.get({
+    metaKey,
+    engine,
+    connectionId: connectionId ?? undefined,
+    lazy: true,
+  });
 
   const [tableSearchQuery, setTableSearchQuery] = useState("");
-  const [activeSchema, setActiveSchema] = useState("public");
+  const [activeSchema, setActiveSchema] = useState(defaultSchema);
   const [expandedSections, setExpandedSections] = useState({
     functions: false,
     tables: true,
   });
 
-  // auto load when tab/schema really changes
-  useEffect(() => {
-    if (!activeTabId) return;
-    void loadSchemaAndTables(activeSchema);
-  }, [activeTabId, activeSchema, loadSchemaAndTables]);
-
+  // Only change UI filter (metadata is global)
   const onSchemaChange = useCallback(
-    async (schema: string) => {
-      if (schema === activeSchema) return;
+    (schema: string) => {
+      if (!schema || schema === activeSchema) return;
       setActiveSchema(schema);
-      await loadSchemaAndTables(schema);
     },
-    [activeSchema, loadSchemaAndTables]
+    [activeSchema]
   );
 
-  // ✅ NEW: refresh without touching state
+  // Refresh metadata without touching activeSchema state
   const refreshSchemaAndTables = useCallback(async () => {
-    if (!activeSchema) return;
-    await loadSchemaAndTables(activeSchema);
-  }, [activeSchema, loadSchemaAndTables]);
+    if (!connectionId || !metaKey) return;
+    await metadata.refresh({
+      metaKey,
+      engine,
+      connectionId,
+    });
+  }, [metadata, metaKey, engine, connectionId]);
 
+  // Filter tables for sidebar
   const filteredTables = useMemo(() => {
-    const list = tabTables?.data ?? [];
+    const list = meta.tables ?? [];
     const q = tableSearchQuery.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
+
+    const bySchema = activeSchema
+      ? list.filter((t: TableItem) => t.schema === activeSchema)
+      : list;
+
+    if (!q) return bySchema;
+
+    return bySchema.filter(
       (t: TableItem) =>
         t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
     );
-  }, [tabTables, tableSearchQuery]);
+  }, [meta.tables, activeSchema, tableSearchQuery]);
 
-  const schemasForEditor = useMemo(() => tabSchemas?.data ?? [], [tabSchemas]);
-  const tablesForEditor = useMemo(() => tabTables?.data ?? [], [tabTables]);
+  // For editor autocomplete: use full metadata (not filtered)
+  const schemasForEditor = useMemo(() => meta.schemas ?? [], [meta.schemas]);
+  const tablesForEditor = useMemo(() => meta.tables ?? [], [meta.tables]);
+  const columnsByTable = useMemo(
+    () => meta.columnsByTable ?? {},
+    [meta.columnsByTable]
+  );
 
+  // Connecting/loading state
   const isConnecting = useMemo(() => {
-    return (
-      (tabTables?.busy && (tabTables?.data?.length ?? 0) === 0) ||
-      (tabSchemas?.busy && (tabSchemas?.data?.length ?? 0) === 0)
-    );
-  }, [tabTables, tabSchemas]);
+    return meta.loading && (meta.tables?.length ?? 0) === 0;
+  }, [meta.loading, meta.tables]);
 
   return {
-    tabTables,
-    tabSchemas,
+    meta,
 
     activeSchema,
     onSchemaChange,
-    refreshSchemaAndTables, // ✅ export
+    refreshSchemaAndTables,
 
     tableSearchQuery,
     setTableSearchQuery,
@@ -77,8 +101,10 @@ export function useSchemaTablesPanel(args: {
     setExpandedSections,
 
     filteredTables,
+
     schemasForEditor,
     tablesForEditor,
+    columnsByTable,
 
     isConnecting,
   };

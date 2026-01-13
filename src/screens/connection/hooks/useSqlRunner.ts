@@ -30,7 +30,7 @@ type WindowState = {
 
 export function useSqlRunner(args: {
   activeSqlWindowId?: string;
-  runtimeConnectionId: string | null;
+  runtimeConnectionId?: string;
   onRunSql: RunSqlFn;
 }) {
   const { activeSqlWindowId, runtimeConnectionId, onRunSql } = args;
