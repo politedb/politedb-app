@@ -110,7 +110,7 @@ export function NavigationTabs({
 
             {/* Active tab che border-bottom của tab bar */}
             {isActive && (
-              <div class="pointer-events-none absolute inset-x-0 bottom-[-1px] h-[2px] bg-white" />
+              <div class="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 bg-white" />
             )}
           </div>
         );

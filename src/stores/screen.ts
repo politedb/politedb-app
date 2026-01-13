@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { OpenWindow, SqlEditorWindow } from "../types";
+import { DatabaseEngine, OpenWindow, SqlEditorWindow } from "../types";
 
 /**
  * A "Profile Tab" represents one connected workspace/profile in the UI.
@@ -9,7 +9,7 @@ import { OpenWindow, SqlEditorWindow } from "../types";
 export type ProfileTab = {
   id: string; // UI tab id (local)
   label: string; // Display name (e.g. "Local Postgres", "Prod DB")
-  engine: string; // "postgres" | "mysql" | "redis" ...
+  engine: DatabaseEngine;
 
   profileId: string; // Persistent identity (backend uuid or legacy mapped id)
   runtimeConnectionId?: string; // Runtime connection handle (created on connect)

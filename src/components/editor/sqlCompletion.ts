@@ -1,5 +1,5 @@
 import * as monaco from "monaco-editor";
-import type { TableItem } from "src/types";
+import type { DatabaseEngine, TableItem } from "src/types";
 
 /**
  * Smart SQL completion (TablePlus-ish).
@@ -14,6 +14,7 @@ export type CompletionCtx = {
   activeSchema?: string;
   tables: TableItem[]; // { schema, name }
   columnsByTable?: Record<string, string[]>; // key: schema.table
+  engine?: DatabaseEngine;
 };
 
 type AliasRef = { schema?: string; table: string };
@@ -94,9 +95,7 @@ const POST_JOIN_KW = [
 ];
 
 const EXPR_KW = ["AND", "OR", "NOT", "IN", "IS", "NULL", "LIKE", "BETWEEN"];
-
 const OPERATORS = ["=", "<>", "!=", "<", ">", "<=", ">=", "IN", "LIKE"];
-
 const FUNCTIONS = ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE"];
 
 /* =========================
@@ -146,7 +145,58 @@ function lastKeyword(ctx: string) {
 }
 
 /* =========================
+ * Engine quoting helpers
+ * ========================= */
+
+const PG_SAFE_IDENT = /^[a-z_][a-z0-9_]*$/;
+
+function isPg(ctx: CompletionCtx) {
+  // default to postgres behavior if omitted (safer for case-sensitivity)
+  return !ctx.engine || ctx.engine === "postgres";
+}
+
+function isMySql(ctx: CompletionCtx) {
+  return ctx.engine === "mysql";
+}
+
+function pgQuoteIdent(name: string) {
+  if (!name) return name;
+  if (name.startsWith('"') && name.endsWith('"')) return name;
+
+  // Quote when not "safe lowercase ident"
+  const needs = !PG_SAFE_IDENT.test(name);
+  if (!needs) return name;
+
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+function mysqlQuoteIdent(name: string) {
+  if (!name) return name;
+  if (name.startsWith("`") && name.endsWith("`")) return name;
+
+  // Quote only when not safe (keeps UI clean)
+  const safe = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
+  if (safe) return name;
+
+  return `\`${name.replace(/`/g, "``")}\``;
+}
+
+function quoteIdent(ctx: CompletionCtx, name: string) {
+  if (isPg(ctx)) return pgQuoteIdent(name);
+  if (isMySql(ctx)) return mysqlQuoteIdent(name);
+  return name;
+}
+
+function quotePath(ctx: CompletionCtx, full: string) {
+  return full
+    .split(".")
+    .map((p) => quoteIdent(ctx, p))
+    .join(".");
+}
+
+/* =========================
  * Parse tables / aliases
+ * (NOTE: unquoted-only; ok for now)
  * ========================= */
 
 function parseTablesAndAliases(ctx: string) {
@@ -173,11 +223,7 @@ function parseTablesAndAliases(ctx: string) {
     if (alias) aliasMap[alias] = { schema, table };
   }
 
-  return {
-    aliasMap,
-    last,
-    recentTables: recentTables.slice(-2),
-  };
+  return { aliasMap, last, recentTables: recentTables.slice(-2) };
 }
 
 function detectDotContext(ctx: string): DotContext | null {
@@ -236,19 +282,19 @@ const kw = (range: monaco.Range, t: string) => ({
   range,
 });
 
-const tableItem = (range: monaco.Range, t: string) => ({
-  label: t,
-  filterText: t,
+const tableItem = (range: monaco.Range, label: string, insert: string) => ({
+  label,
+  filterText: label,
   kind: monaco.languages.CompletionItemKind.Struct,
-  insertText: t,
+  insertText: insert,
   range,
 });
 
-const colItem = (range: monaco.Range, t: string) => ({
-  label: t,
-  filterText: t.split(".").pop(),
+const colItem = (range: monaco.Range, label: string, insert: string) => ({
+  label,
+  filterText: label.split(".").pop(),
   kind: monaco.languages.CompletionItemKind.Field,
-  insertText: t,
+  insertText: insert,
   range,
 });
 
@@ -287,20 +333,26 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
         if (parsed.dot.type === "aliasOrSchema") {
           const base = parsed.dot.base;
           const alias = parsed.aliasMap[base];
+
+          // alias.column suggestions
           if (alias) {
+            const key = makeKey(alias.schema ?? ctx.activeSchema!, alias.table);
+            const cols = ctx.columnsByTable?.[key] ?? [];
             return {
-              suggestions:
-                ctx.columnsByTable?.[
-                  makeKey(alias.schema ?? ctx.activeSchema!, alias.table)
-                ]?.map((c) => colItem(range, `${base}.${c}`)) ?? [],
+              suggestions: cols.map((c) =>
+                colItem(range, `${base}.${c}`, `${base}.${quoteIdent(ctx, c)}`)
+              ),
             };
           }
 
+          // schema.table suggestions after `schema.`
           if (ctx.schemas.includes(base)) {
             return {
               suggestions: ctx.tables
                 .filter((t) => t.schema === base)
-                .map((t) => tableItem(range, t.name)),
+                .map((t) =>
+                  tableItem(range, t.name, `${base}.${quoteIdent(ctx, t.name)}`)
+                ),
             };
           }
         }
@@ -308,27 +360,25 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
 
       /* ---------- POST FROM ---------- */
       if (state === "POST_FROM_TABLE") {
-        return {
-          suggestions: POST_FROM_KW.map((k) => kw(range, k)),
-        };
+        return { suggestions: POST_FROM_KW.map((k) => kw(range, k)) };
       }
 
       /* ---------- POST JOIN ---------- */
       if (state === "POST_JOIN_TABLE") {
-        return {
-          suggestions: POST_JOIN_KW.map((k) => kw(range, k)),
-        };
+        return { suggestions: POST_JOIN_KW.map((k) => kw(range, k)) };
       }
 
       /* ---------- EXPECT TABLE ---------- */
       if (state === "EXPECT_TABLE") {
         return {
-          suggestions: ctx.tables.map((t) =>
-            tableItem(
-              range,
-              t.schema === ctx.activeSchema ? t.name : `${t.schema}.${t.name}`
-            )
-          ),
+          suggestions: ctx.tables.map((t) => {
+            const isSameSchema = t.schema === ctx.activeSchema;
+            const label = isSameSchema ? t.name : `${t.schema}.${t.name}`;
+            const insert = isSameSchema
+              ? quoteIdent(ctx, t.name)
+              : quotePath(ctx, `${t.schema}.${t.name}`);
+            return tableItem(range, label, insert);
+          }),
         };
       }
 
@@ -344,7 +394,7 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
 
         return {
           suggestions: [
-            ...cols.map((c) => colItem(range, c)),
+            ...cols.map((c) => colItem(range, c, quoteIdent(ctx, c))),
             ...OPERATORS.map((o) => kw(range, o)),
             ...EXPR_KW.map((k) => kw(range, k)),
             ...FUNCTIONS.map((f) => kw(range, f)),
@@ -354,9 +404,7 @@ export function registerSqlCompletionSmart(getCtx: () => CompletionCtx) {
       }
 
       /* ---------- DEFAULT ---------- */
-      return {
-        suggestions: KW_LIGHT.map((k) => kw(range, k)),
-      };
+      return { suggestions: KW_LIGHT.map((k) => kw(range, k)) };
     },
   });
 }

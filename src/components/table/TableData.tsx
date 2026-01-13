@@ -23,9 +23,16 @@ interface Props {
   columns: ColumnMeta[];
   data: any[];
   onCellChange?: (rowIndex: number, columnIndex: number, value: any) => void;
+
+  // rowIndexStr -> colName -> value
+  patches?: Record<string, Record<string, any>> | null;
 }
 
-export function TableData({ columns, data, onCellChange }: Props) {
+function hasOwn(obj: any, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+export function TableData({ columns, data, onCellChange, patches }: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
 
@@ -39,6 +46,33 @@ export function TableData({ columns, data, onCellChange }: Props) {
     setEditedData(tableData);
   }, [tableData]);
 
+  // For update cell rendering, prefer patched value over original
+  const getPatchedValue = useCallback(
+    (rowIndex: number, colName: string, fallback: any) => {
+      const rowPatch = patches?.[String(rowIndex)];
+      if (!rowPatch) return fallback;
+      if (hasOwn(rowPatch, colName)) return rowPatch[colName];
+      return fallback;
+    },
+    [patches]
+  );
+
+  const isCellPatched = useCallback(
+    (rowIndex: number, colName: string) => {
+      const rowPatch = patches?.[String(rowIndex)];
+      return !!rowPatch && hasOwn(rowPatch, colName);
+    },
+    [patches]
+  );
+
+  const isRowPatched = useCallback(
+    (rowIndex: number) => {
+      const rowPatch = patches?.[String(rowIndex)];
+      return !!rowPatch && Object.keys(rowPatch).length > 0;
+    },
+    [patches]
+  );
+
   // Define table columns
   const tableColumns = useMemo<ColumnDef<any>[]>(
     () =>
@@ -47,13 +81,26 @@ export function TableData({ columns, data, onCellChange }: Props) {
         accessorFn: (row) => row[col.name]?.v,
         header: col.name,
         cell: ({ cell, row, table }) => {
-          const originalValue = tableData[row.index]?.[cell.column.id];
+          const rowIndex = row.index;
+          const colName = cell.column.id;
+
+          const originalValue = tableData[rowIndex]?.[colName];
+
+          // prefer patch -> editedData -> original(tableData)
+          const fallback = editedData[rowIndex]?.[colName]?.v;
+          const value = getPatchedValue(rowIndex, colName, fallback);
+
+          const patched = isCellPatched(rowIndex, colName);
+
           return (
             <TableCell
               cell={cell}
               row={row}
               table={table}
+              colName={colName}
               originalValue={originalValue}
+              value={value}
+              isPatched={patched}
               onCellChange={onCellChange}
               setEditingCell={setEditingCell}
             />
@@ -62,10 +109,11 @@ export function TableData({ columns, data, onCellChange }: Props) {
       })),
     [
       columns,
-      editedData,
       tableData,
+      editedData,
       onCellChange,
-      setEditedData,
+      getPatchedValue,
+      isCellPatched,
       setEditingCell,
     ]
   );
@@ -82,31 +130,6 @@ export function TableData({ columns, data, onCellChange }: Props) {
       endIndex,
     };
   }, [tableData, pageSize, page]);
-
-  // const paginatedData = useMemo(() => {
-  //   return tableData.slice(pagination.startIndex, pagination.endIndex);
-  // }, [tableData, pagination.startIndex, pagination.endIndex]);
-
-  // // Transform data for react-table
-  // const tableData = useMemo(() => {
-  //   if (!paginatedData || paginatedData.length === 0) return [];
-
-  //   return paginatedData.map((row, index) => {
-  //     // Ensure row is an array
-  //     const rowArray = Array.isArray(row) ? row : [];
-
-  //     return {
-  //       ...rowArray.reduce(
-  //         (acc, cell, colIndex) => {
-  //           acc[columns[colIndex].name] = cell;
-  //           return acc;
-  //         },
-  //         {} as Record<string, any>
-  //       ),
-  //       __rowIndex: pagination.startIndex + index,
-  //     };
-  //   });
-  // }, [paginatedData, pagination.startIndex]);
 
   const table = useReactTable({
     data: editedData,
@@ -181,7 +204,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
                 onMouseDown={header.getResizeHandler()}
                 onTouchStart={header.getResizeHandler()}
                 onDblClick={() => header.column.resetSize()}
-                className="absolute top-0 right-0 h-full w-[6px] cursor-col-resize"
+                className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize"
               />
             )}
           </th>
@@ -192,9 +215,14 @@ export function TableData({ columns, data, onCellChange }: Props) {
 
   const renderRow = useCallback(
     (rowIndex: number, row: Row<any>) => {
+      const rowPatched = isRowPatched(rowIndex);
+
       return row.getVisibleCells().map((cell, colIndex) => {
         const isSelectingRow = editingCell?.rowIdx === rowIndex;
         const isEditing = isSelectingRow && editingCell?.colIdx === colIndex;
+
+        const colName = cell.column.id;
+        const cellPatched = isCellPatched(rowIndex, colName);
 
         return (
           <td
@@ -204,6 +232,8 @@ export function TableData({ columns, data, onCellChange }: Props) {
             class={cn(
               "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
               isSelectingRow ? "bg-blue-200" : "hover:bg-blue-50",
+              rowPatched && !isSelectingRow && "bg-amber-50/40",
+              cellPatched && !isSelectingRow && "ring-1 ring-amber-200",
               isEditing && "outline-2 -outline-offset-2 outline-blue-500"
             )}
           >
@@ -212,7 +242,7 @@ export function TableData({ columns, data, onCellChange }: Props) {
         );
       });
     },
-    [editingCell?.rowIdx, editingCell?.colIdx]
+    [editingCell?.rowIdx, editingCell?.colIdx, isCellPatched, isRowPatched]
   );
 
   return (

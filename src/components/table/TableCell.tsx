@@ -15,8 +15,14 @@ interface Props {
   cell: Cell<any, any>;
   row: Row<any>;
   table: Table<any>;
+  colName: string;
   originalValue: any;
-  onCellChange?: (rowIndex: number, colIdx: number, value: any) => void;
+
+  value: any;
+
+  isPatched: boolean;
+
+  onCellChange?: (rowIndex: number, colIndex: number, value: any) => void;
   setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
 }
 
@@ -24,36 +30,41 @@ export const TableCell = memo(function TableCell({
   cell,
   row,
   table,
-  originalValue,
+  colName,
+  // originalValue,
+  value,
+  isPatched,
   onCellChange,
   setEditingCell,
 }: Props) {
   const rowIndex = row.index;
   const colIndex = cell.column.getIndex();
-  const cellValue = cellToString(cell.getValue());
 
-  const [editValue, setEditValue] = useState(cellValue);
+  const displayValue = cellToString(value);
+  // TODO use original value if needed
+  // const originalString = cellToString(originalValue);
+
+  const [editValue, setEditValue] = useState(displayValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Sync when value changes from outside (patch switch / refresh)
   useEffect(() => {
-    setEditValue(cellValue);
-  }, [cellValue]);
+    setEditValue(displayValue);
+  }, [displayValue]);
 
   const commitValue = useCallback(() => {
-    (table.options.meta as any)?.updateData(
-      rowIndex,
-      cell.column.id,
-      editValue
-    );
+    // Update local editedData (tanstack meta)
+    (table.options.meta as any)?.updateData(rowIndex, colName, editValue);
+
+    // Bubble up to ConnectionScreen → patchMap
     onCellChange?.(rowIndex, colIndex, editValue);
   }, [
     editValue,
     rowIndex,
     colIndex,
-    cell.column.id,
+    colName,
     table.options.meta,
     onCellChange,
-    setEditingCell,
   ]);
 
   const onInputBlur = useCallback(() => {
@@ -66,21 +77,20 @@ export const TableCell = memo(function TableCell({
       if (e.key === "Enter") {
         (e.target as HTMLInputElement).blur();
       } else if (e.key === "Escape") {
-        // Revert changes
-        setEditValue(cellToString(cellValue));
-        // (e.target as HTMLInputElement).blur();
+        // revert to last committed value (patch-aware)
+        setEditValue(displayValue);
       }
     },
-    [cellValue, setEditValue, setEditingCell]
+    [displayValue]
   );
 
   const onMouseDown = useCallback(() => {
     setEditingCell({
       rowIdx: rowIndex,
-      colName: cell.column.id,
+      colName,
       colIdx: colIndex,
     });
-  }, [setEditingCell, rowIndex, colIndex, cell.column.id]);
+  }, [setEditingCell, rowIndex, colIndex, colName]);
 
   const handleInput = useCallback((e: Event) => {
     const input = e.currentTarget as HTMLInputElement;
@@ -109,12 +119,14 @@ export const TableCell = memo(function TableCell({
       class={cn(
         "h-full w-full border-0 p-2 text-sm text-neutral-900",
         "outline-none hover:cursor-default focus:outline-none",
-        "whitespace-nowrap",
-        "overflow-hidden text-ellipsis",
+        "overflow-hidden text-ellipsis whitespace-nowrap",
         "focus:overflow-x-auto focus:text-ellipsis",
-        cellToString(originalValue) !== cellValue
-          ? "bg-amber-200"
-          : "bg-transparent"
+
+        // patched highlight (amber)
+        isPatched && "bg-amber-200",
+
+        // untouched
+        !isPatched && "bg-transparent"
       )}
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     />

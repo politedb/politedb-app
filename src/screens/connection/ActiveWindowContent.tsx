@@ -2,6 +2,7 @@ import { Box } from "src/components/common/Box";
 import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
 import type {
+  DatabaseEngine,
   OpenWindow,
   SqlEditorWindow,
   TableItem,
@@ -12,7 +13,7 @@ import { useMemo } from "preact/hooks";
 import { SplitPane } from "src/components/SplitPane";
 import type { QueryResult } from "src/lib/tauri";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
-import { useSqlRunner } from "src/hooks/useSqlRunner";
+import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 
 type ActiveTableData = {
   data: any;
@@ -20,6 +21,8 @@ type ActiveTableData = {
   busy: boolean;
   error: any;
 };
+
+type PatchMap = Record<string, Record<string, Record<string, any>>>;
 
 function EmptyState(props: { onNewSql: () => void }) {
   return (
@@ -89,6 +92,8 @@ export function ActiveWindowContent(props: {
   }) => Promise<QueryResult>;
 
   onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
+  patchMap: PatchMap;
+  engine: DatabaseEngine;
 }) {
   const {
     activeWindow,
@@ -103,7 +108,14 @@ export function ActiveWindowContent(props: {
     onNewSql,
     onRunSql,
     onCellChange,
+    patchMap,
+    engine,
   } = props;
+
+  const tablePatches = useMemo(() => {
+    if (!activeTableWindow) return null;
+    return patchMap[activeTableWindow.id] ?? null;
+  }, [patchMap, activeTableWindow?.id]);
 
   /* =========================
    * SQL runner hook
@@ -159,6 +171,7 @@ export function ActiveWindowContent(props: {
                 win={activeSqlWindow}
                 tables={tables}
                 schemas={schemas}
+                engine={engine}
                 columnsByTable={columnsByTable}
                 onRunSql={({ windowId, sql }) =>
                   void startRun({ windowId, sql })
@@ -205,6 +218,7 @@ export function ActiveWindowContent(props: {
       columns={activeTableData.data.columns}
       data={activeTableData.data.rows}
       onCellChange={onCellChange}
+      patches={tablePatches}
     />
   );
 }

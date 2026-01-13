@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import * as monaco from "monaco-editor";
-import type { SqlEditorWindow, TableItem } from "src/types";
+import type { DatabaseEngine, SqlEditorWindow, TableItem } from "src/types";
 import {
   registerSqlCompletionSmart,
   type CompletionCtx,
@@ -29,6 +29,8 @@ type Props = {
   activeSchema?: string;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
+
+  engine: DatabaseEngine;
 };
 
 function normalizeEol(s: string) {
@@ -51,8 +53,6 @@ function getSelectedOrCurrentSql(editor: monaco.editor.IStandaloneCodeEditor) {
   const full = model.getValue();
   const offset = model.getOffsetAt(pos);
 
-  // NOTE: current statement detection by ';' is ok.
-  // Parent splitter handles complex selection scripts.
   const left = full.slice(0, offset);
   const right = full.slice(offset);
 
@@ -76,6 +76,7 @@ export function SqlEditorPane(props: Props) {
     activeSchema,
     tables,
     columnsByTable,
+    engine,
   } = props;
 
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +88,7 @@ export function SqlEditorPane(props: Props) {
     activeSchema,
     tables,
     columnsByTable,
+    engine,
   });
   useEffect(() => {
     completionCtxRef.current = {
@@ -94,8 +96,9 @@ export function SqlEditorPane(props: Props) {
       activeSchema,
       tables,
       columnsByTable,
+      engine,
     };
-  }, [schemas, activeSchema, tables, columnsByTable]);
+  }, [schemas, activeSchema, tables, engine, columnsByTable]);
 
   // Keep latest callbacks without re-registering Monaco actions/subscriptions
   const callbacksRef = useRef({
@@ -158,22 +161,18 @@ export function SqlEditorPane(props: Props) {
       dirtyRef.current = false;
       setStatus("saved");
     } else {
-      // do NOT force dirty
       setStatus(dirtyRef.current ? "unsaved" : "saved");
     }
 
     return full;
   };
 
-  // Background save reads model only when timer fires (perf)
   const scheduleBackgroundSave = () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       void (async () => {
         const mm = editorRef.current?.getModel();
         const next = mm?.getValue() ?? "";
-
-        // allow saving empty scripts too; just skip if editor not ready
         if (!mm) return;
 
         savingRef.current = true;
@@ -224,10 +223,7 @@ export function SqlEditorPane(props: Props) {
 
     setIsExecuting(true);
     try {
-      // flush draft first, but keep "saved" semantics based on dirtyRef
       await flushDraft({ markSaved: false });
-
-      // emit picked sql only (parent decides splitting/execution)
       await callbacksRef.current.onRunSql({
         windowId: win.id,
         sql: picked.sql,
@@ -434,7 +430,6 @@ export function SqlEditorPane(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUri, win.id]);
 
-  // External apply only when editor not focused
   useEffect(() => {
     const model = monaco.editor.getModel(modelUri);
     if (!model) return;
