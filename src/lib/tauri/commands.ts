@@ -20,6 +20,12 @@ export const CMD = {
   // Operations
   operationExecute: "operation_execute",
   operationCancel: "operation_cancel",
+
+  // Draft sql management
+  draftSqlLoad: "sql_draft_load",
+  draftSqlSave: "sql_draft_save",
+  draftSqlClear: "sql_draft_clear",
+  draftSqlGC: "sql_draft_gc",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];

@@ -6,19 +6,16 @@ import {
   QueryResult,
   TableChunk,
 } from "../lib/tauri";
+import { toErrorMessage } from "./queryValidate";
 
 type RunSqlOptions = {
   batchSize?: number;
   maxRows?: number;
   timeoutMs?: number;
-  // how long we wait for meta after done (ms)
-  metaGraceMs?: number; // default 30
 };
 
-function normalizeColumns(meta: any): ColumnMeta[] {
-  const cols = Array.isArray(meta)
-    ? meta
-    : (meta?.columns ?? meta?.meta?.columns ?? meta?.meta ?? []);
+function normalizeDoneColumns(done: any): ColumnMeta[] {
+  const cols = done?.columns ?? [];
   if (!Array.isArray(cols)) return [];
   return cols.map((c: any) => ({
     name: String(c?.name ?? ""),
@@ -41,21 +38,14 @@ export async function runSqlQuery(
     },
   });
 
-  const buffer: any[][] = [];
-  let columns: ColumnMeta[] = [];
-
+  // buffer by absolute index (row_offset-safe)
+  const buffer: any[] = [];
   const timeoutMs = opts?.timeoutMs ?? 60_000;
-  const metaGraceMs = opts?.metaGraceMs ?? 30;
 
   return new Promise<QueryResult>(async (resolve, reject) => {
     let finished = false;
     let unsub: (() => void) | null = null;
-
     let timerId: number | null = null;
-    let metaWaitTimer: number | null = null;
-
-    let metaReceived = false;
-    let donePending: any | null = null;
 
     const cleanup = () => {
       try {
@@ -65,9 +55,6 @@ export async function runSqlQuery(
 
       if (timerId) window.clearTimeout(timerId);
       timerId = null;
-
-      if (metaWaitTimer) window.clearTimeout(metaWaitTimer);
-      metaWaitTimer = null;
     };
 
     const finalizeOk = (done: any) => {
@@ -75,10 +62,15 @@ export async function runSqlQuery(
       finished = true;
       cleanup();
 
+      const columns = normalizeDoneColumns(done);
+
+      // remove holes if any
+      const rows = buffer.filter((r) => r !== undefined);
+
       resolve({
         columns,
-        rows: buffer,
-        rowCount: done?.row_count ?? buffer.length,
+        rows,
+        rowCount: done?.row_count ?? rows.length,
       });
     };
 
@@ -86,20 +78,15 @@ export async function runSqlQuery(
       if (finished) return;
       finished = true;
       cleanup();
-      reject(err);
+      reject(new Error(toErrorMessage(err)));
     };
 
-    // timeout for whole query
     if (timeoutMs > 0) {
       timerId = window.setTimeout(async () => {
         if (finished) return;
         finished = true;
 
-        // stop receiving first
-        try {
-          unsub?.();
-        } catch {}
-        unsub = null;
+        cleanup();
 
         try {
           await operationCancel(opId);
@@ -111,45 +98,22 @@ export async function runSqlQuery(
 
     try {
       unsub = await operationBus.subscribe(opId, {
-        onMeta: (meta) => {
-          if (finished) return;
-
-          const next = normalizeColumns(meta);
-          if (next.length) columns = next;
-          metaReceived = true;
-
-          // if done already arrived, resolve now
-          if (donePending) {
-            const d = donePending;
-            donePending = null;
-            finalizeOk(d);
-          }
-        },
-
         onChunk: (chunk: TableChunk) => {
           if (finished) return;
-          if (chunk.rows?.length) buffer.push(...chunk.rows);
+
+          const rows = chunk.rows ?? [];
+          if (!rows.length) return;
+
+          const off = Number((chunk as any).row_offset ?? buffer.length);
+
+          if (buffer.length < off) buffer.length = off;
+          for (let i = 0; i < rows.length; i++) {
+            buffer[off + i] = rows[i];
+          }
         },
 
         onDone: (done: any) => {
-          if (finished) return;
-
-          // If we already have meta (or query likely has no columns), resolve immediately
-          if (metaReceived || columns.length > 0) {
-            finalizeOk(done);
-            return;
-          }
-
-          // Otherwise wait a tiny grace window for meta
-          donePending = done;
-          metaWaitTimer = window.setTimeout(() => {
-            if (finished) return;
-            if (!donePending) return;
-
-            const d = donePending;
-            donePending = null;
-            finalizeOk(d);
-          }, metaGraceMs);
+          finalizeOk(done);
         },
 
         onError: (err: any) => {

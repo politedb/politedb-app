@@ -133,26 +133,22 @@ export const useScreenStore = create<ScreenState>((set) => ({
   updateSqlWindowContent: (tabId, windowId, patch) =>
     set((s) => {
       const list = s.openWindows[tabId];
-      if (!list || list.length === 0) return s;
+      if (!list) return s;
 
       let changed = false;
-
       const nextList = list.map((w) => {
         if (w.id !== windowId) return w;
         if (w.type !== "sql") return w;
 
-        if ("content" in patch && w.content === (patch as any).content)
-          return w;
+        const next = { ...w, ...patch };
+        if (next.content === w.content) return w;
 
         changed = true;
-        return { ...w, ...patch } as OpenWindow;
+        return next;
       });
 
       if (!changed) return s;
-
-      return {
-        openWindows: { ...s.openWindows, [tabId]: nextList },
-      };
+      return { openWindows: { ...s.openWindows, [tabId]: nextList } };
     }),
 
   /* -------------------------------------------------------------------------- */

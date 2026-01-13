@@ -29,3 +29,7 @@ export * from "./TabRight";
 export * from "./Clock";
 export * from "./Ssh";
 export * from "./Kebab";
+export * from "./Play";
+export * from "./Save";
+export * from "./SaveAs";
+export * from "./Revert";

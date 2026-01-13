@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 use crate::engines::cancel::CancelHandle;
 use crate::engines::postgres::row_codec;
 use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
-use crate::operations::emit::{emit_done, emit_error, emit_meta};
+use crate::operations::emit::{emit_done, emit_error};
 use crate::types::{CellValue, SqlQueryInput, TableChunk};
-
+use tokio_postgres::error::ErrorPosition;
 /* =============================================================================
  * Helpers
  * ============================================================================= */
@@ -20,6 +20,22 @@ fn is_cancelled(err: &tokio_postgres::Error) -> bool {
         return db.code().code() == "57014"; // query_canceled
     }
     err.to_string().to_lowercase().contains("cancel")
+}
+
+fn is_explainable(sql: &str) -> bool {
+    // Best-effort heuristic: EXPLAIN supports SELECT and most DML in Postgres.
+    // DDL not reliably explainable.
+    let s = sql.trim_start();
+    if s.is_empty() {
+        return false;
+    }
+    let up = s.chars().take(24).collect::<String>().to_uppercase();
+
+    up.starts_with("SELECT")
+        || up.starts_with("WITH")
+        || up.starts_with("INSERT")
+        || up.starts_with("UPDATE")
+        || up.starts_with("DELETE")
 }
 
 /* =============================================================================
@@ -43,7 +59,10 @@ pub async fn run_pg_sql_query(
 
     // Batch sizing + limits
     let batch_size: usize = sql_input.batch_size.unwrap_or(200).clamp(1, 2000) as usize;
+
     let max_rows: u64 = sql_input.max_rows.unwrap_or(50_000).clamp(1, 1_000_000) as u64;
+
+    let validate_only = sql_input.validate_only.unwrap_or(false);
 
     // Acquire client from pool
     let mut client = match pool.get().await {
@@ -72,8 +91,12 @@ pub async fn run_pg_sql_query(
     let tx = match client.transaction().await {
         Ok(t) => t,
         Err(e) => {
-            let elapsed_ms = started_at.elapsed().as_millis();
-            emit_error(&ctx.app, op_id, format!("TX_BEGIN_FAILED: {e}"), elapsed_ms);
+            emit_error(
+                &ctx.app,
+                op_id,
+                format_pg_error(&e, &sql_input.sql),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
     };
@@ -84,13 +107,11 @@ pub async fn run_pg_sql_query(
             .batch_execute("SET LOCAL default_transaction_read_only = on")
             .await
         {
-            let elapsed_ms = started_at.elapsed().as_millis();
-
             emit_error(
                 &ctx.app,
                 op_id,
                 format!("SET_READ_ONLY_FAILED: {e}"),
-                elapsed_ms,
+                started_at.elapsed().as_millis(),
             );
             return;
         }
@@ -109,33 +130,90 @@ pub async fn run_pg_sql_query(
         ))
         .await
     {
-        let elapsed_ms = started_at.elapsed().as_millis();
-
         emit_error(
             &ctx.app,
             op_id,
-            format!("SET_STATEMENT_TIMEOUT_FAILED: {e}"),
-            elapsed_ms,
+            format_pg_error(&e, &sql_input.sql),
+            started_at.elapsed().as_millis(),
         );
         return;
     }
 
-    // Prepare statement (for column meta + precompiled decoders)
+    // PREPARE catches syntax errors early
     let stmt = match tx.prepare(&sql_input.sql).await {
         Ok(s) => s,
         Err(e) => {
-            let elapsed_ms = started_at.elapsed().as_millis();
-
-            emit_error(&ctx.app, op_id, format!("PREPARE_FAILED: {e}"), elapsed_ms);
+            emit_error(
+                &ctx.app,
+                op_id,
+                format_pg_error(&e, &sql_input.sql),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
     };
 
-    // Emit meta once + precompiled decoders
+    // Build meta + decoders (meta shipped in op:done)
     let (meta, decoders) = row_codec::build_meta_and_decoders(&stmt);
-    emit_meta(&ctx.app, op_id, meta);
+    let done_columns = Some(meta.clone());
 
-    // Backpressure channel (inflight chunks)
+    /* =========================================================================
+     * ✅ Validation-only path (no chunks, no row fetch)
+     * ========================================================================= */
+    if validate_only {
+        // Best-effort semantic validation: EXPLAIN for explainable statements.
+        if is_explainable(&sql_input.sql) {
+            let explain_sql = format!("EXPLAIN {}", sql_input.sql);
+
+            if let Err(e) = tx.batch_execute(&explain_sql).await {
+                if is_cancelled(&e) {
+                    emit_done(
+                        &ctx.app,
+                        op_id,
+                        false,
+                        0,
+                        started_at.elapsed().as_millis(),
+                        done_columns,
+                    );
+                    return;
+                }
+
+                emit_error(
+                    &ctx.app,
+                    op_id,
+                    format_pg_error(&e, &sql_input.sql),
+                    started_at.elapsed().as_millis(),
+                );
+                return;
+            }
+        }
+
+        // Commit to end SET LOCAL scope cleanly
+        if let Err(e) = tx.commit().await {
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("TX_COMMIT_FAILED: {e}"),
+                started_at.elapsed().as_millis(),
+            );
+            return;
+        }
+
+        emit_done(
+            &ctx.app,
+            op_id,
+            false,
+            0,
+            started_at.elapsed().as_millis(),
+            done_columns,
+        );
+        return;
+    }
+
+    /* =========================================================================
+     * Execute path (stream rows -> chunk -> done)
+     * ========================================================================= */
+
     let (tx_chunk, mut rx_chunk) = mpsc::channel::<Result<TableChunk, String>>(2);
 
     // Serialize event emission on one task
@@ -146,15 +224,12 @@ pub async fn run_pg_sql_query(
         while let Some(item) = rx_chunk.recv().await {
             match item {
                 Ok(chunk) => {
-                    // If FE is gone / window reloaded => stop consuming to backpressure producer
                     if app_emit.emit("op:chunk_table", chunk).is_err() {
                         break;
                     }
                 }
                 Err(err) => {
-                    let elapsed_ms = started_at.elapsed().as_millis();
-
-                    emit_error(&app_emit, op_id2, err, elapsed_ms);
+                    emit_error(&app_emit, op_id2, err, started_at.elapsed().as_millis());
                     break;
                 }
             }
@@ -166,8 +241,14 @@ pub async fn run_pg_sql_query(
         Ok(s) => s,
         Err(e) => {
             if is_cancelled(&e) {
-                let elapsed_ms = started_at.elapsed().as_millis();
-                emit_done(&ctx.app, op_id, false, 0, elapsed_ms);
+                emit_done(
+                    &ctx.app,
+                    op_id,
+                    false,
+                    0,
+                    started_at.elapsed().as_millis(),
+                    done_columns.clone(),
+                );
 
                 drop(tx_chunk);
                 let _ = emit_task.await;
@@ -197,8 +278,14 @@ pub async fn run_pg_sql_query(
             Ok(r) => r,
             Err(e) => {
                 if is_cancelled(&e) {
-                    let elapsed_ms = started_at.elapsed().as_millis();
-                    emit_done(&ctx.app, op_id, false, row_count, elapsed_ms);
+                    emit_done(
+                        &ctx.app,
+                        op_id,
+                        false,
+                        row_count,
+                        started_at.elapsed().as_millis(),
+                        done_columns.clone(),
+                    );
 
                     drop(tx_chunk);
                     let _ = emit_task.await;
@@ -268,6 +355,54 @@ pub async fn run_pg_sql_query(
     let _ = emit_task.await;
 
     let truncated = row_count == max_rows;
-    let elapsed_ms = started_at.elapsed().as_millis();
-    emit_done(&ctx.app, op_id, truncated, row_count, elapsed_ms);
+    emit_done(
+        &ctx.app,
+        op_id,
+        truncated,
+        row_count,
+        started_at.elapsed().as_millis(),
+        done_columns.clone(),
+    );
+}
+
+fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
+    let Some(db) = e.as_db_error() else {
+        return format!("ERROR: {}", e);
+    };
+
+    let msg = db.message();
+
+    let pos_u32: u32 = match db.position() {
+        Some(ErrorPosition::Original(p)) => *p,
+        Some(ErrorPosition::Internal { position, .. }) => *position,
+        None => return format!("ERROR: {}", msg),
+    };
+
+    let pos = pos_u32 as usize;
+
+    let mut line = 1usize;
+    let mut last_line_start = 0usize;
+
+    for (i, ch) in sql.char_indices() {
+        if i >= pos.saturating_sub(1) {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            last_line_start = i + 1;
+        }
+    }
+
+    let line_text = sql.lines().nth(line - 1).unwrap_or("");
+
+    let caret_pos = pos.saturating_sub(last_line_start).saturating_sub(1);
+
+    format!(
+        "ERROR at Line {}:\nERROR: {}\nLINE {}: {}\n{}^",
+        line,
+        msg,
+        line,
+        line_text,
+        " ".repeat(caret_pos)
+    )
 }

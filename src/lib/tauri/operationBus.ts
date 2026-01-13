@@ -4,7 +4,6 @@ import type { TableChunk, OperationDone } from "./types";
 type OpId = string;
 
 type OpHandlers = {
-  onMeta?: (meta: any) => void;
   onChunk?: (chunk: TableChunk) => void;
   onDone?: (done: OperationDone) => void;
   onError?: (err: any) => void;
@@ -15,10 +14,12 @@ type BusState = {
   unsubs: UnlistenFn[];
   handlersByOp: Map<OpId, OpHandlers>;
 
-  // ✅ caches to avoid missing early events
-  metaByOp: Map<OpId, any>;
+  // ✅ caches to avoid missing early terminal events
   doneByOp: Map<OpId, OperationDone>;
   errByOp: Map<OpId, any>;
+
+  // ✅ cache chunks to avoid missing early chunks
+  chunksByOp: Map<OpId, TableChunk[]>;
 };
 
 const state: BusState = {
@@ -26,9 +27,10 @@ const state: BusState = {
   unsubs: [],
   handlersByOp: new Map(),
 
-  metaByOp: new Map(),
   doneByOp: new Map(),
   errByOp: new Map(),
+
+  chunksByOp: new Map(),
 };
 
 function getOpId(payload: any): string | null {
@@ -36,8 +38,31 @@ function getOpId(payload: any): string | null {
   return typeof id === "string" && id.length ? id : null;
 }
 
-function normalizeMetaPayload(payload: any) {
-  return payload?.columns ?? payload?.meta?.columns ?? payload?.meta ?? payload;
+const MAX_CHUNKS_PER_OP = 2000; // safety cap
+const MAX_ROWS_PER_OP = 200_000; // safety cap (if each chunk has many rows)
+
+function pushChunk(opId: string, chunk: TableChunk) {
+  let list = state.chunksByOp.get(opId);
+  if (!list) {
+    list = [];
+    state.chunksByOp.set(opId, list);
+  }
+
+  // Basic cap by chunk count
+  if (list.length >= MAX_CHUNKS_PER_OP) return;
+
+  // Optional cap by row count (approx)
+  let rowTotal = 0;
+  for (const c of list) rowTotal += c.rows?.length ?? 0;
+  if (rowTotal >= MAX_ROWS_PER_OP) return;
+
+  list.push(chunk);
+}
+
+function clearCaches(opId: string) {
+  state.doneByOp.delete(opId);
+  state.errByOp.delete(opId);
+  state.chunksByOp.delete(opId);
 }
 
 async function initOnce() {
@@ -49,20 +74,15 @@ async function initOnce() {
     const opId = getOpId(p);
     if (!opId) return;
 
+    const chunk = p as TableChunk;
     const h = state.handlersByOp.get(opId);
-    h?.onChunk?.(p as TableChunk);
-  });
 
-  const uMeta = await listen("op:meta", (e) => {
-    const p: any = e.payload;
-    const opId = getOpId(p);
-    if (!opId) return;
-
-    const meta = normalizeMetaPayload(p);
-    state.metaByOp.set(opId, meta);
-
-    const h = state.handlersByOp.get(opId);
-    h?.onMeta?.(meta);
+    if (h?.onChunk) {
+      h.onChunk(chunk);
+    } else {
+      // ✅ cache early chunks until someone subscribes
+      pushChunk(opId, chunk);
+    }
   });
 
   const uDone = await listen("op:done", (e) => {
@@ -70,14 +90,19 @@ async function initOnce() {
     const opId = getOpId(p);
     if (!opId) return;
 
-    state.doneByOp.set(opId, p as OperationDone);
+    const done = p as OperationDone;
 
+    // cache terminal
+    state.doneByOp.set(opId, done);
+
+    // dispatch
     const h = state.handlersByOp.get(opId);
-    h?.onDone?.(p as OperationDone);
+    h?.onDone?.(done);
 
     // cleanup handlers after terminal event
     state.handlersByOp.delete(opId);
-    // keep meta/done cached for a short while (or clear immediately if you prefer)
+    // keep caches until subscriber calls unsubscribe, OR clear here if you want:
+    // clearCaches(opId);
   });
 
   const uErr = await listen("op:error", (e) => {
@@ -91,15 +116,10 @@ async function initOnce() {
     h?.onError?.(p);
 
     state.handlersByOp.delete(opId);
+    // clearCaches(opId);
   });
 
-  state.unsubs.push(uChunk, uMeta, uDone, uErr);
-}
-
-function clearCaches(opId: string) {
-  state.metaByOp.delete(opId);
-  state.doneByOp.delete(opId);
-  state.errByOp.delete(opId);
+  state.unsubs.push(uChunk, uDone, uErr);
 }
 
 export const operationBus = {
@@ -110,28 +130,34 @@ export const operationBus = {
   async subscribe(opId: string, handlers: OpHandlers): Promise<() => void> {
     await initOnce();
 
-    // set handlers
+    // set handlers first
     state.handlersByOp.set(opId, handlers);
 
-    // ✅ replay cached meta/done/error if they arrived early
-    const meta = state.metaByOp.get(opId);
-    if (meta !== undefined) handlers.onMeta?.(meta);
+    // ✅ replay cached chunks (if any) IN ORDER
+    const chunks = state.chunksByOp.get(opId);
+    if (chunks?.length) {
+      for (const c of chunks) handlers.onChunk?.(c);
+      state.chunksByOp.delete(opId);
+    }
 
+    // ✅ replay cached done/error if they arrived early
     const done = state.doneByOp.get(opId);
     if (done) {
       handlers.onDone?.(done);
       state.handlersByOp.delete(opId);
+      // clearCaches(opId); // optional
     }
 
     const err = state.errByOp.get(opId);
     if (err) {
       handlers.onError?.(err);
       state.handlersByOp.delete(opId);
+      // clearCaches(opId); // optional
     }
 
     return () => {
       state.handlersByOp.delete(opId);
-      clearCaches(opId); // ✅ avoid leaks
+      clearCaches(opId);
     };
   },
 
@@ -144,9 +170,9 @@ export const operationBus = {
     state.unsubs = [];
     state.handlersByOp.clear();
 
-    state.metaByOp.clear();
     state.doneByOp.clear();
     state.errByOp.clear();
+    state.chunksByOp.clear();
 
     state.inited = false;
   },

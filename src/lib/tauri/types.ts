@@ -254,6 +254,8 @@ export type SqlQueryPayload = {
   batch_size?: number;
   max_rows?: number;
 
+  validate_only?: boolean;
+
   // Optional overrides (backend may ignore if unsupported)
   statement_timeout_ms?: number | null;
 };
@@ -302,12 +304,24 @@ export type OperationDone = {
   op_id: string;
   truncated: boolean;
   row_count: number;
+  elapsed_ms: number;
+  columns?: ColumnMeta[] | null;
 };
 
 export type QueryResult = {
   columns: ColumnMeta[];
   rows: any[][];
   rowCount: number;
+};
+
+export type SqlResultSlot = {
+  index: number;
+  sql: string;
+  status: "queued" | "running" | "done" | "error";
+  result?: QueryResult;
+  error?: string;
+  startedAt?: number;
+  finishedAt?: number;
 };
 
 /* ============================================================================

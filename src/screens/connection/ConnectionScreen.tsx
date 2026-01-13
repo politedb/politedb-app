@@ -22,6 +22,7 @@ import {
 } from "src/types";
 import { ActiveWindowContent } from "./ActiveWindowContent";
 import { runSqlQuery } from "src/utils/query";
+import type { QueryResult } from "src/lib/tauri";
 
 type PatchMap = Record<string, Record<string, Record<string, any>>>;
 
@@ -29,7 +30,6 @@ function makeTableKeyLocal(table: Pick<TableItem, "schema" | "name">) {
   return `${table.schema}.${table.name}`;
 }
 
-// window instance id must be unique
 function makeTableWindowId(table: Pick<TableItem, "schema" | "name">) {
   return `table:${makeTableKeyLocal(table)}:${uuid()}`;
 }
@@ -51,13 +51,10 @@ export function ConnectionScreen() {
     removeWindow,
     activeWindowId,
     setActiveWindowId,
-    // updateSqlWindowContent,
   } = useScreenStore();
 
-  // ✅ only select tab-scoped data + active table entry (avoid rerender storms)
   const tabTables = useConnectionStore((s) => s.tables[activeProfileScreen]);
   const tabSchemas = useConnectionStore((s) => s.schemas[activeProfileScreen]);
-  const setSqlResult = useConnectionStore((s) => s.setSqlResult);
 
   const [_patchMap, setPatchMap] = useState<PatchMap>({});
   const [tableSearchQuery, setTableSearchQuery] = useState("");
@@ -96,10 +93,6 @@ export function ConnectionScreen() {
     return isSqlWindow(activeWindow) ? activeWindow : undefined;
   }, [activeWindow]);
 
-  const activeSqlState = useConnectionStore((s) =>
-    activeSqlWindow ? s.sqlResults[activeSqlWindow.id] : undefined
-  );
-
   const activeTableData = useMemo(() => {
     if (!activeTableWindow) {
       return {
@@ -117,7 +110,7 @@ export function ConnectionScreen() {
     );
   }, [activeProfileScreen, activeTableWindow, getTableData]);
 
-  // ✅ pull active table entry only (connectionId) for SQL editor fallback
+  // Active table entry (connectionId fallback)
   const activeTableMapEntry = useConnectionStore((s) => {
     if (!activeTableWindow) return null;
     const k = tableKey(
@@ -246,9 +239,10 @@ export function ConnectionScreen() {
         }
       }
 
+      // If you still keep legacy sqlResults store, you can clear it here
       if (toClose?.type === "sql") {
         const clearSqlResult = useConnectionStore.getState().clearSqlResult;
-        clearSqlResult(windowId);
+        clearSqlResult?.(windowId);
       }
 
       removeWindow(activeProfileScreen, windowId);
@@ -311,10 +305,7 @@ export function ConnectionScreen() {
     );
   }, [activeSchema, activeTableWindow, loadSchemaAndTables, loadTableData]);
 
-  // =========================
-  // ✅ Inject SQL editor props into ActiveWindowContent
-  // =========================
-
+  // ✅ connectionId for SQL editor
   const runtimeConnectionId = useMemo(() => {
     if (activeTab?.runtimeConnectionId) return activeTab.runtimeConnectionId;
     return activeTableMapEntry?.connectionId ?? null;
@@ -323,57 +314,27 @@ export function ConnectionScreen() {
   const schemasForEditor = useMemo(() => tabSchemas?.data ?? [], [tabSchemas]);
   const tablesForEditor = useMemo(() => tabTables?.data ?? [], [tabTables]);
 
-  const handleSqlChangeContent = useCallback(
-    (windowId: string, next: string) => {
-      // TODO - Save SQL content change
-      // updateSqlWindowContent(activeProfileScreen, windowId, { content: next });
-    },
-    [activeProfileScreen]
-  );
-
+  // ✅ IMPORTANT: return QueryResult (for result slots fill)
   const handleRunSql = useCallback(
     async ({
-      windowId,
       connectionId,
       sql,
     }: {
-      windowId: string;
       connectionId: string;
       sql: string;
-    }) => {
-      setSqlResult(windowId, {
-        busy: true,
-        error: null,
-        result: null,
-        lastRunAt: Date.now(),
-      });
-
-      try {
-        const res = await runSqlQuery(connectionId, sql);
-        setSqlResult(windowId, {
-          busy: false,
-          error: null,
-          result: res,
-          lastRunAt: Date.now(),
-        });
-      } catch (e: any) {
-        setSqlResult(windowId, {
-          busy: false,
-          result: null,
-          error: e?.message ? String(e.message) : String(e),
-          lastRunAt: Date.now(),
-        });
-      }
-
+    }): Promise<QueryResult> => {
+      // 1) store history (keep)
       setSqlHistory((prev) => [
         { id: uuid(), sql, createdAt: Date.now() } as unknown as SqlQuery,
         ...prev,
       ]);
+
+      // 2) execute and return result (ActiveWindowContent will handle slots & UI)
+      const res = await runSqlQuery(connectionId, sql);
+      return res;
     },
     []
   );
-
-  // =========================
 
   if (!activeTab) {
     return (
@@ -427,12 +388,7 @@ export function ConnectionScreen() {
         >
           <div class="transition-smooth flex flex-1 flex-col overflow-hidden">
             {activeWindows.length > 0 && (
-              <div
-                class={cn(
-                  "flex shrink-0 items-end overflow-x-auto pt-1",
-                  "overflow-hidden"
-                )}
-              >
+              <div class={cn("flex shrink-0 items-end overflow-x-auto pt-1")}>
                 <NavigationTabs
                   openWindows={activeWindows}
                   setActiveWindowId={(id) =>
@@ -464,11 +420,7 @@ export function ConnectionScreen() {
                 runtimeConnectionId={runtimeConnectionId}
                 schemas={schemasForEditor}
                 tables={tablesForEditor}
-                onSqlChangeContent={handleSqlChangeContent}
                 onRunSql={handleRunSql}
-                activeSqlResult={activeSqlState?.result ?? null}
-                activeSqlBusy={activeSqlState?.busy ?? false}
-                activeSqlError={activeSqlState?.error ?? null}
               />
             </div>
 

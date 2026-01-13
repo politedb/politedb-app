@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::engines::cancel::CancelHandle;
 use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
-use crate::operations::emit::{emit_done, emit_error, emit_meta};
+use crate::operations::emit::{emit_done, emit_error};
 use crate::types::{CellValue, ColumnMeta, RedisCommandInput, TableChunk};
 
 /* =============================================================================
@@ -109,7 +109,6 @@ async fn emit_table_chunks(
     while let Some(item) = rx_chunk.recv().await {
         match item {
             Ok(chunk) => {
-                // If FE is gone / app reload => stop
                 if app.emit("op:chunk_table", chunk).is_err() {
                     break;
                 }
@@ -135,7 +134,6 @@ pub async fn run_redis_command(
     let op_id = ctx.op_id;
     let started_at = Instant::now();
 
-    // Ensure active_ops/cancel_requested cleaned even if we fail early
     let _active_guard = ActiveGuard::new(
         op_id,
         Arc::clone(&ctx.active_ops),
@@ -145,7 +143,7 @@ pub async fn run_redis_command(
     let batch_size = input.batch_size.unwrap_or(200).clamp(1, 2000) as usize;
     let max_rows = input.max_rows.unwrap_or(50_000).clamp(1, 1_000_000);
 
-    // Cancel handle (best-effort): stop loop / stop long scan
+    // Cancel handle
     let notify = Arc::new(Notify::new());
     ctx.running_ops.insert(
         op_id,
@@ -155,12 +153,10 @@ pub async fn run_redis_command(
     );
     let _running_guard = RunningGuard::new(op_id, Arc::clone(&ctx.running_ops));
 
-    // If cancel requested before runner registered
     if ctx.cancel_requested.remove(&op_id).is_some() {
         notify.notify_waiters();
     }
 
-    // Resolve timeout: op override -> conn default
     let timeout_ms = input.command_timeout_ms.or(default_command_timeout_ms);
     let timeout = timeout_ms.map(|ms| Duration::from_millis(ms.clamp(50, 300_000)));
 
@@ -191,20 +187,16 @@ pub async fn run_redis_command(
 
     match cmd.as_str() {
         "GET" => {
-            emit_meta(
-                &ctx.app,
-                op_id,
-                vec![
-                    ColumnMeta {
-                        name: "key".into(),
-                        db_type: "redis:string".into(),
-                    },
-                    ColumnMeta {
-                        name: "value".into(),
-                        db_type: "redis:value".into(),
-                    },
-                ],
-            );
+            let done_columns = Some(vec![
+                ColumnMeta {
+                    name: "key".into(),
+                    db_type: "redis:string".into(),
+                },
+                ColumnMeta {
+                    name: "value".into(),
+                    db_type: "redis:value".into(),
+                },
+            ]);
 
             let key = input.args.get(0).cloned().unwrap_or_default();
             if key.is_empty() {
@@ -263,7 +255,14 @@ pub async fn run_redis_command(
                     drop(tx_chunk);
                     let _ = emit_task.await;
 
-                    emit_done(&ctx.app, op_id, false, 1, started_at.elapsed().as_millis());
+                    emit_done(
+                        &ctx.app,
+                        op_id,
+                        false,
+                        1,
+                        started_at.elapsed().as_millis(),
+                        done_columns,
+                    );
                 }
                 Err(e) => {
                     emit_error(
@@ -277,20 +276,16 @@ pub async fn run_redis_command(
         }
 
         "HGETALL" => {
-            emit_meta(
-                &ctx.app,
-                op_id,
-                vec![
-                    ColumnMeta {
-                        name: "field".into(),
-                        db_type: "redis:string".into(),
-                    },
-                    ColumnMeta {
-                        name: "value".into(),
-                        db_type: "redis:value".into(),
-                    },
-                ],
-            );
+            let done_columns = Some(vec![
+                ColumnMeta {
+                    name: "field".into(),
+                    db_type: "redis:string".into(),
+                },
+                ColumnMeta {
+                    name: "value".into(),
+                    db_type: "redis:value".into(),
+                },
+            ]);
 
             let key = input.args.get(0).cloned().unwrap_or_default();
             if key.is_empty() {
@@ -377,6 +372,7 @@ pub async fn run_redis_command(
                         truncated,
                         row_count,
                         started_at.elapsed().as_millis(),
+                        done_columns,
                     );
                 }
                 Err(e) => {
@@ -391,14 +387,10 @@ pub async fn run_redis_command(
         }
 
         "SCAN" => {
-            emit_meta(
-                &ctx.app,
-                op_id,
-                vec![ColumnMeta {
-                    name: "key".into(),
-                    db_type: "redis:key".into(),
-                }],
-            );
+            let done_columns = Some(vec![ColumnMeta {
+                name: "key".into(),
+                db_type: "redis:key".into(),
+            }]);
 
             let pattern = input.pattern.clone().unwrap_or("*".into());
             let count = input.scan_count.unwrap_or(200).clamp(1, 5000);
@@ -421,6 +413,7 @@ pub async fn run_redis_command(
                             false,
                             row_count,
                             started_at.elapsed().as_millis(),
+                            done_columns.clone(),
                         );
                         return;
                     }
@@ -493,19 +486,16 @@ pub async fn run_redis_command(
                 truncated,
                 row_count,
                 started_at.elapsed().as_millis(),
+                done_columns,
             );
         }
 
-        // Fallback: raw command -> one-cell result as string/json-ish
+        // Fallback: raw command -> one-cell result
         _ => {
-            emit_meta(
-                &ctx.app,
-                op_id,
-                vec![ColumnMeta {
-                    name: "result".into(),
-                    db_type: "redis:value".into(),
-                }],
-            );
+            let done_columns = Some(vec![ColumnMeta {
+                name: "result".into(),
+                db_type: "redis:value".into(),
+            }]);
 
             let mut c = redis::cmd(&cmd);
             for a in &input.args {
@@ -554,7 +544,14 @@ pub async fn run_redis_command(
                     drop(tx_chunk);
                     let _ = emit_task.await;
 
-                    emit_done(&ctx.app, op_id, false, 1, started_at.elapsed().as_millis());
+                    emit_done(
+                        &ctx.app,
+                        op_id,
+                        false,
+                        1,
+                        started_at.elapsed().as_millis(),
+                        done_columns,
+                    );
                 }
                 Err(e) => {
                     emit_error(

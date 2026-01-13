@@ -15,6 +15,7 @@ pub struct OperationDone {
     pub truncated: bool,
     pub row_count: u64,
     pub elapsed_ms: u128,
+    pub columns: Option<Vec<ColumnMeta>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,12 +23,6 @@ pub struct OperationError {
     pub op_id: Uuid,
     pub error: String,
     pub elapsed_ms: u128,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OperationMeta {
-    pub op_id: Uuid,
-    pub columns: Vec<ColumnMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

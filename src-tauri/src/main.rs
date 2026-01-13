@@ -63,6 +63,11 @@ fn main() {
             secrets::secrets_set,
             secrets::secrets_get,
             secrets::secrets_delete,
+            // sql draft
+            commands::sql_draft::sql_draft_save,
+            commands::sql_draft::sql_draft_load,
+            commands::sql_draft::sql_draft_clear,
+            commands::sql_draft::sql_draft_gc,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

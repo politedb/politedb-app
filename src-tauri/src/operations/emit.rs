@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-use crate::types::{OperationDone, OperationError, OperationMeta, OperationStarted};
+use crate::types::{ColumnMeta, OperationDone, OperationError, OperationStarted};
 
 pub fn emit_started(app: &AppHandle, op_id: Uuid, connection_id: Uuid) -> Result<(), String> {
     app.emit(
@@ -14,12 +14,14 @@ pub fn emit_started(app: &AppHandle, op_id: Uuid, connection_id: Uuid) -> Result
     .map_err(|e| e.to_string())
 }
 
-pub fn emit_meta(app: &AppHandle, op_id: Uuid, columns: Vec<crate::types::ColumnMeta>) {
-    // Intentionally best-effort. If you want strictness, return Result and fail runner early.
-    let _ = app.emit("op:meta", OperationMeta { op_id, columns });
-}
-
-pub fn emit_done(app: &AppHandle, op_id: Uuid, truncated: bool, row_count: u64, elapsed_ms: u128) {
+pub fn emit_done(
+    app: &AppHandle,
+    op_id: Uuid,
+    truncated: bool,
+    row_count: u64,
+    elapsed_ms: u128,
+    columns: Option<Vec<ColumnMeta>>,
+) {
     let _ = app.emit(
         "op:done",
         OperationDone {
@@ -27,6 +29,7 @@ pub fn emit_done(app: &AppHandle, op_id: Uuid, truncated: bool, row_count: u64, 
             truncated,
             row_count,
             elapsed_ms,
+            columns,
         },
     );
 }

@@ -15,6 +15,7 @@ pub struct SqlQueryInput {
     pub batch_size: Option<u32>,
     pub statement_timeout_ms: Option<u64>,
     pub read_only: Option<bool>,
+    pub validate_only: Option<bool>,
 }
 
 #[derive(Clone, serde::Deserialize)]
