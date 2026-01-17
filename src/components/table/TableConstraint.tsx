@@ -147,10 +147,12 @@ export function TableConstraints({
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
+          const isRowSelected = selectedRow === index;
 
           return (
             <Input
               className={cn(
+                "cursor-default!",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
@@ -158,6 +160,19 @@ export function TableConstraints({
               onInput={(e) =>
                 handleDataChange(index, name, e.currentTarget.value)
               }
+              onMouseDown={(e) => {
+                if (!isRowSelected && !isEmptyRow && !isDeleted) {
+                  e.preventDefault();
+                }
+              }}
+              onClick={(e) => {
+                if (isRowSelected) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const input = e.currentTarget as HTMLInputElement;
+                  input.select();
+                }
+              }}
               disabled={busy || isDeleted}
               readOnly={isEmptyRow || isDeleted}
             />

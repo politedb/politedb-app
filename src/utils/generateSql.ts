@@ -182,6 +182,7 @@ export function generateStructureSqlFromPatches(
   schema: string,
   tableName: string,
   initStructure: TableStructureType[] | null,
+  initConstraints: TableConstraintType[] | null = null,
   _engine: string = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
@@ -192,12 +193,13 @@ export function generateStructureSqlFromPatches(
 
   if (createPatches) {
     for (const [_rowKey, patchData] of Object.entries(createPatches)) {
-      const columnName = patchData.column_name;
-      const dataType = patchData.data_type;
+      const columnName = patchData.column_name?.trim();
+      const dataType = patchData.data_type?.trim();
       const isNullable = patchData.is_nullable;
       const columnDefault = patchData.column_default;
 
-      if (!columnName || !dataType) {
+      // Skip if column name or data type is empty or missing
+      if (!columnName || !dataType || columnName === "" || dataType === "") {
         continue;
       }
 
@@ -225,66 +227,167 @@ export function generateStructureSqlFromPatches(
 
   // Handle UPDATE (modify existing columns)
   const updatePatches = patchMap["update"]?.["structure"];
-  if (updatePatches && initStructure) {
-    for (const [rowKey, patchData] of Object.entries(updatePatches)) {
-      const rowIndex = parseInt(rowKey, 10);
-      if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= initStructure.length) {
-        continue;
+  if (updatePatches) {
+    // Handle table metadata changes (rowIndex: -1) - table name and primary key
+    const metadataPatch = updatePatches["-1"];
+    if (metadataPatch) {
+      // Handle table name change
+      if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} RENAME TO ${qIdent(metadataPatch.tableName)};`
+        );
       }
 
-      const originalColumn = initStructure[rowIndex];
-      if (!originalColumn) continue;
+      // Handle primary key change
+      if (metadataPatch.primaryKey && Array.isArray(metadataPatch.primaryKey)) {
+        const newPrimaryKey = metadataPatch.primaryKey.filter(Boolean).sort();
 
-      const columnName = originalColumn.column_name;
-      const changes: string[] = [];
+        // Find existing primary key constraint
+        const existingPkConstraint = initConstraints?.find((c) =>
+          c.index_name.toLowerCase().includes("pkey")
+        );
 
-      // Handle data type change
-      if (
-        patchData.data_type &&
-        patchData.data_type !== originalColumn.data_type
-      ) {
-        changes.push(`TYPE ${patchData.data_type}`);
-      }
+        // Get existing primary key columns
+        const existingPkColumns = existingPkConstraint
+          ? existingPkConstraint.column_name
+              .split(",")
+              .map((col) => col.trim())
+              .filter(Boolean)
+              .sort()
+          : [];
 
-      // Handle nullable change
-      if (
-        "is_nullable" in patchData &&
-        patchData.is_nullable !== originalColumn.is_nullable
-      ) {
-        if (patchData.is_nullable) {
-          changes.push("DROP NOT NULL");
-        } else {
-          changes.push("SET NOT NULL");
-        }
-      }
+        // Only change primary key if it's actually different
+        const pkChanged =
+          newPrimaryKey.length !== existingPkColumns.length ||
+          newPrimaryKey.some(
+            (col: string, idx: number) => col !== existingPkColumns[idx]
+          );
 
-      // Handle default change
-      if (
-        "column_default" in patchData &&
-        patchData.column_default !== originalColumn.column_default
-      ) {
-        if (
-          !patchData.column_default ||
-          patchData.column_default.trim() === ""
-        ) {
-          changes.push("DROP DEFAULT");
-        } else {
-          const defaultVal = patchData.column_default.trim();
-          if (
-            defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) ||
-            defaultVal.match(/^[0-9]+$/) ||
-            defaultVal.toUpperCase() === "NULL"
-          ) {
-            changes.push(`SET DEFAULT ${defaultVal}`);
-          } else {
-            changes.push(`SET DEFAULT ${qLiteral(defaultVal)}`);
+        if (pkChanged) {
+          // Drop existing primary key if it exists
+          if (existingPkConstraint) {
+            sqlStatements.push(
+              `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingPkConstraint.index_name)};`
+            );
+          }
+
+          // Add new primary key if columns are specified
+          if (newPrimaryKey.length > 0) {
+            const pkColumns = newPrimaryKey
+              .map((col: string) => qIdent(col))
+              .join(", ");
+            sqlStatements.push(
+              `ALTER TABLE ${tableIdent} ADD PRIMARY KEY (${pkColumns});`
+            );
           }
         }
       }
+    }
 
-      if (changes.length > 0) {
-        const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName)} ${changes.join(", ")};`;
-        sqlStatements.push(sql);
+    // Handle column structure changes
+    if (initStructure) {
+      // First pass: Handle column renames (must be done before other ALTER COLUMN statements)
+      for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+        const rowIndex = parseInt(rowKey, 10);
+        // Skip metadata changes (handled above) and invalid indices
+        if (
+          isNaN(rowIndex) ||
+          rowIndex < 0 ||
+          rowIndex >= initStructure.length
+        ) {
+          continue;
+        }
+
+        const originalColumn = initStructure[rowIndex];
+        if (!originalColumn) continue;
+
+        // Handle column name change (RENAME COLUMN must be done separately)
+        if (
+          patchData.column_name &&
+          patchData.column_name !== originalColumn.column_name &&
+          patchData.column_name.trim() !== ""
+        ) {
+          const oldName = originalColumn.column_name;
+          const newName = patchData.column_name.trim();
+          const sql = `ALTER TABLE ${tableIdent} RENAME COLUMN ${qIdent(oldName)} TO ${qIdent(newName)};`;
+          sqlStatements.push(sql);
+        }
+      }
+
+      // Second pass: Handle other column changes (use new column name if renamed)
+      for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+        const rowIndex = parseInt(rowKey, 10);
+        // Skip metadata changes (handled above) and invalid indices
+        if (
+          isNaN(rowIndex) ||
+          rowIndex < 0 ||
+          rowIndex >= initStructure.length
+        ) {
+          continue;
+        }
+
+        const originalColumn = initStructure[rowIndex];
+        if (!originalColumn) continue;
+
+        // Use new column name if it was changed, otherwise use original
+        const columnName =
+          patchData.column_name &&
+          patchData.column_name !== originalColumn.column_name &&
+          patchData.column_name.trim() !== ""
+            ? patchData.column_name.trim()
+            : originalColumn.column_name;
+
+        const changes: string[] = [];
+
+        // Handle data type change
+        if (
+          patchData.data_type &&
+          patchData.data_type !== originalColumn.data_type
+        ) {
+          changes.push(`TYPE ${patchData.data_type}`);
+        }
+
+        // Handle nullable change
+        if (
+          "is_nullable" in patchData &&
+          patchData.is_nullable !== originalColumn.is_nullable
+        ) {
+          if (patchData.is_nullable) {
+            changes.push("DROP NOT NULL");
+          } else {
+            changes.push("SET NOT NULL");
+          }
+        }
+
+        // Handle default change
+        if (
+          "column_default" in patchData &&
+          patchData.column_default !== originalColumn.column_default
+        ) {
+          if (
+            !patchData.column_default ||
+            patchData.column_default.trim() === ""
+          ) {
+            changes.push("DROP DEFAULT");
+          } else {
+            const defaultVal = patchData.column_default.trim();
+            if (
+              defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) ||
+              defaultVal.match(/^[0-9]+$/) ||
+              defaultVal.toUpperCase() === "NULL"
+            ) {
+              changes.push(`SET DEFAULT ${defaultVal}`);
+            } else {
+              changes.push(`SET DEFAULT ${qLiteral(defaultVal)}`);
+            }
+          }
+        }
+
+        // Only generate ALTER COLUMN if there are changes (excluding column_name which is handled above)
+        if (changes.length > 0) {
+          const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName)} ${changes.join(", ")};`;
+          sqlStatements.push(sql);
+        }
       }
     }
   }
@@ -491,7 +594,7 @@ export function generateDeleteSqlFromPatches(
 export function generateSqlFromPatches(
   patchMap: PatchMap,
   engine: string = "postgres"
-): string {
+): string[] {
   // engine parameter is passed to individual functions for future use
   const allStatements: string[] = [];
 
@@ -510,6 +613,7 @@ export function generateSqlFromPatches(
       schema,
       tableName,
       structure,
+      constraints,
       engine
     );
     allStatements.push(...structureStatements);
@@ -554,5 +658,5 @@ export function generateSqlFromPatches(
     allStatements.push(...deleteStatements);
   }
 
-  return allStatements.join("\n\n");
+  return allStatements;
 }

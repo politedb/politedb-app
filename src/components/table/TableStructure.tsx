@@ -5,7 +5,7 @@ import {
   useEffect,
   useRef,
 } from "preact/hooks";
-import type { TableStructure } from "src/types";
+import type { DatabaseEngine, TableStructure } from "src/types";
 import {
   Table,
   type TableColumn as CommonTableColumn,
@@ -13,7 +13,7 @@ import {
 import { Input } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
-import { DATA_KEYS } from "../../constant";
+import { DATA_KEYS, DATA_TYPES } from "../../constant";
 
 const COLUMNS_NAME: (keyof TableStructure)[] = [
   "column_name",
@@ -30,6 +30,7 @@ interface Props {
   activeTableWindowId: string;
   busy: boolean;
   error: string | null;
+  engine: DatabaseEngine;
   editedData: TableStructure[];
   onAddNewRecord: () => void;
   onDeleteRecord?: (rowIndex: number) => void;
@@ -53,8 +54,11 @@ export function TableStructure({
   onDeleteRecord,
   deletedRows = new Set(),
   onDataChange,
+  engine,
 }: Props) {
   const setEditedData = useConnectionStore((s) => s.updateTableStructure);
+  const setTableStructure = useConnectionStore((s) => s.setTableStructure);
+  const removeDataPatch = useConnectionStore((s) => s.removeDataPatch);
 
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -106,7 +110,6 @@ export function TableStructure({
       // 2. No input field is focused (user is not editing a cell)
       // 3. A row is selected
       // 4. The row is not already deleted
-      // 5. The row is not a new row (empty row)
       if (
         e.key === "Backspace" &&
         document.activeElement?.tagName !== "INPUT" &&
@@ -116,7 +119,37 @@ export function TableStructure({
       ) {
         e.preventDefault();
         e.stopPropagation();
-        onDeleteRecord?.(selectedRow);
+
+        // Check if the row is new (not in initData)
+        const isNewRow = !initData || selectedRow >= initData.length;
+
+        if (isNewRow) {
+          // For new rows, remove from editedData directly without storing delete action
+          const newEditedData = editedData.filter(
+            (_, index) => index !== selectedRow
+          );
+          setTableStructure(
+            activeProfileScreen,
+            activeTableWindowId,
+            newEditedData
+          );
+
+          // Remove the create patch for this row since it was never actually created
+          const rowKey = String(selectedRow);
+          removeDataPatch(
+            activeProfileScreen,
+            activeTableWindowId,
+            "create",
+            DATA_KEYS.structure,
+            rowKey
+          );
+
+          // Clear selection if the deleted row was selected
+          setSelectedRow(null);
+        } else {
+          // For existing rows, mark as deleted (will create a delete patch)
+          onDeleteRecord?.(selectedRow);
+        }
       }
     };
 
@@ -127,7 +160,18 @@ export function TableStructure({
         container.removeEventListener("keydown", handleKeyDown);
       };
     }
-  }, [selectedRow, deletedRows, onDeleteRecord, editedData.length]);
+  }, [
+    selectedRow,
+    deletedRows,
+    onDeleteRecord,
+    editedData,
+    editedData.length,
+    initData,
+    activeProfileScreen,
+    activeTableWindowId,
+    setTableStructure,
+    removeDataPatch,
+  ]);
 
   const tableData = useMemo(() => {
     if (!editedData.length || error || busy) {
@@ -158,10 +202,17 @@ export function TableStructure({
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
+          const isRowSelected = selectedRow === index;
 
           return (
             <Input
+              showSelect={!isEmptyRow && name === "data_type"}
+              options={DATA_TYPES[engine].map((type) => ({
+                label: type,
+                value: type,
+              }))}
               className={cn(
+                "cursor-default!",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
@@ -169,6 +220,21 @@ export function TableStructure({
               onInput={(e) =>
                 handleDataChange(index, name, e.currentTarget.value)
               }
+              onMouseDown={(e) => {
+                // Prevent input focus if row is not selected yet
+                // This allows first click to select row, second click to focus input
+                if (!isRowSelected && !isEmptyRow && !isDeleted) {
+                  e.preventDefault();
+                }
+              }}
+              onClick={(e) => {
+                if (isRowSelected) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const input = e.currentTarget as HTMLInputElement;
+                  input.select();
+                }
+              }}
               disabled={busy || isDeleted}
               readOnly={isEmptyRow || isDeleted}
             />
@@ -176,7 +242,15 @@ export function TableStructure({
         },
       })),
     ],
-    [busy, editedData.length, handleDataChange, deletedRows, onDeleteRecord]
+    [
+      busy,
+      editedData.length,
+      handleDataChange,
+      deletedRows,
+      onDeleteRecord,
+      selectedRow,
+      engine,
+    ]
   );
 
   return (

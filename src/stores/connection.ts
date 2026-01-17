@@ -129,6 +129,13 @@ export type ConnectionState = {
   clearTableConstraints: (screenId: string, tableWindowId?: string) => void;
 
   setDataPatchMap: (screenId: string, props: DataPatchesState) => void;
+  removeDataPatch: (
+    screenId: string,
+    tableWindowId: string,
+    action: DataAction,
+    dataKey: DataKey,
+    rowKey: string
+  ) => void;
   clearDataPatchMap: (screenId: string, tableWindowId?: string) => void;
 
   setNewTableData: (
@@ -385,6 +392,53 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       },
     }));
   },
+
+  removeDataPatch: (screenId, tableWindowId, action, dataKey, rowKey) =>
+    set((s) => {
+      const windowData = s.dataPatchMap[screenId]?.[tableWindowId];
+      if (!windowData?.patches?.[action]?.[dataKey]?.[rowKey]) {
+        return s;
+      }
+
+      const patches = { ...windowData.patches };
+      const actionPatches = { ...patches[action] };
+      const dataKeyPatches = { ...actionPatches[dataKey] };
+      const { [rowKey]: _, ...restDataKeyPatches } = dataKeyPatches;
+
+      let finalPatches: typeof patches;
+
+      // If no patches remain for this dataKey, remove it
+      if (Object.keys(restDataKeyPatches).length === 0) {
+        const { [dataKey]: _, ...restActionPatches } = actionPatches;
+        // If no action patches remain, delete the action; otherwise keep the rest
+        if (Object.keys(restActionPatches).length === 0) {
+          const { [action]: _, ...restPatches } = patches;
+          finalPatches = restPatches;
+        } else {
+          finalPatches = { ...patches, [action]: restActionPatches };
+        }
+      } else {
+        actionPatches[dataKey] = restDataKeyPatches;
+        finalPatches = { ...patches, [action]: actionPatches };
+      }
+
+      // Clean up empty patches object
+      const cleanedPatches =
+        Object.keys(finalPatches).length > 0 ? finalPatches : {};
+
+      return {
+        dataPatchMap: {
+          ...s.dataPatchMap,
+          [screenId]: {
+            ...s.dataPatchMap[screenId],
+            [tableWindowId]: {
+              ...windowData,
+              patches: cleanedPatches,
+            },
+          },
+        },
+      };
+    }),
 
   clearDataPatchMap: (screenId, tableWindowId) =>
     set((s) => {

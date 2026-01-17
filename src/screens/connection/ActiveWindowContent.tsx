@@ -20,11 +20,10 @@ import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { TableFooter } from "src/components/table/TableFooter";
 import { NewTablePane } from "src/components/table/NewTablePane";
 import { TableViewMode } from "src/components/table/TableViewToggle";
-import { TableStructure } from "src/components/table/TableStructure";
-import { TableConstraints } from "src/components/table/TableConstraint";
 import { DATA_KEYS } from "src/constant";
 import { PatchMap } from "src/utils/generateSql";
 import { DataAction, DataKey } from "src/stores/connection";
+import { TableStructurePane } from "src/components/table/TableStructurePane";
 
 // Extract flattened patches for a specific table window
 function extractPatchesForTable(
@@ -249,23 +248,31 @@ export function ActiveWindowContent(props: {
     [patchMap, activeTableWindow?.id]
   );
 
-  const deletedStructureRows = useMemo(
+  const deletedStructureRows: Set<number> = useMemo(
     () =>
       activeTableWindow
-        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.structure)
+        ? extractDeletedRows(
+            patchMap,
+            activeTableWindow.id,
+            DATA_KEYS.structure
+          )
         : new Set(),
     [patchMap, activeTableWindow?.id]
   );
 
-  const deletedConstraintRows = useMemo(
+  const deletedConstraintRows: Set<number> = useMemo(
     () =>
       activeTableWindow
-        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.constraints)
+        ? extractDeletedRows(
+            patchMap,
+            activeTableWindow.id,
+            DATA_KEYS.constraints
+          )
         : new Set(),
     [patchMap, activeTableWindow?.id]
   );
 
-  const deletedDataRows = useMemo(
+  const deletedDataRows: Set<number> = useMemo(
     () =>
       activeTableWindow
         ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.data)
@@ -534,43 +541,21 @@ export function ActiveWindowContent(props: {
       <div class="flex-1 overflow-hidden">
         {viewMode === "structure" ? (
           <div class="flex h-full flex-col overflow-hidden bg-white">
-            <div class="flex-1 overflow-auto">
-              <SplitPane
-                direction="vertical"
-                initialRatio={0.5}
-                minFirstPx={0}
-                minSecondPx={0}
-                splitterPx={8}
-                first={
-                  <TableStructure
-                    activeProfileScreen={activeProfileScreen}
-                    activeTableWindowId={activeTableWindow.id}
-                    initData={activeTableData.structure}
-                    editedData={tableStructure}
-                    busy={activeTableData.busy}
-                    error={activeTableData.error}
-                    onDataChange={onDataChange}
-                    onAddNewRecord={handleAddColumn}
-                    onDeleteRecord={handleDeleteColumn}
-                    deletedRows={deletedStructureRows}
-                  />
-                }
-                second={
-                  <TableConstraints
-                    activeProfileScreen={activeProfileScreen}
-                    activeTableWindowId={activeTableWindow.id}
-                    initData={activeTableData.constraints}
-                    editedData={tableConstraints}
-                    busy={activeTableData.busy}
-                    error={activeTableData.error}
-                    onDataChange={onDataChange}
-                    onAddNewRecord={handleAddIndex}
-                    onDeleteRecord={handleDeleteIndex}
-                    deletedRows={deletedConstraintRows}
-                  />
-                }
-              />
-            </div>
+            <TableStructurePane
+              engine={engine}
+              activeProfileScreen={activeProfileScreen}
+              activeTableWindow={activeTableWindow}
+              activeTableData={activeTableData}
+              tableStructure={tableStructure}
+              tableConstraints={tableConstraints}
+              onDataChange={onDataChange}
+              onAddNewColumn={handleAddColumn}
+              onDeleteColumn={handleDeleteColumn}
+              deletedStructureRows={deletedStructureRows}
+              onAddIndex={handleAddIndex}
+              onDeleteIndex={handleDeleteIndex}
+              deletedConstraintRows={deletedConstraintRows}
+            />
           </div>
         ) : (
           <TableData

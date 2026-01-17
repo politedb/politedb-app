@@ -20,7 +20,8 @@ function makeTableKeyLocal(table: Pick<TableItem, "schema" | "name">) {
 }
 
 function makeTableWindowId(table: Pick<TableItem, "schema" | "name">) {
-  return `table:${makeTableKeyLocal(table)}:${uuid()}`;
+  // Use deterministic ID based on schema and table name so patches persist across close/reopen
+  return `table:${makeTableKeyLocal(table)}`;
 }
 
 function isTableWindow(w: OpenWindow | undefined): w is TableWindow {

@@ -8,6 +8,7 @@ import {
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
+import { connectionRemove } from "src/lib/tauri";
 import { MenuBar } from "./MenuBar";
 import { LeftNav } from "./LeftNav";
 import { NavigationTabs } from "./NavigationTabs";
@@ -30,7 +31,13 @@ import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { normalizeSqlError } from "src/utils/queryValidate";
 
 export function ConnectionScreen() {
-  const activeProfileScreen = useScreenStore((s) => s.activeProfileScreen);
+  const {
+    activeProfileScreen,
+    profileTabs,
+    removeTab,
+    setActiveProfileScreen,
+    openWindows,
+  } = useScreenStore();
 
   const {
     queryHistory,
@@ -44,11 +51,16 @@ export function ConnectionScreen() {
     clearQueryHistory: clearHistory,
     setDataPatchMap: setPatchMap,
     clearDataPatchMap: clearPatchMap,
+    clearNewTableData,
+    tableDataMap,
   } = useConnectionStore();
 
   const [limit, setLimit] = useState(300);
   const [offset, setOffset] = useState(0);
   const [warningRefresh, setWarningRefresh] = useState(false);
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
 
   const { viewMode, toggleViewMode } = useViewMode(["left"]);
@@ -98,7 +110,7 @@ export function ConnectionScreen() {
     ];
   }, [tableStructure, tableConstraints, activeProfileScreen, activeId]);
 
-  const { loadTableData, getTableData } = useLoadTableData();
+  const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
   /* =========================
    * Active table data
@@ -174,10 +186,24 @@ export function ConnectionScreen() {
   }, [meta.error, activeTableWindow, activeTableData.error]);
 
   // check if there are any patches to apply
-  const hasPatches = useMemo(
-    () => Object.keys(patchMap).some((windowId) => patchMap[windowId]),
-    [patchMap]
-  );
+  const hasPatches = useMemo(() => {
+    // Check if any window has actual patches (not just empty objects)
+    return Object.values(patchMap).some((windowData) => {
+      if (!windowData?.patches) return false;
+      const { patches } = windowData;
+      // Check if patches has any actions with data
+      return Object.values(patches).some((actionPatches) => {
+        if (!actionPatches || typeof actionPatches !== "object") return false;
+        // Check if any dataKey has entries
+        return Object.values(actionPatches).some((dataKeyPatches) => {
+          if (!dataKeyPatches || typeof dataKeyPatches !== "object")
+            return false;
+          // Check if any rowKey has entries
+          return Object.keys(dataKeyPatches).length > 0;
+        });
+      });
+    });
+  }, [patchMap]);
 
   // check if we have new table data to save (reactive to store changes)
   const newTableData = useConnectionStore((s) => {
@@ -241,16 +267,118 @@ export function ConnectionScreen() {
       clearTableConstraints(profileScreen, tableWindowId);
       clearTableStructure(profileScreen, tableWindowId);
       clearPatchMap(profileScreen, tableWindowId);
+      clearNewTableData(profileScreen, tableWindowId);
     },
-    [clearTableConstraints, clearTableStructure, clearPatchMap]
+    [
+      clearTableConstraints,
+      clearTableStructure,
+      clearPatchMap,
+      clearNewTableData,
+    ]
+  );
+
+  // Check if a tab has any unsaved changes
+  const tabHasChanges = useCallback(
+    (tabId: string): boolean => {
+      // Check for patches
+      const tabPatches = dataPatchMap[tabId];
+      if (tabPatches && Object.keys(tabPatches).length > 0) {
+        return true;
+      }
+
+      // Check for new table data
+      const tabNewTableData = useConnectionStore.getState().newTableData[tabId];
+      if (tabNewTableData && Object.keys(tabNewTableData).length > 0) {
+        // Check if any new table has valid data
+        for (const windowId in tabNewTableData) {
+          const newTable = tabNewTableData[windowId];
+          if (
+            newTable.tableName.trim().length > 0 &&
+            newTable.columns.some((col) => col.column_name.trim())
+          ) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    },
+    [dataPatchMap]
   );
 
   const handleCloseWindow = useCallback(
     async (windowId: string, e: MouseEvent) => {
       await closeWindow(windowId, e);
-      handleClearChanges(activeProfileScreen, windowId);
     },
-    [activeProfileScreen, closeWindow, handleClearChanges]
+    [closeWindow]
+  );
+
+  const handleCloseConnectionTab = useCallback(
+    async (tabId: string, skipCheck = false) => {
+      // Check for unsaved changes if not skipping the check
+      if (!skipCheck && tabHasChanges(tabId)) {
+        setPendingCloseTabId(tabId);
+        setWarningRefresh(true);
+        return;
+      }
+
+      // Clear all changes for this tab before closing
+      handleClearChanges(tabId);
+
+      const currentTab = profileTabs.find((tab) => tab.id === tabId);
+      const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
+
+      removeTab(tabId);
+
+      if (activeProfileScreen === tabId) {
+        setActiveProfileScreen(
+          newTabs.length > 0 ? newTabs[newTabs.length - 1].id : "main"
+        );
+      }
+
+      if (currentTab?.runtimeConnectionId) {
+        try {
+          await connectionRemove(currentTab.runtimeConnectionId);
+        } catch (err) {
+          console.error("Error removing runtime connection:", err);
+        }
+      }
+
+      const windows = openWindows[tabId] ?? [];
+      if (windows.length === 0) return;
+
+      const tableWindows = windows.filter((w) => w.type === "table");
+
+      await Promise.all(
+        tableWindows.map(async (w) => {
+          const { schema, name } = w.table;
+
+          const key = tableKey(tabId, schema, name);
+          const { connectionId } = tableDataMap[key] || { connectionId: null };
+
+          removeTableData(schema, name);
+
+          if (connectionId) {
+            try {
+              await connectionRemove(connectionId);
+            } catch (err) {
+              console.error("Error removing table connection:", err);
+            }
+          }
+        })
+      );
+    },
+    [
+      profileTabs,
+      removeTab,
+      activeProfileScreen,
+      setActiveProfileScreen,
+      openWindows,
+      tableDataMap,
+      removeTableData,
+      tabHasChanges,
+      handleClearChanges,
+    ]
   );
 
   const handleDataChange = useCallback(
@@ -314,6 +442,27 @@ export function ConnectionScreen() {
     );
   }, [refreshSchemaAndTables, activeTableWindow, loadTableData, limit, offset]);
 
+  const handleDiscardChanges = useCallback(async () => {
+    if (pendingCloseTabId) {
+      // Clear all changes for the tab
+      handleClearChanges(pendingCloseTabId);
+      // Close the tab (skip the check since we're discarding)
+      await handleCloseConnectionTab(pendingCloseTabId, true);
+    } else {
+      handleClearChanges(activeProfileScreen);
+    }
+
+    setWarningRefresh(false);
+    setPendingCloseTabId(null);
+  }, [
+    activeProfileScreen,
+    pendingCloseTabId,
+    handleCloseConnectionTab,
+    handleClearChanges,
+    setWarningRefresh,
+    setPendingCloseTabId,
+  ]);
+
   const handleSaveNewTable = useCallback(async () => {
     if (newTableSaveRef.current) {
       await newTableSaveRef.current();
@@ -327,17 +476,20 @@ export function ConnectionScreen() {
       // Generate SQL from patches
       const sql = generateSqlFromPatches(patchMap, engine || "postgres");
 
-      if (!sql.trim()) {
+      if (!sql.length) {
         // Clear patches after successful execution
         setError("An error occurred while applying patches.");
         return;
       }
 
-      // Execute the SQL
-      await runSqlWithHistory({
-        connectionId: runtimeConnectionId,
-        sql,
-      });
+      // Execute the SQL statements sequentially to maintain transaction integrity
+      // and ensure proper ordering (DDL before DML, etc.)
+      for (const sqlStatement of sql) {
+        await runSqlWithHistory({
+          connectionId: runtimeConnectionId,
+          sql: sqlStatement,
+        });
+      }
 
       // Clear patches after successful execution
       handleClearChanges(activeProfileScreen, activeTableWindow.id);
@@ -438,6 +590,97 @@ export function ConnectionScreen() {
     tableConstraints,
     activeId,
     activeTableWindow,
+  ]);
+
+  /* =========================
+   * Keyboard shortcuts
+   * ========================= */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Detect platform: Mac uses metaKey, Windows/Linux use ctrlKey
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+
+      // Only handle if modifier key is pressed
+      if (!mod) return;
+
+      // Don't handle if user is typing in an input field (unless it's a specific case)
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        // Allow Ctrl+S in input fields to save changes
+        if (e.key.toLowerCase() === "s") {
+          e.preventDefault();
+          e.stopPropagation();
+          handleSaveChanges();
+          return;
+        }
+        // For other shortcuts, ignore if in input field
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+
+      // Cmd/Ctrl + T: Open new SQL editor window
+      if (key === "t") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleOpenSqlEditor();
+        return;
+      }
+
+      // Cmd/Ctrl + S: Save all changes
+      if (key === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleSaveChanges();
+        return;
+      }
+
+      // Cmd/Ctrl + R: Refresh data
+      if (key === "r") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleRefresh();
+        return;
+      }
+
+      // Cmd/Ctrl + W: Close active window or connection tab
+      if (key === "w") {
+        e.preventDefault();
+        e.stopPropagation();
+        // If there's an active window, close it
+        if (activeId) {
+          // Create a synthetic mouse event for handleCloseWindow
+          const syntheticEvent = new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+          }) as unknown as MouseEvent;
+          handleCloseWindow(activeId, syntheticEvent);
+        } else if (activeProfileScreen && activeProfileScreen !== "main") {
+          // If no active window but there's an active connection tab, close the tab
+          handleCloseConnectionTab(activeProfileScreen);
+        }
+        // Always prevent default to stop app/window from closing
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [
+    handleOpenSqlEditor,
+    handleSaveChanges,
+    handleRefresh,
+    handleCloseWindow,
+    handleCloseConnectionTab,
+    activeId,
+    activeProfileScreen,
   ]);
 
   /* =========================
@@ -662,11 +905,11 @@ export function ConnectionScreen() {
 
       <WarningRefreshDialog
         open={warningRefresh}
-        onClose={() => setWarningRefresh(false)}
-        onDiscard={() => {
-          handleClearChanges(activeProfileScreen);
+        onClose={() => {
           setWarningRefresh(false);
+          setPendingCloseTabId(null);
         }}
+        onDiscard={handleDiscardChanges}
       />
 
       {error && (
