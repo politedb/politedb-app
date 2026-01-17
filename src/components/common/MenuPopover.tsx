@@ -32,8 +32,13 @@ export function MenuPopover(props: {
   // Measure menu height after render (for top alignment)
   useEffect(() => {
     if (open && align === "top" && panelRef.current) {
-      const height = panelRef.current.offsetHeight;
-      setMenuHeight(height);
+      // Use requestAnimationFrame to ensure DOM is fully rendered
+      requestAnimationFrame(() => {
+        if (panelRef.current) {
+          const height = panelRef.current.offsetHeight;
+          setMenuHeight(height);
+        }
+      });
     } else if (!open) {
       setMenuHeight(null);
     }
@@ -82,9 +87,17 @@ export function MenuPopover(props: {
 
       if (align === "top") {
         // Position above the anchor
-        // Use measured height if available, otherwise estimate
-        const estimatedHeight = menuHeight || 200;
-        const top = r.top - estimatedHeight - 8;
+        // Hide until we have the measured height to prevent flicker
+        if (menuHeight === null) {
+          return {
+            position: "fixed",
+            left: "-9999px",
+            top: "-9999px",
+            width: `${width}px`,
+            visibility: "hidden" as const,
+          };
+        }
+        const top = r.top - menuHeight - 8;
         const left = r.left;
         return {
           position: "fixed",

@@ -1,4 +1,4 @@
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
 
 export function Box({
   children,
@@ -10,7 +10,7 @@ export function Box({
   return (
     <div
       class={cn(
-        "flex h-full flex-col items-center justify-center bg-white",
+        "flex h-full flex-col items-center justify-center bg-white px-2",
         className
       )}
     >

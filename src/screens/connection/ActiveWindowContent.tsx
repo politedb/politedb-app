@@ -1,3 +1,4 @@
+import { useState, useEffect, useMemo } from "preact/hooks";
 import { Box } from "src/components/common/Box";
 import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
@@ -9,7 +10,6 @@ import type {
   TableWindow,
 } from "src/types";
 import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
-import { useMemo } from "preact/hooks";
 import { SplitPane } from "src/components/SplitPane";
 import type { QueryResult } from "src/lib/tauri";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
@@ -221,19 +221,16 @@ export function ActiveWindowContent(props: {
     return <TableErrorState error={String(activeTableData.error)} />;
   }
 
-  if (!activeTableData.data) return null;
-
   return (
     <TableData
       key={activeTableWindow.id}
-      columns={activeTableData.data.columns}
-      data={activeTableData.data.rows}
+      columns={activeTableData.data?.columns ?? []}
+      data={activeTableData.data?.rows ?? []}
       onCellChange={onCellChange}
       patches={tablePatches}
       limit={limit}
       offset={offset}
       totalRows={totalRows}
-      onPageChange={onPageChange}
     />
   );
 }

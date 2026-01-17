@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from "preact/hooks";
-import type { ColumnMeta } from "../lib/tauri/types";
-import { cellToString } from "../utils/convert";
-import { useScreenStore } from "../stores/screen";
-import { profileConnect } from "../lib/tauri/profile";
+import type { ColumnMeta } from "src/lib/tauri/types";
+import { cellToString } from "src/utils/convert";
+import { useScreenStore } from "src/stores/screen";
+import { profileConnect } from "src/lib/tauri/profile";
 import {
   tableColumnsQuery,
   tableDataQuery,
@@ -11,9 +11,9 @@ import {
   tableSizeInfoQuery,
   tableStructuresQuery,
 } from "./queries";
-import { runSqlQuery } from "../utils/query";
-import { useConnectionStore } from "../stores/connection";
-import { TableRelationships, TableStructure } from "../types";
+import { runSqlQuery } from "src/utils/query";
+import { useConnectionStore } from "src/stores/connection";
+import { TableRelationships, TableStructure } from "src/types";
 
 export function tableKey(
   activeScreen: string,
@@ -124,13 +124,26 @@ export function useLoadTableData() {
           timestamp: new Date(),
         });
 
+        // Map structure data from query result to TableStructure format
+        const structure: TableStructure[] = structureRes.rows.map(
+          (row: any) => ({
+            column_name: cellToString(row[1]), // column_name
+            data_type: cellToString(row[2]), // data_type (udt_name)
+            is_nullable: cellToString(row[8]).toLowerCase() === "yes", // is_nullable
+            check: cellToString(row[9]), // CHECK
+            column_default: cellToString(row[11]), // column_default
+            foreign_key: cellToString(row[12]), // foreign_key
+            comment: cellToString(row[13]), // comment
+          })
+        );
+
         addTableDataMap(key, {
           data: {
             columns,
             rows: dataRes.rows,
             rowCount: Number(cellToString(rowCountRes.rows[0][0])),
           },
-          structure: structureRes.rows as unknown as TableStructure[],
+          structure,
           relationships:
             relationshipsRes.rows as unknown as TableRelationships[],
           sizeInfo: {
@@ -168,6 +181,8 @@ export function useLoadTableData() {
       return (
         tableDataMap[key] || {
           data: null,
+          structure: null,
+          relationships: null,
           sizeInfo: null,
           connectionId: null,
           busy: false,

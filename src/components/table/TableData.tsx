@@ -11,7 +11,6 @@ import type { ColumnMeta } from "../../lib/tauri/types";
 import { cn } from "../../utils/cn";
 import { useNormalizeTableData } from "../../hooks/useNormalizeTableData";
 import { TableCell } from "./TableCell";
-import { TablePagination } from "./TablePagination";
 
 export type EditingCell = {
   rowIdx: number;
@@ -25,7 +24,6 @@ interface Props {
   columns: ColumnMeta[];
   data: any[];
   totalRows: number;
-  onPageChange: (limit: number, offset: number) => void;
   onCellChange?: (rowIndex: number, columnIndex: number, value: any) => void;
 
   // rowIndexStr -> colName -> value
@@ -41,10 +39,8 @@ export function TableData({
   offset,
   columns,
   data,
-  totalRows,
   patches,
   onCellChange,
-  onPageChange,
 }: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
@@ -129,24 +125,12 @@ export function TableData({
     ]
   );
 
-  // Calculate pagination
-  const pagination = useMemo(() => {
-    const startIndex = offset;
-    const endIndex = startIndex + limit;
-
-    return {
-      totalRows,
-      totalPages: Math.ceil(totalRows / limit),
-      startIndex,
-      endIndex,
-    };
-  }, [totalRows, limit, offset]);
-
   const table = useReactTable({
     data: editedData,
     columns: tableColumns,
     defaultColumn: {
       minSize: 60,
+      size: 80,
       maxSize: 800,
     },
     getCoreRowModel: getCoreRowModel(),
@@ -225,7 +209,7 @@ export function TableData({
           <td
             key={cell.id}
             tabIndex={0}
-            style={{ width: cell.column.getSize() }}
+            style={{ width: `calc(var(--col-${cell.column.id}-size) * 1px)` }}
             class={cn(
               "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
               isSelectingRow ? "bg-blue-200" : "hover:bg-blue-50",
@@ -247,29 +231,16 @@ export function TableData({
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
           key={`table-${tableRows.length}-${columns.length}-${offset}-${limit}`}
-          style={{ ...columnSizeVars, height: "100%" }}
-          data={tableRows}
-          components={{
-            Table: ({ style, ...props }: any) => {
-              return (
-                <table
-                  {...props}
-                  style={{ ...style, width: table.getTotalSize() }}
-                />
-              );
-            },
+          style={{
+            ...columnSizeVars,
+            "--table-width": `${table.getTotalSize()}px`,
+            height: "100%",
           }}
+          data={tableRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
         />
       </div>
-
-      <TablePagination
-        pagination={pagination}
-        limit={limit}
-        offset={offset}
-        onPageChange={onPageChange}
-      />
     </div>
   );
 }

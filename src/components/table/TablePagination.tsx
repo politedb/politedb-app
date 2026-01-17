@@ -1,6 +1,7 @@
 import { useCallback } from "preact/hooks";
-import { Button } from "../common/Button";
-import { ChevronLeft, ChevronRight } from "../icons";
+import { Button } from "src/components/common/Button";
+import { ChevronLeft, ChevronRight } from "src/components/icons";
+import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 
 export type Pagination = {
   startIndex: number;
@@ -13,6 +14,8 @@ interface Props {
   pagination: Pagination;
   limit: number;
   offset: number;
+  viewMode: TableViewMode;
+  onViewModeChange: (mode: TableViewMode) => void;
   onPageChange: (limit: number, offset: number) => void;
 }
 
@@ -20,6 +23,8 @@ export function TablePagination({
   pagination,
   limit,
   offset,
+  viewMode,
+  onViewModeChange,
   onPageChange,
 }: Props) {
   const handlePageChange = useCallback(
@@ -36,34 +41,11 @@ export function TablePagination({
   };
 
   return (
-    <div class="flex items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-3">
-      <div class="flex items-center gap-0.5">
-        <div class="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
-          <Button
-            variant="default"
-            onClick={() => handlePageChange(offset - limit)}
-            className="px-3 py-1"
-          >
-            Data
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => handlePageChange(offset + limit)}
-            disabled
-            className="px-3 py-1"
-          >
-            Structure
-          </Button>
-        </div>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <span class="text-sm text-neutral-600">
-          Showing {pagination.startIndex + 1} to{" "}
-          {Math.min(pagination.endIndex, pagination.totalRows)} of{" "}
-          {pagination.totalRows} rows
-        </span>
-      </div>
+    <div class="flex items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
+      <TableViewToggle
+        viewMode={viewMode}
+        onViewModeChange={onViewModeChange}
+      />
 
       <div class="flex items-center gap-0.5">
         <Button

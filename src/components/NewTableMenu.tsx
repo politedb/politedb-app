@@ -1,6 +1,6 @@
 import { MenuDropdown, MenuDropdownItem } from "./common/MenuDropdown";
-import { Table, Eye } from "./icons";
-import { cn } from "../utils/cn";
+import { Table, Schema } from "./icons";
+import { cn } from "src/utils/cn";
 import { Button } from "./common/Button";
 
 export interface Props {
@@ -14,12 +14,12 @@ export function NewTableMenu({ onNewTable, onNewSchema, className }: Props) {
     {
       label: "New Table",
       onClick: () => onNewTable?.(),
-      icon: <Table className="size-4 text-slate-500" />,
+      icon: <Table className="size-4 text-neutral-600" />,
     },
     {
-      label: "New View",
+      label: "New Schema",
       onClick: () => onNewSchema?.(),
-      icon: <Eye className="size-4 text-slate-500" />,
+      icon: <Schema className="size-4 text-neutral-600" />,
     },
   ];
 

@@ -35,7 +35,6 @@ export function NavigationTabs({
       class={cn(
         "flex items-end gap-1 pt-1",
         "bg-neutral-100",
-        "border-b border-neutral-300",
         "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       )}
     >
@@ -51,12 +50,7 @@ export function NavigationTabs({
               "group relative z-0 flex shrink-0 cursor-pointer items-center gap-2",
               "rounded-t-md px-2.5 py-1.5 text-xs transition-all",
               isActive
-                ? [
-                    "z-10",
-                    "bg-white text-neutral-800",
-                    "shadow-sm",
-                    "ring-1 ring-black/5",
-                  ]
+                ? ["z-10", "bg-white text-neutral-800", "ring-1 ring-black/5"]
                 : [
                     "bg-neutral-200/70 text-neutral-600",
                     "hover:bg-neutral-300/80",
