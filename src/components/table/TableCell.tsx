@@ -1,5 +1,5 @@
 import { Cell, Row, Table } from "@tanstack/react-table";
-import { cellToString } from "../../utils/convert";
+import { cellToString } from "src/utils/convert";
 import {
   Dispatch,
   useCallback,
@@ -7,9 +7,10 @@ import {
   useState,
   useRef,
 } from "preact/hooks";
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
 import { memo, SetStateAction } from "preact/compat";
 import { EditingCell } from "./TableData";
+import { DataAction, DataKey } from "src/stores/connection";
 
 interface Props {
   cell: Cell<any, any>;
@@ -21,8 +22,16 @@ interface Props {
   value: any;
 
   isPatched: boolean;
+  isNewRow?: boolean;
+  rowKey?: string;
+  isDeleted?: boolean;
 
-  onCellChange?: (rowIndex: number, colIndex: number, value: any) => void;
+  onCellChange?: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
   setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
 }
 
@@ -34,9 +43,13 @@ export const TableCell = memo(function TableCell({
   // originalValue,
   value,
   isPatched,
+  isNewRow = false,
+  rowKey,
+  isDeleted = false,
   onCellChange,
   setEditingCell,
 }: Props) {
+  const dataKey = "data";
   const rowIndex = row.index;
   const colIndex = cell.column.getIndex();
 
@@ -53,24 +66,53 @@ export const TableCell = memo(function TableCell({
   }, [displayValue]);
 
   const commitValue = useCallback(() => {
+    // Only commit if the value actually changed
+    // Normalize both values for comparison (trim whitespace, treat empty string as empty)
+    const normalizedEditValue = editValue.trim();
+    const normalizedDisplayValue = displayValue.trim();
+
+    // For new rows, always commit (even if empty, it's still a new row)
+    // For existing rows, only commit if the value changed
+    if (!isNewRow && normalizedEditValue === normalizedDisplayValue) {
+      // Value hasn't changed, don't create a patch
+      return;
+    }
+
     // Update local editedData (tanstack meta)
     (table.options.meta as any)?.updateData(rowIndex, colName, editValue);
 
+    // For new rows, use "create" action and include the rowKey
+    // For existing rows, use "update" action
+    const action = isNewRow ? "create" : "update";
+    const changeData: Record<string, any> = { [colName]: editValue };
+
+    // Include rowKey for new rows so handleDataChange can extract it
+    if (isNewRow && rowKey) {
+      changeData.__rowKey = rowKey;
+    }
+
     // Bubble up to ConnectionScreen → patchMap
-    onCellChange?.(rowIndex, colIndex, editValue);
+    onCellChange?.(action, dataKey, isNewRow ? -1 : rowIndex, changeData);
   }, [
     editValue,
+    displayValue,
     rowIndex,
-    colIndex,
     colName,
     table.options.meta,
     onCellChange,
+    isNewRow,
+    rowKey,
   ]);
 
-  const onInputBlur = useCallback(() => {
-    // Check if we're still editing this cell (not switched to another)
-    commitValue();
-  }, [commitValue]);
+  const onInputBlur = useCallback(
+    (e: Event) => {
+      // Check if we're still editing this cell (not switched to another)
+      const input = e.currentTarget as HTMLInputElement;
+      input.style.backgroundColor = "transparent";
+      commitValue();
+    },
+    [commitValue]
+  );
 
   const onInputKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -122,12 +164,19 @@ export const TableCell = memo(function TableCell({
         "overflow-hidden text-ellipsis whitespace-nowrap",
         "focus:overflow-x-auto focus:text-ellipsis",
 
-        // patched highlight (amber)
-        isPatched && "bg-amber-200",
+        // deleted row (grayed out with strikethrough)
+        isDeleted && "bg-red-300",
+
+        // patched highlight (amber) - only if not deleted
+        isPatched && !isDeleted && "bg-amber-200",
+
+        // new row highlight (green) - only if not deleted
+        isNewRow && !isDeleted && "bg-green-200",
 
         // untouched
-        !isPatched && "bg-transparent"
+        !isPatched && !isDeleted && "bg-transparent"
       )}
+      disabled={isDeleted}
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     />
   );

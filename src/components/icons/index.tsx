@@ -33,3 +33,5 @@ export * from "./Play";
 export * from "./Save";
 export * from "./SaveAs";
 export * from "./Revert";
+export * from "./Schema";
+export * from "./ChevronSort";

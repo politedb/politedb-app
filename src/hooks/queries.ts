@@ -1,3 +1,5 @@
+import type { TableColumn } from "src/types";
+
 function qIdent(ident: string) {
   return `"${String(ident).replace(/"/g, `""`)}"`;
 }
@@ -6,8 +8,12 @@ function qLiteral(v: string) {
   return `'${String(v).replace(/"/g, `""`)}'`;
 }
 
-export const listTablesQuery = (schema: string) =>
-  `
+export function regexEscape(s: string) {
+  return s.replace(/\s*=\s*/g, "=").replace(/\s+/g, " ");
+}
+
+export const listTablesQuery = (schema: string) => {
+  const queryStr = `
     SELECT table_schema, table_name
     FROM information_schema.tables
     WHERE table_type = 'BASE TABLE'
@@ -15,19 +21,23 @@ export const listTablesQuery = (schema: string) =>
       AND table_schema NOT LIKE 'pg_%'
       AND table_schema <> 'information_schema'
     ORDER BY table_schema, table_name;
-  `.trim();
+  `;
+  return regexEscape(queryStr);
+};
 
-export const dbSchemasQuery = () =>
-  `
+export const dbSchemasQuery = () => {
+  const queryStr = `
     SELECT schema_name
     FROM information_schema.schemata
     WHERE
       schema_name NOT LIKE 'pg_%'
       AND schema_name <> 'information_schema'
-  `.trim();
+  `;
+  return regexEscape(queryStr);
+};
 
-export const tableSizeInfoQuery = (schema: string, tableName: string) =>
-  `
+export const tableSizeInfoQuery = (schema: string, tableName: string) => {
+  const queryStr = `
     SELECT
       pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
       pg_size_pretty(pg_table_size(relid)) AS data_size,
@@ -60,24 +70,162 @@ export const tableSizeInfoQuery = (schema: string, tableName: string) =>
       n.nspname = ${qLiteral(schema)}
       AND p.relname = ${qLiteral(tableName)}
       AND p.relkind = 'v';
-  `.trim();
+  `;
+  return regexEscape(queryStr);
+};
 
-export const tableColumnsQuery = (schema: string, tableName: string) =>
-  `
+export const tableColumnsQuery = (schema: string, tableName: string) => {
+  const queryStr = `
     SELECT column_name, data_type
     FROM information_schema.columns
     WHERE table_schema = ${qLiteral(schema)}
-      AND table_name   = ${qLiteral(tableName)}
+      AND table_name = ${qLiteral(tableName)}
     ORDER BY ordinal_position;
-  `.trim();
+  `;
+  return regexEscape(queryStr);
+};
 
 export const tableDataQuery = (
   schema: string,
   tableName: string,
-  limit: number = 300,
-  offset: number = 0
+  pagination?: { limit: number; offset: number }
 ) => {
+  const limit = pagination?.limit ?? 300;
+  const offset = pagination?.offset ?? 0;
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const queryStr = `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`;
+  return regexEscape(queryStr);
+};
 
-  return `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`.trim();
+export const tableRowCountQuery = (schema: string, tableName: string) => {
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const queryStr = `SELECT COUNT(*) FROM ${tableIdent};`;
+  return regexEscape(queryStr);
+};
+
+export const tableOidQuery = (schema: string, tableName: string) => {
+  const queryStr = `SELECT '${schema}.${tableName}'::regclass::oid;`;
+  return regexEscape(queryStr);
+};
+
+export const tableStructuresQuery = (
+  schema: string,
+  tableName: string,
+  oid: number
+) => {
+  const queryStr = `
+    SELECT
+      ordinal_position,
+      column_name,
+      udt_name AS data_type,
+      format_type(atttypid, atttypmod) AS FORMAT_TYPE,
+      numeric_precision,
+      datetime_precision,
+      numeric_scale,
+      character_maximum_length AS data_length,
+      is_nullable,
+      column_name AS CHECK,
+      column_name AS check_constraint,
+      column_default,
+      column_name AS foreign_key,
+      pg_catalog.col_description (${oid}, ordinal_position) AS comment
+    FROM
+      information_schema.columns
+      JOIN pg_attribute pa ON attrelid = ${oid}
+      AND attname = column_name
+    WHERE
+      table_name = ${qLiteral(tableName)}
+      AND table_schema = ${qLiteral(schema)}
+  `;
+  return regexEscape(queryStr);
+};
+
+export const tableConstraintsQuery = (schema: string, tableName: string) => {
+  const queryStr = `
+    SELECT
+      ix.relname AS index_name,
+      upper(am.amname) AS index_algorithm,
+      indisunique AS is_unique,
+      pg_get_indexdef(indexrelid) AS index_definition,
+      replace(regexp_replace(regexp_replace(regexp_replace(pg_get_indexdef(indexrelid), ' WHERE .+|INCLUDE .+', ''), ' WITH .+', ''), '.*\\((.*)\\)', '\\1'), ' ', '') AS column_name,
+      CASE
+        WHEN position(' WHERE ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+WHERE ', '')
+        WHEN position(' WITH ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+WITH ', '')
+        ELSE ''
+      END AS condition,
+      CASE
+        WHEN position(' INCLUDE ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+INCLUDE ', '')
+        WHEN position(' WITH ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+WITH ', '')
+        ELSE ''
+      END AS include,
+      pg_catalog.obj_description (i.indexrelid, 'pg_class') AS comment
+    FROM
+      pg_index i
+      JOIN pg_class t ON t.oid = i.indrelid
+      JOIN pg_class ix ON ix.oid = i.indexrelid
+      JOIN pg_namespace n ON t.relnamespace = n.oid
+      JOIN pg_am AS am ON ix.relam = am.oid
+    WHERE
+      t.relname = ${qLiteral(tableName)}
+      AND n.nspname = ${qLiteral(schema)}
+  `;
+  return regexEscape(queryStr);
+};
+
+export const createTableQuery = (
+  schema: string,
+  tableName: string,
+  columns: TableColumn[],
+  primaryKey: string | string[]
+) => {
+  const columnDefinitions = columns
+    .map((col) => {
+      let def = `${qIdent(col.column_name)} ${col.data_type}`;
+
+      // Add NOT NULL constraint if specified
+      if (col.is_nullable === "NOT NULL") {
+        def += " NOT NULL";
+      }
+
+      // Add default value if specified
+      if (col.column_default && col.column_default.trim() !== "") {
+        const defaultVal = col.column_default.trim();
+        // If it's a function call or special value, use as-is, otherwise quote it
+        if (
+          defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) || // Function calls like NOW()
+          defaultVal.match(/^[0-9]+$/) || // Numbers
+          defaultVal.toUpperCase() === "NULL"
+        ) {
+          def += ` DEFAULT ${defaultVal}`;
+        } else {
+          def += ` DEFAULT ${qLiteral(defaultVal)}`;
+        }
+      }
+
+      return def;
+    })
+    .join(",\n      ");
+
+  // Add PRIMARY KEY constraint (support single or multiple columns)
+  const primaryKeyColumns = Array.isArray(primaryKey)
+    ? primaryKey.filter(Boolean)
+    : primaryKey
+      ? [primaryKey]
+      : [];
+  const primaryKeyConstraint =
+    primaryKeyColumns.length > 0
+      ? `,\n      PRIMARY KEY (${primaryKeyColumns.map((key) => qIdent(key)).join(", ")})`
+      : "";
+
+  const queryStr = `
+    CREATE TABLE ${qIdent(schema)}.${qIdent(tableName)} (
+      ${columnDefinitions}${primaryKeyConstraint}
+    );
+  `;
+  return regexEscape(queryStr);
+};
+
+export const createSchemaQuery = (schema: string) => {
+  const queryStr = `CREATE SCHEMA ${qIdent(schema)};`;
+  return regexEscape(queryStr);
 };

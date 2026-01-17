@@ -20,7 +20,8 @@ function makeTableKeyLocal(table: Pick<TableItem, "schema" | "name">) {
 }
 
 function makeTableWindowId(table: Pick<TableItem, "schema" | "name">) {
-  return `table:${makeTableKeyLocal(table)}:${uuid()}`;
+  // Use deterministic ID based on schema and table name so patches persist across close/reopen
+  return `table:${makeTableKeyLocal(table)}`;
 }
 
 function isTableWindow(w: OpenWindow | undefined): w is TableWindow {
@@ -114,7 +115,9 @@ export function useConnectionWindows(activeProfileScreen: string) {
       addWindow(activeProfileScreen, win);
       setActiveWindowId(activeProfileScreen, win.id);
 
-      await loadTableData(table.schema, table.name);
+      if (!table.new) {
+        await loadTableData(table.schema, table.name);
+      }
 
       return win.id;
     },
@@ -190,5 +193,6 @@ export function useConnectionWindows(activeProfileScreen: string) {
     openSqlEditor,
     openTable,
     closeWindow,
+    makeTableWindowId,
   };
 }

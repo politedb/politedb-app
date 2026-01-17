@@ -1,29 +1,31 @@
 import { useMemo } from "preact/hooks";
-import { useScreenStore } from "../../stores/screen";
-import { useProfileStore } from "../../stores/profile";
+import { useScreenStore } from "src/stores/screen";
+import { useProfileStore } from "src/stores/profile";
 import {
   Unlock,
   Database,
   RefreshCw,
   Search,
-  MoreVertical,
   TabBottom,
   TabRight,
   TabLeft,
-} from "../../components/icons";
-import { cn } from "../../utils/cn";
-import { pickHostDbUser } from "../../utils/connection";
-import { Button } from "../../components/common/Button";
-import { TabViewMode } from "../../types";
+  SaveIcon,
+} from "src/components/icons";
+import { cn } from "src/utils/cn";
+import { pickHostDbUser } from "src/utils/connection";
+import { Button } from "src/components/common/Button";
+import { TabViewMode } from "src/types";
 
 interface Props {
   activeSchema?: string;
   activeTable?: string;
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
+  canSaveChanges?: boolean;
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
+  handleSaveChanges?: () => void;
 }
 
 export function MenuBar({
@@ -31,9 +33,11 @@ export function MenuBar({
   activeTable,
   viewMode = ["left"],
   loadTableError,
+  canSaveChanges,
   onViewModeChange,
   onRefresh,
   openSQLWindow,
+  handleSaveChanges,
 }: Props) {
   const { activeProfileScreen, profileTabs } = useScreenStore();
   const activeTab = profileTabs.find((tab) => tab.id === activeProfileScreen);
@@ -60,11 +64,14 @@ export function MenuBar({
   const connectionString = useMemo(() => {
     if (!connectionInfo) return "";
     const { engine, version, database, user, schema, table } = connectionInfo;
+    const tags = profile?.input?.tags ?? [];
+    const tagsString = tags.join(",").toUpperCase();
+
     if (!table) {
-      return `LOCAL | ${engine} ${version} : ${database} : ${user}`;
+      return `${tagsString} | ${engine} ${version} : ${database} : ${user}`;
     }
-    return `LOCAL | ${engine} ${version} : ${database} : ${user} : ${schema}.${table}`;
-  }, [connectionInfo]);
+    return `${tagsString} | ${engine} ${version} : ${database} : ${user} : ${schema}.${table}`;
+  }, [connectionInfo, profile]);
 
   return (
     <div class="flex h-12 items-center gap-2 border-b border-neutral-200 bg-white px-2">
@@ -112,6 +119,16 @@ export function MenuBar({
 
       {/* Right Icons */}
       <div class="flex items-center gap-2">
+        {canSaveChanges && (
+          <Button
+            variant="ghost"
+            className="p-2 hover:bg-neutral-50"
+            title={"Save Changes"}
+            onClick={handleSaveChanges}
+          >
+            <SaveIcon className="size-4.5 text-blue-600" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="p-1.5 hover:bg-neutral-50"
@@ -126,13 +143,6 @@ export function MenuBar({
           title="Search"
         >
           <Search className="size-4 text-neutral-600" />
-        </Button>
-        <Button
-          variant="ghost"
-          className="p-2 hover:bg-neutral-50"
-          title="More Options"
-        >
-          <MoreVertical className="size-4 text-neutral-600" />
         </Button>
 
         {/* View Mode Icons */}

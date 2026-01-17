@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { Box } from "src/components/common/Box";
 import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
@@ -5,26 +6,91 @@ import type {
   DatabaseEngine,
   OpenWindow,
   SqlEditorWindow,
-  TableData as TableDataType,
+  TableStructure as TableStructureType,
+  TableConstraint as TableConstraintType,
   TableWindow,
+  ActiveTableData,
 } from "src/types";
 import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
-import { useMemo } from "preact/hooks";
 import { SplitPane } from "src/components/SplitPane";
 import type { QueryResult } from "src/lib/tauri";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
+import { TableFooter } from "src/components/table/TableFooter";
+import { NewTablePane } from "src/components/table/NewTablePane";
+import { TableViewMode } from "src/components/table/TableViewToggle";
+import { DATA_KEYS } from "src/constant";
+import { PatchMap } from "src/utils/generateSql";
+import { DataAction, DataKey } from "src/stores/connection";
+import { TableStructurePane } from "src/components/table/TableStructurePane";
 
-export type ActiveTableData = {
-  data: TableDataType | null;
-  sizeInfo: any;
-  busy: boolean;
-  error: string | null;
-  connectionId: string | null;
-};
+// Extract flattened patches for a specific table window
+function extractPatchesForTable(
+  patchMap: PatchMap,
+  windowId: string
+): Record<string, Record<string, any>> | null {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return null;
 
-type PatchMap = Record<string, Record<string, Record<string, any>>>;
+  const { patches } = windowData;
+  const result: Record<string, Record<string, any>> = {};
+
+  // Combine update and create patches for data
+  const updatePatches = patches["update"]?.["data"] || {};
+  const createPatches = patches["create"]?.["data"] || {};
+
+  // Add update patches
+  for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+    result[rowKey] = { ...result[rowKey], ...patchData };
+  }
+
+  // Add create patches
+  for (const [rowKey, patchData] of Object.entries(createPatches)) {
+    result[rowKey] = { ...result[rowKey], ...patchData };
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// Extract new row keys (rows with "new-" prefix)
+function extractNewRowKeys(patchMap: PatchMap, windowId: string): string[] {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return [];
+
+  const createPatches = windowData.patches["create"]?.["data"] || {};
+  const newRowKeys: string[] = [];
+
+  for (const rowKey of Object.keys(createPatches)) {
+    if (rowKey.startsWith("new-")) {
+      newRowKeys.push(rowKey);
+    }
+  }
+
+  return newRowKeys;
+}
+
+// Extract deleted row indices for a specific dataKey
+function extractDeletedRows(
+  patchMap: PatchMap,
+  windowId: string,
+  dataKey: DataKey
+): Set<number> {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return new Set();
+
+  const deletePatches = windowData.patches["delete"]?.[dataKey] || {};
+  const deletedIndices = new Set<number>();
+
+  for (const rowKey of Object.keys(deletePatches)) {
+    const index = parseInt(rowKey, 10);
+    if (!isNaN(index)) {
+      deletedIndices.add(index);
+    }
+  }
+
+  return deletedIndices;
+}
 
 function EmptyState(props: { onNewSql: () => void }) {
   return (
@@ -72,6 +138,11 @@ function TableErrorState(props: { error: string }) {
 }
 
 export function ActiveWindowContent(props: {
+  activeProfileScreen: string;
+  activeSchema: string;
+  limit: number;
+  offset: number;
+  totalRows: number;
   activeWindow?: OpenWindow;
   activeSqlWindow?: SqlEditorWindow;
   activeTableWindow?: TableWindow;
@@ -90,35 +161,124 @@ export function ActiveWindowContent(props: {
     sql: string;
   }) => Promise<QueryResult>;
 
-  onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
+  onTableCreated?: (tableName: string) => void;
+
+  onPageChange: (limit: number, offset: number) => void;
+
+  onDataChange: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
+
   patchMap: PatchMap;
+  tableStructure: TableStructureType[];
+  tableConstraints: TableConstraintType[];
+
+  setTableStructure: (
+    screenId: string,
+    tableWindowId: string,
+    structure: TableStructureType[]
+  ) => void;
+
+  setTableConstraints: (
+    screenId: string,
+    tableWindowId: string,
+    constraints: TableConstraintType[]
+  ) => void;
 
   engine: DatabaseEngine;
 
   metadata: MetadataApi;
   metaKey: string;
+
+  newTableSaveRef?: { current: (() => Promise<void>) | null };
 }) {
   const {
+    activeProfileScreen,
     activeWindow,
     activeSqlWindow,
     activeTableWindow,
     activeTableData,
+    activeSchema,
+    limit,
+    offset,
+    totalRows,
     loadError,
     hasAnyWindow,
     runtimeConnectionId,
     onNewSql,
     onRunSql,
-    onCellChange,
+    onDataChange,
     patchMap,
+    tableStructure,
+    tableConstraints,
+    setTableStructure,
+    setTableConstraints,
     engine,
     metadata,
     metaKey,
+    onPageChange,
+    onTableCreated,
+    newTableSaveRef,
   } = props;
 
-  const tablePatches = useMemo(() => {
-    if (!activeTableWindow) return null;
-    return patchMap[activeTableWindow.id] ?? null;
-  }, [patchMap, activeTableWindow?.id]);
+  const [viewMode, setViewMode] = useState<TableViewMode>("data");
+
+  // Reset view mode to "data" when switching tables
+  useEffect(() => {
+    setViewMode("data");
+  }, [activeTableWindow?.id]);
+
+  // Extract patches for the current table window
+  const tablePatches = useMemo(
+    () =>
+      activeTableWindow
+        ? extractPatchesForTable(patchMap, activeTableWindow.id)
+        : null,
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const tableNewRowKeys = useMemo(
+    () =>
+      activeTableWindow
+        ? extractNewRowKeys(patchMap, activeTableWindow.id)
+        : [],
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const deletedStructureRows: Set<number> = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(
+            patchMap,
+            activeTableWindow.id,
+            DATA_KEYS.structure
+          )
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const deletedConstraintRows: Set<number> = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(
+            patchMap,
+            activeTableWindow.id,
+            DATA_KEYS.constraints
+          )
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const deletedDataRows: Set<number> = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.data)
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
 
   /* =========================
    * SQL runner hook
@@ -139,6 +299,143 @@ export function ActiveWindowContent(props: {
     connectionId: runtimeConnectionId,
     lazy: true,
   });
+
+  /* =========================
+   * Handle add column/index/row
+   * ========================= */
+
+  const handleAddColumn = useCallback(() => {
+    const newRecord: TableStructureType = {
+      column_name: "",
+      data_type: "",
+      is_nullable: false,
+      check: "",
+      column_default: "",
+      foreign_key: "",
+      comment: "",
+      isNew: true,
+    };
+
+    setTableStructure(activeProfileScreen, activeTableWindow!.id, [
+      ...tableStructure,
+      newRecord,
+    ]);
+
+    onDataChange?.(
+      "create",
+      DATA_KEYS.structure,
+      tableStructure.length,
+      newRecord
+    );
+  }, [
+    activeProfileScreen,
+    activeTableWindow?.id,
+    tableStructure,
+    setTableStructure,
+    onDataChange,
+  ]);
+
+  const handleAddIndex = useCallback(() => {
+    const newRecord: TableConstraintType = {
+      index_name: "",
+      index_algorithm: "",
+      is_unique: false,
+      column_name: "",
+      condition: "",
+      include: "",
+      comment: "",
+      isNew: true,
+    };
+
+    setTableConstraints(activeProfileScreen, activeTableWindow!.id, [
+      ...tableConstraints,
+      newRecord,
+    ]);
+
+    onDataChange?.(
+      "create",
+      DATA_KEYS.constraints,
+      tableConstraints.length,
+      newRecord
+    );
+  }, [
+    activeProfileScreen,
+    activeTableWindow?.id,
+    tableConstraints,
+    setTableConstraints,
+    onDataChange,
+  ]);
+
+  const handleAddRow = useCallback(() => {
+    if (!activeTableWindow) {
+      console.warn("handleAddRow: activeTableWindow is missing");
+      return;
+    }
+
+    if (!activeTableData.data || !activeTableData.data.columns) {
+      console.warn("handleAddRow: activeTableData.data or columns is missing");
+      return;
+    }
+
+    // Generate a unique row key for the new row (using timestamp + random)
+    const newRowKey = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Initialize the new row with empty values for all columns
+    const newRowData: Record<string, any> = {};
+    activeTableData.data.columns.forEach((col) => {
+      newRowData[col.name] = null;
+    });
+
+    // Create the new row patch with action="create"
+    // Pass the unique key as a string in the data, and use a sentinel number
+    // The actual rowKey will be extracted from the data or we'll modify the system
+    if (onDataChange) {
+      onDataChange("create", DATA_KEYS.data, -1, {
+        ...newRowData,
+        __rowKey: newRowKey,
+      });
+    } else {
+      console.warn("handleAddRow: onDataChange is not available");
+    }
+  }, [activeTableWindow, activeTableData.data, onDataChange]);
+
+  /* =========================
+   * Handle delete column/index/row
+   * ========================= */
+
+  const handleDeleteColumn = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the column as deleted
+      onDataChange?.("delete", DATA_KEYS.structure, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
+
+  const handleDeleteIndex = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the constraint as deleted
+      onDataChange?.("delete", DATA_KEYS.constraints, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
+
+  const handleDeleteRow = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the row as deleted
+      onDataChange?.("delete", DATA_KEYS.data, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
+
+  const handleFilters = useCallback(() => {
+    console.log("filters");
+  }, []);
 
   /* =========================
    * Global guards
@@ -205,21 +502,87 @@ export function ActiveWindowContent(props: {
    * Table window
    * ========================= */
   if (!activeTableWindow) return null;
+
+  // Check if this is a new table (starts with "new_table" or has no data/structure)
+  const isShowNewTablePane = useMemo(() => {
+    return (
+      activeTableWindow?.table.new ||
+      (!activeTableData.data && !activeTableData.busy && !activeTableData.error)
+    );
+  }, [activeTableWindow, activeTableData]);
+
+  // Show NewTablePane for new tables
+  if (isShowNewTablePane) {
+    return (
+      <NewTablePane
+        engine={engine}
+        activeSchema={activeSchema}
+        table={activeTableWindow.table}
+        onSuccess={onTableCreated}
+        activeProfileScreen={activeProfileScreen}
+        tableWindowId={activeTableWindow.id}
+        onSaveRef={(saveFn) => {
+          if (newTableSaveRef) {
+            newTableSaveRef.current = saveFn;
+          }
+        }}
+      />
+    );
+  }
+
   if (activeTableData.busy) return <LoadingTableState />;
 
   if (activeTableData.error) {
     return <TableErrorState error={String(activeTableData.error)} />;
   }
 
-  if (!activeTableData.data) return null;
-
   return (
-    <TableData
-      key={activeTableWindow.id}
-      columns={activeTableData.data.columns}
-      data={activeTableData.data.rows}
-      onCellChange={onCellChange}
-      patches={tablePatches}
-    />
+    <div class="flex h-full flex-col">
+      <div class="flex-1 overflow-hidden">
+        {viewMode === "structure" ? (
+          <div class="flex h-full flex-col overflow-hidden bg-white">
+            <TableStructurePane
+              engine={engine}
+              activeProfileScreen={activeProfileScreen}
+              activeTableWindow={activeTableWindow}
+              activeTableData={activeTableData}
+              tableStructure={tableStructure}
+              tableConstraints={tableConstraints}
+              onDataChange={onDataChange}
+              onAddNewColumn={handleAddColumn}
+              onDeleteColumn={handleDeleteColumn}
+              deletedStructureRows={deletedStructureRows}
+              onAddIndex={handleAddIndex}
+              onDeleteIndex={handleDeleteIndex}
+              deletedConstraintRows={deletedConstraintRows}
+            />
+          </div>
+        ) : (
+          <TableData
+            key={activeTableWindow.id}
+            columns={activeTableData.data?.columns ?? []}
+            data={activeTableData.data?.rows ?? []}
+            onCellChange={onDataChange}
+            patches={tablePatches}
+            newRowKeys={tableNewRowKeys}
+            onDeleteRow={handleDeleteRow}
+            deletedRows={deletedDataRows}
+          />
+        )}
+      </div>
+
+      <TableFooter
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        limit={limit}
+        offset={offset}
+        totalRows={totalRows}
+        onPageChange={onPageChange}
+        onAddColumn={handleAddColumn}
+        onAddIndex={handleAddIndex}
+        onAddRow={handleAddRow}
+        onFilters={handleFilters}
+      />
+    </div>
   );
 }

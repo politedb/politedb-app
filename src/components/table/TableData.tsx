@@ -1,4 +1,10 @@
-import { useMemo, useState, useEffect, useCallback } from "preact/hooks";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "preact/hooks";
 import {
   useReactTable,
   getCoreRowModel,
@@ -7,11 +13,12 @@ import {
   Row,
 } from "@tanstack/react-table";
 import { TableVirtuoso } from "react-virtuoso";
-import type { ColumnMeta } from "../../lib/tauri/types";
-import { cn } from "../../utils/cn";
-import { useNormalizeTableData } from "../../hooks/useNormalizeTableData";
+import type { ColumnMeta } from "src/lib/tauri/types";
+import { cn } from "src/utils/cn";
+import { useNormalizeTableData } from "src/hooks/useNormalizeTableData";
+import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { TableCell } from "./TableCell";
-import { TablePagination } from "./TablePagination";
+import { DataAction, DataKey } from "src/stores/connection";
 
 export type EditingCell = {
   rowIdx: number;
@@ -22,72 +29,206 @@ export type EditingCell = {
 interface Props {
   columns: ColumnMeta[];
   data: any[];
-  onCellChange?: (rowIndex: number, columnIndex: number, value: any) => void;
+  onCellChange?: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
+  onDeleteRow?: (rowIndex: number) => void;
 
   // rowIndexStr -> colName -> value
   patches?: Record<string, Record<string, any>> | null;
+
+  // Array of row keys that represent new rows (for create action)
+  newRowKeys?: string[];
+
+  // Set of row indices that are marked for deletion
+  deletedRows?: Set<number>;
 }
 
 function hasOwn(obj: any, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-export function TableData({ columns, data, onCellChange, patches }: Props) {
+export function TableData({
+  columns,
+  data,
+  patches,
+  onCellChange,
+  onDeleteRow,
+  newRowKeys = [],
+  deletedRows = new Set(),
+}: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(300);
   const [editedData, setEditedData] = useState<any[]>(tableData);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const keyboardContainerRef = useRef<HTMLDivElement>(null);
 
   // Update editedData when normalized data changes
   useEffect(() => {
     setEditedData(tableData);
   }, [tableData]);
 
+  // Create virtual rows for new rows from create patches
+  const newRows = useMemo(() => {
+    if (!patches || newRowKeys.length === 0) return [];
+
+    const rows: any[] = [];
+    for (const rowKey of newRowKeys) {
+      const patchData = patches[rowKey];
+      if (!patchData) continue;
+
+      // Create a normalized row object for the new row
+      const row: any = {};
+      columns.forEach((col) => {
+        const value = patchData[col.name];
+        row[col.name] = {
+          v: value !== undefined ? value : null,
+          t:
+            value === null
+              ? "Null"
+              : typeof value === "string"
+                ? "String"
+                : "Number",
+        };
+      });
+      rows.push({ row, rowKey, isNew: true });
+    }
+    return rows;
+  }, [patches, newRowKeys, columns]);
+
+  // Combine original data with new rows
+  const allData = useMemo(() => {
+    return [...editedData, ...newRows.map((nr) => nr.row)];
+  }, [editedData, newRows]);
+
+  // Get row key for a given row index (handles both numeric indices and new row string keys)
+  const getRowKey = useCallback(
+    (rowIndex: number): string => {
+      // Check if this is a new row (index >= editedData.length)
+      if (rowIndex >= editedData.length) {
+        const newRowIndex = rowIndex - editedData.length;
+        const newRow = newRows[newRowIndex];
+        return newRow?.rowKey || String(rowIndex);
+      }
+      return String(rowIndex);
+    },
+    [editedData.length, newRows]
+  );
+
+  // Check if a row is a new row (for create action)
+  const isNewRow = useCallback(
+    (rowIndex: number): boolean => {
+      return rowIndex >= editedData.length;
+    },
+    [editedData.length]
+  );
+
+  // Handle keyboard events for row deletion
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle backspace if:
+      // 1. Backspace key is pressed
+      // 2. No input field is focused (user is not editing a cell)
+      // 3. A row is selected
+      // 4. The row is not already deleted
+      // 5. The row is not a new row
+      if (
+        e.key === "Backspace" &&
+        document.activeElement?.tagName !== "INPUT" &&
+        selectedRowIndex !== null &&
+        !deletedRows.has(selectedRowIndex) &&
+        !isNewRow(selectedRowIndex)
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        onDeleteRow?.(selectedRowIndex);
+      }
+    };
+
+    const container = keyboardContainerRef.current;
+    if (container) {
+      container.addEventListener("keydown", handleKeyDown);
+      return () => {
+        container.removeEventListener("keydown", handleKeyDown);
+      };
+    }
+  }, [selectedRowIndex, deletedRows, onDeleteRow, isNewRow]);
+
   // For update cell rendering, prefer patched value over original
   const getPatchedValue = useCallback(
     (rowIndex: number, colName: string, fallback: any) => {
-      const rowPatch = patches?.[String(rowIndex)];
+      const rowKey = getRowKey(rowIndex);
+      const rowPatch = patches?.[rowKey];
       if (!rowPatch) return fallback;
       if (hasOwn(rowPatch, colName)) return rowPatch[colName];
       return fallback;
     },
-    [patches]
+    [patches, getRowKey]
   );
 
   const isCellPatched = useCallback(
     (rowIndex: number, colName: string) => {
-      const rowPatch = patches?.[String(rowIndex)];
+      const rowKey = getRowKey(rowIndex);
+      const rowPatch = patches?.[rowKey];
       return !!rowPatch && hasOwn(rowPatch, colName);
     },
-    [patches]
+    [patches, getRowKey]
   );
 
   const isRowPatched = useCallback(
     (rowIndex: number) => {
-      const rowPatch = patches?.[String(rowIndex)];
+      const rowKey = getRowKey(rowIndex);
+      const rowPatch = patches?.[rowKey];
       return !!rowPatch && Object.keys(rowPatch).length > 0;
     },
-    [patches]
+    [patches, getRowKey]
+  );
+
+  // Check if a row is deleted
+  const isRowDeleted = useCallback(
+    (rowIndex: number): boolean => {
+      // For new rows, check if they're in deletedRows
+      if (rowIndex >= editedData.length) {
+        return false; // New rows can't be deleted this way
+      }
+      return deletedRows.has(rowIndex);
+    },
+    [deletedRows, editedData.length]
   );
 
   // Define table columns
   const tableColumns = useMemo<ColumnDef<any>[]>(
-    () =>
-      columns.map((col) => ({
+    () => [
+      ...columns.map((col) => ({
         id: col.name,
-        accessorFn: (row) => row[col.name]?.v,
+        accessorFn: (row: any) => row[col.name]?.v,
         header: col.name,
-        cell: ({ cell, row, table }) => {
+        cell: ({
+          cell,
+          row,
+          table,
+        }: {
+          cell: any;
+          row: Row<any>;
+          table: any;
+        }) => {
           const rowIndex = row.index;
           const colName = cell.column.id;
+          const rowIsNew = isNewRow(rowIndex);
+          const rowKey = getRowKey(rowIndex);
+          const rowDeleted = isRowDeleted(rowIndex);
 
-          const originalValue = tableData[rowIndex]?.[colName];
+          const originalValue =
+            rowIndex < tableData.length ? tableData[rowIndex]?.[colName] : null;
 
           // prefer patch -> editedData -> original(tableData)
-          const fallback = editedData[rowIndex]?.[colName]?.v;
+          const fallback =
+            rowIndex < allData.length ? allData[rowIndex]?.[colName]?.v : null;
           const value = getPatchedValue(rowIndex, colName, fallback);
 
           const patched = isCellPatched(rowIndex, colName);
@@ -101,61 +242,86 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
               originalValue={originalValue}
               value={value}
               isPatched={patched}
+              isNewRow={rowIsNew}
+              rowKey={rowKey}
+              isDeleted={rowDeleted}
               onCellChange={onCellChange}
               setEditingCell={setEditingCell}
             />
           );
         },
       })),
+    ],
     [
       columns,
       tableData,
-      editedData,
+      allData,
       onCellChange,
       getPatchedValue,
       isCellPatched,
       setEditingCell,
+      isNewRow,
+      getRowKey,
+      isRowDeleted,
+      onDeleteRow,
     ]
   );
 
-  // Calculate pagination
-  const pagination = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-
-    return {
-      totalRows: tableData.length,
-      totalPages: Math.ceil(tableData.length / pageSize),
-      startIndex,
-      endIndex,
-    };
-  }, [tableData, pageSize, page]);
-
   const table = useReactTable({
-    data: editedData,
+    data: allData,
     columns: tableColumns,
     defaultColumn: {
       minSize: 60,
+      size: 80,
       maxSize: 800,
     },
     getCoreRowModel: getCoreRowModel(),
     columnResizeMode: "onChange",
     meta: {
       updateData: (rowIndex: number, columnId: string, value: any) => {
-        setEditedData((prev) =>
-          prev.map((row, index) => {
-            if (index === rowIndex) {
-              return {
-                ...prev[rowIndex]!,
-                [columnId]: { ...prev[rowIndex][columnId]!, v: value },
-              };
-            }
-            return row;
-          })
-        );
+        // Check if this is a new row
+        if (rowIndex < editedData.length) {
+          // Update existing row
+          setEditedData((prev) =>
+            prev.map((row, index) => {
+              if (index === rowIndex) {
+                return {
+                  ...prev[rowIndex]!,
+                  [columnId]: { ...prev[rowIndex][columnId]!, v: value },
+                };
+              }
+              return row;
+            })
+          );
+        }
       },
     },
   });
+
+  // Calculate empty rows to fill viewport
+  const { emptyRowsCount, containerRef: viewportContainerRef } =
+    useFillViewportTable({
+      dataLength: allData.length,
+      fillViewport: true,
+      headerHeight: 40,
+    });
+
+  // Merge keyboard container ref with viewport container ref
+  const mergedContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      keyboardContainerRef.current = node;
+      if (
+        viewportContainerRef &&
+        typeof viewportContainerRef === "object" &&
+        viewportContainerRef !== null &&
+        "current" in viewportContainerRef
+      ) {
+        (viewportContainerRef as { current: HTMLDivElement | null }).current =
+          node;
+      }
+    },
+    [viewportContainerRef]
+  );
 
   const columnSizeVars = useMemo(() => {
     const headers = table.getFlatHeaders();
@@ -168,21 +334,22 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
     return colSizes;
   }, [table.getState().columnSizingInfo, table.getState().columnSizing]);
 
-  const tableRows = useMemo(() => table.getRowModel().rows ?? [], [editedData]);
+  const tableRows = useMemo(() => table.getRowModel().rows ?? [], [allData]);
 
-  // Handle empty data
-  if (
-    !editedData ||
-    editedData.length === 0 ||
-    !tableRows ||
-    tableRows.length === 0
-  ) {
-    return (
-      <div class="flex h-full items-center justify-center bg-white">
-        <p class="text-neutral-500">No data to display</p>
-      </div>
-    );
-  }
+  // Create empty rows for viewport filling
+  const emptyRows = useMemo(() => {
+    if (emptyRowsCount === 0) return [];
+    return Array.from({ length: emptyRowsCount }, (_, idx) => ({
+      id: `empty-${idx}`,
+      index: allData.length + idx,
+      original: {},
+    }));
+  }, [emptyRowsCount, allData.length]);
+
+  const allRows = useMemo(
+    () => [...tableRows, ...emptyRows],
+    [tableRows, emptyRows]
+  );
 
   const renderHeader = useCallback(() => {
     return (
@@ -191,7 +358,7 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
           <th
             key={header.id}
             class={cn(
-              "relative border-r border-neutral-200 bg-neutral-50 px-4 py-2 select-none",
+              "relative border-r border-neutral-200 bg-neutral-50 p-2 select-none",
               "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
             style={{ width: `calc(var(--header-${header?.id}-size) * 1px)` }}
@@ -214,60 +381,96 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
   }, [table]);
 
   const renderRow = useCallback(
-    (rowIndex: number, row: Row<any>) => {
-      const rowPatched = isRowPatched(rowIndex);
+    (rowIndex: number, row: Row<any> | any) => {
+      const isEmptyRow = row.id?.startsWith("empty-");
+      const actualRowIndex = isEmptyRow ? row.index : rowIndex;
+      const rowPatched = !isEmptyRow && isRowPatched(actualRowIndex);
 
-      return row.getVisibleCells().map((cell, colIndex) => {
-        const isSelectingRow = editingCell?.rowIdx === rowIndex;
+      if (isEmptyRow) {
+        // Render empty row
+        return table
+          .getHeaderGroups()[0]
+          ?.headers.map((header) => (
+            <td
+              key={header.id}
+              class={cn("h-[28px] border border-neutral-200 px-1")}
+              style={{ width: `calc(var(--col-${header.id}-size) * 1px)` }}
+            />
+          ));
+      }
+
+      const rowIsNew = isNewRow(actualRowIndex);
+      const isSelectingRow = editingCell?.rowIdx === actualRowIndex;
+      const rowDeleted = isRowDeleted(actualRowIndex);
+
+      return row.getVisibleCells().map((cell: any, colIndex: number) => {
         const isEditing = isSelectingRow && editingCell?.colIdx === colIndex;
 
         const colName = cell.column.id;
-        const cellPatched = isCellPatched(rowIndex, colName);
+        const cellPatched = isCellPatched(actualRowIndex, colName);
 
         return (
           <td
             key={cell.id}
             tabIndex={0}
-            style={{ width: cell.column.getSize() }}
+            style={{ width: `calc(var(--col-${cell.column.id}-size) * 1px)` }}
             class={cn(
               "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
-              isSelectingRow ? "bg-blue-200" : "hover:bg-blue-50",
-              rowPatched && !isSelectingRow && "bg-amber-50/40",
+              isSelectingRow ? "bg-blue-200!" : "hover:bg-blue-50",
+              rowIsNew && !isSelectingRow && "bg-green-50/40",
+              rowDeleted && !isSelectingRow && "bg-red-50/20 opacity-50",
+              rowPatched &&
+                !isSelectingRow &&
+                !rowIsNew &&
+                !rowDeleted &&
+                "bg-amber-50/40",
               cellPatched && !isSelectingRow && "ring-1 ring-amber-200",
               isEditing && "outline-2 -outline-offset-2 outline-blue-500"
             )}
+            onMouseDown={(e) => {
+              // Set selected row when clicking on a cell
+              e.stopPropagation();
+              setSelectedRowIndex(actualRowIndex);
+              // Focus the container to enable keyboard events
+              keyboardContainerRef.current?.focus();
+            }}
           >
             {flexRender(cell.column.columnDef.cell, cell.getContext())}
           </td>
         );
       });
     },
-    [editingCell?.rowIdx, editingCell?.colIdx, isCellPatched, isRowPatched]
+    [
+      editingCell?.rowIdx,
+      editingCell?.colIdx,
+      isCellPatched,
+      isRowPatched,
+      isNewRow,
+      isRowDeleted,
+      table,
+    ]
   );
 
   return (
-    <div class="flex h-full flex-col overflow-hidden bg-white">
+    <div
+      ref={mergedContainerRef}
+      class="flex h-full flex-col overflow-hidden bg-white"
+      tabIndex={0}
+    >
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
-          key={`table-${tableRows.length}-${columns.length}-${page}`}
+          key={`table-${allRows.length}-${columns.length}`}
           style={{
             ...columnSizeVars,
+            "--table-width": `${table.getTotalSize()}px`,
             height: "100%",
-            width: table.getTotalSize(),
+            overflowY: emptyRowsCount > 0 ? "hidden" : "auto",
           }}
-          data={tableRows}
+          data={allRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
         />
       </div>
-
-      <TablePagination
-        pagination={pagination}
-        page={page}
-        pageSize={pageSize}
-        setPage={setPage}
-        setPageSize={setPageSize}
-      />
     </div>
   );
 }

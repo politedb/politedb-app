@@ -1,0 +1,662 @@
+import type {
+  TableData as TableDataType,
+  TableStructure as TableStructureType,
+  TableConstraint as TableConstraintType,
+  TableWindow,
+} from "src/types";
+import { cellToString } from "./convert";
+import { TableDataState } from "src/stores/connection";
+
+// patchMap[action][dataKey][rowKey] = data
+export type PatchData = Record<string, Record<string, Record<string, any>>>;
+
+export type PatchMap = {
+  [windowId: string]: {
+    tableData: TableDataState;
+    tableWindow: TableWindow;
+    patches: PatchData;
+  };
+};
+
+function qIdent(ident: string) {
+  return `"${String(ident).replace(/"/g, `""`)}"`;
+}
+
+function qLiteral(v: any): string {
+  if (v === null || v === undefined) {
+    return "NULL";
+  }
+  const str = String(v);
+  // Escape single quotes
+  return `'${str.replace(/'/g, "''")}'`;
+}
+
+function formatValue(value: any): string {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return qLiteral(value);
+}
+
+/**
+ * Generate SQL UPDATE statements from patchMap for data changes
+ */
+export function generateUpdateSqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  tableData: TableDataType | null,
+  _engine: string = "postgres"
+): string[] {
+  const sqlStatements: string[] = [];
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+
+  // Get update patches for data
+  const updatePatches = patchMap["update"]?.["data"];
+  if (!updatePatches || !tableData) {
+    return sqlStatements;
+  }
+
+  const columns = tableData.columns;
+  const rows = tableData.rows;
+
+  // Process each row that has updates
+  for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+    const rowIndex = parseInt(rowKey, 10);
+    if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= rows.length) {
+      continue;
+    }
+
+    const originalRow = rows[rowIndex];
+    if (!originalRow || !Array.isArray(originalRow)) {
+      continue;
+    }
+
+    // Build SET clause from patch data
+    const setClauses: string[] = [];
+    for (const [colName, newValue] of Object.entries(patchData)) {
+      const colIndex = columns.findIndex((c) => c.name === colName);
+      if (colIndex === -1) continue;
+
+      setClauses.push(`${qIdent(colName)} = ${formatValue(newValue)}`);
+    }
+
+    if (setClauses.length === 0) {
+      continue;
+    }
+
+    // Build WHERE clause using all original column values
+    // This ensures we update the correct row even if data has changed
+    const whereClauses: string[] = [];
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (!col) continue;
+
+      const cellValue = originalRow[i];
+      const originalValue = cellToString(cellValue);
+      const colName = qIdent(col.name);
+
+      // Handle null/empty values
+      if (
+        cellValue === null ||
+        cellValue === undefined ||
+        originalValue === ""
+      ) {
+        whereClauses.push(`${colName} IS NULL`);
+      } else {
+        // Extract actual value from cell object if needed
+        let valueToCompare: any = originalValue;
+        if (typeof cellValue === "object" && cellValue !== null) {
+          if ("v" in cellValue) {
+            valueToCompare = (cellValue as any).v;
+          } else if ((cellValue as any).t === "Null") {
+            whereClauses.push(`${colName} IS NULL`);
+            continue;
+          }
+        }
+        whereClauses.push(`${colName} = ${formatValue(valueToCompare)}`);
+      }
+    }
+
+    if (whereClauses.length === 0) {
+      continue;
+    }
+
+    const sql = `UPDATE ${tableIdent}\nSET ${setClauses.join(", ")}\nWHERE ${whereClauses.join(" AND ")};`;
+    sqlStatements.push(sql);
+  }
+
+  return sqlStatements;
+}
+
+/**
+ * Generate SQL INSERT statements from patchMap for data changes
+ */
+export function generateInsertSqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  _engine: string = "postgres"
+): string[] {
+  const sqlStatements: string[] = [];
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+
+  // Get create patches for data only (not structure or constraints)
+  const createPatches = patchMap["create"]?.["data"];
+  if (!createPatches) {
+    return sqlStatements;
+  }
+
+  // Process each new row
+  for (const [_rowKey, patchData] of Object.entries(createPatches)) {
+    const columns: string[] = [];
+    const values: string[] = [];
+
+    for (const [colName, value] of Object.entries(patchData)) {
+      columns.push(qIdent(colName));
+      values.push(formatValue(value));
+    }
+
+    if (columns.length === 0) {
+      continue;
+    }
+
+    const sql = `INSERT INTO ${tableIdent} (${columns.join(", ")})\nVALUES (${values.join(", ")});`;
+    sqlStatements.push(sql);
+  }
+
+  return sqlStatements;
+}
+
+/**
+ * Generate SQL ALTER TABLE statements from patchMap for structure changes
+ */
+export function generateStructureSqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  initStructure: TableStructureType[] | null,
+  initConstraints: TableConstraintType[] | null = null,
+  _engine: string = "postgres"
+): string[] {
+  const sqlStatements: string[] = [];
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+
+  // Handle CREATE (new columns)
+  const createPatches = patchMap["create"]?.["structure"];
+
+  if (createPatches) {
+    for (const [_rowKey, patchData] of Object.entries(createPatches)) {
+      const columnName = patchData.column_name?.trim();
+      const dataType = patchData.data_type?.trim();
+      const isNullable = patchData.is_nullable;
+      const columnDefault = patchData.column_default;
+
+      // Skip if column name or data type is empty or missing
+      if (!columnName || !dataType || columnName === "" || dataType === "") {
+        continue;
+      }
+
+      let columnDef = `${qIdent(columnName)} ${dataType}`;
+      if (!isNullable) {
+        columnDef += " NOT NULL";
+      }
+      if (columnDefault && columnDefault.trim() !== "") {
+        const defaultVal = columnDefault.trim();
+        if (
+          defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) ||
+          defaultVal.match(/^[0-9]+$/) ||
+          defaultVal.toUpperCase() === "NULL"
+        ) {
+          columnDef += ` DEFAULT ${defaultVal}`;
+        } else {
+          columnDef += ` DEFAULT ${qLiteral(defaultVal)}`;
+        }
+      }
+
+      const sql = `ALTER TABLE ${tableIdent} ADD COLUMN ${columnDef};`;
+      sqlStatements.push(sql);
+    }
+  }
+
+  // Handle UPDATE (modify existing columns)
+  const updatePatches = patchMap["update"]?.["structure"];
+  if (updatePatches) {
+    // Handle table metadata changes (rowIndex: -1) - table name and primary key
+    const metadataPatch = updatePatches["-1"];
+    if (metadataPatch) {
+      // Handle table name change
+      if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} RENAME TO ${qIdent(metadataPatch.tableName)};`
+        );
+      }
+
+      // Handle primary key change
+      if (metadataPatch.primaryKey && Array.isArray(metadataPatch.primaryKey)) {
+        const newPrimaryKey = metadataPatch.primaryKey.filter(Boolean).sort();
+
+        // Find existing primary key constraint
+        const existingPkConstraint = initConstraints?.find((c) =>
+          c.index_name.toLowerCase().includes("pkey")
+        );
+
+        // Get existing primary key columns
+        const existingPkColumns = existingPkConstraint
+          ? existingPkConstraint.column_name
+              .split(",")
+              .map((col) => col.trim())
+              .filter(Boolean)
+              .sort()
+          : [];
+
+        // Only change primary key if it's actually different
+        const pkChanged =
+          newPrimaryKey.length !== existingPkColumns.length ||
+          newPrimaryKey.some(
+            (col: string, idx: number) => col !== existingPkColumns[idx]
+          );
+
+        if (pkChanged) {
+          // Drop existing primary key if it exists
+          if (existingPkConstraint) {
+            sqlStatements.push(
+              `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingPkConstraint.index_name)};`
+            );
+          }
+
+          // Add new primary key if columns are specified
+          if (newPrimaryKey.length > 0) {
+            const pkColumns = newPrimaryKey
+              .map((col: string) => qIdent(col))
+              .join(", ");
+            sqlStatements.push(
+              `ALTER TABLE ${tableIdent} ADD PRIMARY KEY (${pkColumns});`
+            );
+          }
+        }
+      }
+    }
+
+    // Handle column structure changes
+    if (initStructure) {
+      // First pass: Handle column renames (must be done before other ALTER COLUMN statements)
+      for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+        const rowIndex = parseInt(rowKey, 10);
+        // Skip metadata changes (handled above) and invalid indices
+        if (
+          isNaN(rowIndex) ||
+          rowIndex < 0 ||
+          rowIndex >= initStructure.length
+        ) {
+          continue;
+        }
+
+        const originalColumn = initStructure[rowIndex];
+        if (!originalColumn) continue;
+
+        // Handle column name change (RENAME COLUMN must be done separately)
+        if (
+          patchData.column_name &&
+          patchData.column_name !== originalColumn.column_name &&
+          patchData.column_name.trim() !== ""
+        ) {
+          const oldName = originalColumn.column_name;
+          const newName = patchData.column_name.trim();
+          const sql = `ALTER TABLE ${tableIdent} RENAME COLUMN ${qIdent(oldName)} TO ${qIdent(newName)};`;
+          sqlStatements.push(sql);
+        }
+      }
+
+      // Second pass: Handle other column changes (use new column name if renamed)
+      for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+        const rowIndex = parseInt(rowKey, 10);
+        // Skip metadata changes (handled above) and invalid indices
+        if (
+          isNaN(rowIndex) ||
+          rowIndex < 0 ||
+          rowIndex >= initStructure.length
+        ) {
+          continue;
+        }
+
+        const originalColumn = initStructure[rowIndex];
+        if (!originalColumn) continue;
+
+        // Use new column name if it was changed, otherwise use original
+        const columnName =
+          patchData.column_name &&
+          patchData.column_name !== originalColumn.column_name &&
+          patchData.column_name.trim() !== ""
+            ? patchData.column_name.trim()
+            : originalColumn.column_name;
+
+        const changes: string[] = [];
+
+        // Handle data type change
+        if (
+          patchData.data_type &&
+          patchData.data_type !== originalColumn.data_type
+        ) {
+          changes.push(`TYPE ${patchData.data_type}`);
+        }
+
+        // Handle nullable change
+        if (
+          "is_nullable" in patchData &&
+          patchData.is_nullable !== originalColumn.is_nullable
+        ) {
+          if (patchData.is_nullable) {
+            changes.push("DROP NOT NULL");
+          } else {
+            changes.push("SET NOT NULL");
+          }
+        }
+
+        // Handle default change
+        if (
+          "column_default" in patchData &&
+          patchData.column_default !== originalColumn.column_default
+        ) {
+          if (
+            !patchData.column_default ||
+            patchData.column_default.trim() === ""
+          ) {
+            changes.push("DROP DEFAULT");
+          } else {
+            const defaultVal = patchData.column_default.trim();
+            if (
+              defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) ||
+              defaultVal.match(/^[0-9]+$/) ||
+              defaultVal.toUpperCase() === "NULL"
+            ) {
+              changes.push(`SET DEFAULT ${defaultVal}`);
+            } else {
+              changes.push(`SET DEFAULT ${qLiteral(defaultVal)}`);
+            }
+          }
+        }
+
+        // Only generate ALTER COLUMN if there are changes (excluding column_name which is handled above)
+        if (changes.length > 0) {
+          const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName)} ${changes.join(", ")};`;
+          sqlStatements.push(sql);
+        }
+      }
+    }
+  }
+
+  // Handle DELETE (drop columns)
+  const deletePatches = patchMap["delete"]?.["structure"];
+  if (deletePatches && initStructure) {
+    for (const [rowKey] of Object.entries(deletePatches)) {
+      const rowIndex = parseInt(rowKey, 10);
+      if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= initStructure.length) {
+        continue;
+      }
+
+      const originalColumn = initStructure[rowIndex];
+      if (!originalColumn) continue;
+
+      const sql = `ALTER TABLE ${tableIdent} DROP COLUMN ${qIdent(originalColumn.column_name)};`;
+      sqlStatements.push(sql);
+    }
+  }
+
+  return sqlStatements;
+}
+
+/**
+ * Generate SQL ALTER TABLE statements from patchMap for constraint changes
+ */
+export function generateConstraintSqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  initConstraints: TableConstraintType[] | null,
+  _engine: string = "postgres"
+): string[] {
+  const sqlStatements: string[] = [];
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+
+  // Handle CREATE (new indexes/constraints)
+  const createPatches = patchMap["create"]?.["constraints"];
+  if (createPatches && initConstraints) {
+    for (const [_rowKey, patchData] of Object.entries(createPatches)) {
+      const indexName = patchData.index_name;
+      const columnName = patchData.column_name;
+      const isUnique = patchData.is_unique;
+      const algorithm = patchData.index_algorithm;
+
+      if (!indexName || !columnName) {
+        continue;
+      }
+
+      const uniqueClause = isUnique ? "UNIQUE " : "";
+      const algorithmClause = algorithm ? `USING ${algorithm} ` : "";
+      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName)});`;
+      sqlStatements.push(sql);
+    }
+  }
+
+  // Handle UPDATE (modify existing constraints) - typically requires DROP and CREATE
+  const updatePatches = patchMap["update"]?.["constraints"];
+  if (updatePatches && initConstraints) {
+    for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+      const rowIndex = parseInt(rowKey, 10);
+      if (
+        isNaN(rowIndex) ||
+        rowIndex < 0 ||
+        rowIndex >= initConstraints.length
+      ) {
+        continue;
+      }
+
+      const originalConstraint = initConstraints[rowIndex];
+      if (!originalConstraint) continue;
+
+      const indexName = originalConstraint.index_name;
+
+      // For updates, we typically need to drop and recreate
+      // Drop the old index
+      sqlStatements.push(
+        `DROP INDEX IF EXISTS ${qIdent(schema)}.${qIdent(indexName)};`
+      );
+
+      // Create the new index with updated properties
+      const newIndexName = patchData.index_name || indexName;
+      const columnName =
+        patchData.column_name || originalConstraint.column_name;
+      const isUnique =
+        "is_unique" in patchData
+          ? patchData.is_unique
+          : originalConstraint.is_unique;
+      const algorithm =
+        patchData.index_algorithm || originalConstraint.index_algorithm;
+
+      const uniqueClause = isUnique ? "UNIQUE " : "";
+      const algorithmClause = algorithm ? `USING ${algorithm} ` : "";
+      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(newIndexName)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName)});`;
+      sqlStatements.push(sql);
+    }
+  }
+
+  // Handle DELETE (drop indexes/constraints)
+  const deletePatches = patchMap["delete"]?.["constraints"];
+  if (deletePatches && initConstraints) {
+    for (const [rowKey] of Object.entries(deletePatches)) {
+      const rowIndex = parseInt(rowKey, 10);
+      if (
+        isNaN(rowIndex) ||
+        rowIndex < 0 ||
+        rowIndex >= initConstraints.length
+      ) {
+        continue;
+      }
+
+      const originalConstraint = initConstraints[rowIndex];
+      if (!originalConstraint) continue;
+
+      const sql = `DROP INDEX IF EXISTS ${qIdent(schema)}.${qIdent(originalConstraint.index_name)};`;
+      sqlStatements.push(sql);
+    }
+  }
+
+  return sqlStatements;
+}
+
+/**
+ * Generate SQL DELETE statements from patchMap for data changes
+ */
+export function generateDeleteSqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  tableData: TableDataType | null,
+  _engine: string = "postgres"
+): string[] {
+  const sqlStatements: string[] = [];
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+
+  // Get delete patches for data
+  const deletePatches = patchMap["delete"]?.["data"];
+  if (!deletePatches || !tableData) {
+    return sqlStatements;
+  }
+
+  const columns = tableData.columns;
+  const rows = tableData.rows;
+
+  // Process each row to delete
+  for (const [rowKey] of Object.entries(deletePatches)) {
+    const rowIndex = parseInt(rowKey, 10);
+    if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= rows.length) {
+      continue;
+    }
+
+    const originalRow = rows[rowIndex];
+    if (!originalRow || !Array.isArray(originalRow)) {
+      continue;
+    }
+
+    // Build WHERE clause using all original column values
+    const whereClauses: string[] = [];
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (!col) continue;
+
+      const cellValue = originalRow[i];
+      const originalValue = cellToString(cellValue);
+      const colName = qIdent(col.name);
+
+      // Handle null/empty values
+      if (
+        cellValue === null ||
+        cellValue === undefined ||
+        originalValue === ""
+      ) {
+        whereClauses.push(`${colName} IS NULL`);
+      } else {
+        // Extract actual value from cell object if needed
+        let valueToCompare: any = originalValue;
+        if (typeof cellValue === "object" && cellValue !== null) {
+          if ("v" in cellValue) {
+            valueToCompare = (cellValue as any).v;
+          } else if ((cellValue as any).t === "Null") {
+            whereClauses.push(`${colName} IS NULL`);
+            continue;
+          }
+        }
+        whereClauses.push(`${colName} = ${formatValue(valueToCompare)}`);
+      }
+    }
+
+    if (whereClauses.length === 0) {
+      continue;
+    }
+
+    const sql = `DELETE FROM ${tableIdent}\nWHERE ${whereClauses.join(" AND ")};`;
+    sqlStatements.push(sql);
+  }
+
+  return sqlStatements;
+}
+
+/**
+ * Generate all SQL statements from patchMap
+ */
+export function generateSqlFromPatches(
+  patchMap: PatchMap,
+  engine: string = "postgres"
+): string[] {
+  // engine parameter is passed to individual functions for future use
+  const allStatements: string[] = [];
+
+  for (const [_windowId, patchData] of Object.entries(patchMap)) {
+    const { tableData, tableWindow, patches } = patchData;
+    if (!tableData || !tableWindow || !patches) {
+      continue;
+    }
+
+    const { schema, name: tableName } = tableWindow.table;
+    const { data, structure, constraints } = tableData;
+
+    // Generate structure ALTER TABLE statements (should come before data changes)
+    const structureStatements = generateStructureSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      structure,
+      constraints,
+      engine
+    );
+    allStatements.push(...structureStatements);
+
+    // Generate constraint ALTER TABLE statements
+    const constraintStatements = generateConstraintSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      constraints,
+      engine
+    );
+    allStatements.push(...constraintStatements);
+
+    // Generate INSERT statements
+    const insertStatements = generateInsertSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      engine
+    );
+    allStatements.push(...insertStatements);
+
+    // Generate UPDATE statements
+    const updateStatements = generateUpdateSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      data,
+      engine
+    );
+    allStatements.push(...updateStatements);
+
+    // Generate DELETE statements
+    const deleteStatements = generateDeleteSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      data,
+      engine
+    );
+    allStatements.push(...deleteStatements);
+  }
+
+  return allStatements;
+}

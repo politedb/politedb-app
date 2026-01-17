@@ -1,8 +1,8 @@
 import { JSX } from "preact";
-import { useEffect, useMemo, useRef } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 
-type Align = "left" | "right";
+type Align = "left" | "right" | "top";
 
 export function MenuPopover(props: {
   open: boolean;
@@ -27,6 +27,22 @@ export function MenuPopover(props: {
     children,
   } = props;
   const panelRef = useRef<HTMLDivElement>(null);
+  const [menuHeight, setMenuHeight] = useState<number | null>(null);
+
+  // Measure menu height after render (for top alignment)
+  useEffect(() => {
+    if (open && align === "top" && panelRef.current) {
+      // Use requestAnimationFrame to ensure DOM is fully rendered
+      requestAnimationFrame(() => {
+        if (panelRef.current) {
+          const height = panelRef.current.offsetHeight;
+          setMenuHeight(height);
+        }
+      });
+    } else if (!open) {
+      setMenuHeight(null);
+    }
+  }, [open, align]);
 
   // Click outside + ESC
   useEffect(() => {
@@ -68,6 +84,30 @@ export function MenuPopover(props: {
     // Anchor menu: fixed near anchor
     if (anchorEl) {
       const r = anchorEl.getBoundingClientRect();
+
+      if (align === "top") {
+        // Position above the anchor
+        // Hide until we have the measured height to prevent flicker
+        if (menuHeight === null) {
+          return {
+            position: "fixed",
+            left: "-9999px",
+            top: "-9999px",
+            width: `${width}px`,
+            visibility: "hidden" as const,
+          };
+        }
+        const top = r.top - menuHeight - 8;
+        const left = r.left;
+        return {
+          position: "fixed",
+          left: `${Math.max(8, left)}px`,
+          top: `${Math.max(8, top)}px`,
+          width: `${width}px`,
+        };
+      }
+
+      // Default: position below the anchor
       const top = r.bottom + 8;
       const left = align === "right" ? r.right - width : r.left;
       return {
@@ -79,7 +119,7 @@ export function MenuPopover(props: {
     }
 
     return { display: "none" };
-  }, [anchorEl, point, align, width]);
+  }, [anchorEl, point, align, width, menuHeight]);
 
   if (!open) return null;
 

@@ -15,7 +15,7 @@ import type {
 } from "./types";
 import { CMD } from "./commands";
 import { secretsDelete, secretsGet, secretsSet } from "./secrets";
-import { DatabaseEngine } from "src/types";
+import type { DatabaseEngine } from "src/types";
 
 /* ============================================================================
  * Local types
