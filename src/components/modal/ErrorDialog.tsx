@@ -27,7 +27,7 @@ export function ErrorDialog({ open, error, onClose }: Props) {
         </DialogHeader>
 
         <div className="space-y-2 text-sm text-neutral-800">
-          <p>ERROR: {error}</p>
+          <p>ERROR: {error.replace("ERROR: ", "")}</p>
           <p>All changes were reverted (DDL statements can't be reverted).</p>
         </div>
       </DialogContent>

@@ -1,10 +1,4 @@
-import {
-  useMemo,
-  useState,
-  useCallback,
-  useEffect,
-  useRef,
-} from "preact/hooks";
+import { useMemo, useCallback, useRef } from "preact/hooks";
 import type { TableConstraint } from "src/types";
 import {
   Table,
@@ -12,8 +6,9 @@ import {
 } from "src/components/common/Table";
 import { Input } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
-import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
-import { DATA_KEYS } from "src/constant";
+import { DataAction, DataKey } from "src/stores/connection";
+import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
+import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 
 const COLUMNS_NAME: (keyof TableConstraint)[] = [
   "index_name",
@@ -55,39 +50,26 @@ export function TableConstraints({
   deletedRows = new Set(),
   onDataChange,
 }: Props) {
-  const setEditedData = useConnectionStore((s) => s.updateTableConstraints);
-
-  const [selectedRow, setSelectedRow] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const handleDataChange = useCallback(
-    (
-      rowIndex: number,
-      field: keyof TableConstraint,
-      value: string | boolean
-    ) => {
-      setEditedData(
-        activeProfileScreen,
-        activeTableWindowId,
-        rowIndex,
-        field,
-        value
-      );
-
-      const isNewRow = !initData || rowIndex >= initData.length;
-      const action = isNewRow ? "create" : "update";
-      onDataChange?.(action, DATA_KEYS.constraints, rowIndex, {
-        [field]: value,
-      });
-    },
-    [
-      initData?.length,
+  // Use constraint operations hook
+  const { handleDataChange, handleDeleteRecord } = useTableConstraintOperations(
+    {
       activeProfileScreen,
       activeTableWindowId,
-      setEditedData,
+      initData,
+      editedData,
       onDataChange,
-    ]
+      onDeleteRecord,
+    }
   );
+
+  // Use row selection hook
+  const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
+    onDeleteRow: handleDeleteRecord,
+    deletedRows,
+    containerRef: containerRef,
+  });
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
@@ -98,37 +80,6 @@ export function TableConstraints({
     },
     [editedData.length, onAddNewRecord]
   );
-
-  // Handle keyboard events for row deletion
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle backspace if:
-      // 1. Backspace key is pressed
-      // 2. No input field is focused (user is not editing a cell)
-      // 3. A row is selected
-      // 4. The row is not already deleted
-      // 5. The row is not a new row (empty row)
-      if (
-        e.key === "Backspace" &&
-        document.activeElement?.tagName !== "INPUT" &&
-        selectedRow !== null &&
-        !deletedRows.has(selectedRow) &&
-        selectedRow < editedData.length
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        onDeleteRecord?.(selectedRow);
-      }
-    };
-
-    const container = containerRef.current;
-    if (container) {
-      container.addEventListener("keydown", handleKeyDown);
-      return () => {
-        container.removeEventListener("keydown", handleKeyDown);
-      };
-    }
-  }, [selectedRow, deletedRows, onDeleteRecord, editedData.length]);
 
   const tableData = useMemo(() => {
     if (!editedData.length || error || busy) {
@@ -147,7 +98,7 @@ export function TableConstraints({
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
-          const isRowSelected = selectedRow === index;
+          const isRowSelected = selectedRowIndex === index;
 
           return (
             <Input
@@ -204,14 +155,12 @@ export function TableConstraints({
         stickyHeader
         fillViewport
         emptyMessage="No constraints data available"
-        selectedRow={selectedRow}
+        selectedRow={selectedRowIndex}
         rowClassName={(_row, index) => {
           return deletedRows.has(index) ? "bg-red-300!" : "";
         }}
         onSelectRow={(_row, index) => {
-          setSelectedRow(index);
-          // Focus container to enable keyboard events
-          containerRef.current?.focus();
+          handleRowSelect(index);
         }}
         onDoubleClickRow={handleDoubleClickRow}
       />

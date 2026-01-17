@@ -1,10 +1,4 @@
-import {
-  useMemo,
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-} from "preact/hooks";
+import { useMemo, useState, useEffect, useCallback } from "preact/hooks";
 import {
   useReactTable,
   getCoreRowModel,
@@ -17,6 +11,8 @@ import type { ColumnMeta } from "src/lib/tauri/types";
 import { cn } from "src/utils/cn";
 import { useNormalizeTableData } from "src/hooks/useNormalizeTableData";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
+import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
+import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { TableCell } from "./TableCell";
 import { DataAction, DataKey } from "src/stores/connection";
 
@@ -47,10 +43,6 @@ interface Props {
   deletedRows?: Set<number>;
 }
 
-function hasOwn(obj: any, key: string) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
-
 export function TableData({
   columns,
   data,
@@ -65,8 +57,6 @@ export function TableData({
 
   const [editedData, setEditedData] = useState<any[]>(tableData);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
-  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
-  const keyboardContainerRef = useRef<HTMLDivElement>(null);
 
   // Update editedData when normalized data changes
   useEffect(() => {
@@ -106,100 +96,27 @@ export function TableData({
     return [...editedData, ...newRows.map((nr) => nr.row)];
   }, [editedData, newRows]);
 
-  // Get row key for a given row index (handles both numeric indices and new row string keys)
-  const getRowKey = useCallback(
-    (rowIndex: number): string => {
-      // Check if this is a new row (index >= editedData.length)
-      if (rowIndex >= editedData.length) {
-        const newRowIndex = rowIndex - editedData.length;
-        const newRow = newRows[newRowIndex];
-        return newRow?.rowKey || String(rowIndex);
-      }
-      return String(rowIndex);
-    },
-    [editedData.length, newRows]
-  );
+  // Use patches hook for patch-related logic
+  const {
+    getRowKey,
+    isNewRow,
+    isRowDeleted,
+    getPatchedValue,
+    isCellPatched,
+    isRowPatched,
+  } = useTablePatches({
+    patches,
+    newRowKeys,
+    deletedRows,
+    editedDataLength: editedData.length,
+  });
 
-  // Check if a row is a new row (for create action)
-  const isNewRow = useCallback(
-    (rowIndex: number): boolean => {
-      return rowIndex >= editedData.length;
-    },
-    [editedData.length]
-  );
-
-  // Handle keyboard events for row deletion
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle backspace if:
-      // 1. Backspace key is pressed
-      // 2. No input field is focused (user is not editing a cell)
-      // 3. A row is selected
-      // 4. The row is not already deleted
-      // 5. The row is not a new row
-      if (
-        e.key === "Backspace" &&
-        document.activeElement?.tagName !== "INPUT" &&
-        selectedRowIndex !== null &&
-        !deletedRows.has(selectedRowIndex) &&
-        !isNewRow(selectedRowIndex)
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        onDeleteRow?.(selectedRowIndex);
-      }
-    };
-
-    const container = keyboardContainerRef.current;
-    if (container) {
-      container.addEventListener("keydown", handleKeyDown);
-      return () => {
-        container.removeEventListener("keydown", handleKeyDown);
-      };
-    }
-  }, [selectedRowIndex, deletedRows, onDeleteRow, isNewRow]);
-
-  // For update cell rendering, prefer patched value over original
-  const getPatchedValue = useCallback(
-    (rowIndex: number, colName: string, fallback: any) => {
-      const rowKey = getRowKey(rowIndex);
-      const rowPatch = patches?.[rowKey];
-      if (!rowPatch) return fallback;
-      if (hasOwn(rowPatch, colName)) return rowPatch[colName];
-      return fallback;
-    },
-    [patches, getRowKey]
-  );
-
-  const isCellPatched = useCallback(
-    (rowIndex: number, colName: string) => {
-      const rowKey = getRowKey(rowIndex);
-      const rowPatch = patches?.[rowKey];
-      return !!rowPatch && hasOwn(rowPatch, colName);
-    },
-    [patches, getRowKey]
-  );
-
-  const isRowPatched = useCallback(
-    (rowIndex: number) => {
-      const rowKey = getRowKey(rowIndex);
-      const rowPatch = patches?.[rowKey];
-      return !!rowPatch && Object.keys(rowPatch).length > 0;
-    },
-    [patches, getRowKey]
-  );
-
-  // Check if a row is deleted
-  const isRowDeleted = useCallback(
-    (rowIndex: number): boolean => {
-      // For new rows, check if they're in deletedRows
-      if (rowIndex >= editedData.length) {
-        return false; // New rows can't be deleted this way
-      }
-      return deletedRows.has(rowIndex);
-    },
-    [deletedRows, editedData.length]
-  );
+  // Use row selection hook for keyboard events and selection
+  const { handleRowSelect, keyboardContainerRef } = useTableRowSelection({
+    onDeleteRow,
+    deletedRows,
+    isNewRow,
+  });
 
   // Define table columns
   const tableColumns = useMemo<ColumnDef<any>[]>(
@@ -220,7 +137,7 @@ export function TableData({
           const rowIndex = row.index;
           const colName = cell.column.id;
           const rowIsNew = isNewRow(rowIndex);
-          const rowKey = getRowKey(rowIndex);
+          const rowKey = getRowKey(rowIndex, newRows);
           const rowDeleted = isRowDeleted(rowIndex);
 
           const originalValue =
@@ -229,9 +146,9 @@ export function TableData({
           // prefer patch -> editedData -> original(tableData)
           const fallback =
             rowIndex < allData.length ? allData[rowIndex]?.[colName]?.v : null;
-          const value = getPatchedValue(rowIndex, colName, fallback);
+          const value = getPatchedValue(rowIndex, colName, fallback, newRows);
 
-          const patched = isCellPatched(rowIndex, colName);
+          const patched = isCellPatched(rowIndex, colName, newRows);
 
           return (
             <TableCell
@@ -263,7 +180,7 @@ export function TableData({
       isNewRow,
       getRowKey,
       isRowDeleted,
-      onDeleteRow,
+      newRows,
     ]
   );
 
@@ -309,7 +226,9 @@ export function TableData({
   // Merge keyboard container ref with viewport container ref
   const mergedContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
-      keyboardContainerRef.current = node;
+      if (keyboardContainerRef?.current !== undefined) {
+        keyboardContainerRef.current = node;
+      }
       if (
         viewportContainerRef &&
         typeof viewportContainerRef === "object" &&
@@ -320,7 +239,7 @@ export function TableData({
           node;
       }
     },
-    [viewportContainerRef]
+    [viewportContainerRef, keyboardContainerRef]
   );
 
   const columnSizeVars = useMemo(() => {
@@ -384,7 +303,7 @@ export function TableData({
     (rowIndex: number, row: Row<any> | any) => {
       const isEmptyRow = row.id?.startsWith("empty-");
       const actualRowIndex = isEmptyRow ? row.index : rowIndex;
-      const rowPatched = !isEmptyRow && isRowPatched(actualRowIndex);
+      const rowPatched = !isEmptyRow && isRowPatched(actualRowIndex, newRows);
 
       if (isEmptyRow) {
         // Render empty row
@@ -407,7 +326,7 @@ export function TableData({
         const isEditing = isSelectingRow && editingCell?.colIdx === colIndex;
 
         const colName = cell.column.id;
-        const cellPatched = isCellPatched(actualRowIndex, colName);
+        const cellPatched = isCellPatched(actualRowIndex, colName, newRows);
 
         return (
           <td
@@ -430,9 +349,7 @@ export function TableData({
             onMouseDown={(e) => {
               // Set selected row when clicking on a cell
               e.stopPropagation();
-              setSelectedRowIndex(actualRowIndex);
-              // Focus the container to enable keyboard events
-              keyboardContainerRef.current?.focus();
+              handleRowSelect(actualRowIndex);
             }}
           >
             {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -448,6 +365,8 @@ export function TableData({
       isNewRow,
       isRowDeleted,
       table,
+      newRows,
+      handleRowSelect,
     ]
   );
 

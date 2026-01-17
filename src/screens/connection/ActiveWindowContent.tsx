@@ -24,6 +24,7 @@ import { DATA_KEYS } from "src/constant";
 import { PatchMap } from "src/utils/generateSql";
 import { DataAction, DataKey } from "src/stores/connection";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
+import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 
 // Extract flattened patches for a specific table window
 function extractPatchesForTable(
@@ -366,6 +367,11 @@ export function ActiveWindowContent(props: {
     onDataChange,
   ]);
 
+  // Use data operations hook for add row
+  const { handleAddRow: handleAddRowFromHook } = useTableDataOperations({
+    onDataChange: onDataChange,
+  });
+
   const handleAddRow = useCallback(() => {
     if (!activeTableWindow) {
       console.warn("handleAddRow: activeTableWindow is missing");
@@ -377,27 +383,13 @@ export function ActiveWindowContent(props: {
       return;
     }
 
-    // Generate a unique row key for the new row (using timestamp + random)
-    const newRowKey = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Initialize the new row with empty values for all columns
-    const newRowData: Record<string, any> = {};
-    activeTableData.data.columns.forEach((col) => {
-      newRowData[col.name] = null;
-    });
-
-    // Create the new row patch with action="create"
-    // Pass the unique key as a string in the data, and use a sentinel number
-    // The actual rowKey will be extracted from the data or we'll modify the system
-    if (onDataChange) {
-      onDataChange("create", DATA_KEYS.data, -1, {
-        ...newRowData,
-        __rowKey: newRowKey,
-      });
-    } else {
-      console.warn("handleAddRow: onDataChange is not available");
-    }
-  }, [activeTableWindow, activeTableData.data, onDataChange]);
+    handleAddRowFromHook(activeTableData.data.columns, onDataChange);
+  }, [
+    activeTableWindow,
+    activeTableData.data,
+    onDataChange,
+    handleAddRowFromHook,
+  ]);
 
   /* =========================
    * Handle delete column/index/row
