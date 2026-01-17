@@ -5,7 +5,7 @@ import type {
   SslMode,
 } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
-import { DatabaseEngine } from "src/types";
+import type { DatabaseEngine } from "src/types";
 import { SUPPORTED_DATABASES } from "../../constant";
 
 /* =============================================================================

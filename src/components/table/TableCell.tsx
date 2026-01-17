@@ -1,5 +1,5 @@
 import { Cell, Row, Table } from "@tanstack/react-table";
-import { cellToString } from "../../utils/convert";
+import { cellToString } from "src/utils/convert";
 import {
   Dispatch,
   useCallback,
@@ -7,9 +7,10 @@ import {
   useState,
   useRef,
 } from "preact/hooks";
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
 import { memo, SetStateAction } from "preact/compat";
 import { EditingCell } from "./TableData";
+import { DataAction, DataKey } from "src/stores/connection";
 
 interface Props {
   cell: Cell<any, any>;
@@ -22,7 +23,12 @@ interface Props {
 
   isPatched: boolean;
 
-  onCellChange?: (rowIndex: number, colIndex: number, value: any) => void;
+  onCellChange?: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
   setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
 }
 
@@ -37,6 +43,7 @@ export const TableCell = memo(function TableCell({
   onCellChange,
   setEditingCell,
 }: Props) {
+  const dataKey = "data";
   const rowIndex = row.index;
   const colIndex = cell.column.getIndex();
 
@@ -57,15 +64,8 @@ export const TableCell = memo(function TableCell({
     (table.options.meta as any)?.updateData(rowIndex, colName, editValue);
 
     // Bubble up to ConnectionScreen → patchMap
-    onCellChange?.(rowIndex, colIndex, editValue);
-  }, [
-    editValue,
-    rowIndex,
-    colIndex,
-    colName,
-    table.options.meta,
-    onCellChange,
-  ]);
+    onCellChange?.("update", dataKey, rowIndex, { [colName]: editValue });
+  }, [editValue, rowIndex, colName, table.options.meta, onCellChange]);
 
   const onInputBlur = useCallback(() => {
     // Check if we're still editing this cell (not switched to another)

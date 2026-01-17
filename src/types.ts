@@ -20,6 +20,7 @@ export type NavItem = {
 export type TableItem = {
   schema: string;
   name: string;
+  new?: boolean;
   kind?: "table" | "view";
 };
 
@@ -86,9 +87,10 @@ export type TableStructure = {
   column_default: string;
   foreign_key: string;
   comment: string;
+  isNew?: boolean;
 };
 
-export type TableRelationships = {
+export type TableConstraint = {
   index_name: string;
   index_algorithm: string;
   is_unique: boolean;
@@ -96,4 +98,29 @@ export type TableRelationships = {
   condition: string;
   include: string;
   comment: string;
+  isNew?: boolean;
+};
+
+export type TableColumn = {
+  column_name: string;
+  data_type: string;
+  is_nullable: string; // "NULL" | "NOT NULL"
+  column_default: string;
+};
+
+export type Pagination = {
+  startIndex: number;
+  endIndex: number;
+  totalRows: number;
+  totalPages: number;
+};
+
+export type ActiveTableData = {
+  data: TableData | null;
+  structure: TableStructure[] | null;
+  constraints: TableConstraint[] | null;
+  sizeInfo: TableSizeInfo | null;
+  busy: boolean;
+  error: string | null;
+  connectionId: string | null;
 };

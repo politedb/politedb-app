@@ -1,15 +1,18 @@
 import { create } from "zustand";
-import {
+import type {
   TableData,
   TableItem,
   TableSizeInfo,
-  TableRelationships,
+  TableConstraint,
   TableStructure,
+  TableColumn,
   SqlQuery,
+  TableWindow,
 } from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
+import { PatchMap } from "src/utils/generateSql";
 
-type SchemaState = {
+export type SchemaState = {
   data: string[];
   busy: boolean;
   error: string | null;
@@ -22,23 +25,42 @@ export type SqlResultState = {
   lastRunAt?: number;
 };
 
-type TableState = {
+export type TableState = {
   data: TableItem[];
   busy: boolean;
   error: string | null;
 };
 
-type TableDataState = {
+export type TableDataState = {
   data: TableData | null;
   structure: TableStructure[] | null;
-  relationships: TableRelationships[] | null;
+  constraints: TableConstraint[] | null;
   sizeInfo: TableSizeInfo | null;
   connectionId: string | null; // profile / DB connection
   busy: boolean;
   error: string | null;
 };
 
-type ConnectionState = {
+export type DataKey = "structure" | "constraints" | "data";
+
+export type DataAction = "create" | "update" | "delete";
+
+export type DataPatchesState = {
+  dataKey: DataKey;
+  action: DataAction;
+  tableData: TableDataState;
+  tableWindow: TableWindow;
+  rowKey: string;
+  data: Record<string, any>;
+};
+
+export type NewTableDataState = {
+  tableName: string;
+  primaryKey: string | string[];
+  columns: TableColumn[];
+};
+
+export type ConnectionState = {
   // key = windowId
   tables: Record<string, TableState>;
   schemas: Record<string, SchemaState>;
@@ -52,30 +74,86 @@ type ConnectionState = {
   tableDataMap: Record<string, TableDataState>;
   sqlResults: Record<string, SqlResultState>;
 
-  addQueryHistory: (tabId: string, query: SqlQuery) => void;
-  clearQueryHistory: (tabId: string) => void;
+  tableStructure: Record<string, Record<string, TableStructure[]>>;
+  tableConstraints: Record<string, Record<string, TableConstraint[]>>;
+  dataPatchMap: Record<string, PatchMap>;
+  newTableData: Record<string, Record<string, NewTableDataState>>;
+
+  addQueryHistory: (windowId: string, sql: string) => void;
+  clearQueryHistory: (windowId: string) => void;
 
   setSqlResult: (windowId: string, patch: Partial<SqlResultState>) => void;
   clearSqlResult: (windowId: string) => void;
 
   setTables: (windowId: string, data: TableState) => void;
+  addTable: (windowId: string, table: TableItem) => void;
+
   setSchemas: (tabIwindowId: string, data: SchemaState) => void;
+  addSchema: (windowId: string, schema: string) => void;
 
   addTableDataMap: (windowId: string, data: TableDataState) => void;
   removeTableDataMap: (windowId: string) => void;
 
   setColumnsCache: (key: string, cols: ColumnMeta[]) => void;
   setSizeInfoCache: (key: string, info: TableSizeInfo) => void;
+
+  setTableStructure: (
+    screenId: string,
+    tableWindowId: string,
+    structure: TableStructure[]
+  ) => void;
+
+  updateTableStructure: (
+    screenId: string,
+    tableWindowId: string,
+    rowIndex: number,
+    field: keyof TableStructure,
+    value: string | boolean
+  ) => void;
+
+  setTableConstraints: (
+    screenId: string,
+    tableWindowId: string,
+    constraints: TableConstraint[]
+  ) => void;
+
+  updateTableConstraints: (
+    screenId: string,
+    tableWindowId: string,
+    rowIndex: number,
+    field: keyof TableConstraint,
+    value: string | boolean
+  ) => void;
+
+  clearTableStructure: (screenId: string, tableWindowId?: string) => void;
+  clearTableConstraints: (screenId: string, tableWindowId?: string) => void;
+
+  setDataPatchMap: (screenId: string, props: DataPatchesState) => void;
+  clearDataPatchMap: (screenId: string, tableWindowId?: string) => void;
+
+  setNewTableData: (
+    screenId: string,
+    tableWindowId: string,
+    data: NewTableDataState
+  ) => void;
+  clearNewTableData: (screenId: string, tableWindowId?: string) => void;
 };
+
 export const useConnectionStore = create<ConnectionState>((set) => ({
   tables: {},
   schemas: {},
   tableDataMap: {},
+
   sqlResults: {},
   queryHistory: {},
 
   columnsCache: {},
   sizeInfoCache: {},
+
+  tableStructure: {},
+  tableConstraints: {},
+  dataPatchMap: {},
+  newTableData: {},
 
   setSqlResult: (windowId, patch) =>
     set((s) => {
@@ -120,11 +198,33 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       },
     })),
 
+  addSchema: (windowId, schema) =>
+    set((s) => ({
+      schemas: {
+        ...s.schemas,
+        [windowId]: {
+          ...(s.schemas[windowId] || { data: [], busy: false, error: null }),
+          data: [...(s.schemas[windowId]?.data || []), schema],
+        },
+      },
+    })),
+
   setTables: (windowId, data) =>
     set((s) => ({
       tables: {
         ...s.tables,
         [windowId]: data,
+      },
+    })),
+
+  addTable: (windowId, table) =>
+    set((s) => ({
+      tables: {
+        ...s.tables,
+        [windowId]: {
+          ...(s.tables[windowId] || { data: [], busy: false, error: null }),
+          data: [...(s.tables[windowId]?.data || []), table],
+        },
       },
     })),
 
@@ -148,19 +248,181 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   setSizeInfoCache: (key, info) =>
     set((s) => ({ sizeInfoCache: { ...s.sizeInfoCache, [key]: info } })),
 
-  addQueryHistory: (tabId: string, query: SqlQuery) =>
+  addQueryHistory: (windowId, sql) =>
     set((s) => ({
       queryHistory: {
         ...s.queryHistory,
-        [tabId]: [...(s.queryHistory[tabId] || []), query],
+        [windowId]: [
+          ...(s.queryHistory[windowId] || []),
+          { sql, timestamp: new Date() },
+        ],
       },
     })),
 
-  clearQueryHistory: (tabId: string) =>
+  clearQueryHistory: (windowId) =>
     set((s) => ({
       queryHistory: {
         ...s.queryHistory,
-        [tabId]: [],
+        [windowId]: [],
       },
     })),
+
+  setTableStructure: (screenId, tableWindowId, structure) =>
+    set((s) => ({
+      tableStructure: {
+        ...s.tableStructure,
+        [screenId]: {
+          ...s.tableStructure[screenId],
+          [tableWindowId]: structure,
+        },
+      },
+    })),
+
+  updateTableStructure: (screenId, tableWindowId, rowIndex, field, value) =>
+    set((s) => {
+      const structure = s.tableStructure[screenId]?.[tableWindowId] ?? [];
+      structure[rowIndex] = { ...structure[rowIndex]!, [field]: value };
+      return {
+        tableStructure: {
+          ...s.tableStructure,
+          [screenId]: {
+            ...s.tableStructure[screenId],
+            [tableWindowId]: structure,
+          },
+        },
+      };
+    }),
+
+  setTableConstraints: (screenId, tableWindowId, constraints) =>
+    set((s) => ({
+      tableConstraints: {
+        ...s.tableConstraints,
+        [screenId]: {
+          ...s.tableConstraints[screenId],
+          [tableWindowId]: constraints,
+        },
+      },
+    })),
+
+  updateTableConstraints: (screenId, tableWindowId, rowIndex, field, value) =>
+    set((s) => {
+      const constraints = s.tableConstraints[screenId]?.[tableWindowId] ?? [];
+      constraints[rowIndex] = { ...constraints[rowIndex]!, [field]: value };
+      return {
+        tableConstraints: {
+          ...s.tableConstraints,
+          [screenId]: {
+            ...s.tableConstraints[screenId],
+            [tableWindowId]: constraints,
+          },
+        },
+      };
+    }),
+
+  clearTableStructure: (screenId, tableWindowId) =>
+    set((s) => {
+      if (!s.tableStructure[screenId]) {
+        return s;
+      }
+
+      if (tableWindowId) {
+        const { [tableWindowId]: _, ...rest } = s.tableStructure[screenId];
+        return { tableStructure: { ...s.tableStructure, [screenId]: rest } };
+      }
+
+      return { tableStructure: { ...s.tableStructure, [screenId]: {} } };
+    }),
+
+  clearTableConstraints: (screenId, tableWindowId) =>
+    set((s) => {
+      if (!s.tableConstraints[screenId]) {
+        return s;
+      }
+
+      if (tableWindowId) {
+        const { [tableWindowId]: _, ...rest } = s.tableConstraints[screenId];
+        return {
+          tableConstraints: { ...s.tableConstraints, [screenId]: rest },
+        };
+      }
+
+      return { tableConstraints: { ...s.tableConstraints, [screenId]: {} } };
+    }),
+
+  setDataPatchMap: (screenId: string, props: DataPatchesState) => {
+    const { dataKey, action, tableData, tableWindow, rowKey, data } = props;
+    const tableWindowId = tableWindow.id;
+
+    set((s) => ({
+      dataPatchMap: {
+        ...s.dataPatchMap,
+        [screenId]: {
+          ...(s.dataPatchMap[screenId] ?? {}),
+          [tableWindowId]: {
+            tableData,
+            tableWindow,
+            patches: {
+              ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches ?? {}),
+              [action]: {
+                ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
+                  action
+                ] ?? {}),
+                [dataKey]: {
+                  ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
+                    action
+                  ]?.[dataKey] ?? {}),
+                  [rowKey]: {
+                    ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
+                      action
+                    ]?.[dataKey]?.[rowKey] ?? {}),
+                    ...data,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }));
+  },
+
+  clearDataPatchMap: (screenId, tableWindowId) =>
+    set((s) => {
+      if (!s.dataPatchMap[screenId]) {
+        return s;
+      }
+
+      if (tableWindowId) {
+        const { [tableWindowId]: _, ...rest } = s.dataPatchMap[screenId];
+        return { dataPatchMap: { ...s.dataPatchMap, [screenId]: rest } };
+      }
+
+      const { [screenId]: _, ...rest } = s.dataPatchMap;
+      return { dataPatchMap: rest };
+    }),
+
+  setNewTableData: (screenId, tableWindowId, data) =>
+    set((s) => ({
+      newTableData: {
+        ...s.newTableData,
+        [screenId]: {
+          ...s.newTableData[screenId],
+          [tableWindowId]: data,
+        },
+      },
+    })),
+
+  clearNewTableData: (screenId, tableWindowId) =>
+    set((s) => {
+      if (!s.newTableData[screenId]) {
+        return s;
+      }
+
+      if (tableWindowId) {
+        const { [tableWindowId]: _, ...rest } = s.newTableData[screenId];
+        return { newTableData: { ...s.newTableData, [screenId]: rest } };
+      }
+
+      return { newTableData: { ...s.newTableData, [screenId]: {} } };
+    }),
 }));

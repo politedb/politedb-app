@@ -141,7 +141,7 @@ export function SplitPane(props: Props) {
       ].join(" ")}
     >
       {/* First pane */}
-      <div class="min-h-0 min-w-0 shrink-0" style={firstStyle}>
+      <div class="flex min-h-0 min-w-0 shrink-0 flex-col" style={firstStyle}>
         {first}
       </div>
 

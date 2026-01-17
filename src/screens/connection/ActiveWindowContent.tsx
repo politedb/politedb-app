@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { Box } from "src/components/common/Box";
 import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
@@ -6,8 +6,10 @@ import type {
   DatabaseEngine,
   OpenWindow,
   SqlEditorWindow,
-  TableData as TableDataType,
+  TableStructure as TableStructureType,
+  TableConstraint as TableConstraintType,
   TableWindow,
+  ActiveTableData,
 } from "src/types";
 import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import { SplitPane } from "src/components/SplitPane";
@@ -15,16 +17,14 @@ import type { QueryResult } from "src/lib/tauri";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
-
-export type ActiveTableData = {
-  data: TableDataType | null;
-  sizeInfo: any;
-  busy: boolean;
-  error: string | null;
-  connectionId: string | null;
-};
-
-type PatchMap = Record<string, Record<string, Record<string, any>>>;
+import { TableFooter } from "src/components/table/TableFooter";
+import { NewTablePane } from "src/components/table/NewTablePane";
+import { TableViewMode } from "src/components/table/TableViewToggle";
+import { TableStructure } from "src/components/table/TableStructure";
+import { TableConstraints } from "src/components/table/TableConstraint";
+import { DATA_KEYS } from "src/constant";
+import { PatchMap } from "src/utils/generateSql";
+import { DataAction, DataKey } from "src/stores/connection";
 
 function EmptyState(props: { onNewSql: () => void }) {
   return (
@@ -72,6 +72,8 @@ function TableErrorState(props: { error: string }) {
 }
 
 export function ActiveWindowContent(props: {
+  activeProfileScreen: string;
+  activeSchema: string;
   limit: number;
   offset: number;
   totalRows: number;
@@ -93,22 +95,47 @@ export function ActiveWindowContent(props: {
     sql: string;
   }) => Promise<QueryResult>;
 
-  onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
+  onTableCreated?: (tableName: string) => void;
+
   onPageChange: (limit: number, offset: number) => void;
 
+  onDataChange: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
+
   patchMap: PatchMap;
+  tableStructure: TableStructureType[];
+  tableConstraints: TableConstraintType[];
+
+  setTableStructure: (
+    screenId: string,
+    tableWindowId: string,
+    structure: TableStructureType[]
+  ) => void;
+
+  setTableConstraints: (
+    screenId: string,
+    tableWindowId: string,
+    constraints: TableConstraintType[]
+  ) => void;
 
   engine: DatabaseEngine;
 
   metadata: MetadataApi;
   metaKey: string;
+
+  newTableSaveRef?: { current: (() => Promise<void>) | null };
 }) {
   const {
+    activeProfileScreen,
     activeWindow,
     activeSqlWindow,
     activeTableWindow,
     activeTableData,
-
+    activeSchema,
     limit,
     offset,
     totalRows,
@@ -117,18 +144,26 @@ export function ActiveWindowContent(props: {
     runtimeConnectionId,
     onNewSql,
     onRunSql,
-    onCellChange,
+    onDataChange,
     patchMap,
+    tableStructure,
+    tableConstraints,
+    setTableStructure,
+    setTableConstraints,
     engine,
     metadata,
     metaKey,
     onPageChange,
+    onTableCreated,
+    newTableSaveRef,
   } = props;
 
-  const tablePatches = useMemo(() => {
-    if (!activeTableWindow) return null;
-    return patchMap[activeTableWindow.id] ?? null;
-  }, [patchMap, activeTableWindow?.id]);
+  const [viewMode, setViewMode] = useState<TableViewMode>("data");
+
+  // Reset view mode to "data" when switching tables
+  useEffect(() => {
+    setViewMode("data");
+  }, [activeTableWindow?.id]);
 
   /* =========================
    * SQL runner hook
@@ -149,6 +184,80 @@ export function ActiveWindowContent(props: {
     connectionId: runtimeConnectionId,
     lazy: true,
   });
+
+  /* =========================
+   * Handle add column/index/row
+   * ========================= */
+
+  const handleAddColumn = useCallback(() => {
+    const newRecord: TableStructureType = {
+      column_name: "",
+      data_type: "",
+      is_nullable: false,
+      check: "",
+      column_default: "",
+      foreign_key: "",
+      comment: "",
+      isNew: true,
+    };
+
+    setTableStructure(activeProfileScreen, activeTableWindow!.id, [
+      ...tableStructure,
+      newRecord,
+    ]);
+
+    onDataChange?.(
+      "create",
+      DATA_KEYS.structure,
+      tableStructure.length,
+      newRecord
+    );
+  }, [
+    activeProfileScreen,
+    activeTableWindow?.id,
+    tableStructure,
+    setTableStructure,
+    onDataChange,
+  ]);
+
+  const handleAddIndex = useCallback(() => {
+    const newRecord: TableConstraintType = {
+      index_name: "",
+      index_algorithm: "",
+      is_unique: false,
+      column_name: "",
+      condition: "",
+      include: "",
+      comment: "",
+      isNew: true,
+    };
+
+    setTableConstraints(activeProfileScreen, activeTableWindow!.id, [
+      ...tableConstraints,
+      newRecord,
+    ]);
+
+    onDataChange?.(
+      "create",
+      DATA_KEYS.constraints,
+      tableConstraints.length,
+      newRecord
+    );
+  }, [
+    activeProfileScreen,
+    activeTableWindow?.id,
+    tableConstraints,
+    setTableConstraints,
+    onDataChange,
+  ]);
+
+  const handleAddRow = useCallback(() => {
+    console.log("add row");
+  }, []);
+
+  const handleFilters = useCallback(() => {
+    console.log("filters");
+  }, []);
 
   /* =========================
    * Global guards
@@ -215,6 +324,34 @@ export function ActiveWindowContent(props: {
    * Table window
    * ========================= */
   if (!activeTableWindow) return null;
+
+  // Check if this is a new table (starts with "new_table" or has no data/structure)
+  const isShowNewTablePane = useMemo(() => {
+    return (
+      activeTableWindow?.table.new ||
+      (!activeTableData.data && !activeTableData.busy && !activeTableData.error)
+    );
+  }, [activeTableWindow, activeTableData]);
+
+  // Show NewTablePane for new tables
+  if (isShowNewTablePane) {
+    return (
+      <NewTablePane
+        engine={engine}
+        activeSchema={activeSchema}
+        table={activeTableWindow.table}
+        onSuccess={onTableCreated}
+        activeProfileScreen={activeProfileScreen}
+        tableWindowId={activeTableWindow.id}
+        onSaveRef={(saveFn) => {
+          if (newTableSaveRef) {
+            newTableSaveRef.current = saveFn;
+          }
+        }}
+      />
+    );
+  }
+
   if (activeTableData.busy) return <LoadingTableState />;
 
   if (activeTableData.error) {
@@ -222,15 +359,67 @@ export function ActiveWindowContent(props: {
   }
 
   return (
-    <TableData
-      key={activeTableWindow.id}
-      columns={activeTableData.data?.columns ?? []}
-      data={activeTableData.data?.rows ?? []}
-      onCellChange={onCellChange}
-      patches={tablePatches}
-      limit={limit}
-      offset={offset}
-      totalRows={totalRows}
-    />
+    <div class="flex h-full flex-col">
+      <div class="flex-1 overflow-hidden">
+        {viewMode === "structure" ? (
+          <div class="flex h-full flex-col overflow-hidden bg-white">
+            <div class="flex-1 overflow-auto">
+              <SplitPane
+                direction="vertical"
+                initialRatio={0.5}
+                minFirstPx={0}
+                minSecondPx={0}
+                splitterPx={8}
+                first={
+                  <TableStructure
+                    activeProfileScreen={activeProfileScreen}
+                    activeTableWindowId={activeTableWindow.id}
+                    initData={activeTableData.structure}
+                    editedData={tableStructure}
+                    busy={activeTableData.busy}
+                    error={activeTableData.error}
+                    onDataChange={onDataChange}
+                    onAddNewRecord={handleAddColumn}
+                  />
+                }
+                second={
+                  <TableConstraints
+                    activeProfileScreen={activeProfileScreen}
+                    activeTableWindowId={activeTableWindow.id}
+                    initData={activeTableData.constraints}
+                    editedData={tableConstraints}
+                    busy={activeTableData.busy}
+                    error={activeTableData.error}
+                    onDataChange={onDataChange}
+                    onAddNewRecord={handleAddIndex}
+                  />
+                }
+              />
+            </div>
+          </div>
+        ) : (
+          <TableData
+            key={activeTableWindow.id}
+            columns={activeTableData.data?.columns ?? []}
+            data={activeTableData.data?.rows ?? []}
+            onCellChange={onDataChange}
+            patches={patchMap}
+          />
+        )}
+      </div>
+
+      <TableFooter
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        limit={limit}
+        offset={offset}
+        totalRows={totalRows}
+        onPageChange={onPageChange}
+        onAddColumn={handleAddColumn}
+        onAddIndex={handleAddIndex}
+        onAddRow={handleAddRow}
+        onFilters={handleFilters}
+      />
+    </div>
   );
 }

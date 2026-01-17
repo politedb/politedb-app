@@ -1,4 +1,5 @@
-import { DatabaseType } from "./types";
+import { DataKey } from "./stores/connection";
+import { DatabaseEngine, DatabaseType } from "./types";
 
 export const SUPPORTED_DATABASES: readonly (DatabaseType & {
   desc?: string;
@@ -68,3 +69,83 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     defaultLabels: ["Zeus"],
   },
 ] as const;
+
+export const POSTGRES_DATA_TYPES = [
+  "serial",
+  "bigserial",
+  "smallserial",
+  "integer",
+  "bigint",
+  "smallint",
+  "decimal",
+  "numeric",
+  "real",
+  "double precision",
+  "money",
+  "varchar",
+  "char",
+  "text",
+  "boolean",
+  "date",
+  "time",
+  "timestamp",
+  "timestamptz",
+  "interval",
+  "json",
+  "jsonb",
+  "uuid",
+  "bytea",
+  "xml",
+];
+
+export const MYSQL_DATA_TYPES = [
+  "tinyint",
+  "smallint",
+  "mediumint",
+  "int",
+  "integer",
+  "bigint",
+  "float",
+  "double",
+  "decimal",
+  "bit",
+  "char",
+  "varchar",
+  "tinytext",
+  "text",
+  "mediumtext",
+  "longtext",
+  "binary",
+  "varbinary",
+  "tinyblob",
+  "blob",
+  "mediumblob",
+  "longblob",
+  "date",
+  "time",
+  "datetime",
+  "timestamp",
+  "year",
+  "boolean",
+  "bool",
+  "json",
+  "enum",
+  "set",
+];
+
+export const DATA_TYPES: Record<DatabaseEngine, readonly string[]> = {
+  postgres: POSTGRES_DATA_TYPES,
+  mysql: MYSQL_DATA_TYPES,
+  sqlite: [],
+  redis: [],
+  mariadb: [],
+  sqlserver: [],
+  oracle: [],
+  mongo: [],
+};
+
+export const DATA_KEYS: Record<DataKey, DataKey> = {
+  structure: "structure",
+  constraints: "constraints",
+  data: "data",
+};

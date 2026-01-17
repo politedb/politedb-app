@@ -1,3 +1,5 @@
+import type { TableColumn } from "src/types";
+
 function qIdent(ident: string) {
   return `"${String(ident).replace(/"/g, `""`)}"`;
 }
@@ -86,9 +88,10 @@ export const tableColumnsQuery = (schema: string, tableName: string) => {
 export const tableDataQuery = (
   schema: string,
   tableName: string,
-  limit: number = 300,
-  offset: number = 0
+  pagination?: { limit: number; offset: number }
 ) => {
+  const limit = pagination?.limit ?? 300;
+  const offset = pagination?.offset ?? 0;
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
   const queryStr = `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
@@ -100,7 +103,16 @@ export const tableRowCountQuery = (schema: string, tableName: string) => {
   return regexEscape(queryStr);
 };
 
-export const tableStructuresQuery = (schema: string, tableName: string) => {
+export const tableOidQuery = (schema: string, tableName: string) => {
+  const queryStr = `SELECT '${schema}.${tableName}'::regclass::oid;`;
+  return regexEscape(queryStr);
+};
+
+export const tableStructuresQuery = (
+  schema: string,
+  tableName: string,
+  oid: number
+) => {
   const queryStr = `
     SELECT
       ordinal_position,
@@ -116,10 +128,10 @@ export const tableStructuresQuery = (schema: string, tableName: string) => {
       column_name AS check_constraint,
       column_default,
       column_name AS foreign_key,
-      pg_catalog.col_description (16464, ordinal_position) AS comment
+      pg_catalog.col_description (${oid}, ordinal_position) AS comment
     FROM
       information_schema.columns
-      JOIN pg_attribute pa ON attrelid = 16464
+      JOIN pg_attribute pa ON attrelid = ${oid}
       AND attname = column_name
     WHERE
       table_name = ${qLiteral(tableName)}
@@ -128,14 +140,14 @@ export const tableStructuresQuery = (schema: string, tableName: string) => {
   return regexEscape(queryStr);
 };
 
-export const tableRelationshipsQuery = (schema: string, tableName: string) => {
+export const tableConstraintsQuery = (schema: string, tableName: string) => {
   const queryStr = `
     SELECT
       ix.relname AS index_name,
       upper(am.amname) AS index_algorithm,
       indisunique AS is_unique,
       pg_get_indexdef(indexrelid) AS index_definition,
-      replace(regexp_replace(regexp_replace(regexp_replace(pg_get_indexdef(indexrelid), ' WHERE .+|INCLUDE .+', ''), ' WITH .+', ''), '.*\((.*)\)', '\\1'), ' ', '') AS column_name,
+      replace(regexp_replace(regexp_replace(regexp_replace(pg_get_indexdef(indexrelid), ' WHERE .+|INCLUDE .+', ''), ' WITH .+', ''), '.*\\((.*)\\)', '\\1'), ' ', '') AS column_name,
       CASE
         WHEN position(' WHERE ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+WHERE ', '')
         WHEN position(' WITH ' IN pg_get_indexdef(indexrelid)) > 0 THEN regexp_replace(pg_get_indexdef(indexrelid), '.+WITH ', '')
@@ -157,5 +169,63 @@ export const tableRelationshipsQuery = (schema: string, tableName: string) => {
       t.relname = ${qLiteral(tableName)}
       AND n.nspname = ${qLiteral(schema)}
   `;
+  return regexEscape(queryStr);
+};
+
+export const createTableQuery = (
+  schema: string,
+  tableName: string,
+  columns: TableColumn[],
+  primaryKey: string | string[]
+) => {
+  const columnDefinitions = columns
+    .map((col) => {
+      let def = `${qIdent(col.column_name)} ${col.data_type}`;
+
+      // Add NOT NULL constraint if specified
+      if (col.is_nullable === "NOT NULL") {
+        def += " NOT NULL";
+      }
+
+      // Add default value if specified
+      if (col.column_default && col.column_default.trim() !== "") {
+        const defaultVal = col.column_default.trim();
+        // If it's a function call or special value, use as-is, otherwise quote it
+        if (
+          defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) || // Function calls like NOW()
+          defaultVal.match(/^[0-9]+$/) || // Numbers
+          defaultVal.toUpperCase() === "NULL"
+        ) {
+          def += ` DEFAULT ${defaultVal}`;
+        } else {
+          def += ` DEFAULT ${qLiteral(defaultVal)}`;
+        }
+      }
+
+      return def;
+    })
+    .join(",\n      ");
+
+  // Add PRIMARY KEY constraint (support single or multiple columns)
+  const primaryKeyColumns = Array.isArray(primaryKey)
+    ? primaryKey.filter(Boolean)
+    : primaryKey
+      ? [primaryKey]
+      : [];
+  const primaryKeyConstraint =
+    primaryKeyColumns.length > 0
+      ? `,\n      PRIMARY KEY (${primaryKeyColumns.map((key) => qIdent(key)).join(", ")})`
+      : "";
+
+  const queryStr = `
+    CREATE TABLE ${qIdent(schema)}.${qIdent(tableName)} (
+      ${columnDefinitions}${primaryKeyConstraint}
+    );
+  `;
+  return regexEscape(queryStr);
+};
+
+export const createSchemaQuery = (schema: string) => {
+  const queryStr = `CREATE SCHEMA ${qIdent(schema)};`;
   return regexEscape(queryStr);
 };

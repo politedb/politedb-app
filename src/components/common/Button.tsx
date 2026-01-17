@@ -1,5 +1,6 @@
 import React from "preact/compat";
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
+import { Spinner } from "./Spinner";
 
 type ButtonVariant =
   | "default"
@@ -15,6 +16,7 @@ interface ButtonProps extends React.ComponentProps<"button"> {
   class?: string;
   variant?: ButtonVariant;
   active?: boolean;
+  loading?: boolean;
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
@@ -48,21 +50,23 @@ export function Button({
   class: classNames,
   variant = "default",
   active = false,
+  loading = false,
   ...props
 }: ButtonProps) {
   return (
     <button
       className={cn(
-        "flex cursor-pointer items-center justify-center gap-1 rounded-md px-4 py-1 text-xs font-medium transition-colors",
+        "flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-4 py-1 text-xs font-medium transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
         variantStyles[variant],
         active && activeStyles[variant],
         className,
         classNames
       )}
-      disabled={disabled}
+      disabled={disabled || loading}
       {...props}
     >
+      {loading && <Spinner className="size-3.5" />}
       {children}
     </button>
   );

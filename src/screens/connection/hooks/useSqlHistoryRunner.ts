@@ -1,10 +1,11 @@
-import { useCallback, useState } from "preact/hooks";
-import { v4 as uuid } from "uuid";
-import type { SqlQuery, DatabaseEngine } from "src/types";
+import { useCallback, useMemo } from "preact/hooks";
+import type { DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { runSqlQuery } from "src/utils/query";
 import { isDDLStatement } from "src/utils/detect";
 import { MetadataApi } from "src/hooks/useDatabaseMetadata";
+import { useConnectionStore } from "src/stores/connection";
+import { useScreenStore } from "src/stores/screen";
 
 type Options = {
   profileId: string;
@@ -14,7 +15,13 @@ type Options = {
 };
 
 export function useSqlHistoryRunner(opts?: Options) {
-  const [sqlHistory, setSqlHistory] = useState<SqlQuery[]>([]);
+  const { addQueryHistory } = useConnectionStore();
+  const { profileTabs, activeProfileScreen } = useScreenStore();
+
+  const activeTab = useMemo(() => {
+    if (!activeProfileScreen || activeProfileScreen === "main") return null;
+    return profileTabs.find((t) => t.id === activeProfileScreen) ?? null;
+  }, [profileTabs, activeProfileScreen]);
 
   const run = useCallback(
     async (args: {
@@ -23,10 +30,7 @@ export function useSqlHistoryRunner(opts?: Options) {
     }): Promise<QueryResult> => {
       const { connectionId, sql } = args;
 
-      setSqlHistory((prev) => [
-        { id: uuid(), sql, createdAt: Date.now() } as unknown as SqlQuery,
-        ...prev,
-      ]);
+      addQueryHistory(activeTab!.id, sql);
 
       const res = await runSqlQuery(connectionId, sql);
 
@@ -49,12 +53,7 @@ export function useSqlHistoryRunner(opts?: Options) {
     [opts?.engine, opts?.metadata]
   );
 
-  const clear = useCallback(() => setSqlHistory([]), []);
-
   return {
-    sqlHistory,
-    setSqlHistory,
     runSqlWithHistory: run,
-    clearHistory: clear,
   };
 }

@@ -1,6 +1,6 @@
 import { Button } from "src/components/common/Button";
 import { Table, X } from "src/components/icons";
-import { OpenWindow } from "src/types";
+import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
 
 interface Props {

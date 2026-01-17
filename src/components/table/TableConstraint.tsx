@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from "preact/hooks";
-import type { TableStructure } from "src/types";
+import type { TableConstraint } from "src/types";
 import {
   Table,
   type TableColumn as CommonTableColumn,
@@ -7,24 +7,25 @@ import {
 import { Input } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
-import { DATA_KEYS } from "../../constant";
+import { DATA_KEYS } from "src/constant";
 
-const COLUMNS_NAME: (keyof TableStructure)[] = [
+const COLUMNS_NAME: (keyof TableConstraint)[] = [
+  "index_name",
+  "index_algorithm",
+  "is_unique",
   "column_name",
-  "data_type",
-  "is_nullable",
-  "column_default",
-  "foreign_key",
+  "condition",
+  "include",
   "comment",
 ];
 
 interface Props {
-  initData: TableStructure[] | null;
+  initData: TableConstraint[] | null;
   activeProfileScreen: string;
   activeTableWindowId: string;
   busy: boolean;
   error: string | null;
-  editedData: TableStructure[];
+  editedData: TableConstraint[];
   onAddNewRecord: () => void;
   onDataChange?: (
     action: DataAction,
@@ -34,24 +35,24 @@ interface Props {
   ) => void;
 }
 
-export function TableStructure({
+export function TableConstraints({
   initData,
   activeProfileScreen,
   activeTableWindowId,
   busy,
   error,
-  editedData = [],
+  editedData,
   onAddNewRecord,
   onDataChange,
 }: Props) {
-  const setEditedData = useConnectionStore((s) => s.updateTableStructure);
+  const setEditedData = useConnectionStore((s) => s.updateTableConstraints);
 
   const [selectedRow, setSelectedRow] = useState<number | null>(null);
 
   const handleDataChange = useCallback(
     (
       rowIndex: number,
-      field: keyof TableStructure,
+      field: keyof TableConstraint,
       value: string | boolean
     ) => {
       setEditedData(
@@ -64,7 +65,7 @@ export function TableStructure({
 
       const isNewRow = !initData || rowIndex >= initData.length;
       const action = isNewRow ? "create" : "update";
-      onDataChange?.(action, DATA_KEYS.structure, rowIndex, {
+      onDataChange?.(action, DATA_KEYS.constraints, rowIndex, {
         [field]: value,
       });
     },
@@ -94,21 +95,9 @@ export function TableStructure({
     return editedData;
   }, [editedData, error, busy]);
 
-  const tableColumns = useMemo<
-    CommonTableColumn<TableStructure & { _rowNumber?: number }>[]
-  >(
-    () => [
-      {
-        key: "_rowNumber",
-        label: "#",
-        className: "min-w-12! text-center",
-        headerClassName: "min-w-12! text-center",
-        render: (_value: any, _row: any, index: number) =>
-          index + 1 <= editedData.length ? (
-            <span class="text-xs text-neutral-500">{index + 1}</span>
-          ) : null,
-      },
-      ...COLUMNS_NAME.map((name) => ({
+  const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(
+    () =>
+      COLUMNS_NAME.map((name) => ({
         key: name,
         label: name,
         render: (_value: any, row: any, index: number) => {
@@ -132,7 +121,6 @@ export function TableStructure({
           );
         },
       })),
-    ],
     [busy, editedData.length, handleDataChange]
   );
 
@@ -143,7 +131,7 @@ export function TableStructure({
         data={tableData}
         stickyHeader
         fillViewport
-        emptyMessage="No structure data available"
+        emptyMessage="No constraints data available"
         selectedRow={selectedRow}
         onSelectRow={(_row, index) => {
           setSelectedRow(index);

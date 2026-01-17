@@ -114,7 +114,9 @@ export function useConnectionWindows(activeProfileScreen: string) {
       addWindow(activeProfileScreen, win);
       setActiveWindowId(activeProfileScreen, win.id);
 
-      await loadTableData(table.schema, table.name);
+      if (!table.new) {
+        await loadTableData(table.schema, table.name);
+      }
 
       return win.id;
     },
@@ -190,5 +192,6 @@ export function useConnectionWindows(activeProfileScreen: string) {
     openSqlEditor,
     openTable,
     closeWindow,
+    makeTableWindowId,
   };
 }

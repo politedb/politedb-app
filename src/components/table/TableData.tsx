@@ -7,10 +7,12 @@ import {
   Row,
 } from "@tanstack/react-table";
 import { TableVirtuoso } from "react-virtuoso";
-import type { ColumnMeta } from "../../lib/tauri/types";
-import { cn } from "../../utils/cn";
-import { useNormalizeTableData } from "../../hooks/useNormalizeTableData";
+import type { ColumnMeta } from "src/lib/tauri/types";
+import { cn } from "src/utils/cn";
+import { useNormalizeTableData } from "src/hooks/useNormalizeTableData";
+import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { TableCell } from "./TableCell";
+import { DataAction, DataKey } from "src/stores/connection";
 
 export type EditingCell = {
   rowIdx: number;
@@ -19,12 +21,14 @@ export type EditingCell = {
 };
 
 interface Props {
-  limit: number;
-  offset: number;
   columns: ColumnMeta[];
   data: any[];
-  totalRows: number;
-  onCellChange?: (rowIndex: number, columnIndex: number, value: any) => void;
+  onCellChange?: (
+    action: DataAction,
+    dataKey: DataKey,
+    rowIndex: number,
+    data: Record<string, any>
+  ) => void;
 
   // rowIndexStr -> colName -> value
   patches?: Record<string, Record<string, any>> | null;
@@ -34,14 +38,7 @@ function hasOwn(obj: any, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-export function TableData({
-  limit,
-  offset,
-  columns,
-  data,
-  patches,
-  onCellChange,
-}: Props) {
+export function TableData({ columns, data, patches, onCellChange }: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
 
@@ -152,6 +149,13 @@ export function TableData({
     },
   });
 
+  // Calculate empty rows to fill viewport
+  const { emptyRowsCount, containerRef } = useFillViewportTable({
+    dataLength: editedData.length,
+    fillViewport: true,
+    headerHeight: 40,
+  });
+
   const columnSizeVars = useMemo(() => {
     const headers = table.getFlatHeaders();
     const colSizes: { [key: string]: number } = {};
@@ -165,6 +169,21 @@ export function TableData({
 
   const tableRows = useMemo(() => table.getRowModel().rows ?? [], [editedData]);
 
+  // Create empty rows for viewport filling
+  const emptyRows = useMemo(() => {
+    if (emptyRowsCount === 0) return [];
+    return Array.from({ length: emptyRowsCount }, (_, idx) => ({
+      id: `empty-${idx}`,
+      index: editedData.length + idx,
+      original: {},
+    }));
+  }, [emptyRowsCount, editedData.length]);
+
+  const allRows = useMemo(
+    () => [...tableRows, ...emptyRows],
+    [tableRows, emptyRows]
+  );
+
   const renderHeader = useCallback(() => {
     return (
       <tr>
@@ -172,7 +191,7 @@ export function TableData({
           <th
             key={header.id}
             class={cn(
-              "relative border-r border-neutral-200 bg-neutral-50 px-4 py-2 select-none",
+              "relative border-r border-neutral-200 bg-neutral-50 p-2 select-none",
               "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
             style={{ width: `calc(var(--header-${header?.id}-size) * 1px)` }}
@@ -195,15 +214,30 @@ export function TableData({
   }, [table]);
 
   const renderRow = useCallback(
-    (rowIndex: number, row: Row<any>) => {
-      const rowPatched = isRowPatched(rowIndex);
+    (rowIndex: number, row: Row<any> | any) => {
+      const isEmptyRow = row.id?.startsWith("empty-");
+      const actualRowIndex = isEmptyRow ? row.index : rowIndex;
+      const rowPatched = !isEmptyRow && isRowPatched(actualRowIndex);
 
-      return row.getVisibleCells().map((cell, colIndex) => {
-        const isSelectingRow = editingCell?.rowIdx === rowIndex;
+      if (isEmptyRow) {
+        // Render empty row
+        return table
+          .getHeaderGroups()[0]
+          ?.headers.map((header) => (
+            <td
+              key={header.id}
+              class={cn("h-[28px] border border-neutral-200 px-1")}
+              style={{ width: `calc(var(--col-${header.id}-size) * 1px)` }}
+            />
+          ));
+      }
+
+      return row.getVisibleCells().map((cell: any, colIndex: number) => {
+        const isSelectingRow = editingCell?.rowIdx === actualRowIndex;
         const isEditing = isSelectingRow && editingCell?.colIdx === colIndex;
 
         const colName = cell.column.id;
-        const cellPatched = isCellPatched(rowIndex, colName);
+        const cellPatched = isCellPatched(actualRowIndex, colName);
 
         return (
           <td
@@ -223,20 +257,30 @@ export function TableData({
         );
       });
     },
-    [editingCell?.rowIdx, editingCell?.colIdx, isCellPatched, isRowPatched]
+    [
+      editingCell?.rowIdx,
+      editingCell?.colIdx,
+      isCellPatched,
+      isRowPatched,
+      table,
+    ]
   );
 
   return (
-    <div class="flex h-full flex-col overflow-hidden bg-white">
+    <div
+      ref={containerRef}
+      class="flex h-full flex-col overflow-hidden bg-white"
+    >
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
-          key={`table-${tableRows.length}-${columns.length}-${offset}-${limit}`}
+          key={`table-${allRows.length}-${columns.length}`}
           style={{
             ...columnSizeVars,
             "--table-width": `${table.getTotalSize()}px`,
             height: "100%",
+            overflowY: emptyRowsCount > 0 ? "hidden" : "auto",
           }}
-          data={tableRows}
+          data={allRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
         />
