@@ -24,6 +24,7 @@ interface Props {
   isPatched: boolean;
   isNewRow?: boolean;
   rowKey?: string;
+  isDeleted?: boolean;
 
   onCellChange?: (
     action: DataAction,
@@ -44,6 +45,7 @@ export const TableCell = memo(function TableCell({
   isPatched,
   isNewRow = false,
   rowKey,
+  isDeleted = false,
   onCellChange,
   setEditingCell,
 }: Props) {
@@ -162,15 +164,19 @@ export const TableCell = memo(function TableCell({
         "overflow-hidden text-ellipsis whitespace-nowrap",
         "focus:overflow-x-auto focus:text-ellipsis",
 
-        // patched highlight (amber)
-        isPatched && "bg-amber-200",
+        // deleted row (grayed out with strikethrough)
+        isDeleted && "bg-red-300",
 
-        // new row highlight (green)
-        isNewRow && "bg-green-200",
+        // patched highlight (amber) - only if not deleted
+        isPatched && !isDeleted && "bg-amber-200",
+
+        // new row highlight (green) - only if not deleted
+        isNewRow && !isDeleted && "bg-green-200",
 
         // untouched
-        !isPatched && "bg-transparent"
+        !isPatched && !isDeleted && "bg-transparent"
       )}
+      disabled={isDeleted}
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     />
   );

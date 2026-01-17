@@ -14,7 +14,7 @@ interface TableProps<T = any> {
   columns: TableColumn<T>[];
   data: T[];
   keyExtractor?: (row: T, index: number) => string | number;
-  rowClassName?: string;
+  rowClassName?: string | ((row: T, index: number) => string);
   headerClassName?: string;
   stickyHeader?: boolean;
   className?: string;
@@ -115,28 +115,38 @@ export function Table<T = any>({
           </tr>
         </thead>
         <tbody>
-          {data.map((row, index) => (
-            <tr
-              key={getRowKey(row, index)}
-              class={cn(
-                rowClassName,
-                (row as any).isNew && "bg-green-200!",
-                selectedRow === index && "bg-blue-200!"
-              )}
-              onClick={() => onSelectRow?.(row, index)}
-            >
-              {columns.map((column) => (
-                <td
-                  key={column.key}
-                  class={cn("border border-neutral-200 px-1", column.className)}
-                >
-                  {column.render
-                    ? column.render((row as any)[column.key], row, index)
-                    : (row as any)[column.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {data.map((row, index) => {
+            const dynamicRowClassName =
+              typeof rowClassName === "function"
+                ? rowClassName(row, index)
+                : rowClassName;
+
+            return (
+              <tr
+                key={getRowKey(row, index)}
+                class={cn(
+                  (row as any).isNew && "bg-green-200!",
+                  selectedRow === index && "bg-blue-200!",
+                  dynamicRowClassName
+                )}
+                onClick={() => onSelectRow?.(row, index)}
+              >
+                {columns.map((column) => (
+                  <td
+                    key={column.key}
+                    class={cn(
+                      "border border-neutral-200 px-1",
+                      column.className
+                    )}
+                  >
+                    {column.render
+                      ? column.render((row as any)[column.key], row, index)
+                      : (row as any)[column.key]}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
           {/* Fill empty rows to cover viewport */}
           {Array.from({ length: emptyRowsCount }).map((_, idx) => {
             const rowIndex = data.length + idx;

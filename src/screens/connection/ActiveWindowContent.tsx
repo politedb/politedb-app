@@ -71,6 +71,28 @@ function extractNewRowKeys(patchMap: PatchMap, windowId: string): string[] {
   return newRowKeys;
 }
 
+// Extract deleted row indices for a specific dataKey
+function extractDeletedRows(
+  patchMap: PatchMap,
+  windowId: string,
+  dataKey: DataKey
+): Set<number> {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return new Set();
+
+  const deletePatches = windowData.patches["delete"]?.[dataKey] || {};
+  const deletedIndices = new Set<number>();
+
+  for (const rowKey of Object.keys(deletePatches)) {
+    const index = parseInt(rowKey, 10);
+    if (!isNaN(index)) {
+      deletedIndices.add(index);
+    }
+  }
+
+  return deletedIndices;
+}
+
 function EmptyState(props: { onNewSql: () => void }) {
   return (
     <Box className="text-center">
@@ -227,6 +249,30 @@ export function ActiveWindowContent(props: {
     [patchMap, activeTableWindow?.id]
   );
 
+  const deletedStructureRows = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.structure)
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const deletedConstraintRows = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.constraints)
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const deletedDataRows = useMemo(
+    () =>
+      activeTableWindow
+        ? extractDeletedRows(patchMap, activeTableWindow.id, DATA_KEYS.data)
+        : new Set(),
+    [patchMap, activeTableWindow?.id]
+  );
+
   /* =========================
    * SQL runner hook
    * ========================= */
@@ -345,6 +391,40 @@ export function ActiveWindowContent(props: {
       console.warn("handleAddRow: onDataChange is not available");
     }
   }, [activeTableWindow, activeTableData.data, onDataChange]);
+
+  /* =========================
+   * Handle delete column/index/row
+   * ========================= */
+
+  const handleDeleteColumn = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the column as deleted
+      onDataChange?.("delete", DATA_KEYS.structure, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
+
+  const handleDeleteIndex = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the constraint as deleted
+      onDataChange?.("delete", DATA_KEYS.constraints, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
+
+  const handleDeleteRow = useCallback(
+    (rowIndex: number) => {
+      if (!activeTableWindow) return;
+
+      // Mark the row as deleted
+      onDataChange?.("delete", DATA_KEYS.data, rowIndex, {});
+    },
+    [activeTableWindow, onDataChange]
+  );
 
   const handleFilters = useCallback(() => {
     console.log("filters");
@@ -471,6 +551,8 @@ export function ActiveWindowContent(props: {
                     error={activeTableData.error}
                     onDataChange={onDataChange}
                     onAddNewRecord={handleAddColumn}
+                    onDeleteRecord={handleDeleteColumn}
+                    deletedRows={deletedStructureRows}
                   />
                 }
                 second={
@@ -483,6 +565,8 @@ export function ActiveWindowContent(props: {
                     error={activeTableData.error}
                     onDataChange={onDataChange}
                     onAddNewRecord={handleAddIndex}
+                    onDeleteRecord={handleDeleteIndex}
+                    deletedRows={deletedConstraintRows}
                   />
                 }
               />
@@ -496,6 +580,8 @@ export function ActiveWindowContent(props: {
             onCellChange={onDataChange}
             patches={tablePatches}
             newRowKeys={tableNewRowKeys}
+            onDeleteRow={handleDeleteRow}
+            deletedRows={deletedDataRows}
           />
         )}
       </div>
