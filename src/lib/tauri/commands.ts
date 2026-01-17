@@ -26,6 +26,11 @@ export const CMD = {
   draftSqlSave: "sql_draft_save",
   draftSqlClear: "sql_draft_clear",
   draftSqlGC: "sql_draft_gc",
+
+  // Persistent storage
+  persistentLoad: "persistent_load",
+  persistentSave: "persistent_save",
+  persistentClear: "persistent_clear",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];

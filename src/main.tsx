@@ -5,6 +5,7 @@ import App from "./App";
 import "./styles.css";
 import { operationBus } from "./lib/tauri/operationBus";
 import { gcSqlDrafts } from "./lib/tauri/sql";
+import { usePersistentStore } from "src/stores/persistentStore";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -23,6 +24,13 @@ async function boot() {
     } catch {
       // ignore
     }
+
+    // ✅ Restore persisted layout BEFORE first render
+    const persistent = usePersistentStore.getState();
+    await persistent.restore();
+
+    // ✅ Start autosave AFTER restore (avoid overwriting with empty state)
+    persistent.install();
   } else {
     document.documentElement.dataset.platform = "web";
   }

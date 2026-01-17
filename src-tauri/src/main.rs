@@ -3,6 +3,7 @@ extern crate objc2;
 
 mod commands;
 mod engines;
+mod file_storage;
 mod operations;
 mod profiles;
 mod security;
@@ -68,6 +69,10 @@ fn main() {
             commands::sql_draft::sql_draft_load,
             commands::sql_draft::sql_draft_clear,
             commands::sql_draft::sql_draft_gc,
+            // persistent
+            commands::persistent::persistent_load,
+            commands::persistent::persistent_save,
+            commands::persistent::persistent_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

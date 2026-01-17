@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { DatabaseEngine, OpenWindow, SqlEditorWindow } from "../types";
 
+function schedulePersistentSave() {
+  queueMicrotask(async () => {
+    const mod = await import("src/stores/persistentStore");
+    mod.usePersistentStore.getState().scheduleSave();
+  });
+}
+
 /**
  * A "Profile Tab" represents one connected workspace/profile in the UI.
  * - profileId: persistent identity from backend (stable across sessions)
@@ -50,9 +57,6 @@ type ScreenState = {
   updateTab: (id: string, patch: Partial<ProfileTab>) => void;
   removeTab: (id: string) => void;
   resetTabs: (profileTabs: ProfileTab[]) => void;
-
-  // Runtime connection management
-  setRuntimeConnectionId: (tabId: string, runtimeId?: string) => void;
 };
 
 export const useScreenStore = create<ScreenState>((set) => ({
@@ -66,19 +70,26 @@ export const useScreenStore = create<ScreenState>((set) => ({
   /* Navigation                                                                 */
   /* -------------------------------------------------------------------------- */
 
-  setActiveProfileScreen: (tabId) => set({ activeProfileScreen: tabId }),
-
+  setActiveProfileScreen: (tabId) => {
+    set({ activeProfileScreen: tabId });
+    schedulePersistentSave();
+  },
   /* -------------------------------------------------------------------------- */
   /* Window focus (per tab)                                                     */
   /* -------------------------------------------------------------------------- */
 
   setActiveWindowId: (tabId, windowId) =>
-    set((s) => ({
-      activeWindowId: {
-        ...s.activeWindowId,
-        [tabId]: windowId,
-      },
-    })),
+    set((s) => {
+      const next = {
+        activeWindowId: {
+          ...s.activeWindowId,
+          [tabId]: windowId,
+        },
+      };
+
+      schedulePersistentSave();
+      return next;
+    }),
 
   /* -------------------------------------------------------------------------- */
   /* Window lifecycle (per tab)                                                 */
@@ -87,6 +98,7 @@ export const useScreenStore = create<ScreenState>((set) => ({
   addWindow: (tabId, window) =>
     set((s) => {
       const prev = s.openWindows[tabId] ?? [];
+      schedulePersistentSave();
       return {
         openWindows: {
           ...s.openWindows,
@@ -100,14 +112,14 @@ export const useScreenStore = create<ScreenState>((set) => ({
       const prev = s.openWindows[tabId] ?? [];
       const next = prev.filter((w) => w.id !== windowId);
 
-      // If the active window is removed, caller usually handles switching,
-      // but we can also defensively clear it if it points to a removed window.
       const currActive = s.activeWindowId[tabId];
       const lastWindowId = next.length > 0 ? next[next.length - 1].id : null;
       const activeWindowId =
         currActive === windowId
           ? { ...s.activeWindowId, [tabId]: lastWindowId }
           : s.activeWindowId;
+
+      schedulePersistentSave();
 
       return {
         openWindows: { ...s.openWindows, [tabId]: next },
@@ -116,19 +128,25 @@ export const useScreenStore = create<ScreenState>((set) => ({
     }),
 
   replaceWindows: (tabId, windows) =>
-    set((s) => ({
-      openWindows: { ...s.openWindows, [tabId]: windows },
-      activeWindowId: {
-        ...s.activeWindowId,
-        [tabId]: windows.length > 0 ? windows[windows.length - 1].id : null,
-      },
-    })),
+    set((s) => {
+      schedulePersistentSave();
+      return {
+        openWindows: { ...s.openWindows, [tabId]: windows },
+        activeWindowId: {
+          ...s.activeWindowId,
+          [tabId]: windows.length > 0 ? windows[windows.length - 1].id : null,
+        },
+      };
+    }),
 
   clearWindows: (tabId) =>
-    set((s) => ({
-      openWindows: { ...s.openWindows, [tabId]: [] },
-      activeWindowId: { ...s.activeWindowId, [tabId]: null },
-    })),
+    set((s) => {
+      schedulePersistentSave();
+      return {
+        openWindows: { ...s.openWindows, [tabId]: [] },
+        activeWindowId: { ...s.activeWindowId, [tabId]: null },
+      };
+    }),
 
   updateSqlWindowContent: (tabId, windowId, patch) =>
     set((s) => {
@@ -141,13 +159,17 @@ export const useScreenStore = create<ScreenState>((set) => ({
         if (w.type !== "sql") return w;
 
         const next = { ...w, ...patch };
-        if (next.content === w.content) return w;
+
+        // Note: include title too, not only content
+        if (next.content === w.content && next.title === w.title) return w;
 
         changed = true;
         return next;
       });
 
       if (!changed) return s;
+
+      schedulePersistentSave();
       return { openWindows: { ...s.openWindows, [tabId]: nextList } };
     }),
 
@@ -156,24 +178,36 @@ export const useScreenStore = create<ScreenState>((set) => ({
   /* -------------------------------------------------------------------------- */
 
   addTab: (tab) =>
-    set((s) => ({
-      profileTabs: [...s.profileTabs, tab],
-      activeProfileScreen: tab.id,
-
-      // Initialize per-tab window state so we never deal with undefined later
-      openWindows: { ...s.openWindows, [tab.id]: s.openWindows[tab.id] ?? [] },
-      activeWindowId: {
-        ...s.activeWindowId,
-        [tab.id]: s.activeWindowId[tab.id] ?? null,
-      },
-    })),
+    set((s) => {
+      schedulePersistentSave();
+      return {
+        profileTabs: [...s.profileTabs, tab],
+        activeProfileScreen: tab.id,
+        openWindows: {
+          ...s.openWindows,
+          [tab.id]: s.openWindows[tab.id] ?? [],
+        },
+        activeWindowId: {
+          ...s.activeWindowId,
+          [tab.id]: s.activeWindowId[tab.id] ?? null,
+        },
+      };
+    }),
 
   updateTab: (id, patch) =>
-    set((s) => ({
-      profileTabs: s.profileTabs.map((t) =>
-        t.id === id ? { ...t, ...patch } : t
-      ),
-    })),
+    set((s) => {
+      // Only persist if patch changes persisted fields (ignore runtimeConnectionId)
+      const { runtimeConnectionId: _rt, ...persistedPatch } = patch as any;
+      const shouldPersist = Object.keys(persistedPatch).length > 0;
+
+      if (shouldPersist) schedulePersistentSave();
+
+      return {
+        profileTabs: s.profileTabs.map((t) =>
+          t.id === id ? { ...t, ...patch } : t
+        ),
+      };
+    }),
 
   removeTab: (id) =>
     set((s) => {
@@ -191,23 +225,13 @@ export const useScreenStore = create<ScreenState>((set) => ({
       const { [id]: _ow, ...openWindows } = s.openWindows;
       const { [id]: _aw, ...activeWindowId } = s.activeWindowId;
 
+      schedulePersistentSave();
       return { profileTabs, activeProfileScreen, openWindows, activeWindowId };
     }),
 
   resetTabs: (profileTabs) =>
     set((s) => {
-      // Keep window maps as-is (or you can rebuild them, depending on your flow)
+      schedulePersistentSave();
       return { ...s, profileTabs };
     }),
-
-  /* -------------------------------------------------------------------------- */
-  /* Runtime connection management                                              */
-  /* -------------------------------------------------------------------------- */
-
-  setRuntimeConnectionId: (tabId, runtimeId) =>
-    set((s) => ({
-      profileTabs: s.profileTabs.map((t) =>
-        t.id === tabId ? { ...t, runtimeConnectionId: runtimeId } : t
-      ),
-    })),
 }));

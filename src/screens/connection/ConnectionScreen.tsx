@@ -151,6 +151,49 @@ export function ConnectionScreen() {
   }, [activeTab?.runtimeConnectionId, activeTableMapEntry?.connectionId]);
 
   /* =========================
+   * Auto-load active table after restore / tab switch
+   * ========================= */
+  const lastAutoLoadRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!activeProfileScreen || activeProfileScreen === "main") return;
+    if (!activeTableWindow) return;
+
+    // Wait until a runtime connection exists (tab-level or table-level)
+    if (!runtimeConnectionId) return;
+
+    // If already have data (and no error) or currently loading, skip
+    if (activeTableData.busy) return;
+    if (activeTableData.data && !activeTableData.error) return;
+
+    // Prevent repeated auto-load for the same table + pagination + window
+    const k = `${activeProfileScreen}:${activeTableWindow.id}:${activeTableWindow.table.schema}.${activeTableWindow.table.name}:${limit}:${offset}`;
+    if (lastAutoLoadRef.current === k) return;
+    lastAutoLoadRef.current = k;
+
+    loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      {
+        limit,
+        offset,
+      }
+    ).catch(console.error);
+  }, [
+    activeProfileScreen,
+    activeTableWindow?.id,
+    activeTableWindow?.table?.schema,
+    activeTableWindow?.table?.name,
+    runtimeConnectionId,
+    activeTableData.busy,
+    activeTableData.data,
+    activeTableData.error,
+    limit,
+    offset,
+    loadTableData,
+  ]);
+
+  /* =========================
    * Metadata (single instance) + Left panel
    * ========================= */
   const metadata = useDatabaseMetadata();
