@@ -5,13 +5,6 @@ import {
   useCallback,
   useRef,
 } from "preact/hooks";
-import {
-  useReactTable,
-  getCoreRowModel,
-  flexRender,
-  type ColumnDef,
-  Row,
-} from "@tanstack/react-table";
 import { TableVirtuoso } from "react-virtuoso";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cn } from "src/utils/cn";
@@ -127,102 +120,104 @@ export function TableData({
     isNewRow,
   });
 
-  // Define table columns
-  const tableColumns = useMemo<ColumnDef<any>[]>(
-    () => [
-      ...columns.map((col) => ({
-        id: col.name,
-        accessorFn: (row: any) => row[col.name]?.v,
-        header: col.name,
-        cell: ({
-          cell,
-          row,
-          table,
-        }: {
-          cell: any;
-          row: Row<any>;
-          table: any;
-        }) => {
-          const rowIndex = row.index;
-          const colName = cell.column.id;
-          const rowIsNew = isNewRow(rowIndex);
-          const rowKey = getRowKey(rowIndex, newRows);
-          const rowDeleted = isRowDeleted(rowIndex);
+  // Column resizing state
+  const [columnSizes, setColumnSizes] = useState<Record<string, number>>(() => {
+    const initial: Record<string, number> = {};
+    columns.forEach((col) => {
+      initial[col.name] = 80; // default size
+    });
+    return initial;
+  });
 
-          const originalValue =
-            rowIndex < tableData.length ? tableData[rowIndex]?.[colName] : null;
+  const [isResizing, setIsResizing] = useState<string | null>(null);
+  const resizeStartX = useRef<number>(0);
+  const resizeStartWidth = useRef<number>(0);
+  const resizeColumn = useRef<string | null>(null);
 
-          // prefer patch -> editedData -> original(tableData)
-          const fallback =
-            rowIndex < allData.length ? allData[rowIndex]?.[colName]?.v : null;
-          const value = getPatchedValue(rowIndex, colName, fallback, newRows);
+  // Container width tracking for empty column
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-          const patched = isCellPatched(rowIndex, colName, newRows);
-
-          return (
-            <TableCell
-              cell={cell}
-              row={row}
-              table={table}
-              colName={colName}
-              originalValue={originalValue}
-              value={value}
-              isPatched={patched}
-              isNewRow={rowIsNew}
-              rowKey={rowKey}
-              isDeleted={rowDeleted}
-              onCellChange={onCellChange}
-              setEditingCell={setEditingCell}
-            />
-          );
-        },
-      })),
-    ],
-    [
-      columns,
-      tableData,
-      allData,
-      onCellChange,
-      getPatchedValue,
-      isCellPatched,
-      setEditingCell,
-      isNewRow,
-      getRowKey,
-      isRowDeleted,
-      newRows,
-    ]
+  // Column resize handlers
+  const handleResizeStart = useCallback(
+    (colName: string, e: MouseEvent | TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(colName);
+      resizeColumn.current = colName;
+      const clientX =
+        "touches" in e ? e.touches[0]!.clientX : (e as MouseEvent).clientX;
+      resizeStartX.current = clientX;
+      resizeStartWidth.current = columnSizes[colName] || 80;
+    },
+    [columnSizes]
   );
 
-  const table = useReactTable({
-    data: allData,
-    columns: tableColumns,
-    defaultColumn: {
-      minSize: 60,
-      size: 80,
-      maxSize: 800,
+  const handleResizeMove = useCallback((e: MouseEvent | TouchEvent) => {
+    if (!resizeColumn.current) return;
+
+    const clientX =
+      "touches" in e ? e.touches[0]!.clientX : (e as MouseEvent).clientX;
+    const diff = clientX - resizeStartX.current;
+    const newWidth = Math.max(
+      60,
+      Math.min(800, resizeStartWidth.current + diff)
+    );
+
+    setColumnSizes((prev) => ({
+      ...prev,
+      [resizeColumn.current!]: newWidth,
+    }));
+  }, []);
+
+  const handleResizeEnd = useCallback(() => {
+    setIsResizing(null);
+    resizeColumn.current = null;
+  }, []);
+
+  // Attach resize listeners
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => handleResizeMove(e);
+    const handleMouseUp = () => handleResizeEnd();
+    const handleTouchMove = (e: TouchEvent) => handleResizeMove(e);
+    const handleTouchEnd = () => handleResizeEnd();
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("touchmove", handleTouchMove);
+    document.addEventListener("touchend", handleTouchEnd);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [isResizing, handleResizeMove, handleResizeEnd]);
+
+  // Update data handler
+  const updateData = useCallback(
+    (rowIndex: number, columnId: string, value: any) => {
+      // Check if this is a new row
+      if (rowIndex < editedData.length) {
+        // Update existing row
+        setEditedData((prev) =>
+          prev.map((row, index) => {
+            if (index === rowIndex) {
+              return {
+                ...prev[rowIndex]!,
+                [columnId]: { ...prev[rowIndex][columnId]!, v: value },
+              };
+            }
+            return row;
+          })
+        );
+      }
     },
-    getCoreRowModel: getCoreRowModel(),
-    columnResizeMode: "onChange",
-    meta: {
-      updateData: (rowIndex: number, columnId: string, value: any) => {
-        // Check if this is a new row
-        if (rowIndex < editedData.length) {
-          // Update existing row
-          setEditedData((prev) =>
-            prev.map((row, index) => {
-              if (index === rowIndex) {
-                return {
-                  ...prev[rowIndex]!,
-                  [columnId]: { ...prev[rowIndex][columnId]!, v: value },
-                };
-              }
-              return row;
-            })
-          );
-        }
-      },
-    },
-  });
+    [editedData.length]
+  );
 
   // Calculate empty rows to fill viewport
   const { emptyRowsCount, containerRef: viewportContainerRef } =
@@ -232,9 +227,48 @@ export function TableData({
       headerHeight: 40,
     });
 
+  // Calculate total table width for horizontal scrolling
+  const totalTableWidth = useMemo(() => {
+    const columnsWidth = columns.reduce((sum, col) => {
+      return sum + (columnSizes[col.name] || 80);
+    }, 0);
+
+    // Calculate remaining width for empty column
+    const remainingWidth = Math.max(0, containerWidth - columnsWidth);
+
+    return columnsWidth + remainingWidth;
+  }, [columns, columnSizes, containerWidth]);
+
+  // Calculate empty column width
+  const emptyColumnWidth = useMemo(() => {
+    const columnsWidth = columns.reduce((sum, col) => {
+      return sum + (columnSizes[col.name] || 80);
+    }, 0);
+    return Math.max(0, containerWidth - columnsWidth);
+  }, [columns, columnSizes, containerWidth]);
+
+  // Track container width using ResizeObserver
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   // Merge keyboard container ref with viewport container ref
   const mergedContainerRef = useCallback(
     (node: HTMLDivElement | null) => {
+      containerRef.current = node;
       if (keyboardContainerRef?.current !== undefined) {
         keyboardContainerRef.current = node;
       }
@@ -251,39 +285,14 @@ export function TableData({
     [viewportContainerRef, keyboardContainerRef]
   );
 
-  // Track column sizes to prevent unnecessary recalculations
-  const prevSizesRef = useRef<{ [key: string]: number } | null>(null);
-  const columnSizeVars = useMemo(() => {
-    const headers = table.getFlatHeaders();
-    const colSizes: { [key: string]: number } = {};
-
-    for (let i = 0; i < headers.length; i++) {
-      const header = headers[i]!;
-      colSizes[`--header-${header.id}-size`] = header.getSize();
-      colSizes[`--col-${header.column.id}-size`] = header.column.getSize();
-    }
-
-    // Check if sizes actually changed by comparing with previous
-    const prev = prevSizesRef.current;
-    if (prev) {
-      const hasChanged = Object.keys(colSizes).some(
-        (key) => prev[key] !== colSizes[key]
-      );
-      if (!hasChanged) {
-        return prev;
-      }
-    }
-
-    prevSizesRef.current = colSizes;
-    return colSizes;
-  }, [table, columns.length]);
-
-  const tableRows = useMemo(
-    () => table.getRowModel().rows ?? [],
-    [table, allData.length]
-  );
-
-  console.log("first");
+  // Create row data for virtualization
+  const tableRows = useMemo(() => {
+    return allData.map((row, index) => ({
+      id: `row-${index}`,
+      index,
+      data: row,
+    }));
+  }, [allData]);
 
   // Create empty rows for viewport filling
   const emptyRows = useMemo(() => {
@@ -303,100 +312,188 @@ export function TableData({
   const renderHeader = useCallback(() => {
     return (
       <tr>
-        {table.getHeaderGroups()[0]?.headers.map((header) => (
-          <th
-            key={header.id}
-            class={cn(
-              "relative border-r border-neutral-200 bg-neutral-50 p-2 select-none",
-              "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
-            )}
-            style={{ width: `calc(var(--header-${header?.id}-size) * 1px)` }}
-          >
-            {header.isPlaceholder
-              ? null
-              : flexRender(header.column.columnDef.header, header.getContext())}
-            {header.column.getCanResize() && (
+        {columns.map((col) => {
+          const colName = col.name;
+          const width = columnSizes[colName] || 80;
+          return (
+            <th
+              key={colName}
+              class={cn(
+                "relative border-r border-neutral-200 bg-neutral-50 p-2 select-none",
+                "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
+              )}
+              style={{ width: `${width}px` }}
+            >
+              {colName}
               <div
-                onMouseDown={header.getResizeHandler()}
-                onTouchStart={header.getResizeHandler()}
-                onDblClick={() => header.column.resetSize()}
+                onMouseDown={(e) => handleResizeStart(colName, e)}
+                onTouchStart={(e) => handleResizeStart(colName, e)}
+                onDblClick={() =>
+                  setColumnSizes((prev) => ({ ...prev, [colName]: 80 }))
+                }
                 className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize"
               />
+            </th>
+          );
+        })}
+        {emptyColumnWidth > 0 && (
+          <th
+            key="empty"
+            class={cn(
+              "border-r border-neutral-200 bg-neutral-50 p-2 select-none",
+              "text-left text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-sm"
             )}
+            style={{ width: `${emptyColumnWidth}px` }}
+          >
+            {/* Empty column header */}
           </th>
-        ))}
+        )}
       </tr>
     );
-  }, [table]);
+  }, [columns, columnSizes, handleResizeStart, emptyColumnWidth]);
 
   const renderRow = useCallback(
-    (rowIndex: number, row: Row<any> | any) => {
-      const isEmptyRow = row.id?.startsWith("empty-");
-      const actualRowIndex = isEmptyRow ? row.index : rowIndex;
+    (rowIndex: number, rowData: any) => {
+      const isEmptyRow = rowData?.id?.startsWith("empty-");
+      const actualRowIndex = isEmptyRow ? rowData.index : rowIndex;
       const rowPatched = !isEmptyRow && isRowPatched(actualRowIndex, newRows);
 
       if (isEmptyRow) {
         // Render empty row
-        return table
-          .getHeaderGroups()[0]
-          ?.headers.map((header) => (
-            <td
-              key={header.id}
-              class={cn("h-[28px] border border-neutral-200 px-1")}
-              style={{ width: `calc(var(--col-${header.id}-size) * 1px)` }}
-            />
-          ));
+        return (
+          <>
+            {columns.map((col) => {
+              const colName = col.name;
+              const width = columnSizes[colName] || 80;
+              return (
+                <td
+                  key={colName}
+                  class={cn("h-[28px] border border-neutral-200 px-1")}
+                  style={{ width: `${width}px` }}
+                />
+              );
+            })}
+            {emptyColumnWidth > 0 && (
+              <td
+                key="empty"
+                class={cn("h-[28px] border border-neutral-200 px-1")}
+                style={{ width: `${emptyColumnWidth}px` }}
+              />
+            )}
+          </>
+        );
       }
 
       const rowIsNew = isNewRow(actualRowIndex);
       const isSelectingRow = editingCell?.rowIdx === actualRowIndex;
       const rowDeleted = isRowDeleted(actualRowIndex);
 
-      return row.getVisibleCells().map((cell: any, colIndex: number) => {
-        const isEditing = isSelectingRow && editingCell?.colIdx === colIndex;
+      return (
+        <>
+          {columns.map((col, colIndex) => {
+            const isEditing =
+              isSelectingRow && editingCell?.colIdx === colIndex;
+            const colName = col.name;
+            const cellPatched = isCellPatched(actualRowIndex, colName, newRows);
+            const width = columnSizes[colName] || 80;
 
-        const colName = cell.column.id;
-        const cellPatched = isCellPatched(actualRowIndex, colName, newRows);
+            const originalValue =
+              actualRowIndex < tableData.length
+                ? tableData[actualRowIndex]?.[colName]
+                : null;
 
-        return (
-          <td
-            key={cell.id}
-            tabIndex={0}
-            style={{ width: `calc(var(--col-${cell.column.id}-size) * 1px)` }}
-            class={cn(
-              "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
-              isSelectingRow ? "bg-blue-200!" : "hover:bg-blue-50",
-              rowIsNew && !isSelectingRow && "bg-green-50/40",
-              rowDeleted && !isSelectingRow && "bg-red-50/20 opacity-50",
-              rowPatched &&
-                !isSelectingRow &&
-                !rowIsNew &&
-                !rowDeleted &&
-                "bg-amber-50/40",
-              cellPatched && !isSelectingRow && "ring-1 ring-amber-200",
-              isEditing && "outline-2 -outline-offset-2 outline-blue-500"
-            )}
-            onMouseDown={(e) => {
-              // Set selected row when clicking on a cell
-              e.stopPropagation();
-              handleRowSelect(actualRowIndex);
-            }}
-          >
-            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-          </td>
-        );
-      });
+            // prefer patch -> editedData -> original(tableData)
+            const fallback =
+              actualRowIndex < allData.length
+                ? allData[actualRowIndex]?.[colName]?.v
+                : null;
+            const value = getPatchedValue(
+              actualRowIndex,
+              colName,
+              fallback,
+              newRows
+            );
+            const rowKey = getRowKey(actualRowIndex, newRows);
+
+            return (
+              <td
+                key={`${actualRowIndex}-${colName}`}
+                tabIndex={0}
+                style={{ width: `${width}px` }}
+                class={cn(
+                  "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
+                  isSelectingRow ? "bg-blue-200!" : "hover:bg-blue-50",
+                  rowIsNew && !isSelectingRow && "bg-green-50/40",
+                  rowDeleted && !isSelectingRow && "bg-red-50/20 opacity-50",
+                  rowPatched &&
+                    !isSelectingRow &&
+                    !rowIsNew &&
+                    !rowDeleted &&
+                    "bg-amber-50/40",
+                  cellPatched && !isSelectingRow && "ring-1 ring-amber-200",
+                  isEditing && "outline-2 -outline-offset-2 outline-blue-500"
+                )}
+                onMouseDown={(e) => {
+                  // Set selected row when clicking on a cell
+                  e.stopPropagation();
+                  handleRowSelect(actualRowIndex);
+                }}
+              >
+                <TableCell
+                  rowIndex={actualRowIndex}
+                  colIndex={colIndex}
+                  colName={colName}
+                  originalValue={originalValue}
+                  value={value}
+                  isPatched={cellPatched}
+                  isNewRow={rowIsNew}
+                  rowKey={rowKey}
+                  isDeleted={rowDeleted}
+                  onCellChange={onCellChange}
+                  setEditingCell={setEditingCell}
+                  updateData={updateData}
+                />
+              </td>
+            );
+          })}
+          {emptyColumnWidth > 0 && (
+            <td
+              key={`${actualRowIndex}-empty`}
+              class={cn(
+                "border border-neutral-200 text-sm text-neutral-900",
+                isSelectingRow ? "bg-blue-200!" : "hover:bg-blue-50",
+                rowIsNew && "bg-green-200!",
+                rowIsNew && !isSelectingRow && "bg-green-50/40"
+              )}
+              style={{ width: `${emptyColumnWidth}px` }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                handleRowSelect(actualRowIndex);
+              }}
+            />
+          )}
+        </>
+      );
     },
     [
+      columns,
+      columnSizes,
       editingCell?.rowIdx,
       editingCell?.colIdx,
       isCellPatched,
       isRowPatched,
       isNewRow,
       isRowDeleted,
-      table,
+      tableData,
+      allData,
+      getPatchedValue,
+      getRowKey,
       newRows,
       handleRowSelect,
+      onCellChange,
+      setEditingCell,
+      updateData,
+      emptyColumnWidth,
     ]
   );
 
@@ -406,18 +503,21 @@ export function TableData({
       class="flex h-full flex-col overflow-hidden bg-white"
       tabIndex={0}
     >
-      <div class="flex-1 overflow-hidden border-t border-neutral-200">
+      <div class="flex-1 overflow-x-auto overflow-y-hidden border-t border-neutral-200">
         <TableVirtuoso
           key={`table-${allRows.length}-${columns.length}`}
           style={{
-            ...columnSizeVars,
-            "--table-width": `${table.getTotalSize()}px`,
             height: "100%",
+            width: `${Math.max(totalTableWidth, containerWidth || 100)}px`,
+            minWidth: "100%",
             overflowY: emptyRowsCount > 0 ? "hidden" : "auto",
           }}
           data={allRows}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
+          overscan={100}
+          increaseViewportBy={{ top: 200, bottom: 200 }}
+          minOverscanItemCount={{ top: 100, bottom: 100 }}
         />
       </div>
     </div>

@@ -9,7 +9,6 @@ import {
   TabBottom,
   TabRight,
   TabLeft,
-  SaveIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -21,11 +20,9 @@ interface Props {
   activeTable?: string;
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
-  canSaveChanges?: boolean;
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
-  handleSaveChanges?: () => void;
 }
 
 export function MenuBar({
@@ -33,11 +30,9 @@ export function MenuBar({
   activeTable,
   viewMode = ["left"],
   loadTableError,
-  canSaveChanges,
   onViewModeChange,
   onRefresh,
   openSQLWindow,
-  handleSaveChanges,
 }: Props) {
   const { activeProfileScreen, profileTabs } = useScreenStore();
   const activeTab = profileTabs.find((tab) => tab.id === activeProfileScreen);
@@ -119,16 +114,6 @@ export function MenuBar({
 
       {/* Right Icons */}
       <div class="flex items-center gap-2">
-        {canSaveChanges && (
-          <Button
-            variant="ghost"
-            className="p-2 hover:bg-neutral-50"
-            title={"Save Changes"}
-            onClick={handleSaveChanges}
-          >
-            <SaveIcon className="size-4.5 text-blue-600" />
-          </Button>
-        )}
         <Button
           variant="ghost"
           className="p-1.5 hover:bg-neutral-50"

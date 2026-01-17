@@ -1,4 +1,3 @@
-import { Cell, Row, Table } from "@tanstack/react-table";
 import { cellToString } from "src/utils/convert";
 import {
   Dispatch,
@@ -8,24 +7,20 @@ import {
   useRef,
 } from "preact/hooks";
 import { cn } from "src/utils/cn";
-import { memo, SetStateAction } from "preact/compat";
+import { SetStateAction } from "preact/compat";
 import { EditingCell } from "./TableData";
 import { DataAction, DataKey } from "src/stores/connection";
 
-interface Props {
-  cell: Cell<any, any>;
-  row: Row<any>;
-  table: Table<any>;
+export interface TableCellProps {
+  rowIndex: number;
+  colIndex: number;
   colName: string;
   originalValue: any;
-
   value: any;
-
   isPatched: boolean;
   isNewRow?: boolean;
   rowKey?: string;
   isDeleted?: boolean;
-
   onCellChange?: (
     action: DataAction,
     dataKey: DataKey,
@@ -33,12 +28,12 @@ interface Props {
     data: Record<string, any>
   ) => void;
   setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
+  updateData: (rowIndex: number, columnId: string, value: any) => void;
 }
 
-export const TableCell = memo(function TableCell({
-  cell,
-  row,
-  table,
+export function TableCell({
+  rowIndex,
+  colIndex,
   colName,
   // originalValue,
   value,
@@ -48,10 +43,9 @@ export const TableCell = memo(function TableCell({
   isDeleted = false,
   onCellChange,
   setEditingCell,
-}: Props) {
+  updateData,
+}: TableCellProps) {
   const dataKey = "data";
-  const rowIndex = row.index;
-  const colIndex = cell.column.getIndex();
 
   const displayValue = cellToString(value);
   // TODO use original value if needed
@@ -78,8 +72,8 @@ export const TableCell = memo(function TableCell({
       return;
     }
 
-    // Update local editedData (tanstack meta)
-    (table.options.meta as any)?.updateData(rowIndex, colName, editValue);
+    // Update local editedData
+    updateData(rowIndex, colName, editValue);
 
     // For new rows, use "create" action and include the rowKey
     // For existing rows, use "update" action
@@ -98,7 +92,7 @@ export const TableCell = memo(function TableCell({
     displayValue,
     rowIndex,
     colName,
-    table.options.meta,
+    updateData,
     onCellChange,
     isNewRow,
     rowKey,
@@ -108,10 +102,15 @@ export const TableCell = memo(function TableCell({
     (e: Event) => {
       // Check if we're still editing this cell (not switched to another)
       const input = e.currentTarget as HTMLInputElement;
-      input.style.backgroundColor = "transparent";
+      // If row is selected, set background to green-200, otherwise transparent
+      if (isNewRow) {
+        input.style.backgroundColor = "#b9f8cf"; // bg-green-200
+      } else {
+        input.style.backgroundColor = "transparent";
+      }
       commitValue();
     },
-    [commitValue]
+    [commitValue, isNewRow]
   );
 
   const onInputKeyDown = useCallback(
@@ -180,4 +179,4 @@ export const TableCell = memo(function TableCell({
       style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
     />
   );
-});
+}

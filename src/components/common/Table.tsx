@@ -153,10 +153,7 @@ export function Table<T = any>({
             return (
               <tr
                 key={`empty-${idx}`}
-                class={cn(
-                  rowClassName,
-                  selectedRow === rowIndex && "bg-blue-200!"
-                )}
+                class={cn(rowClassName)}
                 onClick={() => onSelectRow?.(emptyRow, rowIndex)}
                 onDblClick={() => onDoubleClickRow?.(emptyRow, rowIndex)}
               >

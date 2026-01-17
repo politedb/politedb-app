@@ -63,7 +63,7 @@ export function ConnectionScreen() {
   );
   const [error, setError] = useState<string | null>(null);
 
-  const { viewMode, toggleViewMode } = useViewMode(["left"]);
+  const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
 
   /* =========================
    * Windows orchestration
@@ -99,7 +99,7 @@ export function ConnectionScreen() {
       dataPatchMap[activeProfileScreen] ?? {},
       queryHistory[activeProfileScreen] ?? [],
     ];
-  }, [dataPatchMap, activeProfileScreen]);
+  }, [dataPatchMap, queryHistory, activeProfileScreen]);
 
   const [tableStructureData, tableConstraintsData] = useMemo(() => {
     if (!activeId) return [[], []];
@@ -571,7 +571,12 @@ export function ConnectionScreen() {
         activeTableData.structure
       );
     }
-  }, [activeTableData.structure, tableStructure, activeId, activeTableWindow]);
+  }, [
+    activeTableData.structure,
+    JSON.stringify(tableStructure),
+    activeId,
+    activeTableWindow?.id,
+  ]);
 
   useEffect(() => {
     if (
@@ -587,9 +592,9 @@ export function ConnectionScreen() {
     }
   }, [
     activeTableData.constraints,
-    tableConstraints,
+    JSON.stringify(tableConstraints),
     activeId,
-    activeTableWindow,
+    activeTableWindow?.id,
   ]);
 
   /* =========================
@@ -723,14 +728,7 @@ export function ConnectionScreen() {
           </div>
         )}
 
-        <div
-          class={cn(
-            "flex-1 overflow-auto",
-            viewMode.includes("left") && "animate-slide-in-right",
-            viewMode.includes("right") && "animate-slide-in-left",
-            viewMode.includes("bottom") && "animate-slide-in-up"
-          )}
-        >
+        <div class={cn("flex-1 overflow-auto")}>
           <ActiveWindowContent
             activeProfileScreen={activeProfileScreen}
             activeWindow={activeWindow}
@@ -829,8 +827,6 @@ export function ConnectionScreen() {
         onViewModeChange={toggleViewMode}
         openSQLWindow={handleOpenSqlEditor}
         onRefresh={handleRefresh}
-        canSaveChanges={hasPatches || hasNewTableData}
-        handleSaveChanges={handleSaveChanges}
       />
 
       <div class="flex h-full flex-1 overflow-hidden">

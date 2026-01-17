@@ -70,6 +70,7 @@ export function TableStructure({
     deletedRows,
     containerRef: containerRef,
   });
+  console.log(selectedRowIndex);
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
@@ -99,7 +100,7 @@ export function TableStructure({
         headerClassName: "min-w-12! text-center",
         render: (_value: any, _row: any, index: number) =>
           index + 1 <= editedData.length ? (
-            <span class="text-xs text-neutral-500">{index + 1}</span>
+            <span class="text-sm text-neutral-500">{index + 1}</span>
           ) : null,
       },
       ...COLUMNS_NAME.map((name) => ({
@@ -125,7 +126,7 @@ export function TableStructure({
                   : undefined
               }
               className={cn(
-                "cursor-default!",
+                "cursor-default! text-sm",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
@@ -164,6 +165,7 @@ export function TableStructure({
       deletedRows,
       onDeleteRecord,
       engine,
+      selectedRowIndex,
     ]
   );
 

@@ -103,7 +103,7 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "cursor-default!",
+                "cursor-default! text-sm",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
