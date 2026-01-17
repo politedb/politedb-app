@@ -49,9 +49,11 @@ export function useFillViewportTable({
       if (actualRowsHeight < availableHeight) {
         const remainingHeight = availableHeight - actualRowsHeight;
         const additionalRows = Math.ceil(remainingHeight / estimatedRowHeight);
-        setEmptyRowsCount(additionalRows);
+        setEmptyRowsCount((prev) =>
+          prev !== additionalRows ? additionalRows : prev
+        );
       } else {
-        setEmptyRowsCount(0);
+        setEmptyRowsCount((prev) => (prev !== 0 ? 0 : prev));
       }
     };
 
@@ -66,8 +68,8 @@ export function useFillViewportTable({
     fillViewport,
     estimatedRowHeight,
     headerHeight,
-    containerRef,
-    tableRef,
+    // Note: containerRef and tableRef are refs and don't need to be in deps
+    // but we include tableRef?.current in the closure for safety
   ]);
 
   return { emptyRowsCount, containerRef };

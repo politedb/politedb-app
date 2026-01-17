@@ -1,4 +1,10 @@
-import { useMemo, useState, useEffect, useCallback } from "preact/hooks";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from "preact/hooks";
 import {
   useReactTable,
   getCoreRowModel,
@@ -43,14 +49,17 @@ interface Props {
   deletedRows?: Set<number>;
 }
 
+const EMPTY_ARRAY: string[] = [];
+const EMPTY_SET = new Set<number>();
+
 export function TableData({
   columns,
   data,
   patches,
   onCellChange,
   onDeleteRow,
-  newRowKeys = [],
-  deletedRows = new Set(),
+  newRowKeys = EMPTY_ARRAY,
+  deletedRows = EMPTY_SET,
 }: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
@@ -242,18 +251,39 @@ export function TableData({
     [viewportContainerRef, keyboardContainerRef]
   );
 
+  // Track column sizes to prevent unnecessary recalculations
+  const prevSizesRef = useRef<{ [key: string]: number } | null>(null);
   const columnSizeVars = useMemo(() => {
     const headers = table.getFlatHeaders();
     const colSizes: { [key: string]: number } = {};
+
     for (let i = 0; i < headers.length; i++) {
       const header = headers[i]!;
       colSizes[`--header-${header.id}-size`] = header.getSize();
       colSizes[`--col-${header.column.id}-size`] = header.column.getSize();
     }
-    return colSizes;
-  }, [table.getState().columnSizingInfo, table.getState().columnSizing]);
 
-  const tableRows = useMemo(() => table.getRowModel().rows ?? [], [allData]);
+    // Check if sizes actually changed by comparing with previous
+    const prev = prevSizesRef.current;
+    if (prev) {
+      const hasChanged = Object.keys(colSizes).some(
+        (key) => prev[key] !== colSizes[key]
+      );
+      if (!hasChanged) {
+        return prev;
+      }
+    }
+
+    prevSizesRef.current = colSizes;
+    return colSizes;
+  }, [table, columns.length]);
+
+  const tableRows = useMemo(
+    () => table.getRowModel().rows ?? [],
+    [table, allData.length]
+  );
+
+  console.log("first");
 
   // Create empty rows for viewport filling
   const emptyRows = useMemo(() => {
