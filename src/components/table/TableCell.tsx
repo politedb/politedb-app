@@ -22,6 +22,8 @@ interface Props {
   value: any;
 
   isPatched: boolean;
+  isNewRow?: boolean;
+  rowKey?: string;
 
   onCellChange?: (
     action: DataAction,
@@ -40,6 +42,8 @@ export const TableCell = memo(function TableCell({
   // originalValue,
   value,
   isPatched,
+  isNewRow = false,
+  rowKey,
   onCellChange,
   setEditingCell,
 }: Props) {
@@ -60,17 +64,53 @@ export const TableCell = memo(function TableCell({
   }, [displayValue]);
 
   const commitValue = useCallback(() => {
+    // Only commit if the value actually changed
+    // Normalize both values for comparison (trim whitespace, treat empty string as empty)
+    const normalizedEditValue = editValue.trim();
+    const normalizedDisplayValue = displayValue.trim();
+
+    // For new rows, always commit (even if empty, it's still a new row)
+    // For existing rows, only commit if the value changed
+    if (!isNewRow && normalizedEditValue === normalizedDisplayValue) {
+      // Value hasn't changed, don't create a patch
+      return;
+    }
+
     // Update local editedData (tanstack meta)
     (table.options.meta as any)?.updateData(rowIndex, colName, editValue);
 
-    // Bubble up to ConnectionScreen → patchMap
-    onCellChange?.("update", dataKey, rowIndex, { [colName]: editValue });
-  }, [editValue, rowIndex, colName, table.options.meta, onCellChange]);
+    // For new rows, use "create" action and include the rowKey
+    // For existing rows, use "update" action
+    const action = isNewRow ? "create" : "update";
+    const changeData: Record<string, any> = { [colName]: editValue };
 
-  const onInputBlur = useCallback(() => {
-    // Check if we're still editing this cell (not switched to another)
-    commitValue();
-  }, [commitValue]);
+    // Include rowKey for new rows so handleDataChange can extract it
+    if (isNewRow && rowKey) {
+      changeData.__rowKey = rowKey;
+    }
+
+    // Bubble up to ConnectionScreen → patchMap
+    onCellChange?.(action, dataKey, isNewRow ? -1 : rowIndex, changeData);
+  }, [
+    editValue,
+    displayValue,
+    rowIndex,
+    colName,
+    table.options.meta,
+    onCellChange,
+    isNewRow,
+    rowKey,
+  ]);
+
+  const onInputBlur = useCallback(
+    (e: Event) => {
+      // Check if we're still editing this cell (not switched to another)
+      const input = e.currentTarget as HTMLInputElement;
+      input.style.backgroundColor = "transparent";
+      commitValue();
+    },
+    [commitValue]
+  );
 
   const onInputKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -124,6 +164,9 @@ export const TableCell = memo(function TableCell({
 
         // patched highlight (amber)
         isPatched && "bg-amber-200",
+
+        // new row highlight (green)
+        isNewRow && "bg-green-200",
 
         // untouched
         !isPatched && "bg-transparent"

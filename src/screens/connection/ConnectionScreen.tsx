@@ -260,9 +260,23 @@ export function ConnectionScreen() {
       rowIndex: number,
       data: Record<string, any>
     ) => {
-      if (!activeProfileScreen || !activeTableWindow) return;
+      if (!activeProfileScreen || !activeTableWindow) {
+        return;
+      }
 
-      const rowKey = String(rowIndex);
+      // For new rows (rowIndex === -1), extract the unique rowKey from data
+      // Otherwise, use the rowIndex as the rowKey
+      let rowKey: string;
+      let patchData = data;
+
+      if (rowIndex === -1 && data.__rowKey) {
+        rowKey = data.__rowKey;
+        // Remove __rowKey from the actual patch data
+        const { __rowKey, ...rest } = data;
+        patchData = rest;
+      } else {
+        rowKey = String(rowIndex);
+      }
 
       setPatchMap(activeProfileScreen, {
         dataKey,
@@ -270,13 +284,14 @@ export function ConnectionScreen() {
         tableData: activeTableData,
         tableWindow: activeTableWindow,
         rowKey,
-        data,
+        data: patchData,
       });
     },
     [
       activeProfileScreen,
       JSON.stringify(activeTableWindow),
       JSON.stringify(activeTableData),
+      setPatchMap,
     ]
   );
 

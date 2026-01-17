@@ -26,6 +26,51 @@ import { DATA_KEYS } from "src/constant";
 import { PatchMap } from "src/utils/generateSql";
 import { DataAction, DataKey } from "src/stores/connection";
 
+// Extract flattened patches for a specific table window
+function extractPatchesForTable(
+  patchMap: PatchMap,
+  windowId: string
+): Record<string, Record<string, any>> | null {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return null;
+
+  const { patches } = windowData;
+  const result: Record<string, Record<string, any>> = {};
+
+  // Combine update and create patches for data
+  const updatePatches = patches["update"]?.["data"] || {};
+  const createPatches = patches["create"]?.["data"] || {};
+
+  // Add update patches
+  for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+    result[rowKey] = { ...result[rowKey], ...patchData };
+  }
+
+  // Add create patches
+  for (const [rowKey, patchData] of Object.entries(createPatches)) {
+    result[rowKey] = { ...result[rowKey], ...patchData };
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// Extract new row keys (rows with "new-" prefix)
+function extractNewRowKeys(patchMap: PatchMap, windowId: string): string[] {
+  const windowData = patchMap[windowId];
+  if (!windowData?.patches) return [];
+
+  const createPatches = windowData.patches["create"]?.["data"] || {};
+  const newRowKeys: string[] = [];
+
+  for (const rowKey of Object.keys(createPatches)) {
+    if (rowKey.startsWith("new-")) {
+      newRowKeys.push(rowKey);
+    }
+  }
+
+  return newRowKeys;
+}
+
 function EmptyState(props: { onNewSql: () => void }) {
   return (
     <Box className="text-center">
@@ -165,6 +210,23 @@ export function ActiveWindowContent(props: {
     setViewMode("data");
   }, [activeTableWindow?.id]);
 
+  // Extract patches for the current table window
+  const tablePatches = useMemo(
+    () =>
+      activeTableWindow
+        ? extractPatchesForTable(patchMap, activeTableWindow.id)
+        : null,
+    [patchMap, activeTableWindow?.id]
+  );
+
+  const tableNewRowKeys = useMemo(
+    () =>
+      activeTableWindow
+        ? extractNewRowKeys(patchMap, activeTableWindow.id)
+        : [],
+    [patchMap, activeTableWindow?.id]
+  );
+
   /* =========================
    * SQL runner hook
    * ========================= */
@@ -252,8 +314,37 @@ export function ActiveWindowContent(props: {
   ]);
 
   const handleAddRow = useCallback(() => {
-    console.log("add row");
-  }, []);
+    if (!activeTableWindow) {
+      console.warn("handleAddRow: activeTableWindow is missing");
+      return;
+    }
+
+    if (!activeTableData.data || !activeTableData.data.columns) {
+      console.warn("handleAddRow: activeTableData.data or columns is missing");
+      return;
+    }
+
+    // Generate a unique row key for the new row (using timestamp + random)
+    const newRowKey = `new-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Initialize the new row with empty values for all columns
+    const newRowData: Record<string, any> = {};
+    activeTableData.data.columns.forEach((col) => {
+      newRowData[col.name] = null;
+    });
+
+    // Create the new row patch with action="create"
+    // Pass the unique key as a string in the data, and use a sentinel number
+    // The actual rowKey will be extracted from the data or we'll modify the system
+    if (onDataChange) {
+      onDataChange("create", DATA_KEYS.data, -1, {
+        ...newRowData,
+        __rowKey: newRowKey,
+      });
+    } else {
+      console.warn("handleAddRow: onDataChange is not available");
+    }
+  }, [activeTableWindow, activeTableData.data, onDataChange]);
 
   const handleFilters = useCallback(() => {
     console.log("filters");
@@ -403,7 +494,8 @@ export function ActiveWindowContent(props: {
             columns={activeTableData.data?.columns ?? []}
             data={activeTableData.data?.rows ?? []}
             onCellChange={onDataChange}
-            patches={patchMap}
+            patches={tablePatches}
+            newRowKeys={tableNewRowKeys}
           />
         )}
       </div>
