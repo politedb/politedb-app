@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import { TableData, TableItem, TableSizeInfo } from "src/types";
+import {
+  TableData,
+  TableItem,
+  TableSizeInfo,
+  TableRelationships,
+  TableStructure,
+  SqlQuery,
+} from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 
 type SchemaState = {
@@ -23,16 +30,19 @@ type TableState = {
 
 type TableDataState = {
   data: TableData | null;
+  structure: TableStructure[] | null;
+  relationships: TableRelationships[] | null;
   sizeInfo: TableSizeInfo | null;
   connectionId: string | null; // profile / DB connection
   busy: boolean;
   error: string | null;
-} | null;
+};
 
 type ConnectionState = {
   // key = windowId
   tables: Record<string, TableState>;
   schemas: Record<string, SchemaState>;
+  queryHistory: Record<string, SqlQuery[]>;
 
   // cache key = `${connectionId}.${schema}.${table}`
   columnsCache: Record<string, ColumnMeta[]>;
@@ -41,6 +51,9 @@ type ConnectionState = {
   // key = windowId
   tableDataMap: Record<string, TableDataState>;
   sqlResults: Record<string, SqlResultState>;
+
+  addQueryHistory: (tabId: string, query: SqlQuery) => void;
+  clearQueryHistory: (tabId: string) => void;
 
   setSqlResult: (windowId: string, patch: Partial<SqlResultState>) => void;
   clearSqlResult: (windowId: string) => void;
@@ -59,6 +72,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   schemas: {},
   tableDataMap: {},
   sqlResults: {},
+  queryHistory: {},
 
   columnsCache: {},
   sizeInfoCache: {},
@@ -133,4 +147,20 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 
   setSizeInfoCache: (key, info) =>
     set((s) => ({ sizeInfoCache: { ...s.sizeInfoCache, [key]: info } })),
+
+  addQueryHistory: (tabId: string, query: SqlQuery) =>
+    set((s) => ({
+      queryHistory: {
+        ...s.queryHistory,
+        [tabId]: [...(s.queryHistory[tabId] || []), query],
+      },
+    })),
+
+  clearQueryHistory: (tabId: string) =>
+    set((s) => ({
+      queryHistory: {
+        ...s.queryHistory,
+        [tabId]: [],
+      },
+    })),
 }));

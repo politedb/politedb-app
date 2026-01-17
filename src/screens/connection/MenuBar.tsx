@@ -60,11 +60,14 @@ export function MenuBar({
   const connectionString = useMemo(() => {
     if (!connectionInfo) return "";
     const { engine, version, database, user, schema, table } = connectionInfo;
+    const tags = profile?.input?.tags ?? [];
+    const tagsString = tags.join(",").toUpperCase();
+
     if (!table) {
-      return `LOCAL | ${engine} ${version} : ${database} : ${user}`;
+      return `${tagsString} | ${engine} ${version} : ${database} : ${user}`;
     }
-    return `LOCAL | ${engine} ${version} : ${database} : ${user} : ${schema}.${table}`;
-  }, [connectionInfo]);
+    return `${tagsString} | ${engine} ${version} : ${database} : ${user} : ${schema}.${table}`;
+  }, [connectionInfo, profile]);
 
   return (
     <div class="flex h-12 items-center gap-2 border-b border-neutral-200 bg-white px-2">

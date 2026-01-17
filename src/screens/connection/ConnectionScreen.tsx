@@ -318,11 +318,8 @@ export function ConnectionScreen() {
             {viewMode.includes("bottom") && (
               <div class="animate-slide-in-up h-64 shrink-0 border-t border-neutral-200">
                 <QueryHistory
-                  queries={sqlHistory}
-                  onClear={clearHistory}
-                  onSelectQuery={(query) => {
-                    console.log("Selected query:", query);
-                  }}
+                  queries={sqlHistory ?? []}
+                  onClear={() => clearHistory()}
                 />
               </div>
             )}

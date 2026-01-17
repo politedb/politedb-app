@@ -6,23 +6,9 @@ import { SqlQuery } from "../../types";
 interface Props {
   queries: SqlQuery[];
   onClear?: () => void;
-  onSelectQuery?: (query: SqlQuery) => void;
 }
 
-export function QueryHistory({ queries, onClear, onSelectQuery }: Props) {
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  };
-
-  const truncateSql = (sql: string, maxLength: number = 100) => {
-    if (sql.length <= maxLength) return sql;
-    return sql.substring(0, maxLength) + "...";
-  };
-
+export function QueryHistory({ queries, onClear }: Props) {
   return (
     <div class="flex h-full flex-col bg-white">
       <div class="flex items-center justify-between border-b border-neutral-200 px-4 py-2">
@@ -47,28 +33,22 @@ export function QueryHistory({ queries, onClear, onSelectQuery }: Props) {
           </Box>
         ) : (
           <div class="divide-y divide-neutral-100">
-            {queries.map((query) => (
+            {queries.map((query, index) => (
               <div
-                key={query.id}
-                class="group cursor-pointer border-b border-neutral-100 px-4 py-3 transition-colors hover:bg-neutral-50"
-                onClick={() => onSelectQuery?.(query)}
+                key={index}
+                class="border-b border-neutral-100 px-4 py-3 transition-colors hover:bg-neutral-50"
               >
                 <div class="mb-1 flex items-center justify-between">
                   <div class="flex items-center gap-2">
-                    <Clock className="size-3.5 text-neutral-400" />
-                    <span class="text-xs text-neutral-500">
-                      {formatTime(query.timestamp)}
+                    <Clock className="size-3.5 text-neutral-600" />
+                    <span class="text-xs text-neutral-600">
+                      {query.timestamp.toString()}
                     </span>
-                    {query.executionTime && (
-                      <span class="text-xs text-neutral-400">
-                        ({query.executionTime}ms)
-                      </span>
-                    )}
                   </div>
                 </div>
-                <pre class="mt-1 overflow-x-auto text-xs text-neutral-700">
-                  {truncateSql(query.sql)}
-                </pre>
+                <p class="text-xs font-medium break-all text-neutral-700">
+                  {query.sql}
+                </p>
               </div>
             ))}
           </div>

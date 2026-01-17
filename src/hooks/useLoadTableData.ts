@@ -6,21 +6,21 @@ import { profileConnect } from "../lib/tauri/profile";
 import {
   tableColumnsQuery,
   tableDataQuery,
+  tableRelationshipsQuery,
   tableRowCountQuery,
   tableSizeInfoQuery,
+  tableStructuresQuery,
 } from "./queries";
 import { runSqlQuery } from "../utils/query";
 import { useConnectionStore } from "../stores/connection";
+import { TableRelationships, TableStructure } from "../types";
 
 export function tableKey(
   activeScreen: string,
   schema: string,
-  tableName: string,
-  pagination?: Pagination
+  tableName: string
 ) {
-  const limit = pagination?.limit ?? 300;
-  const offset = pagination?.offset ?? 0;
-  return `${activeScreen}.${schema}.${tableName}.${limit}.${offset}`;
+  return `${activeScreen}.${schema}.${tableName}`;
 }
 
 type Pagination = {
@@ -29,7 +29,7 @@ type Pagination = {
 };
 
 export function useLoadTableData() {
-  const { tableDataMap, addTableDataMap, removeTableDataMap } =
+  const { tableDataMap, addTableDataMap, removeTableDataMap, addQueryHistory } =
     useConnectionStore();
   const { profileTabs, activeProfileScreen } = useScreenStore();
 
@@ -59,6 +59,8 @@ export function useLoadTableData() {
 
       addTableDataMap(key, {
         data: null,
+        structure: null,
+        relationships: null,
         sizeInfo: null,
         connectionId: null,
         busy: true,
@@ -68,11 +70,8 @@ export function useLoadTableData() {
       try {
         const connId = await ensureRuntimeConn(key);
 
-        const colRes = await runSqlQuery(
-          connId,
-          tableColumnsQuery(schema, tableName)
-        );
-
+        const columnQuery = tableColumnsQuery(schema, tableName);
+        const colRes = await runSqlQuery(connId, columnQuery);
         const columns: ColumnMeta[] = colRes.rows
           .map((r: any) => ({
             name: cellToString(r?.[0]),
@@ -80,25 +79,50 @@ export function useLoadTableData() {
           }))
           .filter((c: any) => c.name);
 
-        const dataRes = await runSqlQuery(
-          connId,
-          tableDataQuery(
-            schema,
-            tableName,
-            pagination?.limit,
-            pagination?.offset
-          )
-        );
+        addQueryHistory(activeTab!.id, {
+          sql: columnQuery,
+          timestamp: new Date(),
+        });
 
-        const sizeInfoRes = await runSqlQuery(
-          connId,
-          tableSizeInfoQuery(schema, tableName)
+        const dataQuery = tableDataQuery(
+          schema,
+          tableName,
+          pagination?.limit,
+          pagination?.offset
         );
+        const dataRes = await runSqlQuery(connId, dataQuery);
+        addQueryHistory(activeTab!.id, {
+          sql: dataQuery,
+          timestamp: new Date(),
+        });
 
-        const rowCountRes = await runSqlQuery(
-          connId,
-          tableRowCountQuery(schema, tableName)
-        );
+        const sizeInfoQuery = tableSizeInfoQuery(schema, tableName);
+        const sizeInfoRes = await runSqlQuery(connId, sizeInfoQuery);
+        addQueryHistory(activeTab!.id, {
+          sql: sizeInfoQuery,
+          timestamp: new Date(),
+        });
+
+        const rowCountQuery = tableRowCountQuery(schema, tableName);
+        const rowCountRes = await runSqlQuery(connId, rowCountQuery);
+        addQueryHistory(activeTab!.id, {
+          sql: rowCountQuery,
+          timestamp: new Date(),
+        });
+
+        const structureQuery = tableStructuresQuery(schema, tableName);
+        const structureRes = await runSqlQuery(connId, structureQuery);
+        addQueryHistory(activeTab!.id, {
+          sql: structureQuery,
+          timestamp: new Date(),
+        });
+
+        const relationshipsQuery = tableRelationshipsQuery(schema, tableName);
+        const relationshipsRes = await runSqlQuery(connId, relationshipsQuery);
+        addQueryHistory(activeTab!.id, {
+          sql: relationshipsQuery,
+          timestamp: new Date(),
+        });
 
         addTableDataMap(key, {
           data: {
@@ -106,6 +130,9 @@ export function useLoadTableData() {
             rows: dataRes.rows,
             rowCount: Number(cellToString(rowCountRes.rows[0][0])),
           },
+          structure: structureRes.rows as unknown as TableStructure[],
+          relationships:
+            relationshipsRes.rows as unknown as TableRelationships[],
           sizeInfo: {
             totalSize: cellToString(sizeInfoRes.rows[0][0]),
             dataSize: cellToString(sizeInfoRes.rows[0][1]),
@@ -123,6 +150,8 @@ export function useLoadTableData() {
 
         addTableDataMap(key, {
           data: null,
+          structure: null,
+          relationships: null,
           sizeInfo: null,
           connectionId: null,
           busy: false,
@@ -134,13 +163,8 @@ export function useLoadTableData() {
   );
 
   const getTableData = useCallback(
-    (
-      activeScreen: string,
-      schema: string,
-      tableName: string,
-      pagination?: Pagination
-    ) => {
-      const key = tableKey(activeScreen, schema, tableName, pagination);
+    (activeScreen: string, schema: string, tableName: string) => {
+      const key = tableKey(activeScreen, schema, tableName);
       return (
         tableDataMap[key] || {
           data: null,

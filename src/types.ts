@@ -7,10 +7,8 @@ export type TabViewMode = "left" | "right" | "bottom";
 export type WindowType = "table" | "sql" | "explain" | "erd";
 
 export type SqlQuery = {
-  id: string;
   sql: string;
   timestamp: Date;
-  executionTime?: number;
 };
 
 export type NavItem = {
@@ -78,4 +76,24 @@ export type TableSizeInfo = {
   totalSize: string;
   dataSize: string;
   indexSize: string;
+};
+
+export type TableStructure = {
+  column_name: string;
+  data_type: string;
+  is_nullable: boolean;
+  check: string;
+  column_default: string;
+  foreign_key: string;
+  comment: string;
+};
+
+export type TableRelationships = {
+  index_name: string;
+  index_algorithm: string;
+  is_unique: boolean;
+  column_name: string;
+  condition: string;
+  include: string;
+  comment: string;
 };

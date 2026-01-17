@@ -3,6 +3,7 @@ import { Dispatch } from "preact/hooks";
 import { ChevronDown, ChevronRight, Search, Table } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
+import { NewTableMenu } from "src/components/NewTableMenu";
 import { cn } from "src/utils/cn";
 import { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
@@ -77,7 +78,6 @@ export function LeftNav({
     <aside
       class={cn(
         "flex h-full w-64 shrink-0 flex-col",
-        "bg-neutral-100",
         "border-r border-neutral-200"
       )}
     >
@@ -185,19 +185,14 @@ export function LeftNav({
       {/* Bottom: Toolbar */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">
-          <Button
-            variant="shadow"
-            className={cn(
-              "h-8 w-8",
-              "rounded-lg",
-              "border-neutral-300 bg-white",
-              "p-0",
-              "text-neutral-800"
-            )}
-            title="New"
-          >
-            +
-          </Button>
+          <NewTableMenu
+            onNewTable={() => {
+              console.log("New Table");
+            }}
+            onNewSchema={() => {
+              console.log("New Schema");
+            }}
+          />
 
           <Select
             className={cn(
