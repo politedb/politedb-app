@@ -20,8 +20,12 @@ export type EditingCell = {
 };
 
 interface Props {
+  limit: number;
+  offset: number;
   columns: ColumnMeta[];
   data: any[];
+  totalRows: number;
+  onPageChange: (limit: number, offset: number) => void;
   onCellChange?: (rowIndex: number, columnIndex: number, value: any) => void;
 
   // rowIndexStr -> colName -> value
@@ -32,12 +36,19 @@ function hasOwn(obj: any, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-export function TableData({ columns, data, onCellChange, patches }: Props) {
+export function TableData({
+  limit,
+  offset,
+  columns,
+  data,
+  totalRows,
+  patches,
+  onCellChange,
+  onPageChange,
+}: Props) {
   // Normalize data on mount and when it changes
   const { tableData } = useNormalizeTableData(columns, data);
 
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(300);
   const [editedData, setEditedData] = useState<any[]>(tableData);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
 
@@ -120,16 +131,16 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
 
   // Calculate pagination
   const pagination = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
+    const startIndex = offset;
+    const endIndex = startIndex + limit;
 
     return {
-      totalRows: tableData.length,
-      totalPages: Math.ceil(tableData.length / pageSize),
+      totalRows,
+      totalPages: Math.ceil(totalRows / limit),
       startIndex,
       endIndex,
     };
-  }, [tableData, pageSize, page]);
+  }, [totalRows, limit, offset]);
 
   const table = useReactTable({
     data: editedData,
@@ -169,20 +180,6 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
   }, [table.getState().columnSizingInfo, table.getState().columnSizing]);
 
   const tableRows = useMemo(() => table.getRowModel().rows ?? [], [editedData]);
-
-  // Handle empty data
-  if (
-    !editedData ||
-    editedData.length === 0 ||
-    !tableRows ||
-    tableRows.length === 0
-  ) {
-    return (
-      <div class="flex h-full items-center justify-center bg-white">
-        <p class="text-neutral-500">No data to display</p>
-      </div>
-    );
-  }
 
   const renderHeader = useCallback(() => {
     return (
@@ -249,13 +246,19 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
     <div class="flex h-full flex-col overflow-hidden bg-white">
       <div class="flex-1 overflow-hidden border-t border-neutral-200">
         <TableVirtuoso
-          key={`table-${tableRows.length}-${columns.length}-${page}`}
-          style={{
-            ...columnSizeVars,
-            height: "100%",
-            width: table.getTotalSize(),
-          }}
+          key={`table-${tableRows.length}-${columns.length}-${offset}-${limit}`}
+          style={{ ...columnSizeVars, height: "100%" }}
           data={tableRows}
+          components={{
+            Table: ({ style, ...props }: any) => {
+              return (
+                <table
+                  {...props}
+                  style={{ ...style, width: table.getTotalSize() }}
+                />
+              );
+            },
+          }}
           fixedHeaderContent={renderHeader}
           itemContent={renderRow}
         />
@@ -263,10 +266,9 @@ export function TableData({ columns, data, onCellChange, patches }: Props) {
 
       <TablePagination
         pagination={pagination}
-        page={page}
-        pageSize={pageSize}
-        setPage={setPage}
-        setPageSize={setPageSize}
+        limit={limit}
+        offset={offset}
+        onPageChange={onPageChange}
       />
     </div>
   );

@@ -6,6 +6,7 @@ import { profileConnect } from "../lib/tauri/profile";
 import {
   tableColumnsQuery,
   tableDataQuery,
+  tableRowCountQuery,
   tableSizeInfoQuery,
 } from "./queries";
 import { runSqlQuery } from "../utils/query";
@@ -14,14 +15,17 @@ import { useConnectionStore } from "../stores/connection";
 export function tableKey(
   activeScreen: string,
   schema: string,
-  tableName: string
+  tableName: string,
+  pagination?: Pagination
 ) {
-  return `${activeScreen}.${schema}.${tableName}`;
+  const limit = pagination?.limit ?? 300;
+  const offset = pagination?.offset ?? 0;
+  return `${activeScreen}.${schema}.${tableName}.${limit}.${offset}`;
 }
 
 type Pagination = {
-  page: number;
-  pageSize: number;
+  limit: number;
+  offset: number;
 };
 
 export function useLoadTableData() {
@@ -76,11 +80,14 @@ export function useLoadTableData() {
           }))
           .filter((c: any) => c.name);
 
-        const limit = pagination?.pageSize ?? 1000;
-        const offset = (pagination?.page ?? 0) * limit;
         const dataRes = await runSqlQuery(
           connId,
-          tableDataQuery(schema, tableName, limit, offset)
+          tableDataQuery(
+            schema,
+            tableName,
+            pagination?.limit,
+            pagination?.offset
+          )
         );
 
         const sizeInfoRes = await runSqlQuery(
@@ -88,8 +95,17 @@ export function useLoadTableData() {
           tableSizeInfoQuery(schema, tableName)
         );
 
+        const rowCountRes = await runSqlQuery(
+          connId,
+          tableRowCountQuery(schema, tableName)
+        );
+
         addTableDataMap(key, {
-          data: { columns, rows: dataRes.rows, rowCount: dataRes.rowCount },
+          data: {
+            columns,
+            rows: dataRes.rows,
+            rowCount: Number(cellToString(rowCountRes.rows[0][0])),
+          },
           sizeInfo: {
             totalSize: cellToString(sizeInfoRes.rows[0][0]),
             dataSize: cellToString(sizeInfoRes.rows[0][1]),
@@ -118,8 +134,13 @@ export function useLoadTableData() {
   );
 
   const getTableData = useCallback(
-    (activeScreen: string, schema: string, tableName: string) => {
-      const key = tableKey(activeScreen, schema, tableName);
+    (
+      activeScreen: string,
+      schema: string,
+      tableName: string,
+      pagination?: Pagination
+    ) => {
+      const key = tableKey(activeScreen, schema, tableName, pagination);
       return (
         tableDataMap[key] || {
           data: null,

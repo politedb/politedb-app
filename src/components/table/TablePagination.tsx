@@ -1,3 +1,4 @@
+import { useCallback } from "preact/hooks";
 import { Button } from "../common/Button";
 import { ChevronLeft, ChevronRight } from "../icons";
 
@@ -10,28 +11,28 @@ export type Pagination = {
 
 interface Props {
   pagination: Pagination;
-  page: number;
-  pageSize: number;
-  setPage: (page: number) => void;
-  setPageSize: (pageSize: number) => void;
+  limit: number;
+  offset: number;
+  onPageChange: (limit: number, offset: number) => void;
 }
 
 export function TablePagination({
   pagination,
-  page,
-  pageSize,
-  setPage,
-  setPageSize,
+  limit,
+  offset,
+  onPageChange,
 }: Props) {
-  const handlePageChange = (newPage: number) => {
-    if (newPage >= 1 && newPage <= pagination.totalPages) {
-      setPage(newPage);
-    }
-  };
+  const handlePageChange = useCallback(
+    (newOffset: number) => {
+      if (newOffset >= 0 && newOffset < pagination.totalRows) {
+        onPageChange(limit, newOffset);
+      }
+    },
+    [limit, offset, pagination.totalPages, onPageChange]
+  );
 
-  const handlePageSizeChange = (newPageSize: number) => {
-    setPageSize(newPageSize);
-    setPage(1); // Reset to first page when changing page size
+  const handlePageSizeChange = (limit: number) => {
+    onPageChange(limit, 0);
   };
 
   return (
@@ -40,14 +41,14 @@ export function TablePagination({
         <div class="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
           <Button
             variant="default"
-            onClick={() => handlePageChange(page - 1)}
+            onClick={() => handlePageChange(offset - limit)}
             className="px-3 py-1"
           >
             Data
           </Button>
           <Button
             variant="ghost"
-            onClick={() => handlePageChange(page + 1)}
+            onClick={() => handlePageChange(offset + limit)}
             disabled
             className="px-3 py-1"
           >
@@ -67,22 +68,22 @@ export function TablePagination({
       <div class="flex items-center gap-0.5">
         <Button
           variant="outline"
-          onClick={() => handlePageChange(page - 1)}
-          disabled={page === 1}
+          onClick={() => handlePageChange(offset - limit)}
+          disabled={offset === 0}
           className="px-3 py-1"
         >
           <ChevronLeft className="size-3" />
         </Button>
         <Button
           variant="outline"
-          onClick={() => handlePageChange(page + 1)}
-          disabled={page === pagination.totalPages}
+          onClick={() => handlePageChange(offset + limit)}
+          disabled={offset + limit >= pagination.totalRows}
           className="px-3 py-1"
         >
           <ChevronRight className="size-3" />
         </Button>
         <select
-          value={pageSize}
+          value={limit}
           onChange={(e: any) => handlePageSizeChange(Number(e.target.value))}
           class="rounded-md border border-neutral-300 bg-white px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
         >

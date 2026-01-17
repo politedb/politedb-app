@@ -78,6 +78,10 @@ export const tableDataQuery = (
   offset: number = 0
 ) => {
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
-
   return `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`.trim();
+};
+
+export const tableRowCountQuery = (schema: string, tableName: string) => {
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  return `SELECT COUNT(*) FROM ${tableIdent};`.trim();
 };

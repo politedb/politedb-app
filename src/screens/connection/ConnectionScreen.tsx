@@ -48,6 +48,8 @@ export function ConnectionScreen() {
     useEnsureRuntimeConnection(activeTab);
 
   const engine = activeTab?.engine;
+  const [limit, setLimit] = useState(300);
+  const [offset, setOffset] = useState(0);
 
   // Stable metaKey (NOT runtimeConnectionId)
   const metaKey = useMemo(() => {
@@ -135,6 +137,22 @@ export function ConnectionScreen() {
     profileId: activeProfileScreen,
   });
 
+  const handlePageChange = useCallback(
+    (limit: number, offset: number) => {
+      setLimit(limit);
+      setOffset(offset);
+
+      if (!activeTableWindow) return;
+
+      loadTableData(
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        { limit, offset }
+      );
+    },
+    [activeTableWindow, loadTableData, setLimit, setOffset]
+  );
+
   /* =========================
    * Actions
    * ========================= */
@@ -194,7 +212,8 @@ export function ConnectionScreen() {
 
     await loadTableData(
       activeTableWindow.table.schema,
-      activeTableWindow.table.name
+      activeTableWindow.table.name,
+      { limit, offset }
     );
   }, [refreshSchemaAndTables, activeTableWindow, loadTableData]);
 
@@ -280,6 +299,9 @@ export function ConnectionScreen() {
                 activeSqlWindow={activeSqlWindow}
                 activeTableWindow={activeTableWindow}
                 activeTableData={activeTableData}
+                limit={limit}
+                offset={offset}
+                totalRows={activeTableData.data?.rowCount ?? 0}
                 loadError={loadError}
                 hasAnyWindow={hasAnyWindow}
                 onNewSql={handleOpenSqlEditor}
@@ -289,6 +311,7 @@ export function ConnectionScreen() {
                 patchMap={patchMap}
                 metadata={metadata}
                 metaKey={metaKey}
+                onPageChange={handlePageChange}
               />
             </div>
 

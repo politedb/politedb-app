@@ -72,6 +72,9 @@ function TableErrorState(props: { error: string }) {
 }
 
 export function ActiveWindowContent(props: {
+  limit: number;
+  offset: number;
+  totalRows: number;
   activeWindow?: OpenWindow;
   activeSqlWindow?: SqlEditorWindow;
   activeTableWindow?: TableWindow;
@@ -91,6 +94,8 @@ export function ActiveWindowContent(props: {
   }) => Promise<QueryResult>;
 
   onCellChange: (rowIndex: number, columnIndex: number, value: any) => void;
+  onPageChange: (limit: number, offset: number) => void;
+
   patchMap: PatchMap;
 
   engine: DatabaseEngine;
@@ -103,6 +108,10 @@ export function ActiveWindowContent(props: {
     activeSqlWindow,
     activeTableWindow,
     activeTableData,
+
+    limit,
+    offset,
+    totalRows,
     loadError,
     hasAnyWindow,
     runtimeConnectionId,
@@ -113,6 +122,7 @@ export function ActiveWindowContent(props: {
     engine,
     metadata,
     metaKey,
+    onPageChange,
   } = props;
 
   const tablePatches = useMemo(() => {
@@ -220,6 +230,10 @@ export function ActiveWindowContent(props: {
       data={activeTableData.data.rows}
       onCellChange={onCellChange}
       patches={tablePatches}
+      limit={limit}
+      offset={offset}
+      totalRows={totalRows}
+      onPageChange={onPageChange}
     />
   );
 }
