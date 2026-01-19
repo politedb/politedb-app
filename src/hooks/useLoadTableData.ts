@@ -22,162 +22,270 @@ export function tableKey(
   return `${activeScreen}.${schema}.${tableName}`;
 }
 
-type Pagination = {
-  limit: number;
-  offset: number;
+export type TablePagination = { limit: number; offset: number };
+
+const EMPTY = {
+  data: null,
+  structure: null,
+  constraints: null,
+  sizeInfo: null,
+  connectionId: null,
+  busy: false,
+  error: null,
 };
 
+export type LoadFlags = {
+  force?: boolean; // force refresh everything relevant
+  refreshRows?: boolean; // default true (but first-load always fetches rows)
+  refreshMeta?: boolean; // structure + constraints (default false)
+  refreshStats?: boolean; // rowCount + sizeInfo (default false)
+};
+
+type ColumnRow = { name: string; db_type: string };
+
+function isNonEmptyName(v: ColumnRow) {
+  return (v.name ?? "").trim().length > 0;
+}
+
+function getErrorMessage(e: unknown) {
+  if (e && typeof e === "object") {
+    const rec = e as Record<string, unknown>;
+    if (typeof rec.error === "string" && rec.error) return rec.error;
+    if (typeof rec.message === "string" && rec.message) return rec.message;
+  }
+  return String(e ?? "UNKNOWN_ERROR");
+}
+
 export function useLoadTableData() {
-  const { tableDataMap, addTableDataMap, removeTableDataMap, addQueryHistory } =
-    useConnectionStore();
-  const { profileTabs, activeProfileScreen } = useScreenStore();
+  const tableDataMap = useConnectionStore((s) => s.tableDataMap);
+  const addTableDataMap = useConnectionStore((s) => s.addTableDataMap);
+  const removeTableDataMap = useConnectionStore((s) => s.removeTableDataMap);
+  const addQueryHistory = useConnectionStore((s) => s.addQueryHistory);
+
+  const profileTabs = useScreenStore((s) => s.profileTabs);
+  const activeProfileScreen = useScreenStore((s) => s.activeProfileScreen);
 
   const activeTab = useMemo(() => {
     if (!activeProfileScreen || activeProfileScreen === "main") return null;
     return profileTabs.find((t) => t.id === activeProfileScreen) ?? null;
   }, [profileTabs, activeProfileScreen]);
 
-  const ensureRuntimeConn = useCallback(
-    async (tableKey: string) => {
-      if (!activeTab) throw new Error("NO_ACTIVE_TAB");
-
-      const tableData = tableDataMap[tableKey];
-      if (tableData?.connectionId) return tableData.connectionId;
-
-      const res = await profileConnect(activeTab.profileId);
-      const runtimeId = res.connection.id;
-
-      return runtimeId;
-    },
-    [activeTab]
-  );
-
   const addLogQuery = useCallback(
     (sql: string) => {
-      addQueryHistory(activeTab!.id, sql);
+      if (!activeTab) return;
+      addQueryHistory(activeTab.id, sql);
     },
     [activeTab, addQueryHistory]
   );
 
-  const loadTableData = useCallback(
-    async (schema: string, tableName: string, pagination?: Pagination) => {
-      const key = tableKey(activeProfileScreen, schema, tableName);
+  const ensureRuntimeConn = useCallback(
+    async (key: string) => {
+      if (!activeTab) throw new Error("NO_ACTIVE_TAB");
 
-      addTableDataMap(key, {
-        data: null,
-        structure: null,
-        constraints: null,
-        sizeInfo: null,
-        connectionId: null,
-        busy: true,
-        error: null,
-      });
+      const tableData = tableDataMap[key];
+      if (tableData?.connectionId) return tableData.connectionId;
+
+      const res = await profileConnect(activeTab.profileId);
+      return res.connection.id;
+    },
+    [activeTab, tableDataMap]
+  );
+
+  /**
+   * loadTableData:
+   * - First load: ALWAYS fetch minimum (columns + rows) even if flags say otherwise.
+   * - Subsequent loads: respect flags.
+   */
+  const loadTableData = useCallback(
+    async (
+      schema: string,
+      tableName: string,
+      pagination?: TablePagination,
+      flags: LoadFlags = {}
+    ) => {
+      if (!activeTab) throw new Error("NO_ACTIVE_TAB");
+
+      const key = tableKey(activeProfileScreen, schema, tableName);
+      const prev = tableDataMap[key] ?? EMPTY;
+
+      const force = !!flags.force;
+
+      const refreshRows = flags.refreshRows ?? true;
+      const refreshMeta = flags.refreshMeta ?? false;
+      const refreshStats = flags.refreshStats ?? false;
+
+      const hasColumns = !!prev.data?.columns?.length;
+      const hasRows = Array.isArray(prev.data?.rows);
+
+      const hasRowCount =
+        typeof prev.data?.rowCount === "number" && prev.data.rowCount >= 0;
+      const hasSizeInfo = !!prev.sizeInfo;
+
+      const hasStructure =
+        Array.isArray(prev.structure) && prev.structure.length > 0;
+      const hasConstraints =
+        Array.isArray(prev.constraints) && prev.constraints.length > 0;
+
+      const isFirstLoad = !hasColumns || !hasRows;
+
+      // ✅ first load must fetch minimum dataset (columns + rows)
+      const needColumns = force || isFirstLoad || !hasColumns;
+      const needRows = force || isFirstLoad || refreshRows;
+
+      // ✅ only fetch stats/meta on first load if you explicitly want (force) — default OFF
+      const needRowCount =
+        (force ? true : !isFirstLoad && refreshStats) &&
+        (force || !hasRowCount);
+      const needSizeInfo =
+        (force ? true : !isFirstLoad && refreshStats) &&
+        (force || !hasSizeInfo);
+      const needMeta =
+        (force ? true : !isFirstLoad && refreshMeta) &&
+        (force || !hasStructure || !hasConstraints);
+
+      // if absolutely nothing to do, return
+      if (
+        !needColumns &&
+        !needRows &&
+        !needRowCount &&
+        !needSizeInfo &&
+        !needMeta
+      ) {
+        return;
+      }
+
+      // mark busy but KEEP existing data (avoid flicker)
+      addTableDataMap(key, { ...prev, busy: true, error: null });
 
       try {
         const connId = await ensureRuntimeConn(key);
 
-        const columnQuery = tableColumnsQuery(schema, tableName);
-        const colRes = await runSqlQuery(connId, columnQuery);
-        addLogQuery(columnQuery);
+        // ===== Columns
+        let columns = prev.data?.columns ?? [];
+        if (needColumns) {
+          const q = tableColumnsQuery(schema, tableName);
+          const res = await runSqlQuery(connId, q);
+          addLogQuery(q);
 
-        const dataQuery = tableDataQuery(schema, tableName, pagination);
-        const dataRes = await runSqlQuery(connId, dataQuery);
-        addLogQuery(dataQuery);
+          columns = (res.rows as unknown[][])
+            .map((r) => ({
+              name: cellToString(r?.[0]),
+              db_type: cellToString(r?.[1]),
+            }))
+            .filter(isNonEmptyName);
+        }
 
-        const sizeInfoQuery = tableSizeInfoQuery(schema, tableName);
-        const sizeInfoRes = await runSqlQuery(connId, sizeInfoQuery);
-        addLogQuery(sizeInfoQuery);
+        // ===== Rows
+        let rows = prev.data?.rows ?? [];
+        if (needRows) {
+          const q = tableDataQuery(schema, tableName, pagination);
+          const res = await runSqlQuery(connId, q);
+          addLogQuery(q);
+          rows = res.rows as unknown[][];
+        }
 
-        const rowCountQuery = tableRowCountQuery(schema, tableName);
-        const rowCountRes = await runSqlQuery(connId, rowCountQuery);
-        addLogQuery(rowCountQuery);
+        // ===== Stats
+        let rowCount = prev.data?.rowCount ?? 0;
+        if (needRowCount) {
+          const q = tableRowCountQuery(schema, tableName);
+          const res = await runSqlQuery(connId, q);
+          addLogQuery(q);
+          rowCount = Number(cellToString((res.rows as unknown[][])?.[0]?.[0]));
+        }
 
-        const oidQuery = tableOidQuery(schema, tableName);
-        const oidRes = await runSqlQuery(connId, oidQuery);
-        const oid = Number(cellToString(oidRes.rows[0][0]));
-        addLogQuery(oidQuery);
+        let sizeInfo = prev.sizeInfo;
+        if (needSizeInfo) {
+          const q = tableSizeInfoQuery(schema, tableName);
+          const res = await runSqlQuery(connId, q);
+          addLogQuery(q);
 
-        const structureQuery = tableStructuresQuery(schema, tableName, oid);
-        const structureRes = await runSqlQuery(connId, structureQuery);
-        addLogQuery(structureQuery);
+          const r0 = (res.rows as unknown[][])?.[0] ?? [];
+          sizeInfo = {
+            totalSize: cellToString(r0?.[0]),
+            dataSize: cellToString(r0?.[1]),
+            indexSize: cellToString(r0?.[2]),
+          };
+        }
 
-        const constraintsQuery = tableConstraintsQuery(schema, tableName);
-        const constraintsRes = await runSqlQuery(connId, constraintsQuery);
-        addLogQuery(constraintsQuery);
+        // ===== Meta: oid + structure + constraints
+        let structure = prev.structure;
+        let constraints = prev.constraints;
+
+        if (needMeta) {
+          const qOid = tableOidQuery(schema, tableName);
+          const oidRes = await runSqlQuery(connId, qOid);
+          addLogQuery(qOid);
+
+          const oid = Number(
+            cellToString((oidRes.rows as unknown[][])?.[0]?.[0])
+          );
+
+          const qStructure = tableStructuresQuery(schema, tableName, oid);
+          const structureRes = await runSqlQuery(connId, qStructure);
+          addLogQuery(qStructure);
+
+          structure = (structureRes.rows as unknown[][]).map((row) => ({
+            column_name: cellToString(row?.[1]),
+            data_type: cellToString(row?.[2]),
+            is_nullable: cellToString(row?.[8]).toLowerCase() === "yes",
+            check: cellToString(row?.[9]),
+            column_default: cellToString(row?.[11]),
+            foreign_key: cellToString(row?.[12]),
+            comment: cellToString(row?.[13]),
+          }));
+
+          const qConstraints = tableConstraintsQuery(schema, tableName);
+          const constraintsRes = await runSqlQuery(connId, qConstraints);
+          addLogQuery(qConstraints);
+
+          constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
+            index_name: cellToString(row?.[0]),
+            index_algorithm: cellToString(row?.[1]),
+            is_unique: cellToString(row?.[2]).toLowerCase() === "true",
+            index_definition: cellToString(row?.[3]),
+            column_name: cellToString(row?.[4]),
+            condition: cellToString(row?.[5]),
+            include: cellToString(row?.[6]),
+            comment: cellToString(row?.[7]),
+          }));
+        }
 
         addTableDataMap(key, {
+          ...prev,
           data: {
-            columns: colRes.rows
-              .map((r: any) => ({
-                name: cellToString(r?.[0]),
-                db_type: cellToString(r?.[1]),
-              }))
-              .filter((c: any) => c.name),
-            rows: dataRes.rows,
-            rowCount: Number(cellToString(rowCountRes.rows[0][0])),
+            columns,
+            rows,
+            rowCount,
           },
-          structure: structureRes.rows.map((row: any) => ({
-            column_name: cellToString(row[1]),
-            data_type: cellToString(row[2]),
-            is_nullable: cellToString(row[8]).toLowerCase() === "yes",
-            check: cellToString(row[9]),
-            column_default: cellToString(row[11]),
-            foreign_key: cellToString(row[12]),
-            comment: cellToString(row[13]),
-          })),
-          constraints: constraintsRes.rows.map((row: any) => ({
-            index_name: cellToString(row[0]),
-            index_algorithm: cellToString(row[1]),
-            is_unique: cellToString(row[2]).toLowerCase() === "true",
-            index_definition: cellToString(row[3]),
-            column_name: cellToString(row[4]),
-            condition: cellToString(row[5]),
-            include: cellToString(row[6]),
-            comment: cellToString(row[7]),
-          })),
-          sizeInfo: {
-            totalSize: cellToString(sizeInfoRes.rows[0][0]),
-            dataSize: cellToString(sizeInfoRes.rows[0][1]),
-            indexSize: cellToString(sizeInfoRes.rows[0][2]),
-          },
-          connectionId: connId,
+          structure,
+          constraints,
+          sizeInfo,
+          connectionId: prev.connectionId ?? connId,
           busy: false,
           error: null,
         });
-      } catch (e: any) {
-        const msg =
-          e?.error ||
-          (e?.message ? String(e.message) : String(e)) ||
-          "UNKNOWN_ERROR";
-
+      } catch (e: unknown) {
         addTableDataMap(key, {
-          data: null,
-          structure: null,
-          constraints: null,
-          sizeInfo: null,
-          connectionId: null,
+          ...prev,
           busy: false,
-          error: msg,
+          error: getErrorMessage(e),
         });
       }
     },
-    [activeProfileScreen, ensureRuntimeConn]
+    [
+      activeTab,
+      activeProfileScreen,
+      tableDataMap,
+      addTableDataMap,
+      ensureRuntimeConn,
+      addLogQuery,
+    ]
   );
 
   const getTableData = useCallback(
     (activeScreen: string, schema: string, tableName: string) => {
       const key = tableKey(activeScreen, schema, tableName);
-      return (
-        tableDataMap[key] || {
-          data: null,
-          structure: null,
-          constraints: null,
-          sizeInfo: null,
-          connectionId: null,
-          busy: false,
-          error: null,
-        }
-      );
+      return tableDataMap[key] ?? EMPTY;
     },
     [tableDataMap]
   );
@@ -187,7 +295,7 @@ export function useLoadTableData() {
       const key = tableKey(activeProfileScreen, schema, tableName);
       removeTableDataMap(key);
     },
-    [activeProfileScreen]
+    [activeProfileScreen, removeTableDataMap]
   );
 
   return {

@@ -82,11 +82,10 @@ export function TableConstraints({
   );
 
   const tableData = useMemo(() => {
-    if (!editedData.length || error || busy) {
-      return [];
-    }
-    return editedData;
-  }, [editedData, error, busy]);
+    if (error) return [];
+    if (editedData.length > 0) return editedData;
+    return initData ?? [];
+  }, [editedData, initData, error]);
 
   const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(
     () => [

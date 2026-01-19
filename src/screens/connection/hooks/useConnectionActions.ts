@@ -8,10 +8,12 @@ import type {
 } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { connectionRemove } from "src/lib/tauri";
+import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
 import { normalizeSqlError } from "src/utils/queryValidate";
 import { useConnectionStore } from "src/stores/connection";
+import type { ProfileTab } from "src/stores/screen";
 
 /* =============================================================================
  * Types
@@ -19,15 +21,11 @@ import { useConnectionStore } from "src/stores/connection";
 
 export type Ref<T> = { current: T };
 
-export type Pagination = {
-  limit: number;
-  offset: number;
-};
-
 export type LoadTableDataFn = (
   schema: string,
   name: string,
-  opts: Pagination
+  opts?: TablePagination,
+  flags?: LoadFlags
 ) => Promise<void>;
 
 export type RemoveTableDataFn = (schema: string, name: string) => void;
@@ -39,21 +37,13 @@ export type RunSqlWithHistoryFn = (args: {
   sql: string;
 }) => Promise<QueryResult>;
 
-export type ConnectionTab = {
-  id: string;
-  label: string;
-  profileId?: string;
-  engine?: DatabaseEngine;
-  runtimeConnectionId?: string;
-};
-
 export type UseConnectionActionsArgs = {
   activeProfileScreen: string; // tabId
   activeId: string | null; // windowId
 
-  activeTab: ConnectionTab | null;
-  profileTabs: ConnectionTab[];
-  openWindows: Record<string, OpenWindow[]>; // tabId -> windows
+  activeTab: ProfileTab | null;
+  profileTabs: ProfileTab[];
+  openWindows: Record<string, OpenWindow[]>;
   activeTableWindow: TableWindow | undefined;
 
   runtimeConnectionId: string | undefined;
@@ -100,6 +90,70 @@ export type ConnectionActions = {
  * Helpers (no any)
  * ============================================================================= */
 
+type RefreshFlags = {
+  refreshRows: boolean;
+  refreshMeta: boolean;
+  refreshStats: boolean;
+};
+
+type WindowPatchBuckets = Partial<
+  Record<
+    "create" | "update" | "delete",
+    Partial<
+      Record<"data" | "structure" | "constraints", Record<string, unknown>>
+    >
+  >
+>;
+
+type PatchMapEntry = {
+  tableWindow: TableWindow;
+  patches: WindowPatchBuckets;
+};
+
+function hasAnyRows(bucket?: Record<string, unknown>): boolean {
+  return (
+    !!bucket && typeof bucket === "object" && Object.keys(bucket).length > 0
+  );
+}
+
+function inferRefreshFlagsFromEntry(
+  entry: PatchMapEntry | undefined
+): RefreshFlags {
+  const patches = entry?.patches;
+
+  const dataCreate = patches?.create?.data;
+  const dataUpdate = patches?.update?.data;
+  const dataDelete = patches?.delete?.data;
+
+  const structCreate = patches?.create?.structure;
+  const structUpdate = patches?.update?.structure;
+  const structDelete = patches?.delete?.structure;
+
+  const consCreate = patches?.create?.constraints;
+  const consUpdate = patches?.update?.constraints;
+  const consDelete = patches?.delete?.constraints;
+
+  const hasData =
+    hasAnyRows(dataCreate) || hasAnyRows(dataUpdate) || hasAnyRows(dataDelete);
+
+  const hasStructure =
+    hasAnyRows(structCreate) ||
+    hasAnyRows(structUpdate) ||
+    hasAnyRows(structDelete);
+
+  const hasConstraints =
+    hasAnyRows(consCreate) || hasAnyRows(consUpdate) || hasAnyRows(consDelete);
+
+  const hasCreateOrDeleteRows =
+    hasAnyRows(dataCreate) || hasAnyRows(dataDelete);
+
+  const refreshMeta = hasStructure || hasConstraints;
+  const refreshRows = hasData || refreshMeta;
+  const refreshStats = hasCreateOrDeleteRows;
+
+  return { refreshRows, refreshMeta, refreshStats };
+}
+
 type NewTableLike = {
   tableName: string;
   columns: Array<{ column_name: string }>;
@@ -126,10 +180,9 @@ function isValidNewTable(v: unknown): v is NewTableLike {
 function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
   if (!patchMap) return false;
 
-  for (const winId of Object.keys(patchMap as Record<string, unknown>)) {
-    const win = (patchMap as Record<string, unknown>)[winId] as
-      | Record<string, unknown>
-      | undefined;
+  const byWin = patchMap as unknown as Record<string, unknown>;
+  for (const winId of Object.keys(byWin)) {
+    const win = byWin[winId] as { patches?: unknown } | undefined;
     const patches = win?.patches as Record<string, unknown> | undefined;
     if (!patches) continue;
 
@@ -143,9 +196,7 @@ function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
         const rows = actionPatches[dataKey] as
           | Record<string, unknown>
           | undefined;
-        if (!rows) continue;
-
-        if (Object.keys(rows).length > 0) return true;
+        if (rows && Object.keys(rows).length > 0) return true;
       }
     }
   }
@@ -162,6 +213,33 @@ export function useConnectionActions(
 ): ConnectionActions {
   const closingRef = useRef(false);
 
+  const {
+    activeProfileScreen,
+    profileTabs,
+    openWindows,
+    activeTableWindow,
+    runtimeConnectionId,
+    engine,
+    limit,
+    offset,
+    setLimit,
+    setOffset,
+    setWarningRefresh,
+    setPendingCloseTabId,
+    setError,
+    pendingCloseTabId,
+    loadTableData,
+    removeTableData,
+    refreshSchemaAndTables,
+    runSqlWithHistory,
+    openSqlEditor,
+    openTable,
+    closeWindow: closeWindowFn,
+    removeTab,
+    setActiveProfileScreen,
+    newTableSaveRef,
+  } = args;
+
   const clearChanges = useCallback((tabId: string, tableWindowId?: string) => {
     const s = useConnectionStore.getState();
     s.clearTableConstraints(tabId, tableWindowId);
@@ -173,15 +251,14 @@ export function useConnectionActions(
   const tabHasChanges = useCallback((tabId: string): boolean => {
     const s = useConnectionStore.getState();
 
-    // Fast path if you already have derived dirty state
     const derived = (
       s as unknown as {
         dirtyStateByScreen?: Record<string, { hasAnyChanges: boolean }>;
       }
     ).dirtyStateByScreen?.[tabId]?.hasAnyChanges;
+
     if (typeof derived === "boolean") return derived;
 
-    // Fallback: scan patchMap + newTableData
     const pm = s.dataPatchMap[tabId] as unknown as PatchMap | undefined;
     if (patchMapHasAnyChanges(pm)) return true;
 
@@ -197,122 +274,155 @@ export function useConnectionActions(
   }, []);
 
   const openSql = useCallback(() => {
-    args.openSqlEditor();
-  }, [args.openSqlEditor]);
+    openSqlEditor();
+  }, [openSqlEditor]);
 
   const selectTable = useCallback(
     async (table: TableItem) => {
-      await args.openTable(table);
+      await openTable(table);
     },
-    [args.openTable]
+    [openTable]
   );
 
   const closeWindow = useCallback(
     async (windowId: string, e: MouseEvent) => {
-      await args.closeWindow(windowId, e);
+      await closeWindowFn(windowId, e);
     },
-    [args.closeWindow]
+    [closeWindowFn]
   );
 
   const pageChange = useCallback(
-    async (limit: number, offset: number) => {
-      args.setLimit(limit);
-      args.setOffset(offset);
+    async (nextLimit: number, nextOffset: number) => {
+      setLimit(nextLimit);
+      setOffset(nextOffset);
 
-      if (!args.activeTableWindow) return;
+      if (!activeTableWindow) return;
 
-      await args.loadTableData(
-        args.activeTableWindow.table.schema,
-        args.activeTableWindow.table.name,
-        { limit, offset }
+      await loadTableData(
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        { limit: nextLimit, offset: nextOffset }
       );
     },
-    [args]
+    [setLimit, setOffset, activeTableWindow, loadTableData]
   );
 
   const refresh = useCallback(async () => {
-    // block refresh if current tab has patches (same behavior as old code)
-    const tabDirty = tabHasChanges(args.activeProfileScreen);
+    const tabDirty = tabHasChanges(activeProfileScreen);
     if (tabDirty) {
-      args.setWarningRefresh(true);
+      setWarningRefresh(true);
       return;
     }
 
-    await args.refreshSchemaAndTables();
+    await refreshSchemaAndTables();
 
-    if (!args.activeTableWindow) return;
+    if (!activeTableWindow) return;
 
-    await args.loadTableData(
-      args.activeTableWindow.table.schema,
-      args.activeTableWindow.table.name,
-      { limit: args.limit, offset: args.offset }
+    await loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        force: true,
+        refreshRows: true,
+        refreshMeta: false,
+        refreshStats: false,
+      }
     );
-  }, [args, tabHasChanges]);
+  }, [
+    tabHasChanges,
+    activeProfileScreen,
+    setWarningRefresh,
+    refreshSchemaAndTables,
+    activeTableWindow,
+    loadTableData,
+    limit,
+    offset,
+  ]);
 
   const applyPatchesForActiveWindow = useCallback(async () => {
-    if (!args.activeTableWindow || !args.runtimeConnectionId) return;
+    if (!activeTableWindow || !runtimeConnectionId) return;
 
     try {
       const s = useConnectionStore.getState();
-      const tabPatchMap = (s.dataPatchMap[args.activeProfileScreen] ??
+      const tabPatchMap = (s.dataPatchMap[activeProfileScreen] ??
         {}) as unknown as PatchMap;
 
-      // Only apply current window’s patches (faster, TablePlus-like)
-      const entry = (tabPatchMap as Record<string, unknown>)[
-        args.activeTableWindow.id
-      ];
+      const entry = (tabPatchMap as unknown as Record<string, unknown>)[
+        activeTableWindow.id
+      ] as PatchMapEntry | undefined;
+
       const onlyActive: PatchMap = entry
-        ? ({ [args.activeTableWindow.id]: entry } as unknown as PatchMap)
+        ? ({ [activeTableWindow.id]: entry } as unknown as PatchMap)
         : ({} as PatchMap);
 
-      const sql = generateSqlFromPatches(onlyActive, args.engine ?? "postgres");
+      const sql = generateSqlFromPatches(onlyActive, engine ?? "postgres");
       if (!sql.length) {
-        args.setError("An error occurred while applying patches.");
+        setError("An error occurred while applying patches.");
         return;
       }
 
       for (const stmt of sql) {
-        await args.runSqlWithHistory({
-          connectionId: args.runtimeConnectionId,
+        await runSqlWithHistory({
+          connectionId: runtimeConnectionId,
           sql: stmt,
         });
       }
 
-      clearChanges(args.activeProfileScreen, args.activeTableWindow.id);
+      clearChanges(activeProfileScreen, activeTableWindow.id);
 
-      await args.loadTableData(
-        args.activeTableWindow.table.schema,
-        args.activeTableWindow.table.name,
-        { limit: args.limit, offset: args.offset }
+      const { refreshRows, refreshMeta, refreshStats } =
+        inferRefreshFlagsFromEntry(entry);
+
+      await loadTableData(
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        { limit, offset },
+        { force: true, refreshRows, refreshMeta, refreshStats }
       );
     } catch (e) {
-      args.setError(normalizeSqlError(e));
+      setError(normalizeSqlError(e));
     }
-  }, [args, clearChanges]);
+  }, [
+    activeTableWindow,
+    runtimeConnectionId,
+    activeProfileScreen,
+    engine,
+    runSqlWithHistory,
+    clearChanges,
+    loadTableData,
+    limit,
+    offset,
+    setError,
+  ]);
 
   const saveNewTable = useCallback(async () => {
-    if (args.newTableSaveRef.current) {
-      await args.newTableSaveRef.current();
+    if (newTableSaveRef.current) {
+      await newTableSaveRef.current();
     }
-  }, [args.newTableSaveRef]);
+  }, [newTableSaveRef]);
 
   const saveChanges = useCallback(async () => {
-    if (!args.activeTableWindow || !args.runtimeConnectionId) return;
+    if (!activeTableWindow || !runtimeConnectionId) return;
 
-    const tabDirty = tabHasChanges(args.activeProfileScreen);
+    const tabDirty = tabHasChanges(activeProfileScreen);
+
     const jobs: Array<Promise<void>> = [];
-
     if (tabDirty) jobs.push(applyPatchesForActiveWindow());
-    if (args.pendingCloseTabId === null) {
-      // normal save: allow new table save if present
-      // (if you want more strict condition, pass hasNewTableData into args and use it here)
-      jobs.push(saveNewTable());
-    }
 
-    // If newTableSaveRef is null, saveNewTable does nothing.
-    // If no jobs, nothing to do.
+    // keep old behavior: only save new table when not in "pending close tab" flow
+    if (pendingCloseTabId === null) jobs.push(saveNewTable());
+
     if (jobs.length) await Promise.all(jobs);
-  }, [args, tabHasChanges, applyPatchesForActiveWindow, saveNewTable]);
+  }, [
+    activeTableWindow,
+    runtimeConnectionId,
+    tabHasChanges,
+    activeProfileScreen,
+    applyPatchesForActiveWindow,
+    pendingCloseTabId,
+    saveNewTable,
+  ]);
 
   const closeTab = useCallback(
     async (tabId: string, skipCheck = false) => {
@@ -321,20 +431,20 @@ export function useConnectionActions(
 
       try {
         if (!skipCheck && tabHasChanges(tabId)) {
-          args.setPendingCloseTabId(tabId);
-          args.setWarningRefresh(true);
+          setPendingCloseTabId(tabId);
+          setWarningRefresh(true);
           return;
         }
 
         clearChanges(tabId);
 
-        const currentTab = args.profileTabs.find((t) => t.id === tabId);
-        const newTabs = args.profileTabs.filter((t) => t.id !== tabId);
+        const currentTab = profileTabs.find((t) => t.id === tabId);
+        const newTabs = profileTabs.filter((t) => t.id !== tabId);
 
-        args.removeTab(tabId);
+        removeTab(tabId);
 
-        if (args.activeProfileScreen === tabId) {
-          args.setActiveProfileScreen(
+        if (activeProfileScreen === tabId) {
+          setActiveProfileScreen(
             newTabs.length ? newTabs[newTabs.length - 1].id : "main"
           );
         }
@@ -342,16 +452,13 @@ export function useConnectionActions(
         if (currentTab?.runtimeConnectionId) {
           try {
             await connectionRemove(currentTab.runtimeConnectionId);
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
 
-        const windows = args.openWindows[tabId] ?? [];
+        const windows = openWindows[tabId] ?? [];
         if (!windows.length) return;
 
         const tableWindows = windows.filter((w) => w.type === "table");
-
         const s = useConnectionStore.getState();
 
         await Promise.all(
@@ -360,14 +467,12 @@ export function useConnectionActions(
             const k = tableKey(tabId, schema, name);
             const connId = s.tableDataMap[k]?.connectionId ?? null;
 
-            args.removeTableData(schema, name);
+            removeTableData(schema, name);
 
             if (connId) {
               try {
                 await connectionRemove(connId);
-              } catch {
-                // ignore
-              }
+              } catch {}
             }
           })
         );
@@ -375,20 +480,38 @@ export function useConnectionActions(
         closingRef.current = false;
       }
     },
-    [args, tabHasChanges, clearChanges]
+    [
+      tabHasChanges,
+      setPendingCloseTabId,
+      setWarningRefresh,
+      clearChanges,
+      profileTabs,
+      removeTab,
+      activeProfileScreen,
+      setActiveProfileScreen,
+      openWindows,
+      removeTableData,
+    ]
   );
 
   const discardChanges = useCallback(async () => {
-    if (args.pendingCloseTabId) {
-      clearChanges(args.pendingCloseTabId);
-      await closeTab(args.pendingCloseTabId, true);
+    if (pendingCloseTabId) {
+      clearChanges(pendingCloseTabId);
+      await closeTab(pendingCloseTabId, true);
     } else {
-      clearChanges(args.activeProfileScreen);
+      clearChanges(activeProfileScreen);
     }
 
-    args.setWarningRefresh(false);
-    args.setPendingCloseTabId(null);
-  }, [args, clearChanges, closeTab]);
+    setWarningRefresh(false);
+    setPendingCloseTabId(null);
+  }, [
+    pendingCloseTabId,
+    clearChanges,
+    closeTab,
+    activeProfileScreen,
+    setWarningRefresh,
+    setPendingCloseTabId,
+  ]);
 
   return {
     openSql,
