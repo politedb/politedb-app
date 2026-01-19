@@ -57,7 +57,48 @@ fn known_host_format_from_hostkey_type(t: HostKeyType) -> ssh2::KnownHostKeyForm
 
 fn known_hosts_path() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    Some(home.join(".ssh").join("known_hosts"))
+    Some(home.join(".politedb").join("ssh_known_hosts"))
+}
+
+fn remove_known_hosts_entry(path: &Path, host: &str, port: u16) -> std::io::Result<()> {
+    let host = host.trim();
+    let hostport = format!("[{}]:{}", host, port);
+
+    let mut s = String::new();
+    std::fs::File::open(path)?.read_to_string(&mut s)?;
+
+    let mut out = String::with_capacity(s.len());
+    for line in s.lines() {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        let first = t.split_whitespace().next().unwrap_or("");
+        let mut hit = false;
+        for h in first.split(',') {
+            if h == hostport {
+                hit = true;
+                break;
+            }
+        }
+
+        if !hit {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    let tmp = path.with_extension("tmp");
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(out.as_bytes())?;
+        f.flush()?;
+    }
+    std::fs::rename(tmp, path)?;
+    Ok(())
 }
 
 fn apply_hostkey_policy(
@@ -71,7 +112,6 @@ fn apply_hostkey_policy(
     }
 
     let Some(path) = known_hosts_path() else {
-        // Degrade gracefully if no home dir
         return Ok(());
     };
 
@@ -83,27 +123,53 @@ fn apply_hostkey_policy(
     let (key, key_type) = sess
         .host_key()
         .ok_or_else(|| anyhow!("SSH_HOSTKEY_MISSING"))?;
+    let host = ssh_host.trim();
+    let hostport = format!("[{}]:{}", host, ssh_port);
+    let fmt = known_host_format_from_hostkey_type(key_type);
 
-    match kh.check_port(ssh_host.trim(), ssh_port, key) {
+    match kh.check_port(host, ssh_port, key) {
         CheckResult::Match => Ok(()),
-        CheckResult::Mismatch => Err(anyhow!("SSH_HOSTKEY_MISMATCH")),
+
         CheckResult::NotFound => {
             if strict == "yes" {
                 return Err(anyhow!("SSH_HOSTKEY_NOT_FOUND"));
             }
 
-            let hostport = format!("[{}]:{}", ssh_host.trim(), ssh_port);
-            let fmt = known_host_format_from_hostkey_type(key_type);
-
-            // fmt may be Unknown; ssh2 still allows adding, but this is best-effort.
             kh.add(&hostport, key, "", fmt)?;
-
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
             kh.write_file(&path, ssh2::KnownHostFileKind::OpenSSH)?;
             Ok(())
         }
+
+        CheckResult::Mismatch => {
+            // TablePlus-style: auto replace, no error to UI
+            if path.exists() {
+                let _ = remove_known_hosts_entry(&path, host, ssh_port);
+            }
+
+            // reload after removal (avoid duplicate state)
+            let mut kh2 = sess.known_hosts()?;
+            if path.exists() {
+                let _ = kh2.read_file(&path, ssh2::KnownHostFileKind::OpenSSH);
+            }
+
+            kh2.add(&hostport, key, "", fmt)?;
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            kh2.write_file(&path, ssh2::KnownHostFileKind::OpenSSH)?;
+
+            tracing::warn!(
+                ssh_host = %host,
+                ssh_port = ssh_port,
+                "ssh_tunnel: host key mismatch -> auto-replaced (tableplus mode)"
+            );
+
+            Ok(())
+        }
+
         CheckResult::Failure => Err(anyhow!("SSH_HOSTKEY_CHECK_FAILED")),
     }
 }
