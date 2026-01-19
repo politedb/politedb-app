@@ -98,13 +98,13 @@ export type ConnectionState = {
   setSizeInfoCache: (key: string, info: TableSizeInfo) => void;
 
   setTableStructure: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     structure: TableStructure[]
   ) => void;
 
   updateTableStructure: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     rowIndex: number,
     field: keyof TableStructure,
@@ -112,38 +112,38 @@ export type ConnectionState = {
   ) => void;
 
   setTableConstraints: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     constraints: TableConstraint[]
   ) => void;
 
   updateTableConstraints: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     rowIndex: number,
     field: keyof TableConstraint,
     value: string | boolean
   ) => void;
 
-  clearTableStructure: (screenId: string, tableWindowId?: string) => void;
-  clearTableConstraints: (screenId: string, tableWindowId?: string) => void;
+  clearTableStructure: (tabId: string, tableWindowId?: string) => void;
+  clearTableConstraints: (tabId: string, tableWindowId?: string) => void;
 
-  setDataPatchMap: (screenId: string, props: DataPatchesState) => void;
+  setDataPatchMap: (tabId: string, props: DataPatchesState) => void;
   removeDataPatch: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     action: DataAction,
     dataKey: DataKey,
     rowKey: string
   ) => void;
-  clearDataPatchMap: (screenId: string, tableWindowId?: string) => void;
+  clearDataPatchMap: (tabId: string, tableWindowId?: string) => void;
 
   setNewTableData: (
-    screenId: string,
+    tabId: string,
     tableWindowId: string,
     data: NewTableDataState
   ) => void;
-  clearNewTableData: (screenId: string, tableWindowId?: string) => void;
+  clearNewTableData: (tabId: string, tableWindowId?: string) => void;
 };
 
 export const useConnectionStore = create<ConnectionState>((set) => ({
@@ -274,112 +274,111 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       },
     })),
 
-  setTableStructure: (screenId, tableWindowId, structure) =>
+  setTableStructure: (tabId, tableWindowId, structure) =>
     set((s) => ({
       tableStructure: {
         ...s.tableStructure,
-        [screenId]: {
-          ...s.tableStructure[screenId],
+        [tabId]: {
+          ...s.tableStructure[tabId],
           [tableWindowId]: structure,
         },
       },
     })),
 
-  updateTableStructure: (screenId, tableWindowId, rowIndex, field, value) =>
+  updateTableStructure: (tabId, tableWindowId, rowIndex, field, value) =>
     set((s) => {
-      const structure = s.tableStructure[screenId]?.[tableWindowId] ?? [];
+      const structure = s.tableStructure[tabId]?.[tableWindowId] ?? [];
       structure[rowIndex] = { ...structure[rowIndex]!, [field]: value };
       return {
         tableStructure: {
           ...s.tableStructure,
-          [screenId]: {
-            ...s.tableStructure[screenId],
+          [tabId]: {
+            ...s.tableStructure[tabId],
             [tableWindowId]: structure,
           },
         },
       };
     }),
 
-  setTableConstraints: (screenId, tableWindowId, constraints) =>
+  setTableConstraints: (tabId, tableWindowId, constraints) =>
     set((s) => ({
       tableConstraints: {
         ...s.tableConstraints,
-        [screenId]: {
-          ...s.tableConstraints[screenId],
+        [tabId]: {
+          ...s.tableConstraints[tabId],
           [tableWindowId]: constraints,
         },
       },
     })),
 
-  updateTableConstraints: (screenId, tableWindowId, rowIndex, field, value) =>
+  updateTableConstraints: (tabId, tableWindowId, rowIndex, field, value) =>
     set((s) => {
-      const constraints = s.tableConstraints[screenId]?.[tableWindowId] ?? [];
+      const constraints = s.tableConstraints[tabId]?.[tableWindowId] ?? [];
       constraints[rowIndex] = { ...constraints[rowIndex]!, [field]: value };
       return {
         tableConstraints: {
           ...s.tableConstraints,
-          [screenId]: {
-            ...s.tableConstraints[screenId],
+          [tabId]: {
+            ...s.tableConstraints[tabId],
             [tableWindowId]: constraints,
           },
         },
       };
     }),
 
-  clearTableStructure: (screenId, tableWindowId) =>
+  clearTableStructure: (tabId, tableWindowId) =>
     set((s) => {
-      if (!s.tableStructure[screenId]) {
+      if (!s.tableStructure[tabId]) {
         return s;
       }
 
       if (tableWindowId) {
-        const { [tableWindowId]: _, ...rest } = s.tableStructure[screenId];
-        return { tableStructure: { ...s.tableStructure, [screenId]: rest } };
+        const { [tableWindowId]: _, ...rest } = s.tableStructure[tabId];
+        return { tableStructure: { ...s.tableStructure, [tabId]: rest } };
       }
 
-      return { tableStructure: { ...s.tableStructure, [screenId]: {} } };
+      return { tableStructure: { ...s.tableStructure, [tabId]: {} } };
     }),
 
-  clearTableConstraints: (screenId, tableWindowId) =>
+  clearTableConstraints: (tabId, tableWindowId) =>
     set((s) => {
-      if (!s.tableConstraints[screenId]) {
+      if (!s.tableConstraints[tabId]) {
         return s;
       }
 
       if (tableWindowId) {
-        const { [tableWindowId]: _, ...rest } = s.tableConstraints[screenId];
+        const { [tableWindowId]: _, ...rest } = s.tableConstraints[tabId];
         return {
-          tableConstraints: { ...s.tableConstraints, [screenId]: rest },
+          tableConstraints: { ...s.tableConstraints, [tabId]: rest },
         };
       }
 
-      return { tableConstraints: { ...s.tableConstraints, [screenId]: {} } };
+      return { tableConstraints: { ...s.tableConstraints, [tabId]: {} } };
     }),
 
-  setDataPatchMap: (screenId: string, props: DataPatchesState) => {
+  setDataPatchMap: (tabId: string, props: DataPatchesState) => {
     const { dataKey, action, tableData, tableWindow, rowKey, data } = props;
     const tableWindowId = tableWindow.id;
 
     set((s) => ({
       dataPatchMap: {
         ...s.dataPatchMap,
-        [screenId]: {
-          ...(s.dataPatchMap[screenId] ?? {}),
+        [tabId]: {
+          ...(s.dataPatchMap[tabId] ?? {}),
           [tableWindowId]: {
             tableData,
             tableWindow,
             patches: {
-              ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches ?? {}),
+              ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches ?? {}),
               [action]: {
-                ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
-                  action
-                ] ?? {}),
+                ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[action] ??
+                  {}),
                 [dataKey]: {
-                  ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
+                  ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[
                     action
                   ]?.[dataKey] ?? {}),
                   [rowKey]: {
-                    ...(s.dataPatchMap[screenId]?.[tableWindowId]?.patches?.[
+                    ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[
                       action
                     ]?.[dataKey]?.[rowKey] ?? {}),
                     ...data,
@@ -393,9 +392,9 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
     }));
   },
 
-  removeDataPatch: (screenId, tableWindowId, action, dataKey, rowKey) =>
+  removeDataPatch: (tabId, tableWindowId, action, dataKey, rowKey) =>
     set((s) => {
-      const windowData = s.dataPatchMap[screenId]?.[tableWindowId];
+      const windowData = s.dataPatchMap[tabId]?.[tableWindowId];
       if (!windowData?.patches?.[action]?.[dataKey]?.[rowKey]) {
         return s;
       }
@@ -429,8 +428,8 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       return {
         dataPatchMap: {
           ...s.dataPatchMap,
-          [screenId]: {
-            ...s.dataPatchMap[screenId],
+          [tabId]: {
+            ...s.dataPatchMap[tabId],
             [tableWindowId]: {
               ...windowData,
               patches: cleanedPatches,
@@ -440,43 +439,43 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       };
     }),
 
-  clearDataPatchMap: (screenId, tableWindowId) =>
+  clearDataPatchMap: (tabId, tableWindowId) =>
     set((s) => {
-      if (!s.dataPatchMap[screenId]) {
+      if (!s.dataPatchMap[tabId]) {
         return s;
       }
 
       if (tableWindowId) {
-        const { [tableWindowId]: _, ...rest } = s.dataPatchMap[screenId];
-        return { dataPatchMap: { ...s.dataPatchMap, [screenId]: rest } };
+        const { [tableWindowId]: _, ...rest } = s.dataPatchMap[tabId];
+        return { dataPatchMap: { ...s.dataPatchMap, [tabId]: rest } };
       }
 
-      const { [screenId]: _, ...rest } = s.dataPatchMap;
+      const { [tabId]: _, ...rest } = s.dataPatchMap;
       return { dataPatchMap: rest };
     }),
 
-  setNewTableData: (screenId, tableWindowId, data) =>
+  setNewTableData: (tabId, tableWindowId, data) =>
     set((s) => ({
       newTableData: {
         ...s.newTableData,
-        [screenId]: {
-          ...s.newTableData[screenId],
+        [tabId]: {
+          ...s.newTableData[tabId],
           [tableWindowId]: data,
         },
       },
     })),
 
-  clearNewTableData: (screenId, tableWindowId) =>
+  clearNewTableData: (tabId, tableWindowId) =>
     set((s) => {
-      if (!s.newTableData[screenId]) {
+      if (!s.newTableData[tabId]) {
         return s;
       }
 
       if (tableWindowId) {
-        const { [tableWindowId]: _, ...rest } = s.newTableData[screenId];
-        return { newTableData: { ...s.newTableData, [screenId]: rest } };
+        const { [tableWindowId]: _, ...rest } = s.newTableData[tabId];
+        return { newTableData: { ...s.newTableData, [tabId]: rest } };
       }
 
-      return { newTableData: { ...s.newTableData, [screenId]: {} } };
+      return { newTableData: { ...s.newTableData, [tabId]: {} } };
     }),
 }));

@@ -2,12 +2,12 @@ import { Button } from "src/components/common/Button";
 import { Table, X } from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
+import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 
 interface Props {
   openWindows: OpenWindow[];
   setActiveWindowId: (id: string) => void;
   activeWindowId: string | null;
-  handleCloseWindow: (id: string, e: MouseEvent) => void;
 }
 
 function getWindowTitle(w: OpenWindow) {
@@ -28,8 +28,9 @@ export function NavigationTabs({
   openWindows,
   setActiveWindowId,
   activeWindowId,
-  handleCloseWindow,
 }: Props) {
+  const actions = useConnectionActionsCtx();
+
   return (
     <div
       class={cn(
@@ -57,7 +58,6 @@ export function NavigationTabs({
                   ]
             )}
           >
-            {/* Left: icon / badge */}
             <div class="flex items-center gap-2">
               {w.type === "table" && <WindowIcon />}
 
@@ -86,10 +86,9 @@ export function NavigationTabs({
               </span>
             </div>
 
-            {/* Close button */}
             <Button
               variant="ghost"
-              onClick={(e) => handleCloseWindow(w.id, e)}
+              onClick={(e) => actions.closeWindow(w.id, e)}
               class={cn(
                 "ml-1 p-0.5",
                 "opacity-0 transition-opacity",
@@ -102,7 +101,6 @@ export function NavigationTabs({
               <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
             </Button>
 
-            {/* Active tab che border-bottom của tab bar */}
             {isActive && (
               <div class="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 bg-white" />
             )}

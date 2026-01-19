@@ -7,21 +7,23 @@ import { NewTableMenu } from "src/components/table/NewTableMenu";
 import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
+import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 
 interface Props {
   schemas: string[];
   currSchema: string;
   onSchemaChange: (schema: string) => void;
+
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<SetStateAction<string>>;
+
   expandedSections: { functions: boolean; tables: boolean };
   setExpandedSections: Dispatch<
     SetStateAction<{ functions: boolean; tables: boolean }>
   >;
+
   filteredTables: TableItem[];
-  handleSelectTable: (table: TableItem) => void;
   activeWindowId: string | null;
-  handleOpenNewTable: (table: TableItem) => void;
 }
 
 function SectionHeader(props: {
@@ -38,7 +40,6 @@ function SectionHeader(props: {
       className={cn("w-full px-2 py-1.5 hover:bg-neutral-200/60")}
       title={title}
     >
-      {/* Force left alignment even if Button defaults to justify-center */}
       <div class="flex w-full items-center justify-start gap-1">
         {expanded ? (
           <ChevronDown className="size-3.5 shrink-0 text-neutral-500" />
@@ -72,10 +73,10 @@ export function LeftNav({
   expandedSections,
   setExpandedSections,
   filteredTables,
-  handleSelectTable,
   activeWindowId,
-  handleOpenNewTable,
 }: Props) {
+  const actions = useConnectionActionsCtx();
+
   return (
     <aside
       class={cn(
@@ -153,7 +154,7 @@ export function LeftNav({
                       <Button
                         variant="ghost"
                         key={key}
-                        onClick={() => handleSelectTable(table)}
+                        onClick={() => void actions.selectTable(table)}
                         active={isActive}
                         className={cn(
                           "w-full justify-start",
@@ -169,11 +170,6 @@ export function LeftNav({
                       >
                         <Table className="size-4 shrink-0 text-neutral-500" />
                         <TableName name={table.name} />
-
-                        {/* Optional tiny schema chip if you want */}
-                        {/* <span class="shrink-0 rounded bg-neutral-200/70 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600">
-                          {table.schema}
-                        </span> */}
                       </Button>
                     );
                   })}
@@ -188,13 +184,15 @@ export function LeftNav({
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">
           <NewTableMenu
-            onOpenNewTable={() =>
-              handleOpenNewTable({
+            onOpenNewTable={() => {
+              const t: TableItem = {
                 schema: currSchema,
                 name: `untitled_table_${Math.round(Date.now() / 1000)}`,
                 new: true,
-              })
-            }
+              } as TableItem;
+
+              void actions.selectTable(t);
+            }}
           />
 
           <Select

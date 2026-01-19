@@ -374,8 +374,6 @@ async function profileSaveCore<K extends SaveKind>(
     const payload = buildProfilePayload(input, plan);
     const cmdPayload = buildCmdPayload(kind, plan, payload);
 
-    console.log({ cmdPayload });
-
     if (kind === "save_and_connect") {
       return (await invoke<ProfileSaveAndConnectResult>(
         CMD.profileSaveAndConnect,

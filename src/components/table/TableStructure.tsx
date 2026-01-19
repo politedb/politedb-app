@@ -70,7 +70,6 @@ export function TableStructure({
     deletedRows,
     containerRef: containerRef,
   });
-  console.log(selectedRowIndex);
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
