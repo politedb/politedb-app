@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "preact/hooks";
+import { useMemo, useRef, useCallback } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 
@@ -26,6 +26,8 @@ interface TableProps<T = any> {
   onDoubleClickRow?: (row: T, index: number) => void;
 }
 
+const TABLE_STYLE = { minHeight: "100%", tableLayout: "auto" } as const;
+
 export function Table<T = any>({
   columns,
   data,
@@ -43,13 +45,6 @@ export function Table<T = any>({
 }: TableProps<T>) {
   const tableRef = useRef<HTMLTableElement>(null);
 
-  const getRowKey = (row: T, index: number) => {
-    if (keyExtractor) {
-      return keyExtractor(row, index);
-    }
-    return index;
-  };
-
   const { emptyRowsCount, containerRef } = useFillViewportTable({
     tableRef,
     dataLength: data.length,
@@ -57,6 +52,64 @@ export function Table<T = any>({
     fillViewport,
   });
 
+  // Column width style (cached)
+  const columnWidthStyle = useMemo(
+    () => ({ width: `${100 / columns.length}%` }),
+    [columns.length]
+  );
+
+  // Empty row template
+  const emptyRow = useMemo(() => {
+    const row: Record<string, any> = {};
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      row[col.key] = col.key === "_rowNumber" ? null : "";
+    }
+    return row as T;
+  }, [columns]);
+
+  // Event delegation for row clicks
+  const handleTableClick = useCallback(
+    (e: MouseEvent) => {
+      if (!onSelectRow) return;
+
+      const tr = (e.target as HTMLElement).closest("tr[data-row]");
+      if (!tr) return;
+
+      const rowIndex = Number((tr as HTMLElement).dataset.row);
+      if (!Number.isFinite(rowIndex)) return;
+
+      const isEmpty = (tr as HTMLElement).dataset.empty === "true";
+      const row = isEmpty ? emptyRow : data[rowIndex];
+
+      if (row !== undefined) {
+        onSelectRow(row, rowIndex);
+      }
+    },
+    [onSelectRow, data, emptyRow]
+  );
+
+  const handleTableDblClick = useCallback(
+    (e: MouseEvent) => {
+      if (!onDoubleClickRow) return;
+
+      const tr = (e.target as HTMLElement).closest("tr[data-row]");
+      if (!tr) return;
+
+      const rowIndex = Number((tr as HTMLElement).dataset.row);
+      if (!Number.isFinite(rowIndex)) return;
+
+      const isEmpty = (tr as HTMLElement).dataset.empty === "true";
+      const row = isEmpty ? emptyRow : data[rowIndex];
+
+      if (row !== undefined) {
+        onDoubleClickRow(row, rowIndex);
+      }
+    },
+    [onDoubleClickRow, data, emptyRow]
+  );
+
+  // Early return for empty data
   if (data.length === 0) {
     return (
       <div class="flex h-full items-center justify-center bg-white">
@@ -65,20 +118,6 @@ export function Table<T = any>({
     );
   }
 
-  // Create empty row data
-  const emptyRow = useMemo(
-    () =>
-      columns.reduce((acc, col) => {
-        if (col.key === "_rowNumber") {
-          acc[col.key] = null; // Row number will be rendered separately
-        } else {
-          acc[col.key] = "";
-        }
-        return acc;
-      }, {} as any),
-    [columns]
-  );
-
   return (
     <div
       ref={containerRef}
@@ -86,12 +125,10 @@ export function Table<T = any>({
         "h-full w-full overflow-auto bg-white",
         emptyRowsCount > 0 && "overflow-y-hidden"
       )}
+      onClick={handleTableClick}
+      onDblClick={handleTableDblClick}
     >
-      <table
-        ref={tableRef}
-        class={cn("w-full", className)}
-        style={{ minHeight: "100%", tableLayout: "auto" }}
-      >
+      <table ref={tableRef} class={cn("w-full", className)} style={TABLE_STYLE}>
         <thead
           class={cn(
             "bg-neutral-50",
@@ -100,84 +137,95 @@ export function Table<T = any>({
           )}
         >
           <tr>
-            {columns.map((column) => (
+            {columns.map((col) => (
               <th
-                key={column.key}
+                key={col.key}
                 class={cn(
                   "border border-neutral-300 p-2 text-left text-xs font-semibold text-neutral-700",
-                  column.headerClassName
+                  col.headerClassName
                 )}
-                style={{ width: `${100 / columns.length}%` }}
+                style={columnWidthStyle}
               >
-                {column.label}
+                {col.label}
               </th>
             ))}
           </tr>
         </thead>
+
         <tbody>
           {data.map((row, index) => {
-            const dynamicRowClassName =
+            const isSelected = selectedRow === index;
+            const isNewRow = (row as any).isNew;
+            const dynamicClassName =
               typeof rowClassName === "function"
                 ? rowClassName(row, index)
                 : rowClassName;
 
             return (
               <tr
-                key={getRowKey(row, index)}
+                key={keyExtractor ? keyExtractor(row, index) : index}
+                data-row={index}
                 class={cn(
-                  (row as any).isNew && "bg-green-200!",
-                  selectedRow === index && "bg-blue-200!",
-                  dynamicRowClassName
+                  isNewRow && "bg-green-200!",
+                  isSelected && "bg-blue-200!",
+                  dynamicClassName
                 )}
-                onClick={() => onSelectRow?.(row, index)}
               >
-                {columns.map((column) => (
+                {columns.map((col) => (
                   <td
-                    key={column.key}
-                    class={cn(
-                      "border border-neutral-200 px-1",
-                      column.className
-                    )}
+                    key={col.key}
+                    class={cn("border border-neutral-200 px-1", col.className)}
+                    style={columnWidthStyle}
                   >
-                    {column.render
-                      ? column.render((row as any)[column.key], row, index)
-                      : (row as any)[column.key]}
+                    {col.render
+                      ? col.render((row as any)[col.key], row, index)
+                      : (row as any)[col.key]}
                   </td>
                 ))}
               </tr>
             );
           })}
-          {/* Fill empty rows to cover viewport */}
-          {Array.from({ length: emptyRowsCount }).map((_, idx) => {
+
+          {/* Empty rows to fill viewport */}
+          {Array.from({ length: emptyRowsCount }, (_, idx) => {
             const rowIndex = data.length + idx;
+
             return (
               <tr
                 key={`empty-${idx}`}
-                class={cn(rowClassName)}
-                onClick={() => onSelectRow?.(emptyRow, rowIndex)}
-                onDblClick={() => onDoubleClickRow?.(emptyRow, rowIndex)}
+                data-row={rowIndex}
+                data-empty="true"
+                class={
+                  typeof rowClassName === "string" ? rowClassName : undefined
+                }
               >
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    class={cn(
-                      "min-h-[40px] border border-neutral-200 px-1",
-                      column.className
-                    )}
-                  >
-                    {column.key === "_rowNumber"
-                      ? column.render
-                        ? column.render(rowIndex + 1, emptyRow, rowIndex)
-                        : rowIndex + 1
-                      : column.render
-                        ? column.render(
-                            emptyRow[column.key],
-                            emptyRow,
-                            rowIndex
-                          )
-                        : ""}
-                  </td>
-                ))}
+                {columns.map((col) => {
+                  let content: any = "";
+                  if (col.key === "_rowNumber") {
+                    content = col.render
+                      ? col.render(rowIndex + 1, emptyRow, rowIndex)
+                      : rowIndex + 1;
+                  } else if (col.render) {
+                    content = col.render(
+                      (emptyRow as any)[col.key],
+                      emptyRow,
+                      rowIndex
+                    );
+                  }
+
+                  return (
+                    <td
+                      key={col.key}
+                      class={cn(
+                        "min-h-10 border border-neutral-200 px-1",
+                        col.className
+                      )}
+                      style={columnWidthStyle}
+                    >
+                      {content}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}

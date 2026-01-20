@@ -7,7 +7,12 @@ import type {
   TableWindow,
 } from "src/types";
 import { useScreenStore } from "src/stores/screen";
-import { useLoadTableData, tableKey } from "src/hooks/useLoadTableData";
+import {
+  useLoadTableData,
+  tableKey,
+  DEFAULT_LIMIT,
+  DEFAULT_OFFSET,
+} from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
 import { connectionRemove } from "src/lib/tauri";
 
@@ -116,7 +121,12 @@ export function useConnectionWindows(activeProfileScreen: string) {
       setActiveWindowId(activeProfileScreen, win.id);
 
       if (!table.new) {
-        await loadTableData(table.schema, table.name);
+        await loadTableData(
+          table.schema,
+          table.name,
+          { limit: DEFAULT_LIMIT, offset: DEFAULT_OFFSET },
+          { force: true }
+        );
       }
 
       return win.id;

@@ -23,6 +23,8 @@ export function tableKey(
 }
 
 export type TablePagination = { limit: number; offset: number };
+export const DEFAULT_LIMIT = 300;
+export const DEFAULT_OFFSET = 0;
 
 const EMPTY = {
   data: null,
@@ -94,7 +96,9 @@ export function useLoadTableData() {
   /**
    * loadTableData:
    * - First load: ALWAYS fetch minimum (columns + rows) even if flags say otherwise.
-   * - Subsequent loads: respect flags.
+   * - Subsequent loads:
+   *   - Respect flags for "refresh" intent
+   *   - BUT also auto-fetch missing meta/stats when they are absent in state
    */
   const loadTableData = useCallback(
     async (
@@ -128,20 +132,20 @@ export function useLoadTableData() {
 
       const isFirstLoad = !hasColumns || !hasRows;
 
+      const metaMissing = !hasStructure || !hasConstraints;
+
       // ✅ first load must fetch minimum dataset (columns + rows)
       const needColumns = force || isFirstLoad || !hasColumns;
       const needRows = force || isFirstLoad || refreshRows;
 
-      // ✅ only fetch stats/meta on first load if you explicitly want (force) — default OFF
+      // ✅ stats/meta:
+      // - First load: do NOT fetch by default (unless force)
+      // - Later: fetch if missing OR explicitly requested via flags
       const needRowCount =
-        (force ? true : !isFirstLoad && refreshStats) &&
-        (force || !hasRowCount);
+        force || (!isFirstLoad && (!hasRowCount || refreshStats));
       const needSizeInfo =
-        (force ? true : !isFirstLoad && refreshStats) &&
-        (force || !hasSizeInfo);
-      const needMeta =
-        (force ? true : !isFirstLoad && refreshMeta) &&
-        (force || !hasStructure || !hasConstraints);
+        force || (!isFirstLoad && (!hasSizeInfo || refreshStats));
+      const needMeta = force || (!isFirstLoad && (metaMissing || refreshMeta));
 
       // if absolutely nothing to do, return
       if (

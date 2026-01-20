@@ -1,15 +1,13 @@
-import { cellToString } from "src/utils/convert";
-import {
-  Dispatch,
-  useCallback,
-  useEffect,
-  useState,
-  useRef,
-} from "preact/hooks";
+import { useCallback, useEffect, useState, useRef } from "preact/hooks";
+import { memo } from "preact/compat";
 import { cn } from "src/utils/cn";
-import { SetStateAction } from "preact/compat";
-import { EditingCell } from "./TableData";
-import { DataAction, DataKey } from "src/stores/connection";
+import { cellToString } from "src/utils/convert";
+import type { DataAction, DataKey } from "src/stores/connection";
+import type { EditingCell } from "./tableUtils";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface TableCellProps {
   rowIndex: number;
@@ -27,15 +25,37 @@ export interface TableCellProps {
     rowIndex: number,
     data: Record<string, any>
   ) => void;
-  setEditingCell: Dispatch<SetStateAction<EditingCell | null>>;
+  setEditingCell: (cell: EditingCell | null) => void;
   updateData: (rowIndex: number, columnId: string, value: any) => void;
 }
 
-export function TableCell({
+// ============================================================================
+// Constants
+// ============================================================================
+
+const DATA_KEY: DataKey = "data";
+
+// Input style - hide scrollbar
+const INPUT_STYLE = {
+  scrollbarWidth: "none",
+  msOverflowStyle: "none",
+} as const;
+
+// Background colors for focus/blur states
+const BG_COLORS = {
+  focus: "white",
+  newRow: "#d1fae5", // bg-green-100
+  default: "transparent",
+} as const;
+
+// ============================================================================
+// Component
+// ============================================================================
+
+export const TableCell = memo(function TableCell({
   rowIndex,
   colIndex,
   colName,
-  // originalValue,
   value,
   isPatched,
   isNewRow = false,
@@ -45,12 +65,7 @@ export function TableCell({
   setEditingCell,
   updateData,
 }: TableCellProps) {
-  const dataKey = "data";
-
   const displayValue = cellToString(value);
-  // TODO use original value if needed
-  // const originalString = cellToString(originalValue);
-
   const [editValue, setEditValue] = useState(displayValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -59,34 +74,30 @@ export function TableCell({
     setEditValue(displayValue);
   }, [displayValue]);
 
+  // Commit value on blur
   const commitValue = useCallback(() => {
-    // Only commit if the value actually changed
-    // Normalize both values for comparison (trim whitespace, treat empty string as empty)
-    const normalizedEditValue = editValue.trim();
-    const normalizedDisplayValue = displayValue.trim();
+    const trimmedEdit = editValue.trim();
+    const trimmedDisplay = displayValue.trim();
 
-    // For new rows, always commit (even if empty, it's still a new row)
-    // For existing rows, only commit if the value changed
-    if (!isNewRow && normalizedEditValue === normalizedDisplayValue) {
-      // Value hasn't changed, don't create a patch
-      return;
-    }
+    // Skip if unchanged (for existing rows)
+    if (!isNewRow && trimmedEdit === trimmedDisplay) return;
 
-    // Update local editedData
+    // Update local state
     updateData(rowIndex, colName, editValue);
 
-    // For new rows, use "create" action and include the rowKey
-    // For existing rows, use "update" action
-    const action = isNewRow ? "create" : "update";
+    // Build change data
     const changeData: Record<string, any> = { [colName]: editValue };
-
-    // Include rowKey for new rows so handleDataChange can extract it
     if (isNewRow && rowKey) {
       changeData.__rowKey = rowKey;
     }
 
-    // Bubble up to ConnectionScreen → patchMap
-    onCellChange?.(action, dataKey, isNewRow ? -1 : rowIndex, changeData);
+    // Notify parent
+    onCellChange?.(
+      isNewRow ? "create" : "update",
+      DATA_KEY,
+      isNewRow ? -1 : rowIndex,
+      changeData
+    );
   }, [
     editValue,
     displayValue,
@@ -98,85 +109,82 @@ export function TableCell({
     rowKey,
   ]);
 
-  const onInputBlur = useCallback(
+  // Event handlers - stable references
+  const handleInput = useCallback((e: Event) => {
+    const value = (e.currentTarget as HTMLInputElement).value;
+    // Immediate UI update
+    (e.currentTarget as HTMLInputElement).value = value;
+    // Debounced state update
+    requestAnimationFrame(() => setEditValue(value));
+  }, []);
+
+  const handleMouseDown = useCallback(() => {
+    setEditingCell({ rowIdx: rowIndex, colName, colIdx: colIndex });
+  }, [setEditingCell, rowIndex, colIndex, colName]);
+
+  const handleClick = useCallback((e: Event) => {
+    const input = e.currentTarget as HTMLInputElement;
+    input.scrollLeft = input.scrollWidth;
+    input.select();
+  }, []);
+
+  const handleFocus = useCallback((e: Event) => {
+    (e.currentTarget as HTMLInputElement).style.backgroundColor =
+      BG_COLORS.focus;
+  }, []);
+
+  const handleBlur = useCallback(
     (e: Event) => {
-      // Check if we're still editing this cell (not switched to another)
       const input = e.currentTarget as HTMLInputElement;
-      // If row is selected, set background to green-200, otherwise transparent
-      if (isNewRow) {
-        input.style.backgroundColor = "#b9f8cf"; // bg-green-200
-      } else {
-        input.style.backgroundColor = "transparent";
-      }
+      input.style.backgroundColor = isNewRow
+        ? BG_COLORS.newRow
+        : BG_COLORS.default;
       commitValue();
     },
     [commitValue, isNewRow]
   );
 
-  const onInputKeyDown = useCallback(
+  const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        (e.target as HTMLInputElement).blur();
-      } else if (e.key === "Escape") {
-        // revert to last committed value (patch-aware)
-        setEditValue(displayValue);
+      switch (e.key) {
+        case "Enter":
+          (e.target as HTMLInputElement).blur();
+          break;
+        case "Escape":
+          setEditValue(displayValue);
+          break;
       }
     },
     [displayValue]
   );
 
-  const onMouseDown = useCallback(() => {
-    setEditingCell({
-      rowIdx: rowIndex,
-      colName,
-      colIdx: colIndex,
-    });
-  }, [setEditingCell, rowIndex, colIndex, colName]);
-
-  const handleInput = useCallback((e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    setEditValue(input.value);
-  }, []);
+  // Compute class once
+  const inputClass = cn(
+    "h-full w-full border-0 p-2 text-sm text-neutral-900",
+    "outline-none hover:cursor-default focus:outline-none",
+    "overflow-hidden text-ellipsis whitespace-nowrap",
+    "focus:overflow-x-auto focus:text-ellipsis",
+    isDeleted && "bg-red-300",
+    isPatched && !isDeleted && "bg-amber-200",
+    isNewRow && !isDeleted && "bg-green-200",
+    !isPatched && !isNewRow && !isDeleted && "bg-transparent"
+  );
 
   return (
     <input
       ref={inputRef}
       type="text"
       value={editValue}
-      placeholder={!editValue ? "NULL" : undefined}
-      onInput={handleInput}
-      onMouseDown={onMouseDown}
-      onClick={(e) => {
-        const input = e.currentTarget as HTMLInputElement;
-        input.scrollLeft = input.scrollWidth;
-        input.select();
-      }}
-      onFocus={(e) => {
-        const input = e.currentTarget as HTMLInputElement;
-        input.style.backgroundColor = "white";
-      }}
-      onBlur={onInputBlur}
-      onKeyDown={onInputKeyDown}
-      class={cn(
-        "h-full w-full border-0 p-2 text-sm text-neutral-900",
-        "outline-none hover:cursor-default focus:outline-none",
-        "overflow-hidden text-ellipsis whitespace-nowrap",
-        "focus:overflow-x-auto focus:text-ellipsis",
-
-        // deleted row (grayed out with strikethrough)
-        isDeleted && "bg-red-300",
-
-        // patched highlight (amber) - only if not deleted
-        isPatched && !isDeleted && "bg-amber-200",
-
-        // new row highlight (green) - only if not deleted
-        isNewRow && !isDeleted && "bg-green-200",
-
-        // untouched
-        !isPatched && !isDeleted && "bg-transparent"
-      )}
+      placeholder={editValue ? undefined : "NULL"}
       disabled={isDeleted}
-      style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+      class={inputClass}
+      style={INPUT_STYLE}
+      onInput={handleInput}
+      onMouseDown={handleMouseDown}
+      onClick={handleClick}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
     />
   );
-}
+});
