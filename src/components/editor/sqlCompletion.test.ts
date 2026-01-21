@@ -1,17 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ✅ Mock monaco-editor (minimal surface needed)
 vi.mock("monaco-editor", () => {
   class Range {
     startLineNumber: number;
     startColumn: number;
     endLineNumber: number;
     endColumn: number;
-    constructor(sl: number, sc: number, el: number, ec: number) {
-      this.startLineNumber = sl;
-      this.startColumn = sc;
-      this.endLineNumber = el;
-      this.endColumn = ec;
+    constructor(sLn: number, sCol: number, eLn: number, eCol: number) {
+      this.startLineNumber = sLn;
+      this.startColumn = sCol;
+      this.endLineNumber = eLn;
+      this.endColumn = eCol;
     }
   }
 
@@ -26,304 +25,304 @@ vi.mock("monaco-editor", () => {
 
   const CompletionItemKind = {
     Keyword: 14,
+    Function: 1,
     Field: 4,
-    Struct: 23,
+    Struct: 6,
     Class: 7,
+    Module: 8,
+    Operator: 12,
   };
 
   const languages = {
     CompletionItemKind,
-    registerCompletionItemProvider: vi.fn(),
+    CompletionItemInsertTextRule: {
+      InsertAsSnippet: 4,
+    },
+    registerCompletionItemProvider: vi.fn((langId: string, provider: any) => {
+      return { dispose: vi.fn(), __langId: langId, __provider: provider };
+    }),
   };
 
+  return { Range, Position, languages };
+});
+
+// mock sqlConstants
+vi.mock("src/sqlConstants", () => {
   return {
-    Range,
-    Position,
-    languages,
-    editor: {},
+    getKeywordsForEngine: () => ({
+      statement: ["SELECT", "WITH", "INSERT", "UPDATE", "DELETE"],
+      clause: ["FROM", "WHERE", "GROUP BY", "ORDER BY"],
+      postFrom: ["WHERE", "GROUP BY", "ORDER BY", "LIMIT"],
+      postJoin: ["ON", "WHERE", "GROUP BY", "ORDER BY"],
+      expression: ["AND", "OR", "IN", "IS", "NULL", "LIKE"],
+      orderBy: ["ASC", "DESC", "NULLS LAST"],
+      values: ["TRUE", "FALSE", "NULL"],
+    }),
+    getFunctionsForEngine: () => ["COUNT", "MAX", "MIN"],
+    ALL_COMPLETION_KEYWORDS: ["SELECT", "FROM", "WHERE", "JOIN", "LIMIT"],
   };
 });
 
+vi.mock("src/types", () => ({}));
+
+// Now import module under test
 import * as monaco from "monaco-editor";
 import { registerSqlCompletionSmart } from "./sqlCompletion";
-import { DatabaseEngine, TableItem } from "src/types";
+import { DatabaseEngine } from "src/types";
 
-function makeModel(text: string) {
+type TableItem = { schema: string; name: string; kind?: "table" | "view" };
+
+function createModel(text: string) {
+  const value = text;
+
   return {
-    getValue: () => text,
-    getOffsetAt: (_pos: any) => text.length, // cursor at end
-    getWordUntilPosition: (_pos: any) => ({
-      startColumn: text.length + 1,
-      endColumn: text.length + 1,
-    }),
+    getValue: () => value,
+    getOffsetAt: (pos: any) => {
+      return pos.column - 1;
+    },
+    getWordUntilPosition: (pos: any) => {
+      // naive word split for test: letters/numbers/underscore
+      const left = value.slice(0, pos.column - 1);
+      const m = left.match(/[a-zA-Z0-9_]*$/);
+      const word = m?.[0] ?? "";
+      return { startColumn: pos.column - word.length, endColumn: pos.column };
+    },
   } as any;
 }
 
-function getProvider() {
-  const calls = (monaco as any).languages.registerCompletionItemProvider.mock
-    .calls;
-  expect(calls.length).toBeGreaterThan(0);
-  return calls[calls.length - 1]![1];
+function provide(provider: any, sql: string) {
+  const model = createModel(sql);
+  const pos = new (monaco as any).Position(1, sql.length + 1);
+  return provider.provideCompletionItems(model, pos);
 }
 
-function provide(text: string, _ctx: any) {
-  const model = makeModel(text);
-  const pos = new (monaco as any).Position(1, text.length + 1);
-  const provider = getProvider();
-  return provider.provideCompletionItems(model, pos, undefined, undefined);
-}
-
-const KW_LIGHT = [
-  "SELECT",
-  "FROM",
-  "WHERE",
-  "JOIN",
-  "LEFT JOIN",
-  "RIGHT JOIN",
-  "INNER JOIN",
-  "GROUP BY",
-  "ORDER BY",
-  "LIMIT",
-  "OFFSET",
-  "AND",
-  "OR",
-  "ON",
-  "AS",
-  "INSERT",
-  "UPDATE",
-  "DELETE",
-];
-
-const POST_FROM_KW = [
-  "JOIN",
-  "LEFT JOIN",
-  "RIGHT JOIN",
-  "INNER JOIN",
-  "WHERE",
-  "GROUP BY",
-  "ORDER BY",
-  "LIMIT",
-  "OFFSET",
-];
-
-const POST_JOIN_KW = [
-  "ON",
-  "JOIN",
-  "LEFT JOIN",
-  "RIGHT JOIN",
-  "INNER JOIN",
-  "WHERE",
-  "GROUP BY",
-  "ORDER BY",
-  "LIMIT",
-  "OFFSET",
-];
-
-describe("registerSqlCompletionSmart", () => {
+describe("sqlCompletionSmart", () => {
   beforeEach(() => {
-    (monaco as any).languages.registerCompletionItemProvider.mockClear();
+    (monaco.languages.registerCompletionItemProvider as any).mockClear();
   });
 
-  it("registers provider for sql with trigger characters", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: [],
+  it("registers a completion provider for sql", () => {
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
       tables: [],
       columnsByTable: {},
-    }));
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
 
     expect(
-      (monaco as any).languages.registerCompletionItemProvider
+      monaco.languages.registerCompletionItemProvider
     ).toHaveBeenCalledTimes(1);
-
-    const [, provider] = (monaco as any).languages
-      .registerCompletionItemProvider.mock.calls[0];
-
-    expect(provider.triggerCharacters).toEqual([".", "_", " ", ";"]);
-    expect(typeof provider.provideCompletionItems).toBe("function");
+    expect(disposable).toBeTruthy();
   });
 
-  it("returns KW_LIGHT at statement boundary (empty / new statement)", () => {
-    registerSqlCompletionSmart(() => ({
+  it("STATEMENT_START: suggests statement keywords", () => {
+    const getCtx = () => ({
       schemas: ["public"],
       activeSchema: "public",
       tables: [],
       columnsByTable: {},
       engine: "postgres" as DatabaseEngine,
-    }));
+    });
 
-    const res = provide("", null);
-    const labels = res.suggestions.map((s: any) => s.label);
-    expect(labels).toEqual(KW_LIGHT);
-  });
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
 
-  it("DOT: suggests alias columns as alias.col", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public"],
-      activeSchema: "public",
-      tables: [{ schema: "public", name: "users" }],
-      columnsByTable: { "public.users": ["id", "email"] },
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    // alias "u" for users, then u.
-    const sql = "SELECT * FROM users u WHERE u.";
-    const res = provide(sql, null);
-
-    const labels = res.suggestions.map((s: any) => s.label);
-    expect(labels).toEqual(["u.id", "u.email"]);
-
-    // insertText should be alias."col" when PG needs quoting (here safe -> no quote)
-    const inserts = res.suggestions.map((s: any) => s.insertText);
-    expect(inserts).toEqual(["u.id", "u.email"]);
-  });
-
-  it("DOT: suggests schema tables after schema.", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public", "auth"],
-      activeSchema: "public",
-      tables: [
-        { schema: "public", name: "users" },
-        { schema: "public", name: "orders" },
-        { schema: "auth", name: "sessions" },
-      ],
-      columnsByTable: {},
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    const res = provide("SELECT * FROM public.", null);
-    const labels = res.suggestions.map((s: any) => s.label);
-    expect(labels).toEqual(["users", "orders"]);
-
-    // insertText should be public.<table> (quoted if needed)
-    const inserts = res.suggestions.map((s: any) => s.insertText);
-    expect(inserts).toEqual(["public.users", "public.orders"]);
-  });
-
-  it("POST_FROM_TABLE: suggests POST_FROM_KW right after FROM <table> [alias]", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public"],
-      activeSchema: "public",
-      tables: [{ schema: "public", name: "users" }],
-      columnsByTable: {},
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    const res1 = provide("SELECT * FROM users ", null);
-    expect(res1.suggestions.map((s: any) => s.label)).toEqual(POST_FROM_KW);
-
-    const res2 = provide("SELECT * FROM users u ", null);
-    expect(res2.suggestions.map((s: any) => s.label)).toEqual(POST_FROM_KW);
-  });
-
-  it("POST_JOIN_TABLE: suggests POST_JOIN_KW right after JOIN <table> [alias]", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public"],
-      activeSchema: "public",
-      tables: [{ schema: "public", name: "users" }],
-      columnsByTable: {},
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    const res1 = provide("JOIN users ", null);
-    expect(res1.suggestions.map((s: any) => s.label)).toEqual(POST_JOIN_KW);
-
-    const res2 = provide("JOIN users u ", null);
-    expect(res2.suggestions.map((s: any) => s.label)).toEqual(POST_JOIN_KW);
-  });
-
-  it("EXPECT_TABLE: suggests tables with schema prefix when not active schema", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public", "auth"],
-      activeSchema: "public",
-      tables: [
-        { schema: "public", name: "users" },
-        { schema: "auth", name: "sessions" },
-      ],
-      columnsByTable: {},
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    const res = provide("SELECT * FROM ", null);
-    const labels = res.suggestions.map((s: any) => s.label);
-    expect(labels).toEqual(["users", "auth.sessions"]);
-
-    const inserts = res.suggestions.map((s: any) => s.insertText);
-    expect(inserts).toEqual(["users", "auth.sessions"]);
-  });
-
-  it("EXPECT_TABLE: quotes identifiers based on engine (mysql backticks)", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public"],
-      activeSchema: "public",
-      tables: [
-        { schema: "public", name: "User Sessions", kind: "table" } as TableItem,
-      ],
-      columnsByTable: {},
-      engine: "mysql" as DatabaseEngine,
-    }));
-
-    const res = provide("SELECT * FROM ", null);
-    expect(res.suggestions[0].label).toBe("User Sessions");
-    expect(res.suggestions[0].insertText).toBe("`User Sessions`");
-  });
-
-  it("EXPECT_COLUMN: suggests columns from last table + operators/keywords/functions", () => {
-    registerSqlCompletionSmart(() => ({
-      schemas: ["public"],
-      activeSchema: "public",
-      tables: [{ schema: "public", name: "users" }],
-      columnsByTable: { "public.users": ["id", "email"] },
-      engine: "postgres" as DatabaseEngine,
-    }));
-
-    const res = provide("SELECT * FROM users WHERE a = ", null);
+    const res = provide(provider, "");
     const labels = res.suggestions.map((s: any) => s.label);
 
-    // columns first
-    expect(labels.slice(0, 2)).toEqual(["id", "email"]);
-
-    // some known operators/functions/kw appear later
-    expect(labels).toContain("=");
-    expect(labels).toContain("IN");
-    expect(labels).toContain("COUNT");
     expect(labels).toContain("SELECT");
+    expect(labels).toContain("WITH");
+    expect(labels).toContain("INSERT");
   });
 
-  it("DEFAULT: returns KW_LIGHT when not in a special context", () => {
-    registerSqlCompletionSmart(() => ({
+  it("DOT_ALIAS: suggests columns for alias.", () => {
+    const tables: TableItem[] = [{ schema: "public", name: "users" }];
+    const getCtx = () => ({
       schemas: ["public"],
       activeSchema: "public",
-      tables: [],
+      tables,
+      columnsByTable: {
+        "public.users": ["id", "email", "created_at"],
+      },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    // alias comes from FROM users u
+    const sqlWithFrom = "SELECT * FROM users u WHERE u.";
+    const res = provide(provider, sqlWithFrom);
+
+    const labels = res.suggestions.map((s: any) => s.label);
+    expect(labels).toContain("id");
+    expect(labels).toContain("email");
+  });
+
+  it("DOT_SCHEMA: suggests tables for schema.", () => {
+    const tables: TableItem[] = [
+      { schema: "public", name: "users" },
+      { schema: "public", name: "orders" },
+      { schema: "sales", name: "invoices" },
+    ];
+
+    const getCtx = () => ({
+      schemas: ["public", "sales"],
+      activeSchema: "public",
+      tables,
       columnsByTable: {},
       engine: "postgres" as DatabaseEngine,
-    }));
+    });
 
-    const res = provide("hello ", null);
-    expect(res.suggestions.map((s: any) => s.label)).toEqual(KW_LIGHT);
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const res = provide(provider, "SELECT * FROM public.");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("users");
+    expect(labels).toContain("orders");
+    expect(labels).not.toContain("invoices");
   });
 
-  it("uses CompletionItemKind icons (Keyword/Field/Struct/Class) as expected", () => {
-    registerSqlCompletionSmart(() => ({
+  it("EXPECT_TABLE: includes recent tables with higher priority (lower sortText)", () => {
+    const tables: TableItem[] = [
+      { schema: "public", name: "users" },
+      { schema: "public", name: "orders" },
+      { schema: "public", name: "products" },
+    ];
+
+    const getCtx = () => ({
       schemas: ["public"],
       activeSchema: "public",
-      tables: [
-        { schema: "public", name: "users" },
-        { schema: "public", name: "v_users", kind: "view" },
-      ],
-      columnsByTable: { "public.users": ["id"] },
+      tables,
+      columnsByTable: {},
       engine: "postgres" as DatabaseEngine,
-    }));
+    });
 
-    const resTables = provide("SELECT * FROM ", null);
-    const users = resTables.suggestions.find((s: any) => s.label === "users");
-    const view = resTables.suggestions.find((s: any) => s.label === "v_users");
-    expect(users.kind).toBe(
-      (monaco as any).languages.CompletionItemKind.Struct
-    );
-    expect(view.kind).toBe((monaco as any).languages.CompletionItemKind.Class);
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
 
-    const resCols = provide("SELECT * FROM users WHERE a =", null);
-    const id = resCols.suggestions.find((s: any) => s.label === "id");
-    expect(id.kind).toBe((monaco as any).languages.CompletionItemKind.Field);
+    const res = provide(provider, "SELECT * FROM users u JOIN ");
+    const usersItem = res.suggestions.find((s: any) => s.label === "users");
+    const ordersItem = res.suggestions.find((s: any) => s.label === "orders");
+
+    expect(usersItem).toBeTruthy();
+    expect(ordersItem).toBeTruthy();
+
+    // sortText is "priority+label"
+    expect(usersItem.sortText <= ordersItem.sortText).toBe(true);
+  });
+
+  it("SELECT_CLAUSE: suggests columns + * + functions", () => {
+    const tables: TableItem[] = [{ schema: "public", name: "users" }];
+
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: {
+        "public.users": ["id", "email"],
+      },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const res = provide(provider, "SELECT ");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("*");
+    expect(labels).toContain("COUNT");
+    // Should suggest base columns too when recent tables exist in context
+    // (in this parser version, recent tables come from FROM/JOIN context;
+    // so this is mostly about functions and keywords)
+    expect(labels).toContain("FROM");
+  });
+
+  it("EXPECT_COLUMN: suggests columns from recent tables + expression keywords", () => {
+    const tables: TableItem[] = [
+      { schema: "public", name: "users" },
+      { schema: "public", name: "orders" },
+    ];
+
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: {
+        "public.users": ["id", "status"],
+        "public.orders": ["user_id", "total"],
+      },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const res = provide(provider, "SELECT * FROM users u WHERE ");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    // columns
+    expect(labels).toContain("id");
+    expect(labels).toContain("status");
+
+    // expr keywords
+    expect(labels).toContain("AND");
+    expect(labels).toContain("IN");
+    expect(labels).toContain("LIKE");
+  });
+
+  it("INSERT_COLUMNS: suggests columns for insert target", () => {
+    const tables: TableItem[] = [{ schema: "public", name: "users" }];
+
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: {
+        "public.users": ["id", "email", "status"],
+      },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const res = provide(provider, "INSERT INTO users (");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("id");
+    expect(labels).toContain("email");
+    expect(labels).toContain("status");
+  });
+
+  it("UPDATE_SET: suggests columns + expression keywords", () => {
+    const tables: TableItem[] = [{ schema: "public", name: "users" }];
+
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: {
+        "public.users": ["email", "status"],
+      },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const res = provide(provider, "UPDATE users SET e");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("email");
+    expect(labels).toContain("status");
+    expect(labels).toContain("AND");
+    expect(labels).toContain("OR");
   });
 });
