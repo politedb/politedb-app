@@ -29,6 +29,8 @@ import { ConnectionActionsProvider } from "./ConnectionActionsContext";
 import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import type { TableItem } from "src/types";
+import { ConnectingPanel } from "./ConnectingPanel";
+import { useProfileStore } from "src/stores/profile";
 
 const EMPTY_TABLE_DATA = {
   data: null,
@@ -273,6 +275,13 @@ export function ConnectionScreen() {
     };
   }, []);
 
+  const { getProfileById } = useProfileStore();
+
+  const profile = useMemo(() => {
+    if (!activeTab?.profileId) return null;
+    return getProfileById(activeTab.profileId);
+  }, [activeTab, getProfileById]);
+
   /* =============================================================================
    * Keyboard shortcuts (uses stable actions)
    * ============================================================================= */
@@ -295,8 +304,13 @@ export function ConnectionScreen() {
 
   if (isConnecting || connectingRuntime) {
     return (
-      <Box className="bg-neutral-100 text-center">
-        <p class="text-neutral-500">Connecting to {activeTab.label}...</p>
+      <Box className="bg-neutral-100">
+        <ConnectingPanel
+          label={activeTab.label}
+          engine={activeTab.engine}
+          viaSsh={!!profile?.input.ssh}
+          tags={profile?.input?.tags}
+        />
       </Box>
     );
   }

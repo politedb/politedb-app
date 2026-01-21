@@ -1,28 +1,5 @@
 import { cn } from "src/utils/cn";
-
-function normalizeTags(raw: unknown): string[] {
-  const arr: string[] = Array.isArray(raw)
-    ? (raw as any[]).map((x) => String(x ?? ""))
-    : typeof raw === "string"
-      ? [raw]
-      : [];
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-
-  for (const t of arr) {
-    const v = String(t ?? "").trim();
-    if (!v) continue;
-
-    const key = v.toLowerCase();
-    if (seen.has(key)) continue;
-
-    seen.add(key);
-    out.push(v);
-  }
-
-  return out;
-}
+import { normalizeTags } from "src/utils/convert";
 
 export function TagChips(props: {
   tags?: string[] | string | null;
@@ -39,31 +16,29 @@ export function TagChips(props: {
   const rest = list.length - shown.length;
 
   const chipCls =
-    size === "md" ? "px-2.5 py-1 text-[12px]" : "px-2 py-0.5 text-[11px]";
+    size === "md" ? "h-6 px-2.5 text-[12px]" : "h-5 px-2 text-[11px]";
+
+  const baseCls = cn(
+    "inline-flex items-center rounded-md border",
+    "border-neutral-200 bg-white",
+    "font-semibold text-neutral-700",
+    "shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+  );
 
   return (
-    <div class={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
+    <div class={cn("flex min-w-0 flex-wrap items-center gap-1", className)}>
       {shown.map((t) => (
         <span
           key={t}
           title={t}
-          class={cn(
-            "max-w-30 truncate rounded-md border border-slate-200 bg-slate-50 font-semibold text-slate-600",
-            chipCls
-          )}
+          class={cn("max-w-30 truncate", baseCls, chipCls)}
         >
           {t}
         </span>
       ))}
 
       {rest > 0 ? (
-        <span
-          class={cn(
-            "rounded-md border border-slate-200 bg-slate-50 font-semibold text-slate-600",
-            chipCls
-          )}
-          title={list.slice(max).join(", ")}
-        >
+        <span title={list.slice(max).join(", ")} class={cn(baseCls, chipCls)}>
           +{rest}
         </span>
       ) : null}

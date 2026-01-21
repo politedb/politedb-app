@@ -14,6 +14,8 @@ import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
 import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
+import { TagChips } from "src/components/common/TagChips";
+import { normalizeEngineName } from "src/utils/convert";
 
 interface Props {
   activeSchema?: string;
@@ -23,6 +25,123 @@ interface Props {
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
+}
+
+function ToolbarDivider() {
+  return <div class="mx-1 h-5 w-px bg-neutral-200" />;
+}
+
+function IconButton(props: any) {
+  const { className, ...rest } = props;
+  return (
+    <Button
+      variant="ghost"
+      className={cn(
+        "h-7 w-7 rounded-md p-0",
+        "hover:bg-neutral-100 active:bg-neutral-200",
+        "disabled:opacity-50",
+        className
+      )}
+      {...rest}
+    />
+  );
+}
+
+function SegButton({
+  title,
+  onClick,
+  children,
+  className,
+}: {
+  title: string;
+  onClick?: () => void;
+  children: any;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      class={cn(
+        "flex h-7 w-8 items-center justify-center rounded-md",
+        "transition-colors",
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function EnvBadge({ text }: { text: string }) {
+  if (!text) return null;
+
+  const t = text.toUpperCase();
+  const isProd = t.includes("PROD");
+  const isStaging = t.includes("STAGING");
+  const isDev = t.includes("DEV") || t.includes("LOCAL");
+
+  const cls = isProd
+    ? "bg-red-50 text-red-700"
+    : isStaging
+      ? "bg-amber-50 text-amber-700"
+      : isDev
+        ? "bg-emerald-50 text-emerald-700"
+        : "bg-neutral-100 text-neutral-600";
+
+  return (
+    <span class={cn("rounded-md px-1.5 py-0.5 text-[10px] font-semibold", cls)}>
+      {t}
+    </span>
+  );
+}
+
+function MetaPill({
+  text,
+  tone = "neutral",
+}: {
+  text: string;
+  tone?: "neutral" | "blue";
+}) {
+  if (!text) return null;
+
+  const cls =
+    tone === "blue"
+      ? "bg-blue-50 text-blue-700 border-blue-200/70"
+      : "bg-neutral-50 text-neutral-600 border-neutral-200";
+
+  return (
+    <span
+      class={cn(
+        "inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-semibold",
+        cls
+      )}
+    >
+      {text}
+    </span>
+  );
+}
+
+function classifyTags(tags: string[]) {
+  const list = (tags ?? []).map((s) => s.trim()).filter(Boolean);
+  const envKeywords = [
+    "prod",
+    "production",
+    "staging",
+    "stage",
+    "dev",
+    "local",
+  ];
+
+  const env = list.find((x) =>
+    envKeywords.some((k) => x.toLowerCase().includes(k))
+  );
+
+  return {
+    env: env ?? "",
+    rest: list.filter((x) => x !== env),
+  };
 }
 
 export function MenuBar({
@@ -46,95 +165,157 @@ export function MenuBar({
   const connectionInfo = useMemo(() => {
     if (!profile) return null;
     const { database, user } = pickHostDbUser(profile);
+
+    const isSsh = Boolean(profile?.input?.ssh?.enabled);
+
     return {
       engine: profile.engine,
-      version: "16.3", // TODO: Get actual version from connection
+      version: "16.3", // TODO: fetch from connection
       database,
       user,
       schema: activeSchema || "public",
       table: activeTable || "",
+      isSsh,
     };
   }, [profile, activeSchema, activeTable]);
 
-  const connectionString = useMemo(() => {
-    if (!connectionInfo) return "";
-    const { engine, version, database, user, schema, table } = connectionInfo;
-    const tags = profile?.input?.tags ?? [];
-    const tagsString = tags.join(",").toUpperCase();
+  const connected = !!connectionInfo && !loadTableError;
 
-    if (!table) {
-      return `${tagsString} | ${engine} ${version} : ${database} : ${user}`;
-    }
-    return `${tagsString} | ${engine} ${version} : ${database} : ${user} : ${schema}.${table}`;
-  }, [connectionInfo, profile]);
+  const tags = useMemo(() => {
+    const raw = (profile?.input?.tags ?? []).map(String);
+    return classifyTags(raw);
+  }, [profile]);
+
+  const dbLabel = useMemo(() => {
+    if (!connectionInfo) return { db: "", target: "" };
+    const { database, schema, table } = connectionInfo;
+    return {
+      db: database,
+      target: table ? `${schema}.${table}` : schema,
+    };
+  }, [connectionInfo]);
+
+  const engineLabel = useMemo(() => {
+    if (!connectionInfo) return "";
+
+    const pretty = normalizeEngineName(connectionInfo.engine || "postgres", {
+      upper: true,
+    });
+
+    return `${pretty} ${connectionInfo.version}`;
+  }, [connectionInfo]);
 
   return (
-    <div class="flex h-12 items-center gap-2 border-b border-neutral-200 bg-white px-2">
-      {/* Left Icons */}
-      <div class="mr-30 flex items-center gap-2">
-        <Button
-          variant="ghost"
-          className="p-2 hover:bg-neutral-50"
-          disabled
-          title="Unlock"
-        >
-          <Unlock className="size-4 text-neutral-600" />
-        </Button>
-        <Button
-          variant="ghost"
-          className="p-2 hover:bg-neutral-50"
-          disabled
-          title="Database"
-        >
-          <Database className="size-4 text-neutral-600" />
-        </Button>
-        <Button
-          variant="ghost"
-          className="p-2 hover:bg-neutral-50"
-          onClick={openSQLWindow}
-        >
-          <span class="text-xs font-medium text-neutral-600">SQL</span>
-        </Button>
-      </div>
+    <div class="flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
+      {/* Left */}
+      <div class="flex items-center">
+        <div class="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+          <IconButton disabled title="Unlock">
+            <Unlock className="size-4 text-neutral-600" />
+          </IconButton>
 
-      {/* Center Connection Info */}
-      <div class="flex-1">
-        <input
-          type="text"
-          value={connectionString}
-          readOnly
-          class={cn(
-            "h-8 w-full rounded-2xl border border-neutral-200 bg-neutral-50 px-3",
-            "text-xs font-semibold text-neutral-700 focus:outline-none",
-            loadTableError && "border-red-300 bg-red-300/80"
-          )}
-          placeholder="No connection"
-        />
-      </div>
+          <IconButton disabled title="Database">
+            <Database className="size-4 text-neutral-600" />
+          </IconButton>
 
-      {/* Right Icons */}
-      <div class="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          className="p-1.5 hover:bg-neutral-50"
-          title="Refresh"
-          onClick={onRefresh}
-        >
-          <RefreshCw className="size-5 text-neutral-600" />
-        </Button>
-        <Button
-          variant="ghost"
-          className="p-2 hover:bg-neutral-50"
-          title="Search"
-        >
-          <Search className="size-4 text-neutral-600" />
-        </Button>
+          <ToolbarDivider />
 
-        {/* View Mode Icons */}
-        <div class="ml-1 flex items-center gap-0.5">
           <Button
             variant="ghost"
-            className={cn("p-2 transition-colors hover:bg-neutral-50")}
+            className="h-7 rounded-md px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
+            onClick={openSQLWindow}
+          >
+            SQL
+          </Button>
+        </div>
+      </div>
+
+      {/* Center */}
+      <div class="flex min-w-0 flex-1 items-center justify-center">
+        <div class="w-full max-w-220 min-w-0">
+          <div
+            class={cn(
+              "flex h-7 w-full items-center gap-2 rounded-lg border bg-white px-2",
+              loadTableError
+                ? "border-red-300"
+                : "border-neutral-200 hover:border-neutral-300",
+              "shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+            )}
+          >
+            {/* Status */}
+            <div
+              class={cn(
+                "h-2 w-2 rounded-full",
+                connected
+                  ? "bg-emerald-500"
+                  : loadTableError
+                    ? "bg-red-500"
+                    : "bg-neutral-300"
+              )}
+            />
+
+            {/* Tags: ENV badge + TagChips for the rest */}
+            {(tags.env || tags.rest.length > 0) && (
+              <div class="flex min-w-0 items-center gap-1">
+                {tags.env ? <EnvBadge text={tags.env} /> : null}
+
+                <TagChips
+                  tags={tags.rest}
+                  max={2}
+                  size="sm"
+                  className="gap-1"
+                />
+
+                <div class="mx-1 h-4 w-px bg-neutral-200" />
+              </div>
+            )}
+
+            {/* DB breadcrumb */}
+            {connectionInfo ? (
+              <div class="min-w-0 flex-1 truncate">
+                <span class="text-xs font-semibold text-neutral-800">
+                  {dbLabel.db}
+                </span>
+                <span class="mx-1 text-neutral-400">›</span>
+                <span class="text-xs font-medium text-neutral-600">
+                  {dbLabel.target}
+                </span>
+              </div>
+            ) : (
+              <div class="text-xs text-neutral-500">No connection</div>
+            )}
+
+            {/* Engine + SSH */}
+            {connectionInfo && (
+              <div class="flex items-center gap-1">
+                <div class="mx-1 h-4 w-px bg-neutral-200" />
+                <MetaPill text={engineLabel} />
+                {connectionInfo.isSsh ? (
+                  <MetaPill text="SSH" tone="blue" />
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Right */}
+      <div class="flex items-center gap-1">
+        <div class="mx-1 h-5 w-px bg-neutral-200" />
+
+        <IconButton title="Refresh" onClick={onRefresh}>
+          <RefreshCw className="size-4.5 text-neutral-700" />
+        </IconButton>
+
+        <IconButton title="Search">
+          <Search className="size-4 text-neutral-700" />
+        </IconButton>
+
+        <ToolbarDivider />
+
+        {/* Segmented view mode */}
+        <div class="flex h-7 items-center rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
+          <SegButton
             title="Tab Left"
             onClick={() => onViewModeChange?.("left")}
           >
@@ -144,10 +325,11 @@ export function MenuBar({
                 viewMode.includes("left") ? "text-blue-600" : "text-neutral-600"
               )}
             />
-          </Button>
-          <Button
-            variant="ghost"
-            className={cn("p-2 transition-colors hover:bg-neutral-50")}
+          </SegButton>
+
+          <div class="mx-0.5 h-5 w-px bg-neutral-200" />
+
+          <SegButton
             title="Tab Bottom"
             onClick={() => onViewModeChange?.("bottom")}
           >
@@ -159,10 +341,11 @@ export function MenuBar({
                   : "text-neutral-600"
               )}
             />
-          </Button>
-          <Button
-            variant="ghost"
-            className={cn("p-2 transition-colors hover:bg-neutral-50")}
+          </SegButton>
+
+          <div class="mx-0.5 h-5 w-px bg-neutral-200" />
+
+          <SegButton
             title="Tab Right"
             onClick={() => onViewModeChange?.("right")}
           >
@@ -174,7 +357,7 @@ export function MenuBar({
                   : "text-neutral-600"
               )}
             />
-          </Button>
+          </SegButton>
         </div>
       </div>
     </div>

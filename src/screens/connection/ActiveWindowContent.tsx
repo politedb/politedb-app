@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 
-import { Box } from "src/components/common/Box";
-import { Database } from "src/components/icons";
 import { TableData } from "src/components/table/TableData";
 import type {
   TableStructure as TableStructureType,
@@ -23,6 +21,10 @@ import { useConnectionWindows } from "./hooks/useConnectionWindows";
 
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { EmptyWindow } from "./EmptyWindow";
+import { LoadingTableState } from "./LoadingTableState";
+import { ErrorState } from "./ErrorState";
+import { useDelayedVisibility } from "src/hooks/useDelayedVisibility";
 
 /* =============================================================================
  * Patches types
@@ -102,55 +104,6 @@ function extractDeletedRowsFromPatches(
 }
 
 /* =============================================================================
- * UI states
- * ============================================================================= */
-
-function EmptyState(props: { onNewSql: () => void }) {
-  return (
-    <Box className="text-center">
-      <Database className="mx-auto mb-4 size-12 text-neutral-300" />
-      <p class="text-neutral-500">
-        Select a table from the sidebar (or open SQL editor) to view data
-      </p>
-      <div class="mt-3">
-        <button
-          class="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white"
-          onClick={props.onNewSql}
-        >
-          New SQL Editor
-        </button>
-      </div>
-    </Box>
-  );
-}
-
-function ErrorState(props: { error: string }) {
-  return (
-    <Box className="text-center">
-      <p class="text-sm text-red-500">{props.error}</p>
-    </Box>
-  );
-}
-
-function LoadingTableState() {
-  return (
-    <Box className="text-center">
-      <div class="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
-      <p class="text-neutral-500">Loading table data...</p>
-    </Box>
-  );
-}
-
-function TableErrorState(props: { error: string }) {
-  return (
-    <Box className="text-center">
-      <p class="mb-2 text-red-600">Error loading table data</p>
-      <p class="text-sm text-neutral-500">{props.error}</p>
-    </Box>
-  );
-}
-
-/* =============================================================================
  * Component (NO PROPS)
  * ============================================================================= */
 
@@ -173,13 +126,8 @@ export function ActiveWindowContent() {
     runSqlWithHistory,
   } = rt;
 
-  const {
-    hasAnyWindow,
-    activeId,
-    activeWindow,
-    activeSqlWindow,
-    activeTableWindow,
-  } = useConnectionWindows(profileId);
+  const { hasAnyWindow, activeId, activeSqlWindow, activeTableWindow } =
+    useConnectionWindows(profileId);
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
 
@@ -413,19 +361,16 @@ export function ActiveWindowContent() {
     [actions, activeTableWindow, refreshSchemaAndTables, activeSchema]
   );
 
-  // Guards
-  if (loadError) return <ErrorState error={loadError} />;
-  if (!hasAnyWindow) return <EmptyState onNewSql={actions.openSql} />;
+  // Delay loading so fast queries don't flash; keep it visible briefly once shown
+  const showLoading = useDelayedVisibility(!!activeTableData.busy, {
+    showDelayMs: 200,
+    minShowMs: 450,
+  });
 
-  if (!activeWindow) {
-    return (
-      <Box>
-        <p class="text-neutral-500">Select a tab to continue</p>
-      </Box>
-    );
-  }
+  // Guards first (cheap)
+  if (loadError) return <ErrorState message={loadError} />;
+  if (!hasAnyWindow) return <EmptyWindow onNewSql={actions.openSql} />;
 
-  // ✅ SQL pane only created when needed
   if (activeSqlWindow) {
     return (
       <SqlWindowPane
@@ -457,9 +402,11 @@ export function ActiveWindowContent() {
     );
   }
 
-  if (activeTableData.busy) return <LoadingTableState />;
-  if (activeTableData.error)
-    return <TableErrorState error={String(activeTableData.error)} />;
+  if (showLoading) return <LoadingTableState />;
+
+  if (activeTableData.error) {
+    return <ErrorState message={String(activeTableData.error)} />;
+  }
 
   return (
     <div class="flex h-full flex-col">

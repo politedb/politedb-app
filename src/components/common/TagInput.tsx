@@ -1,4 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
+import { normalizeTag } from "src/utils/convert";
 import { X } from "../icons";
 
 export function TagInput(props: {
@@ -18,10 +19,6 @@ export function TagInput(props: {
   } = props;
 
   const [input, setInput] = useState("");
-
-  function normalizeTag(raw: string) {
-    return raw.trim();
-  }
 
   function addTag(raw: string) {
     const t = normalizeTag(raw);

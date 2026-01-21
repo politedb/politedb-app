@@ -4,9 +4,9 @@ import type {
   ConnectionProfile,
   SslMode,
 } from "src/lib/tauri";
-import { toNumber } from "src/utils/convert";
+import { normalizeTag, toNumber } from "src/utils/convert";
 import type { DatabaseEngine } from "src/types";
-import { SUPPORTED_DATABASES } from "../../constant";
+import { SUPPORTED_DATABASES } from "src/constant";
 
 /* =============================================================================
  * Types
@@ -51,14 +51,6 @@ export type SectionProps = {
 /* =============================================================================
  * Small utils
  * ============================================================================= */
-
-export function normalizeTag(s: string) {
-  return s
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-}
 
 export function dedupeKeepOrder(xs: string[]) {
   const seen = new Set<string>();

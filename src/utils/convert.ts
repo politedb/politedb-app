@@ -64,3 +64,56 @@ export function formatBytesSize(bytes: string | number): string {
     return `${numBytes} B`;
   }
 }
+
+export function normalizeTag(s: string) {
+  return s
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+}
+
+export function normalizeTags(
+  raw: string | string[] | null | undefined
+): string[] {
+  const arr: string[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? [raw]
+      : [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const item of arr) {
+    const normalized = normalizeTag(item);
+    if (!normalized) continue;
+
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+
+    out.push(normalized);
+  }
+
+  return out;
+}
+
+export function normalizeEngineName(
+  engine: unknown,
+  opts?: { upper?: boolean }
+): string {
+  const v = String(engine ?? "").toLowerCase();
+
+  const map: Record<string, string> = {
+    postgres: "Postgres",
+    postgresql: "Postgres",
+    mysql: "MySQL",
+    mariadb: "MariaDB",
+    sqlite: "SQLite",
+    redis: "Redis",
+  };
+
+  const pretty = map[v] ?? String(engine ?? "Postgres");
+
+  return opts?.upper ? pretty.toUpperCase() : pretty;
+}
