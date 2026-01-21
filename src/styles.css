@@ -15,7 +15,7 @@
 
 :root {
   --titlebar-left-padding: 12px;
-  --sidebar-width: 15rem;
+  --sidebar-width: 16rem;
 }
 
 html[data-platform="macos"] {

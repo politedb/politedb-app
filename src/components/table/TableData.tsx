@@ -365,10 +365,12 @@ export function TableData({
     });
 
   // Layout calculations
-  const emptyColumnWidth = Math.max(0, containerWidth - columnsWidth);
+  const safeContainerWidth = Math.max(1, containerWidth || 0);
+  const emptyColumnWidth = Math.max(0, safeContainerWidth - columnsWidth);
+
   const tablePixelWidth = Math.max(
     columnsWidth + emptyColumnWidth,
-    containerWidth || 100
+    safeContainerWidth
   );
 
   // Auto-fit column
@@ -507,15 +509,16 @@ export function TableData({
   const virtuosoStyle = useMemo(
     () => ({
       height: "100%",
-      width: `${tablePixelWidth}px`,
+      minHeight: "100%",
+      width: `${Math.max(1, tablePixelWidth)}px`,
       minWidth: "100%",
-      overflowY: (emptyRowsCount > 0 ? "hidden" : "auto") as "hidden" | "auto",
+      overflowY: emptyRowsCount > 0 ? "hidden" : "auto",
     }),
     [tablePixelWidth, emptyRowsCount]
   );
 
   const totalCount = allData.length + emptyRowsCount;
-
+  const isReady = containerWidth > 0;
   return (
     <div
       ref={mergedContainerRef}
@@ -524,14 +527,18 @@ export function TableData({
       onMouseDown={onTableMouseDown as any}
     >
       <div class="flex-1 overflow-x-auto overflow-y-hidden border-t border-neutral-200">
-        <TableVirtuoso
-          style={virtuosoStyle}
-          totalCount={totalCount}
-          fixedHeaderContent={renderHeader}
-          itemContent={renderRow}
-          overscan={VIRTUOSO_OVERSCAN}
-          increaseViewportBy={VIRTUOSO_VIEWPORT_INCREASE}
-        />
+        {isReady ? (
+          <TableVirtuoso
+            style={virtuosoStyle}
+            totalCount={totalCount}
+            fixedHeaderContent={renderHeader}
+            itemContent={renderRow}
+            overscan={VIRTUOSO_OVERSCAN}
+            increaseViewportBy={VIRTUOSO_VIEWPORT_INCREASE}
+          />
+        ) : (
+          <div class="h-full w-full" />
+        )}
       </div>
     </div>
   );

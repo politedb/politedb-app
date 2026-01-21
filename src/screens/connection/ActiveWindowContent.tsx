@@ -384,7 +384,7 @@ export function ActiveWindowContent() {
     );
   }
 
-  if (!activeTableWindow) return null;
+  if (!activeTableWindow || activeTableData.busy) return null;
 
   if (isShowNewTablePane) {
     return (

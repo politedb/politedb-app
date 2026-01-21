@@ -1,8 +1,10 @@
+import { useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { Table, X } from "src/components/icons";
+import { Table, X, ChevronLeft, ChevronRight } from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
 interface Props {
   openWindows: OpenWindow[];
@@ -20,93 +22,164 @@ function getWindowSubtitle(w: OpenWindow) {
   return "SQL Editor";
 }
 
-function WindowIcon() {
-  return <Table className="size-4 text-neutral-500" />;
-}
-
 export function NavigationTabs({
   openWindows,
   setActiveWindowId,
   activeWindowId,
 }: Props) {
   const actions = useConnectionActionsCtx();
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  const [ctx, setCtx] = useState<{
+    x: number;
+    y: number;
+    tabId: string;
+    tabIndex: number;
+  } | null>(null);
+
+  const scrollBy = (dir: -1 | 1) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: el.clientWidth * 0.7 * dir, behavior: "smooth" });
+  };
+
+  const onWheel = (e: WheelEvent) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    // keep native horizontal trackpad scroll
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+    e.preventDefault();
+    el.scrollLeft += e.deltaY;
+  };
+
+  const closeNow = (id: string) => {
+    actions.closeWindow(id, new MouseEvent("click"));
+  };
+
+  const menuItems: MenuItem[] = ctx
+    ? [
+        {
+          type: "item",
+          label: "Close",
+          shortcut: "⌘W",
+          onClick: () => closeNow(ctx.tabId),
+        },
+        {
+          type: "item",
+          label: "Close Others",
+          disabled: openWindows.length <= 1,
+          onClick: () =>
+            openWindows.forEach((w) => w.id !== ctx.tabId && closeNow(w.id)),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Close All",
+          shortcut: "⌘⇧W",
+          onClick: () => openWindows.forEach((w) => closeNow(w.id)),
+        },
+      ]
+    : [];
 
   return (
-    <div
-      class={cn(
-        "flex items-end gap-1 pt-1",
-        "bg-neutral-100",
-        "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      )}
-    >
-      {openWindows.map((w) => {
-        const isActive = activeWindowId === w.id;
-
-        return (
-          <div
-            key={w.id}
-            onClick={() => setActiveWindowId(w.id)}
-            title={getWindowSubtitle(w)}
-            class={cn(
-              "group relative z-0 flex shrink-0 cursor-pointer items-center gap-2",
-              "rounded-t-md px-2.5 py-1.5 text-xs transition-all",
-              isActive
-                ? ["z-10", "bg-white text-neutral-800", "ring-1 ring-black/5"]
-                : [
-                    "bg-neutral-200/70 text-neutral-600",
-                    "hover:bg-neutral-300/80",
-                  ]
-            )}
+    <>
+      <div class="flex w-full items-stretch bg-neutral-100">
+        {/* Left */}
+        <div class="flex shrink-0 items-center px-1">
+          <Button
+            variant="ghost"
+            className="h-7 w-7 rounded-md p-0"
+            onClick={() => scrollBy(-1)}
+            title="Scroll left"
           >
-            <div class="flex items-center gap-2">
-              {w.type === "table" && <WindowIcon />}
+            <ChevronLeft className="size-4 text-neutral-600" />
+          </Button>
+        </div>
 
-              {w.type === "sql" && (
-                <span
-                  class={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
-                    isActive
-                      ? "bg-indigo-50 text-indigo-600"
-                      : "bg-indigo-100/70 text-indigo-600"
-                  )}
-                >
-                  SQL
-                </span>
-              )}
+        {/* Tabs scroller */}
+        <div
+          ref={scrollerRef}
+          class="flex min-w-0 flex-1 items-end gap-1 overflow-hidden px-1 pt-1"
+          onWheel={onWheel}
+        >
+          {openWindows.map((w, idx) => {
+            const active = activeWindowId === w.id;
 
-              <span
+            return (
+              <div
+                key={w.id}
+                onClick={() => setActiveWindowId(w.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtx({
+                    x: e.clientX,
+                    y: e.clientY,
+                    tabId: w.id,
+                    tabIndex: idx,
+                  });
+                }}
+                title={getWindowSubtitle(w)}
                 class={cn(
-                  "max-w-40 truncate",
-                  isActive
-                    ? "font-semibold text-neutral-800"
-                    : "font-medium text-neutral-600"
+                  "group flex shrink-0 cursor-pointer items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
+                  active
+                    ? "bg-white text-neutral-800 ring-1 ring-black/5"
+                    : "bg-neutral-200/70 text-neutral-600 hover:bg-neutral-300/80"
                 )}
               >
-                {getWindowTitle(w)}
-              </span>
-            </div>
+                {w.type === "table" && (
+                  <Table className="size-4 text-neutral-500" />
+                )}
 
-            <Button
-              variant="ghost"
-              onClick={(e) => actions.closeWindow(w.id, e)}
-              class={cn(
-                "ml-1 p-0.5",
-                "opacity-0 transition-opacity",
-                "group-hover:opacity-100",
-                isActive && "opacity-100",
-                "hover:bg-neutral-200"
-              )}
-              title="Close"
-            >
-              <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
-            </Button>
+                {w.type === "sql" && (
+                  <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
+                    SQL
+                  </span>
+                )}
 
-            {isActive && (
-              <div class="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 bg-white" />
-            )}
-          </div>
-        );
-      })}
-    </div>
+                <span
+                  class={cn("max-w-40 truncate", active && "font-semibold")}
+                >
+                  {getWindowTitle(w)}
+                </span>
+
+                <Button
+                  variant="ghost"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeNow(w.id);
+                  }}
+                  class="ml-1 p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-200"
+                  title="Close"
+                >
+                  <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Right */}
+        <div class="flex shrink-0 items-center px-1">
+          <Button
+            variant="ghost"
+            className="h-7 w-7 rounded-md p-0"
+            onClick={() => scrollBy(1)}
+            title="Scroll right"
+          >
+            <ChevronRight className="size-4 text-neutral-600" />
+          </Button>
+        </div>
+      </div>
+
+      <ContextMenu
+        open={!!ctx}
+        x={ctx?.x ?? 0}
+        y={ctx?.y ?? 0}
+        items={menuItems}
+        onClose={() => setCtx(null)}
+      />
+    </>
   );
 }
