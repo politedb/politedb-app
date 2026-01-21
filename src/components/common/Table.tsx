@@ -38,7 +38,7 @@ export function Table<T = any>({
   className,
   emptyMessage = "No data available",
   fillViewport = false,
-  estimatedRowHeight = 28,
+  estimatedRowHeight,
   selectedRow,
   onSelectRow,
   onDoubleClickRow,
@@ -122,26 +122,22 @@ export function Table<T = any>({
     <div
       ref={containerRef}
       class={cn(
-        "h-full w-full overflow-auto bg-white",
+        "h-full overflow-auto bg-white",
         emptyRowsCount > 0 && "overflow-y-hidden"
       )}
       onClick={handleTableClick}
       onDblClick={handleTableDblClick}
     >
-      <table ref={tableRef} class={cn("w-full", className)} style={TABLE_STYLE}>
-        <thead
-          class={cn(
-            "bg-neutral-50",
-            stickyHeader && "sticky top-0 z-10",
-            headerClassName
-          )}
-        >
+      <table ref={tableRef} class={cn(className)} style={TABLE_STYLE}>
+        <thead class={cn("bg-neutral-50", headerClassName)}>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 class={cn(
-                  "border border-neutral-300 p-2 text-left text-xs font-semibold text-neutral-700",
+                  "border-r border-neutral-300",
+                  "p-2 text-left text-xs font-semibold text-neutral-700",
+                  stickyHeader && "sticky top-0 z-50 bg-neutral-50 shadow-sm",
                   col.headerClassName
                 )}
                 style={columnWidthStyle}

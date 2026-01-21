@@ -35,6 +35,7 @@ export function useTableRowSelection({
         e.preventDefault();
         e.stopPropagation();
         onDeleteRow?.(selectedRowIndex);
+        setSelectedRowIndex(null);
       }
     };
 

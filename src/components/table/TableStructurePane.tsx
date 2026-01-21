@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect, useCallback } from "preact/hooks";
-import { DataAction, DataKey } from "src/stores/connection";
+import { useEffect } from "preact/hooks";
+import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import type {
   ActiveTableData,
   TableStructure as TableStructureType,
@@ -7,19 +7,22 @@ import type {
   TableWindow,
   DatabaseEngine,
 } from "src/types";
-import { SplitPane } from "../SplitPane";
+import { SplitPane } from "src/components/SplitPane";
 import { TableConstraints } from "./TableConstraint";
 import { TableStructure } from "./TableStructure";
-import { Input } from "../common/Input";
-import { TagSelect } from "../common/TagSelect";
+import { Input } from "src/components/common/Input";
+import { TagSelect } from "src/components/common/TagSelect";
+import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
-  activeProfileScreen: string;
+  profileId: string;
   activeTableData: ActiveTableData;
   activeTableWindow: TableWindow;
   tableStructure: TableStructureType[];
   tableConstraints: TableConstraintType[];
+  deletedStructureRows: Set<number>;
+  deletedConstraintRows: Set<number>;
   onDataChange: (
     action: DataAction,
     dataKey: DataKey,
@@ -28,104 +31,71 @@ export function TableStructurePane(props: {
   ) => void;
   onAddNewColumn: () => void;
   onDeleteColumn: (rowIndex: number) => void;
-  deletedStructureRows: Set<number>;
   onAddIndex: () => void;
   onDeleteIndex: (rowIndex: number) => void;
-  deletedConstraintRows: Set<number>;
 }) {
   const {
     engine,
-    activeProfileScreen,
+    profileId,
     activeTableData,
     activeTableWindow,
     tableStructure,
     tableConstraints,
+    deletedStructureRows,
+    deletedConstraintRows,
     onDataChange,
     onAddNewColumn,
     onDeleteColumn,
-    deletedStructureRows,
     onAddIndex,
     onDeleteIndex,
-    deletedConstraintRows,
   } = props;
 
-  // Extract primary key from constraints (find constraint where index_name contains "pkey")
-  const primaryKeyConstraint = useMemo(() => {
-    if (!tableConstraints || tableConstraints.length === 0) return null;
-    return tableConstraints.find(
-      (constraint) =>
-        constraint.index_name.toLowerCase().includes("pkey") ||
-        (constraint.is_unique &&
-          constraint.index_name.toLowerCase().includes("primary"))
-    );
-  }, [tableConstraints]);
+  const {
+    tableName,
+    primaryKey,
+    columnNames,
+    changeTableName,
+    togglePrimaryKey,
+  } = useTableMetaState({
+    initialTableName: activeTableWindow.table.name,
+    constraints: tableConstraints,
+    structure: tableStructure,
+    deletedRows: deletedStructureRows,
+    onDataChange,
+  });
 
-  // Extract primary key columns from the constraint
-  const primaryKeyColumns = useMemo(() => {
-    if (!primaryKeyConstraint) return [];
-    // column_name might contain comma-separated values
-    return primaryKeyConstraint.column_name
-      .split(",")
-      .map((col) => col.trim())
-      .filter(Boolean);
-  }, [primaryKeyConstraint]);
+  const setTableStructure = useConnectionStore((s) => s.setTableStructure);
+  const setTableConstraints = useConnectionStore((s) => s.setTableConstraints);
 
-  // Get column names from table structure (exclude deleted columns)
-  // Create a serialized key to track changes in column names
-  const columnNamesKey = useMemo(
-    () =>
-      tableStructure
-        .map((col, idx) => `${idx}:${col.column_name || ""}`)
-        .join("|"),
-    [tableStructure]
-  );
-
-  const columnNames = useMemo(() => {
-    return tableStructure
-      .map((col, index) => ({
-        name: col.column_name?.trim() || "",
-        index,
-      }))
-      .filter(
-        (item) => item.name !== "" && !deletedStructureRows.has(item.index)
-      )
-      .map((item) => item.name);
-  }, [columnNamesKey, tableStructure, deletedStructureRows]);
-
-  const [tableName, setTableName] = useState(activeTableWindow.table.name);
-  const [primaryKey, setPrimaryKey] = useState<string[]>(primaryKeyColumns);
-
-  // Update state when table window changes
   useEffect(() => {
-    setTableName(activeTableWindow.table.name);
-  }, [activeTableWindow.table.name]);
+    if (activeTableData.structure && !tableStructure?.length) {
+      setTableStructure(
+        profileId,
+        activeTableWindow.id,
+        activeTableData.structure
+      );
+    }
+  }, [
+    profileId,
+    activeTableWindow.id,
+    activeTableData.structure,
+    JSON.stringify(tableStructure),
+  ]);
 
-  // Update primary key when constraints change
   useEffect(() => {
-    setPrimaryKey(primaryKeyColumns);
-  }, [primaryKeyColumns.join(",")]);
-
-  // Handle table name change
-  const handleTableNameChange = (value: string) => {
-    setTableName(value);
-    // Use rowIndex -1 to indicate table metadata change
-    onDataChange("update", "structure", -1, { tableName: value });
-  };
-
-  // Toggle primary key column
-  const togglePrimaryKey = useCallback(
-    (columnName: string) => {
-      setPrimaryKey((prev) => {
-        const newKeys = prev.includes(columnName)
-          ? prev.filter((key) => key !== columnName)
-          : [...prev, columnName];
-        // Use rowIndex -1 to indicate table metadata change
-        onDataChange("update", "structure", -1, { primaryKey: newKeys });
-        return newKeys;
-      });
-    },
-    [onDataChange]
-  );
+    if (activeTableData.constraints && !tableConstraints?.length) {
+      setTableConstraints(
+        profileId,
+        activeTableWindow.id,
+        activeTableData.constraints
+      );
+    }
+  }, [
+    profileId,
+    activeTableWindow.id,
+    activeTableData.constraints,
+    JSON.stringify(tableConstraints),
+  ]);
 
   return (
     <div class="flex h-full flex-col overflow-hidden">
@@ -136,7 +106,7 @@ export function TableStructurePane(props: {
             <label class="text-xs font-semibold text-neutral-700">Name</label>
             <Input
               value={tableName}
-              onInput={(e) => handleTableNameChange(e.currentTarget.value)}
+              onInput={(e) => changeTableName(e.currentTarget.value)}
               placeholder="table_name"
               className="border border-neutral-200 bg-white text-xs"
               disabled={activeTableData.busy}
@@ -166,7 +136,7 @@ export function TableStructurePane(props: {
           first={
             <TableStructure
               engine={engine}
-              activeProfileScreen={activeProfileScreen}
+              activeProfileScreen={profileId}
               activeTableWindowId={activeTableWindow.id}
               initData={activeTableData.structure}
               editedData={tableStructure}
@@ -180,7 +150,7 @@ export function TableStructurePane(props: {
           }
           second={
             <TableConstraints
-              activeProfileScreen={activeProfileScreen}
+              activeProfileScreen={profileId}
               activeTableWindowId={activeTableWindow.id}
               initData={activeTableData.constraints}
               editedData={tableConstraints}

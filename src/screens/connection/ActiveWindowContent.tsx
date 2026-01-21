@@ -415,7 +415,7 @@ export function ActiveWindowContent() {
           <div class="flex h-full flex-col overflow-hidden bg-white">
             <TableStructurePane
               engine={engine}
-              activeProfileScreen={profileId}
+              profileId={profileId}
               activeTableWindow={activeTableWindow}
               activeTableData={activeTableData}
               tableStructure={tableStructure}
@@ -438,6 +438,7 @@ export function ActiveWindowContent() {
             patches={tablePatches}
             newRowKeys={tableNewRowKeys}
             onDeleteRow={handleDeleteRow}
+            onAddRow={handleAddRow}
             deletedRows={deletedDataRows}
           />
         )}
