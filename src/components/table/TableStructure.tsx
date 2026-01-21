@@ -124,7 +124,7 @@ export function TableStructure({
                   : undefined
               }
               className={cn(
-                "cursor-default! text-sm",
+                "h-8 cursor-default! text-sm",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
@@ -159,11 +159,11 @@ export function TableStructure({
     [
       busy,
       editedData.length,
-      handleDataChange,
       deletedRows,
-      onDeleteRecord,
       engine,
       selectedRowIndex,
+      handleDataChange,
+      onDeleteRecord,
     ]
   );
 

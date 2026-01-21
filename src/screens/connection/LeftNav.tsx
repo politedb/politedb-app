@@ -8,8 +8,10 @@ import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { useConnectionStore } from "src/stores/connection";
 
 interface Props {
+  profileId: string;
   schemas: string[];
   currSchema: string;
   onSchemaChange: (schema: string) => void;
@@ -65,6 +67,7 @@ function TableName({ name }: { name: string }) {
 }
 
 export function LeftNav({
+  profileId,
   schemas,
   currSchema,
   onSchemaChange,
@@ -76,6 +79,7 @@ export function LeftNav({
   activeWindowId,
 }: Props) {
   const actions = useConnectionActionsCtx();
+  const { dataPatchMap } = useConnectionStore();
 
   return (
     <aside
@@ -149,6 +153,8 @@ export function LeftNav({
                   {filteredTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
                     const isActive = activeWindowId === key;
+                    const hasChanges =
+                      !!dataPatchMap[profileId]?.[`table:${key}`];
 
                     return (
                       <Button
@@ -164,7 +170,8 @@ export function LeftNav({
                           "overflow-hidden",
                           isActive
                             ? "bg-white shadow-sm ring-1 ring-black/5"
-                            : "hover:bg-neutral-200/60"
+                            : "hover:bg-neutral-200/60",
+                          hasChanges ? "bg-amber-200 hover:bg-amber-200/80" : ""
                         )}
                         title={key}
                       >

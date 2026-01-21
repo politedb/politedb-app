@@ -102,7 +102,7 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "cursor-default! text-sm",
+                "h-8 cursor-default! text-sm",
                 isEmptyRow && "focus:bg-transparent focus:outline-none"
               )}
               value={String(fieldValue ?? "")}
@@ -130,7 +130,14 @@ export function TableConstraints({
         },
       })),
     ],
-    [busy, editedData.length, handleDataChange, deletedRows, onDeleteRecord]
+    [
+      busy,
+      editedData.length,
+      selectedRowIndex,
+      deletedRows,
+      handleDataChange,
+      onDeleteRecord,
+    ]
   );
 
   return (

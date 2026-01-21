@@ -16,8 +16,9 @@ export interface TableCellProps {
   originalValue: any;
   value: any;
   isPatched: boolean;
-  isNewRow?: boolean;
   rowKey?: string;
+  isSelecting?: boolean;
+  isNewRow?: boolean;
   isDeleted?: boolean;
   onCellChange?: (
     action: DataAction,
@@ -41,13 +42,6 @@ const INPUT_STYLE = {
   msOverflowStyle: "none",
 } as const;
 
-// Background colors for focus/blur states
-const BG_COLORS = {
-  focus: "white",
-  newRow: "#d1fae5", // bg-green-100
-  default: "transparent",
-} as const;
-
 // ============================================================================
 // Component
 // ============================================================================
@@ -57,9 +51,9 @@ export const TableCell = memo(function TableCell({
   colIndex,
   colName,
   value,
-  isPatched,
-  isNewRow = false,
   rowKey,
+  isSelecting = false,
+  isNewRow = false,
   isDeleted = false,
   onCellChange,
   setEditingCell,
@@ -68,6 +62,7 @@ export const TableCell = memo(function TableCell({
   const displayValue = cellToString(value);
   const [editValue, setEditValue] = useState(displayValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const ignoreBlurRef = useRef<boolean>(false);
 
   // Sync when value changes from outside (patch switch / refresh)
   useEffect(() => {
@@ -103,10 +98,10 @@ export const TableCell = memo(function TableCell({
     displayValue,
     rowIndex,
     colName,
-    updateData,
-    onCellChange,
     isNewRow,
     rowKey,
+    updateData,
+    onCellChange,
   ]);
 
   // Event handlers - stable references
@@ -118,31 +113,35 @@ export const TableCell = memo(function TableCell({
     requestAnimationFrame(() => setEditValue(value));
   }, []);
 
-  const handleMouseDown = useCallback(() => {
-    setEditingCell({ rowIdx: rowIndex, colName, colIdx: colIndex });
-  }, [setEditingCell, rowIndex, colIndex, colName]);
-
-  const handleClick = useCallback((e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    input.scrollLeft = input.scrollWidth;
-    input.select();
-  }, []);
-
-  const handleFocus = useCallback((e: Event) => {
-    (e.currentTarget as HTMLInputElement).style.backgroundColor =
-      BG_COLORS.focus;
-  }, []);
-
-  const handleBlur = useCallback(
-    (e: Event) => {
-      const input = e.currentTarget as HTMLInputElement;
-      input.style.backgroundColor = isNewRow
-        ? BG_COLORS.newRow
-        : BG_COLORS.default;
-      commitValue();
+  const handleMouseDown = useCallback(
+    (e: MouseEvent) => {
+      setEditingCell({ rowIdx: rowIndex, colName, colIdx: colIndex });
+      if (!isSelecting) {
+        e.preventDefault();
+      }
     },
-    [commitValue, isNewRow]
+    [setEditingCell, rowIndex, colIndex, colName, isSelecting]
   );
+
+  const handleClick = useCallback(
+    (e: Event) => {
+      if (isSelecting) {
+        const input = e.currentTarget as HTMLInputElement;
+        input.scrollLeft = input.scrollWidth;
+        input.select();
+      }
+    },
+    [isSelecting]
+  );
+
+  const handleBlur = useCallback(() => {
+    if (ignoreBlurRef.current) {
+      ignoreBlurRef.current = false;
+      return;
+    }
+
+    commitValue();
+  }, [commitValue, isNewRow]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -152,6 +151,8 @@ export const TableCell = memo(function TableCell({
           break;
         case "Escape":
           setEditValue(displayValue);
+          ignoreBlurRef.current = true;
+          (e.target as HTMLInputElement).blur();
           break;
       }
     },
@@ -163,11 +164,7 @@ export const TableCell = memo(function TableCell({
     "h-full w-full border-0 p-2 text-sm text-neutral-900",
     "outline-none hover:cursor-default focus:outline-none",
     "overflow-hidden text-ellipsis whitespace-nowrap",
-    "focus:overflow-x-auto focus:text-ellipsis",
-    isDeleted && "bg-red-300",
-    isPatched && !isDeleted && "bg-amber-200",
-    isNewRow && !isDeleted && "bg-green-200",
-    !isPatched && !isNewRow && !isDeleted && "bg-transparent"
+    "focus:overflow-x-auto focus:text-ellipsis focus:bg-white!"
   );
 
   return (
@@ -182,7 +179,6 @@ export const TableCell = memo(function TableCell({
       onInput={handleInput}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
     />

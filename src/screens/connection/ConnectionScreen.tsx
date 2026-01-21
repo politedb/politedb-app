@@ -144,6 +144,7 @@ export function ConnectionScreen() {
   useEffect(() => {
     if (!activeProfileScreen || activeProfileScreen === "main") return;
     if (!activeTableWindow) return;
+    if (activeTableWindow.table.new) return;
     if (!runtimeConnectionId) return;
 
     if (activeTableData.busy) return;
@@ -153,14 +154,14 @@ export function ConnectionScreen() {
     if (lastAutoLoadRef.current === k) return;
     lastAutoLoadRef.current = k;
 
-    loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      {
-        limit,
-        offset,
-      }
-    ).catch(console.error);
+    if (!activeTableData.data) {
+      loadTableData(
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        { limit, offset },
+        { force: true }
+      ).catch(console.error);
+    }
   }, [
     activeProfileScreen,
     activeTableWindow?.id,
@@ -416,6 +417,7 @@ export function ConnectionScreen() {
                 first={
                   <div class="h-full overflow-hidden">
                     <LeftNav
+                      profileId={activeProfileScreen}
                       schemas={schemasForEditor}
                       currSchema={activeSchema}
                       onSchemaChange={onSchemaChange}

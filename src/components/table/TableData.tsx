@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useMemo, useState, useEffect, useCallback } from "preact/hooks";
 import { TableVirtuoso } from "react-virtuoso";
 import type { ColumnMeta } from "src/lib/tauri/types";
@@ -29,7 +30,6 @@ import {
   useNewRows,
   useMergedRefs,
 } from "./tableHooks";
-import { memo } from "preact/compat";
 
 // ============================================================================
 // Types
@@ -45,6 +45,7 @@ interface Props {
     data: Record<string, any>
   ) => void;
   onDeleteRow?: (rowIndex: number) => void;
+  onAddRow?: () => void;
   patches?: Record<string, Record<string, any>> | null;
   newRowKeys?: string[];
   deletedRows?: Set<number>;
@@ -58,6 +59,7 @@ interface RowContext {
   allData: any[];
   newRows: NewRowData[];
   editingCell: EditingCell | null;
+  selectedRowIndex: number | null;
   isRowPatched: (idx: number, newRows: NewRowData[]) => boolean;
   isNewRow: (idx: number) => boolean;
   isRowDeleted: (idx: number) => boolean;
@@ -70,8 +72,9 @@ interface RowContext {
   ) => any;
   getRowKey: (idx: number, newRows: NewRowData[]) => string;
   onCellChange?: Props["onCellChange"];
-  setEditingCell: (cell: EditingCell | null) => void;
   updateData: (rowIndex: number, columnId: string, value: any) => void;
+  setEditingCell: (cell: EditingCell | null) => void;
+  setSelectedRowIndex: (rowIndex: number) => void;
 }
 
 // ============================================================================
@@ -161,7 +164,7 @@ const DataCell = memo(function DataCell({
   ctx,
 }: DataCellProps) {
   const colName = col.name;
-  const isSelecting = ctx.editingCell?.rowIdx === rowIdx;
+  const isSelecting = ctx.selectedRowIndex === rowIdx;
   const isEditing = isSelecting && ctx.editingCell?.colIdx === colIdx;
   const cellPatched = ctx.isCellPatched(rowIdx, colName, ctx.newRows);
   const rowIsNew = ctx.isNewRow(rowIdx);
@@ -180,11 +183,10 @@ const DataCell = memo(function DataCell({
   const cellClass = cn(
     "max-w-52 min-w-20 border border-neutral-200 text-sm text-neutral-900",
     "overflow-hidden text-ellipsis whitespace-nowrap",
-    isSelecting ? "bg-blue-200!" : "hover:bg-blue-50",
-    rowIsNew && !isSelecting && "bg-green-100",
-    rowDeleted && !isSelecting && "bg-red-50/20 opacity-50",
-    rowPatched && !isSelecting && !rowIsNew && !rowDeleted && "bg-amber-50/40",
-    cellPatched && !isSelecting && "ring-1 ring-amber-200",
+    rowIsNew && "bg-green-200",
+    rowDeleted && "bg-red-300",
+    rowPatched && !rowIsNew && !rowDeleted && "bg-amber-200",
+    isSelecting && "bg-blue-200!",
     isEditing && "outline-2 -outline-offset-2 outline-blue-500"
   );
 
@@ -202,9 +204,10 @@ const DataCell = memo(function DataCell({
         colName={colName}
         originalValue={originalValue}
         value={value}
-        isPatched={cellPatched}
-        isNewRow={rowIsNew}
         rowKey={rowKey}
+        isPatched={cellPatched}
+        isSelecting={isSelecting}
+        isNewRow={rowIsNew}
         isDeleted={rowDeleted}
         onCellChange={ctx.onCellChange}
         setEditingCell={ctx.setEditingCell}
@@ -224,17 +227,11 @@ interface DataRowProps {
 }
 
 const DataRow = memo(function DataRow({ rowIdx, ctx }: DataRowProps) {
-  const isSelecting = ctx.editingCell?.rowIdx === rowIdx;
-  const rowIsNew = ctx.isNewRow(rowIdx);
-  const rowDeleted = ctx.isRowDeleted(rowIdx);
-  const rowPatched = ctx.isRowPatched(rowIdx, ctx.newRows);
+  const isSelecting = ctx.selectedRowIndex === rowIdx;
 
   const emptyColClass = cn(
     "border border-neutral-200 text-sm text-neutral-900",
-    isSelecting ? "bg-blue-200!" : "hover:bg-blue-50",
-    rowIsNew && !isSelecting && "bg-green-100",
-    rowDeleted && !isSelecting && "bg-red-50/20 opacity-50",
-    rowPatched && !isSelecting && !rowIsNew && !rowDeleted && "bg-amber-50/40"
+    isSelecting && "bg-blue-200!"
   );
 
   return (
@@ -264,12 +261,14 @@ interface EmptyRowProps {
   columns: ColumnMeta[];
   widthByName: Record<string, number>;
   emptyColumnWidth: number;
+  onAddRow?: () => void;
 }
 
 const EmptyRow = memo(function EmptyRow({
   columns,
   widthByName,
   emptyColumnWidth,
+  onAddRow,
 }: EmptyRowProps) {
   return (
     <>
@@ -277,13 +276,15 @@ const EmptyRow = memo(function EmptyRow({
         <td
           key={col.name}
           data-col={col.name}
-          class="h-7 border border-neutral-200 px-1"
+          class="h-8 border border-neutral-200 px-1"
+          onDblClick={onAddRow}
           style={getWidthStyle(widthByName[col.name] ?? DEFAULT_COL_WIDTH)}
         />
       ))}
       {emptyColumnWidth > 0 && (
         <td
-          class="h-7 border border-neutral-200 px-1"
+          onDblClick={onAddRow}
+          class="h-8 border border-neutral-200 px-1"
           style={getWidthStyle(emptyColumnWidth)}
         />
       )}
@@ -301,6 +302,7 @@ export function TableData({
   patches,
   onCellChange,
   onDeleteRow,
+  onAddRow,
   newRowKeys = EMPTY_ARRAY,
   deletedRows = EMPTY_SET,
 }: Props) {
@@ -350,7 +352,12 @@ export function TableData({
   });
 
   // Row selection
-  const { handleRowSelect, keyboardContainerRef } = useTableRowSelection({
+  const {
+    selectedRowIndex,
+    setSelectedRowIndex,
+    handleRowSelect,
+    keyboardContainerRef,
+  } = useTableRowSelection({
     onDeleteRow,
     deletedRows,
     isNewRow: patchHelpers.isNewRow,
@@ -361,7 +368,7 @@ export function TableData({
     useFillViewportTable({
       dataLength: allData.length,
       fillViewport: true,
-      headerHeight: 40,
+      headerHeight: 28,
     });
 
   // Layout calculations
@@ -440,10 +447,12 @@ export function TableData({
       allData,
       newRows,
       editingCell,
+      selectedRowIndex,
       ...patchHelpers,
       onCellChange,
-      setEditingCell,
       updateData,
+      setEditingCell,
+      setSelectedRowIndex,
     }),
     [
       columnsKey,
@@ -453,9 +462,12 @@ export function TableData({
       allData,
       newRows,
       editingCell,
+      selectedRowIndex,
       patchHelpers,
       onCellChange,
       updateData,
+      setEditingCell,
+      setSelectedRowIndex,
     ]
   );
 
@@ -497,12 +509,20 @@ export function TableData({
             columns={columns}
             widthByName={widthByName}
             emptyColumnWidth={emptyColumnWidth}
+            onAddRow={onAddRow}
           />
         );
       }
       return <DataRow rowIdx={itemIndex} ctx={rowContext} />;
     },
-    [allData.length, columns, widthByName, emptyColumnWidth, rowContext]
+    [
+      allData.length,
+      columns,
+      widthByName,
+      emptyColumnWidth,
+      rowContext,
+      onAddRow,
+    ]
   );
 
   // Virtuoso style
@@ -519,12 +539,13 @@ export function TableData({
 
   const totalCount = allData.length + emptyRowsCount;
   const isReady = containerWidth > 0;
+
   return (
     <div
       ref={mergedContainerRef}
       class="flex h-full flex-col overflow-hidden bg-white"
       tabIndex={0}
-      onMouseDown={onTableMouseDown as any}
+      onMouseDown={onTableMouseDown}
     >
       <div class="flex-1 overflow-x-auto overflow-y-hidden border-t border-neutral-200">
         {isReady ? (
