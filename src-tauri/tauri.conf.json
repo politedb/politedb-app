@@ -42,5 +42,10 @@
       "entitlements": "entitlements.mac.plist",
       "hardenedRuntime": true
     }
+  },
+  "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": true
+    }
   }
 }

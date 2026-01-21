@@ -44,7 +44,7 @@ export function SqlWindowPane(props: {
     <div class="h-full min-h-0 overflow-hidden">
       <SplitPane
         direction="vertical"
-        initialRatio={0.45}
+        initialRatio={0.65}
         minFirstPx={180}
         minSecondPx={160}
         splitterPx={8}

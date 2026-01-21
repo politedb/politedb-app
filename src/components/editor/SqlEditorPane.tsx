@@ -6,24 +6,21 @@ import {
   type CompletionCtx,
 } from "./sqlCompletion";
 import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
-import { SqlEditorToolbar, type SaveStatus } from "./SqlEditorToolbar";
+import { SqlEditorToolbar } from "./SqlEditorToolbar";
+import { ensureSqlTheme } from "./registerSqlTheme";
+import { formatSql, minifySql } from "src/utils/sqlFormatter";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 
 type Props = {
   win: SqlEditorWindow;
 
   onCommitContent?: (windowId: string, next: string) => void;
 
-  // parent handles splitting & execution queue; pane just emits picked sql
   onRunSql: (payload: {
     windowId: string;
     sql: string;
   }) => Promise<void> | void;
-
-  onBeautifySql?: (payload: { windowId: string; fullSql: string }) => void;
-  limitLabel?: string;
-  onClickLimit?: (windowId: string) => void;
-
-  onSaveAs?: (payload: { windowId: string; fullSql: string }) => void;
 
   schemas: string[];
   activeSchema?: string;
@@ -33,8 +30,34 @@ type Props = {
   engine: DatabaseEngine;
 };
 
+interface ExtendedEditor extends monaco.editor.IStandaloneCodeEditor {
+  __disposeAll?: () => void;
+}
+
 function normalizeEol(s: string) {
   return s.replace(/\r\n/g, "\n");
+}
+
+function defaultSqlFilename(win: SqlEditorWindow) {
+  const base = (win.title?.trim() ? win.title.trim() : "SQL Query")
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .slice(0, 80);
+
+  return base.toLowerCase().endsWith(".sql") ? base : `${base}.sql`;
+}
+
+function buildExportHeader(opts: { engine: string; includeUrl?: boolean }) {
+  const ts = new Date().toISOString().replace("T", " ").replace("Z", " UTC");
+
+  const lines: string[] = [
+    "-- Exported from PoliteDB",
+    opts.includeUrl ? "-- https://politedb.app" : "",
+    `-- Engine: ${opts.engine}`,
+    `-- Exported at: ${ts}`,
+  ].filter(Boolean);
+
+  // ✅ Always end with TWO newlines so SQL never sticks to header
+  return lines.join("\n") + "\n\n";
 }
 
 function getSelectedOrCurrentSql(editor: monaco.editor.IStandaloneCodeEditor) {
@@ -68,10 +91,6 @@ export function SqlEditorPane(props: Props) {
     win,
     onCommitContent,
     onRunSql,
-    onBeautifySql,
-    limitLabel = "No limit",
-    onClickLimit,
-    onSaveAs,
     schemas,
     activeSchema,
     tables,
@@ -80,9 +99,8 @@ export function SqlEditorPane(props: Props) {
   } = props;
 
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const editorRef = useRef<ExtendedEditor | null>(null);
 
-  // Completion ctx ref (no re-register)
   const completionCtxRef = useRef<CompletionCtx>({
     schemas,
     activeSchema,
@@ -90,6 +108,7 @@ export function SqlEditorPane(props: Props) {
     columnsByTable,
     engine,
   });
+
   useEffect(() => {
     completionCtxRef.current = {
       schemas,
@@ -98,25 +117,17 @@ export function SqlEditorPane(props: Props) {
       columnsByTable,
       engine,
     };
-  }, [schemas, activeSchema, tables, engine, columnsByTable]);
+  }, [schemas, activeSchema, tables, columnsByTable, engine]);
 
-  // Keep latest callbacks without re-registering Monaco actions/subscriptions
   const callbacksRef = useRef({
     onCommitContent,
     onRunSql,
-    onBeautifySql,
-    onSaveAs,
   });
-  useEffect(() => {
-    callbacksRef.current = {
-      onCommitContent,
-      onRunSql,
-      onBeautifySql,
-      onSaveAs,
-    };
-  }, [onCommitContent, onRunSql, onBeautifySql, onSaveAs]);
 
-  // Model per window id
+  useEffect(() => {
+    callbacksRef.current = { onCommitContent, onRunSql };
+  }, [onCommitContent, onRunSql]);
+
   const modelUri = useMemo(
     () => monaco.Uri.parse(`inmemory://sql/${win.id}.sql`),
     [win.id]
@@ -124,94 +135,101 @@ export function SqlEditorPane(props: Props) {
 
   const saveTimerRef = useRef<number | null>(null);
   const loadedDraftRef = useRef(false);
-  const applyingExternalRef = useRef(false);
+
+  // Guard to prevent autosave loop when we programmatically apply content
+  const applyingExternalCounterRef = useRef(0);
 
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
-  const lastSavedSnapshotRef = useRef<string>("");
-
-  const saveStatusRef = useRef<SaveStatus>("saved");
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
 
   const [isExecuting, setIsExecuting] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
 
-  const setStatus = (next: SaveStatus) => {
-    if (saveStatusRef.current === next) return;
-    saveStatusRef.current = next;
-    setSaveStatus(next);
-  };
-
   const getFullSql = () => editorRef.current?.getModel()?.getValue() ?? "";
 
-  const flushDraft = async (opts?: { markSaved?: boolean }) => {
+  const flushDraft = async () => {
     const full = getFullSql();
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
 
     savingRef.current = true;
-    setStatus("saving");
-
-    await saveSqlDraft(win.id, full);
-    callbacksRef.current.onCommitContent?.(win.id, full);
-
-    savingRef.current = false;
-
-    if (opts?.markSaved) {
-      lastSavedSnapshotRef.current = full;
+    try {
+      await saveSqlDraft(win.id, full);
+      callbacksRef.current.onCommitContent?.(win.id, full);
       dirtyRef.current = false;
-      setStatus("saved");
-    } else {
-      setStatus(dirtyRef.current ? "unsaved" : "saved");
+    } finally {
+      savingRef.current = false;
     }
-
     return full;
   };
 
   const scheduleBackgroundSave = () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+
     saveTimerRef.current = window.setTimeout(() => {
       void (async () => {
         const mm = editorRef.current?.getModel();
-        const next = mm?.getValue() ?? "";
         if (!mm) return;
 
+        const next = mm.getValue();
+
         savingRef.current = true;
-        if (dirtyRef.current) setStatus("saving");
-
-        await saveSqlDraft(win.id, next);
-
-        savingRef.current = false;
-        setStatus(dirtyRef.current ? "unsaved" : "saved");
+        try {
+          await saveSqlDraft(win.id, next);
+          callbacksRef.current.onCommitContent?.(win.id, next);
+        } finally {
+          savingRef.current = false;
+        }
       })();
     }, 700);
   };
 
-  const onSave = () => void flushDraft({ markSaved: true });
+  // Apply transformation to selection (if any) or whole doc; preserve selection.
+  const applyTransform = async (
+    transform: (input: string) => string,
+    source: "format" | "minify"
+  ) => {
+    const editor = editorRef.current;
+    if (!editor) return;
 
-  const onRevert = () => {
-    const snap = lastSavedSnapshotRef.current;
-    if (!snap) return;
-
-    const model = monaco.editor.getModel(modelUri);
+    const model = editor.getModel();
     if (!model) return;
 
-    applyingExternalRef.current = true;
-    try {
-      model.pushEditOperations(
-        [],
-        [{ range: model.getFullModelRange(), text: snap }],
-        () => []
-      );
-      dirtyRef.current = false;
-      setStatus("saved");
-    } finally {
-      queueMicrotask(() => (applyingExternalRef.current = false));
-    }
-  };
+    const sel = editor.getSelection();
+    const hasSel = !!sel && !sel.isEmpty();
 
-  const onSaveAsClick = () => {
-    const full = getFullSql();
-    callbacksRef.current.onSaveAs?.({ windowId: win.id, fullSql: full });
+    const range = hasSel ? sel! : model.getFullModelRange();
+    const input = hasSel ? model.getValueInRange(range) : model.getValue();
+    const output = transform(input);
+
+    const startPos = range.getStartPosition();
+    const startOffset = model.getOffsetAt(startPos);
+
+    applyingExternalCounterRef.current += 1;
+    const currentCounter = applyingExternalCounterRef.current;
+
+    try {
+      editor.executeEdits(source, [{ range, text: output }]);
+
+      if (hasSel) {
+        const endPos = model.getPositionAt(startOffset + output.length);
+        editor.setSelection(
+          new monaco.Selection(
+            startPos.lineNumber,
+            startPos.column,
+            endPos.lineNumber,
+            endPos.column
+          )
+        );
+      }
+    } finally {
+      queueMicrotask(() => {
+        if (applyingExternalCounterRef.current === currentCounter) {
+          applyingExternalCounterRef.current = 0;
+        }
+      });
+    }
+
+    await flushDraft();
   };
 
   const onRun = async () => {
@@ -223,7 +241,7 @@ export function SqlEditorPane(props: Props) {
 
     setIsExecuting(true);
     try {
-      await flushDraft({ markSaved: false });
+      await flushDraft();
       await callbacksRef.current.onRunSql({
         windowId: win.id,
         sql: picked.sql,
@@ -233,12 +251,36 @@ export function SqlEditorPane(props: Props) {
     }
   };
 
-  const onBeautify = () => {
-    const full = getFullSql();
-    callbacksRef.current.onBeautifySql?.({ windowId: win.id, fullSql: full });
+  const onFormatSql = async () => {
+    await applyTransform((input) => formatSql(input, { engine }), "format");
   };
 
-  // Cmd/Ctrl+S -> Save (once per window)
+  const onMinifySql = async () => {
+    await applyTransform((input) => minifySql(input), "minify");
+  };
+
+  const onExportClick = async () => {
+    // Always flush draft first so export matches latest editor content
+    const full = await flushDraft();
+
+    const path = await save({
+      title: "Export SQL…",
+      defaultPath: defaultSqlFilename(win),
+      filters: [{ name: "SQL", extensions: ["sql"] }],
+    });
+
+    if (!path) return;
+
+    const header = buildExportHeader({ engine, includeUrl: true });
+
+    try {
+      await writeTextFile(path, header + full);
+    } catch (error) {
+      console.error("Failed to export SQL file:", error);
+    }
+  };
+
+  // Cmd/Ctrl+S: force flush draft (auto-save is still on)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toLowerCase().includes("mac");
@@ -247,20 +289,19 @@ export function SqlEditorPane(props: Props) {
 
       if (e.key.toLowerCase() === "s") {
         e.preventDefault();
-        onSave();
+        void flushDraft();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win.id]);
 
   // Reduce unhandled cancellation noise
   useEffect(() => {
     const handler = (e: PromiseRejectionEvent) => {
-      const r: any = e.reason;
-      const msg = String(r?.message ?? r ?? "");
+      const r: unknown = e.reason;
+      const msg = String((r as { message?: string })?.message ?? r ?? "");
       if (msg.includes("Canceled") || msg.includes("Cancelled"))
         e.preventDefault();
     };
@@ -268,7 +309,7 @@ export function SqlEditorPane(props: Props) {
     return () => window.removeEventListener("unhandledrejection", handler);
   }, []);
 
-  // Monaco lifecycle (only depends on modelUri + win.id)
+  // Monaco lifecycle
   useEffect(() => {
     if (!rootRef.current) return;
 
@@ -278,18 +319,23 @@ export function SqlEditorPane(props: Props) {
     const createEditor = (m: monaco.editor.ITextModel) => {
       if (disposed) return;
 
-      const editor = monaco.editor.create(rootRef.current!, {
+      ensureSqlTheme();
+
+      const editor: ExtendedEditor = monaco.editor.create(rootRef.current!, {
         model: m,
         language: "sql",
-        theme: "vs",
-        fontSize: 13,
+        theme: "politedb-sql",
+        fontSize: 12,
         fontFamily:
           "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        suggestFontSize: 12,
+        suggestLineHeight: 20,
+
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         automaticLayout: true,
+
         tabSize: 2,
-        wordWrap: "off",
         renderWhitespace: "none",
         smoothScrolling: false,
         cursorSmoothCaretAnimation: "off",
@@ -306,6 +352,16 @@ export function SqlEditorPane(props: Props) {
 
         selectionHighlight: false,
         occurrencesHighlight: "off",
+        renderValidationDecorations: "off",
+
+        folding: false,
+        lineNumbersMinChars: 3,
+        lineDecorationsWidth: 12,
+        glyphMargin: false,
+        renderLineHighlight: "none",
+
+        wordWrap: "on",
+        wrappingIndent: "indent",
       });
 
       editorRef.current = editor;
@@ -313,10 +369,6 @@ export function SqlEditorPane(props: Props) {
       const completionDisposable = registerSqlCompletionSmart(
         () => completionCtxRef.current
       );
-
-      lastSavedSnapshotRef.current = normalizeEol(m.getValue());
-      dirtyRef.current = false;
-      setStatus("saved");
 
       const selSub = editor.onDidChangeCursorSelection(() => {
         const sel = editor.getSelection();
@@ -342,11 +394,9 @@ export function SqlEditorPane(props: Props) {
       });
 
       const changeSub = editor.onDidChangeModelContent(() => {
-        if (applyingExternalRef.current) return;
-
+        if (applyingExternalCounterRef.current > 0) return;
         dirtyRef.current = true;
-        if (!savingRef.current) setStatus("unsaved");
-        scheduleBackgroundSave();
+        if (!savingRef.current) scheduleBackgroundSave();
       });
 
       const triggerSub = editor.onDidChangeModelContent((e) => {
@@ -379,7 +429,7 @@ export function SqlEditorPane(props: Props) {
       });
 
       const blurSub = editor.onDidBlurEditorText(() => {
-        void flushDraft({ markSaved: false });
+        void flushDraft();
       });
 
       const disposeAll = () => {
@@ -393,15 +443,14 @@ export function SqlEditorPane(props: Props) {
         editorRef.current = null;
       };
 
-      (editor as any).__disposeAll = disposeAll;
+      editor.__disposeAll = disposeAll;
     };
 
     if (model) {
       createEditor(model);
       return () => {
         disposed = true;
-        const ed = editorRef.current as any;
-        if (ed?.__disposeAll) ed.__disposeAll();
+        editorRef.current?.__disposeAll?.();
       };
     }
 
@@ -410,12 +459,15 @@ export function SqlEditorPane(props: Props) {
         const draft = loadedDraftRef.current
           ? null
           : await loadSqlDraft(win.id);
+        if (disposed) return;
+
         loadedDraftRef.current = true;
 
         const initial = normalizeEol((draft ?? win.content ?? "") || "");
         model = monaco.editor.createModel(initial, "sql", modelUri);
         createEditor(model);
       } catch {
+        if (disposed) return;
         const initial = normalizeEol((win.content ?? "") || "");
         model = monaco.editor.createModel(initial, "sql", modelUri);
         createEditor(model);
@@ -424,12 +476,11 @@ export function SqlEditorPane(props: Props) {
 
     return () => {
       disposed = true;
-      const ed = editorRef.current as any;
-      if (ed?.__disposeAll) ed.__disposeAll();
+      editorRef.current?.__disposeAll?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUri, win.id]);
 
+  // External content sync (if parent pushes content)
   useEffect(() => {
     const model = monaco.editor.getModel(modelUri);
     if (!model) return;
@@ -440,33 +491,31 @@ export function SqlEditorPane(props: Props) {
 
     if (editorRef.current?.hasTextFocus()) return;
 
-    applyingExternalRef.current = true;
+    applyingExternalCounterRef.current += 1;
+    const currentCounter = applyingExternalCounterRef.current;
+
     try {
       model.pushEditOperations(
         [],
         [{ range: model.getFullModelRange(), text: next }],
         () => []
       );
-
-      lastSavedSnapshotRef.current = next;
       dirtyRef.current = false;
-      setStatus("saved");
     } finally {
-      queueMicrotask(() => (applyingExternalRef.current = false));
+      queueMicrotask(() => {
+        if (applyingExternalCounterRef.current === currentCounter) {
+          applyingExternalCounterRef.current = 0;
+        }
+      });
     }
   }, [win.content, modelUri]);
 
   return (
     <div class="flex h-full min-h-0 w-full flex-col bg-white">
       <SqlEditorToolbar
-        saveStatus={saveStatus}
-        onSave={onSave}
-        onSaveAs={onSaveAs ? onSaveAsClick : undefined}
-        onRevert={onRevert}
-        canRevert={!!lastSavedSnapshotRef.current}
-        limitLabel={limitLabel}
-        onClickLimit={onClickLimit ? () => onClickLimit(win.id) : undefined}
-        onBeautify={onBeautifySql ? onBeautify : undefined}
+        onExport={onExportClick}
+        onFormat={onFormatSql}
+        onMinify={onMinifySql}
         onRun={onRun}
         isExecuting={isExecuting}
         hasSelection={hasSelection}

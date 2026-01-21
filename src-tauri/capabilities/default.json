@@ -15,6 +15,9 @@
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",
     "core:window:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:allow-create",
+    "fs:allow-write-text-file"
   ]
 }
