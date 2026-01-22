@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::engines::EngineConnection;
 use crate::ssh_tunnel;
 use crate::ssh_tunnel::pool::{acquire_shared_tunnel, release_shared_tunnel_by_conn};
 use crate::state::AppState;
@@ -300,7 +301,7 @@ pub async fn connection_remove(
     state: State<'_, AppState>,
     connection_id: Uuid,
 ) -> Result<(), String> {
-    // 1) cancel ops of this connection only
+    // 1) cancel + abort ops
     let op_ids: Vec<Uuid> = state
         .op_to_conn
         .iter()
@@ -310,18 +311,35 @@ pub async fn connection_remove(
 
     for op_id in op_ids {
         if let Some(h) = state.running_ops.get(&op_id) {
-            h.value().cancel();
+            h.value().cancel(); // DB-level cancel
         }
+
+        if let Some((_k, task)) = state.op_tasks.remove(&op_id) {
+            task.abort(); // HARD STOP
+        }
+
         state.active_ops.remove(&op_id);
-        state.cancel_requested.insert(op_id, ());
         state.running_ops.remove(&op_id);
+        state.cancel_requested.remove(&op_id);
         state.op_to_conn.remove(&op_id);
     }
 
-    // 2) Remove runtime connection
-    state.connections.remove(&connection_id);
+    // 2) close DB connection resources
+    if let Some((_id, conn)) = state.connections.remove(&connection_id) {
+        match conn {
+            EngineConnection::Postgres(pg) => {
+                drop(pg.pool);
+            }
+            EngineConnection::MySql(my) => {
+                let _ = my.pool.clone().disconnect().await;
+            }
+            EngineConnection::Redis(r) => {
+                drop(r.pool);
+            }
+        }
+    }
 
-    // 3) Release SSH tunnel ref (shared)
+    // 3) release SSH tunnel
     crate::ssh_tunnel::pool::release_shared_tunnel_by_conn(&state, connection_id).await;
 
     Ok(())

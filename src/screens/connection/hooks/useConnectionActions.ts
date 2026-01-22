@@ -301,7 +301,8 @@ export function useConnectionActions(
       await loadTableData(
         activeTableWindow.table.schema,
         activeTableWindow.table.name,
-        { limit: nextLimit, offset: nextOffset }
+        { limit: nextLimit, offset: nextOffset },
+        { refreshRows: true }
       );
     },
     [setLimit, setOffset, activeTableWindow, loadTableData]

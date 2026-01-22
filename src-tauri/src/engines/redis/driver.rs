@@ -157,7 +157,7 @@ pub async fn connect_redis(
 
     let mut cfg = deadpool_redis::Config::from_url(url);
 
-    let max_size = input.pool_max_size.unwrap_or(10).clamp(1, 50);
+    let max_size = input.pool_max_size.unwrap_or(5).clamp(1, 20);
     cfg.pool = Some(deadpool_redis::PoolConfig::new(max_size));
 
     let pool = cfg

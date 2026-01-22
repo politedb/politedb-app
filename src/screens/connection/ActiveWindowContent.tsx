@@ -78,10 +78,12 @@ function extractPatchesForTableFromPatches(
 
 function extractNewRowKeysFromPatches(patches: WindowPatches | null): string[] {
   if (!patches) return EMPTY_ARRAY;
+
   const createPatches = (patches["create"]?.["data"] ?? {}) as Record<
     string,
     any
   >;
+
   const keys = Object.keys(createPatches).filter((k) => k.startsWith("new-"));
   return keys.length > 0 ? keys : EMPTY_ARRAY;
 }
@@ -116,6 +118,11 @@ function extractDeletedRowsFromPatches(
 function getTableMeta(key: string) {
   if (!key) return EMPTY_TABLE_META;
   return useConnectionStore.getState().tableDataMap[key] ?? EMPTY_TABLE_META;
+}
+
+function getRowsWindowInfo(key: string) {
+  if (!key) return null;
+  return useConnectionStore.getState().getRowsWindowInfo(key) ?? null;
 }
 
 function getTableStructure(profileId: string, tableId: string) {
@@ -183,7 +190,7 @@ export function ActiveWindowContent() {
   }, [activeTableWindow?.id]);
 
   // =========================================================================
-  // Computed keys
+  // Computed key
   // =========================================================================
   const activeKey = useMemo(() => {
     if (!activeTableWindow) return "";
@@ -200,56 +207,122 @@ export function ActiveWindowContent() {
 
   // =========================================================================
   // Subscribe ONLY to critical changes that require re-render
+  // NOTE: rows store is the source-of-truth for data loading/progress
   // =========================================================================
   useEffect(() => {
     if (!activeKey) return;
 
-    // Initialize rows
+    // Ensure rows window exists (idempotent)
     useConnectionStore.getState().initRows(activeKey, 5000);
 
-    // Track what we care about
     let lastBusy = getTableMeta(activeKey).busy;
-    let lastError = getTableMeta(activeKey).error;
+    let lastMetaError = String(getTableMeta(activeKey).error ?? "");
     let lastColumnsLen = getTableMeta(activeKey).columns?.length ?? 0;
     let lastRowCount = getTableMeta(activeKey).rowCount;
 
+    let lastRowsVersion = getRowsWindowInfo(activeKey)?.version ?? 0;
+    let lastRowsError = String(
+      (getRowsWindowInfo(activeKey) as any)?.error ?? ""
+    );
+    let lastRowsRunning = !!(getRowsWindowInfo(activeKey) as any)?.running;
+
     const unsub = useConnectionStore.subscribe((state) => {
       const meta = state.tableDataMap[activeKey] ?? EMPTY_TABLE_META;
+      const info = state.getRowsWindowInfo(activeKey);
 
       const busy = meta.busy;
-      const error = meta.error;
+      const metaError = String(meta.error ?? "");
       const columnsLen = meta.columns?.length ?? 0;
       const rowCount = meta.rowCount;
 
-      // Only trigger re-render if critical fields changed
+      const rowsVersion = info?.version ?? 0;
+      const rowsError = String((info as any)?.error ?? "");
+      const rowsRunning = !!(info as any)?.running;
+
       const shouldUpdate =
         busy !== lastBusy ||
-        error !== lastError ||
+        metaError !== lastMetaError ||
         columnsLen !== lastColumnsLen ||
-        rowCount !== lastRowCount;
+        rowCount !== lastRowCount ||
+        rowsVersion !== lastRowsVersion ||
+        rowsError !== lastRowsError ||
+        rowsRunning !== lastRowsRunning;
 
-      if (shouldUpdate) {
-        lastBusy = busy;
-        lastError = error;
-        lastColumnsLen = columnsLen;
-        lastRowCount = rowCount;
-        triggerRender();
-      }
+      if (!shouldUpdate) return;
+
+      lastBusy = busy;
+      lastMetaError = metaError;
+      lastColumnsLen = columnsLen;
+      lastRowCount = rowCount;
+      lastRowsVersion = rowsVersion;
+      lastRowsError = rowsError;
+      lastRowsRunning = rowsRunning;
+
+      triggerRender();
     });
 
     return unsub;
   }, [activeKey, triggerRender]);
 
   // =========================================================================
-  // Read current values from store (snapshot, no subscription)
+  // Snapshot reads (no subscription)
   // =========================================================================
   const activeTableMeta = getTableMeta(activeKey);
+  const activeRowsInfo = getRowsWindowInfo(activeKey);
+
   const tableStructure = getTableStructure(profileId, activeId ?? "");
   const tableConstraints = getTableConstraints(profileId, activeId ?? "");
   const windowPatches = getWindowPatches(profileId, activeTableWindow?.id);
 
   // =========================================================================
-  // Derived patch data (memoized)
+  // Unified error
+  // =========================================================================
+  const loadErrorText = String(loadError ?? "");
+  const metaErrorText = String(activeTableMeta.error ?? "");
+  const rowsErrorText = String(activeRowsInfo?.error ?? "");
+  const effectiveErrorText = loadErrorText || rowsErrorText || metaErrorText;
+  const hasError = !!effectiveErrorText;
+
+  // =========================================================================
+  // Rows readiness: if rows store has any hydrated/cached data, do NOT block UI
+  // =========================================================================
+  const hasAnyRowData = useMemo(() => {
+    if (!activeKey) return false;
+
+    const info = activeRowsInfo;
+    if (!info) return false;
+
+    const streamOffset =
+      typeof info.streamOffset === "number" ? info.streamOffset : 0;
+    const loadedMax = typeof info.loadedMax === "number" ? info.loadedMax : -1;
+
+    // If at least 1 row has ever been received for this stream offset
+    if (loadedMax >= streamOffset) return true;
+
+    // Fallback: try a few reads from rows window/cache
+    const st = useConnectionStore.getState();
+    const base = typeof info.base === "number" ? info.base : 0;
+    for (let i = 0; i < 5; i++) {
+      if (st.getRowAt(activeKey, base + i)) return true;
+    }
+
+    return false;
+  }, [activeKey, activeRowsInfo]);
+
+  // =========================================================================
+  // Full-screen loading policy (NOT dependent on meta.busy)
+  // - Only show full loading when we cannot render meaningful content yet
+  // =========================================================================
+  const shouldShowFullLoading =
+    !hasError &&
+    !!activeTableWindow &&
+    !activeSqlWindow &&
+    !hasAnyRowData &&
+    activeRowsInfo &&
+    (activeRowsInfo.running || activeRowsInfo.loadedMax < 0);
+
+  // =========================================================================
+  // Derived patch data
   // =========================================================================
   const tablePatches = useMemo(
     () => extractPatchesForTableFromPatches(windowPatches),
@@ -335,6 +408,7 @@ export function ActiveWindowContent() {
     useConnectionStore
       .getState()
       .setTableStructure(profileId, activeId, [...currentStructure, newRecord]);
+
     onDataChange(
       "create",
       DATA_KEYS.structure,
@@ -365,6 +439,7 @@ export function ActiveWindowContent() {
         ...currentConstraints,
         newRecord,
       ]);
+
     onDataChange(
       "create",
       DATA_KEYS.constraints,
@@ -382,8 +457,8 @@ export function ActiveWindowContent() {
 
     const currentMeta = getTableMeta(activeKey);
     const cols = currentMeta.columns ?? [];
-
     if (!cols.length) return;
+
     handleAddRowFromHook(cols as any, onDataChange);
   }, [activeTableWindow, activeKey, handleAddRowFromHook, onDataChange]);
 
@@ -419,25 +494,32 @@ export function ActiveWindowContent() {
   }, []);
 
   // =========================================================================
-  // New table pane logic
+  // Guards / early returns
   // =========================================================================
-  const isShowNewTablePane = useMemo(() => {
-    if (!activeTableWindow) return false;
+  if (shouldShowFullLoading) return <LoadingTableState />;
+  if (hasError) return <ErrorState message={effectiveErrorText} />;
+  if (!hasAnyWindow || !activeTableWindow)
+    return <EmptyWindow onNewSql={actions.openSql} />;
+  // =========================================================================
+  // SQL Window Pane
+  // =========================================================================
+  if (activeSqlWindow) {
+    return (
+      <SqlWindowPane
+        win={activeSqlWindow}
+        engine={engine}
+        runtimeConnectionId={runtimeConnectionId}
+        metaKey={metaKey}
+        metadata={metadata}
+        onRunSql={runSqlWithHistory}
+      />
+    );
+  }
 
-    const hasCols =
-      Array.isArray(activeTableMeta.columns) &&
-      activeTableMeta.columns.length > 0;
-
-    const noLoadedData =
-      !hasCols && !activeTableMeta.busy && !activeTableMeta.error;
-
-    return !!activeTableWindow.table.new || noLoadedData;
-  }, [
-    activeTableWindow,
-    activeTableMeta.columns,
-    activeTableMeta.busy,
-    activeTableMeta.error,
-  ]);
+  // =========================================================================
+  // New table pane logic (avoid "false positives" during first load)
+  // =========================================================================
+  const isShowNewTablePane = !!activeTableWindow?.table?.new;
 
   const handleTableCreated = useCallback(
     async (tableName: string) => {
@@ -456,80 +538,6 @@ export function ActiveWindowContent() {
     [actions, activeTableWindow, refreshSchemaAndTables, activeSchema]
   );
 
-  // =========================================================================
-  // Page-ready state
-  // =========================================================================
-  const [pageReady, setPageReady] = useState(false);
-
-  useEffect(() => {
-    setPageReady(false);
-    if (!activeKey) return;
-
-    // Fast path: already has at least 1 row
-    const st0 = useConnectionStore.getState();
-    const n0 = Math.min(20, limit);
-    for (let i = 0; i < n0; i++) {
-      if (st0.getRowAt(activeKey, offset + i)) {
-        setPageReady(true);
-        return;
-      }
-    }
-
-    let lastVersion = -1;
-
-    const unsub = useConnectionStore.subscribe((state) => {
-      const info = state.getRowsWindowInfo(activeKey);
-      const version = info?.version ?? 0;
-
-      if (version === lastVersion) return;
-      lastVersion = version;
-
-      const n = Math.min(20, limit);
-      for (let i = 0; i < n; i++) {
-        if (useConnectionStore.getState().getRowAt(activeKey, offset + i)) {
-          setPageReady(true);
-          unsub();
-          return;
-        }
-      }
-    });
-
-    return unsub;
-  }, [activeKey, offset, limit]);
-
-  // =========================================================================
-  // Loading state
-  // =========================================================================
-  const hasCols =
-    Array.isArray(activeTableMeta.columns) &&
-    activeTableMeta.columns.length > 0;
-
-  const shouldShowFullLoading =
-    !!activeTableMeta.busy &&
-    !activeTableMeta.error &&
-    (!hasCols || !pageReady);
-
-  // =========================================================================
-  // Early returns / Guards
-  // =========================================================================
-  if (loadError) return <ErrorState message={loadError} />;
-  if (!hasAnyWindow) return <EmptyWindow onNewSql={actions.openSql} />;
-
-  if (activeSqlWindow) {
-    return (
-      <SqlWindowPane
-        win={activeSqlWindow}
-        engine={engine}
-        runtimeConnectionId={runtimeConnectionId}
-        metaKey={metaKey}
-        metadata={metadata}
-        onRunSql={runSqlWithHistory}
-      />
-    );
-  }
-
-  if (!activeTableWindow) return null;
-
   if (isShowNewTablePane) {
     return (
       <NewTablePane
@@ -546,12 +554,6 @@ export function ActiveWindowContent() {
     );
   }
 
-  if (shouldShowFullLoading) return <LoadingTableState />;
-
-  if (activeTableMeta.error) {
-    return <ErrorState message={String(activeTableMeta.error)} />;
-  }
-
   // =========================================================================
   // Page view mode calculations
   // =========================================================================
@@ -563,10 +565,10 @@ export function ActiveWindowContent() {
 
     if (typeof activeTableMeta.rowCount === "number") {
       const remaining = Math.max(0, activeTableMeta.rowCount - pageOffset);
-
       return Math.max(MIN_ROWS, Math.min(pageLimit, remaining));
     }
 
+    // Unknown rowCount: assume at least pageLimit (virtual)
     return Math.max(MIN_ROWS, pageLimit);
   }, [activeTableMeta.rowCount, pageOffset, pageLimit]);
 
@@ -617,7 +619,7 @@ export function ActiveWindowContent() {
           <TableData
             key={activeTableWindow.id}
             columns={activeTableMeta.columns ?? []}
-            totalRows={pageTotalRows}
+            totalRows={hasAnyRowData ? pageTotalRows : 0}
             getRowAt={getRowAt}
             onCellChange={onDataChange}
             patches={tablePatches}
@@ -625,6 +627,7 @@ export function ActiveWindowContent() {
             onDeleteRow={handleDeleteRow}
             onAddRow={handleAddRow}
             deletedRows={deletedDataRows}
+            rowsVersion={activeRowsInfo?.version ?? 0}
           />
         )}
       </div>
@@ -634,6 +637,7 @@ export function ActiveWindowContent() {
         onViewModeChange={setViewMode}
         limit={limit}
         offset={offset}
+        loadedMax={activeRowsInfo?.loadedMax ?? -1}
         totalRows={totalRowsForFooter}
         onPageChange={(l, o) => void actions.pageChange(l, o)}
         onAddColumn={handleAddColumn}

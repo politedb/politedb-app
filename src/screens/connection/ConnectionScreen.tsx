@@ -138,51 +138,6 @@ export function ConnectionScreen() {
   });
 
   /* =============================================================================
-   * Auto-load active table rows/meta
-   * ============================================================================= */
-  const lastAutoLoadRef = useRef<string>("");
-
-  useEffect(() => {
-    if (!activeProfileScreen || activeProfileScreen === "main") return;
-    if (!activeTableWindow) return;
-    if (activeTableWindow.table.new) return;
-    if (!runtimeConnectionId) return;
-
-    if (activeTableData.busy) return;
-
-    // With meta-only store:
-    // - "loaded" condition becomes: columns exist (and no error).
-    // - rows are streamed separately, so we don't check rows here.
-    const hasColumns =
-      Array.isArray(activeTableData.columns) &&
-      activeTableData.columns.length > 0;
-    if (hasColumns && !activeTableData.error) return;
-
-    const k = `${activeProfileScreen}:${activeTableWindow.id}:${activeTableWindow.table.schema}.${activeTableWindow.table.name}:${limit}:${offset}`;
-    if (lastAutoLoadRef.current === k) return;
-    lastAutoLoadRef.current = k;
-
-    loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      { limit, offset },
-      { force: true }
-    ).catch(console.error);
-  }, [
-    activeProfileScreen,
-    activeTableWindow?.id,
-    activeTableWindow?.table?.schema,
-    activeTableWindow?.table?.name,
-    runtimeConnectionId,
-    activeTableData.busy,
-    activeTableData.columns,
-    activeTableData.error,
-    limit,
-    offset,
-    loadTableData,
-  ]);
-
-  /* =============================================================================
    * Schema/tables panel (depends on runtimeConnectionId + metaKey)
    * ============================================================================= */
   const {

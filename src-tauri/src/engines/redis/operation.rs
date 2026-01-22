@@ -140,8 +140,8 @@ pub async fn run_redis_command(
         Arc::clone(&ctx.cancel_requested),
     );
 
-    let batch_size = input.batch_size.unwrap_or(200).clamp(1, 2000) as usize;
-    let max_rows = input.max_rows.unwrap_or(50_000).clamp(1, 1_000_000);
+    let batch_size = input.batch_size.unwrap_or(100).clamp(1, 2000) as usize;
+    let max_rows = input.max_rows.unwrap_or(1_000_000).clamp(1, 10_000_000);
 
     // Cancel handle
     let notify = Arc::new(Notify::new());

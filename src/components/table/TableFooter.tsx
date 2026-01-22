@@ -7,7 +7,13 @@ import { Select } from "src/components/common/Select";
 interface Props {
   limit: number;
   offset: number;
+
+  // total rows (rowCount if known, else whatever you pass today)
   totalRows: number;
+
+  // ✅ rows stream progress (global row index max loaded so far)
+  loadedMax?: number;
+
   viewMode: TableViewMode;
   onViewModeChange: (mode: TableViewMode) => void;
   onPageChange: (limit: number, offset: number) => void;
@@ -21,6 +27,7 @@ export function TableFooter({
   limit,
   offset,
   totalRows,
+  loadedMax,
   viewMode,
   onViewModeChange,
   onPageChange,
@@ -48,15 +55,39 @@ export function TableFooter({
         onPageChange(limit, newOffset);
       }
     },
-    [limit, offset, pagination.totalPages, onPageChange]
+    [limit, pagination.totalRows, onPageChange]
   );
 
-  const handlePageSizeChange = (limit: number) => {
-    onPageChange(limit, 0);
+  const handlePageSizeChange = (nextLimit: number) => {
+    onPageChange(nextLimit, 0);
   };
+
+  // ✅ Loaded label in the middle
+  const loadedLabel = useMemo(() => {
+    if (viewMode !== "data") return "";
+
+    if (typeof loadedMax !== "number" || loadedMax < 0) {
+      return "Rows loaded: 0";
+    }
+
+    // loadedMax is 0-based index => +1 rows count
+    const loadedCount = loadedMax + 1;
+
+    // show "x–y" for current page, based on loadedMax
+    const start = offset + 1;
+    const end = Math.min(offset + limit, loadedCount);
+
+    if (end < start) return `Rows loaded: ${loadedCount}`;
+
+    // If totalRows is unknown, you can pass 0. We won't show "of N".
+    const totalPart = totalRows > 0 ? ` of ${totalRows}` : "";
+
+    return `Rows loaded: ${start}–${end}${totalPart}`;
+  }, [viewMode, loadedMax, offset, limit, totalRows]);
 
   return (
     <div class="flex items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
+      {/* LEFT */}
       <div class="flex items-center gap-1.5">
         <TableViewToggle
           viewMode={viewMode}
@@ -84,6 +115,12 @@ export function TableFooter({
         )}
       </div>
 
+      {/* CENTER */}
+      {viewMode === "data" && (
+        <div class="text-xs text-neutral-600 tabular-nums">{loadedLabel}</div>
+      )}
+
+      {/* RIGHT */}
       {viewMode === "data" && (
         <div class="flex items-center gap-2">
           <Button variant="shadow" onClick={onFilters}>

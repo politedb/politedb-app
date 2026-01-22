@@ -32,6 +32,7 @@ type Props = {
 
   onDeleteRow?: (rowIdx: number) => void;
   onAddRow?: () => void;
+  dataVersion: number;
 };
 
 // ============================================================================
@@ -67,7 +68,7 @@ function hitTestCol(
   lefts: number[],
   widthByName: Record<string, number>
 ) {
-  // linear scan is fine for ~30 columns
+  // Linear scan is acceptable for < 100 columns.
   for (let i = 0; i < cols.length; i++) {
     const w = widthByName[cols[i]!.name] ?? 140;
     const l = lefts[i]!;
@@ -77,14 +78,14 @@ function hitTestCol(
 }
 
 // ============================================================================
-// Main
+// Main Component
 // ============================================================================
 
 export function CanvasTable({
   columns,
   totalRows,
   getRowAt,
-  widthByName,
+  widthByName = {}, // Default empty if not provided
   emptyColumnWidth,
   selected,
   editing,
@@ -94,12 +95,38 @@ export function CanvasTable({
   onExitEdit,
   onDeleteRow,
   onAddRow,
+  dataVersion,
 }: Props) {
+  // --- Refs for DOM elements ---
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  // editor overlay
+  // --- INTERNAL STATE FOR COLUMNS ---
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => ({
+    ...widthByName,
+  }));
+
+  // Sync widthByName if prop changes (optional)
+  useEffect(() => {
+    setColWidths((prev) => ({ ...prev, ...widthByName }));
+  }, [widthByName]);
+
+  // --- Optimization: Scroll State via Refs ---
+  const scrollRef = useRef({ top: 0, left: 0 });
+  const rafRef = useRef<number | null>(null);
+
+  // --- Resize State ---
+  const resizingRef = useRef<{
+    colName: string;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+
+  // --- Editor State ---
   const editorRef = useRef<HTMLInputElement>(null);
   const [editorValue, setEditorValue] = useState("");
   const [editorRect, setEditorRect] = useState<{
@@ -109,23 +136,25 @@ export function CanvasTable({
     h: number;
   } | null>(null);
 
+  // --- Viewport ---
   const [viewport, setViewport] = useState({ w: 1, h: 1 });
-  const [scroll, setScroll] = useState({ top: 0, left: 0 });
 
+  // --- Memoized Computations (Using colWidths state) ---
   const totalWidth = useMemo(
-    () => sumWidths(columns, widthByName, emptyColumnWidth),
-    [columns, widthByName, emptyColumnWidth]
+    () => sumWidths(columns, colWidths, emptyColumnWidth),
+    [columns, colWidths, emptyColumnWidth]
   );
 
   const colLefts = useMemo(
-    () => buildColLefts(columns, widthByName),
-    [columns, widthByName]
+    () => buildColLefts(columns, colWidths),
+    [columns, colWidths]
   );
 
-  // --------------------------------------------------------------------------
-  // Resize observer (viewport) - observe scroller
-  // --------------------------------------------------------------------------
+  const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
 
+  // --------------------------------------------------------------------------
+  // Resize Observer
+  // --------------------------------------------------------------------------
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -143,200 +172,249 @@ export function CanvasTable({
   }, []);
 
   // --------------------------------------------------------------------------
-  // Scroll
+  // Canvas Resolution Setup (HiDPI support)
   // --------------------------------------------------------------------------
-  const onScroll = useCallback((e: Event) => {
-    const el = e.currentTarget as HTMLDivElement;
-
-    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
-    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-
-    const left = Math.max(0, Math.min(el.scrollLeft, maxLeft));
-    const top = Math.max(0, Math.min(el.scrollTop, maxTop));
-
-    // Avoid state churn if unchanged
-    setScroll((prev) =>
-      prev.left === left && prev.top === top ? prev : { top, left }
-    );
-  }, []);
-
-  // --------------------------------------------------------------------------
-  // Canvas backing store (HiDPI)
-  // Canvas is only for BODY, so height = viewport.h - HEADER_HEIGHT
-  // --------------------------------------------------------------------------
-
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
     const dpr = window.devicePixelRatio || 1;
-
     canvas.style.width = `${viewport.w}px`;
     canvas.style.height = `${bodyH}px`;
     canvas.width = Math.floor(viewport.w * dpr);
     canvas.height = Math.floor(bodyH * dpr);
 
     const ctx = canvas.getContext("2d");
+    ctxRef.current = ctx;
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }, [viewport.w, viewport.h]);
+
+    draw();
+  }, [viewport.w, viewport.h, bodyH]);
 
   // --------------------------------------------------------------------------
-  // Visible rows (body area)
+  // Helper: Get Cell Rect
   // --------------------------------------------------------------------------
-
-  const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
-
-  const visible = useMemo(() => {
-    const firstRow = Math.max(0, Math.floor(scroll.top / ROW_HEIGHT));
-    const visibleCount = Math.ceil(bodyH / ROW_HEIGHT) + 4; // small overscan
-    const lastRow = Math.min(totalRows, firstRow + visibleCount);
-    return { firstRow, lastRow };
-  }, [scroll.top, bodyH, totalRows]);
-
-  // --------------------------------------------------------------------------
-  // Cell rect (canvas/body coords; y=0 at first row)
-  // Note: editor overlay uses root coords => add HEADER_HEIGHT later.
-  // --------------------------------------------------------------------------
-
-  const getCellRect = useCallback(
-    (rowIdx: number, colIdx: number) => {
+  const getRect = useCallback(
+    (
+      rowIdx: number,
+      colIdx: number,
+      currentLeft: number,
+      currentTop: number
+    ) => {
       const col = columns[colIdx];
       if (!col) return null;
 
-      const x = (colLefts[colIdx] ?? 0) - scroll.left;
-      const w = widthByName[col.name] ?? 140;
-
-      const y = rowIdx * ROW_HEIGHT - scroll.top; // body coords
+      const x = (colLefts[colIdx] ?? 0) - currentLeft;
+      const w = colWidths[col.name] ?? 140; // Use state
+      const y = rowIdx * ROW_HEIGHT - currentTop;
       const h = ROW_HEIGHT;
 
       return { x, y, w, h };
     },
-    [columns, colLefts, scroll.left, scroll.top, widthByName]
+    [columns, colLefts, colWidths]
   );
 
   // --------------------------------------------------------------------------
-  // Draw canvas (BODY ONLY)
+  // DRAW FUNCTION (Uses colWidths state)
   // --------------------------------------------------------------------------
-
-  useEffect(() => {
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
+    const ctx = ctxRef.current;
     if (!canvas || !ctx) return;
 
-    ctx.clearRect(0, 0, viewport.w, bodyH);
+    const { top, left } = scrollRef.current;
 
-    // Background
+    const firstRow = Math.max(0, Math.floor(top / ROW_HEIGHT));
+    const visibleCount = Math.ceil(bodyH / ROW_HEIGHT) + 2;
+    const lastRow = Math.min(totalRows, firstRow + visibleCount);
+
+    // 1. Clear
+    ctx.clearRect(0, 0, viewport.w, bodyH);
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, viewport.w, bodyH);
 
-    // Zebra background (fill whole body viewport)
+    // 2. Zebra
     {
-      const firstBandRow = Math.floor(scroll.top / ROW_HEIGHT);
-      const startY = -(scroll.top % ROW_HEIGHT || 0);
-
-      for (let i = 0, y = startY; y < bodyH; i++, y += ROW_HEIGHT) {
-        const row = firstBandRow + i;
-        if ((row & 1) === 1) {
+      const startY = -(top % ROW_HEIGHT || 0);
+      for (let y = startY; y < bodyH; y += ROW_HEIGHT) {
+        const absoluteRowIdx = Math.floor((top + y) / ROW_HEIGHT);
+        if ((absoluteRowIdx & 1) === 1) {
           ctx.fillStyle = "#fafafa";
           ctx.fillRect(0, y, viewport.w, ROW_HEIGHT);
         }
       }
     }
 
-    // Horizontal grid lines
+    // 3. Grid Lines
+    ctx.beginPath();
     ctx.strokeStyle = "#f3f4f6";
-    ctx.beginPath();
-    {
-      const startY = -(scroll.top % ROW_HEIGHT || 0);
-      for (let y = startY; y <= bodyH; y += ROW_HEIGHT) {
-        const yy = Math.floor(y) + 0.5;
-        ctx.moveTo(0, yy);
-        ctx.lineTo(viewport.w, yy);
-      }
+
+    // Horizontal
+    const startY = -(top % ROW_HEIGHT || 0);
+    for (let y = startY; y <= bodyH; y += ROW_HEIGHT) {
+      const yy = Math.floor(y) + 0.5;
+      ctx.moveTo(0, yy);
+      ctx.lineTo(viewport.w, yy);
     }
-    ctx.stroke();
 
-    // Vertical grid lines
+    // Vertical
     ctx.strokeStyle = "#e5e7eb";
-    ctx.beginPath();
-
-    // Left border
     ctx.moveTo(0.5, 0);
     ctx.lineTo(0.5, bodyH);
 
     for (let c = 0; c < columns.length; c++) {
       const col = columns[c]!;
-      const x = (colLefts[c] ?? 0) - scroll.left;
-      const w = widthByName[col.name] ?? 140;
+      const x = (colLefts[c] ?? 0) - left;
+      const w = colWidths[col.name] ?? 140; // Use state
       const xr = x + w;
 
-      if (xr < 0 || xr > viewport.w) continue;
+      if (xr < 0 || x > viewport.w) continue;
 
       const xx = Math.floor(xr) + 0.5;
       ctx.moveTo(xx, 0);
       ctx.lineTo(xx, bodyH);
     }
-
-    // Right border
     ctx.moveTo(viewport.w - 0.5, 0);
     ctx.lineTo(viewport.w - 0.5, bodyH);
-
     ctx.stroke();
 
-    // Text
+    // 4. Content
     ctx.font = "400 13px system-ui, -apple-system, Segoe UI, sans-serif";
     ctx.textBaseline = "middle";
 
-    for (let r = visible.firstRow; r < visible.lastRow; r++) {
-      const y = r * ROW_HEIGHT - scroll.top;
-
+    for (let r = firstRow; r < lastRow; r++) {
+      const y = r * ROW_HEIGHT - top;
       const row = getRowAt(r);
       if (!row) continue;
 
-      // Selected cell background
       if (selected && selected.rowIdx === r) {
-        const rect = getCellRect(r, selected.colIdx);
+        const rect = getRect(r, selected.colIdx, left, top);
         if (rect) {
-          ctx.fillStyle = "#dbeafe";
-          ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+          if (rect.x + rect.w > 0 && rect.x < viewport.w) {
+            ctx.fillStyle = "#dbeafe";
+            ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+          }
         }
       }
 
       for (let c = 0; c < columns.length; c++) {
         const col = columns[c]!;
-        const x = (colLefts[c] ?? 0) - scroll.left;
-        const w = widthByName[col.name] ?? 140;
+        const x = (colLefts[c] ?? 0) - left;
+        const w = colWidths[col.name] ?? 140; // Use state
+
         if (x + w < 0 || x > viewport.w) continue;
 
-        const v = (row as any)[c] ?? null;
+        const v = row[c] ?? null;
         const s = cellToString(v);
 
-        ctx.fillStyle = s ? "#111827" : "#9ca3af";
-        drawTruncatedText(ctx, s || "NULL", x + 8, y + ROW_HEIGHT / 2, w - 16);
+        if (s) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x + 8, y, w - 16, ROW_HEIGHT);
+          ctx.clip();
+
+          ctx.fillStyle = "#111827";
+          ctx.fillText(s, x + 8, y + ROW_HEIGHT / 2);
+
+          ctx.restore();
+        }
       }
     }
   }, [
     viewport.w,
-    viewport.h,
     bodyH,
-    scroll.top,
-    scroll.left,
-    visible.firstRow,
-    visible.lastRow,
+    totalRows,
     columns,
     colLefts,
-    widthByName,
+    colWidths, // Dependent on width changes
     getRowAt,
     selected,
-    getCellRect,
+    getRect,
   ]);
 
-  // --------------------------------------------------------------------------
-  // Mouse interaction (INSIDE SCROLLER)
-  // y0 includes header area; subtract HEADER_HEIGHT for body.
-  // --------------------------------------------------------------------------
+  useEffect(() => {
+    draw();
+  }, [draw, dataVersion]);
 
+  // --------------------------------------------------------------------------
+  // Scroll Handler
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      scrollRef.current.left = el.scrollLeft;
+      scrollRef.current.top = el.scrollTop;
+
+      if (headerRef.current) {
+        headerRef.current.style.transform = `translateX(${-el.scrollLeft}px)`;
+      }
+
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          draw();
+          rafRef.current = null;
+        });
+      }
+    };
+
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [draw]);
+
+  // --------------------------------------------------------------------------
+  // Resize Handlers (Logic)
+  // --------------------------------------------------------------------------
+  const handleResizeStart = (
+    e: MouseEvent,
+    colName: string,
+    currentWidth: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    resizingRef.current = {
+      colName,
+      startX: e.clientX,
+      startWidth: currentWidth,
+    };
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const onMove = (e: MouseEvent) => {
+      const state = resizingRef.current;
+      if (!state) return;
+
+      const delta = e.clientX - state.startX;
+      const newW = Math.max(50, state.startWidth + delta);
+
+      // Update internal state -> Triggers re-render -> Updates colWidths -> Updates Draw
+      setColWidths((prev) => ({
+        ...prev,
+        [state.colName]: newW,
+      }));
+    };
+
+    const onUp = () => {
+      setIsResizing(false);
+      resizingRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isResizing]);
+
+  // --------------------------------------------------------------------------
+  // Mouse Handlers (Select / Edit)
+  // --------------------------------------------------------------------------
   const handleMouseDown = useCallback(
     (e: MouseEvent) => {
       const host = scrollerRef.current;
@@ -346,29 +424,21 @@ export function CanvasTable({
       const x0 = e.clientX - rect.left;
       const y0 = e.clientY - rect.top;
 
-      // Click on header => ignore for now
       if (y0 < HEADER_HEIGHT) return;
 
-      const x = x0 + scroll.left;
-      const y = y0 - HEADER_HEIGHT + scroll.top;
+      const { left, top } = scrollRef.current;
+      const x = x0 + left;
+      const y = y0 - HEADER_HEIGHT + top;
 
       const rowIdx = Math.floor(y / ROW_HEIGHT);
       if (rowIdx < 0 || rowIdx >= totalRows) return;
 
-      const colIdx = hitTestCol(x, columns, colLefts, widthByName);
+      const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
 
       onSelect?.(rowIdx, colIdx);
     },
-    [
-      scroll.left,
-      scroll.top,
-      columns,
-      colLefts,
-      widthByName,
-      totalRows,
-      onSelect,
-    ]
+    [columns, colLefts, colWidths, totalRows, onSelect]
   );
 
   const handleDblClick = useCallback(
@@ -382,53 +452,43 @@ export function CanvasTable({
 
       if (y0 < HEADER_HEIGHT) return;
 
-      const x = x0 + scroll.left;
-      const y = y0 - HEADER_HEIGHT + scroll.top;
+      const { left, top } = scrollRef.current;
+      const x = x0 + left;
+      const y = y0 - HEADER_HEIGHT + top;
 
       const rowIdx = Math.floor(y / ROW_HEIGHT);
 
-      // dblclick below data => add row
       if (rowIdx >= totalRows) {
         onAddRow?.();
         return;
       }
+      if (rowIdx < 0) return;
 
-      if (rowIdx < 0 || rowIdx >= totalRows) return;
-
-      const colIdx = hitTestCol(x, columns, colLefts, widthByName);
+      const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
 
       onStartEdit?.({ rowIdx, colIdx });
 
       const row = getRowAt(rowIdx);
-      const s = cellToString((row as any)?.[colIdx] ?? null);
+      const s = cellToString(row?.[colIdx] ?? null);
       setEditorValue(s);
 
-      const r2 = getCellRect(rowIdx, colIdx);
+      const r2 = getRect(rowIdx, colIdx, left, top);
       if (r2) setEditorRect(r2);
 
       queueMicrotask(() => editorRef.current?.focus());
     },
     [
-      scroll.left,
-      scroll.top,
       columns,
       colLefts,
-      widthByName,
+      colWidths,
       totalRows,
       onAddRow,
       onStartEdit,
       getRowAt,
-      getCellRect,
+      getRect,
     ]
   );
-
-  // Keep editor synced on scroll
-  useEffect(() => {
-    if (!editing) return;
-    const r = getCellRect(editing.rowIdx, editing.colIdx);
-    if (r) setEditorRect(r);
-  }, [editing, getCellRect, scroll.left, scroll.top]);
 
   const commitAndExit = useCallback(() => {
     if (!editing) return;
@@ -442,20 +502,27 @@ export function CanvasTable({
     setEditorRect(null);
   }, [onExitEdit]);
 
+  // Sync editor position when widths change or scrolling
+  useEffect(() => {
+    if (!editing) return;
+    const { left, top } = scrollRef.current;
+    const r = getRect(editing.rowIdx, editing.colIdx, left, top);
+    if (r) setEditorRect(r);
+  }, [editing, getRect, colWidths]);
+
   // --------------------------------------------------------------------------
   // Render
-  // Header wrapper is pinned (sticky left=0) and translated by -scrollLeft,
-  // matching the body canvas behavior -> "stuck" feeling.
   // --------------------------------------------------------------------------
 
   return (
     <div
       ref={rootRef}
-      class="relative h-full w-full bg-white"
+      class={`relative h-full w-full bg-white ${
+        isResizing ? "cursor-col-resize select-none" : ""
+      }`}
       tabIndex={0}
       onKeyDown={(e) => {
         if (!selected) return;
-
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
           onDeleteRow?.(selected.rowIdx);
@@ -466,33 +533,42 @@ export function CanvasTable({
         ref={scrollerRef}
         class="relative h-full w-full overflow-auto overscroll-none"
         style={{ overscrollBehavior: "none" }}
-        onScroll={onScroll as any}
-        onMouseDown={handleMouseDown as any}
-        onDblClick={handleDblClick as any}
+        onMouseDown={handleMouseDown}
+        onDblClick={handleDblClick}
       >
-        {/* Header (pinned to viewport like canvas) */}
+        {/* Sticky Header Container */}
         <div
           class="sticky top-0 left-0 z-50 overflow-hidden border-b border-neutral-200 bg-neutral-50"
           style={{ width: viewport.w }}
         >
+          {/* Inner Header */}
           <div
+            ref={headerRef}
             class="flex"
             style={{
               height: HEADER_HEIGHT,
               width: Math.max(1, totalWidth),
-              transform: `translateX(${-scroll.left}px)`,
               willChange: "transform",
+              paddingLeft: 1,
             }}
           >
             {columns.map((col) => {
-              const w = widthByName[col.name] ?? 140;
+              // Render using internal state
+              const w = colWidths[col.name] ?? 140;
               return (
                 <div
                   key={col.name}
-                  class="box-border flex items-center border-r border-neutral-200 px-2 text-xs font-semibold whitespace-nowrap text-neutral-700"
+                  class="relative box-border flex items-center border-r border-neutral-200 px-2 text-xs font-semibold whitespace-nowrap text-neutral-700"
                   style={{ width: w, height: HEADER_HEIGHT }}
                 >
-                  <span class="truncate">{col.name}</span>
+                  <span class="truncate select-none">{col.name}</span>
+
+                  {/* --- RESIZE HANDLE --- */}
+                  <div
+                    class="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
+                    style={{ right: 0, width: 2, cursor: "col-resize" }}
+                    onMouseDown={(e) => handleResizeStart(e, col.name, w)}
+                  />
                 </div>
               );
             })}
@@ -505,7 +581,7 @@ export function CanvasTable({
           </div>
         </div>
 
-        {/* Content spacer */}
+        {/* Content Height Spacer */}
         <div
           style={{
             width: Math.max(1, totalWidth),
@@ -513,7 +589,7 @@ export function CanvasTable({
             position: "relative",
           }}
         >
-          {/* Canvas pinned below header */}
+          {/* Canvas Layer */}
           <canvas
             ref={canvasRef}
             style={{
@@ -527,11 +603,11 @@ export function CanvasTable({
         </div>
       </div>
 
-      {/* Editor overlay (root coords) */}
-      {editorRect && editing && (
+      {/* Editor Overlay */}
+      {editorRect && editing && !isResizing && (
         <input
           ref={editorRef}
-          class="absolute z-60 border border-blue-400 bg-white px-2 text-sm outline-none"
+          class="absolute z-60 border border-blue-400 bg-white px-2 text-sm shadow-sm outline-none"
           style={{
             left: editorRect.x,
             top: editorRect.y + HEADER_HEIGHT,
@@ -551,32 +627,4 @@ export function CanvasTable({
       )}
     </div>
   );
-}
-
-// ============================================================================
-// Text truncation
-// ============================================================================
-
-function drawTruncatedText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number
-) {
-  if (maxWidth <= 0) return;
-  if (ctx.measureText(text).width <= maxWidth) {
-    ctx.fillText(text, x, y);
-    return;
-  }
-  const ell = "…";
-  let lo = 0;
-  let hi = text.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    const s = text.slice(0, mid) + ell;
-    if (ctx.measureText(s).width <= maxWidth) lo = mid + 1;
-    else hi = mid;
-  }
-  ctx.fillText(text.slice(0, Math.max(0, lo - 1)) + ell, x, y);
 }

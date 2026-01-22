@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { profileConnect } from "src/lib/tauri/profile";
-import { useScreenStore } from "src/stores/screen";
+import { ProfileTab, useScreenStore } from "src/stores/screen";
 
-export function useEnsureRuntimeConnection(activeTab: any | null) {
+export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
   const { updateTab } = useScreenStore();
   const [connecting, setConnecting] = useState(false);
 
