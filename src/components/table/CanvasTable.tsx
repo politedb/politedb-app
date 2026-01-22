@@ -29,8 +29,8 @@ type Props = {
   onStartEdit?: (cell: EditingCell) => void;
   onCommitEdit?: (cell: EditingCell, value: string) => void;
   onExitEdit?: () => void;
-  onDeleteRow?: (rowIdx: number) => void;
 
+  onDeleteRow?: (rowIdx: number) => void;
   onAddRow?: () => void;
 };
 
@@ -76,6 +76,10 @@ function hitTestCol(
   return -1;
 }
 
+// ============================================================================
+// Main
+// ============================================================================
+
 export function CanvasTable({
   columns,
   totalRows,
@@ -88,8 +92,8 @@ export function CanvasTable({
   onStartEdit,
   onCommitEdit,
   onExitEdit,
-  onAddRow,
   onDeleteRow,
+  onAddRow,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -119,7 +123,7 @@ export function CanvasTable({
   );
 
   // --------------------------------------------------------------------------
-  // Resize observer (viewport)
+  // Resize observer (viewport) - observe scroller
   // --------------------------------------------------------------------------
 
   useLayoutEffect(() => {
@@ -141,43 +145,58 @@ export function CanvasTable({
   // --------------------------------------------------------------------------
   // Scroll
   // --------------------------------------------------------------------------
-
   const onScroll = useCallback((e: Event) => {
     const el = e.currentTarget as HTMLDivElement;
-    setScroll({ top: el.scrollTop, left: el.scrollLeft });
+
+    const maxLeft = Math.max(0, el.scrollWidth - el.clientWidth);
+    const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+
+    const left = Math.max(0, Math.min(el.scrollLeft, maxLeft));
+    const top = Math.max(0, Math.min(el.scrollTop, maxTop));
+
+    // Avoid state churn if unchanged
+    setScroll((prev) =>
+      prev.left === left && prev.top === top ? prev : { top, left }
+    );
   }, []);
 
   // --------------------------------------------------------------------------
   // Canvas backing store (HiDPI)
+  // Canvas is only for BODY, so height = viewport.h - HEADER_HEIGHT
   // --------------------------------------------------------------------------
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
     const dpr = window.devicePixelRatio || 1;
+
     canvas.style.width = `${viewport.w}px`;
-    canvas.style.height = `${viewport.h}px`;
+    canvas.style.height = `${bodyH}px`;
     canvas.width = Math.floor(viewport.w * dpr);
-    canvas.height = Math.floor(viewport.h * dpr);
+    canvas.height = Math.floor(bodyH * dpr);
 
     const ctx = canvas.getContext("2d");
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }, [viewport.w, viewport.h]);
 
   // --------------------------------------------------------------------------
-  // Visible rows
+  // Visible rows (body area)
   // --------------------------------------------------------------------------
+
+  const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
 
   const visible = useMemo(() => {
     const firstRow = Math.max(0, Math.floor(scroll.top / ROW_HEIGHT));
-    const visibleCount = Math.ceil(viewport.h / ROW_HEIGHT) + 4; // small overscan
+    const visibleCount = Math.ceil(bodyH / ROW_HEIGHT) + 4; // small overscan
     const lastRow = Math.min(totalRows, firstRow + visibleCount);
     return { firstRow, lastRow };
-  }, [scroll.top, viewport.h, totalRows]);
+  }, [scroll.top, bodyH, totalRows]);
 
   // --------------------------------------------------------------------------
-  // Cell rect (for editor overlay)
+  // Cell rect (canvas/body coords; y=0 at first row)
+  // Note: editor overlay uses root coords => add HEADER_HEIGHT later.
   // --------------------------------------------------------------------------
 
   const getCellRect = useCallback(
@@ -188,7 +207,7 @@ export function CanvasTable({
       const x = (colLefts[colIdx] ?? 0) - scroll.left;
       const w = widthByName[col.name] ?? 140;
 
-      const y = rowIdx * ROW_HEIGHT - scroll.top;
+      const y = rowIdx * ROW_HEIGHT - scroll.top; // body coords
       const h = ROW_HEIGHT;
 
       return { x, y, w, h };
@@ -205,29 +224,36 @@ export function CanvasTable({
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
 
-    ctx.clearRect(0, 0, viewport.w, viewport.h);
+    ctx.clearRect(0, 0, viewport.w, bodyH);
 
     // Background
     ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, viewport.w, viewport.h);
+    ctx.fillRect(0, 0, viewport.w, bodyH);
 
-    // Zebra background
-    for (let r = visible.firstRow; r < visible.lastRow; r++) {
-      if ((r & 1) === 1) {
-        const y = r * ROW_HEIGHT - scroll.top;
-        ctx.fillStyle = "#fafafa";
-        ctx.fillRect(0, y, viewport.w, ROW_HEIGHT);
+    // Zebra background (fill whole body viewport)
+    {
+      const firstBandRow = Math.floor(scroll.top / ROW_HEIGHT);
+      const startY = -(scroll.top % ROW_HEIGHT || 0);
+
+      for (let i = 0, y = startY; y < bodyH; i++, y += ROW_HEIGHT) {
+        const row = firstBandRow + i;
+        if ((row & 1) === 1) {
+          ctx.fillStyle = "#fafafa";
+          ctx.fillRect(0, y, viewport.w, ROW_HEIGHT);
+        }
       }
     }
 
     // Horizontal grid lines
     ctx.strokeStyle = "#f3f4f6";
     ctx.beginPath();
-    const startY = -(scroll.top % ROW_HEIGHT || 0);
-    for (let y = startY; y <= viewport.h; y += ROW_HEIGHT) {
-      const yy = Math.floor(y) + 0.5;
-      ctx.moveTo(0, yy);
-      ctx.lineTo(viewport.w, yy);
+    {
+      const startY = -(scroll.top % ROW_HEIGHT || 0);
+      for (let y = startY; y <= bodyH; y += ROW_HEIGHT) {
+        const yy = Math.floor(y) + 0.5;
+        ctx.moveTo(0, yy);
+        ctx.lineTo(viewport.w, yy);
+      }
     }
     ctx.stroke();
 
@@ -237,7 +263,7 @@ export function CanvasTable({
 
     // Left border
     ctx.moveTo(0.5, 0);
-    ctx.lineTo(0.5, viewport.h);
+    ctx.lineTo(0.5, bodyH);
 
     for (let c = 0; c < columns.length; c++) {
       const col = columns[c]!;
@@ -249,12 +275,12 @@ export function CanvasTable({
 
       const xx = Math.floor(xr) + 0.5;
       ctx.moveTo(xx, 0);
-      ctx.lineTo(xx, viewport.h);
+      ctx.lineTo(xx, bodyH);
     }
 
     // Right border
     ctx.moveTo(viewport.w - 0.5, 0);
-    ctx.lineTo(viewport.w - 0.5, viewport.h);
+    ctx.lineTo(viewport.w - 0.5, bodyH);
 
     ctx.stroke();
 
@@ -283,7 +309,7 @@ export function CanvasTable({
         const w = widthByName[col.name] ?? 140;
         if (x + w < 0 || x > viewport.w) continue;
 
-        const v = row[c] ?? null;
+        const v = (row as any)[c] ?? null;
         const s = cellToString(v);
 
         ctx.fillStyle = s ? "#111827" : "#9ca3af";
@@ -293,6 +319,7 @@ export function CanvasTable({
   }, [
     viewport.w,
     viewport.h,
+    bodyH,
     scroll.top,
     scroll.left,
     visible.firstRow,
@@ -306,7 +333,8 @@ export function CanvasTable({
   ]);
 
   // --------------------------------------------------------------------------
-  // Mouse interaction
+  // Mouse interaction (INSIDE SCROLLER)
+  // y0 includes header area; subtract HEADER_HEIGHT for body.
   // --------------------------------------------------------------------------
 
   const handleMouseDown = useCallback(
@@ -315,8 +343,14 @@ export function CanvasTable({
       if (!host) return;
 
       const rect = host.getBoundingClientRect();
-      const x = e.clientX - rect.left + scroll.left;
-      const y = e.clientY - rect.top + scroll.top;
+      const x0 = e.clientX - rect.left;
+      const y0 = e.clientY - rect.top;
+
+      // Click on header => ignore for now
+      if (y0 < HEADER_HEIGHT) return;
+
+      const x = x0 + scroll.left;
+      const y = y0 - HEADER_HEIGHT + scroll.top;
 
       const rowIdx = Math.floor(y / ROW_HEIGHT);
       if (rowIdx < 0 || rowIdx >= totalRows) return;
@@ -343,8 +377,13 @@ export function CanvasTable({
       if (!host) return;
 
       const rect = host.getBoundingClientRect();
-      const x = e.clientX - rect.left + scroll.left;
-      const y = e.clientY - rect.top + scroll.top;
+      const x0 = e.clientX - rect.left;
+      const y0 = e.clientY - rect.top;
+
+      if (y0 < HEADER_HEIGHT) return;
+
+      const x = x0 + scroll.left;
+      const y = y0 - HEADER_HEIGHT + scroll.top;
 
       const rowIdx = Math.floor(y / ROW_HEIGHT);
 
@@ -362,7 +401,7 @@ export function CanvasTable({
       onStartEdit?.({ rowIdx, colIdx });
 
       const row = getRowAt(rowIdx);
-      const s = cellToString(row?.[colIdx] ?? null);
+      const s = cellToString((row as any)?.[colIdx] ?? null);
       setEditorValue(s);
 
       const r2 = getCellRect(rowIdx, colIdx);
@@ -405,6 +444,8 @@ export function CanvasTable({
 
   // --------------------------------------------------------------------------
   // Render
+  // Header wrapper is pinned (sticky left=0) and translated by -scrollLeft,
+  // matching the body canvas behavior -> "stuck" feeling.
   // --------------------------------------------------------------------------
 
   return (
@@ -421,59 +462,63 @@ export function CanvasTable({
         }
       }}
     >
-      {/* HEADER */}
-      <div class="sticky top-0 z-50 border-b border-neutral-200 bg-neutral-50">
-        <div
-          class="flex"
-          style={{
-            height: HEADER_HEIGHT,
-            width: Math.max(1, totalWidth),
-            transform: `translateX(${-scroll.left}px)`,
-            willChange: "transform",
-            paddingLeft: 1, // tiny nudge
-          }}
-        >
-          {columns.map((col) => {
-            const w = widthByName[col.name] ?? 140;
-            return (
-              <div
-                key={col.name}
-                class="box-border flex items-center border-r border-neutral-200 px-2 text-xs font-semibold whitespace-nowrap text-neutral-700"
-                style={{ width: w, height: HEADER_HEIGHT }}
-              >
-                <span class="truncate">{col.name}</span>
-              </div>
-            );
-          })}
-          {emptyColumnWidth > 0 && (
-            <div
-              class="box-border border-r border-neutral-200"
-              style={{ width: emptyColumnWidth, height: HEADER_HEIGHT }}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* BODY */}
       <div
         ref={scrollerRef}
-        class="relative h-[calc(100%-32px)] w-full overflow-auto"
+        class="relative h-full w-full overflow-auto overscroll-none"
+        style={{ overscrollBehavior: "none" }}
         onScroll={onScroll as any}
         onMouseDown={handleMouseDown as any}
         onDblClick={handleDblClick as any}
       >
+        {/* Header (pinned to viewport like canvas) */}
+        <div
+          class="sticky top-0 left-0 z-50 overflow-hidden border-b border-neutral-200 bg-neutral-50"
+          style={{ width: viewport.w }}
+        >
+          <div
+            class="flex"
+            style={{
+              height: HEADER_HEIGHT,
+              width: Math.max(1, totalWidth),
+              transform: `translateX(${-scroll.left}px)`,
+              willChange: "transform",
+            }}
+          >
+            {columns.map((col) => {
+              const w = widthByName[col.name] ?? 140;
+              return (
+                <div
+                  key={col.name}
+                  class="box-border flex items-center border-r border-neutral-200 px-2 text-xs font-semibold whitespace-nowrap text-neutral-700"
+                  style={{ width: w, height: HEADER_HEIGHT }}
+                >
+                  <span class="truncate">{col.name}</span>
+                </div>
+              );
+            })}
+            {emptyColumnWidth > 0 && (
+              <div
+                class="box-border border-r border-neutral-200"
+                style={{ width: emptyColumnWidth, height: HEADER_HEIGHT }}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Content spacer */}
         <div
           style={{
             width: Math.max(1, totalWidth),
-            height: Math.max(1, totalRows * ROW_HEIGHT),
+            height: Math.max(1, HEADER_HEIGHT + totalRows * ROW_HEIGHT),
             position: "relative",
           }}
         >
+          {/* Canvas pinned below header */}
           <canvas
             ref={canvasRef}
             style={{
               position: "sticky",
-              top: 0,
+              top: HEADER_HEIGHT,
               left: 0,
               display: "block",
               zIndex: 1,
@@ -482,7 +527,7 @@ export function CanvasTable({
         </div>
       </div>
 
-      {/* EDITOR OVERLAY */}
+      {/* Editor overlay (root coords) */}
       {editorRect && editing && (
         <input
           ref={editorRef}
