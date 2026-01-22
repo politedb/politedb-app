@@ -1,12 +1,12 @@
-import { operationBus } from "../lib/tauri/operationBus";
 import {
   ColumnMeta,
   operationExecute,
   operationCancel,
   QueryResult,
   TableChunk,
-} from "../lib/tauri";
+} from "src/lib/tauri";
 import { toErrorMessage } from "./queryValidate";
+import { operationBus } from "./operationBus";
 
 type RunSqlOptions = {
   batchSize?: number;
@@ -104,7 +104,7 @@ export async function runSqlQuery(
           const rows = chunk.rows ?? [];
           if (!rows.length) return;
 
-          const off = Number((chunk as any).row_offset ?? buffer.length);
+          const off = Number(chunk.row_offset ?? buffer.length);
 
           if (buffer.length < off) buffer.length = off;
           for (let i = 0; i < rows.length; i++) {
@@ -124,4 +124,21 @@ export async function runSqlQuery(
       finalizeErr(e);
     }
   });
+}
+
+export async function startSqlQueryStream(
+  connection_id: string,
+  sql: string,
+  opts?: RunSqlOptions
+): Promise<string> {
+  const opId = await operationExecute({
+    connection_id,
+    kind: "sql_query",
+    sql: {
+      sql,
+      batch_size: opts?.batchSize ?? 200,
+      max_rows: opts?.maxRows ?? 50_000,
+    },
+  });
+  return opId;
 }

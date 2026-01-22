@@ -1,5 +1,7 @@
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import type { TableChunk, OperationDone } from "./types";
+import { CMD } from "./commands";
 
 type OpId = string;
 
@@ -9,171 +11,401 @@ type OpHandlers = {
   onError?: (err: any) => void;
 };
 
+type CachedOp = {
+  chunks: TableChunk[];
+  done?: OperationDone;
+  error?: any;
+  createdAt: number;
+};
+
 type BusState = {
   inited: boolean;
   unsubs: UnlistenFn[];
   handlersByOp: Map<OpId, OpHandlers>;
-
-  // ✅ caches to avoid missing early terminal events
-  doneByOp: Map<OpId, OperationDone>;
-  errByOp: Map<OpId, any>;
-
-  // ✅ cache chunks to avoid missing early chunks
-  chunksByOp: Map<OpId, TableChunk[]>;
+  cacheByOp: Map<OpId, CachedOp>;
+  cleanupTimer: ReturnType<typeof setInterval> | null;
 };
+
+/* =============================================================================
+ * Constants
+ * ============================================================================= */
+
+const MAX_CHUNKS_PER_OP = 2000;
+const MAX_ROWS_PER_OP = 200_000;
+const CACHE_TTL_MS = 60_000; // 1 minute TTL for orphan caches
+const CLEANUP_INTERVAL_MS = 15_000;
+
+/* =============================================================================
+ * State
+ * ============================================================================= */
 
 const state: BusState = {
   inited: false,
   unsubs: [],
   handlersByOp: new Map(),
-
-  doneByOp: new Map(),
-  errByOp: new Map(),
-
-  chunksByOp: new Map(),
+  cacheByOp: new Map(),
+  cleanupTimer: null,
 };
 
-function getOpId(payload: any): string | null {
-  const id = payload?.op_id;
-  return typeof id === "string" && id.length ? id : null;
+/* =============================================================================
+ * Helpers
+ * ============================================================================= */
+
+function getOpId(payload: unknown): string | null {
+  if (payload && typeof payload === "object" && "op_id" in payload) {
+    const id = (payload as { op_id: unknown }).op_id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  }
+  return null;
 }
 
-const MAX_CHUNKS_PER_OP = 2000; // safety cap
-const MAX_ROWS_PER_OP = 200_000; // safety cap (if each chunk has many rows)
+function getOrCreateCache(opId: string): CachedOp {
+  let cache = state.cacheByOp.get(opId);
+  if (!cache) {
+    cache = { chunks: [], createdAt: Date.now() };
+    state.cacheByOp.set(opId, cache);
+  }
+  return cache;
+}
 
-function pushChunk(opId: string, chunk: TableChunk) {
-  let list = state.chunksByOp.get(opId);
-  if (!list) {
-    list = [];
-    state.chunksByOp.set(opId, list);
+function clearCache(opId: string) {
+  state.cacheByOp.delete(opId);
+}
+
+/**
+ * Push chunk to cache. Returns true if accepted, false if dropped due to caps.
+ */
+function pushChunk(opId: string, chunk: TableChunk): boolean {
+  const cache = getOrCreateCache(opId);
+
+  // Cap by chunk count
+  if (cache.chunks.length >= MAX_CHUNKS_PER_OP) {
+    console.warn(
+      `[operationBus] op=${opId} chunk dropped - MAX_CHUNKS_PER_OP reached`
+    );
+    return false;
   }
 
-  // Basic cap by chunk count
-  if (list.length >= MAX_CHUNKS_PER_OP) return;
+  // Cap by total row count
+  let totalRows = 0;
+  for (const c of cache.chunks) {
+    totalRows += c.rows?.length ?? 0;
+  }
+  if (totalRows >= MAX_ROWS_PER_OP) {
+    console.warn(
+      `[operationBus] op=${opId} chunk dropped - MAX_ROWS_PER_OP reached`
+    );
+    return false;
+  }
 
-  // Optional cap by row count (approx)
-  let rowTotal = 0;
-  for (const c of list) rowTotal += c.rows?.length ?? 0;
-  if (rowTotal >= MAX_ROWS_PER_OP) return;
-
-  list.push(chunk);
+  cache.chunks.push(chunk);
+  return true;
 }
 
-function clearCaches(opId: string) {
-  state.doneByOp.delete(opId);
-  state.errByOp.delete(opId);
-  state.chunksByOp.delete(opId);
+/**
+ * Sort chunks by sequence number to ensure correct order.
+ */
+function getSortedChunks(opId: string): TableChunk[] {
+  const cache = state.cacheByOp.get(opId);
+  if (!cache?.chunks.length) return [];
+
+  // Sort by seq (ascending)
+  return [...cache.chunks].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
 }
+
+/**
+ * Periodic cleanup of orphan caches (no subscriber, exceeded TTL).
+ */
+function runCleanup() {
+  const now = Date.now();
+
+  for (const [opId, cache] of state.cacheByOp) {
+    const hasSubscriber = state.handlersByOp.has(opId);
+    const isTerminal = cache.done !== undefined || cache.error !== undefined;
+    const isExpired = now - cache.createdAt > CACHE_TTL_MS;
+
+    // Clean if: no subscriber AND (terminal OR expired)
+    if (!hasSubscriber && (isTerminal || isExpired)) {
+      state.cacheByOp.delete(opId);
+    }
+  }
+}
+
+function startCleanupTimer() {
+  if (state.cleanupTimer) return;
+  state.cleanupTimer = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+}
+
+function stopCleanupTimer() {
+  if (state.cleanupTimer) {
+    clearInterval(state.cleanupTimer);
+    state.cleanupTimer = null;
+  }
+}
+
+/* =============================================================================
+ * FE-ACK Flow Control (batched per animation frame)
+ * ============================================================================= */
+
+const pendingAcksByOp = new Map<OpId, number>();
+let ackScheduled = false;
+
+function scheduleAckFlush() {
+  if (ackScheduled) return;
+  ackScheduled = true;
+
+  requestAnimationFrame(async () => {
+    ackScheduled = false;
+
+    const entries = Array.from(pendingAcksByOp.entries());
+    pendingAcksByOp.clear();
+
+    // Batch invoke - could be parallelized but sequential is safer for ordering
+    for (const [opId, permits] of entries) {
+      try {
+        await invoke(CMD.operationChunkAck, {
+          input: { op_id: opId, permits },
+        });
+      } catch {
+        // Ignore errors during app shutdown
+      }
+    }
+  });
+}
+
+function ackChunk(opId: OpId, count: number = 1) {
+  if (count <= 0) return;
+  pendingAcksByOp.set(opId, (pendingAcksByOp.get(opId) ?? 0) + count);
+  scheduleAckFlush();
+}
+
+/* =============================================================================
+ * Event Listeners
+ * ============================================================================= */
+
+async function setupListeners(): Promise<UnlistenFn[]> {
+  const uChunk = await listen("op:chunk_table", (e) => {
+    const payload = e.payload;
+    const opId = getOpId(payload);
+    if (!opId) return;
+
+    const chunk = payload as TableChunk;
+    const handlers = state.handlersByOp.get(opId);
+
+    if (handlers?.onChunk) {
+      // Direct delivery - ACK immediately
+      handlers.onChunk(chunk);
+      ackChunk(opId);
+    } else {
+      // Cache for later replay - only ACK if accepted
+      const accepted = pushChunk(opId, chunk);
+      if (accepted) {
+        ackChunk(opId);
+      }
+      // If dropped, we intentionally don't ACK to apply backpressure
+      // BE will eventually hit flow control limit
+    }
+  });
+
+  const uDone = await listen("op:done", (e) => {
+    const payload = e.payload;
+    const opId = getOpId(payload);
+    if (!opId) return;
+
+    const done = payload as OperationDone;
+    const cache = getOrCreateCache(opId);
+    cache.done = done;
+
+    const handlers = state.handlersByOp.get(opId);
+    if (handlers?.onDone) {
+      handlers.onDone(done);
+      state.handlersByOp.delete(opId);
+    }
+    // Keep cache until subscriber calls unsubscribe or TTL expires
+  });
+
+  const uErr = await listen("op:error", (e) => {
+    const payload = e.payload;
+    const opId = getOpId(payload);
+    if (!opId) return;
+
+    const error = payload as any;
+    const cache = getOrCreateCache(opId);
+    cache.error = error;
+
+    const handlers = state.handlersByOp.get(opId);
+    if (handlers?.onError) {
+      handlers.onError(error);
+      state.handlersByOp.delete(opId);
+    }
+  });
+
+  return [uChunk, uDone, uErr];
+}
+
+/* =============================================================================
+ * Initialization
+ * ============================================================================= */
 
 async function initOnce() {
   if (state.inited) return;
   state.inited = true;
 
-  const uChunk = await listen("op:chunk_table", (e) => {
-    const p: any = e.payload;
-    const opId = getOpId(p);
-    if (!opId) return;
-
-    const chunk = p as TableChunk;
-    const h = state.handlersByOp.get(opId);
-
-    if (h?.onChunk) {
-      h.onChunk(chunk);
-    } else {
-      // ✅ cache early chunks until someone subscribes
-      pushChunk(opId, chunk);
-    }
-  });
-
-  const uDone = await listen("op:done", (e) => {
-    const p: any = e.payload;
-    const opId = getOpId(p);
-    if (!opId) return;
-
-    const done = p as OperationDone;
-
-    // cache terminal
-    state.doneByOp.set(opId, done);
-
-    // dispatch
-    const h = state.handlersByOp.get(opId);
-    h?.onDone?.(done);
-
-    // cleanup handlers after terminal event
-    state.handlersByOp.delete(opId);
-    // keep caches until subscriber calls unsubscribe, OR clear here if you want:
-    // clearCaches(opId);
-  });
-
-  const uErr = await listen("op:error", (e) => {
-    const p: any = e.payload;
-    const opId = getOpId(p);
-    if (!opId) return;
-
-    state.errByOp.set(opId, p);
-
-    const h = state.handlersByOp.get(opId);
-    h?.onError?.(p);
-
-    state.handlersByOp.delete(opId);
-    // clearCaches(opId);
-  });
-
-  state.unsubs.push(uChunk, uDone, uErr);
+  state.unsubs = await setupListeners();
+  startCleanupTimer();
 }
 
+/* =============================================================================
+ * Public API
+ * ============================================================================= */
+
 export const operationBus = {
-  async ensureInit() {
+  /**
+   * Ensure the bus is initialized. Safe to call multiple times.
+   */
+  async ensureInit(): Promise<void> {
     await initOnce();
   },
 
+  /**
+   * Subscribe to operation events. Returns unsubscribe function.
+   *
+   * - Replays any cached chunks (sorted by seq) before done/error.
+   * - Handles race conditions where events arrive before subscription.
+   */
   async subscribe(opId: string, handlers: OpHandlers): Promise<() => void> {
     await initOnce();
 
-    // set handlers first
+    // Register handlers first
     state.handlersByOp.set(opId, handlers);
 
-    // ✅ replay cached chunks (if any) IN ORDER
-    const chunks = state.chunksByOp.get(opId);
-    if (chunks?.length) {
-      for (const c of chunks) handlers.onChunk?.(c);
-      state.chunksByOp.delete(opId);
+    const cache = state.cacheByOp.get(opId);
+
+    if (cache) {
+      // Replay cached chunks IN ORDER (sorted by seq)
+      if (cache.chunks.length > 0 && handlers.onChunk) {
+        const sortedChunks = getSortedChunks(opId);
+        for (const chunk of sortedChunks) {
+          handlers.onChunk(chunk);
+        }
+        cache.chunks = []; // Clear after replay
+      }
+
+      // Replay terminal event (done takes precedence if both exist somehow)
+      if (cache.done && handlers.onDone) {
+        // Use queueMicrotask to ensure onChunk processing completes first
+        queueMicrotask(() => {
+          handlers.onDone?.(cache.done!);
+          state.handlersByOp.delete(opId);
+        });
+      } else if (cache.error && handlers.onError) {
+        queueMicrotask(() => {
+          handlers.onError?.(cache.error!);
+          state.handlersByOp.delete(opId);
+        });
+      }
     }
 
-    // ✅ replay cached done/error if they arrived early
-    const done = state.doneByOp.get(opId);
-    if (done) {
-      handlers.onDone?.(done);
-      state.handlersByOp.delete(opId);
-      // clearCaches(opId); // optional
-    }
-
-    const err = state.errByOp.get(opId);
-    if (err) {
-      handlers.onError?.(err);
-      state.handlersByOp.delete(opId);
-      // clearCaches(opId); // optional
-    }
-
+    // Return unsubscribe function
     return () => {
       state.handlersByOp.delete(opId);
-      clearCaches(opId);
+      clearCache(opId);
     };
   },
 
-  disposeAll() {
-    for (const u of state.unsubs) {
-      try {
-        u();
-      } catch {}
+  /**
+   * Check if there are pending (undelivered) chunks for an operation.
+   */
+  hasPendingChunks(opId: string): boolean {
+    const cache = state.cacheByOp.get(opId);
+    return (cache?.chunks.length ?? 0) > 0;
+  },
+
+  /**
+   * Get count of pending chunks for an operation.
+   */
+  getPendingChunkCount(opId: string): number {
+    return state.cacheByOp.get(opId)?.chunks.length ?? 0;
+  },
+
+  /**
+   * Get total pending row count for an operation.
+   */
+  getPendingRowCount(opId: string): number {
+    const cache = state.cacheByOp.get(opId);
+    if (!cache) return 0;
+
+    let total = 0;
+    for (const chunk of cache.chunks) {
+      total += chunk.rows?.length ?? 0;
     }
+    return total;
+  },
+
+  /**
+   * Check if operation has completed (done or error cached).
+   */
+  isCompleted(opId: string): boolean {
+    const cache = state.cacheByOp.get(opId);
+    return cache?.done !== undefined || cache?.error !== undefined;
+  },
+
+  /**
+   * Get cached result if operation completed before subscription.
+   */
+  getCachedResult(opId: string): { done?: OperationDone; error?: any } | null {
+    const cache = state.cacheByOp.get(opId);
+    if (!cache) return null;
+    if (cache.done === undefined && cache.error === undefined) return null;
+    return { done: cache.done, error: cache.error };
+  },
+
+  /**
+   * Manually clear cache for an operation.
+   */
+  clearCache(opId: string): void {
+    clearCache(opId);
+  },
+
+  /**
+   * Get diagnostic info for debugging.
+   */
+  getDebugInfo(): {
+    activeOps: string[];
+    cachedOps: string[];
+    pendingAcks: [string, number][];
+  } {
+    return {
+      activeOps: Array.from(state.handlersByOp.keys()),
+      cachedOps: Array.from(state.cacheByOp.keys()),
+      pendingAcks: Array.from(pendingAcksByOp.entries()),
+    };
+  },
+
+  /**
+   * Dispose all listeners and clear state. Call on app unmount.
+   */
+  disposeAll(): void {
+    // Stop cleanup timer
+    stopCleanupTimer();
+
+    // Unsubscribe all listeners
+    for (const unsub of state.unsubs) {
+      try {
+        unsub();
+      } catch {
+        // Ignore errors during cleanup
+      }
+    }
+
+    // Clear all state
     state.unsubs = [];
     state.handlersByOp.clear();
-
-    state.doneByOp.clear();
-    state.errByOp.clear();
-    state.chunksByOp.clear();
-
+    state.cacheByOp.clear();
+    pendingAcksByOp.clear();
+    ackScheduled = false;
     state.inited = false;
   },
 };
+
+export type { OpHandlers, TableChunk, OperationDone };

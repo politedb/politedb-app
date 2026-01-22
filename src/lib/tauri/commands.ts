@@ -20,6 +20,7 @@ export const CMD = {
   // Operations
   operationExecute: "operation_execute",
   operationCancel: "operation_cancel",
+  operationChunkAck: "operation_chunk_ack",
 
   // Draft sql management
   draftSqlLoad: "sql_draft_load",

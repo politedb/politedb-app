@@ -1,7 +1,11 @@
 import { useEffect } from "preact/hooks";
-import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
+import {
+  DataAction,
+  DataKey,
+  TableMetaState,
+  useConnectionStore,
+} from "src/stores/connection";
 import type {
-  ActiveTableData,
   TableStructure as TableStructureType,
   TableConstraint as TableConstraintType,
   TableWindow,
@@ -17,7 +21,7 @@ import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
   profileId: string;
-  activeTableData: ActiveTableData;
+  activeTableMeta: TableMetaState;
   activeTableWindow: TableWindow;
   tableStructure: TableStructureType[];
   tableConstraints: TableConstraintType[];
@@ -37,7 +41,7 @@ export function TableStructurePane(props: {
   const {
     engine,
     profileId,
-    activeTableData,
+    activeTableMeta,
     activeTableWindow,
     tableStructure,
     tableConstraints,
@@ -68,32 +72,32 @@ export function TableStructurePane(props: {
   const setTableConstraints = useConnectionStore((s) => s.setTableConstraints);
 
   useEffect(() => {
-    if (activeTableData.structure && !tableStructure?.length) {
+    if (activeTableMeta.structure && !tableStructure?.length) {
       setTableStructure(
         profileId,
         activeTableWindow.id,
-        activeTableData.structure
+        activeTableMeta.structure
       );
     }
   }, [
     profileId,
     activeTableWindow.id,
-    activeTableData.structure,
+    activeTableMeta.structure,
     JSON.stringify(tableStructure),
   ]);
 
   useEffect(() => {
-    if (activeTableData.constraints && !tableConstraints?.length) {
+    if (activeTableMeta.constraints && !tableConstraints?.length) {
       setTableConstraints(
         profileId,
         activeTableWindow.id,
-        activeTableData.constraints
+        activeTableMeta.constraints
       );
     }
   }, [
     profileId,
     activeTableWindow.id,
-    activeTableData.constraints,
+    activeTableMeta.constraints,
     JSON.stringify(tableConstraints),
   ]);
 
@@ -109,7 +113,7 @@ export function TableStructurePane(props: {
               onInput={(e) => changeTableName(e.currentTarget.value)}
               placeholder="table_name"
               className="border border-neutral-200 bg-white text-xs"
-              disabled={activeTableData.busy}
+              disabled={activeTableMeta.busy}
             />
           </div>
           <div class="flex items-center gap-2">
@@ -138,10 +142,10 @@ export function TableStructurePane(props: {
               engine={engine}
               activeProfileScreen={profileId}
               activeTableWindowId={activeTableWindow.id}
-              initData={activeTableData.structure}
+              initData={activeTableMeta.structure}
               editedData={tableStructure}
-              busy={activeTableData.busy}
-              error={activeTableData.error}
+              busy={activeTableMeta.busy}
+              error={activeTableMeta.error}
               onDataChange={onDataChange}
               onAddNewRecord={onAddNewColumn}
               onDeleteRecord={onDeleteColumn}
@@ -152,10 +156,10 @@ export function TableStructurePane(props: {
             <TableConstraints
               activeProfileScreen={profileId}
               activeTableWindowId={activeTableWindow.id}
-              initData={activeTableData.constraints}
+              initData={activeTableMeta.constraints}
               editedData={tableConstraints}
-              busy={activeTableData.busy}
-              error={activeTableData.error}
+              busy={activeTableMeta.busy}
+              error={activeTableMeta.error}
               onDataChange={onDataChange}
               onAddNewRecord={onAddIndex}
               onDeleteRecord={onDeleteIndex}

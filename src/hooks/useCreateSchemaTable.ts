@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
-import { runSqlQuery } from "src/utils/query";
+import { runSqlQuery } from "src/lib/tauri/query";
 import { createSchemaQuery, createTableQuery } from "./queries";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { profileConnect } from "src/lib/tauri";
 import type { TableColumn } from "src/types";
-import { normalizeSqlError } from "src/utils/queryValidate";
+import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 
 interface ICreateTable {
   payload: {

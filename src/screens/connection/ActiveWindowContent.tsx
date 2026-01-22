@@ -4,7 +4,6 @@ import { TableData } from "src/components/table/TableData";
 import type {
   TableStructure as TableStructureType,
   TableConstraint as TableConstraintType,
-  ActiveTableData,
   TableItem,
 } from "src/types";
 
@@ -24,7 +23,6 @@ import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { EmptyWindow } from "./EmptyWindow";
 import { LoadingTableState } from "./LoadingTableState";
 import { ErrorState } from "./ErrorState";
-import { useDelayedVisibility } from "src/hooks/useDelayedVisibility";
 
 /* =============================================================================
  * Patches types
@@ -35,15 +33,19 @@ export type WindowPatches = Partial<
   Record<DataAction, Partial<Record<DataKey, Record<string, RowPatch>>>>
 >;
 
-const EMPTY_TABLE_DATA: ActiveTableData = {
-  data: null,
+const EMPTY_TABLE_META = {
+  columns: null,
   structure: null,
   constraints: null,
   sizeInfo: null,
+  rowCount: null,
   busy: false,
   error: null,
   connectionId: null,
 };
+
+const EMPTY_ARRAY: any[] = [];
+const EMPTY_SET = new Set<number>();
 
 /* =============================================================================
  * Patch helpers
@@ -75,27 +77,31 @@ function extractPatchesForTableFromPatches(
 }
 
 function extractNewRowKeysFromPatches(patches: WindowPatches | null): string[] {
-  if (!patches) return [];
+  if (!patches) return EMPTY_ARRAY;
   const createPatches = (patches["create"]?.["data"] ?? {}) as Record<
     string,
     any
   >;
-  return Object.keys(createPatches).filter((k) => k.startsWith("new-"));
+  const keys = Object.keys(createPatches).filter((k) => k.startsWith("new-"));
+  return keys.length > 0 ? keys : EMPTY_ARRAY;
 }
 
 function extractDeletedRowsFromPatches(
   patches: WindowPatches | null,
   dataKey: DataKey
 ): Set<number> {
-  if (!patches) return new Set<number>();
+  if (!patches) return EMPTY_SET;
 
   const deletePatches = (patches["delete"]?.[dataKey] ?? {}) as Record<
     string,
     any
   >;
-  const deleted = new Set<number>();
 
-  for (const rowKey of Object.keys(deletePatches)) {
+  const keys = Object.keys(deletePatches);
+  if (keys.length === 0) return EMPTY_SET;
+
+  const deleted = new Set<number>();
+  for (const rowKey of keys) {
     const idx = parseInt(rowKey, 10);
     if (!Number.isNaN(idx)) deleted.add(idx);
   }
@@ -104,7 +110,42 @@ function extractDeletedRowsFromPatches(
 }
 
 /* =============================================================================
- * Component (NO PROPS)
+ * Read store snapshot (NO subscription, just read once)
+ * ============================================================================= */
+
+function getTableMeta(key: string) {
+  if (!key) return EMPTY_TABLE_META;
+  return useConnectionStore.getState().tableDataMap[key] ?? EMPTY_TABLE_META;
+}
+
+function getTableStructure(profileId: string, tableId: string) {
+  if (!tableId) return EMPTY_ARRAY;
+  return (
+    useConnectionStore.getState().tableStructure[profileId]?.[tableId] ??
+    EMPTY_ARRAY
+  );
+}
+
+function getTableConstraints(profileId: string, tableId: string) {
+  if (!tableId) return EMPTY_ARRAY;
+  return (
+    useConnectionStore.getState().tableConstraints[profileId]?.[tableId] ??
+    EMPTY_ARRAY
+  );
+}
+
+function getWindowPatches(
+  profileId: string,
+  windowId: string | undefined
+): WindowPatches | null {
+  if (!windowId) return null;
+  return ((useConnectionStore.getState().dataPatchMap as any)[profileId]?.[
+    windowId
+  ]?.patches ?? null) as WindowPatches | null;
+}
+
+/* =============================================================================
+ * Component
  * ============================================================================= */
 
 export function ActiveWindowContent() {
@@ -131,45 +172,85 @@ export function ActiveWindowContent() {
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
 
+  // =========================================================================
+  // Force update trigger (only for data that MUST trigger re-render)
+  // =========================================================================
+  const [, forceUpdate] = useState(0);
+  const triggerRender = useCallback(() => forceUpdate((n) => n + 1), []);
+
   useEffect(() => {
     setViewMode("data");
   }, [activeTableWindow?.id]);
 
-  // store setters
-  const setPatchMap = useConnectionStore((s) => s.setDataPatchMap);
-  const setTableStructure = useConnectionStore((s) => s.setTableStructure);
-  const setTableConstraints = useConnectionStore((s) => s.setTableConstraints);
-
-  const activeTableData = useConnectionStore((s) => {
-    if (!activeTableWindow) return EMPTY_TABLE_DATA;
-    const k = tableKey(
+  // =========================================================================
+  // Computed keys
+  // =========================================================================
+  const activeKey = useMemo(() => {
+    if (!activeTableWindow) return "";
+    return tableKey(
       profileId,
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
-    return (s.tableDataMap as any)[k] ?? EMPTY_TABLE_DATA;
-  });
+  }, [
+    profileId,
+    activeTableWindow?.table?.schema,
+    activeTableWindow?.table?.name,
+  ]);
 
-  const tableStructureMap = useConnectionStore((s) => s.tableStructure);
-  const tableConstraintsMap = useConnectionStore((s) => s.tableConstraints);
-  const dataPatchMapByScreen = useConnectionStore((s) => s.dataPatchMap);
+  // =========================================================================
+  // Subscribe ONLY to critical changes that require re-render
+  // =========================================================================
+  useEffect(() => {
+    if (!activeKey) return;
 
-  const tableStructure: TableStructureType[] = useMemo(() => {
-    if (!activeId) return [];
-    return tableStructureMap[profileId]?.[activeId] ?? [];
-  }, [tableStructureMap, profileId, activeId]);
+    // Initialize rows
+    useConnectionStore.getState().initRows(activeKey, 5000);
 
-  const tableConstraints: TableConstraintType[] = useMemo(() => {
-    if (!activeId) return [];
-    return tableConstraintsMap[profileId]?.[activeId] ?? [];
-  }, [tableConstraintsMap, profileId, activeId]);
+    // Track what we care about
+    let lastBusy = getTableMeta(activeKey).busy;
+    let lastError = getTableMeta(activeKey).error;
+    let lastColumnsLen = getTableMeta(activeKey).columns?.length ?? 0;
+    let lastRowCount = getTableMeta(activeKey).rowCount;
 
-  const windowPatches: WindowPatches | null = useMemo(() => {
-    if (!activeTableWindow) return null;
-    return ((dataPatchMapByScreen as any)[profileId]?.[activeTableWindow.id]
-      ?.patches ?? null) as WindowPatches | null;
-  }, [dataPatchMapByScreen, profileId, activeTableWindow?.id]);
+    const unsub = useConnectionStore.subscribe((state) => {
+      const meta = state.tableDataMap[activeKey] ?? EMPTY_TABLE_META;
 
+      const busy = meta.busy;
+      const error = meta.error;
+      const columnsLen = meta.columns?.length ?? 0;
+      const rowCount = meta.rowCount;
+
+      // Only trigger re-render if critical fields changed
+      const shouldUpdate =
+        busy !== lastBusy ||
+        error !== lastError ||
+        columnsLen !== lastColumnsLen ||
+        rowCount !== lastRowCount;
+
+      if (shouldUpdate) {
+        lastBusy = busy;
+        lastError = error;
+        lastColumnsLen = columnsLen;
+        lastRowCount = rowCount;
+        triggerRender();
+      }
+    });
+
+    return unsub;
+  }, [activeKey, triggerRender]);
+
+  // =========================================================================
+  // Read current values from store (snapshot, no subscription)
+  // =========================================================================
+  const activeTableMeta = getTableMeta(activeKey);
+  const tableStructure = getTableStructure(profileId, activeId ?? "");
+  const tableConstraints = getTableConstraints(profileId, activeId ?? "");
+  const windowPatches = getWindowPatches(profileId, activeTableWindow?.id);
+
+  // =========================================================================
+  // Derived patch data (memoized)
+  // =========================================================================
   const tablePatches = useMemo(
     () => extractPatchesForTableFromPatches(windowPatches),
     [windowPatches]
@@ -184,16 +265,20 @@ export function ActiveWindowContent() {
     () => extractDeletedRowsFromPatches(windowPatches, DATA_KEYS.structure),
     [windowPatches]
   );
+
   const deletedConstraintRows = useMemo(
     () => extractDeletedRowsFromPatches(windowPatches, DATA_KEYS.constraints),
     [windowPatches]
   );
+
   const deletedDataRows = useMemo(
     () => extractDeletedRowsFromPatches(windowPatches, DATA_KEYS.data),
     [windowPatches]
   );
 
-  // local onDataChange -> patch store
+  // =========================================================================
+  // Data change handler
+  // =========================================================================
   const onDataChange = useCallback(
     (
       action: DataAction,
@@ -203,32 +288,38 @@ export function ActiveWindowContent() {
     ) => {
       if (!profileId || !activeTableWindow) return;
 
+      const currentMeta = getTableMeta(activeKey);
+
       let rowKey: string;
       let patchData = data;
 
-      if (rowIndex === -1 && data.__rowKey) {
-        rowKey = data.__rowKey;
-        const { __rowKey, ...rest } = data;
+      if (rowIndex === -1 && (data as any).__rowKey) {
+        rowKey = String((data as any).__rowKey);
+        const { __rowKey, ...rest } = data as any;
         patchData = rest;
       } else {
         rowKey = String(rowIndex);
       }
 
-      setPatchMap(profileId, {
+      useConnectionStore.getState().setDataPatchMap(profileId, {
         dataKey,
         action,
-        tableData: activeTableData,
+        tableData: currentMeta,
         tableWindow: activeTableWindow,
         rowKey,
         data: patchData,
       });
     },
-    [profileId, activeTableWindow, activeTableData, setPatchMap]
+    [profileId, activeTableWindow, activeKey]
   );
 
-  // add operations
+  // =========================================================================
+  // Add operations
+  // =========================================================================
   const handleAddColumn = useCallback(() => {
     if (!activeTableWindow || !activeId) return;
+
+    const currentStructure = getTableStructure(profileId, activeId);
 
     const newRecord: TableStructureType = {
       column_name: "",
@@ -241,24 +332,21 @@ export function ActiveWindowContent() {
       isNew: true,
     };
 
-    setTableStructure(profileId, activeId, [...tableStructure, newRecord]);
+    useConnectionStore
+      .getState()
+      .setTableStructure(profileId, activeId, [...currentStructure, newRecord]);
     onDataChange(
       "create",
       DATA_KEYS.structure,
-      tableStructure.length,
+      currentStructure.length,
       newRecord
     );
-  }, [
-    profileId,
-    activeId,
-    activeTableWindow?.id,
-    tableStructure,
-    setTableStructure,
-    onDataChange,
-  ]);
+  }, [profileId, activeId, activeTableWindow, onDataChange]);
 
   const handleAddIndex = useCallback(() => {
     if (!activeTableWindow || !activeId) return;
+
+    const currentConstraints = getTableConstraints(profileId, activeId);
 
     const newRecord: TableConstraintType = {
       index_name: "",
@@ -271,21 +359,19 @@ export function ActiveWindowContent() {
       isNew: true,
     };
 
-    setTableConstraints(profileId, activeId, [...tableConstraints, newRecord]);
+    useConnectionStore
+      .getState()
+      .setTableConstraints(profileId, activeId, [
+        ...currentConstraints,
+        newRecord,
+      ]);
     onDataChange(
       "create",
       DATA_KEYS.constraints,
-      tableConstraints.length,
+      currentConstraints.length,
       newRecord
     );
-  }, [
-    profileId,
-    activeId,
-    activeTableWindow?.id,
-    tableConstraints,
-    setTableConstraints,
-    onDataChange,
-  ]);
+  }, [profileId, activeId, activeTableWindow, onDataChange]);
 
   const { handleAddRow: handleAddRowFromHook } = useTableDataOperations({
     onDataChange,
@@ -293,22 +379,23 @@ export function ActiveWindowContent() {
 
   const handleAddRow = useCallback(() => {
     if (!activeTableWindow) return;
-    if (!activeTableData.data?.columns) return;
-    handleAddRowFromHook(activeTableData.data.columns, onDataChange);
-  }, [
-    activeTableWindow?.id,
-    activeTableData.data,
-    handleAddRowFromHook,
-    onDataChange,
-  ]);
 
-  // delete operations
+    const currentMeta = getTableMeta(activeKey);
+    const cols = currentMeta.columns ?? [];
+
+    if (!cols.length) return;
+    handleAddRowFromHook(cols as any, onDataChange);
+  }, [activeTableWindow, activeKey, handleAddRowFromHook, onDataChange]);
+
+  // =========================================================================
+  // Delete operations
+  // =========================================================================
   const handleDeleteColumn = useCallback(
     (rowIndex: number) => {
       if (!activeTableWindow) return;
       onDataChange("delete", DATA_KEYS.structure, rowIndex, {});
     },
-    [activeTableWindow?.id, onDataChange]
+    [activeTableWindow, onDataChange]
   );
 
   const handleDeleteIndex = useCallback(
@@ -316,7 +403,7 @@ export function ActiveWindowContent() {
       if (!activeTableWindow) return;
       onDataChange("delete", DATA_KEYS.constraints, rowIndex, {});
     },
-    [activeTableWindow?.id, onDataChange]
+    [activeTableWindow, onDataChange]
   );
 
   const handleDeleteRow = useCallback(
@@ -324,24 +411,32 @@ export function ActiveWindowContent() {
       if (!activeTableWindow) return;
       onDataChange("delete", DATA_KEYS.data, rowIndex, {});
     },
-    [activeTableWindow?.id, onDataChange]
+    [activeTableWindow, onDataChange]
   );
 
   const handleFilters = useCallback(() => {
     console.log("filters");
   }, []);
 
+  // =========================================================================
+  // New table pane logic
+  // =========================================================================
   const isShowNewTablePane = useMemo(() => {
     if (!activeTableWindow) return false;
+
+    const hasCols =
+      Array.isArray(activeTableMeta.columns) &&
+      activeTableMeta.columns.length > 0;
+
     const noLoadedData =
-      !activeTableData.data && !activeTableData.busy && !activeTableData.error;
+      !hasCols && !activeTableMeta.busy && !activeTableMeta.error;
+
     return !!activeTableWindow.table.new || noLoadedData;
   }, [
-    activeTableWindow?.id,
-    activeTableWindow?.table?.new,
-    activeTableData.data,
-    activeTableData.busy,
-    activeTableData.error,
+    activeTableWindow,
+    activeTableMeta.columns,
+    activeTableMeta.busy,
+    activeTableMeta.error,
   ]);
 
   const handleTableCreated = useCallback(
@@ -361,13 +456,62 @@ export function ActiveWindowContent() {
     [actions, activeTableWindow, refreshSchemaAndTables, activeSchema]
   );
 
-  // Delay loading so fast queries don't flash; keep it visible briefly once shown
-  const showLoading = useDelayedVisibility(!!activeTableData.busy, {
-    showDelayMs: 200,
-    minShowMs: 450,
-  });
+  // =========================================================================
+  // Page-ready state
+  // =========================================================================
+  const [pageReady, setPageReady] = useState(false);
 
-  // Guards first (cheap)
+  useEffect(() => {
+    setPageReady(false);
+    if (!activeKey) return;
+
+    // Fast path: already has at least 1 row
+    const st0 = useConnectionStore.getState();
+    const n0 = Math.min(20, limit);
+    for (let i = 0; i < n0; i++) {
+      if (st0.getRowAt(activeKey, offset + i)) {
+        setPageReady(true);
+        return;
+      }
+    }
+
+    let lastVersion = -1;
+
+    const unsub = useConnectionStore.subscribe((state) => {
+      const info = state.getRowsWindowInfo(activeKey);
+      const version = info?.version ?? 0;
+
+      if (version === lastVersion) return;
+      lastVersion = version;
+
+      const n = Math.min(20, limit);
+      for (let i = 0; i < n; i++) {
+        if (useConnectionStore.getState().getRowAt(activeKey, offset + i)) {
+          setPageReady(true);
+          unsub();
+          return;
+        }
+      }
+    });
+
+    return unsub;
+  }, [activeKey, offset, limit]);
+
+  // =========================================================================
+  // Loading state
+  // =========================================================================
+  const hasCols =
+    Array.isArray(activeTableMeta.columns) &&
+    activeTableMeta.columns.length > 0;
+
+  const shouldShowFullLoading =
+    !!activeTableMeta.busy &&
+    !activeTableMeta.error &&
+    (!hasCols || !pageReady);
+
+  // =========================================================================
+  // Early returns / Guards
+  // =========================================================================
   if (loadError) return <ErrorState message={loadError} />;
   if (!hasAnyWindow) return <EmptyWindow onNewSql={actions.openSql} />;
 
@@ -384,7 +528,7 @@ export function ActiveWindowContent() {
     );
   }
 
-  if (!activeTableWindow || activeTableData.busy) return null;
+  if (!activeTableWindow) return null;
 
   if (isShowNewTablePane) {
     return (
@@ -402,22 +546,62 @@ export function ActiveWindowContent() {
     );
   }
 
-  if (showLoading) return <LoadingTableState />;
+  if (shouldShowFullLoading) return <LoadingTableState />;
 
-  if (activeTableData.error) {
-    return <ErrorState message={String(activeTableData.error)} />;
+  if (activeTableMeta.error) {
+    return <ErrorState message={String(activeTableMeta.error)} />;
   }
 
+  // =========================================================================
+  // Page view mode calculations
+  // =========================================================================
+  const pageOffset = offset;
+  const pageLimit = limit;
+
+  const pageTotalRows = useMemo(() => {
+    const MIN_ROWS = 0;
+
+    if (typeof activeTableMeta.rowCount === "number") {
+      const remaining = Math.max(0, activeTableMeta.rowCount - pageOffset);
+
+      return Math.max(MIN_ROWS, Math.min(pageLimit, remaining));
+    }
+
+    return Math.max(MIN_ROWS, pageLimit);
+  }, [activeTableMeta.rowCount, pageOffset, pageLimit]);
+
+  const totalRowsForFooter = useMemo(() => {
+    if (typeof activeTableMeta.rowCount === "number")
+      return activeTableMeta.rowCount;
+    return pageOffset + pageTotalRows;
+  }, [activeTableMeta.rowCount, pageOffset, pageTotalRows]);
+
+  // =========================================================================
+  // Row accessor (NO subscription, just read from store)
+  // =========================================================================
+  const getRowAt = useCallback(
+    (localIdx: number) => {
+      if (!activeKey) return undefined;
+      return useConnectionStore
+        .getState()
+        .getRowAt(activeKey, pageOffset + localIdx);
+    },
+    [activeKey, pageOffset]
+  );
+
+  // =========================================================================
+  // Render
+  // =========================================================================
   return (
-    <div class="flex h-full flex-col">
-      <div class="flex-1 overflow-hidden">
+    <div class="flex h-full min-h-0 flex-col">
+      <div class="min-h-0 flex-1 overflow-hidden">
         {viewMode === "structure" ? (
           <div class="flex h-full flex-col overflow-hidden bg-white">
             <TableStructurePane
               engine={engine}
               profileId={profileId}
               activeTableWindow={activeTableWindow}
-              activeTableData={activeTableData}
+              activeTableMeta={activeTableMeta}
               tableStructure={tableStructure}
               tableConstraints={tableConstraints}
               onDataChange={onDataChange}
@@ -432,8 +616,9 @@ export function ActiveWindowContent() {
         ) : (
           <TableData
             key={activeTableWindow.id}
-            columns={activeTableData.data?.columns ?? []}
-            data={activeTableData.data?.rows ?? []}
+            columns={activeTableMeta.columns ?? []}
+            totalRows={pageTotalRows}
+            getRowAt={getRowAt}
             onCellChange={onDataChange}
             patches={tablePatches}
             newRowKeys={tableNewRowKeys}
@@ -449,7 +634,7 @@ export function ActiveWindowContent() {
         onViewModeChange={setViewMode}
         limit={limit}
         offset={offset}
-        totalRows={activeTableData.data?.rowCount ?? 0}
+        totalRows={totalRowsForFooter}
         onPageChange={(l, o) => void actions.pageChange(l, o)}
         onAddColumn={handleAddColumn}
         onAddIndex={handleAddIndex}

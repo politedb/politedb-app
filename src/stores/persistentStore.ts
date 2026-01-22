@@ -62,7 +62,7 @@ export type PersistentSnapshot = PersistentSnapshotV1;
 
 function isSnapshotV1(x: unknown): x is PersistentSnapshotV1 {
   if (!x || typeof x !== "object") return false;
-  const v = x as any;
+  const v = x as PersistentSnapshotV1;
 
   return (
     v.version === 1 &&
@@ -89,7 +89,7 @@ function clampSnapshotV1(
   for (const tab of profileTabs) {
     const list = (snap.openWindows?.[tab.id] ?? []).slice(0, maxWindowsPerTab);
     openWindows[tab.id] = list;
-    const lastId = list.length > 0 ? (list[list.length - 1] as any).id : null;
+    const lastId = list.length > 0 ? list[list.length - 1].id : null;
     activeWindowId[tab.id] = snap.activeWindowId?.[tab.id] ?? lastId;
   }
 
@@ -111,7 +111,7 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
       profileId: t.profileId,
     })),
 
-    openWindows: s.openWindows as any,
+    openWindows: s.openWindows,
     activeWindowId: s.activeWindowId,
   };
 }
@@ -255,8 +255,7 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       for (const tab of profileTabs) {
         const list = snap.openWindows[tab.id] ?? [];
         openWindows[tab.id] = list;
-        const lastId =
-          list.length > 0 ? (list[list.length - 1] as any).id : null;
+        const lastId = list.length > 0 ? list[list.length - 1].id : null;
         activeWindowId[tab.id] = snap.activeWindowId[tab.id] ?? lastId;
       }
 
@@ -271,8 +270,8 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
 
       useScreenStore.setState({
         activeProfileScreen: nextActive,
-        profileTabs: profileTabs as any,
-        openWindows: openWindows as any,
+        profileTabs: profileTabs,
+        openWindows: openWindows,
         activeWindowId,
       });
 

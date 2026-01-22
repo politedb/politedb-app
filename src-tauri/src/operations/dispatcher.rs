@@ -55,6 +55,7 @@ pub async fn dispatch_operation(
         cancel_requested: Arc::clone(&state.cancel_requested),
         active_ops: Arc::clone(&state.active_ops),
         op_to_conn: Arc::clone(&state.op_to_conn),
+        flow_by_op: Arc::clone(&state.flow_by_op),
     };
 
     let spawn_res: Result<(), String> = match input.kind {

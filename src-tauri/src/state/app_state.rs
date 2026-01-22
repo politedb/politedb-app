@@ -5,6 +5,7 @@ use futures_util::lock::Mutex;
 use uuid::Uuid;
 
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
+use crate::operations::ctx::FlowCtrl;
 use crate::ssh_tunnel::handle::SshTunnelHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -43,6 +44,8 @@ pub struct AppState {
     pub running_ops: Arc<DashMap<Uuid, CancelHandle>>,
     pub cancel_requested: Arc<DashMap<Uuid, ()>>,
     pub active_ops: Arc<DashMap<Uuid, ()>>,
+
+    pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
 }
 
 impl AppState {
@@ -56,6 +59,7 @@ impl AppState {
             running_ops: Arc::new(DashMap::new()),
             cancel_requested: Arc::new(DashMap::new()),
             active_ops: Arc::new(DashMap::new()),
+            flow_by_op: Arc::new(DashMap::new()),
         }
     }
 }

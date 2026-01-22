@@ -32,11 +32,12 @@ import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
 
-const EMPTY_TABLE_DATA = {
-  data: null,
+const EMPTY_TABLE_META = {
+  columns: null,
   structure: null,
   constraints: null,
   sizeInfo: null,
+  rowCount: null,
   busy: false,
   error: null,
   connectionId: null,
@@ -97,12 +98,12 @@ export function ConnectionScreen() {
   }, [engine, activeTab?.profileId]);
 
   /* =============================================================================
-   * Table loading (service) + active table data snapshot
+   * Table loading (service) + active table meta snapshot
    * ============================================================================= */
   const { loadTableData, getTableData, removeTableData } = useLoadTableData();
 
   const activeTableData = useMemo(() => {
-    if (!activeTableWindow) return EMPTY_TABLE_DATA;
+    if (!activeTableWindow) return EMPTY_TABLE_META;
     return getTableData(
       activeProfileScreen,
       activeTableWindow.table.schema,
@@ -137,7 +138,7 @@ export function ConnectionScreen() {
   });
 
   /* =============================================================================
-   * Auto-load active table rows
+   * Auto-load active table rows/meta
    * ============================================================================= */
   const lastAutoLoadRef = useRef<string>("");
 
@@ -148,20 +149,25 @@ export function ConnectionScreen() {
     if (!runtimeConnectionId) return;
 
     if (activeTableData.busy) return;
-    if (activeTableData.data && !activeTableData.error) return;
+
+    // With meta-only store:
+    // - "loaded" condition becomes: columns exist (and no error).
+    // - rows are streamed separately, so we don't check rows here.
+    const hasColumns =
+      Array.isArray(activeTableData.columns) &&
+      activeTableData.columns.length > 0;
+    if (hasColumns && !activeTableData.error) return;
 
     const k = `${activeProfileScreen}:${activeTableWindow.id}:${activeTableWindow.table.schema}.${activeTableWindow.table.name}:${limit}:${offset}`;
     if (lastAutoLoadRef.current === k) return;
     lastAutoLoadRef.current = k;
 
-    if (!activeTableData.data) {
-      loadTableData(
-        activeTableWindow.table.schema,
-        activeTableWindow.table.name,
-        { limit, offset },
-        { force: true }
-      ).catch(console.error);
-    }
+    loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      { force: true }
+    ).catch(console.error);
   }, [
     activeProfileScreen,
     activeTableWindow?.id,
@@ -169,7 +175,7 @@ export function ConnectionScreen() {
     activeTableWindow?.table?.name,
     runtimeConnectionId,
     activeTableData.busy,
-    activeTableData.data,
+    activeTableData.columns,
     activeTableData.error,
     limit,
     offset,

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
-import { runSqlQuery } from "src/utils/query";
+import { runSqlQuery } from "src/lib/tauri/query";
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
 

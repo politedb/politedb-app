@@ -51,6 +51,7 @@ fn main() {
             // Operations
             commands::operation::operation_execute,
             commands::operation::operation_cancel,
+            commands::operation::operation_chunk_ack,
             // Profiles
             commands::profile::profile_list,
             commands::profile::profile_update,

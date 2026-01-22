@@ -114,13 +114,3 @@ export type Pagination = {
   totalRows: number;
   totalPages: number;
 };
-
-export type ActiveTableData = {
-  data: TableData | null;
-  structure: TableStructure[] | null;
-  constraints: TableConstraint[] | null;
-  sizeInfo: TableSizeInfo | null;
-  busy: boolean;
-  error: string | null;
-  connectionId: string | null;
-};

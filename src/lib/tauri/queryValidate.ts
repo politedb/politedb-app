@@ -1,6 +1,6 @@
 import { operationBus } from "src/lib/tauri/operationBus";
 import { operationExecute, operationCancel } from "src/lib/tauri";
-import { splitSqlStatements } from "../components/editor/splitSqlStatements";
+import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 
 type ValidateSqlOptions = {
   timeoutMs?: number;

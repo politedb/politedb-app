@@ -30,4 +30,12 @@ pub struct TableChunk {
     pub op_id: Uuid,
     pub rows: Vec<Vec<CellValue>>,
     pub row_offset: u64,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TableChunkAckInput {
+    pub op_id: Uuid,
+    // How many credits to return. FE can ack per chunk (=1) or batch acks.
+    pub permits: Option<u32>,
 }

@@ -143,7 +143,8 @@ export function SqlResultsPane(props: {
           <TableData
             key={`${windowId}:${activeIndex}`}
             columns={slot.result!.columns}
-            data={slot.result!.rows}
+            totalRows={slot.result!.rows.length}
+            getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
             onCellChange={() => {}}
           />
         ) : (

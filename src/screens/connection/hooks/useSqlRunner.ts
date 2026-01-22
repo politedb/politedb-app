@@ -10,7 +10,7 @@ import {
   unwrapErrorMessage,
   validateSqlClient,
   validateSqlQueryBE,
-} from "src/utils/queryValidate";
+} from "src/lib/tauri/queryValidate";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);

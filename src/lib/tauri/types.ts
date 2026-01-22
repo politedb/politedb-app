@@ -293,6 +293,7 @@ export type TableChunk = {
   columns?: ColumnMeta[];
   rows: any[][];
   row_offset: number;
+  seq: number;
 };
 
 export type RedisResult =

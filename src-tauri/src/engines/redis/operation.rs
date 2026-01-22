@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, Notify};
 use uuid::Uuid;
 
 use crate::engines::cancel::CancelHandle;
-use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
+use crate::operations::ctx::{ActiveGuard, FlowCtrl, FlowGuard, OperationCtx, RunningGuard};
 use crate::operations::emit::{emit_done, emit_error};
 use crate::types::{CellValue, ColumnMeta, RedisCommandInput, TableChunk};
 
@@ -160,6 +160,16 @@ pub async fn run_redis_command(
     let timeout_ms = input.command_timeout_ms.or(default_command_timeout_ms);
     let timeout = timeout_ms.map(|ms| Duration::from_millis(ms.clamp(50, 300_000)));
 
+    // FE-ack flow control: bound in-flight chunks to prevent IPC/UI backlog growth.
+    // Window size can be tuned; 3 is a good default for smooth streaming.
+    ctx.flow_by_op.insert(op_id, FlowCtrl::new(3));
+    let _flow_guard = FlowGuard::new(op_id, Arc::clone(&ctx.flow_by_op));
+    let flow = ctx
+        .flow_by_op
+        .get(&op_id)
+        .map(|x| x.clone())
+        .expect("FLOW_CTRL_MISSING");
+
     // Backpressure channel (inflight chunks)
     let (tx_chunk, rx_chunk) = mpsc::channel::<Result<TableChunk, String>>(2);
     let emit_task = tokio::spawn(emit_table_chunks(
@@ -236,21 +246,32 @@ pub async fn run_redis_command(
                         CellValue::Str(k),
                         v.map(bytes_to_cell).unwrap_or(CellValue::Null),
                     ];
+
+                    // Single-chunk emit: still respect FE credit.
+                    let permit = flow.acquire_credit().await;
+                    let seq = flow.alloc_seq().await;
+
                     let chunk = TableChunk {
                         op_id,
+                        seq,
                         rows: vec![row],
                         row_offset: 0,
                     };
 
                     if tx_chunk.send(Ok(chunk)).await.is_err() {
+                        flow.ack(1);
                         emit_error(
                             &ctx.app,
                             op_id,
                             "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
                             started_at.elapsed().as_millis(),
                         );
+                        // permit drops here (RAII)
                         return;
                     }
+
+                    // permit drops here (RAII)
+                    let _ = permit;
 
                     drop(tx_chunk);
                     let _ = emit_task.await;
@@ -334,32 +355,55 @@ pub async fn run_redis_command(
                         row_count += 1;
 
                         if rows.len() >= batch_size {
+                            let permit = flow.acquire_credit().await;
+                            let seq = flow.alloc_seq().await;
+
                             let chunk = TableChunk {
                                 op_id,
+                                seq,
                                 rows: std::mem::take(&mut rows),
                                 row_offset,
                             };
                             row_offset = row_count;
 
                             if tx_chunk.send(Ok(chunk)).await.is_err() {
+                                flow.ack(1);
                                 emit_error(
                                     &ctx.app,
                                     op_id,
                                     "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
                                     started_at.elapsed().as_millis(),
                                 );
+                                // permit drops here (RAII)
                                 return;
                             }
+
+                            // permit drops here (RAII)
+                            let _ = permit;
                         }
                     }
 
                     if !rows.is_empty() {
+                        let permit = flow.acquire_credit().await;
+                        let seq = flow.alloc_seq().await;
+
                         let chunk = TableChunk {
                             op_id,
+                            seq,
                             rows,
                             row_offset,
                         };
-                        let _ = tx_chunk.send(Ok(chunk)).await;
+
+                        if tx_chunk.send(Ok(chunk)).await.is_err() {
+                            flow.ack(1);
+                            drop(tx_chunk);
+                            let _ = emit_task.await;
+                            // permit drops here (RAII)
+                            return;
+                        }
+
+                        // permit drops here (RAII)
+                        let _ = permit;
                     }
 
                     drop(tx_chunk);
@@ -442,22 +486,31 @@ pub async fn run_redis_command(
                             row_count += 1;
 
                             if rows.len() >= batch_size {
+                                let permit = flow.acquire_credit().await;
+                                let seq = flow.alloc_seq().await;
+
                                 let chunk = TableChunk {
                                     op_id,
+                                    seq,
                                     rows: std::mem::take(&mut rows),
                                     row_offset,
                                 };
                                 row_offset = row_count;
 
                                 if tx_chunk.send(Ok(chunk)).await.is_err() {
+                                    flow.ack(1);
                                     emit_error(
                                         &ctx.app,
                                         op_id,
                                         "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
                                         started_at.elapsed().as_millis(),
                                     );
+                                    // permit drops here (RAII)
                                     return;
                                 }
+
+                                // permit drops here (RAII)
+                                let _ = permit;
                             }
                         }
 
@@ -468,12 +521,26 @@ pub async fn run_redis_command(
             }
 
             if !rows.is_empty() {
+                let permit = flow.acquire_credit().await;
+                let seq = flow.alloc_seq().await;
+
                 let chunk = TableChunk {
                     op_id,
+                    seq,
                     rows,
                     row_offset,
                 };
-                let _ = tx_chunk.send(Ok(chunk)).await;
+
+                if tx_chunk.send(Ok(chunk)).await.is_err() {
+                    flow.ack(1);
+                    drop(tx_chunk);
+                    let _ = emit_task.await;
+                    // permit drops here (RAII)
+                    return;
+                }
+
+                // permit drops here (RAII)
+                let _ = permit;
             }
 
             drop(tx_chunk);
@@ -525,21 +592,31 @@ pub async fn run_redis_command(
 
             match v {
                 Ok(v) => {
+                    // Single-chunk emit: still respect FE credit.
+                    let permit = flow.acquire_credit().await;
+                    let seq = flow.alloc_seq().await;
+
                     let chunk = TableChunk {
                         op_id,
+                        seq,
                         rows: vec![vec![value_to_cell(v)]],
                         row_offset: 0,
                     };
 
                     if tx_chunk.send(Ok(chunk)).await.is_err() {
+                        flow.ack(1);
                         emit_error(
                             &ctx.app,
                             op_id,
                             "REDIS_EMIT_CHANNEL_CLOSED".to_string(),
                             started_at.elapsed().as_millis(),
                         );
+                        // permit drops here (RAII)
                         return;
                     }
+
+                    // permit drops here (RAII)
+                    let _ = permit;
 
                     drop(tx_chunk);
                     let _ = emit_task.await;

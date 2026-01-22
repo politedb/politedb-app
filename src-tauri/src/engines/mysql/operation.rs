@@ -8,7 +8,7 @@ use mysql_async::prelude::Queryable;
 
 use crate::engines::cancel::CancelHandle;
 use crate::engines::mysql::row_codec;
-use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
+use crate::operations::ctx::{ActiveGuard, FlowCtrl, FlowGuard, OperationCtx, RunningGuard};
 use crate::operations::emit::{emit_done, emit_error};
 use crate::types::{CellValue, SqlQueryInput, TableChunk};
 
@@ -193,6 +193,16 @@ pub async fn run_mysql_sql_query(
     // ✅ columns shipped in op:done
     let done_columns = Some(meta.clone());
 
+    // FE-ack flow control: bound in-flight chunks to prevent IPC/UI backlog growth.
+    // Window size can be tuned; 3 is a good default for smooth streaming.
+    ctx.flow_by_op.insert(op_id, FlowCtrl::new(3));
+    let _flow_guard = FlowGuard::new(op_id, Arc::clone(&ctx.flow_by_op));
+    let flow = ctx
+        .flow_by_op
+        .get(&op_id)
+        .map(|x| x.clone())
+        .expect("FLOW_CTRL_MISSING");
+
     let (tx_chunk, mut rx_chunk) = mpsc::channel::<Result<TableChunk, String>>(2);
 
     let app_emit = ctx.app.clone();
@@ -218,10 +228,8 @@ pub async fn run_mysql_sql_query(
     let mut batch_rows: Vec<Vec<CellValue>> = Vec::with_capacity(batch_size);
 
     // Adaptive batching
-    let min_batch: usize = 50;
-    let max_batch: usize = batch_size;
-    let mut target_batch: usize = (batch_size / 2).max(min_batch).min(max_batch);
-
+    // NOTE: We keep a fixed batch_size here and rely on FE-ACK flow control to apply
+    // backpressure safely (bounded in-flight chunks). This prevents unbounded queues.
     loop {
         tokio::select! {
             _ = notify.notified() => {
@@ -261,29 +269,32 @@ pub async fn run_mysql_sql_query(
                 batch_rows.push(row_codec::row_to_cells(&row, &decoders));
                 row_count += 1;
 
-                if batch_rows.len() >= target_batch {
+                if batch_rows.len() >= batch_size {
+                    // Wait for FE credit (bounded in-flight chunks).
+                    let permit = flow.acquire_credit().await;
+                    let seq = flow.alloc_seq().await;
+
                     let chunk = TableChunk {
                         op_id,
+                        seq,
                         rows: std::mem::take(&mut batch_rows),
                         row_offset,
                     };
                     row_offset = row_count;
 
-                    let t0 = Instant::now();
                     let sent = tx_chunk.send(Ok(chunk)).await;
-                    let dt = t0.elapsed();
 
+                    // Credit is consumed on successful send; refund if send fails to avoid deadlock.
                     if sent.is_err() {
+                        flow.ack(1);
                         drop(tx_chunk);
                         let _ = emit_task.await;
+                        // permit drops here (RAII)
                         return;
                     }
 
-                    if dt.as_millis() >= 30 {
-                        target_batch = (target_batch / 2).max(min_batch);
-                    } else if dt.as_millis() <= 5 {
-                        target_batch = (target_batch * 2).min(max_batch);
-                    }
+                    // permit drops here (RAII)
+                    let _ = permit;
                 }
             }
         }
@@ -291,12 +302,27 @@ pub async fn run_mysql_sql_query(
 
     // Flush remaining
     if !batch_rows.is_empty() {
+        let permit = flow.acquire_credit().await;
+        let seq = flow.alloc_seq().await;
+
         let chunk = TableChunk {
             op_id,
+            seq,
             rows: batch_rows,
             row_offset,
         };
-        let _ = tx_chunk.send(Ok(chunk)).await;
+
+        let sent = tx_chunk.send(Ok(chunk)).await;
+        if sent.is_err() {
+            flow.ack(1);
+            drop(tx_chunk);
+            let _ = emit_task.await;
+            // permit drops here (RAII)
+            return;
+        }
+
+        // permit drops here (RAII)
+        let _ = permit;
     }
 
     drop(tx_chunk);
