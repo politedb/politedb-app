@@ -258,6 +258,7 @@ export type SqlQueryPayload = {
 
   // Optional overrides (backend may ignore if unsupported)
   statement_timeout_ms?: number | null;
+  client_mode?: "direct" | "stream";
 };
 
 export type RedisCommandPayload = {

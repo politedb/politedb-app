@@ -16,6 +16,14 @@ pub struct SqlQueryInput {
     pub statement_timeout_ms: Option<u64>,
     pub read_only: Option<bool>,
     pub validate_only: Option<bool>,
+    #[serde(default)]
+    pub client_mode: Option<String>, // "direct" | "stream"
+}
+
+impl SqlQueryInput {
+    pub fn is_stream(&self) -> bool {
+        matches!(self.client_mode.as_deref(), Some("stream"))
+    }
 }
 
 #[derive(Clone, serde::Deserialize)]

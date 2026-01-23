@@ -1,41 +1,53 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use dashmap::DashMap;
-use futures_util::lock::Mutex;
 use tauri::AppHandle;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::engines::cancel::CancelHandle;
 
+/* =============================================================================
+ * Operation Context
+ * ============================================================================= */
+
 pub struct OperationCtx {
     pub op_id: Uuid,
     pub app: AppHandle,
 
-    pub running_ops: Arc<dashmap::DashMap<Uuid, CancelHandle>>,
-    pub cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
-    pub active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
-    pub op_to_conn: Arc<dashmap::DashMap<Uuid, Uuid>>,
+    pub running_ops: Arc<DashMap<Uuid, CancelHandle>>,
+    pub cancel_requested: Arc<DashMap<Uuid, ()>>,
+    pub active_ops: Arc<DashMap<Uuid, ()>>,
+    pub op_to_conn: Arc<DashMap<Uuid, Uuid>>,
+
+    // ✅ busy guard (sync mutex; safe in Drop)
     pub sql_busy: SqlBusyRegistry,
 
     // per-op flow control for chunk streaming
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
-    pub op_tasks: Arc<dashmap::DashMap<Uuid, tokio::task::JoinHandle<()>>>,
+    pub op_tasks: Arc<DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 }
+
+/* =============================================================================
+ * ActiveGuard
+ * ============================================================================= */
 
 /// Always clean active marker + pending cancel request,
 /// even if runner fails early (before registering cancel handle).
 pub struct ActiveGuard {
     op_id: Uuid,
-    active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
-    cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
+    active_ops: Arc<DashMap<Uuid, ()>>,
+    cancel_requested: Arc<DashMap<Uuid, ()>>,
 }
 
 impl ActiveGuard {
     pub fn new(
         op_id: Uuid,
-        active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
-        cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
+        active_ops: Arc<DashMap<Uuid, ()>>,
+        cancel_requested: Arc<DashMap<Uuid, ()>>,
     ) -> Self {
         Self {
             op_id,
@@ -52,14 +64,18 @@ impl Drop for ActiveGuard {
     }
 }
 
+/* =============================================================================
+ * RunningGuard
+ * ============================================================================= */
+
 /// Clean running_ops once cancel handle exists.
 pub struct RunningGuard {
     op_id: Uuid,
-    running_ops: Arc<dashmap::DashMap<Uuid, CancelHandle>>,
+    running_ops: Arc<DashMap<Uuid, CancelHandle>>,
 }
 
 impl RunningGuard {
-    pub fn new(op_id: Uuid, running_ops: Arc<dashmap::DashMap<Uuid, CancelHandle>>) -> Self {
+    pub fn new(op_id: Uuid, running_ops: Arc<DashMap<Uuid, CancelHandle>>) -> Self {
         Self { op_id, running_ops }
     }
 }
@@ -70,17 +86,21 @@ impl Drop for RunningGuard {
     }
 }
 
+/* =============================================================================
+ * Flow Control
+ * ============================================================================= */
+
 #[derive(Clone)]
 pub struct FlowCtrl {
     pub sem: Arc<Semaphore>,
-    pub next_seq: Arc<Mutex<u64>>,
+    pub next_seq: Arc<tokio::sync::Mutex<u64>>,
 }
 
 impl FlowCtrl {
     pub fn new(window: usize) -> Self {
         Self {
             sem: Arc::new(Semaphore::new(window)),
-            next_seq: Arc::new(Mutex::new(0)),
+            next_seq: Arc::new(tokio::sync::Mutex::new(0)),
         }
     }
 
@@ -118,11 +138,13 @@ impl Drop for FlowGuard {
     }
 }
 
-// Registry to track busy SQL connections.
+/* =============================================================================
+ * SQL Busy Registry (sync)
+ * ============================================================================= */
+
 #[derive(Clone)]
 pub struct SqlBusyRegistry {
-    // connection_id -> op_id
-    pub busy_by_conn: Arc<Mutex<HashMap<String, String>>>,
+    pub busy_by_conn: Arc<Mutex<HashMap<Uuid, Uuid>>>,
 }
 
 impl SqlBusyRegistry {
@@ -132,24 +154,28 @@ impl SqlBusyRegistry {
         }
     }
 
-    pub async fn try_acquire(&self, connection_id: &str, op_id: &str) -> Result<(), String> {
-        let mut map = self.busy_by_conn.lock().await;
+    pub fn try_acquire(&self, connection_id: Uuid, op_id: Uuid) -> Result<(), String> {
+        let mut map = self.busy_by_conn.lock().unwrap();
 
-        if let Some(existing) = map.get(connection_id) {
+        if let Some(existing) = map.get(&connection_id) {
             return Err(format!("ERR_SQL_BUSY:{}", existing));
         }
 
-        map.insert(connection_id.to_string(), op_id.to_string());
+        map.insert(connection_id, op_id);
         Ok(())
     }
 
-    pub async fn release_if_owner(&self, connection_id: &str, op_id: &str) {
-        let mut map = self.busy_by_conn.lock().await;
-        match map.get(connection_id) {
-            Some(cur) if cur == op_id => {
-                map.remove(connection_id);
+    pub fn release_if_owner(&self, connection_id: Uuid, op_id: Uuid) {
+        let mut map = self.busy_by_conn.lock().unwrap();
+        match map.get(&connection_id) {
+            Some(cur) if *cur == op_id => {
+                map.remove(&connection_id);
             }
             _ => {}
         }
+    }
+
+    pub fn clear(&self) {
+        self.busy_by_conn.lock().unwrap().clear();
     }
 }

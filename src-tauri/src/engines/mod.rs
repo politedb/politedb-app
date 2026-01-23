@@ -32,6 +32,7 @@ pub struct OpCleanup {
     active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
     op_to_conn: Arc<dashmap::DashMap<Uuid, Uuid>>,
     op_tasks: Arc<dashmap::DashMap<Uuid, tokio::task::JoinHandle<()>>>,
+    is_stream_sql: bool,
 }
 
 impl Drop for OpCleanup {
@@ -43,13 +44,9 @@ impl Drop for OpCleanup {
         self.op_tasks.remove(&self.op_id);
 
         // ✅ async release (Drop can't await)
-        if self.kind == OperationKind::SqlQuery {
-            let sql_busy = self.sql_busy.clone();
-            let conn_id = self.connection_id.to_string();
-            let op_id = self.op_id.to_string();
-            tokio::spawn(async move {
-                sql_busy.release_if_owner(&conn_id, &op_id).await;
-            });
+        if self.kind == OperationKind::SqlQuery && self.is_stream_sql {
+            self.sql_busy
+                .release_if_owner(self.connection_id, self.op_id);
         }
     }
 }
@@ -93,15 +90,14 @@ impl EngineConnection {
         let op_id = ctx.op_id;
         let op_tasks = Arc::clone(&ctx.op_tasks);
 
-        // ✅ capture conn_id now (before moving ctx into task)
         let connection_id = ctx
             .op_to_conn
             .get(&op_id)
             .map(|r| *r.value())
             .ok_or("CONNECTION_NOT_FOUND_FOR_OP")?;
 
-        // ✅ clone sql_busy handle now
         let sql_busy = ctx.sql_busy.clone();
+        let is_stream_sql = input.is_stream();
 
         match self {
             EngineConnection::Postgres(pg) => {
@@ -114,6 +110,7 @@ impl EngineConnection {
                         kind: OperationKind::SqlQuery,
                         connection_id,
                         sql_busy,
+                        is_stream_sql,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
@@ -140,6 +137,7 @@ impl EngineConnection {
                         connection_id,
                         kind: OperationKind::SqlQuery,
                         sql_busy,
+                        is_stream_sql,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
@@ -174,9 +172,9 @@ impl EngineConnection {
                 let pool = r.pool.clone();
                 let default_timeout_ms = r.default_command_timeout_ms;
 
-                // ✅ take copies / clones BEFORE moving ctx into async block
                 let op_id = ctx.op_id;
                 let conn_id = self.id();
+                let sql_busy = ctx.sql_busy.clone();
 
                 let op_tasks = Arc::clone(&ctx.op_tasks);
                 let op_to_conn = Arc::clone(&ctx.op_to_conn);
@@ -186,15 +184,13 @@ impl EngineConnection {
                 op_to_conn.insert(op_id, conn_id);
                 active_ops.insert(op_id, ());
 
-                // ✅ capture for cleanup before moving ctx
-                let sql_busy = ctx.sql_busy.clone();
-
                 let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
                         op_id,
                         kind: OperationKind::RedisCommand,
                         connection_id: conn_id,
                         sql_busy,
+                        is_stream_sql: false,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),

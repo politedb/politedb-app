@@ -42,6 +42,7 @@ export async function runSqlQuery(
       sql,
       batch_size: opts?.batchSize ?? 100,
       max_rows: opts?.maxRows,
+      client_mode: "direct",
     },
   });
 
@@ -137,6 +138,7 @@ export async function startSqlQueryStream(
       sql,
       batch_size: opts?.batchSize ?? 100,
       max_rows: opts?.maxRows,
+      client_mode: "stream",
     },
   });
   return opId;

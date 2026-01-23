@@ -11,6 +11,7 @@ mod state;
 mod types;
 
 use crate::security::secrets;
+use crate::state::AppState;
 
 mod ssh_tunnel;
 
@@ -20,6 +21,9 @@ use tracing_subscriber::EnvFilter;
 
 use engines::driver::EngineDriver;
 use engines::registry::EngineRegistry;
+
+// Needed for `app.state()` and other app/window extension methods.
+use tauri::Manager;
 
 fn main() {
     tracing_subscriber::fmt()
@@ -41,6 +45,8 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             window_chrome::apply(app);
+            let state: tauri::State<AppState> = app.state();
+            state.sql_busy.clear();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -41,42 +41,49 @@ pub async fn dispatch_operation(
         .clone();
 
     let op_id = Uuid::new_v4();
-    let op_id_str = op_id.to_string();
-    let conn_id: Uuid = input.connection_id.clone();
-    let conn_id_str = conn_id.to_string();
+    let conn_id: Uuid = input.connection_id;
 
     /* ============================================================
      * SQL BUSY GUARD (ONLY FOR SQL QUERY)
+     * - Acquire BEFORE marking active / emitting started / spawning
      * ============================================================ */
-    if input.kind == OperationKind::SqlQuery {
-        state
-            .sql_busy
-            .try_acquire(conn_id_str.as_str(), &op_id_str)
-            .await?;
+    // ✅ determine is_stream from payload (only for SqlQuery)
+    let is_stream_sql = match input.kind {
+        OperationKind::SqlQuery => input.sql.as_ref().map(|s| s.is_stream()).unwrap_or(false),
+        _ => false,
+    };
+
+    // ✅ acquire only for stream
+    if is_stream_sql {
+        state.sql_busy.try_acquire(conn_id, op_id)?;
     }
 
     /* ============================================================
      * OP REGISTRATION
      * ============================================================ */
 
-    // Map op -> connection ASAP
-    state.op_to_conn.insert(op_id, conn_id.clone());
+    // Map op -> connection ASAP (so connection_remove can cancel correctly)
+    state.op_to_conn.insert(op_id, conn_id);
+
+    // Mark active
     state.active_ops.insert(op_id, ());
 
-    // Emit started
-    if let Err(e) = emit_started(&app, op_id, conn_id.clone()) {
-        // rollback
-        if input.kind == OperationKind::SqlQuery {
-            state
-                .sql_busy
-                .release_if_owner(conn_id_str.as_str(), &op_id_str)
-                .await;
+    // Emit started (if this fails, rollback state)
+    if let Err(e) = emit_started(&app, op_id, conn_id) {
+        // rollback op tracking
+        state.active_ops.remove(&op_id);
+        state.op_to_conn.remove(&op_id);
+
+        state.running_ops.remove(&op_id);
+        state.cancel_requested.remove(&op_id);
+        state.flow_by_op.remove(&op_id);
+        if let Some((_k, t)) = state.op_tasks.remove(&op_id) {
+            t.abort();
         }
-        if input.kind == OperationKind::SqlQuery {
-            state
-                .sql_busy
-                .release_if_owner(&conn_id_str.as_str(), &op_id_str)
-                .await;
+
+        // rollback busy lock
+        if is_stream_sql {
+            state.sql_busy.release_if_owner(conn_id, op_id);
         }
 
         return Err(e);
@@ -129,11 +136,9 @@ pub async fn dispatch_operation(
             t.abort();
         }
 
-        if input.kind == OperationKind::SqlQuery {
-            state
-                .sql_busy
-                .release_if_owner(&conn_id_str.as_str(), &op_id_str)
-                .await;
+        // rollback busy lock
+        if is_stream_sql {
+            state.sql_busy.release_if_owner(conn_id, op_id);
         }
 
         return Err(e);

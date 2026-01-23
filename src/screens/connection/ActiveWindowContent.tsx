@@ -67,10 +67,10 @@ function extractPatchesForTableFromPatches(
   >;
 
   for (const [rowKey, patchData] of Object.entries(updatePatches)) {
-    result[rowKey] = { ...result[rowKey], ...(patchData as any) };
+    result[rowKey] = { ...result[rowKey], ...patchData };
   }
   for (const [rowKey, patchData] of Object.entries(createPatches)) {
-    result[rowKey] = { ...result[rowKey], ...(patchData as any) };
+    result[rowKey] = { ...result[rowKey], ...patchData };
   }
 
   return Object.keys(result).length ? result : null;
@@ -146,9 +146,8 @@ function getWindowPatches(
   windowId: string | undefined
 ): WindowPatches | null {
   if (!windowId) return null;
-  return ((useConnectionStore.getState().dataPatchMap as any)[profileId]?.[
-    windowId
-  ]?.patches ?? null) as WindowPatches | null;
+  return (useConnectionStore.getState().dataPatchMap[profileId]?.[windowId]
+    ?.patches ?? null) as WindowPatches | null;
 }
 
 /* =============================================================================
@@ -190,7 +189,7 @@ export function ActiveWindowContent() {
   }, [activeTableWindow?.id]);
 
   // =========================================================================
-  // Computed key
+  // Active key
   // =========================================================================
   const activeKey = useMemo(() => {
     if (!activeTableWindow) return "";
@@ -207,12 +206,10 @@ export function ActiveWindowContent() {
 
   // =========================================================================
   // Subscribe ONLY to critical changes that require re-render
-  // NOTE: rows store is the source-of-truth for data loading/progress
   // =========================================================================
   useEffect(() => {
     if (!activeKey) return;
 
-    // Ensure rows window exists (idempotent)
     useConnectionStore.getState().initRows(activeKey, 5000);
 
     let lastBusy = getTableMeta(activeKey).busy;
@@ -221,10 +218,13 @@ export function ActiveWindowContent() {
     let lastRowCount = getTableMeta(activeKey).rowCount;
 
     let lastRowsVersion = getRowsWindowInfo(activeKey)?.version ?? 0;
-    let lastRowsError = String(
-      (getRowsWindowInfo(activeKey) as any)?.error ?? ""
-    );
-    let lastRowsRunning = !!(getRowsWindowInfo(activeKey) as any)?.running;
+    let lastRowsError = String(getRowsWindowInfo(activeKey)?.error ?? "");
+    let lastRowsRunning = !!getRowsWindowInfo(activeKey)?.running;
+    let lastLoadedMax = getRowsWindowInfo(activeKey)?.loadedMax ?? -1;
+    let lastStreamOffset =
+      typeof getRowsWindowInfo(activeKey)?.streamOffset === "number"
+        ? getRowsWindowInfo(activeKey)?.streamOffset
+        : 0;
 
     const unsub = useConnectionStore.subscribe((state) => {
       const meta = state.tableDataMap[activeKey] ?? EMPTY_TABLE_META;
@@ -236,8 +236,12 @@ export function ActiveWindowContent() {
       const rowCount = meta.rowCount;
 
       const rowsVersion = info?.version ?? 0;
-      const rowsError = String((info as any)?.error ?? "");
-      const rowsRunning = !!(info as any)?.running;
+      const rowsError = String(info?.error ?? "");
+      const rowsRunning = !!info?.running;
+      const loadedMax =
+        typeof info?.loadedMax === "number" ? info.loadedMax : -1;
+      const streamOffset =
+        typeof info?.streamOffset === "number" ? info.streamOffset : 0;
 
       const shouldUpdate =
         busy !== lastBusy ||
@@ -246,7 +250,9 @@ export function ActiveWindowContent() {
         rowCount !== lastRowCount ||
         rowsVersion !== lastRowsVersion ||
         rowsError !== lastRowsError ||
-        rowsRunning !== lastRowsRunning;
+        rowsRunning !== lastRowsRunning ||
+        loadedMax !== lastLoadedMax ||
+        streamOffset !== lastStreamOffset;
 
       if (!shouldUpdate) return;
 
@@ -257,6 +263,8 @@ export function ActiveWindowContent() {
       lastRowsVersion = rowsVersion;
       lastRowsError = rowsError;
       lastRowsRunning = rowsRunning;
+      lastLoadedMax = loadedMax;
+      lastStreamOffset = streamOffset;
 
       triggerRender();
     });
@@ -275,7 +283,7 @@ export function ActiveWindowContent() {
   const windowPatches = getWindowPatches(profileId, activeTableWindow?.id);
 
   // =========================================================================
-  // Unified error
+  // Errors
   // =========================================================================
   const loadErrorText = String(loadError ?? "");
   const metaErrorText = String(activeTableMeta.error ?? "");
@@ -284,42 +292,51 @@ export function ActiveWindowContent() {
   const hasError = !!effectiveErrorText;
 
   // =========================================================================
-  // Rows readiness: if rows store has any hydrated/cached data, do NOT block UI
+  // Rows state (robust against empty results)
   // =========================================================================
+  const rowsRunning = !!activeRowsInfo?.running;
+  const streamOffset =
+    typeof activeRowsInfo?.streamOffset === "number"
+      ? activeRowsInfo.streamOffset
+      : 0;
+  const loadedMax =
+    typeof activeRowsInfo?.loadedMax === "number"
+      ? activeRowsInfo.loadedMax
+      : -1;
+
   const hasAnyRowData = useMemo(() => {
     if (!activeKey) return false;
+    if (!activeRowsInfo) return false;
 
-    const info = activeRowsInfo;
-    if (!info) return false;
-
-    const streamOffset =
-      typeof info.streamOffset === "number" ? info.streamOffset : 0;
-    const loadedMax = typeof info.loadedMax === "number" ? info.loadedMax : -1;
-
-    // If at least 1 row has ever been received for this stream offset
     if (loadedMax >= streamOffset) return true;
 
-    // Fallback: try a few reads from rows window/cache
     const st = useConnectionStore.getState();
-    const base = typeof info.base === "number" ? info.base : 0;
+    const base =
+      typeof activeRowsInfo?.base === "number" ? activeRowsInfo.base : 0;
     for (let i = 0; i < 5; i++) {
       if (st.getRowAt(activeKey, base + i)) return true;
     }
 
     return false;
-  }, [activeKey, activeRowsInfo]);
+  }, [activeKey, activeRowsInfo, loadedMax, streamOffset]);
+
+  // ✅ terminal empty: query finished, no rows were ever received for this stream offset
+  const rowsKnownEmpty =
+    !!activeRowsInfo && !rowsRunning && loadedMax < streamOffset;
 
   // =========================================================================
-  // Full-screen loading policy (NOT dependent on meta.busy)
-  // - Only show full loading when we cannot render meaningful content yet
+  // Full-screen loading policy
+  // - Only show when we truly cannot render anything meaningful
+  // - Never block UI when the result is known empty
   // =========================================================================
   const shouldShowFullLoading =
     !hasError &&
     !!activeTableWindow &&
     !activeSqlWindow &&
     !hasAnyRowData &&
-    activeRowsInfo &&
-    (activeRowsInfo.running || activeRowsInfo.loadedMax < 0);
+    !!activeRowsInfo &&
+    !rowsKnownEmpty &&
+    (rowsRunning || loadedMax < 0);
 
   // =========================================================================
   // Derived patch data
@@ -366,9 +383,9 @@ export function ActiveWindowContent() {
       let rowKey: string;
       let patchData = data;
 
-      if (rowIndex === -1 && (data as any).__rowKey) {
-        rowKey = String((data as any).__rowKey);
-        const { __rowKey, ...rest } = data as any;
+      if (rowIndex === -1 && data.__rowKey) {
+        rowKey = String(data.__rowKey);
+        const { __rowKey, ...rest } = data;
         patchData = rest;
       } else {
         rowKey = String(rowIndex);
@@ -459,7 +476,7 @@ export function ActiveWindowContent() {
     const cols = currentMeta.columns ?? [];
     if (!cols.length) return;
 
-    handleAddRowFromHook(cols as any, onDataChange);
+    handleAddRowFromHook(cols, onDataChange);
   }, [activeTableWindow, activeKey, handleAddRowFromHook, onDataChange]);
 
   // =========================================================================
@@ -510,7 +527,7 @@ export function ActiveWindowContent() {
   }
 
   // =========================================================================
-  // New table pane logic (avoid "false positives" during first load)
+  // New table pane
   // =========================================================================
   const isShowNewTablePane = !!activeTableWindow?.table?.new;
 
@@ -550,10 +567,12 @@ export function ActiveWindowContent() {
   // =========================================================================
   // Guards / early returns
   // =========================================================================
-  if (shouldShowFullLoading) return <LoadingTableState />;
-  if (hasError) return <ErrorState message={effectiveErrorText} />;
   if (!hasAnyWindow || !activeTableWindow)
     return <EmptyWindow onNewSql={actions.openSql} />;
+
+  if (hasError) return <ErrorState message={effectiveErrorText} />;
+
+  if (shouldShowFullLoading) return <LoadingTableState />;
 
   // =========================================================================
   // Page view mode calculations
@@ -569,7 +588,6 @@ export function ActiveWindowContent() {
       return Math.max(MIN_ROWS, Math.min(pageLimit, remaining));
     }
 
-    // Unknown rowCount: assume at least pageLimit (virtual)
     return Math.max(MIN_ROWS, pageLimit);
   }, [activeTableMeta.rowCount, pageOffset, pageLimit]);
 
@@ -580,7 +598,7 @@ export function ActiveWindowContent() {
   }, [activeTableMeta.rowCount, pageOffset, pageTotalRows]);
 
   // =========================================================================
-  // Row accessor (NO subscription, just read from store)
+  // Row accessor
   // =========================================================================
   const getRowAt = useCallback(
     (localIdx: number) => {
