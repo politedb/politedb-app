@@ -2,13 +2,13 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
-import type { QueryResult } from "src/lib/tauri";
+import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
 
 export type SqlRunFn = (args: {
   windowId: string;
   connectionId: string;
   sql: string;
-}) => Promise<QueryResult>;
+}) => Promise<RunSqlReturn>;
 
 export type ConnectionRuntime = {
   profileId: string;

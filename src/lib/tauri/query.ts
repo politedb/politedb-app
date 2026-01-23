@@ -23,6 +23,13 @@ function normalizeDoneColumns(done: any): ColumnMeta[] {
   }));
 }
 
+function safeRowOffset(chunk: TableChunk, fallback: number) {
+  const raw = (chunk as any)?.row_offset;
+  const off = Number(raw);
+  if (Number.isFinite(off) && off >= 0) return off;
+  return fallback;
+}
+
 export async function runSqlQuery(
   connection_id: string,
   sql: string,
@@ -42,45 +49,43 @@ export async function runSqlQuery(
   const buffer: any[] = [];
   const timeoutMs = opts?.timeoutMs ?? 60_000;
 
-  return new Promise<QueryResult>(async (resolve, reject) => {
-    let finished = false;
-    let unsub: (() => void) | null = null;
-    let timerId: number | null = null;
+  let finished = false;
+  let unsub: (() => void) | null = null;
+  let timerId: number | null = null;
 
-    const cleanup = () => {
-      try {
-        unsub?.();
-      } catch {}
-      unsub = null;
+  const cleanup = () => {
+    try {
+      unsub?.();
+    } catch {}
+    unsub = null;
 
-      if (timerId) window.clearTimeout(timerId);
-      timerId = null;
-    };
+    if (timerId != null) window.clearTimeout(timerId);
+    timerId = null;
+  };
 
-    const finalizeOk = (done: any) => {
-      if (finished) return;
-      finished = true;
-      cleanup();
+  const finalizeOk = (done: any, resolve: (v: QueryResult) => void) => {
+    if (finished) return;
+    finished = true;
+    cleanup();
 
-      const columns = normalizeDoneColumns(done);
+    const columns = normalizeDoneColumns(done);
+    const rows = buffer.filter((r) => r !== undefined);
 
-      // remove holes if any
-      const rows = buffer.filter((r) => r !== undefined);
+    resolve({
+      columns,
+      rows,
+      rowCount: done?.row_count ?? rows.length,
+    });
+  };
 
-      resolve({
-        columns,
-        rows,
-        rowCount: done?.row_count ?? rows.length,
-      });
-    };
+  const finalizeErr = (err: any, reject: (e: Error) => void) => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    reject(new Error(toErrorMessage(err)));
+  };
 
-    const finalizeErr = (err: any) => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      reject(new Error(toErrorMessage(err)));
-    };
-
+  return await new Promise<QueryResult>(async (resolve, reject) => {
     if (timeoutMs > 0) {
       timerId = window.setTimeout(async () => {
         if (finished) return;
@@ -104,24 +109,18 @@ export async function runSqlQuery(
           const rows = chunk.rows ?? [];
           if (!rows.length) return;
 
-          const off = Number(chunk.row_offset ?? buffer.length);
+          const off = safeRowOffset(chunk, buffer.length);
 
           if (buffer.length < off) buffer.length = off;
           for (let i = 0; i < rows.length; i++) {
             buffer[off + i] = rows[i];
           }
         },
-
-        onDone: (done: any) => {
-          finalizeOk(done);
-        },
-
-        onError: (err: any) => {
-          finalizeErr(err);
-        },
+        onDone: (done: any) => finalizeOk(done, resolve),
+        onError: (err: any) => finalizeErr(err, reject),
       });
     } catch (e) {
-      finalizeErr(e);
+      finalizeErr(e, reject);
     }
   });
 }

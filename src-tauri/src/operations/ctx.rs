@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use dashmap::DashMap;
 use futures_util::lock::Mutex;
@@ -16,6 +16,7 @@ pub struct OperationCtx {
     pub cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
     pub active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
     pub op_to_conn: Arc<dashmap::DashMap<Uuid, Uuid>>,
+    pub sql_busy: SqlBusyRegistry,
 
     // per-op flow control for chunk streaming
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
@@ -114,5 +115,41 @@ impl FlowGuard {
 impl Drop for FlowGuard {
     fn drop(&mut self) {
         self.flow_by_op.remove(&self.op_id);
+    }
+}
+
+// Registry to track busy SQL connections.
+#[derive(Clone)]
+pub struct SqlBusyRegistry {
+    // connection_id -> op_id
+    pub busy_by_conn: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl SqlBusyRegistry {
+    pub fn new() -> Self {
+        Self {
+            busy_by_conn: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn try_acquire(&self, connection_id: &str, op_id: &str) -> Result<(), String> {
+        let mut map = self.busy_by_conn.lock().await;
+
+        if let Some(existing) = map.get(connection_id) {
+            return Err(format!("ERR_SQL_BUSY:{}", existing));
+        }
+
+        map.insert(connection_id.to_string(), op_id.to_string());
+        Ok(())
+    }
+
+    pub async fn release_if_owner(&self, connection_id: &str, op_id: &str) {
+        let mut map = self.busy_by_conn.lock().await;
+        match map.get(connection_id) {
+            Some(cur) if cur == op_id => {
+                map.remove(connection_id);
+            }
+            _ => {}
+        }
     }
 }

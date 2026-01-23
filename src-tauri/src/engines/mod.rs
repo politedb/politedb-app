@@ -11,9 +11,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::engines::cancel::CancelHandle;
-use crate::operations::ctx::OperationCtx;
-use crate::types::RedisCommandInput;
+use crate::operations::ctx::{OperationCtx, SqlBusyRegistry};
 use crate::types::{EngineKind, SqlQueryInput};
+use crate::types::{OperationKind, RedisCommandInput};
 
 #[derive(Clone)]
 pub enum EngineConnection {
@@ -24,6 +24,9 @@ pub enum EngineConnection {
 
 pub struct OpCleanup {
     op_id: Uuid,
+    kind: OperationKind,
+    connection_id: Uuid,
+    sql_busy: SqlBusyRegistry,
     running_ops: Arc<dashmap::DashMap<Uuid, CancelHandle>>,
     cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
     active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
@@ -38,6 +41,16 @@ impl Drop for OpCleanup {
         self.active_ops.remove(&self.op_id);
         self.op_to_conn.remove(&self.op_id);
         self.op_tasks.remove(&self.op_id);
+
+        // ✅ async release (Drop can't await)
+        if self.kind == OperationKind::SqlQuery {
+            let sql_busy = self.sql_busy.clone();
+            let conn_id = self.connection_id.to_string();
+            let op_id = self.op_id.to_string();
+            tokio::spawn(async move {
+                sql_busy.release_if_owner(&conn_id, &op_id).await;
+            });
+        }
     }
 }
 
@@ -80,6 +93,16 @@ impl EngineConnection {
         let op_id = ctx.op_id;
         let op_tasks = Arc::clone(&ctx.op_tasks);
 
+        // ✅ capture conn_id now (before moving ctx into task)
+        let connection_id = ctx
+            .op_to_conn
+            .get(&op_id)
+            .map(|r| *r.value())
+            .ok_or("CONNECTION_NOT_FOUND_FOR_OP")?;
+
+        // ✅ clone sql_busy handle now
+        let sql_busy = ctx.sql_busy.clone();
+
         match self {
             EngineConnection::Postgres(pg) => {
                 let pool = pg.pool.clone();
@@ -88,6 +111,9 @@ impl EngineConnection {
                 let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
                         op_id,
+                        kind: OperationKind::SqlQuery,
+                        connection_id,
+                        sql_busy,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
@@ -111,6 +137,9 @@ impl EngineConnection {
                 let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
                         op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
@@ -153,13 +182,19 @@ impl EngineConnection {
                 let op_to_conn = Arc::clone(&ctx.op_to_conn);
                 let active_ops = Arc::clone(&ctx.active_ops);
 
-                // ✅ register mapping before spawn
+                // register mapping before spawn
                 op_to_conn.insert(op_id, conn_id);
                 active_ops.insert(op_id, ());
+
+                // ✅ capture for cleanup before moving ctx
+                let sql_busy = ctx.sql_busy.clone();
 
                 let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
                         op_id,
+                        kind: OperationKind::RedisCommand,
+                        connection_id: conn_id,
+                        sql_busy,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
@@ -176,9 +211,7 @@ impl EngineConnection {
                     .await;
                 });
 
-                // ✅ insert handle using cloned Arc (NOT ctx)
                 op_tasks.insert(op_id, handle);
-
                 Ok(())
             }
 

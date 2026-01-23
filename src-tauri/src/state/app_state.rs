@@ -5,7 +5,7 @@ use futures_util::lock::Mutex;
 use uuid::Uuid;
 
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
-use crate::operations::ctx::FlowCtrl;
+use crate::operations::ctx::{FlowCtrl, SqlBusyRegistry};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,6 +47,8 @@ pub struct AppState {
 
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
     pub op_tasks: Arc<DashMap<Uuid, tokio::task::JoinHandle<()>>>,
+
+    pub sql_busy: SqlBusyRegistry,
 }
 
 impl AppState {
@@ -62,6 +64,7 @@ impl AppState {
             active_ops: Arc::new(DashMap::new()),
             flow_by_op: Arc::new(DashMap::new()),
             op_tasks: Arc::new(DashMap::new()),
+            sql_busy: SqlBusyRegistry::new(),
         }
     }
 }

@@ -6,7 +6,6 @@ import type {
   TableItem,
   TableWindow,
 } from "src/types";
-import type { QueryResult } from "src/lib/tauri";
 import { connectionRemove } from "src/lib/tauri";
 import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
@@ -14,6 +13,7 @@ import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { useConnectionStore } from "src/stores/connection";
 import type { ProfileTab } from "src/stores/screen";
+import { RunSqlReturn } from "./useSqlHistoryRunner";
 
 /* =============================================================================
  * Types
@@ -35,7 +35,7 @@ export type RefreshSchemaAndTablesFn = () => Promise<void>;
 export type RunSqlWithHistoryFn = (args: {
   connectionId: string;
   sql: string;
-}) => Promise<QueryResult>;
+}) => Promise<RunSqlReturn>;
 
 export type UseConnectionActionsArgs = {
   activeProfileScreen: string; // tabId

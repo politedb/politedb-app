@@ -323,6 +323,9 @@ export type SqlResultSlot = {
   error?: string;
   startedAt?: number;
   finishedAt?: number;
+
+  opId?: string; // For Streaming / SELECT queries
+  mode?: "direct" | "stream"; // To easily switch UI rendering
 };
 
 /* ============================================================================

@@ -1,16 +1,11 @@
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
-import type { QueryResult } from "src/lib/tauri";
+import type { SqlResultSlot } from "src/lib/tauri";
+import { useSqlStreamResult } from "src/screens/connection/hooks/useSqlStreamResult";
 
-export type SqlResultSlot = {
-  index: number;
-  sql: string;
-  status: "queued" | "running" | "done" | "error";
-  result?: QueryResult;
-  error?: string;
-  startedAt?: number;
-  finishedAt?: number;
-};
+/* =============================================================================
+ * Helpers
+ * ============================================================================= */
 
 function statusMark(status: SqlResultSlot["status"]) {
   if (status === "queued") return "•";
@@ -25,6 +20,10 @@ function statusTone(status: SqlResultSlot["status"]) {
   if (status === "error") return "text-rose-700";
   return "text-neutral-400";
 }
+
+/* =============================================================================
+ * UI blocks
+ * ============================================================================= */
 
 function EmptyResults() {
   return (
@@ -80,6 +79,10 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
   );
 }
 
+/* =============================================================================
+ * Tabs
+ * ============================================================================= */
+
 function ResultsTabs(props: {
   slots: SqlResultSlot[];
   activeIndex: number;
@@ -91,7 +94,7 @@ function ResultsTabs(props: {
     <div class="flex items-center gap-1 border-b border-neutral-200 bg-neutral-50 px-2 py-1">
       {slots.map((s, idx) => (
         <button
-          key={idx}
+          key={s.index}
           onClick={() => onSelect(idx)}
           class={cn(
             "inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs",
@@ -111,6 +114,115 @@ function ResultsTabs(props: {
   );
 }
 
+/* =============================================================================
+ * Content renderer (single responsibility: decide what to show)
+ * ============================================================================= */
+
+function ResultsContent(props: {
+  windowId: string;
+  slot: SqlResultSlot;
+  safeIndex: number;
+}) {
+  const { windowId, slot, safeIndex } = props;
+
+  const isDirect = slot.mode === "direct";
+  const isStream = slot.mode === "stream" && !!slot.opId;
+
+  const stream = useSqlStreamResult(isStream ? slot.opId! : null);
+
+  // ---------- Error first ----------
+  if (slot.status === "error") {
+    return (
+      <div class="p-3">
+        <ErrorCard
+          title="Query error"
+          right={`Result ${safeIndex + 1}`}
+          error={slot.error}
+        />
+      </div>
+    );
+  }
+
+  if (isStream && stream.status === "error") {
+    return (
+      <div class="p-3">
+        <ErrorCard
+          title="Query error"
+          right={`Result ${safeIndex + 1}`}
+          error={stream.error}
+        />
+      </div>
+    );
+  }
+
+  // ---------- Data ----------
+  if (isDirect && slot.status === "done" && slot.result) {
+    return (
+      <TableData
+        key={`${windowId}:${slot.index}:direct`}
+        columns={slot.result.columns}
+        totalRows={slot.result.rows.length}
+        getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
+        rowsVersion={0}
+        onCellChange={() => {}}
+      />
+    );
+  }
+
+  if (isStream) {
+    console.log("STREAM STATUS", stream.status, stream.totalRows);
+    // stream done + empty
+    if (stream.status === "done" && stream.totalRows === 0) {
+      return (
+        <div class="p-3">
+          <SmallStateCard kind="empty" />
+        </div>
+      );
+    }
+
+    // stream done + has rows => show table
+    if (stream.status === "done" && stream.totalRows > 0) {
+      return (
+        <TableData
+          key={`${windowId}:${slot.index}:stream`}
+          columns={stream.columns}
+          totalRows={stream.totalRows}
+          getRowAt={stream.getRowAt}
+          rowsVersion={stream.rowsVersion}
+          onCellChange={() => {}}
+        />
+      );
+    }
+
+    // stream running (or unknown)
+    return (
+      <div class="p-3">
+        <SmallStateCard kind="running" />
+      </div>
+    );
+  }
+
+  // ---------- Non-table terminal states ----------
+  if (slot.status === "done") {
+    return (
+      <div class="p-3">
+        <SmallStateCard kind="empty" />
+      </div>
+    );
+  }
+
+  // queued / running fallback
+  return (
+    <div class="p-3">
+      <SmallStateCard kind={slot.status === "queued" ? "queued" : "running"} />
+    </div>
+  );
+}
+
+/* =============================================================================
+ * Main pane
+ * ============================================================================= */
+
 export function SqlResultsPane(props: {
   windowId: string;
   slots: SqlResultSlot[] | null;
@@ -127,43 +239,37 @@ export function SqlResultsPane(props: {
     );
   }
 
-  const slot = slots[activeIndex];
-  const hasTable = !!slot && slot.status === "done" && !!slot.result;
+  const safeIndex = Math.min(Math.max(activeIndex, 0), slots.length - 1);
+  const slot = slots[safeIndex];
+
+  // Decide whether we should allow scrolling here.
+  // (Tables manage their own scrolling; non-table views should be scrollable.)
+  const isDirectTable =
+    slot.mode === "direct" && slot.status === "done" && !!slot.result;
+
+  const isStream = slot.mode === "stream" && !!slot.opId;
+  const stream = useSqlStreamResult(isStream ? slot.opId! : null);
+
+  const isStreamTable =
+    isStream && stream.status === "done" && stream.totalRows > 0;
+
+  const shouldShowTable = isDirectTable || isStreamTable;
 
   return (
     <div class="flex h-full min-h-0 flex-col bg-white">
       <ResultsTabs
         slots={slots}
-        activeIndex={activeIndex}
+        activeIndex={safeIndex}
         onSelect={setActiveIndex}
       />
 
-      <div class={cn("min-h-0 flex-1 bg-white", !hasTable && "overflow-auto")}>
-        {!slot ? null : hasTable ? (
-          <TableData
-            key={`${windowId}:${activeIndex}`}
-            columns={slot.result!.columns}
-            totalRows={slot.result!.rows.length}
-            getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
-            onCellChange={() => {}}
-          />
-        ) : (
-          <div class="p-3">
-            {slot.status === "queued" ? (
-              <SmallStateCard kind="queued" />
-            ) : slot.status === "running" ? (
-              <SmallStateCard kind="running" />
-            ) : slot.status === "error" ? (
-              <ErrorCard
-                title="Query error"
-                right={`Result ${activeIndex + 1}`}
-                error={slot.error}
-              />
-            ) : (
-              <SmallStateCard kind="empty" />
-            )}
-          </div>
+      <div
+        class={cn(
+          "min-h-0 flex-1 bg-white",
+          !shouldShowTable && "overflow-auto"
         )}
+      >
+        <ResultsContent windowId={windowId} slot={slot} safeIndex={safeIndex} />
       </div>
     </div>
   );

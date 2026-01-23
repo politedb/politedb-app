@@ -20,6 +20,7 @@ type CachedOp = {
 
 type BusState = {
   inited: boolean;
+  initPromise: Promise<void> | null;
   unsubs: UnlistenFn[];
   handlersByOp: Map<OpId, OpHandlers>;
   cacheByOp: Map<OpId, CachedOp>;
@@ -41,6 +42,7 @@ const CLEANUP_INTERVAL_MS = 15_000;
 
 const state: BusState = {
   inited: false,
+  initPromise: null,
   unsubs: [],
   handlersByOp: new Map(),
   cacheByOp: new Map(),
@@ -81,9 +83,8 @@ function pushChunk(opId: string, chunk: TableChunk): boolean {
   // Cap by chunk count
   if (cache.chunks.length >= MAX_CHUNKS_PER_OP) {
     console.warn(
-      `[operationBus] op=${opId} chunk dropped - MAX_CHUNKS_PER_OP reached`
+      `[operationBus] op=${opId} chunk limit warn - MAX_CHUNKS_PER_OP reached`
     );
-    return false;
   }
 
   // Cap by total row count
@@ -93,9 +94,8 @@ function pushChunk(opId: string, chunk: TableChunk): boolean {
   }
   if (totalRows >= MAX_ROWS_PER_OP) {
     console.warn(
-      `[operationBus] op=${opId} chunk dropped - MAX_ROWS_PER_OP reached`
+      `[operationBus] op=${opId} row limit warn - MAX_ROWS_PER_OP reached`
     );
-    return false;
   }
 
   cache.chunks.push(chunk);
@@ -160,6 +160,8 @@ function scheduleAckFlush() {
     const entries = Array.from(pendingAcksByOp.entries());
     pendingAcksByOp.clear();
 
+    if (entries.length === 0) return;
+
     // Batch invoke - could be parallelized but sequential is safer for ordering
     for (const [opId, permits] of entries) {
       try {
@@ -202,8 +204,6 @@ async function setupListeners(): Promise<UnlistenFn[]> {
       if (accepted) {
         ackChunk(opId);
       }
-      // If dropped, we intentionally don't ACK to apply backpressure
-      // BE will eventually hit flow control limit
     }
   });
 
@@ -249,10 +249,18 @@ async function setupListeners(): Promise<UnlistenFn[]> {
 
 async function initOnce() {
   if (state.inited) return;
-  state.inited = true;
 
-  state.unsubs = await setupListeners();
-  startCleanupTimer();
+  if (state.initPromise) {
+    return state.initPromise;
+  }
+
+  state.initPromise = (async () => {
+    state.unsubs = await setupListeners();
+    startCleanupTimer();
+    state.inited = true;
+  })();
+
+  return state.initPromise;
 }
 
 /* =============================================================================
@@ -281,33 +289,47 @@ export const operationBus = {
 
     const cache = state.cacheByOp.get(opId);
 
+    // Flag to track if unsubscribed (safety for microtask)
+    let active = true;
+
     if (cache) {
       // Replay cached chunks IN ORDER (sorted by seq)
       if (cache.chunks.length > 0 && handlers.onChunk) {
         const sortedChunks = getSortedChunks(opId);
+
+        // Clear cache BEFORE calling handlers to ensure logic order
+        cache.chunks = [];
+
         for (const chunk of sortedChunks) {
+          if (!active) break; // Stop if unsubscribed
           handlers.onChunk(chunk);
         }
-        cache.chunks = []; // Clear after replay
       }
 
       // Replay terminal event (done takes precedence if both exist somehow)
-      if (cache.done && handlers.onDone) {
-        // Use queueMicrotask to ensure onChunk processing completes first
-        queueMicrotask(() => {
-          handlers.onDone?.(cache.done!);
-          state.handlersByOp.delete(opId);
-        });
-      } else if (cache.error && handlers.onError) {
-        queueMicrotask(() => {
-          handlers.onError?.(cache.error!);
-          state.handlersByOp.delete(opId);
-        });
+      if (active) {
+        if (cache.done && handlers.onDone) {
+          // Use queueMicrotask to ensure onChunk processing completes first
+          queueMicrotask(() => {
+            if (active && state.handlersByOp.has(opId)) {
+              handlers.onDone?.(cache.done!);
+              state.handlersByOp.delete(opId);
+            }
+          });
+        } else if (cache.error && handlers.onError) {
+          queueMicrotask(() => {
+            if (active && state.handlersByOp.has(opId)) {
+              handlers.onError?.(cache.error!);
+              state.handlersByOp.delete(opId);
+            }
+          });
+        }
       }
     }
 
     // Return unsubscribe function
     return () => {
+      active = false; // Mark inactive
       state.handlersByOp.delete(opId);
       clearCache(opId);
     };
@@ -405,6 +427,7 @@ export const operationBus = {
     pendingAcksByOp.clear();
     ackScheduled = false;
     state.inited = false;
+    state.initPromise = null;
   },
 };
 

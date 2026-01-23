@@ -2,12 +2,12 @@ import { useMemo } from "preact/hooks";
 
 import type { SqlEditorWindow, DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
-import type { QueryResult } from "src/lib/tauri";
 
 import { SplitPane } from "src/components/SplitPane";
 import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
+import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
 
 export function SqlWindowPane(props: {
   win: SqlEditorWindow;
@@ -19,7 +19,7 @@ export function SqlWindowPane(props: {
     windowId: string;
     connectionId: string;
     sql: string;
-  }) => Promise<QueryResult>;
+  }) => Promise<RunSqlReturn>;
 }) {
   const { win, engine, metaKey, metadata, runtimeConnectionId, onRunSql } =
     props;
@@ -56,7 +56,7 @@ export function SqlWindowPane(props: {
               tables={meta.tables}
               columnsByTable={meta.columnsByTable}
               engine={engine}
-              onRunSql={({ windowId, sql }) => void startRun({ windowId, sql })}
+              onRunSql={({ windowId, sql }) => startRun({ windowId, sql })}
             />
 
             {!runtimeConnectionId ? (

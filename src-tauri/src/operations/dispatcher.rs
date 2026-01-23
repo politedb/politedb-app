@@ -41,27 +41,50 @@ pub async fn dispatch_operation(
         .clone();
 
     let op_id = Uuid::new_v4();
+    let op_id_str = op_id.to_string();
+    let conn_id: Uuid = input.connection_id.clone();
+    let conn_id_str = conn_id.to_string();
 
-    // Map op -> connection ASAP (so connection_remove can cancel correctly)
-    state.op_to_conn.insert(op_id, input.connection_id);
+    /* ============================================================
+     * SQL BUSY GUARD (ONLY FOR SQL QUERY)
+     * ============================================================ */
+    if input.kind == OperationKind::SqlQuery {
+        state
+            .sql_busy
+            .try_acquire(conn_id_str.as_str(), &op_id_str)
+            .await?;
+    }
 
-    // Mark active
+    /* ============================================================
+     * OP REGISTRATION
+     * ============================================================ */
+
+    // Map op -> connection ASAP
+    state.op_to_conn.insert(op_id, conn_id.clone());
     state.active_ops.insert(op_id, ());
 
-    // Emit started (if this fails, rollback state)
-    if let Err(e) = emit_started(&app, op_id, input.connection_id) {
-        state.active_ops.remove(&op_id);
-        state.op_to_conn.remove(&op_id);
-
-        state.running_ops.remove(&op_id);
-        state.cancel_requested.remove(&op_id);
-        state.flow_by_op.remove(&op_id);
-        if let Some((_k, t)) = state.op_tasks.remove(&op_id) {
-            t.abort();
+    // Emit started
+    if let Err(e) = emit_started(&app, op_id, conn_id.clone()) {
+        // rollback
+        if input.kind == OperationKind::SqlQuery {
+            state
+                .sql_busy
+                .release_if_owner(conn_id_str.as_str(), &op_id_str)
+                .await;
+        }
+        if input.kind == OperationKind::SqlQuery {
+            state
+                .sql_busy
+                .release_if_owner(&conn_id_str.as_str(), &op_id_str)
+                .await;
         }
 
         return Err(e);
     }
+
+    /* ============================================================
+     * OP CONTEXT
+     * ============================================================ */
 
     let ctx = OperationCtx {
         op_id,
@@ -72,7 +95,12 @@ pub async fn dispatch_operation(
         op_to_conn: Arc::clone(&state.op_to_conn),
         flow_by_op: Arc::clone(&state.flow_by_op),
         op_tasks: Arc::clone(&state.op_tasks),
+        sql_busy: state.sql_busy.clone(),
     };
+
+    /* ============================================================
+     * SPAWN OPERATION
+     * ============================================================ */
 
     let spawn_res: Result<(), String> = match input.kind {
         OperationKind::SqlQuery => {
@@ -85,7 +113,10 @@ pub async fn dispatch_operation(
         }
     };
 
-    // If spawn fails, rollback op tracking
+    /* ============================================================
+     * SPAWN FAIL → ROLLBACK EVERYTHING
+     * ============================================================ */
+
     if let Err(e) = spawn_res {
         state.active_ops.remove(&op_id);
         state.op_to_conn.remove(&op_id);
@@ -93,8 +124,16 @@ pub async fn dispatch_operation(
         state.running_ops.remove(&op_id);
         state.cancel_requested.remove(&op_id);
         state.flow_by_op.remove(&op_id);
+
         if let Some((_k, t)) = state.op_tasks.remove(&op_id) {
             t.abort();
+        }
+
+        if input.kind == OperationKind::SqlQuery {
+            state
+                .sql_busy
+                .release_if_owner(&conn_id_str.as_str(), &op_id_str)
+                .await;
         }
 
         return Err(e);

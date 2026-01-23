@@ -5,12 +5,17 @@ import {
   useRef,
   useState,
 } from "preact/hooks";
-import type { QueryResult, SqlResultSlot } from "src/lib/tauri";
+import type { SqlResultSlot } from "src/lib/tauri";
 import {
   unwrapErrorMessage,
   validateSqlClient,
   validateSqlQueryBE,
 } from "src/lib/tauri/queryValidate";
+import { RunSqlReturn } from "./useSqlHistoryRunner";
+import {
+  ensureSqlStreamStarted,
+  clearSqlStream,
+} from "src/screens/connection/hooks/useSqlStreamResult";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);
@@ -21,12 +26,17 @@ type RunSqlFn = (args: {
   windowId: string;
   connectionId: string;
   sql: string;
-}) => Promise<QueryResult>;
+}) => Promise<RunSqlReturn>;
 
 type WindowState = {
   slots: SqlResultSlot[] | null;
   activeIndex: number;
 };
+
+const CONCURRENCY = 2;
+
+// Gate settings
+const RUN_THROTTLE_MS = 400;
 
 export function useSqlRunner(args: {
   activeSqlWindowId?: string;
@@ -41,11 +51,12 @@ export function useSqlRunner(args: {
     stopOnError = false,
   } = args;
 
-  // Persist results per window id (so switching tabs keeps results)
   const stateByWindowIdRef = useRef<Map<string, WindowState>>(new Map());
-
-  // One run id per window, so rerun in window A doesn't cancel window B
   const runIdByWindowRef = useRef<Map<string, number>>(new Map());
+
+  // ✅ Gate: per-window in-flight flag + throttle
+  const inflightByWindowRef = useRef<Map<string, boolean>>(new Map());
+  const lastRunAtByWindowRef = useRef<Map<string, number>>(new Map());
 
   const getSaved = useCallback((): WindowState => {
     if (!activeSqlWindowId) return { slots: null, activeIndex: 0 };
@@ -57,7 +68,6 @@ export function useSqlRunner(args: {
     );
   }, [activeSqlWindowId]);
 
-  // Init from current active window state (first render)
   const initial = useMemo(() => getSaved(), [getSaved]);
 
   const [sqlSlots, setSqlSlots] = useState<SqlResultSlot[] | null>(
@@ -67,19 +77,15 @@ export function useSqlRunner(args: {
     initial.activeIndex
   );
 
-  // Restore state when switching SQL tabs/windows
   useEffect(() => {
     if (!activeSqlWindowId) return;
-
     const saved = stateByWindowIdRef.current.get(activeSqlWindowId);
     setSqlSlots(saved?.slots ?? null);
     setActiveResultIndex(saved?.activeIndex ?? 0);
   }, [activeSqlWindowId]);
 
-  // Persist whenever state changes
   useEffect(() => {
     if (!activeSqlWindowId) return;
-
     stateByWindowIdRef.current.set(activeSqlWindowId, {
       slots: sqlSlots,
       activeIndex: activeResultIndex,
@@ -99,140 +105,182 @@ export function useSqlRunner(args: {
   const startRun = useCallback(
     async (payload: { windowId: string; sql: string }) => {
       const winId = payload.windowId;
-
       if (!runtimeConnectionId) return;
 
-      const v = validateSqlClient(payload.sql);
-      if (!v.ok) {
-        const slots: SqlResultSlot[] = [
-          {
-            index: 0,
-            sql: payload.sql,
-            status: "error",
-            error: v.message,
-            finishedAt: Date.now(),
-          },
-        ];
+      // ✅ Gate 1: throttle
+      const now = Date.now();
+      const lastAt = lastRunAtByWindowRef.current.get(winId) ?? 0;
+      if (now - lastAt < RUN_THROTTLE_MS) return;
+      lastRunAtByWindowRef.current.set(winId, now);
 
-        // update local state
-        setSqlSlots(slots);
-        setActiveResultIndex(0);
+      // ✅ Gate 2: single in-flight run per window
+      if (inflightByWindowRef.current.get(winId)) return;
+      inflightByWindowRef.current.set(winId, true);
 
-        // update per-window cache immediately
-        stateByWindowIdRef.current.set(winId, { slots, activeIndex: 0 });
-
-        // cancel any inflight run for this window logically
-        bumpRunId(winId);
-        return;
-      }
-
-      const list = v.statements;
-      const runId = bumpRunId(winId);
-
-      const initialSlots: SqlResultSlot[] = list.map((sql, i) => ({
-        index: i,
-        sql,
-        status: "queued" as const,
-      }));
-
-      setSqlSlots(initialSlots);
-      setActiveResultIndex(0);
-      stateByWindowIdRef.current.set(winId, {
-        slots: initialSlots,
-        activeIndex: 0,
-      });
-
-      const setSlot = (i: number, patch: Partial<SqlResultSlot>) => {
-        setSqlSlots((prev) => {
-          if (!prev || !prev[i]) return prev;
-          const next = prev.slice();
-          next[i] = { ...next[i], ...patch };
-          return next;
-        });
-
-        // also patch cached state (avoid relying on effect timing)
-        const cached = stateByWindowIdRef.current.get(winId);
-        if (!cached?.slots || !cached.slots[i]) return;
-        const nextSlots = cached.slots.slice();
-        nextSlots[i] = { ...nextSlots[i], ...patch } as SqlResultSlot;
-        stateByWindowIdRef.current.set(winId, {
-          slots: nextSlots,
-          activeIndex: stateByWindowIdRef.current.get(winId)?.activeIndex ?? 0,
-        });
-      };
-
-      const setActive = (idx: number) => {
-        setActiveResultIndex(idx);
-        const cached = stateByWindowIdRef.current.get(winId);
-        stateByWindowIdRef.current.set(winId, {
-          slots: cached?.slots ?? null,
-          activeIndex: idx,
-        });
-      };
-
-      for (let i = 0; i < list.length; i++) {
-        // cancelled / superseded for this window
-        if (currentRunId(winId) !== runId) return;
-
-        setSlot(i, { status: "running", startedAt: Date.now() });
-        setActive(i);
-
-        try {
-          await validateSqlQueryBE(runtimeConnectionId, list[i], {
-            timeoutMs: 20_000,
-            statementTimeoutMs: 15_000,
-          });
-
-          if (currentRunId(winId) !== runId) return;
-
-          const result = await onRunSql({
-            windowId: winId,
-            connectionId: runtimeConnectionId,
-            sql: list[i],
-          });
-
-          if (currentRunId(winId) !== runId) return;
-
-          setSlot(i, {
-            status: "done",
-            result,
-            finishedAt: Date.now(),
-          });
-        } catch (err) {
-          if (currentRunId(winId) !== runId) return;
-
-          setSlot(i, {
-            status: "error",
-            error: formatQueryError(err, i),
-            finishedAt: Date.now(),
-          });
-
-          // stop-on-error
-          if (stopOnError) break;
-          continue;
+      try {
+        const v = validateSqlClient(payload.sql);
+        if (!v.ok) {
+          const slots: SqlResultSlot[] = [
+            {
+              index: 0,
+              sql: payload.sql,
+              status: "error",
+              error: v.message,
+              finishedAt: Date.now(),
+            },
+          ];
+          setSqlSlots(slots);
+          setActiveResultIndex(0);
+          stateByWindowIdRef.current.set(winId, { slots, activeIndex: 0 });
+          bumpRunId(winId);
+          return;
         }
+
+        const list = v.statements;
+        const runId = bumpRunId(winId);
+
+        // clear previous stream caches for this window
+        const prev = stateByWindowIdRef.current.get(winId)?.slots;
+        for (const s of prev ?? []) {
+          if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
+        }
+
+        const initialSlots: SqlResultSlot[] = list.map((sql, i) => ({
+          index: i,
+          sql,
+          status: "queued",
+        }));
+
+        setSqlSlots(initialSlots);
+        setActiveResultIndex(0);
+        stateByWindowIdRef.current.set(winId, {
+          slots: initialSlots,
+          activeIndex: 0,
+        });
+
+        const setSlot = (i: number, patch: Partial<SqlResultSlot>) => {
+          setSqlSlots((prevSlots) => {
+            if (!prevSlots || !prevSlots[i]) return prevSlots;
+            const next = prevSlots.slice();
+            next[i] = { ...next[i], ...patch };
+            return next;
+          });
+
+          const cached = stateByWindowIdRef.current.get(winId);
+          if (!cached?.slots || !cached.slots[i]) return;
+          const nextSlots = cached.slots.slice();
+          nextSlots[i] = { ...nextSlots[i], ...patch } as SqlResultSlot;
+          stateByWindowIdRef.current.set(winId, {
+            slots: nextSlots,
+            activeIndex: cached.activeIndex,
+          });
+        };
+
+        const runOne = async (i: number) => {
+          if (currentRunId(winId) !== runId) return;
+
+          setSlot(i, { status: "running", startedAt: Date.now() });
+
+          try {
+            await validateSqlQueryBE(runtimeConnectionId, list[i], {
+              timeoutMs: 20_000,
+              statementTimeoutMs: 15_000,
+            });
+
+            if (currentRunId(winId) !== runId) return;
+
+            const response = await onRunSql({
+              windowId: winId,
+              connectionId: runtimeConnectionId,
+              sql: list[i],
+            });
+
+            if (currentRunId(winId) !== runId) return;
+
+            if (response.mode === "direct") {
+              setSlot(i, {
+                status: "done",
+                mode: "direct",
+                result: response.result,
+                finishedAt: Date.now(),
+              });
+            } else {
+              setSlot(i, {
+                status: "done",
+                mode: "stream",
+                opId: response.opId,
+                startedAt: Date.now(),
+              });
+
+              // ✅ force restart even if opId reused
+              clearSqlStream(response.opId);
+              ensureSqlStreamStarted(response.opId);
+            }
+          } catch (err) {
+            if (currentRunId(winId) !== runId) return;
+
+            setSlot(i, {
+              status: "error",
+              error: formatQueryError(err, i),
+              finishedAt: Date.now(),
+            });
+
+            if (stopOnError) bumpRunId(winId);
+          }
+        };
+
+        let cursor = 0;
+
+        const worker = async () => {
+          while (cursor < list.length) {
+            const i = cursor++;
+            if (currentRunId(winId) !== runId) return;
+            await runOne(i);
+            if (stopOnError && currentRunId(winId) !== runId) return;
+          }
+        };
+
+        const workers: Promise<void>[] = [];
+        for (let k = 0; k < Math.min(CONCURRENCY, list.length); k++) {
+          workers.push(worker());
+        }
+
+        setActiveResultIndex(0);
+        await Promise.all(workers);
+      } finally {
+        // ✅ release inflight flag no matter what
+        inflightByWindowRef.current.set(winId, false);
       }
     },
-    [bumpRunId, currentRunId, onRunSql, runtimeConnectionId]
+    [bumpRunId, currentRunId, onRunSql, runtimeConnectionId, stopOnError]
   );
 
-  // Reset only current active window's results
   const reset = useCallback(() => {
     if (!activeSqlWindowId) return;
-
     const winId = activeSqlWindowId;
+
+    const prev = stateByWindowIdRef.current.get(winId)?.slots;
+    for (const s of prev ?? []) {
+      if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
+    }
 
     setSqlSlots(null);
     setActiveResultIndex(0);
-
     stateByWindowIdRef.current.set(winId, { slots: null, activeIndex: 0 });
     bumpRunId(winId);
   }, [activeSqlWindowId, bumpRunId]);
 
-  // Optional: call when window/tab is closed to free memory
   const clearWindow = useCallback((windowId: string) => {
+    const prev = stateByWindowIdRef.current.get(windowId)?.slots;
+    for (const s of prev ?? []) {
+      if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
+    }
     stateByWindowIdRef.current.delete(windowId);
     runIdByWindowRef.current.delete(windowId);
+
+    // cleanup gate refs
+    inflightByWindowRef.current.delete(windowId);
+    lastRunAtByWindowRef.current.delete(windowId);
   }, []);
 
   return {

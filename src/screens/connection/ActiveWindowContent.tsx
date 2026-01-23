@@ -494,13 +494,6 @@ export function ActiveWindowContent() {
   }, []);
 
   // =========================================================================
-  // Guards / early returns
-  // =========================================================================
-  if (shouldShowFullLoading) return <LoadingTableState />;
-  if (hasError) return <ErrorState message={effectiveErrorText} />;
-  if (!hasAnyWindow || !activeTableWindow)
-    return <EmptyWindow onNewSql={actions.openSql} />;
-  // =========================================================================
   // SQL Window Pane
   // =========================================================================
   if (activeSqlWindow) {
@@ -553,6 +546,14 @@ export function ActiveWindowContent() {
       />
     );
   }
+
+  // =========================================================================
+  // Guards / early returns
+  // =========================================================================
+  if (shouldShowFullLoading) return <LoadingTableState />;
+  if (hasError) return <ErrorState message={effectiveErrorText} />;
+  if (!hasAnyWindow || !activeTableWindow)
+    return <EmptyWindow onNewSql={actions.openSql} />;
 
   // =========================================================================
   // Page view mode calculations

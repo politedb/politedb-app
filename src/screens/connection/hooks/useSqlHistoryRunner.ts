@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "preact/hooks";
 import type { DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
-import { runSqlQuery } from "src/lib/tauri/query";
+import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { isDDLStatement } from "src/utils/detect";
 import { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { useConnectionStore } from "src/stores/connection";
@@ -10,9 +10,12 @@ import { useScreenStore } from "src/stores/screen";
 type Options = {
   profileId: string;
   engine?: DatabaseEngine;
-
   metadata?: MetadataApi;
 };
+
+export type RunSqlReturn =
+  | { mode: "direct"; result: QueryResult }
+  | { mode: "stream"; opId: string };
 
 export function useSqlHistoryRunner(opts?: Options) {
   const { addQueryHistory } = useConnectionStore();
@@ -27,30 +30,40 @@ export function useSqlHistoryRunner(opts?: Options) {
     async (args: {
       connectionId: string;
       sql: string;
-    }): Promise<QueryResult> => {
+    }): Promise<RunSqlReturn> => {
       const { connectionId, sql } = args;
 
-      addQueryHistory(activeTab!.id, sql);
-
-      const res = await runSqlQuery(connectionId, sql);
-
-      // ✅ invalidate metadata if DDL succeeded
-      if (opts?.metadata && isDDLStatement(sql)) {
-        const metaKey = `${opts.engine}:${opts.profileId}`;
-        opts.metadata.invalidate({ metaKey });
-
-        // background reload (don’t await)
-        void opts.metadata.load({
-          metaKey,
-          engine: opts.engine,
-          connectionId,
-          force: true,
-        });
+      if (activeTab) {
+        addQueryHistory(activeTab.id, sql);
       }
 
-      return res;
+      const isDDL = isDDLStatement(sql);
+
+      if (isDDL) {
+        const res = await runSqlQuery(connectionId, sql);
+
+        // Invalidate metadata logic
+        if (opts?.metadata) {
+          const metaKey = `${opts.engine}:${opts.profileId}`;
+          opts.metadata.invalidate({ metaKey });
+
+          // Background reload
+          void opts.metadata.load({
+            metaKey,
+            engine: opts.engine,
+            connectionId,
+            force: true,
+          });
+        }
+
+        return { mode: "direct", result: res };
+      } else {
+        const opId = await startSqlQueryStream(connectionId, sql);
+
+        return { mode: "stream", opId };
+      }
     },
-    [opts?.engine, opts?.metadata]
+    [opts?.engine, opts?.metadata, activeTab, addQueryHistory]
   );
 
   return {
