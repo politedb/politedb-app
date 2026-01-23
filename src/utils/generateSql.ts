@@ -45,6 +45,32 @@ function formatValue(value: any): string {
 }
 
 /**
+ * Extract primary key column names from constraints
+ */
+function getPrimaryKeyColumns(
+  constraints: TableConstraintType[] | null | undefined
+): string[] {
+  if (!constraints || constraints.length === 0) {
+    return [];
+  }
+
+  const pkConstraint = constraints.find(
+    (c) =>
+      c.index_name.toLowerCase().includes("pkey") ||
+      (c.is_unique && c.index_name.toLowerCase().includes("primary"))
+  );
+
+  if (!pkConstraint?.column_name) {
+    return [];
+  }
+
+  return pkConstraint.column_name
+    .split(",")
+    .map((col) => col.trim())
+    .filter(Boolean);
+}
+
+/**
  * Generate SQL UPDATE statements from patchMap for data changes
  */
 export function generateUpdateSqlFromPatches(
@@ -52,6 +78,7 @@ export function generateUpdateSqlFromPatches(
   schema: string,
   tableName: string,
   tableData: TableDataType | null,
+  constraints: TableConstraintType[] | null = null,
   _engine: string = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
@@ -65,6 +92,10 @@ export function generateUpdateSqlFromPatches(
 
   const columns = tableData.columns;
   const rows = tableData.rows;
+
+  // Get primary key columns if available
+  const primaryKeyColumns = getPrimaryKeyColumns(constraints);
+  const usePrimaryKey = primaryKeyColumns.length > 0;
 
   // Process each row that has updates
   for (const [rowKey, patchData] of Object.entries(updatePatches)) {
@@ -91,12 +122,16 @@ export function generateUpdateSqlFromPatches(
       continue;
     }
 
-    // Build WHERE clause using all original column values
-    // This ensures we update the correct row even if data has changed
+    // Build WHERE clause using primary key columns if available, otherwise all columns
     const whereClauses: string[] = [];
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       if (!col) continue;
+
+      // Skip if using primary key and this column is not a primary key
+      if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
+        continue;
+      }
 
       const cellValue = originalRow[i];
       const originalValue = cellToString(cellValue);
@@ -198,12 +233,7 @@ export function generateStructureSqlFromPatches(
       const isNullable = patchData.is_nullable;
       const columnDefault = patchData.column_default;
 
-      // Skip if column name or data type is empty or missing
-      if (!columnName || !dataType || columnName === "" || dataType === "") {
-        continue;
-      }
-
-      let columnDef = `${qIdent(columnName)} ${dataType}`;
+      let columnDef = `${qIdent(columnName)} ${dataType || "UNKNOWN"}`;
       if (!isNullable) {
         columnDef += " NOT NULL";
       }
@@ -304,8 +334,7 @@ export function generateStructureSqlFromPatches(
         // Handle column name change (RENAME COLUMN must be done separately)
         if (
           patchData.column_name &&
-          patchData.column_name !== originalColumn.column_name &&
-          patchData.column_name.trim() !== ""
+          patchData.column_name !== originalColumn.column_name
         ) {
           const oldName = originalColumn.column_name;
           const newName = patchData.column_name.trim();
@@ -434,13 +463,10 @@ export function generateConstraintSqlFromPatches(
       const isUnique = patchData.is_unique;
       const algorithm = patchData.index_algorithm;
 
-      if (!indexName || !columnName) {
-        continue;
-      }
-
       const uniqueClause = isUnique ? "UNIQUE " : "";
-      const algorithmClause = algorithm ? `USING ${algorithm} ` : "";
-      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName)});`;
+      const algorithmClause = ` USING ${algorithm || "BTREE"}`;
+      const columnClause = columnName ? ` (${qIdent(columnName)})` : "";
+      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName)} ON ${tableIdent}${algorithmClause}${columnClause};`;
       sqlStatements.push(sql);
     }
   }
@@ -519,6 +545,7 @@ export function generateDeleteSqlFromPatches(
   schema: string,
   tableName: string,
   tableData: TableDataType | null,
+  constraints: TableConstraintType[] | null = null,
   _engine: string = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
@@ -533,6 +560,10 @@ export function generateDeleteSqlFromPatches(
   const columns = tableData.columns;
   const rows = tableData.rows;
 
+  // Get primary key columns if available
+  const primaryKeyColumns = getPrimaryKeyColumns(constraints);
+  const usePrimaryKey = primaryKeyColumns.length > 0;
+
   // Process each row to delete
   for (const [rowKey] of Object.entries(deletePatches)) {
     const rowIndex = parseInt(rowKey, 10);
@@ -545,11 +576,16 @@ export function generateDeleteSqlFromPatches(
       continue;
     }
 
-    // Build WHERE clause using all original column values
+    // Build WHERE clause using primary key columns if available, otherwise all columns
     const whereClauses: string[] = [];
     for (let i = 0; i < columns.length; i++) {
       const col = columns[i];
       if (!col) continue;
+
+      // Skip if using primary key and this column is not a primary key
+      if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
+        continue;
+      }
 
       const cellValue = originalRow[i];
       const originalValue = cellToString(cellValue);
@@ -593,10 +629,15 @@ export function generateDeleteSqlFromPatches(
  */
 export function generateSqlFromPatches(
   patchMap: PatchMap,
-  engine: string = "postgres"
+  engine: string = "postgres",
+  options?: {
+    activeScreen?: string;
+    getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  }
 ): string[] {
   // engine parameter is passed to individual functions for future use
   const allStatements: string[] = [];
+  const { activeScreen, getRowAt } = options || {};
 
   for (const [_windowId, patchData] of Object.entries(patchMap)) {
     const { tableData, tableWindow, patches } = patchData;
@@ -605,7 +646,91 @@ export function generateSqlFromPatches(
     }
 
     const { schema, name: tableName } = tableWindow.table;
-    const { data, structure, constraints } = tableData;
+    const { structure, constraints, columns } = tableData;
+
+    // Construct TableDataType for UPDATE and DELETE operations
+    // These need row data to build WHERE clauses
+    let tableDataForSql: TableDataType | null = null;
+    if (columns && getRowAt && activeScreen) {
+      // Build rows array from getRowAt function
+      // We need to get rows for all row indices that appear in patches
+      const rowIndices = new Set<number>();
+
+      // Collect all row indices from update and delete patches
+      const updatePatches = patches["update"]?.["data"];
+      const deletePatches = patches["delete"]?.["data"];
+
+      if (updatePatches) {
+        for (const rowKey of Object.keys(updatePatches)) {
+          const rowIndex = parseInt(rowKey, 10);
+          if (!isNaN(rowIndex) && rowIndex >= 0) {
+            rowIndices.add(rowIndex);
+          }
+        }
+      }
+
+      if (deletePatches) {
+        for (const rowKey of Object.keys(deletePatches)) {
+          const rowIndex = parseInt(rowKey, 10);
+          if (!isNaN(rowIndex) && rowIndex >= 0) {
+            rowIndices.add(rowIndex);
+          }
+        }
+      }
+
+      if (rowIndices.size > 0) {
+        // Construct table key: activeScreen.schema.tableName
+        const tableKey = `${activeScreen}.${schema}.${tableName}`;
+        const rows: unknown[][] = [];
+        const maxIndex = Math.max(...Array.from(rowIndices), -1);
+
+        // Build rows array - only include rows that exist
+        // Use empty arrays for missing rows (functions will handle this)
+        for (let i = 0; i <= maxIndex; i++) {
+          const row = getRowAt(tableKey, i);
+          // Push the row if it exists, otherwise push empty array
+          // Functions check for array validity and will skip invalid rows
+          rows.push(row ? (row as unknown[]) : []);
+        }
+
+        tableDataForSql = {
+          columns,
+          rows,
+          rowCount: rows.length,
+        };
+      }
+    }
+
+    // Generate INSERT statements
+    const insertStatements = generateInsertSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      engine
+    );
+    allStatements.push(...insertStatements);
+
+    // Generate UPDATE statements
+    const updateStatements = generateUpdateSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      tableDataForSql,
+      constraints,
+      engine
+    );
+    allStatements.push(...updateStatements);
+
+    // Generate DELETE statements
+    const deleteStatements = generateDeleteSqlFromPatches(
+      patches,
+      schema,
+      tableName,
+      tableDataForSql,
+      constraints,
+      engine
+    );
+    allStatements.push(...deleteStatements);
 
     // Generate structure ALTER TABLE statements (should come before data changes)
     const structureStatements = generateStructureSqlFromPatches(
@@ -627,35 +752,6 @@ export function generateSqlFromPatches(
       engine
     );
     allStatements.push(...constraintStatements);
-
-    // Generate INSERT statements
-    const insertStatements = generateInsertSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      engine
-    );
-    allStatements.push(...insertStatements);
-
-    // Generate UPDATE statements
-    const updateStatements = generateUpdateSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      data,
-      engine
-    );
-    allStatements.push(...updateStatements);
-
-    // Generate DELETE statements
-    const deleteStatements = generateDeleteSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      data,
-      engine
-    );
-    allStatements.push(...deleteStatements);
   }
 
   return allStatements;

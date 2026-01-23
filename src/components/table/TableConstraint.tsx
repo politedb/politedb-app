@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useRef } from "preact/hooks";
-import type { TableConstraint } from "src/types";
+import type { DatabaseEngine, TableConstraint } from "src/types";
 import {
   Table,
   type TableColumn as CommonTableColumn,
@@ -9,6 +9,7 @@ import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
+import { INDEX_ALGORITHMS } from "../../constant";
 
 const COLUMNS_NAME: (keyof TableConstraint)[] = [
   "index_name",
@@ -36,6 +37,7 @@ interface Props {
     rowIndex: number,
     data: Record<string, any>
   ) => void;
+  engine: DatabaseEngine;
 }
 
 export function TableConstraints({
@@ -49,6 +51,7 @@ export function TableConstraints({
   onDeleteRecord,
   deletedRows = new Set(),
   onDataChange,
+  engine,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -92,7 +95,9 @@ export function TableConstraints({
       ...COLUMNS_NAME.map((name) => ({
         key: name,
         label: name,
+        className: "px-0",
         render: (_value: any, row: any, index: number) => {
+          const initValue = initData?.[index]?.[name] ?? "";
           const fieldValue = row[name];
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
@@ -102,13 +107,29 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! text-sm",
-                isEmptyRow && "focus:bg-transparent focus:outline-none"
+                "h-8 cursor-default! rounded-none text-sm",
+                initValue !== fieldValue && "bg-amber-200",
+                isEmptyRow
+                  ? "focus:bg-transparent focus:outline-none"
+                  : "focus:bg-white!",
+                isRowSelected && "bg-blue-200!"
               )}
+              showSelect={!isEmptyRow && name === "index_algorithm"}
+              options={INDEX_ALGORITHMS[engine].map((type) => ({
+                label: type,
+                value: type,
+              }))}
+              onValueChange={
+                name === "index_algorithm"
+                  ? (value) => handleDataChange(index, name, value)
+                  : undefined
+              }
               value={String(fieldValue ?? "")}
               placeholder={placeholder}
-              onInput={(e) =>
-                handleDataChange(index, name, e.currentTarget.value)
+              onInput={
+                name !== "index_algorithm"
+                  ? (e) => handleDataChange(index, name, e.currentTarget.value)
+                  : undefined
               }
               onMouseDown={(e) => {
                 if (!isRowSelected && !isEmptyRow && !isDeleted) {
@@ -160,7 +181,7 @@ export function TableConstraints({
         data={tableData}
         stickyHeader
         fillViewport
-        emptyMessage="No constraints data available"
+        showEmptyMessage={false}
         selectedRow={selectedRowIndex}
         rowClassName={(_row, index) => {
           return deletedRows.has(index) ? "bg-red-300!" : "";

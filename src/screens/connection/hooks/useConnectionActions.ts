@@ -11,9 +11,14 @@ import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
-import { useConnectionStore } from "src/stores/connection";
+import {
+  type DataAction,
+  type DataKey,
+  useConnectionStore,
+} from "src/stores/connection";
 import type { ProfileTab } from "src/stores/screen";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
+import { createTableQuery } from "src/hooks/queries";
 
 /* =============================================================================
  * Types
@@ -57,6 +62,7 @@ export type UseConnectionActionsArgs = {
   setWarningRefresh: (v: boolean) => void;
   setPendingCloseTabId: (v: string | null) => void;
   setError: (v: string | null) => void;
+  setShowSaveDialog: (v: boolean) => void;
 
   pendingCloseTabId: string | null;
 
@@ -82,8 +88,11 @@ export type ConnectionActions = {
   closeTab: (tabId: string, skipCheck?: boolean) => Promise<void>;
   refresh: () => Promise<void>;
   pageChange: (limit: number, offset: number) => Promise<void>;
+  beforeSaveChanges: () => void;
   saveChanges: () => Promise<void>;
   discardChanges: () => Promise<void>;
+  getPatchMap: () => PatchMap | null;
+  getNewTableSql: () => { data: string[]; error: string | null };
 };
 
 /* =============================================================================
@@ -97,12 +106,7 @@ type RefreshFlags = {
 };
 
 type WindowPatchBuckets = Partial<
-  Record<
-    "create" | "update" | "delete",
-    Partial<
-      Record<"data" | "structure" | "constraints", Record<string, unknown>>
-    >
-  >
+  Record<DataAction, Partial<Record<DataKey, Record<string, unknown>>>>
 >;
 
 type PatchMapEntry = {
@@ -227,6 +231,7 @@ export function useConnectionActions(
     setWarningRefresh,
     setPendingCloseTabId,
     setError,
+    setShowSaveDialog,
     pendingCloseTabId,
     loadTableData,
     removeTableData,
@@ -341,23 +346,63 @@ export function useConnectionActions(
     offset,
   ]);
 
+  const getNewTableSql = useCallback(() => {
+    if (!activeTableWindow) return { data: [], error: null };
+
+    const s = useConnectionStore.getState();
+
+    // Check for new table data
+    const newTableData =
+      s.newTableData[activeProfileScreen]?.[activeTableWindow.id];
+
+    if (!newTableData) return { data: [], error: null };
+
+    const { tableName, columns, primaryKey } = newTableData;
+    const validColumns = columns.filter((col) => col.column_name?.trim());
+
+    if (!tableName?.trim() || validColumns.length === 0) {
+      return { data: [], error: "Invalid new table data" };
+    }
+
+    const sql = createTableQuery(
+      activeTableWindow.table.schema,
+      tableName.trim(),
+      validColumns,
+      primaryKey
+    );
+
+    return { data: [sql], error: null };
+  }, [activeProfileScreen, activeTableWindow]);
+
+  const getPatchMap = useCallback((): PatchMap | null => {
+    if (!activeTableWindow) return null;
+
+    const s = useConnectionStore.getState();
+    const tabPatchMap = (s.dataPatchMap[activeProfileScreen] ??
+      {}) as unknown as PatchMap;
+
+    const entry = (tabPatchMap as unknown as Record<string, unknown>)[
+      activeTableWindow.id
+    ] as PatchMapEntry | undefined;
+
+    if (!entry) return null;
+
+    return { [activeTableWindow.id]: entry } as unknown as PatchMap;
+  }, [activeProfileScreen, activeTableWindow]);
+
   const applyPatchesForActiveWindow = useCallback(async () => {
     if (!activeTableWindow || !runtimeConnectionId) return;
 
     try {
-      const s = useConnectionStore.getState();
-      const tabPatchMap = (s.dataPatchMap[activeProfileScreen] ??
-        {}) as unknown as PatchMap;
+      const onlyActive = getPatchMap();
 
-      const entry = (tabPatchMap as unknown as Record<string, unknown>)[
-        activeTableWindow.id
-      ] as PatchMapEntry | undefined;
+      if (!onlyActive) return;
 
-      const onlyActive: PatchMap = entry
-        ? ({ [activeTableWindow.id]: entry } as unknown as PatchMap)
-        : ({} as PatchMap);
-
-      const sql = generateSqlFromPatches(onlyActive, engine ?? "postgres");
+      const store = useConnectionStore.getState();
+      const sql = generateSqlFromPatches(onlyActive, engine ?? "postgres", {
+        activeScreen: activeProfileScreen,
+        getRowAt: store.getRowAt,
+      });
       if (!sql.length) {
         setError("An error occurred while applying patches.");
         return;
@@ -371,6 +416,8 @@ export function useConnectionActions(
       }
 
       clearChanges(activeProfileScreen, activeTableWindow.id);
+
+      const entry = onlyActive[activeTableWindow.id];
 
       const { refreshRows, refreshMeta, refreshStats } =
         inferRefreshFlagsFromEntry(entry);
@@ -396,6 +443,23 @@ export function useConnectionActions(
     offset,
     setError,
   ]);
+
+  const beforeSaveChanges = useCallback(() => {
+    const newTableSql = getNewTableSql();
+    const hasNewTable = !newTableSql.error && newTableSql.data.length > 0;
+
+    const patchMap = getPatchMap();
+    const hasPatches = patchMap && Object.keys(patchMap).length > 0;
+
+    if (newTableSql.error) {
+      setError(newTableSql.error);
+      return;
+    }
+
+    if (!hasPatches && !hasNewTable) return;
+
+    setShowSaveDialog(true);
+  }, [getNewTableSql, getPatchMap, setError]);
 
   const saveNewTable = useCallback(async () => {
     if (newTableSaveRef.current) {
@@ -521,7 +585,10 @@ export function useConnectionActions(
     closeTab,
     refresh,
     pageChange,
+    beforeSaveChanges,
     saveChanges,
     discardChanges,
+    getPatchMap,
+    getNewTableSql,
   };
 }

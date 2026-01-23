@@ -23,6 +23,7 @@ import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection
 import { SplitPane } from "src/components/SplitPane";
 import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -31,6 +32,7 @@ import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
+import type { PatchMap } from "src/utils/generateSql";
 
 const EMPTY_TABLE_META = {
   columns: null,
@@ -66,6 +68,7 @@ export function ConnectionScreen() {
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
 
   const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
 
@@ -199,6 +202,7 @@ export function ConnectionScreen() {
     setWarningRefresh,
     setPendingCloseTabId,
     setError,
+    setShowSaveDialog,
     pendingCloseTabId,
 
     loadTableData,
@@ -226,6 +230,9 @@ export function ConnectionScreen() {
     return {
       openSql: () => actionsRef.current.openSql(),
       refresh: () => actionsRef.current.refresh(),
+      getPatchMap: () => actionsRef.current.getPatchMap(),
+      getNewTableSql: () => actionsRef.current.getNewTableSql(),
+      beforeSaveChanges: () => actionsRef.current.beforeSaveChanges(),
       saveChanges: () => actionsRef.current.saveChanges(),
       discardChanges: () => actionsRef.current.discardChanges(),
       closeWindow: (id: string, e: MouseEvent) =>
@@ -236,6 +243,14 @@ export function ConnectionScreen() {
       selectTable: (t: TableItem) => actionsRef.current.selectTable(t),
     };
   }, []);
+
+  const patchMap = useMemo(() => {
+    return actions.getPatchMap() || ({} as PatchMap);
+  }, [actions.getPatchMap()]);
+
+  const newTableSql = useMemo(() => {
+    return actions.getNewTableSql().data;
+  }, [actions.getNewTableSql().data]);
 
   const { getProfileById } = useProfileStore();
 
@@ -450,6 +465,22 @@ export function ConnectionScreen() {
               open={!!error}
               error={error}
               onClose={() => setError(null)}
+            />
+          )}
+
+          {showSaveDialog && (
+            <SaveChangesDialog
+              open={showSaveDialog}
+              onClose={() => setShowSaveDialog(false)}
+              onConfirm={async () => {
+                await actions.saveChanges();
+                setShowSaveDialog(false);
+              }}
+              patchMap={patchMap}
+              engine={engine ?? "postgres"}
+              newTableSql={newTableSql}
+              activeScreen={activeProfileScreen}
+              getRowAt={useConnectionStore.getState().getRowAt}
             />
           )}
         </div>

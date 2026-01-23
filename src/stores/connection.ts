@@ -492,13 +492,14 @@ export const useConnectionStore = create<ConnectionState>()(
       updateTableStructure: (tabId, tableWindowId, rowIndex, field, value) =>
         set((s) => {
           const structure = s.tableStructure[tabId]?.[tableWindowId] ?? [];
-          structure[rowIndex] = { ...structure[rowIndex]!, [field]: value };
+          const newStructure = [...structure];
+          newStructure[rowIndex] = { ...newStructure[rowIndex]!, [field]: value };
           return {
             tableStructure: {
               ...s.tableStructure,
               [tabId]: {
                 ...s.tableStructure[tabId],
-                [tableWindowId]: structure,
+                [tableWindowId]: newStructure,
               },
             },
           };
@@ -518,13 +519,14 @@ export const useConnectionStore = create<ConnectionState>()(
       updateTableConstraints: (tabId, tableWindowId, rowIndex, field, value) =>
         set((s) => {
           const constraints = s.tableConstraints[tabId]?.[tableWindowId] ?? [];
-          constraints[rowIndex] = { ...constraints[rowIndex]!, [field]: value };
+          const newConstraints = [...constraints];
+          newConstraints[rowIndex] = { ...newConstraints[rowIndex]!, [field]: value };
           return {
             tableConstraints: {
               ...s.tableConstraints,
               [tabId]: {
                 ...s.tableConstraints[tabId],
-                [tableWindowId]: constraints,
+                [tableWindowId]: newConstraints,
               },
             },
           };

@@ -1,12 +1,14 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { TableItem } from "src/types";
+import type { PatchMap } from "src/utils/generateSql";
 
 export type ConnectionActions = {
   openSql(): void;
   refresh(): Promise<void>;
-  saveChanges(): Promise<void>;
+  saveChanges(): Promise<void> | void;
   discardChanges(): Promise<void>;
+  getPatchMap(): PatchMap | null;
 
   closeWindow(windowId: string, e: MouseEvent): Promise<void>;
   closeTab(tabId: string, skipCheck?: boolean): Promise<void>;

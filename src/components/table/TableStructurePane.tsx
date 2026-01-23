@@ -154,6 +154,7 @@ export function TableStructurePane(props: {
           }
           second={
             <TableConstraints
+              engine={engine}
               activeProfileScreen={profileId}
               activeTableWindowId={activeTableWindow.id}
               initData={activeTableMeta.constraints}

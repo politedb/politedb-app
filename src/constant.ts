@@ -1,4 +1,4 @@
-import { DataKey } from "./stores/connection";
+import { DataAction, DataKey } from "./stores/connection";
 import { DatabaseEngine, DatabaseType } from "./types";
 
 export const SUPPORTED_DATABASES: readonly (DatabaseType & {
@@ -71,30 +71,25 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
 ] as const;
 
 export const POSTGRES_DATA_TYPES = [
-  "serial",
-  "bigserial",
-  "smallserial",
-  "integer",
-  "bigint",
-  "smallint",
-  "decimal",
-  "numeric",
-  "real",
-  "double precision",
-  "money",
-  "varchar",
+  "bool",
+  "bytea",
   "char",
-  "text",
-  "boolean",
   "date",
-  "time",
-  "timestamp",
-  "timestamptz",
+  "float4",
+  "float8",
+  "int2",
+  "int4",
+  "int8",
   "interval",
   "json",
   "jsonb",
+  "numeric",
+  "text",
+  "time",
+  "timestamp",
+  "timestamptz",
   "uuid",
-  "bytea",
+  "varchar",
   "xml",
 ];
 
@@ -144,8 +139,25 @@ export const DATA_TYPES: Record<DatabaseEngine, readonly string[]> = {
   mongo: [],
 };
 
+export const INDEX_ALGORITHMS: Record<DatabaseEngine, readonly string[]> = {
+  postgres: ["BTREE", "HASH", "GIN", "GIST"],
+  mysql: ["BTREE", "HASH", "RTREE"],
+  sqlite: [],
+  redis: [],
+  mariadb: [],
+  sqlserver: [],
+  oracle: [],
+  mongo: [],
+};
+
 export const DATA_KEYS: Record<DataKey, DataKey> = {
   structure: "structure",
   constraints: "constraints",
   data: "data",
+};
+
+export const DATA_ACTIONS: Record<DataAction, DataAction> = {
+  create: "create",
+  update: "update",
+  delete: "delete",
 };

@@ -104,7 +104,9 @@ export function TableStructure({
       ...COLUMNS_NAME.map((name) => ({
         key: name,
         label: name,
+        className: "px-0",
         render: (_value: any, row: any, index: number) => {
+          const initValue = initData?.[index]?.[name] ?? "";
           const fieldValue = row[name];
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
@@ -113,6 +115,14 @@ export function TableStructure({
 
           return (
             <Input
+              className={cn(
+                "h-8 cursor-default! rounded-none text-sm",
+                initValue !== fieldValue && "bg-amber-200",
+                isEmptyRow
+                  ? "focus:bg-transparent focus:outline-none"
+                  : "focus:bg-white!",
+                isRowSelected && "bg-blue-200!"
+              )}
               showSelect={!isEmptyRow && name === "data_type"}
               options={DATA_TYPES[engine].map((type) => ({
                 label: type,
@@ -123,10 +133,6 @@ export function TableStructure({
                   ? (value) => handleDataChange(index, name, value)
                   : undefined
               }
-              className={cn(
-                "h-8 cursor-default! text-sm",
-                isEmptyRow && "focus:bg-transparent focus:outline-none"
-              )}
               value={String(fieldValue ?? "")}
               placeholder={placeholder}
               onInput={
@@ -187,7 +193,7 @@ export function TableStructure({
         data={tableData}
         stickyHeader
         fillViewport
-        emptyMessage="No structure data available"
+        showEmptyMessage={false}
         selectedRow={selectedRowIndex}
         rowClassName={(_row, index) => {
           return deletedRows.has(index) ? "bg-red-300!" : "";

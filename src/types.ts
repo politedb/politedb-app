@@ -82,7 +82,7 @@ export type TableSizeInfo = {
 export type TableStructure = {
   column_name: string;
   data_type: string;
-  is_nullable: boolean;
+  is_nullable: boolean | string;
   check: string;
   column_default: string;
   foreign_key: string;
@@ -93,7 +93,7 @@ export type TableStructure = {
 export type TableConstraint = {
   index_name: string;
   index_algorithm: string;
-  is_unique: boolean;
+  is_unique: boolean | string;
   column_name: string;
   condition: string;
   include: string;
