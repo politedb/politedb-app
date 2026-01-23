@@ -46,6 +46,7 @@ pub struct AppState {
     pub active_ops: Arc<DashMap<Uuid, ()>>,
 
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
+    pub op_tasks: Arc<DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -60,6 +61,7 @@ impl AppState {
             cancel_requested: Arc::new(DashMap::new()),
             active_ops: Arc::new(DashMap::new()),
             flow_by_op: Arc::new(DashMap::new()),
+            op_tasks: Arc::new(DashMap::new()),
         }
     }
 }

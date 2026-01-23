@@ -133,11 +133,13 @@ pub async fn connect_pg(
         .map_err(|e| anyhow!("{e}"))?;
 
     // Build config WITHOUT logging password
-    let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
+    let mut cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
+    let app_name = format!("PoliteDB");
+    cfg.application_name(&app_name);
 
     let mgr = Manager::from_config(cfg, NoTls, deadpool_postgres::ManagerConfig::default());
 
-    let max_size: usize = input.pool_max_size.unwrap_or(10).clamp(1, 50);
+    let max_size: usize = input.pool_max_size.unwrap_or(5).clamp(1, 20);
 
     let pool = Pool::builder(mgr)
         .max_size(max_size)

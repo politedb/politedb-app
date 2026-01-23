@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "preact/hooks";
+import { useCallback, useMemo, useRef } from "preact/hooks";
 import { cellToString } from "src/utils/convert";
 import { useScreenStore } from "src/stores/screen";
 import { profileConnect } from "src/lib/tauri/profile";
@@ -14,7 +14,11 @@ import {
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { operationCancel, TableChunk } from "src/lib/tauri";
-import { useConnectionStore } from "src/stores/connection";
+import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
+
+// =============================================================================
+// Types & Constants
+// =============================================================================
 
 export function tableKey(
   activeScreen: string,
@@ -40,13 +44,17 @@ const EMPTY_META = {
 };
 
 export type LoadFlags = {
-  force?: boolean; // force refresh everything relevant
-  refreshRows?: boolean; // default true (but first-load always fetches rows)
-  refreshMeta?: boolean; // structure + constraints (default false)
-  refreshStats?: boolean; // rowCount + sizeInfo (default false)
+  force?: boolean; // Force refresh everything (bypasses dedup check)
+  refreshRows?: boolean; // Default true (but first-load always fetches rows)
+  refreshMeta?: boolean; // Structure + constraints (default false)
+  refreshStats?: boolean; // RowCount + sizeInfo (default false)
 };
 
 type ColumnRow = { name: string; db_type: string };
+
+// =============================================================================
+// Helpers
+// =============================================================================
 
 function isNonEmptyName(v: ColumnRow) {
   return (v.name ?? "").trim().length > 0;
@@ -73,27 +81,41 @@ type LoadPlan = {
   needRowCount: boolean;
   needSizeInfo: boolean;
   needMeta: boolean;
+
+  // busy should reflect only meta/columns/stats work, NOT rows streaming
+  needAnyMetaWork: boolean;
 };
 
-type BusyGate = {
-  markNonRowDone: () => void;
-  markRowsDone: () => void;
-  fail: (err: unknown) => void;
-};
+/**
+ * Determines what needs to be fetched based on current state and flags.
+ */
+function computeLoadPlan(params: {
+  key: string;
+  prev: any;
+  flags: LoadFlags;
+  pagination?: TablePagination;
+}): LoadPlan {
+  const { key, prev, flags, pagination } = params;
 
-function computeLoadPlan(key: string, prev: any, flags: LoadFlags): LoadPlan {
   const force = !!flags.force;
-
   const refreshRows = flags.refreshRows ?? true;
   const refreshMeta = flags.refreshMeta ?? false;
   const refreshStats = flags.refreshStats ?? false;
 
+  const limit = pagination?.limit ?? DEFAULT_LIMIT;
+  const offset = pagination?.offset ?? DEFAULT_OFFSET;
+
   const hasColumns = Array.isArray(prev.columns) && prev.columns.length > 0;
 
-  // Rows "existence" is now based on rows store state (not tableDataMap)
-  // We'll treat first load as "no columns OR no rows window init"
   const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(key);
   const hasRowsWindow = !!rowsInfo;
+
+  // Check if rows for current page are already loaded
+  const rowsMatchOffset = (rowsInfo?.streamOffset ?? -1) === offset;
+  const hasAnyRowForPage =
+    rowsMatchOffset && typeof rowsInfo?.loadedMax === "number"
+      ? rowsInfo.loadedMax >= offset
+      : false;
 
   const hasRowCount = typeof prev.rowCount === "number" && prev.rowCount >= 0;
   const hasSizeInfo = !!prev.sizeInfo;
@@ -104,21 +126,33 @@ function computeLoadPlan(key: string, prev: any, flags: LoadFlags): LoadPlan {
     Array.isArray(prev.constraints) && prev.constraints.length > 0;
 
   const isFirstLoad = !hasColumns || !hasRowsWindow;
-
   const metaMissing = !hasStructure || !hasConstraints;
 
-  // ✅ first load must fetch minimum dataset (columns + rows)
+  // Columns are blocking requirement for UI
   const needColumns = force || isFirstLoad || !hasColumns;
-  const needRows = force || isFirstLoad || refreshRows;
 
-  // ✅ stats/meta:
-  // - First load: do NOT fetch by default (unless force)
-  // - Later: fetch if missing OR explicitly requested via flags
+  const paginationChanged = !rowsMatchOffset;
+  const needRows =
+    force ||
+    isFirstLoad ||
+    refreshRows ||
+    paginationChanged ||
+    (!hasAnyRowForPage && !rowsInfo?.running);
+
   const needRowCount =
     force || (!isFirstLoad && (!hasRowCount || refreshStats));
   const needSizeInfo =
     force || (!isFirstLoad && (!hasSizeInfo || refreshStats));
   const needMeta = force || (!isFirstLoad && (metaMissing || refreshMeta));
+
+  const needAnyMetaWork =
+    needColumns || needRowCount || needSizeInfo || needMeta;
+
+  // Check if rows capacity needs update
+  const desiredCap = Math.max(1000, limit * 4);
+  const capMismatch = rowsInfo ? rowsInfo.cap !== desiredCap : true;
+  const needRowsWithLimit =
+    needRows || (capMismatch && (refreshRows || force || paginationChanged));
 
   return {
     key,
@@ -126,10 +160,11 @@ function computeLoadPlan(key: string, prev: any, flags: LoadFlags): LoadPlan {
     force,
     isFirstLoad,
     needColumns,
-    needRows,
+    needRows: needRowsWithLimit,
     needRowCount,
     needSizeInfo,
     needMeta,
+    needAnyMetaWork,
   };
 }
 
@@ -143,49 +178,20 @@ function shouldDoAnything(p: LoadPlan) {
   );
 }
 
-function createBusyGate(params: {
-  key: string;
-  prev: any;
-  setMeta: (key: string, patch: any) => void;
-  needRows: boolean;
-}): BusyGate {
-  const { key, prev, setMeta, needRows } = params;
-
-  let nonRowDone = false;
-  let rowsDone = !needRows;
-  let failed = false;
-
-  const maybeFinalizeBusy = () => {
-    if (failed) return;
-    if (!nonRowDone) return;
-    if (!rowsDone) return;
-
-    const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-    setMeta(key, { ...cur, busy: false, error: cur.error ?? null });
-  };
-
-  return {
-    markNonRowDone() {
-      nonRowDone = true;
-      maybeFinalizeBusy();
-    },
-    markRowsDone() {
-      rowsDone = true;
-      maybeFinalizeBusy();
-    },
-    fail(err: unknown) {
-      if (failed) return;
-      failed = true;
-
-      const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-      setMeta(key, {
-        ...cur,
-        busy: false,
-        error: getErrorMessage(err),
-      });
-    },
-  };
+function patchMeta(
+  setMeta: (key: string, patch: any) => void,
+  key: string,
+  prev: any,
+  patch: any
+) {
+  // Always fetch latest state to ensure we don't overwrite with stale 'prev'
+  const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
+  setMeta(key, { ...cur, ...patch });
 }
+
+// =============================================================================
+// Loaders (Single Responsibility)
+// =============================================================================
 
 async function loadColumns(params: {
   connId: string;
@@ -194,7 +200,6 @@ async function loadColumns(params: {
   addLogQuery: (sql: string) => void;
 }): Promise<ColumnRow[]> {
   const { connId, schema, tableName, addLogQuery } = params;
-
   const q = tableColumnsQuery(schema, tableName);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
@@ -214,11 +219,9 @@ async function loadRowCount(params: {
   addLogQuery: (sql: string) => void;
 }): Promise<number> {
   const { connId, schema, tableName, addLogQuery } = params;
-
   const q = tableRowCountQuery(schema, tableName);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
-
   return Number(cellToString((res.rows as unknown[][])?.[0]?.[0]));
 }
 
@@ -229,7 +232,6 @@ async function loadSizeInfo(params: {
   addLogQuery: (sql: string) => void;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const { connId, schema, tableName, addLogQuery } = params;
-
   const q = tableSizeInfoQuery(schema, tableName);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
@@ -250,12 +252,13 @@ async function loadMeta(params: {
 }): Promise<{ structure: any[]; constraints: any[] }> {
   const { connId, schema, tableName, addLogQuery } = params;
 
+  // 1. Get OID
   const qOid = tableOidQuery(schema, tableName);
   const oidRes = await runSqlQuery(connId, qOid);
   addLogQuery(qOid);
-
   const oid = Number(cellToString((oidRes.rows as unknown[][])?.[0]?.[0]));
 
+  // 2. Structure
   const qStructure = tableStructuresQuery(schema, tableName, oid);
   const structureRes = await runSqlQuery(connId, qStructure);
   addLogQuery(qStructure);
@@ -270,6 +273,7 @@ async function loadMeta(params: {
     comment: cellToString(row?.[13]),
   }));
 
+  // 3. Constraints
   const qConstraints = tableConstraintsQuery(schema, tableName);
   const constraintsRes = await runSqlQuery(connId, qConstraints);
   addLogQuery(qConstraints);
@@ -290,39 +294,33 @@ async function loadMeta(params: {
 
 async function startRowsStream(params: {
   key: string;
-  prev: any;
   connId: string;
   schema: string;
   tableName: string;
-  pagination?: TablePagination;
+  limit: number;
+  offset: number;
   addLogQuery: (sql: string) => void;
-  setMeta: (key: string, patch: any) => void;
-  gate: BusyGate;
+  resetCache?: boolean; // New flag to force cache invalidation
 }): Promise<void> {
   const {
     key,
-    prev,
     connId,
     schema,
     tableName,
-    pagination,
+    limit,
+    offset,
     addLogQuery,
-    setMeta,
-    gate,
+    resetCache,
   } = params;
-
-  const limit = pagination?.limit ?? DEFAULT_LIMIT;
-  const offset = pagination?.offset ?? DEFAULT_OFFSET;
 
   const q = tableDataQuery(schema, tableName, { limit, offset });
   addLogQuery(q);
 
   const store = useConnectionStore.getState();
 
-  // Ensure rows window exists
-  store.initRows(key, 5000);
+  store.initRows(key, DEFAULT_ROWS_CAP);
 
-  // Cancel previous stream if any
+  // Cancel previous stream for this table if any
   const old = store.getRowsWindowInfo(key);
   const oldOpId = old?.opId;
   if (oldOpId) {
@@ -333,145 +331,66 @@ async function startRowsStream(params: {
 
   const rowsOpId = await startSqlQueryStream(connId, q, {
     batchSize: 200,
-    maxRows: limit, // ✅ tight window fetch
+    maxRows: limit,
   });
 
-  // Cap should be >= limit (+ overscan)
   const cap = Math.max(1000, limit * 4);
 
-  // IMPORTANT: base must align with the global offset
-  // This requires store.beginRowsStream to accept streamOffset (4th arg)
-  store.beginRowsStream(key, rowsOpId, cap, offset);
+  // Begin stream in store (resets cache if requested)
+  store.beginRowsStream(key, rowsOpId, cap, offset, resetCache);
 
   let unsub: (() => void) | null = null;
 
   unsub = await operationBus.subscribe(rowsOpId, {
     onChunk: (chunk: TableChunk) => {
-      // Apply chunk into viewport window only (drop outside window)
       useConnectionStore.getState().applyRowsChunk(key, rowsOpId, chunk);
     },
 
-    onDone: (_done: any) => {
+    onDone: () => {
       const cur = useConnectionStore.getState().getRowsWindowInfo(key);
       if (!cur || cur.opId !== rowsOpId) return;
-
       try {
         unsub?.();
       } catch {}
       unsub = null;
-
       useConnectionStore.getState().endRowsStream(key, rowsOpId);
-      gate.markRowsDone();
     },
 
     onError: (err: any) => {
       const cur = useConnectionStore.getState().getRowsWindowInfo(key);
       if (!cur || cur.opId !== rowsOpId) return;
-
       try {
         unsub?.();
       } catch {}
       unsub = null;
-
       useConnectionStore
         .getState()
         .failRowsStream(key, rowsOpId, getErrorMessage(err));
-
-      // Also reflect error on meta state for UX
-      const metaCur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-      setMeta(key, { ...metaCur, error: getErrorMessage(err) });
-
-      gate.fail(err);
     },
   });
 }
 
-function applyColumnsPatch(params: {
-  key: string;
-  prev: any;
-  connId: string;
-  columns: ColumnRow[];
-  setMeta: (key: string, patch: any) => void;
-}) {
-  const { key, prev, connId, columns, setMeta } = params;
-
-  const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-  setMeta(key, {
-    ...cur,
-    columns,
-    connectionId: cur.connectionId ?? connId,
-    busy: true,
-    error: null,
-  });
-}
-
-function applyRowCountPatch(params: {
-  key: string;
-  prev: any;
-  connId: string;
-  rowCount: number;
-  setMeta: (key: string, patch: any) => void;
-}) {
-  const { key, prev, connId, rowCount, setMeta } = params;
-
-  const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-  setMeta(key, {
-    ...cur,
-    rowCount,
-    connectionId: cur.connectionId ?? connId,
-    busy: true,
-    error: null,
-  });
-}
-
-function applySizeInfoPatch(params: {
-  key: string;
-  prev: any;
-  connId: string;
-  sizeInfo: any;
-  setMeta: (key: string, patch: any) => void;
-}) {
-  const { key, prev, connId, sizeInfo, setMeta } = params;
-
-  const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-  setMeta(key, {
-    ...cur,
-    sizeInfo,
-    connectionId: cur.connectionId ?? connId,
-    busy: true,
-    error: null,
-  });
-}
-
-function applyMetaPatch(params: {
-  key: string;
-  prev: any;
-  connId: string;
-  structure: any[];
-  constraints: any[];
-  setMeta: (key: string, patch: any) => void;
-}) {
-  const { key, prev, connId, structure, constraints, setMeta } = params;
-
-  const cur = useConnectionStore.getState().tableDataMap[key] ?? prev;
-  setMeta(key, {
-    ...cur,
-    structure,
-    constraints,
-    connectionId: cur.connectionId ?? connId,
-    busy: true,
-    error: null,
-  });
-}
+// =============================================================================
+// Hook
+// =============================================================================
 
 export function useLoadTableData() {
   const tableDataMap = useConnectionStore((s) => s.tableDataMap);
   const setMeta = useConnectionStore((s) => s.addTableDataMap);
   const removeMeta = useConnectionStore((s) => s.removeTableDataMap);
+
+  const setColumnsCache = useConnectionStore((s) => s.setColumnsCache);
+  const setSizeInfoCache = useConnectionStore((s) => s.setSizeInfoCache);
   const addQueryHistory = useConnectionStore((s) => s.addQueryHistory);
+
+  const columnsCache = useConnectionStore((s) => s.columnsCache);
+  const sizeInfoCache = useConnectionStore((s) => s.sizeInfoCache);
 
   const profileTabs = useScreenStore((s) => s.profileTabs);
   const activeProfileScreen = useScreenStore((s) => s.activeProfileScreen);
+
+  // Ref to track active loading requests (Deduplication)
+  const loadingKeysRef = useRef<Set<string>>(new Set());
 
   const activeTab = useMemo(() => {
     if (!activeProfileScreen || activeProfileScreen === "main") return null;
@@ -489,10 +408,8 @@ export function useLoadTableData() {
   const ensureRuntimeConn = useCallback(
     async (key: string) => {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
-
       const meta = tableDataMap[key];
       if (meta?.connectionId) return meta.connectionId;
-
       const res = await profileConnect(activeTab.profileId);
       return res.connection.id;
     },
@@ -509,104 +426,211 @@ export function useLoadTableData() {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
 
       const key = tableKey(activeProfileScreen, schema, tableName);
-      const prev = (tableDataMap[key] ?? EMPTY_META) as any;
 
-      const plan = computeLoadPlan(key, prev, flags);
-      if (!shouldDoAnything(plan)) return;
-
-      setMeta(key, { ...prev, busy: true, error: null });
-
-      const gate = createBusyGate({
-        key,
-        prev,
-        setMeta,
-        needRows: plan.needRows,
-      });
+      // --- DEDUPLICATION CHECK ---
+      // If already loading this key and not forced, skip to avoid race conditions
+      if (loadingKeysRef.current.has(key) && !flags.force) {
+        return;
+      }
+      loadingKeysRef.current.add(key);
 
       try {
-        const connId = await ensureRuntimeConn(key);
+        const prev = tableDataMap[key] ?? EMPTY_META;
+        const plan = computeLoadPlan({ key, prev, flags, pagination });
 
-        // Always keep connectionId updated early (helps later ops)
-        setMeta(key, {
-          ...prev,
+        if (!shouldDoAnything(plan)) return;
+
+        const limit = pagination?.limit ?? DEFAULT_LIMIT;
+        const offset = pagination?.offset ?? DEFAULT_OFFSET;
+
+        // Set busy/error state
+        if (plan.needAnyMetaWork)
+          patchMeta(setMeta, key, prev, { busy: true, error: null });
+        else patchMeta(setMeta, key, prev, { error: null });
+
+        // Ensure connection
+        let connId: string;
+        try {
+          connId = activeTab.runtimeConnectionId
+            ? activeTab.runtimeConnectionId
+            : await ensureRuntimeConn(key);
+        } catch (e) {
+          patchMeta(setMeta, key, prev, {
+            busy: false,
+            error: getErrorMessage(e),
+          });
+          return;
+        }
+
+        patchMeta(setMeta, key, prev, {
           connectionId: prev.connectionId ?? connId,
-          busy: true,
-          error: null,
         });
 
-        if (plan.needRows) {
-          await startRowsStream({
-            key,
-            prev,
-            connId,
-            schema,
-            tableName,
-            pagination,
-            addLogQuery,
-            setMeta,
-            gate,
-          });
+        // --- 1. APPLY CACHES (Instant UI Feedback) ---
+        const cachedCols = columnsCache[key];
+        if (
+          (!Array.isArray(prev.columns) || prev.columns.length === 0) &&
+          Array.isArray(cachedCols) &&
+          cachedCols.length > 0
+        ) {
+          patchMeta(setMeta, key, prev, { columns: cachedCols });
         }
 
-        if (plan.needColumns) {
-          const columns = await loadColumns({
-            connId,
-            schema,
-            tableName,
-            addLogQuery,
-          });
-          applyColumnsPatch({ key, prev, connId, columns, setMeta });
+        const cachedSize = sizeInfoCache[key];
+        if (!prev.sizeInfo && cachedSize) {
+          patchMeta(setMeta, key, prev, { sizeInfo: cachedSize });
         }
+
+        // --- 2. LOAD COLUMNS (Blocking) ---
+        // We must have columns before processing rows to ensure correct data mapping.
+        if (plan.needColumns) {
+          try {
+            const columns = await loadColumns({
+              connId,
+              schema,
+              tableName,
+              addLogQuery,
+            });
+
+            const curPrev =
+              useConnectionStore.getState().tableDataMap[key] ?? prev;
+
+            patchMeta(setMeta, key, curPrev, {
+              columns,
+              connectionId: curPrev.connectionId ?? connId,
+            });
+
+            try {
+              setColumnsCache(key, columns as any);
+            } catch {}
+          } catch (e) {
+            patchMeta(setMeta, key, prev, {
+              busy: false,
+              error: getErrorMessage(e),
+            });
+            // Stop here if columns fail
+            return;
+          }
+        }
+
+        // --- 3. START ROWS STREAM (Fire & Forget) ---
+        // Runs independently of meta tasks.
+        if (plan.needRows) {
+          void (async () => {
+            try {
+              // Force refresh means we should invalidate existing cache
+              const shouldReset = !!flags.force;
+
+              await startRowsStream({
+                key,
+                connId,
+                schema,
+                tableName,
+                limit,
+                offset,
+                addLogQuery,
+                resetCache: shouldReset, // <-- Passed flag
+              });
+            } catch (e) {
+              const curMeta =
+                useConnectionStore.getState().tableDataMap[key] ?? prev;
+              patchMeta(setMeta, key, curMeta, {
+                busy: false,
+                error: getErrorMessage(e),
+              });
+            }
+          })();
+        }
+
+        // --- 4. LOAD META (Parallel) ---
+        const metaTasks: Promise<void>[] = [];
 
         if (plan.needRowCount) {
-          const rowCount = await loadRowCount({
-            connId,
-            schema,
-            tableName,
-            addLogQuery,
-          });
-          applyRowCountPatch({ key, prev, connId, rowCount, setMeta });
+          metaTasks.push(
+            (async () => {
+              const rowCount = await loadRowCount({
+                connId,
+                schema,
+                tableName,
+                addLogQuery,
+              });
+              patchMeta(setMeta, key, prev, { rowCount });
+            })()
+          );
         }
 
         if (plan.needSizeInfo) {
-          const sizeInfo = await loadSizeInfo({
-            connId,
-            schema,
-            tableName,
-            addLogQuery,
-          });
-          applySizeInfoPatch({ key, prev, connId, sizeInfo, setMeta });
+          metaTasks.push(
+            (async () => {
+              const sizeInfo = await loadSizeInfo({
+                connId,
+                schema,
+                tableName,
+                addLogQuery,
+              });
+              patchMeta(setMeta, key, prev, { sizeInfo });
+              try {
+                setSizeInfoCache(key, sizeInfo as any);
+              } catch {}
+            })()
+          );
         }
 
         if (plan.needMeta) {
-          const { structure, constraints } = await loadMeta({
-            connId,
-            schema,
-            tableName,
-            addLogQuery,
-          });
-          applyMetaPatch({
-            key,
-            prev,
-            connId,
-            structure,
-            constraints,
-            setMeta,
-          });
+          metaTasks.push(
+            (async () => {
+              const { structure, constraints } = await loadMeta({
+                connId,
+                schema,
+                tableName,
+                addLogQuery,
+              });
+              patchMeta(setMeta, key, prev, { structure, constraints });
+            })()
+          );
         }
 
-        gate.markNonRowDone();
-      } catch (e: unknown) {
-        gate.fail(e);
+        // If no meta tasks needed, we are done
+        if (metaTasks.length === 0) {
+          // Only clear busy if we set it earlier
+          if (plan.needAnyMetaWork) {
+            patchMeta(setMeta, key, prev, { busy: false });
+          }
+          return;
+        }
+
+        // Wait for all meta tasks to settle
+        const results = await Promise.allSettled(metaTasks);
+        const firstErr = results.find((r) => r.status === "rejected") as
+          | PromiseRejectedResult
+          | undefined;
+
+        if (firstErr) {
+          patchMeta(setMeta, key, prev, {
+            busy: false,
+            error: getErrorMessage(firstErr.reason),
+          });
+          return;
+        }
+
+        // All done
+        patchMeta(setMeta, key, prev, { busy: false });
+      } finally {
+        // CLEANUP: Always remove deduplication lock
+        loadingKeysRef.current.delete(key);
       }
     },
     [
       activeTab,
       activeProfileScreen,
       tableDataMap,
+      columnsCache,
+      sizeInfoCache,
       setMeta,
       ensureRuntimeConn,
       addLogQuery,
+      setColumnsCache,
+      setSizeInfoCache,
     ]
   );
 
@@ -622,7 +646,6 @@ export function useLoadTableData() {
     (schema: string, tableName: string) => {
       const key = tableKey(activeProfileScreen, schema, tableName);
 
-      // Cancel row stream if running + cleanup row window state
       const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(key);
       if (rowsInfo?.opId) {
         operationCancel(rowsInfo.opId).catch(() => {});

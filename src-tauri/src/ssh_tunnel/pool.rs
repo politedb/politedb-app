@@ -77,10 +77,14 @@ pub async fn acquire_shared_tunnel(
 
     // fast path
     if let Some(existing) = state.ssh_tunnel_pool.get(&key) {
+        // Optimistic increment.
+        // Even if ref count was 0 (zombie race), we increment to 1.
+        // But with remove_if below, zombie race is practically eliminated.
+        let prev = existing.refs.fetch_add(1, Ordering::SeqCst);
+
         let shared = existing.clone();
         drop(existing);
 
-        let prev = shared.refs.fetch_add(1, Ordering::SeqCst);
         tracing::info!(ssh_key=?key, refs=prev+1, "ssh_tunnel: reuse");
         return Ok((key, shared));
     }
@@ -129,31 +133,34 @@ pub async fn acquire_shared_tunnel(
 /* release */
 
 pub async fn release_shared_tunnel_by_key(state: &AppState, key: &TunnelKey) {
-    // Get shared (clone Arc) then drop DashMap guard early.
-    let Some(entry) = state.ssh_tunnel_pool.get(key) else {
-        return;
-    };
-    let shared = entry.clone();
-    drop(entry);
+    // Attempt to atomically remove IF refs == 1.
+    // This prevents acquiring a zombie connection while we are closing.
+    let remove_result = state.ssh_tunnel_pool.remove_if(key, |_, shared| {
+        // Condition: Only remove if we are the last user (refs == 1)
+        shared.refs.load(Ordering::SeqCst) == 1
+    });
 
-    // Decrement refs
-    let prev = shared.refs.fetch_sub(1, Ordering::SeqCst);
-    if prev > 1 {
-        tracing::info!(ssh_key=?key, refs=prev-1, "ssh_tunnel: release (still in use)");
-        return;
-    }
+    match remove_result {
+        Some((_, shared)) => {
+            // We successfully removed the entry because refs was 1.
+            // Now refs is effectively 0 (from the perspective of the pool),
+            // and we own the responsibility to close it.
 
-    // prev == 1 => now 0, we are responsible for closing.
-    // Remove from pool first to prevent new reusers during close.
-    state.ssh_tunnel_pool.remove(key);
+            tracing::info!(ssh_key=?key, local_bind=%shared.local_addr, "ssh_tunnel: closing (refs reached 0)");
 
-    tracing::info!(ssh_key=?key, local_bind=%shared.local_addr, "ssh_tunnel: closing (refs=0)");
-
-    // take handle and close
-    // take handle and close
-    let mut g = shared.handle.lock().await;
-    if let Some(h) = g.take() {
-        let _ = h.close().await;
+            let mut g = shared.handle.lock().await;
+            if let Some(h) = g.take() {
+                let _ = h.close().await;
+            }
+        }
+        None => {
+            // Either key not found OR refs > 1.
+            // Just decrement ref count.
+            if let Some(entry) = state.ssh_tunnel_pool.get(key) {
+                let prev = entry.refs.fetch_sub(1, Ordering::SeqCst);
+                tracing::info!(ssh_key=?key, refs=prev-1, "ssh_tunnel: release (decrement)");
+            }
+        }
     }
 }
 

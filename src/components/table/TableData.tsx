@@ -30,6 +30,7 @@ interface Props {
   patches?: Record<string, Record<string, any>> | null;
   newRowKeys?: string[];
   deletedRows?: Set<number>;
+  rowsVersion: number;
 }
 
 // ============================================================================
@@ -48,6 +49,7 @@ export function TableData({
   onAddRow,
   newRowKeys = EMPTY_ARRAY,
   deletedRows = EMPTY_SET,
+  rowsVersion = 0,
 }: Props) {
   const baseLen = Math.max(0, totalRows || 0);
 
@@ -84,6 +86,8 @@ export function TableData({
   // Unified row accessor (base + newRows)
   const getRowArray = useCallback(
     (idx: number): unknown[] | undefined => {
+      void rowsVersion;
+
       if (idx < 0) return undefined;
 
       if (idx < baseLen) {
@@ -103,7 +107,7 @@ export function TableData({
 
       return undefined;
     },
-    [baseLen, getRowAt, newRows, columns]
+    [baseLen, getRowAt, newRows, columns, rowsVersion]
   );
 
   // --------------------------------------------------------------------------
@@ -196,6 +200,7 @@ export function TableData({
         onDeleteRow={onDeleteRow}
         onCommitEdit={handleCommitEdit}
         onExitEdit={() => setEditing(null)}
+        dataVersion={rowsVersion ?? 0}
       />
     </div>
   );

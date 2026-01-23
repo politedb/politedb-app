@@ -9,12 +9,10 @@ import type {
 import { useScreenStore } from "src/stores/screen";
 import {
   useLoadTableData,
-  tableKey,
   DEFAULT_LIMIT,
   DEFAULT_OFFSET,
 } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
-import { connectionRemove } from "src/lib/tauri";
 
 /* =============================================================================
  * Helpers
@@ -142,21 +140,22 @@ export function useConnectionWindows(activeProfileScreen: string) {
 
       if (toClose?.type === "table") {
         const { schema, name } = toClose.table;
-        const k = tableKey(activeProfileScreen, schema, name);
-        const entry = useConnectionStore.getState().tableDataMap[k];
-        const connectionId = entry?.connectionId ?? null;
 
         // remove cached UI data immediately
         removeTableData(schema, name);
 
+        // NOTE - DO NOT close per-table runtime connection here anymore since we're using runtimeConnection for table/window
         // drop per-table runtime connection if any
-        if (connectionId) {
-          try {
-            await connectionRemove(connectionId);
-          } catch (err) {
-            console.error("Error removing connection:", err);
-          }
-        }
+        // const k = tableKey(activeProfileScreen, schema, name);
+        // const entry = useConnectionStore.getState().tableDataMap[k];
+        // const connectionId = entry?.connectionId ?? null;
+        // if (connectionId) {
+        //   try {
+        //     await connectionRemove(connectionId);
+        //   } catch (err) {
+        //     console.error("Error removing connection:", err);
+        //   }
+        // }
       }
 
       // If you still keep legacy sqlResults store, clear it here

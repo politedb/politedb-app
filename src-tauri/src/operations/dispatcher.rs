@@ -13,12 +13,19 @@ pub async fn cancel_operation(state: State<'_, AppState>, op_id: Uuid) -> Result
         return Ok(());
     }
 
+    // Always mark cancel request to cover races (cancel before token exists).
+    state.cancel_requested.insert(op_id, ());
+
+    // If cancel handle exists -> request DB-side cancel immediately.
     if let Some(handle) = state.running_ops.get(&op_id).map(|e| e.value().clone()) {
         handle.cancel();
-        return Ok(());
     }
 
-    state.cancel_requested.insert(op_id, ());
+    // If the task exists -> abort the async task as a fallback (covers "stuck before token").
+    if let Some((_k, task)) = state.op_tasks.remove(&op_id) {
+        task.abort();
+    }
+
     Ok(())
 }
 
@@ -44,7 +51,15 @@ pub async fn dispatch_operation(
     // Emit started (if this fails, rollback state)
     if let Err(e) = emit_started(&app, op_id, input.connection_id) {
         state.active_ops.remove(&op_id);
-        state.op_to_conn.remove(&op_id); // ✅ rollback mapping
+        state.op_to_conn.remove(&op_id);
+
+        state.running_ops.remove(&op_id);
+        state.cancel_requested.remove(&op_id);
+        state.flow_by_op.remove(&op_id);
+        if let Some((_k, t)) = state.op_tasks.remove(&op_id) {
+            t.abort();
+        }
+
         return Err(e);
     }
 
@@ -56,6 +71,7 @@ pub async fn dispatch_operation(
         active_ops: Arc::clone(&state.active_ops),
         op_to_conn: Arc::clone(&state.op_to_conn),
         flow_by_op: Arc::clone(&state.flow_by_op),
+        op_tasks: Arc::clone(&state.op_tasks),
     };
 
     let spawn_res: Result<(), String> = match input.kind {
@@ -72,11 +88,14 @@ pub async fn dispatch_operation(
     // If spawn fails, rollback op tracking
     if let Err(e) = spawn_res {
         state.active_ops.remove(&op_id);
-        state.op_to_conn.remove(&op_id); // ✅ rollback mapping
+        state.op_to_conn.remove(&op_id);
 
-        // Optional hygiene (in case spawn_* inserted some handles before failing)
         state.running_ops.remove(&op_id);
         state.cancel_requested.remove(&op_id);
+        state.flow_by_op.remove(&op_id);
+        if let Some((_k, t)) = state.op_tasks.remove(&op_id) {
+            t.abort();
+        }
 
         return Err(e);
     }

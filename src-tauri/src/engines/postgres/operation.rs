@@ -58,9 +58,9 @@ pub async fn run_pg_sql_query(
     );
 
     // Batch sizing + limits
-    let batch_size: usize = sql_input.batch_size.unwrap_or(200).clamp(1, 2000) as usize;
+    let batch_size: usize = sql_input.batch_size.unwrap_or(100).clamp(1, 2000) as usize;
 
-    let max_rows: u64 = sql_input.max_rows.unwrap_or(50_000).clamp(1, 1_000_000) as u64;
+    let max_rows: u64 = sql_input.max_rows.unwrap_or(1_000_000).clamp(1, 10_000_000) as u64;
 
     let validate_only = sql_input.validate_only.unwrap_or(false);
 
@@ -73,18 +73,31 @@ pub async fn run_pg_sql_query(
             return;
         }
     };
+    // Register cancel handle (token + backend_pid)
+    let cancel_token = (&*client).cancel_token();
+    let backend_pid: i32 = match client.query_one("SELECT pg_backend_pid()", &[]).await {
+        Ok(row) => row.get::<usize, i32>(0),
+        Err(_) => -1,
+    };
 
-    // Register cancel token (engine-agnostic cancel handle)
-    let cancel_token = client.cancel_token();
-    ctx.running_ops
-        .insert(op_id, CancelHandle::Postgres(cancel_token.clone()));
+    ctx.running_ops.insert(
+        op_id,
+        CancelHandle::Postgres {
+            token: cancel_token.clone(),
+            backend_pid,
+        },
+    );
 
     // Ensure running_ops cleaned once token exists
     let _running_guard = RunningGuard::new(op_id, Arc::clone(&ctx.running_ops));
 
     // If user requested cancel before token existed, cancel immediately (non-blocking)
     if ctx.cancel_requested.remove(&op_id).is_some() {
-        CancelHandle::Postgres(cancel_token.clone()).cancel();
+        CancelHandle::Postgres {
+            token: cancel_token.clone(),
+            backend_pid,
+        }
+        .cancel();
     }
 
     // Transaction for SET LOCAL scoping (won't leak to pooled connection)
@@ -101,7 +114,7 @@ pub async fn run_pg_sql_query(
         }
     };
 
-    // Optional read-only (best-effort; real enforcement should be DB roles)
+    // Optional read-only (best-effort)
     if sql_input.read_only.unwrap_or(false) {
         if let Err(e) = tx
             .batch_execute("SET LOCAL default_transaction_read_only = on")
@@ -158,10 +171,9 @@ pub async fn run_pg_sql_query(
     let done_columns = Some(meta.clone());
 
     /* =========================================================================
-     * ✅ Validation-only path (no chunks, no row fetch)
+     * Validation-only path (no chunks, no row fetch)
      * ========================================================================= */
     if validate_only {
-        // Best-effort semantic validation: EXPLAIN for explainable statements.
         if is_explainable(&sql_input.sql) {
             let explain_sql = format!("EXPLAIN {}", sql_input.sql);
 
@@ -188,7 +200,6 @@ pub async fn run_pg_sql_query(
             }
         }
 
-        // Commit to end SET LOCAL scope cleanly
         if let Err(e) = tx.commit().await {
             emit_error(
                 &ctx.app,
@@ -214,8 +225,7 @@ pub async fn run_pg_sql_query(
      * Execute path (stream rows -> chunk -> done)
      * ========================================================================= */
 
-    // FE-ack flow control: bound in-flight chunks to prevent IPC/UI backlog growth.
-    // Window size can be tuned; 3 is a good default for smooth streaming.
+    // FE-ack flow control
     ctx.flow_by_op.insert(op_id, FlowCtrl::new(3));
     let _flow_guard = FlowGuard::new(op_id, Arc::clone(&ctx.flow_by_op));
     let flow = ctx
@@ -246,7 +256,7 @@ pub async fn run_pg_sql_query(
         }
     });
 
-    // Query stream (no params for now)
+    // Query stream
     let stream = match tx.query_raw(&stmt, std::iter::empty::<&str>()).await {
         Ok(s) => s,
         Err(e) => {
@@ -259,7 +269,6 @@ pub async fn run_pg_sql_query(
                     started_at.elapsed().as_millis(),
                     done_columns.clone(),
                 );
-
                 drop(tx_chunk);
                 let _ = emit_task.await;
                 return;
@@ -278,9 +287,6 @@ pub async fn run_pg_sql_query(
     let mut row_offset: u64 = 0;
     let mut batch_rows: Vec<Vec<CellValue>> = Vec::with_capacity(batch_size);
 
-    // Adaptive batching
-    // NOTE: We keep a fixed batch_size here and rely on FE-ACK flow control to apply
-    // backpressure safely (bounded in-flight chunks). This prevents unbounded queues.
     while let Some(row_result) = stream.next().await {
         let row = match row_result {
             Ok(r) => r,
@@ -329,16 +335,15 @@ pub async fn run_pg_sql_query(
 
             let sent = tx_chunk.send(Ok(chunk)).await;
 
-            // Credit is consumed on successful send; refund if send fails to avoid deadlock.
             if sent.is_err() {
+                // Refund credit if send fails to avoid deadlock.
                 flow.ack(1);
                 drop(tx_chunk);
                 let _ = emit_task.await;
-                // permit drops here (RAII)
+                let _ = permit;
                 return;
             }
 
-            // permit drops here (RAII)
             let _ = permit;
         }
     }
@@ -360,15 +365,14 @@ pub async fn run_pg_sql_query(
             flow.ack(1);
             drop(tx_chunk);
             let _ = emit_task.await;
-            // permit drops here (RAII)
+            let _ = permit;
             return;
         }
 
-        // permit drops here (RAII)
         let _ = permit;
     }
 
-    // Commit (even for SELECT, commit ends SET LOCAL scope cleanly)
+    // Commit (ends SET LOCAL scope cleanly)
     if let Err(e) = tx.commit().await {
         let _ = tx_chunk.send(Err(format!("TX_COMMIT_FAILED: {e}"))).await;
         drop(tx_chunk);
@@ -386,7 +390,7 @@ pub async fn run_pg_sql_query(
         truncated,
         row_count,
         started_at.elapsed().as_millis(),
-        done_columns.clone(),
+        done_columns,
     );
 }
 

@@ -28,6 +28,7 @@ pub struct OpCleanup {
     cancel_requested: Arc<dashmap::DashMap<Uuid, ()>>,
     active_ops: Arc<dashmap::DashMap<Uuid, ()>>,
     op_to_conn: Arc<dashmap::DashMap<Uuid, Uuid>>,
+    op_tasks: Arc<dashmap::DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 }
 
 impl Drop for OpCleanup {
@@ -36,6 +37,7 @@ impl Drop for OpCleanup {
         self.cancel_requested.remove(&self.op_id);
         self.active_ops.remove(&self.op_id);
         self.op_to_conn.remove(&self.op_id);
+        self.op_tasks.remove(&self.op_id);
     }
 }
 
@@ -75,22 +77,29 @@ impl EngineConnection {
     }
 
     pub fn spawn_sql_query(&self, ctx: OperationCtx, input: SqlQueryInput) -> Result<(), String> {
+        let op_id = ctx.op_id;
+        let op_tasks = Arc::clone(&ctx.op_tasks);
+
         match self {
             EngineConnection::Postgres(pg) => {
                 let pool = pg.pool.clone();
 
-                tokio::spawn(async move {
+                // ✅ spawn first, return handle
+                let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
-                        op_id: ctx.op_id,
+                        op_id,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
                         op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
                     };
 
                     crate::engines::postgres::operation::run_pg_sql_query(ctx, pool, input).await;
-                    // cleanup runs here
                 });
+
+                // ✅ insert handle using the cloned Arc (NOT ctx)
+                op_tasks.insert(op_id, handle);
 
                 Ok(())
             }
@@ -99,13 +108,14 @@ impl EngineConnection {
                 let pool = my.pool.clone();
                 let default_timeout = my.default_statement_timeout_ms;
 
-                tokio::spawn(async move {
+                let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
-                        op_id: ctx.op_id,
+                        op_id,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
                         op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
                     };
 
                     crate::engines::mysql::operation::run_mysql_sql_query(
@@ -117,6 +127,7 @@ impl EngineConnection {
                     .await;
                 });
 
+                op_tasks.insert(op_id, handle);
                 Ok(())
             }
 
@@ -134,13 +145,26 @@ impl EngineConnection {
                 let pool = r.pool.clone();
                 let default_timeout_ms = r.default_command_timeout_ms;
 
-                tokio::spawn(async move {
+                // ✅ take copies / clones BEFORE moving ctx into async block
+                let op_id = ctx.op_id;
+                let conn_id = self.id();
+
+                let op_tasks = Arc::clone(&ctx.op_tasks);
+                let op_to_conn = Arc::clone(&ctx.op_to_conn);
+                let active_ops = Arc::clone(&ctx.active_ops);
+
+                // ✅ register mapping before spawn
+                op_to_conn.insert(op_id, conn_id);
+                active_ops.insert(op_id, ());
+
+                let handle = tokio::spawn(async move {
                     let _cleanup = OpCleanup {
-                        op_id: ctx.op_id,
+                        op_id,
                         running_ops: Arc::clone(&ctx.running_ops),
                         cancel_requested: Arc::clone(&ctx.cancel_requested),
                         active_ops: Arc::clone(&ctx.active_ops),
                         op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
                     };
 
                     crate::engines::redis::operation::run_redis_command(
@@ -151,6 +175,9 @@ impl EngineConnection {
                     )
                     .await;
                 });
+
+                // ✅ insert handle using cloned Arc (NOT ctx)
+                op_tasks.insert(op_id, handle);
 
                 Ok(())
             }

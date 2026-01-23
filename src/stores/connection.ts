@@ -17,7 +17,7 @@ import { PatchMap } from "src/utils/generateSql";
  * ============================================================================= */
 // Simple in-memory FIFO cache (cheap + predictable)
 
-const ROW_CACHE_LIMIT = 20000;
+const ROW_CACHE_LIMIT = 100000;
 const ROW_CACHE_EVICT_BATCH = 512;
 
 function cachePut(
@@ -80,15 +80,6 @@ export type TableMetaState = {
   error: string | null;
 };
 
-// =============================================================================
-// Rows notify scheduler (batch state updates to max 1/frame)
-// =============================================================================
-
-type PendingRowsMeta = {
-  loadedMax: number;
-  lastChunkAt: number;
-};
-
 function raf(cb: () => void) {
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(cb);
   else setTimeout(cb, 16);
@@ -147,7 +138,7 @@ export type TableRowState = {
   lastChunkAt?: number;
 };
 
-const DEFAULT_ROWS_CAP = 5000;
+export const DEFAULT_ROWS_CAP = 1000;
 
 function clampNonNeg(n: number) {
   return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
@@ -278,7 +269,8 @@ export type ConnectionState = {
     key: string,
     opId: string,
     cap?: number,
-    streamOffset?: number
+    streamOffset?: number,
+    resetCache?: boolean // <--- UPDATED: Add resetCache flag
   ) => void;
 
   endRowsStream: (key: string, opId: string) => void;
@@ -298,45 +290,55 @@ export const useConnectionStore = create<ConnectionState>()(
     // -------------------------------------------------------------------------
     // Batched notify: at most 1 state update per frame per table key
     // -------------------------------------------------------------------------
-    const pendingKeys = new Set<string>();
-    const pendingMeta = new Map<string, PendingRowsMeta>();
-    let scheduled = false;
+    type PendingMeta = { loadedMax: number; lastChunkAt: number };
 
-    const scheduleRowsNotify = (key: string) => {
-      pendingKeys.add(key);
-      if (scheduled) return;
-      scheduled = true;
+    const pendingMeta = new Map<string, PendingMeta>();
+    const rafByKey = new Map<string, number>();
 
-      raf(() => {
-        scheduled = false;
+    function scheduleRowsNotify(key: string, opts?: { immediate?: boolean }) {
+      const immediate = !!opts?.immediate;
 
-        const keys = Array.from(pendingKeys);
-        pendingKeys.clear();
-        if (keys.length === 0) return;
+      const flush = () => {
+        rafByKey.delete(key);
 
-        set((s) => {
-          let changed = false;
-          const nextRowsByKey = { ...s.tableRowsByKey };
+        const meta = pendingMeta.get(key);
+        if (!meta) return;
+        pendingMeta.delete(key);
 
-          for (const k of keys) {
-            const st = nextRowsByKey[k];
-            if (!st) continue;
+        useConnectionStore.setState((s) => {
+          const prev = s.tableRowsByKey[key];
+          if (!prev) return s;
 
-            const meta = pendingMeta.get(k);
-            if (meta) {
-              st.loadedMax = Math.max(st.loadedMax, meta.loadedMax);
-              st.lastChunkAt = meta.lastChunkAt;
-              pendingMeta.delete(k);
-            }
+          // ✅ IMPORTANT: bump version so UI knows data changed
+          const next = {
+            ...prev,
+            loadedMax: Math.max(prev.loadedMax ?? -1, meta.loadedMax),
+            lastChunkAt: meta.lastChunkAt,
+            version: (prev.version ?? 0) + 1,
+          };
 
-            st.version += 1;
-            changed = true;
-          }
-
-          return changed ? { tableRowsByKey: nextRowsByKey } : s;
+          return {
+            tableRowsByKey: { ...s.tableRowsByKey, [key]: next },
+          };
         });
-      });
-    };
+      };
+
+      if (immediate) {
+        // Nếu đã có RAF pending thì hủy luôn để flush ngay
+        const raf = rafByKey.get(key);
+        if (raf) {
+          cancelAnimationFrame(raf);
+          rafByKey.delete(key);
+        }
+        flush();
+        return;
+      }
+
+      if (rafByKey.has(key)) return;
+
+      const raf = requestAnimationFrame(() => flush());
+      rafByKey.set(key, raf);
+    }
 
     return {
       tables: {},
@@ -694,36 +696,99 @@ export const useConnectionStore = create<ConnectionState>()(
           return { tableRowsByKey: restRows, tableRowCacheByKey: restCache };
         }),
 
-      beginRowsStream: (key, opId, cap, streamOffset = 0) =>
+      beginRowsStream: (key, opId, cap, streamOffset = 0, resetCache = false) =>
         set((s) => {
+          // --- UPDATED: Handle cache reset ---
+          let currentCache = s.tableRowCacheByKey;
+          if (resetCache) {
+            const { [key]: _, ...rest } = s.tableRowCacheByKey;
+            currentCache = rest;
+          }
+
           const prev =
             s.tableRowsByKey[key] ?? makeRowsState(cap ?? DEFAULT_ROWS_CAP);
-          const nextCap = cap ? Math.max(200, Math.floor(cap)) : prev.cap;
 
-          const base = clampNonNeg(streamOffset);
+          const nextCap = cap ? Math.max(200, Math.floor(cap)) : prev.cap;
+          const nextStreamOffset = clampNonNeg(streamOffset);
+
+          // Get cache for this specific key (might be undefined if we just reset it)
+          const cacheEntry = currentCache[key];
+
+          // Soft refresh window buffer:
+          // - Same streamOffset + same cap + !resetCache: keep prev.rows
+          // - Otherwise: allocate new window and hydrate from overlap + cache
+          let nextRows: (unknown[] | undefined)[];
+
+          const sameCap = prev.cap === nextCap;
+          const sameStream = prev.streamOffset === nextStreamOffset;
+
+          // If resetCache is true, we must assume prev.rows contains stale data (e.g. from previous sort order),
+          // so we force a fresh start (no overlap reuse).
+          const forceFresh = resetCache;
+
+          if (!forceFresh && sameCap && sameStream) {
+            nextRows = prev.rows;
+          } else {
+            nextRows = new Array(nextCap).fill(undefined);
+
+            // Only copy overlap if we are NOT forcing a fresh start
+            if (!forceFresh) {
+              const prevBase = prev.base;
+              const prevEnd = prev.base + prev.cap;
+
+              const newBase = nextStreamOffset; // align base to streamOffset
+              const newEnd = newBase + nextCap;
+
+              const overlapStart = Math.max(prevBase, newBase);
+              const overlapEnd = Math.min(prevEnd, newEnd);
+
+              if (overlapEnd > overlapStart) {
+                const len = overlapEnd - overlapStart;
+                const srcOff = overlapStart - prevBase;
+                const dstOff = overlapStart - newBase;
+                for (let i = 0; i < len; i++) {
+                  nextRows[dstOff + i] = prev.rows[srcOff + i];
+                }
+              }
+            }
+
+            // Hydrate from cache for instant render (if cache exists)
+            if (cacheEntry) {
+              const newBase = nextStreamOffset;
+              for (let i = 0; i < nextCap; i++) {
+                if (nextRows[i] !== undefined) continue;
+                const globalIdx = newBase + i;
+                const cached = cacheGet(cacheEntry, globalIdx);
+                if (cached !== undefined) nextRows[i] = cached;
+              }
+            }
+          }
 
           const next: TableRowState = {
             ...prev,
             opId,
+
             cap: nextCap,
-            base,
-            streamOffset: base,
-            rows: new Array(nextCap).fill(undefined),
-            loadedMax: base - 1,
+            base: nextStreamOffset,
+            streamOffset: nextStreamOffset,
+
+            rows: nextRows,
+
+            // If resetting cache, ensure loadedMax is reset so UI doesn't think we have data
+            loadedMax: forceFresh
+              ? nextStreamOffset - 1
+              : Math.max(prev.loadedMax, nextStreamOffset - 1),
+
             running: true,
             error: null,
             truncated: false,
+
             startedAt: Date.now(),
-            lastChunkAt: undefined,
-            // version bump is scheduled
+            lastChunkAt: prev.lastChunkAt,
             version: prev.version,
           };
 
-          const nextCache = {
-            ...s.tableRowCacheByKey,
-            [key]: { map: new Map<number, unknown[]>(), order: [] },
-          };
-
+          // Schedule 1/frame notify
           raf(() => scheduleRowsNotify(key));
 
           return {
@@ -731,7 +796,7 @@ export const useConnectionStore = create<ConnectionState>()(
               ...s.tableRowsByKey,
               [key]: next,
             },
-            tableRowCacheByKey: nextCache,
+            tableRowCacheByKey: currentCache,
           };
         }),
 
@@ -875,8 +940,15 @@ export const useConnectionStore = create<ConnectionState>()(
             prevMeta.lastChunkAt = lastChunkAt;
           }
 
-          if (touched > 0 || loadedMax > prev.loadedMax) {
-            scheduleRowsNotify(key);
+          const wasEmpty = prev.loadedMax < prev.streamOffset; // chưa có row nào
+          const nowHasAny = loadedMax >= prev.streamOffset;
+
+          if (
+            (wasEmpty && nowHasAny) ||
+            touched > 0 ||
+            loadedMax > prev.loadedMax
+          ) {
+            scheduleRowsNotify(key, { immediate: wasEmpty && nowHasAny });
           }
 
           if (cacheChanged) {

@@ -19,6 +19,7 @@ pub struct OperationCtx {
 
     // per-op flow control for chunk streaming
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
+    pub op_tasks: Arc<dashmap::DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 }
 
 /// Always clean active marker + pending cancel request,

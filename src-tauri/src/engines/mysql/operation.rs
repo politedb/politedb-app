@@ -52,8 +52,8 @@ pub async fn run_mysql_sql_query(
     );
 
     // Batch sizing + limits
-    let batch_size = sql_input.batch_size.unwrap_or(200).clamp(1, 2000) as usize;
-    let max_rows = sql_input.max_rows.unwrap_or(50_000).clamp(1, 1_000_000) as u64;
+    let batch_size = sql_input.batch_size.unwrap_or(100).clamp(1, 2000) as usize;
+    let max_rows = sql_input.max_rows.unwrap_or(1_000_000).clamp(1, 10_000_000) as u64;
 
     let validate_only = sql_input.validate_only.unwrap_or(false);
 

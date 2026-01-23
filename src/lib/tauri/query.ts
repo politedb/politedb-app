@@ -33,8 +33,8 @@ export async function runSqlQuery(
     kind: "sql_query",
     sql: {
       sql,
-      batch_size: opts?.batchSize ?? 200,
-      max_rows: opts?.maxRows ?? 50_000,
+      batch_size: opts?.batchSize ?? 100,
+      max_rows: opts?.maxRows,
     },
   });
 
@@ -136,8 +136,8 @@ export async function startSqlQueryStream(
     kind: "sql_query",
     sql: {
       sql,
-      batch_size: opts?.batchSize ?? 200,
-      max_rows: opts?.maxRows ?? 50_000,
+      batch_size: opts?.batchSize ?? 100,
+      max_rows: opts?.maxRows,
     },
   });
   return opId;
