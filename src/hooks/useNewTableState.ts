@@ -20,7 +20,14 @@ export function useNewTableState({
   const { createTable } = useCreateSchemaTable();
   const clearNewTableData = useConnectionStore((s) => s.clearNewTableData);
 
-  const [tableName, setTableName] = useState(initialData?.tableName ?? "");
+  const initTableName = useMemo(() => {
+    if (initialData?.tableName) return initialData.tableName;
+    return activeWindowId?.replace(`table:${schema}.`, "") ?? "";
+  }, [initialData?.tableName, activeWindowId, schema]);
+
+  const [tableName, setTableName] = useState(
+    initialData?.tableName ?? initTableName
+  );
   const [columns, setColumns] = useState<TableColumn[]>(
     initialData?.columns ?? [
       {
@@ -50,17 +57,22 @@ export function useNewTableState({
     );
   }, []);
 
-  const addColumn = useCallback(() => {
-    setColumns((prev) => [
-      ...prev,
-      {
-        column_name: "",
-        data_type: "text",
-        is_nullable: "YES",
-        column_default: "",
-      },
-    ]);
-  }, []);
+  const addColumn = useCallback(
+    (_row: any, index: number) => {
+      if (index >= columns.length) {
+        setColumns((prev) => [
+          ...prev,
+          {
+            column_name: "",
+            data_type: "text",
+            is_nullable: "YES",
+            column_default: "",
+          },
+        ]);
+      }
+    },
+    [columns.length]
+  );
 
   const removeColumn = useCallback((index: number) => {
     setColumns((prev) => {

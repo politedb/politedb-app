@@ -264,6 +264,7 @@ export type ConnectionState = {
 
   initRows: (key: string, cap?: number) => void;
   clearRows: (key: string) => void;
+  resetRows: (key: string) => void;
 
   beginRowsStream: (
     key: string,
@@ -283,6 +284,10 @@ export type ConnectionState = {
 
   getRowAt: (key: string, rowIndex: number) => unknown[] | undefined;
   getRowsWindowInfo: (key: string) => TableRowState | null;
+
+  updateRow: (key: string, rowIndex: number, row: unknown[]) => void;
+  addRow: (key: string, row: unknown[], insertAfterIndex?: number) => void;
+  removeRow: (key: string, globalRowIndex: number) => void;
 };
 
 export const useConnectionStore = create<ConnectionState>()(
@@ -493,7 +498,10 @@ export const useConnectionStore = create<ConnectionState>()(
         set((s) => {
           const structure = s.tableStructure[tabId]?.[tableWindowId] ?? [];
           const newStructure = [...structure];
-          newStructure[rowIndex] = { ...newStructure[rowIndex]!, [field]: value };
+          newStructure[rowIndex] = {
+            ...newStructure[rowIndex]!,
+            [field]: value,
+          };
           return {
             tableStructure: {
               ...s.tableStructure,
@@ -520,7 +528,10 @@ export const useConnectionStore = create<ConnectionState>()(
         set((s) => {
           const constraints = s.tableConstraints[tabId]?.[tableWindowId] ?? [];
           const newConstraints = [...constraints];
-          newConstraints[rowIndex] = { ...newConstraints[rowIndex]!, [field]: value };
+          newConstraints[rowIndex] = {
+            ...newConstraints[rowIndex]!,
+            [field]: value,
+          };
           return {
             tableConstraints: {
               ...s.tableConstraints,
@@ -696,6 +707,20 @@ export const useConnectionStore = create<ConnectionState>()(
           const { [key]: __, ...restCache } = s.tableRowCacheByKey;
 
           return { tableRowsByKey: restRows, tableRowCacheByKey: restCache };
+        }),
+
+      resetRows: (key) =>
+        set((s) => {
+          if (!s.tableRowCacheByKey[key] && !s.tableRowsByKey[key]) return s;
+          return {
+            tableRowsByKey: {
+              ...s.tableRowsByKey,
+              [key]: {
+                ...s.tableRowsByKey[key],
+                rows: Array.from(s.tableRowCacheByKey[key]?.map),
+              },
+            },
+          };
         }),
 
       beginRowsStream: (key, opId, cap, streamOffset = 0, resetCache = false) =>
@@ -963,6 +988,101 @@ export const useConnectionStore = create<ConnectionState>()(
           }
 
           return s;
+        }),
+
+      updateRow: (key, rowIndex, row) =>
+        set((s) => {
+          const prev = s.tableRowsByKey[key];
+          if (!prev) return s;
+
+          const idx = clampNonNeg(rowIndex);
+          const base = prev.base;
+          const cap = prev.cap;
+
+          // Check if row is within current window
+          if (idx < base || idx >= base + cap) return s;
+
+          // Update the row in the window
+          const windowIndex = idx - base;
+          const newRows = [...prev.rows];
+          newRows[windowIndex] = row;
+
+          return {
+            tableRowsByKey: {
+              ...s.tableRowsByKey,
+              [key]: { ...prev, rows: newRows },
+            },
+          };
+        }),
+
+      addRow: (key, row) =>
+        set((s) => {
+          const prev = s.tableRowsByKey[key];
+          if (!prev) return s;
+
+          const newGlobalIndex = prev.loadedMax + 1;
+
+          // --- update window if visible ---
+          let rows = prev.rows;
+          if (
+            newGlobalIndex >= prev.base &&
+            newGlobalIndex < prev.base + prev.cap
+          ) {
+            const localIndex = newGlobalIndex - prev.base;
+            rows = [...prev.rows];
+            rows[localIndex] = row;
+          }
+
+          const next = {
+            ...prev,
+            rows,
+            loadedMax: newGlobalIndex,
+            version: prev.version + 1, // 🔥 important
+          };
+
+          return {
+            tableRowsByKey: {
+              ...s.tableRowsByKey,
+              [key]: next,
+            },
+          };
+        }),
+
+      removeRow: (key, globalRowIndex) =>
+        set((s) => {
+          const prev = s.tableRowsByKey[key];
+          if (!prev) return s;
+          // Only support removing the last added row (unsaved new row)
+          if (
+            globalRowIndex !== prev.loadedMax ||
+            prev.loadedMax < prev.streamOffset
+          )
+            return s;
+
+          const nextLoadedMax = prev.loadedMax - 1;
+          let rows = prev.rows;
+          if (
+            globalRowIndex >= prev.base &&
+            globalRowIndex < prev.base + prev.cap
+          ) {
+            const localIndex = globalRowIndex - prev.base;
+            rows = [...prev.rows];
+            rows[localIndex] = undefined;
+          }
+
+          const next = {
+            ...prev,
+            rows,
+            loadedMax: nextLoadedMax,
+            version: prev.version + 1,
+          };
+
+          return {
+            tableRowsByKey: {
+              ...s.tableRowsByKey,
+              [key]: next,
+            },
+          };
         }),
 
       getRowAt: (key, rowIndex) => {

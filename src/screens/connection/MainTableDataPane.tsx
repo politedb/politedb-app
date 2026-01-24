@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 
 import { TableData } from "src/components/table/TableData";
 import { TableFooter } from "src/components/table/TableFooter";
@@ -9,7 +15,7 @@ import { ErrorState } from "./ErrorState";
 import { DATA_KEYS } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
-import { tableKey } from "src/hooks/useLoadTableData";
+import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 
@@ -86,9 +92,13 @@ export function MainTableDataPane(props: {
   const rt = useConnectionRuntimeCtx();
   const { profileId, engine, limit, offset } = rt;
 
+  const { loadTableData } = useLoadTableData();
+
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
   const rerender = () => forceUpdate((n) => n + 1);
+
+  const startedRef = useRef<string | null>(null);
 
   const activeKey = useMemo(
     () =>
@@ -104,10 +114,33 @@ export function MainTableDataPane(props: {
    * Subscribe minimal state
    * =========================================================================== */
 
+  const handleLoadRows = useCallback(async () => {
+    // 🔒 guard: only start stream 1 time for each activeKey
+    if (startedRef.current === activeKey) return;
+    startedRef.current = activeKey;
+
+    useConnectionStore.getState().initRows(activeKey, 5000);
+
+    const cache = useConnectionStore.getState().tableRowCacheByKey[activeKey];
+    if (cache) return;
+
+    await loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        force: true,
+        refreshRows: true,
+        refreshMeta: false,
+        refreshStats: false,
+      }
+    );
+  }, [activeTableWindow, limit, offset]);
+
   useEffect(() => {
     if (!activeKey) return;
 
-    useConnectionStore.getState().initRows(activeKey, 5000);
+    handleLoadRows();
 
     let last = "";
 
@@ -131,7 +164,7 @@ export function MainTableDataPane(props: {
     });
 
     return unsub;
-  }, [activeKey]);
+  }, [activeKey, handleLoadRows]);
 
   /* ===========================================================================
    * Snapshots
@@ -189,6 +222,7 @@ export function MainTableDataPane(props: {
           ? String(data.__rowKey)
           : String(rowIndex);
 
+      // Update patches for UI consistency (but not for creates, since they're handled by store)
       useConnectionStore.getState().setDataPatchMap(profileId, {
         dataKey,
         action,
@@ -197,17 +231,69 @@ export function MainTableDataPane(props: {
         rowKey,
         data,
       });
+
+      // Convert row key to number
+      const rowIdx = Number(rowKey);
+
+      // Update existing row
+      const existingRow = useConnectionStore
+        .getState()
+        .getRowAt(activeKey, rowIdx);
+      if (!existingRow) return;
+
+      // Create updated row by copying existing data and updating the changed column
+      const updatedRow = [...existingRow];
+      const columns = meta.columns ?? [];
+
+      // Find the column that was changed and update it
+      for (const [colName, newValue] of Object.entries(data)) {
+        if (colName === "__rowKey") continue; // Skip internal row key
+
+        const colIndex = columns.findIndex((col) => col.name === colName);
+        if (colIndex >= 0) {
+          updatedRow[colIndex] = newValue;
+        }
+      }
+
+      // Update the row in the store
+      useConnectionStore.getState().updateRow(activeKey, rowIdx, updatedRow);
     },
-    [profileId, meta, activeTableWindow]
+    [profileId, meta, activeTableWindow, activeKey]
   );
 
-  const { handleAddRow } = useTableDataOperations({ onDataChange });
+  const { handleAddRow } = useTableDataOperations({ activeKey, onDataChange });
 
   const handleDeleteRow = useCallback(
     (rowIndex: number) => {
+      const rowKey = String(rowIndex);
+      const store = useConnectionStore.getState();
+      const windowPatches =
+        store.dataPatchMap[profileId]?.[activeTableWindow.id]?.patches ?? null;
+
+      // If this row is a new row (only in create patch), remove the create patch
+      // and the row from the store so we don't generate INSERT + DELETE SQL
+      if (windowPatches?.create?.data?.[rowKey]) {
+        store.removeDataPatch(
+          profileId,
+          activeTableWindow.id,
+          "create",
+          DATA_KEYS.data,
+          rowKey
+        );
+        const globalRowIndex = offset + rowIndex;
+        store.removeRow(activeKey, globalRowIndex);
+        return;
+      }
+
       onDataChange("delete", DATA_KEYS.data, rowIndex, {});
     },
-    [onDataChange]
+    [
+      onDataChange,
+      profileId,
+      activeTableWindow.id,
+      activeKey,
+      offset,
+    ]
   );
 
   /* ===========================================================================
@@ -221,15 +307,25 @@ export function MainTableDataPane(props: {
    * Paging
    * =========================================================================== */
 
-  const pageTotal = useMemo(() => {
+  const basePageTotal = useMemo(() => {
     if (typeof meta.rowCount === "number") {
       return Math.min(limit, Math.max(0, meta.rowCount - offset));
     }
     return limit;
   }, [meta.rowCount, limit, offset]);
 
-  const totalRows =
-    typeof meta.rowCount === "number" ? meta.rowCount : offset + pageTotal;
+  const pageTotal = useMemo(() => {
+    if (!rowsInfo) return 0;
+
+    const storeRows =
+      rowsInfo.loadedMax >= rowsInfo.streamOffset
+        ? rowsInfo.loadedMax - rowsInfo.streamOffset + 1
+        : 0;
+
+    return Math.max(basePageTotal, storeRows);
+  }, [rowsInfo, basePageTotal]);
+
+  const totalRows = offset + pageTotal;
 
   const getRowAt = (i: number) =>
     useConnectionStore.getState().getRowAt(activeKey, offset + i);
@@ -271,11 +367,14 @@ export function MainTableDataPane(props: {
         ) : (
           <TableData
             columns={meta.columns ?? []}
+            baseRows={hasAnyRowData ? basePageTotal : 0}
             totalRows={hasAnyRowData ? pageTotal : 0}
             getRowAt={getRowAt}
             onCellChange={onDataChange}
             patches={extractPatches(patches)}
-            onAddRow={() => handleAddRow(meta.columns ?? [], onDataChange)}
+            onAddRow={() =>
+              handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
+            }
             onDeleteRow={handleDeleteRow}
             deletedRows={extractDeleted(patches, DATA_KEYS.data)}
             rowsVersion={rowsInfo?.version ?? 0}
@@ -291,7 +390,9 @@ export function MainTableDataPane(props: {
         loadedMax={loadedMax}
         totalRows={totalRows}
         onPageChange={pageChange}
-        onAddRow={() => handleAddRow(meta.columns ?? [], onDataChange)}
+        onAddRow={() =>
+          handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
+        }
         onAddColumn={onAddColumn}
         onAddIndex={onAddIndex}
         onFilters={onFilters}

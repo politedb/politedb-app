@@ -16,6 +16,7 @@ import { CanvasTable } from "./CanvasTable";
 
 interface Props {
   columns: ColumnMeta[];
+  baseRows: number;
   totalRows: number;
   getRowAt: (rowIndex: number) => unknown[] | undefined;
 
@@ -41,6 +42,7 @@ const DATA_KEY: DataKey = "data";
 
 export function TableData({
   columns,
+  baseRows,
   totalRows,
   getRowAt,
   patches,
@@ -51,7 +53,8 @@ export function TableData({
   deletedRows = EMPTY_SET,
   rowsVersion = 0,
 }: Props) {
-  const baseLen = Math.max(0, totalRows || 0);
+  const baseLen = Math.max(0, baseRows || 0);
+  const totalLen = Math.max(0, totalRows || 0);
 
   // --------------------------------------------------------------------------
   // Columns
@@ -81,7 +84,7 @@ export function TableData({
     editedDataLength: baseLen,
   });
 
-  const totalDataLength = baseLen + newRows.length;
+  const totalDataLength = totalLen + newRows.length;
 
   // Unified row accessor (base + newRows)
   const getRowArray = useCallback(
@@ -90,11 +93,11 @@ export function TableData({
 
       if (idx < 0) return undefined;
 
-      if (idx < baseLen) {
+      if (idx < totalLen) {
         return getRowAt(idx);
       }
 
-      const j = idx - baseLen;
+      const j = idx - totalLen;
       if (j >= 0 && j < newRows.length) {
         const obj = newRows[j]?.row ?? EMPTY_OBJECT;
         const out = new Array(columns.length);
@@ -107,7 +110,27 @@ export function TableData({
 
       return undefined;
     },
-    [baseLen, getRowAt, newRows, columns, rowsVersion]
+    [totalLen, getRowAt, newRows, columns, rowsVersion]
+  );
+
+  // Check if a cell is dirty (has a patch)
+  const isCellDirty = useCallback(
+    (rowIdx: number, colName: string) => {
+      if (!patches || patchHelpers.isNewRow(rowIdx)) return false;
+
+      // existing row
+      return !!patches?.[rowIdx]?.[colName];
+    },
+    [patches, patchHelpers, newRows]
+  );
+
+  // Check if a row is new
+  const isNewRow = useCallback(
+    (rowIdx: number) => {
+      if (!patches) return false;
+      return patchHelpers.isNewRow(rowIdx);
+    },
+    [patches, patchHelpers]
   );
 
   // --------------------------------------------------------------------------
@@ -188,6 +211,7 @@ export function TableData({
         emptyColumnWidth={emptyColumnWidth}
         selected={selected}
         editing={editing}
+        deletedRows={deletedRows}
         onSelect={(rowIdx, colIdx) => {
           setSelected({ rowIdx, colIdx });
           setEditing(null);
@@ -197,10 +221,16 @@ export function TableData({
           setSelected(cell);
         }}
         onAddRow={onAddRow}
-        onDeleteRow={onDeleteRow}
+        onDeleteRow={(rowIdx) => {
+          onDeleteRow?.(rowIdx);
+          setSelected(null);
+          setEditing(null);
+        }}
         onCommitEdit={handleCommitEdit}
         onExitEdit={() => setEditing(null)}
         dataVersion={rowsVersion ?? 0}
+        isCellDirty={isCellDirty}
+        isNewRow={isNewRow}
       />
     </div>
   );

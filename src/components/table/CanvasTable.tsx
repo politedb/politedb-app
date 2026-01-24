@@ -18,12 +18,17 @@ type Props = {
   columns: ColumnMeta[];
   totalRows: number;
   getRowAt: (rowIndex: number) => unknown[] | undefined;
+  isCellDirty?: (rowIdx: number, colName: string) => boolean;
+  isNewRow?: (rowIdx: number) => boolean;
 
   widthByName: Record<string, number>;
   emptyColumnWidth: number;
 
   selected?: { rowIdx: number; colIdx: number } | null;
   editing?: EditingCell | null;
+  deletedRows?: Set<number>;
+
+  dataVersion: number;
 
   onSelect?: (rowIdx: number, colIdx: number) => void;
   onStartEdit?: (cell: EditingCell) => void;
@@ -32,7 +37,6 @@ type Props = {
 
   onDeleteRow?: (rowIdx: number) => void;
   onAddRow?: () => void;
-  dataVersion: number;
 };
 
 // ============================================================================
@@ -89,13 +93,16 @@ export function CanvasTable({
   emptyColumnWidth,
   selected,
   editing,
+  deletedRows,
+  dataVersion,
   onSelect,
   onStartEdit,
   onCommitEdit,
   onExitEdit,
   onDeleteRow,
   onAddRow,
-  dataVersion,
+  isCellDirty,
+  isNewRow,
 }: Props) {
   // --- Refs for DOM elements ---
   const rootRef = useRef<HTMLDivElement>(null);
@@ -287,16 +294,6 @@ export function CanvasTable({
       const row = getRowAt(r);
       if (!row) continue;
 
-      if (selected && selected.rowIdx === r) {
-        const rect = getRect(r, selected.colIdx, left, top);
-        if (rect) {
-          if (rect.x + rect.w > 0 && rect.x < viewport.w) {
-            ctx.fillStyle = "#dbeafe";
-            ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-          }
-        }
-      }
-
       for (let c = 0; c < columns.length; c++) {
         const col = columns[c]!;
         const x = (colLefts[c] ?? 0) - left;
@@ -305,7 +302,35 @@ export function CanvasTable({
         if (x + w < 0 || x > viewport.w) continue;
 
         const v = row[c] ?? null;
-        const s = cellToString(v);
+        const s = cellToString(v) || "NULL";
+
+        const dirty = isCellDirty?.(r, col.name);
+
+        if (dirty) {
+          ctx.fillStyle = "#FEF3C7"; // amber-100
+          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+        }
+
+        if (deletedRows?.has(r)) {
+          ctx.fillStyle = "#ffa2a2";
+          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+        }
+
+        if (isNewRow?.(r)) {
+          ctx.fillStyle = "#dcfce7";
+          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+        }
+
+        if (selected && selected.rowIdx === r) {
+          ctx.fillStyle = "#bedbff";
+          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+
+          if (selected.colIdx === c) {
+            ctx.strokeStyle = "#51a2ff";
+            ctx.strokeRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+            ctx.restore();
+          }
+        }
 
         if (s) {
           ctx.save();
@@ -313,7 +338,7 @@ export function CanvasTable({
           ctx.rect(x + 8, y, w - 16, ROW_HEIGHT);
           ctx.clip();
 
-          ctx.fillStyle = "#111827";
+          ctx.fillStyle = s === "NULL" ? "#9ca3af" : "#111827";
           ctx.fillText(s, x + 8, y + ROW_HEIGHT / 2);
 
           ctx.restore();
@@ -344,8 +369,14 @@ export function CanvasTable({
     if (!el) return;
 
     const handleScroll = () => {
+      const isLowerBound =
+        el.scrollTop > ROW_HEIGHT &&
+        el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+
       scrollRef.current.left = el.scrollLeft;
-      scrollRef.current.top = el.scrollTop;
+      scrollRef.current.top = isLowerBound
+        ? el.scrollTop - HEADER_HEIGHT + 2
+        : el.scrollTop + 2;
 
       if (headerRef.current) {
         headerRef.current.style.transform = `translateX(${-el.scrollLeft}px)`;
@@ -412,6 +443,18 @@ export function CanvasTable({
     };
   }, [isResizing]);
 
+  const commitAndExit = useCallback(() => {
+    if (!editing) return;
+    onCommitEdit?.(editing, editorValue);
+    onExitEdit?.();
+    setEditorRect(null);
+  }, [editing, editorValue, onCommitEdit, onExitEdit]);
+
+  const cancelExit = useCallback(() => {
+    onExitEdit?.();
+    setEditorRect(null);
+  }, [onExitEdit]);
+
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
   // --------------------------------------------------------------------------
@@ -436,9 +479,14 @@ export function CanvasTable({
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
 
+      // Commit any existing edit before selecting new cell
+      if (editing) {
+        commitAndExit();
+      }
+
       onSelect?.(rowIdx, colIdx);
     },
-    [columns, colLefts, colWidths, totalRows, onSelect]
+    [columns, editing, totalRows, colLefts, colWidths, onSelect, commitAndExit]
   );
 
   const handleDblClick = useCallback(
@@ -489,18 +537,6 @@ export function CanvasTable({
       getRect,
     ]
   );
-
-  const commitAndExit = useCallback(() => {
-    if (!editing) return;
-    onCommitEdit?.(editing, editorValue);
-    onExitEdit?.();
-    setEditorRect(null);
-  }, [editing, editorValue, onCommitEdit, onExitEdit]);
-
-  const cancelExit = useCallback(() => {
-    onExitEdit?.();
-    setEditorRect(null);
-  }, [onExitEdit]);
 
   // Sync editor position when widths change or scrolling
   useEffect(() => {
@@ -608,6 +644,7 @@ export function CanvasTable({
         <input
           ref={editorRef}
           class="absolute z-60 border border-blue-400 bg-white px-2 text-sm shadow-sm outline-none"
+          placeholder="NULL"
           style={{
             left: editorRect.x,
             top: editorRect.y + HEADER_HEIGHT,

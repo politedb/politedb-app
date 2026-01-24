@@ -1,7 +1,9 @@
 import { useCallback } from "preact/hooks";
-import { DataAction, DataKey } from "src/stores/connection";
+import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
+import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 
 export interface UseTableDataOperationsProps {
+  activeKey: string;
   onDataChange?: (
     action: DataAction,
     dataKey: DataKey,
@@ -12,6 +14,7 @@ export interface UseTableDataOperationsProps {
 }
 
 export function useTableDataOperations({
+  activeKey,
   onDataChange,
   onDeleteRow,
 }: UseTableDataOperationsProps) {
@@ -46,6 +49,7 @@ export function useTableDataOperations({
   const handleAddRow = useCallback(
     (
       columns: Array<{ name: string }>,
+      rowIndex: number,
       onDataChange?: (
         action: DataAction,
         dataKey: DataKey,
@@ -59,9 +63,7 @@ export function useTableDataOperations({
       }
 
       // Generate a unique row key for the new row
-      const newRowKey = `new-${Date.now()}-${Math.random()
-        .toString(36)
-        .substr(2, 9)}`;
+      const newRowKey = rowIndex.toString();
 
       // Initialize the new row with empty values for all columns
       const newRowData: Record<string, any> = {};
@@ -69,15 +71,20 @@ export function useTableDataOperations({
         newRowData[col.name] = null;
       });
 
+      // Add the row to the store (always use current activeKey so we don't add to the wrong table when switching)
+      useConnectionStore
+        .getState()
+        .addRow(activeKey, Object.values(newRowData));
+
       // Create the new row patch with action="create"
       if (onDataChange) {
-        onDataChange("create", "data", -1, {
+        onDataChange(DATA_ACTIONS.create, DATA_KEYS.data, -1, {
           ...newRowData,
           __rowKey: newRowKey,
         });
       }
     },
-    []
+    [activeKey]
   );
 
   return {
