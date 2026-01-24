@@ -107,7 +107,7 @@ export function ActiveWindowContent() {
     const newRecord: TableStructureType = {
       column_name: "",
       data_type: "",
-      is_nullable: false,
+      is_nullable: "",
       check: "",
       column_default: "",
       foreign_key: "",
@@ -143,7 +143,7 @@ export function ActiveWindowContent() {
     const newRecord: TableConstraintType = {
       index_name: "",
       index_algorithm: "",
-      is_unique: false,
+      is_unique: "",
       column_name: "",
       condition: "",
       include: "",

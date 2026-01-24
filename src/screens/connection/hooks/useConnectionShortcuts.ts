@@ -2,6 +2,7 @@ import { useEffect, useRef } from "preact/hooks";
 
 type ShortcutActions = {
   openSql: () => void;
+  beforeSaveChanges: () => void;
   saveChanges: () => Promise<void> | void;
   refresh: () => Promise<void> | void;
   closeWindow: (id: string, e: MouseEvent) => Promise<void> | void;
@@ -48,7 +49,7 @@ export function useConnectionShortcuts(params: {
         if (key === "s") {
           e.preventDefault();
           e.stopPropagation();
-          void actionsRef.current.saveChanges();
+          void actionsRef.current.beforeSaveChanges();
         }
         return;
       }
@@ -63,7 +64,7 @@ export function useConnectionShortcuts(params: {
       if (key === "s") {
         e.preventDefault();
         e.stopPropagation();
-        void actionsRef.current.saveChanges();
+        void actionsRef.current.beforeSaveChanges();
         return;
       }
 

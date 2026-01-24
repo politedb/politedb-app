@@ -18,6 +18,7 @@ interface TableProps<T = any> {
   headerClassName?: string;
   stickyHeader?: boolean;
   className?: string;
+  showEmptyMessage?: boolean;
   emptyMessage?: string;
   fillViewport?: boolean;
   estimatedRowHeight?: number;
@@ -36,6 +37,7 @@ export function Table<T = any>({
   headerClassName,
   stickyHeader = true,
   className,
+  showEmptyMessage = true,
   emptyMessage = "No data available",
   fillViewport = false,
   estimatedRowHeight,
@@ -110,7 +112,7 @@ export function Table<T = any>({
   );
 
   // Early return for empty data
-  if (data.length === 0) {
+  if (data.length === 0 && showEmptyMessage) {
     return (
       <div class="flex h-full items-center justify-center bg-white">
         <p class="text-sm text-neutral-500">{emptyMessage}</p>

@@ -104,7 +104,7 @@ export const tableRowCountQuery = (schema: string, tableName: string) => {
 };
 
 export const tableOidQuery = (schema: string, tableName: string) => {
-  const queryStr = `SELECT '${schema}.${tableName}'::regclass::oid;`;
+  const queryStr = `SELECT '${qIdent(schema)}.${qIdent(tableName)}'::regclass::oid;`;
   return regexEscape(queryStr);
 };
 

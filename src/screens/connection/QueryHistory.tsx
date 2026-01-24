@@ -33,7 +33,7 @@ function normalizeSql(sql: string) {
   return (sql ?? "").replace(/\r\n/g, "\n").trim();
 }
 
-function highlightSql(sql: string): ComponentChildren {
+export function highlightSql(sql: string): ComponentChildren {
   // Keep it light: strings -> numbers -> keywords -> identifiers
   const layers: Array<{ re: RegExp; cls: string }> = [
     // single-quoted strings

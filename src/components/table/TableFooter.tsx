@@ -86,7 +86,7 @@ export function TableFooter({
   }, [viewMode, loadedMax, offset, limit, totalRows]);
 
   return (
-    <div class="flex items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
+    <div class="flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
       {/* LEFT */}
       <div class="flex items-center gap-1.5">
         <TableViewToggle
