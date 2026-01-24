@@ -1,25 +1,8 @@
+import { useEffect, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
 import type { SqlResultSlot } from "src/lib/tauri";
 import { useSqlStreamResult } from "src/screens/connection/hooks/useSqlStreamResult";
-
-/* =============================================================================
- * Helpers
- * ============================================================================= */
-
-function statusMark(status: SqlResultSlot["status"]) {
-  if (status === "queued") return "•";
-  if (status === "running") return "…";
-  if (status === "done") return "✓";
-  return "!";
-}
-
-function statusTone(status: SqlResultSlot["status"]) {
-  if (status === "running") return "text-blue-700";
-  if (status === "done") return "text-emerald-700";
-  if (status === "error") return "text-rose-700";
-  return "text-neutral-400";
-}
 
 /* =============================================================================
  * UI blocks
@@ -83,6 +66,20 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
  * Tabs
  * ============================================================================= */
 
+function statusMark(status: SqlResultSlot["status"]) {
+  if (status === "queued") return "•";
+  if (status === "running") return "…";
+  if (status === "done") return "✓";
+  return "!";
+}
+
+function statusTone(status: SqlResultSlot["status"]) {
+  if (status === "running") return "text-blue-700";
+  if (status === "done") return "text-emerald-700";
+  if (status === "error") return "text-rose-700";
+  return "text-neutral-400";
+}
+
 function ResultsTabs(props: {
   slots: SqlResultSlot[];
   activeIndex: number;
@@ -115,22 +112,21 @@ function ResultsTabs(props: {
 }
 
 /* =============================================================================
- * Content renderer (single responsibility: decide what to show)
+ * Content
  * ============================================================================= */
 
 function ResultsContent(props: {
   windowId: string;
   slot: SqlResultSlot;
   safeIndex: number;
+  stream: ReturnType<typeof useSqlStreamResult> | null;
 }) {
-  const { windowId, slot, safeIndex } = props;
+  const { windowId, slot, safeIndex, stream } = props;
 
   const isDirect = slot.mode === "direct";
   const isStream = slot.mode === "stream" && !!slot.opId;
 
-  const stream = useSqlStreamResult(isStream ? slot.opId! : null);
-
-  // ---------- Error first ----------
+  // slot error first
   if (slot.status === "error") {
     return (
       <div class="p-3">
@@ -143,7 +139,8 @@ function ResultsContent(props: {
     );
   }
 
-  if (isStream && stream.status === "error") {
+  // stream error
+  if (isStream && stream?.status === "error") {
     return (
       <div class="p-3">
         <ErrorCard
@@ -155,7 +152,7 @@ function ResultsContent(props: {
     );
   }
 
-  // ---------- Data ----------
+  // direct data
   if (isDirect && slot.status === "done" && slot.result) {
     return (
       <TableData
@@ -169,19 +166,10 @@ function ResultsContent(props: {
     );
   }
 
-  if (isStream) {
-    console.log("STREAM STATUS", stream.status, stream.totalRows);
-    // stream done + empty
-    if (stream.status === "done" && stream.totalRows === 0) {
-      return (
-        <div class="p-3">
-          <SmallStateCard kind="empty" />
-        </div>
-      );
-    }
-
-    // stream done + has rows => show table
-    if (stream.status === "done" && stream.totalRows > 0) {
+  // stream data
+  if (isStream && stream) {
+    // ✅ show as soon as we have rows (do not wait for done)
+    if (stream.totalRows > 0) {
       return (
         <TableData
           key={`${windowId}:${slot.index}:stream`}
@@ -194,7 +182,16 @@ function ResultsContent(props: {
       );
     }
 
-    // stream running (or unknown)
+    // done + empty
+    if (stream.status === "done") {
+      return (
+        <div class="p-3">
+          <SmallStateCard kind="empty" />
+        </div>
+      );
+    }
+
+    // running + no rows yet
     return (
       <div class="p-3">
         <SmallStateCard kind="running" />
@@ -202,7 +199,7 @@ function ResultsContent(props: {
     );
   }
 
-  // ---------- Non-table terminal states ----------
+  // non-table terminal
   if (slot.status === "done") {
     return (
       <div class="p-3">
@@ -211,7 +208,7 @@ function ResultsContent(props: {
     );
   }
 
-  // queued / running fallback
+  // queued/running fallback
   return (
     <div class="p-3">
       <SmallStateCard kind={slot.status === "queued" ? "queued" : "running"} />
@@ -242,16 +239,24 @@ export function SqlResultsPane(props: {
   const safeIndex = Math.min(Math.max(activeIndex, 0), slots.length - 1);
   const slot = slots[safeIndex];
 
-  // Decide whether we should allow scrolling here.
-  // (Tables manage their own scrolling; non-table views should be scrollable.)
+  // ✅ IMPORTANT: use STATE (not ref) so hook re-subscribes when opId appears
+  const [streamOpId, setStreamOpId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (slot?.mode === "stream" && slot.opId) {
+      setStreamOpId(slot.opId);
+    } else {
+      setStreamOpId(null);
+    }
+  }, [slot?.mode, slot?.opId]);
+
+  const stream = useSqlStreamResult(streamOpId);
+
+  // Decide scroll mode: tables manage their own scrolling
   const isDirectTable =
     slot.mode === "direct" && slot.status === "done" && !!slot.result;
 
-  const isStream = slot.mode === "stream" && !!slot.opId;
-  const stream = useSqlStreamResult(isStream ? slot.opId! : null);
-
-  const isStreamTable =
-    isStream && stream.status === "done" && stream.totalRows > 0;
+  const isStreamTable = slot.mode === "stream" && stream.totalRows > 0;
 
   const shouldShowTable = isDirectTable || isStreamTable;
 
@@ -269,7 +274,12 @@ export function SqlResultsPane(props: {
           !shouldShowTable && "overflow-auto"
         )}
       >
-        <ResultsContent windowId={windowId} slot={slot} safeIndex={safeIndex} />
+        <ResultsContent
+          windowId={windowId}
+          slot={slot}
+          safeIndex={safeIndex}
+          stream={slot.mode === "stream" ? stream : null}
+        />
       </div>
     </div>
   );

@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import type { ColumnMeta, OperationDone, TableChunk } from "src/lib/tauri";
 import { operationBus } from "src/lib/tauri/operationBus";
 
+/* =============================================================================
+ * Types
+ * ============================================================================= */
+
 type StreamStatus = "idle" | "running" | "done" | "error";
 
 export type SqlStreamResult = {
@@ -18,9 +22,8 @@ type Listener = () => void;
 type StreamEntry = {
   opId: string;
   status: StreamStatus;
-  columns: ColumnMeta[];
-  error?: string;
 
+  columns: ColumnMeta[];
   rowsByIdx: Map<number, unknown[]>;
   maxIdx: number;
   totalRows: number;
@@ -31,12 +34,22 @@ type StreamEntry = {
   started: boolean;
   unsub: (() => void) | null;
 
-  // ✅ failsafe
+  // failsafe
   lastEventAt: number;
   idleTimer: number | null;
+
+  error?: string;
 };
 
+/* =============================================================================
+ * Registry
+ * ============================================================================= */
+
 const streams = new Map<string, StreamEntry>();
+
+/* =============================================================================
+ * Helpers
+ * ============================================================================= */
 
 function normalizeColumns(cols: any): ColumnMeta[] {
   if (!Array.isArray(cols)) return [];
@@ -46,45 +59,25 @@ function normalizeColumns(cols: any): ColumnMeta[] {
   }));
 }
 
+function buildFallbackColumnsFromArrayRow(row: unknown[]): ColumnMeta[] {
+  return row.map((_, i) => ({
+    name: `col_${i + 1}`,
+    db_type: "",
+  }));
+}
+
+function buildFallbackColumnsFromObjectRow(
+  row: Record<string, any>
+): ColumnMeta[] {
+  return Object.keys(row).map((k) => ({
+    name: k,
+    db_type: "",
+  }));
+}
+
 function safeOffset(chunk: TableChunk, fallback: number) {
   const off = Number((chunk as any)?.row_offset);
-  if (Number.isFinite(off) && off >= 0) return off;
-  return fallback;
-}
-
-function notify(entry: StreamEntry) {
-  entry.version++;
-  for (const fn of entry.listeners) fn();
-}
-
-function getOrCreate(opId: string): StreamEntry {
-  let entry = streams.get(opId);
-  if (!entry) {
-    entry = {
-      opId,
-      status: "idle",
-      columns: [],
-      rowsByIdx: new Map(),
-      maxIdx: -1,
-      totalRows: 0,
-      version: 0,
-      listeners: new Set(),
-      started: false,
-      unsub: null,
-
-      lastEventAt: Date.now(),
-      idleTimer: null,
-    };
-    streams.set(opId, entry);
-  }
-  return entry;
-}
-
-function buildFallbackColumnsFromRow(row: unknown[]): ColumnMeta[] {
-  const n = Array.isArray(row) ? row.length : 0;
-  const cols: ColumnMeta[] = [];
-  for (let i = 0; i < n; i++) cols.push({ name: `col_${i + 1}`, db_type: "" });
-  return cols;
+  return Number.isFinite(off) && off >= 0 ? off : fallback;
 }
 
 function pickDoneColumns(done: any) {
@@ -108,10 +101,49 @@ function pickDoneRowCount(done: any) {
   );
 }
 
+function notify(entry: StreamEntry) {
+  entry.version++;
+  for (const fn of entry.listeners) fn();
+}
+
+function getOrCreate(opId: string): StreamEntry {
+  let entry = streams.get(opId);
+  if (!entry) {
+    entry = {
+      opId,
+      status: "idle",
+
+      columns: [],
+      rowsByIdx: new Map(),
+      maxIdx: -1,
+      totalRows: 0,
+
+      version: 0,
+      listeners: new Set(),
+
+      started: false,
+      unsub: null,
+
+      lastEventAt: Date.now(),
+      idleTimer: null,
+    };
+    streams.set(opId, entry);
+  }
+  return entry;
+}
+
+/* =============================================================================
+ * Start stream
+ * ============================================================================= */
+
 export function ensureSqlStreamStarted(opId: string) {
   const entry = getOrCreate(opId);
   if (entry.started) return;
-
+  console.log(
+    "[hook] ensure start",
+    opId,
+    "FILE=connection/hooks/useSqlStreamResult"
+  );
   entry.started = true;
   entry.status = "running";
   entry.lastEventAt = Date.now();
@@ -139,7 +171,7 @@ export function ensureSqlStreamStarted(opId: string) {
     .subscribe(opId, {
       onChunk: (chunk: TableChunk) => {
         if (entry.status === "error" || entry.status === "done") return;
-
+        console.log("[hook] chunk", opId, chunk.seq, chunk.rows?.length);
         entry.lastEventAt = Date.now();
 
         const maybeCols = (chunk as any)?.columns;
@@ -150,20 +182,27 @@ export function ensureSqlStreamStarted(opId: string) {
         const rows = chunk.rows ?? [];
         if (!rows.length) return;
 
+        // infer columns if missing
         if (entry.columns.length === 0) {
           const first = rows[0];
-          if (Array.isArray(first))
-            entry.columns = buildFallbackColumnsFromRow(first);
+          if (Array.isArray(first)) {
+            entry.columns = buildFallbackColumnsFromArrayRow(first);
+          } else if (first && typeof first === "object") {
+            entry.columns = buildFallbackColumnsFromObjectRow(
+              first as Record<string, any>
+            );
+          }
         }
 
         const base = safeOffset(chunk, entry.maxIdx + 1);
+
         for (let i = 0; i < rows.length; i++) {
           const idx = base + i;
           entry.rowsByIdx.set(idx, rows[i]);
           if (idx > entry.maxIdx) entry.maxIdx = idx;
         }
 
-        entry.totalRows = Math.max(entry.totalRows, entry.maxIdx + 1);
+        entry.totalRows = Math.max(entry.totalRows, base + rows.length);
         notify(entry);
       },
 
@@ -212,7 +251,12 @@ export function ensureSqlStreamStarted(opId: string) {
     });
 }
 
+/* =============================================================================
+ * Cleanup
+ * ============================================================================= */
+
 export function clearSqlStream(opId: string) {
+  console.log("[hook] clear", opId, new Error().stack);
   const entry = streams.get(opId);
   if (!entry) return;
 
@@ -225,6 +269,10 @@ export function clearSqlStream(opId: string) {
 
   streams.delete(opId);
 }
+
+/* =============================================================================
+ * Hook
+ * ============================================================================= */
 
 export function useSqlStreamResult(opId?: string | null): SqlStreamResult {
   const [, force] = useState(0);

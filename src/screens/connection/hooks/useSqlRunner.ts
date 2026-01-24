@@ -212,8 +212,6 @@ export function useSqlRunner(args: {
                 startedAt: Date.now(),
               });
 
-              // ✅ force restart even if opId reused
-              clearSqlStream(response.opId);
               ensureSqlStreamStarted(response.opId);
             }
           } catch (err) {
