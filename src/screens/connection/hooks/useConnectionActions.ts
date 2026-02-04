@@ -569,6 +569,21 @@ export function useConnectionActions(
 
     setWarningRefresh(false);
     setPendingCloseTabId(null);
+
+    if (!activeTableWindow) return;
+
+    // 🔥 Reload table data after discard so rows are restored from DB
+    await loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        force: true,
+        refreshRows: true,
+        refreshMeta: false,
+        refreshStats: false,
+      }
+    );
   }, [
     pendingCloseTabId,
     clearChanges,
@@ -576,6 +591,7 @@ export function useConnectionActions(
     activeProfileScreen,
     setWarningRefresh,
     setPendingCloseTabId,
+    activeTableWindow,
   ]);
 
   return {

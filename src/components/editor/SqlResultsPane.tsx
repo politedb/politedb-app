@@ -158,6 +158,7 @@ function ResultsContent(props: {
       <TableData
         key={`${windowId}:${slot.index}:direct`}
         columns={slot.result.columns}
+        baseRows={slot.result.rows.length}
         totalRows={slot.result.rows.length}
         getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
         rowsVersion={0}
@@ -174,6 +175,7 @@ function ResultsContent(props: {
         <TableData
           key={`${windowId}:${slot.index}:stream`}
           columns={stream.columns}
+          baseRows={stream.totalRows}
           totalRows={stream.totalRows}
           getRowAt={stream.getRowAt}
           rowsVersion={stream.rowsVersion}

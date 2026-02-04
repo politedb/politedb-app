@@ -7,12 +7,9 @@ import type {
   TableWindow,
 } from "src/types";
 import { useScreenStore } from "src/stores/screen";
-import {
-  useLoadTableData,
-  DEFAULT_LIMIT,
-  DEFAULT_OFFSET,
-} from "src/hooks/useLoadTableData";
+import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
+import { PatchData } from "../../../utils/generateSql";
 
 /* =============================================================================
  * Helpers
@@ -49,7 +46,7 @@ export function useConnectionWindows(activeProfileScreen: string) {
     setActiveWindowId,
   } = useScreenStore();
 
-  const { loadTableData, removeTableData } = useLoadTableData();
+  const { removeTableData } = useLoadTableData();
 
   const activeTab = useMemo(
     () => profileTabs.find((tab) => tab.id === activeProfileScreen) ?? null,
@@ -119,17 +116,12 @@ export function useConnectionWindows(activeProfileScreen: string) {
       setActiveWindowId(activeProfileScreen, win.id);
 
       if (!table.new) {
-        await loadTableData(
-          table.schema,
-          table.name,
-          { limit: DEFAULT_LIMIT, offset: DEFAULT_OFFSET },
-          { force: true }
-        );
+        useConnectionStore.getState().resetRows(makeTableWindowId(table));
       }
 
       return win.id;
     },
-    [activeProfileScreen, windows, addWindow, setActiveWindowId, loadTableData]
+    [activeProfileScreen, windows, addWindow, setActiveWindowId]
   );
 
   const closeWindow = useCallback(
@@ -185,6 +177,24 @@ export function useConnectionWindows(activeProfileScreen: string) {
     ]
   );
 
+  const windowHasPatchChanges = useCallback(
+    (entry: { patches?: PatchData | null } | undefined): boolean => {
+      if (!entry?.patches) return false;
+      const patches = entry.patches;
+      for (const action of Object.keys(patches)) {
+        const key = patches[action];
+        if (!key || typeof key !== "object") continue;
+        for (const dataKey of Object.keys(key)) {
+          const rows = key[dataKey];
+          if (rows && typeof rows === "object" && Object.keys(rows).length > 0)
+            return true;
+        }
+      }
+      return false;
+    },
+    []
+  );
+
   const hasAnyWindow = windows.length > 0;
 
   return {
@@ -203,5 +213,6 @@ export function useConnectionWindows(activeProfileScreen: string) {
     openTable,
     closeWindow,
     makeTableWindowId,
+    windowHasPatchChanges,
   };
 }

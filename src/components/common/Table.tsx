@@ -54,12 +54,6 @@ export function Table<T = any>({
     fillViewport,
   });
 
-  // Column width style (cached)
-  const columnWidthStyle = useMemo(
-    () => ({ width: `${100 / columns.length}%` }),
-    [columns.length]
-  );
-
   // Empty row template
   const emptyRow = useMemo(() => {
     const row: Record<string, any> = {};
@@ -130,19 +124,27 @@ export function Table<T = any>({
       onClick={handleTableClick}
       onDblClick={handleTableDblClick}
     >
-      <table ref={tableRef} class={cn(className)} style={TABLE_STYLE}>
+      <table
+        ref={tableRef}
+        class={cn(
+          "w-full border-collapse border border-neutral-200",
+          className
+        )}
+        style={TABLE_STYLE}
+      >
         <thead class={cn("bg-neutral-50", headerClassName)}>
           <tr>
-            {columns.map((col) => (
+            {columns.map((col, colIndex) => (
               <th
                 key={col.key}
                 class={cn(
-                  "border-r border-neutral-300",
+                  "border-r border-b border-neutral-200",
+                  colIndex === 0 && "border-l",
                   "p-2 text-left text-xs font-semibold text-neutral-700",
-                  stickyHeader && "sticky top-0 z-50 bg-neutral-50 shadow-sm",
+                  stickyHeader &&
+                    "sticky top-0 z-50 bg-neutral-50 shadow-[0_1px_0_0_rgba(0,0,0,0.12)]",
                   col.headerClassName
                 )}
-                style={columnWidthStyle}
               >
                 {col.label}
               </th>
@@ -169,11 +171,14 @@ export function Table<T = any>({
                   dynamicClassName
                 )}
               >
-                {columns.map((col) => (
+                {columns.map((col, colIndex) => (
                   <td
                     key={col.key}
-                    class={cn("border border-neutral-200 px-1", col.className)}
-                    style={columnWidthStyle}
+                    class={cn(
+                      "border-r border-b border-neutral-200 px-1",
+                      colIndex === 0 && "border-l",
+                      col.className
+                    )}
                   >
                     {col.render
                       ? col.render((row as any)[col.key], row, index)
@@ -187,17 +192,19 @@ export function Table<T = any>({
           {/* Empty rows to fill viewport */}
           {Array.from({ length: emptyRowsCount }, (_, idx) => {
             const rowIndex = data.length + idx;
+            const isSelected = selectedRow === rowIndex;
 
             return (
               <tr
                 key={`empty-${idx}`}
                 data-row={rowIndex}
                 data-empty="true"
-                class={
-                  typeof rowClassName === "string" ? rowClassName : undefined
-                }
+                class={cn(
+                  typeof rowClassName === "string" ? rowClassName : undefined,
+                  isSelected && "bg-blue-200!"
+                )}
               >
-                {columns.map((col) => {
+                {columns.map((col, colIndex) => {
                   let content: any = "";
                   if (col.key === "_rowNumber") {
                     content = col.render
@@ -215,10 +222,10 @@ export function Table<T = any>({
                     <td
                       key={col.key}
                       class={cn(
-                        "min-h-10 border border-neutral-200 px-1",
+                        "min-h-10 border-r border-b border-neutral-200 px-1",
+                        colIndex === 0 && "border-l",
                         col.className
                       )}
-                      style={columnWidthStyle}
                     >
                       {content}
                     </td>

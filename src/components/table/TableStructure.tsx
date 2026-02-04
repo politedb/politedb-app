@@ -99,7 +99,9 @@ export function TableStructure({
         render: (_value: any, _row: any, index: number) =>
           index + 1 <= editedData.length ? (
             <span class="text-sm text-neutral-500">{index + 1}</span>
-          ) : null,
+          ) : (
+            <></>
+          ),
       },
       ...COLUMNS_NAME.map((name) => ({
         key: name,
@@ -117,7 +119,7 @@ export function TableStructure({
             <Input
               className={cn(
                 "h-8 cursor-default! rounded-none text-sm",
-                initValue !== fieldValue && "bg-amber-200",
+                initValue !== fieldValue && "bg-amber-100",
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
                   : "focus:bg-white!",

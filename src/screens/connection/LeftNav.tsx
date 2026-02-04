@@ -9,6 +9,7 @@ import type { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionStore } from "src/stores/connection";
+import { useConnectionWindows } from "./hooks/useConnectionWindows";
 
 interface Props {
   profileId: string;
@@ -80,6 +81,7 @@ export function LeftNav({
 }: Props) {
   const actions = useConnectionActionsCtx();
   const { dataPatchMap } = useConnectionStore();
+  const { windowHasPatchChanges } = useConnectionWindows(profileId);
 
   return (
     <aside
@@ -153,8 +155,9 @@ export function LeftNav({
                   {filteredTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
                     const isActive = activeWindowId === key;
-                    const hasChanges =
-                      !!dataPatchMap[profileId]?.[`table:${key}`];
+                    const hasChanges = windowHasPatchChanges(
+                      dataPatchMap[profileId]?.[`table:${key}`]
+                    );
 
                     return (
                       <Button
@@ -171,7 +174,7 @@ export function LeftNav({
                           isActive
                             ? "bg-white shadow-sm ring-1 ring-black/5"
                             : "hover:bg-neutral-200/60",
-                          hasChanges ? "bg-amber-200 hover:bg-amber-200/80" : ""
+                          hasChanges ? "bg-amber-100 hover:bg-amber-100/80" : ""
                         )}
                         title={key}
                       >

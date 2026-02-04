@@ -1,15 +1,25 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useMemo, useRef } from "preact/hooks";
 import { Input } from "src/components/common/Input";
 import { Button } from "src/components/common/Button";
 import { Table } from "src/components/common/Table";
 import { Plus } from "src/components/icons";
-import type { TableItem, DatabaseEngine } from "src/types";
+import type { TableItem, DatabaseEngine, TableColumn } from "src/types";
+import type { TableColumn as CommonColumn } from "src/components/common/Table";
 import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
 import { useConnectionStore } from "src/stores/connection";
 import { TableViewToggle } from "./TableViewToggle";
 import { TagSelect } from "src/components/common/TagSelect";
 import { useNewTableState } from "src/hooks/useNewTableState";
-import { useNewTableColumns } from "./hooks/useNewTableColumns";
+import { DATA_TYPES } from "src/constant";
+import { cn } from "src/utils/cn";
+import { useTableRowSelection } from "../../screens/connection/hooks/useTableRowSelection";
+
+const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
+  "column_name",
+  "data_type",
+  "is_nullable",
+  "column_default",
+];
 
 interface Props {
   activeSchema: string;
@@ -29,6 +39,8 @@ export function NewTablePane({
   onSuccess,
   onSaveRef,
 }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const { busy } = useCreateSchemaTable();
   const setNewTableData = useConnectionStore((s) => s.setNewTableData);
 
@@ -46,12 +58,10 @@ export function NewTablePane({
     onSuccess,
   });
 
-  const tableColumns = useNewTableColumns({
-    columns: tableState.columns,
-    busy,
-    engine,
-    onChange: tableState.updateColumn,
-    onRemove: tableState.removeColumn,
+  // Use row selection hook
+  const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
+    onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
+    containerRef: containerRef,
   });
 
   useEffect(() => {
@@ -76,6 +86,68 @@ export function NewTablePane({
       onSaveRef(tableState.handleSave);
     }
   }, [tableState.handleSave, onSaveRef]);
+
+  const dataTypes = useMemo(
+    () => DATA_TYPES[engine].map((type) => ({ label: type, value: type })),
+    [engine]
+  );
+
+  const tableColumns = useMemo<CommonColumn<TableColumn>[]>(
+    () =>
+      COLUMN_PROPERTIES.map((colKey) => ({
+        key: colKey,
+        label: colKey,
+        className: "px-0",
+        render: (_, row, index) => {
+          const isEmptyRow = index + 1 > tableState.columns.length;
+          const isRowSelected = selectedRowIndex === index;
+          const placeholder = isEmptyRow ? "" : "NULL";
+
+          return (
+            <Input
+              className={cn(
+                "h-8 cursor-default! rounded-none text-sm",
+                isEmptyRow
+                  ? "focus:bg-transparent focus:outline-none"
+                  : "bg-green-100! focus:bg-white!",
+                isRowSelected && !isEmptyRow && "bg-blue-200!"
+              )}
+              showSelect={!isEmptyRow && colKey === "data_type"}
+              options={dataTypes}
+              value={row[colKey]}
+              placeholder={placeholder}
+              onInput={(e) =>
+                tableState.updateColumn(index, colKey, e.currentTarget.value)
+              }
+              onMouseDown={(e) => {
+                // Prevent input focus if row is not selected yet
+                // This allows first click to select row, second click to focus input
+                if (!isRowSelected && !isEmptyRow) {
+                  e.preventDefault();
+                }
+              }}
+              onClick={(e) => {
+                if (isRowSelected) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const input = e.currentTarget as HTMLInputElement;
+                  input.select();
+                }
+              }}
+              disabled={busy}
+              readOnly={isEmptyRow}
+            />
+          );
+        },
+      })),
+    [
+      tableState.columns.length,
+      selectedRowIndex,
+      busy,
+      dataTypes,
+      tableState.updateColumn,
+    ]
+  );
 
   return (
     <div class="flex h-full flex-1 flex-col bg-white">
@@ -106,14 +178,29 @@ export function NewTablePane({
       </div>
 
       {/* Column Definition Table */}
-      <div class="flex-1 overflow-auto">
-        <div class="min-w-full">
+      <div class="flex-1 overflow-hidden">
+        <div
+          ref={containerRef}
+          class="h-full w-full"
+          tabIndex={0}
+          onMouseDown={(e) => {
+            // Focus container when clicking to enable keyboard events
+            if (
+              e.target === e.currentTarget ||
+              (e.target as HTMLElement).closest("table")
+            ) {
+              containerRef.current?.focus();
+            }
+          }}
+        >
           <Table
             columns={tableColumns}
             data={tableState.columns}
-            rowClassName="bg-green-200!"
+            fillViewport
             stickyHeader
-            emptyMessage="No columns defined"
+            showEmptyMessage={false}
+            onDoubleClickRow={tableState.addColumn}
+            onSelectRow={(_row, index) => handleRowSelect(index)}
           />
         </div>
       </div>
@@ -131,7 +218,9 @@ export function NewTablePane({
           <Button
             variant="shadow"
             className="px-2"
-            onClick={tableState.addColumn}
+            onClick={() =>
+              tableState.addColumn(null, tableState.columns.length)
+            }
           >
             <Plus className="size-3.5" />
             Column

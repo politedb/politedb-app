@@ -194,6 +194,7 @@ export function generateInsertSqlFromPatches(
     const values: string[] = [];
 
     for (const [colName, value] of Object.entries(patchData)) {
+      if (colName === "__rowKey") continue; // Skip internal row key
       columns.push(qIdent(colName));
       values.push(formatValue(value));
     }
