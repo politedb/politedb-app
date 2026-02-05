@@ -7,17 +7,25 @@ import {
 } from "preact/hooks";
 
 import { TableData } from "src/components/table/TableData";
+import { TableFilterBar } from "src/components/table/TableFilterBar";
 import { TableFooter } from "src/components/table/TableFooter";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
 import { ErrorState } from "./ErrorState";
 
-import { DATA_KEYS } from "src/constant";
+import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "src/components/common/Dialog";
+import { useTableFilter } from "src/components/table/tableHooks";
 
 /* =============================================================================
  * Patch helpers
@@ -86,7 +94,6 @@ export function MainTableDataPane(props: {
     onDeleteColumn,
     onAddIndex,
     onDeleteIndex,
-    onFilters,
   } = props;
 
   const rt = useConnectionRuntimeCtx();
@@ -96,9 +103,25 @@ export function MainTableDataPane(props: {
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
+  const [sqlPreview, setSqlPreview] = useState("");
+  const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
+
   const rerender = () => forceUpdate((n) => n + 1);
 
   const startedRef = useRef<string | null>(null);
+
+  const {
+    filterBarVisible,
+    filters,
+    filterCombine,
+    appliedFilters,
+    appliedFilterCombine,
+    setFilters,
+    setFilterCombine,
+    setFilterBarVisible,
+    handleApplyFilters,
+    handleClearFilters,
+  } = useTableFilter(startedRef);
 
   const activeKey = useMemo(
     () =>
@@ -115,15 +138,14 @@ export function MainTableDataPane(props: {
    * =========================================================================== */
 
   const handleLoadRows = useCallback(async () => {
-    // 🔒 guard: only start stream 1 time for each activeKey
-    if (startedRef.current === activeKey) return;
-    startedRef.current = activeKey;
+    const effectiveKey = `${activeKey}:${limit}:${offset}:${appliedFilters.length}:${appliedFilterCombine}`;
+    if (startedRef.current === effectiveKey) return;
+    startedRef.current = effectiveKey;
 
     useConnectionStore.getState().initRows(activeKey, 5000);
 
-    const cache = useConnectionStore.getState().tableRowCacheByKey[activeKey];
-    if (cache) return;
-
+    // Always refetch when filter state changes so cache matches current filters.
+    // (If we had filters and then cleared, cache would still hold filtered rows.)
     await loadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
@@ -133,9 +155,18 @@ export function MainTableDataPane(props: {
         refreshRows: true,
         refreshMeta: false,
         refreshStats: false,
+        filters: appliedFilters.length ? appliedFilters : undefined,
+        filterCombine: appliedFilterCombine,
       }
     );
-  }, [activeTableWindow, limit, offset]);
+  }, [
+    activeTableWindow,
+    activeKey,
+    limit,
+    offset,
+    appliedFilters,
+    appliedFilterCombine,
+  ]);
 
   useEffect(() => {
     if (!activeKey) return;
@@ -276,7 +307,7 @@ export function MainTableDataPane(props: {
         store.removeDataPatch(
           profileId,
           activeTableWindow.id,
-          "create",
+          DATA_ACTIONS.create,
           DATA_KEYS.data,
           rowKey
         );
@@ -285,15 +316,9 @@ export function MainTableDataPane(props: {
         return;
       }
 
-      onDataChange("delete", DATA_KEYS.data, rowIndex, {});
+      onDataChange(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
     },
-    [
-      onDataChange,
-      profileId,
-      activeTableWindow.id,
-      activeKey,
-      offset,
-    ]
+    [onDataChange, profileId, activeTableWindow.id, activeKey, offset]
   );
 
   /* ===========================================================================
@@ -365,20 +390,41 @@ export function MainTableDataPane(props: {
             )}
           />
         ) : (
-          <TableData
-            columns={meta.columns ?? []}
-            baseRows={hasAnyRowData ? basePageTotal : 0}
-            totalRows={hasAnyRowData ? pageTotal : 0}
-            getRowAt={getRowAt}
-            onCellChange={onDataChange}
-            patches={extractPatches(patches)}
-            onAddRow={() =>
-              handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
-            }
-            onDeleteRow={handleDeleteRow}
-            deletedRows={extractDeleted(patches, DATA_KEYS.data)}
-            rowsVersion={rowsInfo?.version ?? 0}
-          />
+          <>
+            {filterBarVisible && (
+              <TableFilterBar
+                schema={activeTableWindow.table.schema}
+                tableName={activeTableWindow.table.name}
+                columns={meta.columns ?? []}
+                filters={filters}
+                filterCombine={filterCombine}
+                limit={limit}
+                offset={offset}
+                onFiltersChange={setFilters}
+                onFilterCombineChange={setFilterCombine}
+                onApply={handleApplyFilters}
+                onClear={handleClearFilters}
+                onShowSql={(sql) => {
+                  setSqlPreview(sql);
+                  setSqlDialogOpen(true);
+                }}
+              />
+            )}
+            <TableData
+              columns={meta.columns ?? []}
+              baseRows={hasAnyRowData ? basePageTotal : 0}
+              totalRows={hasAnyRowData ? pageTotal : 0}
+              getRowAt={getRowAt}
+              onCellChange={onDataChange}
+              patches={extractPatches(patches)}
+              onAddRow={() =>
+                handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
+              }
+              onDeleteRow={handleDeleteRow}
+              deletedRows={extractDeleted(patches, DATA_KEYS.data)}
+              rowsVersion={rowsInfo?.version ?? 0}
+            />
+          </>
         )}
       </div>
 
@@ -395,8 +441,23 @@ export function MainTableDataPane(props: {
         }
         onAddColumn={onAddColumn}
         onAddIndex={onAddIndex}
-        onFilters={onFilters}
+        onFilters={() => setFilterBarVisible((v) => !v)}
       />
+
+      <Dialog
+        open={sqlDialogOpen}
+        onClose={() => setSqlDialogOpen(false)}
+        size="lg"
+      >
+        <DialogHeader>
+          <DialogTitle>SQL Preview</DialogTitle>
+        </DialogHeader>
+        <DialogContent>
+          <div class="rounded border border-neutral-200 bg-neutral-100 p-2 font-mono text-xs break-all whitespace-pre-wrap">
+            {sqlPreview}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   tableRowCountQuery,
   tableSizeInfoQuery,
   tableStructuresQuery,
+  type TableFilterCondition,
 } from "./queries";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
@@ -48,6 +49,8 @@ export type LoadFlags = {
   refreshRows?: boolean; // Default true (but first-load always fetches rows)
   refreshMeta?: boolean; // Structure + constraints (default false)
   refreshStats?: boolean; // RowCount + sizeInfo (default false)
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
 };
 
 type ColumnRow = { name: string; db_type: string };
@@ -300,7 +303,9 @@ async function startRowsStream(params: {
   limit: number;
   offset: number;
   addLogQuery: (sql: string) => void;
-  resetCache?: boolean; // New flag to force cache invalidation
+  resetCache?: boolean;
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
 }): Promise<void> {
   const {
     key,
@@ -311,9 +316,17 @@ async function startRowsStream(params: {
     offset,
     addLogQuery,
     resetCache,
+    filters,
+    filterCombine = "AND",
   } = params;
 
-  const q = tableDataQuery(schema, tableName, { limit, offset });
+  const q = tableDataQuery(
+    schema,
+    tableName,
+    { limit, offset },
+    filters,
+    filterCombine
+  );
   addLogQuery(q);
 
   const store = useConnectionStore.getState();
@@ -529,7 +542,9 @@ export function useLoadTableData() {
                 limit,
                 offset,
                 addLogQuery,
-                resetCache: shouldReset, // <-- Passed flag
+                resetCache: shouldReset,
+                filters: flags.filters,
+                filterCombine: flags.filterCombine ?? "AND",
               });
             } catch (e) {
               const curMeta =

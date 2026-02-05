@@ -123,7 +123,7 @@ export function TableFooter({
       {/* RIGHT */}
       {viewMode === "data" && (
         <div class="flex items-center gap-2">
-          <Button variant="shadow" onClick={onFilters}>
+          <Button variant="shadow" class="py-[2.5px]" onClick={onFilters}>
             Filters
           </Button>
           <div class="flex items-center gap-0.5">

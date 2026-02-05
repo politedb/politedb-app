@@ -85,15 +85,67 @@ export const tableColumnsQuery = (schema: string, tableName: string) => {
   return regexEscape(queryStr);
 };
 
+// Filter condition for table data (WHERE clause)
+export type TableFilterCondition = {
+  column: string;
+  operator: string;
+  value: string;
+  enabled: boolean;
+};
+
+const VALUE_OPS = ["=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "ILIKE"];
+const IN_OPS = ["IN", "NOT IN"];
+const NULL_OPS = ["IS NULL", "IS NOT NULL"];
+
+function buildWhereClause(
+  filters: TableFilterCondition[],
+  combineWith: "AND" | "OR"
+): string {
+  const parts = filters
+    .filter((f) => f.enabled && (f.column ?? "").trim())
+    .map((f) => {
+      const col = qIdent(String(f.column).trim());
+      const op = String(f.operator).toUpperCase();
+      if (NULL_OPS.includes(op)) {
+        return `${col} ${op}`;
+      }
+      if (IN_OPS.includes(op)) {
+        const raw = (f.value ?? "").trim();
+        const values = raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((s) => qLiteral(s));
+        if (values.length === 0) return "";
+        return `${col} ${op} (${values.join(", ")})`;
+      }
+      if (VALUE_OPS.includes(op)) {
+        const val = (f.value ?? "").trim();
+        if (op === "LIKE" || op === "ILIKE") {
+          const literal = qLiteral(`%${val}%`);
+          return `${col} ${op} ${literal}`;
+        }
+        return `${col} ${op} ${qLiteral(val)}`;
+      }
+      return `${col} = ${qLiteral(String(f.value ?? "").trim())}`;
+    })
+    .filter(Boolean);
+  if (parts.length === 0) return "";
+  return " WHERE " + parts.join(` ${combineWith} `);
+}
+
 export const tableDataQuery = (
   schema: string,
   tableName: string,
-  pagination?: { limit: number; offset: number }
+  pagination?: { limit: number; offset: number },
+  filters?: TableFilterCondition[],
+  combineWith: "AND" | "OR" = "AND"
 ) => {
   const limit = pagination?.limit ?? 300;
   const offset = pagination?.offset ?? 0;
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
-  const queryStr = `SELECT * FROM ${tableIdent} LIMIT ${limit} OFFSET ${offset};`;
+  const where = filters?.length ? buildWhereClause(filters, combineWith) : "";
+  const queryStr = `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
 

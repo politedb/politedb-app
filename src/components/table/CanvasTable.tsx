@@ -574,7 +574,7 @@ export function CanvasTable({
       >
         {/* Sticky Header Container */}
         <div
-          class="sticky top-0 left-0 z-50 overflow-hidden border-b border-neutral-200 bg-neutral-50"
+          class="sticky top-0 left-0 z-10 overflow-hidden border-b border-neutral-200 bg-neutral-50"
           style={{ width: viewport.w }}
         >
           {/* Inner Header */}

@@ -4,6 +4,7 @@ import {
   useEffect,
   useCallback,
   useRef,
+  MutableRef,
 } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import {
@@ -17,6 +18,7 @@ import {
   guessWidthByMeta,
   inferCellType,
 } from "./tableUtils";
+import { TableFilterCondition } from "src/hooks/queries";
 
 // ============================================================================
 // useColumnSizing
@@ -293,4 +295,49 @@ export function useMergedRefs<T>(
       }
     }
   }, refs);
+}
+
+export function useTableFilter(startedRef: MutableRef<string | null>) {
+  const [filterBarVisible, setFilterBarVisible] = useState(false);
+  const [filters, setFilters] = useState<TableFilterCondition[]>([]);
+  const [filterCombine, setFilterCombine] = useState<"AND" | "OR">("AND");
+  const [appliedFilters, setAppliedFilters] = useState<TableFilterCondition[]>(
+    []
+  );
+  const [appliedFilterCombine, setAppliedFilterCombine] = useState<
+    "AND" | "OR"
+  >("AND");
+
+  const handleApplyFilters = useCallback(
+    (newFilters: TableFilterCondition[], combine: "AND" | "OR") => {
+      setAppliedFilters(newFilters);
+      setAppliedFilterCombine(combine);
+      setFilters(newFilters);
+      setFilterCombine(combine);
+      startedRef.current = null; // allow effect to run with new filters
+    },
+    []
+  );
+
+  const handleClearFilters = useCallback(() => {
+    setFilterCombine("AND");
+    setAppliedFilters([]);
+    setAppliedFilterCombine("AND");
+    startedRef.current = null; // allow effect to run without filters
+  }, []);
+
+  return {
+    filterBarVisible,
+    filters,
+    filterCombine,
+    appliedFilters,
+    appliedFilterCombine,
+
+    setFilters,
+    setFilterCombine,
+    setFilterBarVisible,
+
+    handleApplyFilters,
+    handleClearFilters,
+  };
 }
