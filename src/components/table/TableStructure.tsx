@@ -123,7 +123,7 @@ export function TableStructure({
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
                   : "focus:bg-white!",
-                isRowSelected && "bg-blue-200!"
+                isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
               showSelect={!isEmptyRow && name === "data_type"}
               options={DATA_TYPES[engine].map((type) => ({

@@ -1,4 +1,4 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import {
   DataAction,
   DataKey,
@@ -11,11 +11,11 @@ import type {
   TableWindow,
   DatabaseEngine,
 } from "src/types";
-import { SplitPane } from "src/components/SplitPane";
 import { TableConstraints } from "./TableConstraint";
 import { TableStructure } from "./TableStructure";
 import { Input } from "src/components/common/Input";
 import { TagSelect } from "src/components/common/TagSelect";
+import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 
 export function TableStructurePane(props: {
@@ -53,6 +53,10 @@ export function TableStructurePane(props: {
     onAddIndex,
     onDeleteIndex,
   } = props;
+
+  const [activeTab, setActiveTab] = useState<"columns" | "constraints">(
+    "columns"
+  );
 
   const {
     tableName,
@@ -129,46 +133,50 @@ export function TableStructurePane(props: {
         </div>
       </div>
 
-      {/* Structure and Constraints Split View */}
-      <div class="flex-1 overflow-hidden">
-        <SplitPane
-          direction="vertical"
-          initialRatio={0.5}
-          minFirstPx={0}
-          minSecondPx={0}
-          splitterPx={8}
-          first={
-            <TableStructure
-              engine={engine}
-              activeProfileScreen={profileId}
-              activeTableWindowId={activeTableWindow.id}
-              initData={activeTableMeta.structure}
-              editedData={tableStructure}
-              busy={activeTableMeta.busy}
-              error={activeTableMeta.error}
-              onDataChange={onDataChange}
-              onAddNewRecord={onAddNewColumn}
-              onDeleteRecord={onDeleteColumn}
-              deletedRows={deletedStructureRows}
-            />
-          }
-          second={
-            <TableConstraints
-              engine={engine}
-              activeProfileScreen={profileId}
-              activeTableWindowId={activeTableWindow.id}
-              initData={activeTableMeta.constraints}
-              editedData={tableConstraints}
-              busy={activeTableMeta.busy}
-              error={activeTableMeta.error}
-              onDataChange={onDataChange}
-              onAddNewRecord={onAddIndex}
-              onDeleteRecord={onDeleteIndex}
-              deletedRows={deletedConstraintRows}
-            />
-          }
-        />
-      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        tabs={[
+          {
+            value: "columns",
+            label: "Columns",
+            children: (
+              <TableStructure
+                engine={engine}
+                activeProfileScreen={profileId}
+                activeTableWindowId={activeTableWindow.id}
+                initData={activeTableMeta.structure}
+                editedData={tableStructure}
+                busy={activeTableMeta.busy}
+                error={activeTableMeta.error}
+                onDataChange={onDataChange}
+                onAddNewRecord={onAddNewColumn}
+                onDeleteRecord={onDeleteColumn}
+                deletedRows={deletedStructureRows}
+              />
+            ),
+          },
+          {
+            value: "constraints",
+            label: "Constraints",
+            children: (
+              <TableConstraints
+                engine={engine}
+                activeProfileScreen={profileId}
+                activeTableWindowId={activeTableWindow.id}
+                initData={activeTableMeta.constraints}
+                editedData={tableConstraints}
+                busy={activeTableMeta.busy}
+                error={activeTableMeta.error}
+                onDataChange={onDataChange}
+                onAddNewRecord={onAddIndex}
+                onDeleteRecord={onDeleteIndex}
+                deletedRows={deletedConstraintRows}
+              />
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

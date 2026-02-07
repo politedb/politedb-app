@@ -192,7 +192,6 @@ export function Table<T = any>({
           {/* Empty rows to fill viewport */}
           {Array.from({ length: emptyRowsCount }, (_, idx) => {
             const rowIndex = data.length + idx;
-            const isSelected = selectedRow === rowIndex;
 
             return (
               <tr
@@ -200,8 +199,7 @@ export function Table<T = any>({
                 data-row={rowIndex}
                 data-empty="true"
                 class={cn(
-                  typeof rowClassName === "string" ? rowClassName : undefined,
-                  isSelected && "bg-blue-200!"
+                  typeof rowClassName === "string" ? rowClassName : undefined
                 )}
               >
                 {columns.map((col, colIndex) => {

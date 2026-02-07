@@ -112,7 +112,7 @@ export function TableConstraints({
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
                   : "focus:bg-white!",
-                isRowSelected && "bg-blue-200!"
+                isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
               showSelect={!isEmptyRow && name === "index_algorithm"}
               options={INDEX_ALGORITHMS[engine].map((type) => ({
