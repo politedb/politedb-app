@@ -6,16 +6,36 @@ use crate::types::{SecretRef, SecretRefKind};
 /// Resolve SecretRef (inline/keychain) for CONNECT path.
 pub async fn resolve_secret_ref(app: &AppHandle, secret: &SecretRef) -> Result<String, String> {
     match secret.kind {
-        SecretRefKind::Inline => Ok(secret.value.clone()),
+        SecretRefKind::Inline => {
+            let v = secret.value.clone();
+            if v.is_empty() {
+                return Err("EMPTY_INLINE_SECRET".into());
+            }
+            Ok(v)
+        }
+
         SecretRefKind::Keychain => {
             let key = secret.value.trim();
             if key.is_empty() {
                 return Err("EMPTY_KEYCHAIN_KEY".into());
             }
 
-            let v = secrets::keychain_get(app, key).map_err(|e| e.to_string())?;
+            // IMPORTANT:
+            // - Do NOT leak secret value
+            // - But include key in errors so FE can prompt user correctly
+            let v = match secrets::keychain_get(app, key) {
+                Ok(v) => v,
+                Err(e) => {
+                    // Normalize common case for better UX & debugging
+                    if e == "KEYCHAIN_ITEM_NOT_FOUND" {
+                        return Err("CREDENTIALS_INVALID".into());
+                    }
+                    return Err(e);
+                }
+            };
+
             if v.is_empty() {
-                return Err("EMPTY_SECRET_FROM_KEYCHAIN".into());
+                return Err("CREDENTIALS_INVALID".into());
             }
 
             Ok(v)

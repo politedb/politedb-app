@@ -1,7 +1,6 @@
 #![cfg(target_os = "macos")]
 
-use core_foundation::base::CFTypeRef;
-use core_foundation::base::TCFType;
+use core_foundation::base::{CFTypeRef, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::data::CFData;
 use core_foundation::dictionary::CFMutableDictionary;
@@ -9,13 +8,12 @@ use core_foundation::string::{CFString, CFStringRef};
 use core_foundation_sys::base::OSStatus;
 
 use security_framework_sys::base::{errSecDuplicateItem, errSecItemNotFound, errSecSuccess};
+use security_framework_sys::item::{
+    kSecAttrAccount, kSecAttrService, kSecAttrSynchronizable, kSecClass, kSecClassGenericPassword,
+    kSecMatchLimit, kSecReturnData, kSecValueData,
+};
 use security_framework_sys::keychain_item::{
     SecItemAdd, SecItemCopyMatching, SecItemDelete, SecItemUpdate,
-};
-
-use security_framework_sys::item::{
-    kSecAttrAccount, kSecAttrService, kSecClass, kSecClassGenericPassword, kSecMatchLimit,
-    kSecReturnData, kSecValueData,
 };
 
 #[link(name = "Security", kind = "framework")]
@@ -25,6 +23,10 @@ extern "C" {
     static kSecMatchLimitOne: CFStringRef;
 }
 
+/* =============================================================================
+ * Helpers
+ * ============================================================================= */
+
 #[inline]
 unsafe fn k_str(k: CFStringRef) -> CFTypeRef {
     k as CFTypeRef
@@ -33,6 +35,7 @@ unsafe fn k_str(k: CFStringRef) -> CFTypeRef {
 fn cfstr(s: &str) -> CFString {
     CFString::new(s)
 }
+
 fn cfdata(s: &str) -> CFData {
     CFData::from_buffer(s.as_bytes())
 }
@@ -45,12 +48,16 @@ fn os_err(code: OSStatus, ctx: &str) -> String {
     }
 }
 
+/* =============================================================================
+ * Query builder (stable, TablePlus-like)
+ * ============================================================================= */
+
 fn build_query(service: &str, account: &str) -> CFMutableDictionary {
     let service_cf = cfstr(service);
     let account_cf = cfstr(account);
 
     unsafe {
-        CFMutableDictionary::from_CFType_pairs(&[
+        let mut d = CFMutableDictionary::from_CFType_pairs(&[
             (k_str(kSecClass), k_str(kSecClassGenericPassword)),
             (
                 k_str(kSecAttrService),
@@ -60,9 +67,21 @@ fn build_query(service: &str, account: &str) -> CFMutableDictionary {
                 k_str(kSecAttrAccount),
                 account_cf.as_concrete_TypeRef() as CFTypeRef,
             ),
-        ])
+        ]);
+
+        // Avoid iCloud Keychain sync oddities
+        d.add(
+            &k_str(kSecAttrSynchronizable),
+            &(CFBoolean::false_value().as_concrete_TypeRef() as CFTypeRef),
+        );
+
+        d
     }
 }
+
+/* =============================================================================
+ * Public API
+ * ============================================================================= */
 
 pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), String> {
     if service.trim().is_empty() {
@@ -75,22 +94,15 @@ pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), Str
         return Err("SECRET_VALUE_EMPTY".into());
     }
 
-    match update_password(service, account, value) {
-        Ok(()) => Ok(()),
-        Err(e) if e.contains("KEYCHAIN_ITEM_NOT_FOUND") => add_password(service, account, value),
-        Err(e) => Err(e),
-    }
-}
-
-pub fn add_password(service: &str, account: &str, value: &str) -> Result<(), String> {
     let mut attrs = build_query(service, account);
 
     // value
-    attrs.add(&unsafe { k_str(kSecValueData) }, &{
-        cfdata(value).as_concrete_TypeRef() as CFTypeRef
-    });
+    attrs.add(
+        &unsafe { k_str(kSecValueData) },
+        &(cfdata(value).as_concrete_TypeRef() as CFTypeRef),
+    );
 
-    // ✅ accessible key/value (no prompt policy)
+    // accessible (set at CREATE time)
     unsafe {
         attrs.add(
             &k_str(kSecAttrAccessible),
@@ -99,12 +111,16 @@ pub fn add_password(service: &str, account: &str, value: &str) -> Result<(), Str
     }
 
     let status = unsafe { SecItemAdd(attrs.as_concrete_TypeRef(), std::ptr::null_mut()) };
+
     if status == errSecSuccess {
         return Ok(());
     }
+
+    // Duplicate => update
     if status == errSecDuplicateItem {
         return update_password(service, account, value);
     }
+
     Err(os_err(status, "KEYCHAIN_ADD_FAILED"))
 }
 
@@ -112,17 +128,13 @@ pub fn update_password(service: &str, account: &str, value: &str) -> Result<(), 
     let query = build_query(service, account);
 
     let mut attrs = CFMutableDictionary::new();
-    attrs.add(&unsafe { k_str(kSecValueData) }, &{
-        cfdata(value).as_concrete_TypeRef() as CFTypeRef
-    });
-    unsafe {
-        attrs.add(
-            &k_str(kSecAttrAccessible),
-            &k_str(kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly),
-        );
-    }
+    attrs.add(
+        &unsafe { k_str(kSecValueData) },
+        &(cfdata(value).as_concrete_TypeRef() as CFTypeRef),
+    );
 
     let status = unsafe { SecItemUpdate(query.as_concrete_TypeRef(), attrs.as_concrete_TypeRef()) };
+
     if status == errSecSuccess {
         Ok(())
     } else {
@@ -133,9 +145,10 @@ pub fn update_password(service: &str, account: &str, value: &str) -> Result<(), 
 pub fn get_password(service: &str, account: &str) -> Result<String, String> {
     let mut query = build_query(service, account);
 
-    query.add(&unsafe { k_str(kSecReturnData) }, &{
-        CFBoolean::true_value().as_concrete_TypeRef() as CFTypeRef
-    });
+    query.add(
+        &unsafe { k_str(kSecReturnData) },
+        &(CFBoolean::true_value().as_concrete_TypeRef() as CFTypeRef),
+    );
     query.add(&unsafe { k_str(kSecMatchLimit) }, &unsafe {
         k_str(kSecMatchLimitOne)
     });

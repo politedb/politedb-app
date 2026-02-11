@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
 
-  <!-- Required for hardened runtime -->
+  <!-- Not sandboxed -->
   <key>com.apple.security.app-sandbox</key>
   <false/>
 
@@ -12,28 +12,26 @@
   <key>com.apple.security.network.client</key>
   <true/>
 
-  <!-- (Optional) If you run a local server / tunnel listener -->
-  <!-- Enable ONLY if really needed -->
-  <!--
-  <key>com.apple.security.network.server</key>
-  <true/>
-  -->
-
   <!-- File access: user-selected files/folders only -->
   <key>com.apple.security.files.user-selected.read-write</key>
   <true/>
 
-  <!-- Needed for WebView / Tauri -->
+  <!-- Hardened runtime settings -->
   <key>com.apple.security.cs.allow-jit</key>
   <false/>
 
-  <!-- Allow loading signed dynamic libraries inside app bundle -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <false/>
 
   <!-- No debugger / no DYLD injection in PROD -->
   <key>com.apple.security.get-task-allow</key>
   <false/>
+
+  <!-- Keychain access group (prevents errSecMissingEntitlement -34018) -->
+  <key>com.apple.security.keychain-access-groups</key>
+  <array>
+    <string>$(AppIdentifierPrefix)com.politehq.politedb</string>
+  </array>
 
 </dict>
 </plist>

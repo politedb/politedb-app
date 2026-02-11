@@ -1,12 +1,7 @@
 use tauri::AppHandle;
 
-fn service_name(app: &AppHandle) -> String {
-    let identifier = app.config().identifier.clone();
-    if identifier.is_empty() {
-        "politedb".to_string()
-    } else {
-        identifier
-    }
+fn service_name(_app: &AppHandle) -> String {
+    "politedb".to_string()
 }
 
 /* ===============================
