@@ -149,6 +149,24 @@ export const tableDataQuery = (
   return regexEscape(queryStr);
 };
 
+/** Full table query for export (no LIMIT; backend streams with batch_size/max_rows). */
+export const tableExportQuery = (
+  schema: string,
+  tableName: string,
+  columns?: string[],
+  filters?: TableFilterCondition[],
+  combineWith: "AND" | "OR" = "AND"
+) => {
+  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const colList =
+    columns && columns.length > 0
+      ? columns.map((c) => qIdent(c)).join(", ")
+      : "*";
+  const where = filters?.length ? buildWhereClause(filters, combineWith) : "";
+  const queryStr = `SELECT ${colList} FROM ${tableIdent}${where};`;
+  return regexEscape(queryStr);
+};
+
 export const tableRowCountQuery = (schema: string, tableName: string) => {
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
   const queryStr = `SELECT COUNT(*) FROM ${tableIdent};`;

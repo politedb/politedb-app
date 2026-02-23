@@ -40,6 +40,7 @@ interface TableFilterBarProps {
   onApply: (filters: TableFilterCondition[], combine: "AND" | "OR") => void;
   onClear: () => void;
   onExport?: () => void;
+  onImport?: () => void;
   onShowSql?: (sql: string) => void;
 }
 
@@ -236,7 +237,7 @@ export function TableFilterBar({
           {onExport && (
             <Button
               variant="shadow"
-              className="px-3 py-1.5 text-xs"
+              className="px-3 text-xs"
               onClick={onExport}
             >
               Export

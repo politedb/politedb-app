@@ -8,3 +8,7 @@ export function debounce<T extends (...args: any[]) => void>(
     t = setTimeout(() => fn(...args), ms);
   };
 }
+
+export function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

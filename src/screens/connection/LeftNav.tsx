@@ -1,9 +1,10 @@
 import { SetStateAction } from "preact/compat";
-import { Dispatch } from "preact/hooks";
+import { Dispatch, useState } from "preact/hooks";
 import { ChevronDown, ChevronRight, Search, Table } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { NewTableMenu } from "src/components/table/NewTableMenu";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
@@ -61,7 +62,10 @@ function SectionHeader(props: {
 function TableName({ name }: { name: string }) {
   const { ref, value } = useMiddleEllipsisByWidth({ text: name });
   return (
-    <span ref={ref} class="min-w-0 flex-1 overflow-hidden">
+    <span
+      ref={ref}
+      class="min-w-0 flex-1 overflow-hidden text-ellipsis select-none"
+    >
       {value}
     </span>
   );
@@ -82,6 +86,62 @@ export function LeftNav({
   const actions = useConnectionActionsCtx();
   const { dataPatchMap } = useConnectionStore();
   const { windowHasPatchChanges } = useConnectionWindows(profileId);
+
+  const [tableMenu, setTableMenu] = useState<{
+    x: number;
+    y: number;
+    table: TableItem;
+  } | null>(null);
+
+  const tableMenuItems: MenuItem[] = tableMenu
+    ? [
+        {
+          type: "item",
+          label: "Open table",
+          onClick: () => {
+            void actions.selectTable(tableMenu.table);
+          },
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Pin to top",
+          onClick: () => {},
+        },
+        {
+          type: "item",
+          label: "Copy name",
+          onClick: () => navigator.clipboard.writeText(tableMenu.table.name),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Export data",
+          onClick: () => actions.exportTableData(tableMenu.table),
+        },
+        {
+          type: "item",
+          label: "Import data",
+          onClick: () => actions.importTableData(tableMenu.table),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Clone...",
+          onClick: () => actions.exportTableData(tableMenu.table),
+        },
+        {
+          type: "item",
+          label: "Truncate...",
+          onClick: () => actions.importTableData(tableMenu.table),
+        },
+        {
+          type: "item",
+          label: "Delete...",
+          onClick: () => actions.importTableData(tableMenu.table),
+        },
+      ]
+    : [];
 
   return (
     <aside
@@ -154,31 +214,44 @@ export function LeftNav({
                 <div class="space-y-1 pl-3">
                   {filteredTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
-                    const isActive = activeWindowId === key;
+                    const isActive = activeWindowId === `table:${key}`;
                     const hasChanges = windowHasPatchChanges(
                       dataPatchMap[profileId]?.[`table:${key}`]
                     );
 
                     return (
                       <Button
-                        variant="ghost"
+                        variant={isActive ? "default" : "ghost"}
                         key={key}
                         onClick={() => void actions.selectTable(table)}
+                        onContextMenu={(e: MouseEvent) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setTableMenu({ x: e.clientX, y: e.clientY, table });
+                        }}
                         active={isActive}
                         className={cn(
                           "w-full justify-start",
-                          "rounded-lg px-2.5 py-1.5",
+                          "rounded-md px-2.5 py-1.5",
                           "gap-2",
                           "text-left text-sm",
-                          "overflow-hidden",
-                          isActive
-                            ? "bg-white shadow-sm ring-1 ring-black/5"
-                            : "hover:bg-neutral-200/60",
-                          hasChanges ? "bg-amber-100 hover:bg-amber-100/80" : ""
+                          "overflow-hidden text-ellipsis select-none",
+                          "transition-none",
+                          !isActive && "hover:bg-neutral-200/60",
+                          hasChanges
+                            ? "bg-amber-100 text-neutral-600 hover:bg-amber-100/80"
+                            : ""
                         )}
                         title={key}
                       >
-                        <Table className="size-4 shrink-0 text-neutral-500" />
+                        <Table
+                          className={cn(
+                            "size-4 shrink-0",
+                            isActive && !hasChanges
+                              ? "text-white"
+                              : "text-neutral-500"
+                          )}
+                        />
                         <TableName name={table.name} />
                       </Button>
                     );
@@ -189,6 +262,14 @@ export function LeftNav({
           )}
         </div>
       </div>
+
+      <ContextMenu
+        open={!!tableMenu}
+        x={tableMenu?.x ?? 0}
+        y={tableMenu?.y ?? 0}
+        items={tableMenuItems}
+        onClose={() => setTableMenu(null)}
+      />
 
       {/* Bottom: Toolbar */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">

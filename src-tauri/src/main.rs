@@ -81,6 +81,8 @@ fn main() {
             commands::persistent::persistent_load,
             commands::persistent::persistent_save,
             commands::persistent::persistent_clear,
+            // export (streaming append for large table export)
+            commands::export::export_append_to_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

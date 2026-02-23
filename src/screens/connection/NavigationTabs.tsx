@@ -139,7 +139,10 @@ export function NavigationTabs({
                 )}
 
                 <span
-                  class={cn("max-w-40 truncate", active && "font-semibold")}
+                  class={cn(
+                    "max-w-40 truncate select-none",
+                    active && "font-semibold"
+                  )}
                 >
                   {getWindowTitle(w)}
                 </span>

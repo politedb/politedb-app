@@ -33,7 +33,10 @@ export function Tabs<T extends string = string>({
   return (
     <div class="flex min-h-0 flex-1 flex-col">
       <div
-        class={cn("flex border-b border-neutral-200 bg-neutral-50", listClassName)}
+        class={cn(
+          "flex border-b border-neutral-200 bg-neutral-50",
+          listClassName
+        )}
       >
         {tabs.map((tab) => (
           <Button
@@ -42,7 +45,7 @@ export function Tabs<T extends string = string>({
             type="button"
             onClick={() => onValueChange(tab.value)}
             class={cn(
-              "-mb-px rounded-none border-b-2 px-3 py-2 text-xs font-medium transition-colors hover:bg-transparent",
+              "-mb-px rounded-none border-b-2 px-3 py-2 text-[11px] font-medium transition-colors hover:bg-transparent",
               value === tab.value
                 ? "border-blue-500 text-blue-600"
                 : "border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900"

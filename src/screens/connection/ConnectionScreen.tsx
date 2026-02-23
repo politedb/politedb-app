@@ -67,6 +67,9 @@ export function ConnectionScreen() {
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
     null
   );
+  const [pendingTableAction, setPendingTableAction] = useState<
+    "export" | "import" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
 
@@ -241,6 +244,16 @@ export function ConnectionScreen() {
         actionsRef.current.closeTab(id, skip),
       pageChange: (l: number, o: number) => actionsRef.current.pageChange(l, o),
       selectTable: (t: TableItem) => actionsRef.current.selectTable(t),
+      exportTableData: (table: TableItem) => {
+        void actionsRef.current.selectTable(table).then(() => {
+          setPendingTableAction("export");
+        });
+      },
+      importTableData: (table: TableItem) => {
+        void actionsRef.current.selectTable(table).then(() => {
+          setPendingTableAction("import");
+        });
+      },
     };
   }, []);
 
@@ -309,6 +322,8 @@ export function ConnectionScreen() {
       runSqlWithHistory,
       refreshSchemaAndTables,
       newTableSaveRef,
+      pendingTableAction,
+      setPendingTableAction,
     }),
     [
       activeProfileScreen,
@@ -322,6 +337,7 @@ export function ConnectionScreen() {
       loadError,
       runSqlWithHistory,
       refreshSchemaAndTables,
+      pendingTableAction,
     ]
   );
 

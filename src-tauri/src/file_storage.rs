@@ -133,3 +133,22 @@ pub fn text_read_if_exists(path: &Path) -> Result<Option<String>, String> {
 pub fn remove_if_exists(path: &Path) -> Result<(), String> {
     remove_file_if_exists(path)
 }
+
+/* -------------------------------------------------------------------------- */
+/* Export: append to file (for streaming export; path is from dialog)         */
+/* -------------------------------------------------------------------------- */
+
+pub fn export_append_to_file(path: &Path, content: &str, append: &bool) -> Result<(), String> {
+    use std::fs::OpenOptions;
+    let mut f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(*append)
+        .truncate(!*append)
+        .open(path)
+        .map_err(|e| format!("Open/append failed: {e}"))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| format!("Write failed: {e}"))?;
+    f.sync_all().map_err(|e| format!("Sync failed: {e}"))?;
+    Ok(())
+}

@@ -15,6 +15,11 @@ export type ConnectionActions = {
 
   pageChange(limit: number, offset: number): Promise<void>;
   selectTable(table: TableItem): Promise<void>;
+
+  /** Open table tab then trigger export data (used from table context menu) */
+  exportTableData(table: TableItem): void;
+  /** Open table tab then trigger import data (used from table context menu) */
+  importTableData(table: TableItem): void;
 };
 
 const Ctx = createContext<ConnectionActions | null>(null);

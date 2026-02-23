@@ -166,6 +166,19 @@ table {
   animation: slide-in-up 0.3s ease-out;
 }
 
+@keyframes export-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-export-progress {
+  animation: export-progress 1.5s ease-in-out infinite;
+}
+
 /* container */
 .split-pane {
   position: relative;
