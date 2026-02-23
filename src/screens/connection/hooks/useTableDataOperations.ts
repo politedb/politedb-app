@@ -4,19 +4,21 @@ import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 
 export interface UseTableDataOperationsProps {
   activeKey: string;
+  profileId: string;
+  activeTableWindowId: string;
   onDataChange?: (
     action: DataAction,
     dataKey: DataKey,
     rowIndex: number,
     data: Record<string, any>
   ) => void;
-  onDeleteRow?: (rowIndex: number) => void;
 }
 
 export function useTableDataOperations({
   activeKey,
+  profileId,
+  activeTableWindowId,
   onDataChange,
-  onDeleteRow,
 }: UseTableDataOperationsProps) {
   const handleCellChange = useCallback(
     (
@@ -40,10 +42,30 @@ export function useTableDataOperations({
   );
 
   const handleDeleteRow = useCallback(
-    (rowIndex: number) => {
-      onDeleteRow?.(rowIndex);
+    (rowIndex: number, offset: number) => {
+      const rowKey = String(rowIndex);
+      const store = useConnectionStore.getState();
+      const windowPatches =
+        store.dataPatchMap[profileId]?.[activeTableWindowId]?.patches ?? null;
+
+      // If this row is a new row (only in create patch), remove the create patch
+      // and the row from the store so we don't generate INSERT + DELETE SQL
+      if (windowPatches?.create?.data?.[rowKey]) {
+        store.removeDataPatch(
+          profileId,
+          activeTableWindowId,
+          DATA_ACTIONS.create,
+          DATA_KEYS.data,
+          rowKey
+        );
+        const globalRowIndex = offset + rowIndex;
+        store.removeRow(activeKey, globalRowIndex);
+        return;
+      }
+
+      onDataChange?.(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
     },
-    [onDeleteRow]
+    [activeKey, onDataChange]
   );
 
   const handleAddRow = useCallback(

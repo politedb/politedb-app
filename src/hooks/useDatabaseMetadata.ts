@@ -89,7 +89,7 @@ export function useDatabaseMetadata() {
           // Schemas (0 -> 10)
           const schemasRes = await runSqlQuery(connectionId, q.schemasQuery);
           const schemas = (schemasRes.rows ?? [])
-            .map((r: any) => cellToString(r?.[0]))
+            .map((r: any) => cellToString(r?.[0]) ?? "")
             .filter(Boolean);
           setCache(metaKey, { schemas, progress: 10, stage: "tables" });
 
@@ -97,13 +97,13 @@ export function useDatabaseMetadata() {
           const tablesRes = await runSqlQuery(connectionId, q.tablesQuery);
           const tables: TableItem[] = (tablesRes.rows ?? [])
             .map((r: any): TableItem => {
-              const rawKind = cellToString(r?.[2]).toUpperCase();
+              const rawKind = cellToString(r?.[2])?.toUpperCase() ?? "";
               const kind: TableItem["kind"] =
                 rawKind === "VIEW" ? "view" : "table";
 
               return {
-                schema: cellToString(r?.[0]),
-                name: cellToString(r?.[1]),
+                schema: cellToString(r?.[0]) ?? "",
+                name: cellToString(r?.[1]) ?? "",
                 kind,
               };
             })

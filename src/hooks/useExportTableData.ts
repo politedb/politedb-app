@@ -63,6 +63,24 @@ export function useExportTableData() {
     [setExportOptions]
   );
 
+  const loadExportOptions = useCallback(
+    async (columns: ColumnMeta[], tableName: string) => {
+      if (columns.length === 0) return;
+      const columnNames = columns.map((c) => c.name);
+      setExportOptions((prev) => ({
+        ...prev,
+        format: "csv",
+        fileName: tableName,
+        columns: columnNames,
+        csvOptions: prev.csvOptions || {},
+        nullToEmpty: true,
+      }));
+      setProgress(null);
+      setFormat("csv");
+    },
+    [setExportOptions, setProgress]
+  );
+
   const runStreamingExport = useCallback(
     async (
       path: string,
@@ -226,5 +244,6 @@ export function useExportTableData() {
     setFileName,
     handleChangeFormat,
     handleExport,
+    loadExportOptions,
   };
 }

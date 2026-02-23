@@ -53,7 +53,7 @@ export type LoadFlags = {
   filterCombine?: "AND" | "OR";
 };
 
-type ColumnRow = { name: string; db_type: string };
+type ColumnRow = { name: string | null; db_type: string | null };
 
 // =============================================================================
 // Helpers
@@ -241,9 +241,9 @@ async function loadSizeInfo(params: {
 
   const r0 = (res.rows as unknown[][])?.[0] ?? [];
   return {
-    totalSize: cellToString(r0?.[0]),
-    dataSize: cellToString(r0?.[1]),
-    indexSize: cellToString(r0?.[2]),
+    totalSize: cellToString(r0?.[0]) ?? "0",
+    dataSize: cellToString(r0?.[1]) ?? "0",
+    indexSize: cellToString(r0?.[2]) ?? "0",
   };
 }
 
@@ -269,7 +269,7 @@ async function loadMeta(params: {
   const structure = (structureRes.rows as unknown[][]).map((row) => ({
     column_name: cellToString(row?.[1]),
     data_type: cellToString(row?.[2]),
-    is_nullable: cellToString(row?.[8]).toLowerCase() === "yes",
+    is_nullable: cellToString(row?.[8])?.toLowerCase() === "yes",
     check: cellToString(row?.[9]),
     column_default: cellToString(row?.[11]),
     foreign_key: cellToString(row?.[12]),
@@ -284,7 +284,7 @@ async function loadMeta(params: {
   const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
     index_name: cellToString(row?.[0]),
     index_algorithm: cellToString(row?.[1]),
-    is_unique: cellToString(row?.[2]).toLowerCase() === "true",
+    is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
     index_definition: cellToString(row?.[3]),
     column_name: cellToString(row?.[4]),
     condition: cellToString(row?.[5]),

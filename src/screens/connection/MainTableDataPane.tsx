@@ -13,7 +13,7 @@ import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
 import { ErrorState } from "./ErrorState";
 
-import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
+import { DATA_KEYS } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
@@ -24,15 +24,11 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "src/components/common/Dialog";
 import { useTableFilter } from "src/components/table/tableHooks";
-import { parseCsv } from "src/utils/csv";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
-import { runSqlQuery } from "src/lib/tauri/query";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
-import { useExportTableData } from "src/hooks/useExportTableData";
+import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
+import { useImportTableData } from "src/hooks/useImportTableData";
 
 /* =============================================================================
  * Patch helpers
@@ -42,6 +38,10 @@ type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
   Record<DataAction, Partial<Record<DataKey, Record<string, RowPatch>>>>
 >;
+type ActiveTableWindow = {
+  id: string;
+  table: { schema: string; name: string };
+};
 
 const EMPTY_META = {
   columns: null,
@@ -79,10 +79,7 @@ function extractDeleted(patches: WindowPatches | null, key: DataKey) {
  * ============================================================================= */
 
 export function MainTableDataPane(props: {
-  activeTableWindow: {
-    id: string;
-    table: { schema: string; name: string };
-  };
+  activeTableWindow: ActiveTableWindow;
 
   // pagination from outer layer (actions ctx)
   pageChange: (limit: number, offset: number) => void;
@@ -107,19 +104,20 @@ export function MainTableDataPane(props: {
   const { profileId, engine, limit, offset } = rt;
 
   const { loadTableData } = useLoadTableData();
-  const { setProgress, setExportOptions } = useExportTableData();
+  const {
+    dataPreview: dataImportPreview,
+    error: importError,
+    importing: importBusy,
+    runImport,
+    reset: resetImport,
+    loadDataImport,
+  } = useImportTableData();
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
   const [sqlPreview, setSqlPreview] = useState("");
   const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importPreview, setImportPreview] = useState<{
-    headers: string[];
-    rows: string[][];
-  } | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importBusy, setImportBusy] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   const rerender = () => forceUpdate((n) => n + 1);
@@ -308,34 +306,12 @@ export function MainTableDataPane(props: {
     [profileId, meta, activeTableWindow, activeKey]
   );
 
-  const { handleAddRow } = useTableDataOperations({ activeKey, onDataChange });
-
-  const handleDeleteRow = useCallback(
-    (rowIndex: number) => {
-      const rowKey = String(rowIndex);
-      const store = useConnectionStore.getState();
-      const windowPatches =
-        store.dataPatchMap[profileId]?.[activeTableWindow.id]?.patches ?? null;
-
-      // If this row is a new row (only in create patch), remove the create patch
-      // and the row from the store so we don't generate INSERT + DELETE SQL
-      if (windowPatches?.create?.data?.[rowKey]) {
-        store.removeDataPatch(
-          profileId,
-          activeTableWindow.id,
-          DATA_ACTIONS.create,
-          DATA_KEYS.data,
-          rowKey
-        );
-        const globalRowIndex = offset + rowIndex;
-        store.removeRow(activeKey, globalRowIndex);
-        return;
-      }
-
-      onDataChange(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
-    },
-    [onDataChange, profileId, activeTableWindow.id, activeKey, offset]
-  );
+  const { handleAddRow, handleDeleteRow } = useTableDataOperations({
+    activeKey,
+    profileId,
+    activeTableWindowId: activeTableWindow.id,
+    onDataChange,
+  });
 
   /* ===========================================================================
    * Render guards
@@ -383,132 +359,53 @@ export function MainTableDataPane(props: {
    * Export / Import
    * =========================================================================== */
 
-  const handleExport = useCallback(() => {
-    const columns = meta.columns ?? [];
-    if (columns.length === 0) return;
-    const columnNames = columns.map((c) => c.name);
-    setExportOptions((prev) => ({
-      ...prev,
-      format: "csv",
-      fileName: activeTableWindow.table.name,
-      columns: columnNames,
-      csvOptions: prev.csvOptions || {},
-      nullToEmpty: true,
-    }));
-    setProgress(null);
+  const onExportOpen = useCallback(() => {
     setExportDialogOpen(true);
-  }, [
-    meta.columns,
-    activeTableWindow.table.name,
-    setExportOptions,
-    setProgress,
-    setExportDialogOpen,
-  ]);
+  }, [setExportDialogOpen]);
+
+  const onImportOpen = useCallback(async () => {
+    const loaded = await loadDataImport();
+    if (!loaded) return;
+    setImportDialogOpen(true);
+  }, [loadDataImport, setImportDialogOpen]);
+
+  const onImportClose = useCallback(() => {
+    resetImport();
+    setImportDialogOpen(false);
+  }, [resetImport, setImportDialogOpen]);
 
   const handleImport = useCallback(async () => {
-    const path = await open({
-      title: "Import table data",
-      multiple: false,
-      directory: false,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
+    runImport({
+      connectionId: meta.connectionId,
+      schema: activeTableWindow.table.schema,
+      tableName: activeTableWindow.table.name,
+      columns: meta.columns ?? [],
+      limit,
+      offset,
+      onSuccess: async () => {
+        startedRef.current = null;
+        await loadTableData(
+          activeTableWindow.table.schema,
+          activeTableWindow.table.name,
+          { limit, offset },
+          {
+            force: true,
+            refreshRows: true,
+            refreshMeta: false,
+            refreshStats: false,
+          }
+        );
+      },
     });
-    if (!path || typeof path !== "string") return;
-    setImportError(null);
-    try {
-      const text = await readTextFile(path);
-      const { headers, rows } = parseCsv(text);
-      if (headers.length === 0 || rows.length === 0) {
-        setImportError("File has no headers or data rows.");
-        setImportPreview({ headers, rows });
-        setImportDialogOpen(true);
-        return;
-      }
-      setImportPreview({ headers, rows });
-      setImportDialogOpen(true);
-    } catch (err) {
-      setImportError(
-        err instanceof Error ? err.message : "Failed to read file."
-      );
-      setImportPreview(null);
-      setImportDialogOpen(true);
-    }
-  }, []);
-
-  const handleImportConfirm = useCallback(async () => {
-    if (!importPreview || importPreview.rows.length === 0) {
-      setImportDialogOpen(false);
-      return;
-    }
-    const columns = meta.columns ?? [];
-    const tableCols = columns.map((c) => c.name);
-    const headerToIndex = new Map(
-      importPreview.headers.map((h, i) => [h.trim(), i])
-    );
-    const colOrder = tableCols.filter((name) => headerToIndex.has(name));
-    if (colOrder.length === 0) {
-      setImportError("No CSV columns match table columns.");
-      return;
-    }
-    const connId = meta.connectionId;
-    if (!connId) {
-      setImportError("Not connected.");
-      return;
-    }
-    setImportBusy(true);
-    setImportError(null);
-    const schema = activeTableWindow.table.schema;
-    const tableName = activeTableWindow.table.name;
-    const quotedTable = `"${schema.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
-    const quotedCols = colOrder
-      .map((c) => `"${c.replace(/"/g, '""')}"`)
-      .join(", ");
-    const escape = (v: string) => `'${String(v).replace(/'/g, "''")}'`;
-
-    const BATCH = 50;
-    try {
-      for (let i = 0; i < importPreview.rows.length; i += BATCH) {
-        const batch = importPreview.rows.slice(i, i + BATCH);
-        const values = batch
-          .map((row) => {
-            const vals = colOrder.map((col) => {
-              const idx = headerToIndex.get(col)!;
-              const raw = row[idx] ?? "";
-              return escape(raw);
-            });
-            return `(${vals.join(", ")})`;
-          })
-          .join(", ");
-        const sql = `INSERT INTO ${quotedTable} (${quotedCols}) VALUES ${values}`;
-        await runSqlQuery(connId, sql, { timeoutMs: 30_000 });
-      }
-      setImportDialogOpen(false);
-      setImportPreview(null);
-      startedRef.current = null;
-      await loadTableData(
-        schema,
-        tableName,
-        { limit, offset },
-        {
-          force: true,
-          refreshRows: true,
-          refreshMeta: false,
-          refreshStats: false,
-        }
-      );
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed.");
-    } finally {
-      setImportBusy(false);
-    }
   }, [
-    importPreview,
-    meta.columns,
-    meta.connectionId,
     activeTableWindow.table.schema,
     activeTableWindow.table.name,
-    loadTableData,
+    meta.connectionId,
+    meta.columns,
     limit,
     offset,
+    loadTableData,
+    runImport,
   ]);
 
   // When user chose Export/Import from table context menu in left nav
@@ -516,16 +413,16 @@ export function MainTableDataPane(props: {
     if (!rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
     const t = setTimeout(() => {
-      if (action === "export") handleExport();
-      else if (action === "import") handleImport();
+      if (action === "export") onExportOpen();
+      else if (action === "import") onImportOpen();
       rt.setPendingTableAction(null);
     }, 80);
     return () => clearTimeout(t);
   }, [
     rt.pendingTableAction,
     rt.setPendingTableAction,
-    handleExport,
-    handleImport,
+    onExportOpen,
+    onImportOpen,
   ]);
 
   /* ===========================================================================
@@ -577,8 +474,8 @@ export function MainTableDataPane(props: {
                 onFilterCombineChange={setFilterCombine}
                 onApply={handleApplyFilters}
                 onClear={handleClearFilters}
-                onExport={handleExport}
-                onImport={handleImport}
+                onExport={onExportOpen}
+                onImport={onImportOpen}
                 onShowSql={(sql) => {
                   setSqlPreview(sql);
                   setSqlDialogOpen(true);
@@ -595,7 +492,7 @@ export function MainTableDataPane(props: {
               onAddRow={() =>
                 handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
               }
-              onDeleteRow={handleDeleteRow}
+              onDeleteRow={(rowIndex) => handleDeleteRow(rowIndex, offset)}
               deletedRows={extractDeleted(patches, DATA_KEYS.data)}
               rowsVersion={rowsInfo?.version ?? 0}
             />
@@ -634,101 +531,33 @@ export function MainTableDataPane(props: {
         </DialogContent>
       </Dialog>
 
-      <ExportTableDialog
-        open={exportDialogOpen}
-        handleClose={() => setExportDialogOpen(false)}
-        connectionId={meta.connectionId}
-        schema={activeTableWindow.table.schema}
-        tableName={activeTableWindow.table.name}
-        columns={meta.columns ?? []}
-        totalRows={totalRows}
-        appliedFilters={appliedFilters}
-        appliedFilterCombine={appliedFilterCombine}
-      />
+      {exportDialogOpen && (
+        <ExportTableDialog
+          open={exportDialogOpen}
+          handleClose={() => setExportDialogOpen(false)}
+          connectionId={meta.connectionId}
+          schema={activeTableWindow.table.schema}
+          tableName={activeTableWindow.table.name}
+          columns={meta.columns ?? []}
+          totalRows={totalRows}
+          appliedFilters={appliedFilters}
+          appliedFilterCombine={appliedFilterCombine}
+        />
+      )}
 
-      <Dialog
-        open={importDialogOpen}
-        onClose={() => {
-          if (!importBusy) {
-            setImportDialogOpen(false);
-            setImportPreview(null);
-            setImportError(null);
-          }
-        }}
-        size="lg"
-      >
-        <DialogHeader>
-          <DialogTitle>Import data</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          {importError && (
-            <p class="mb-2 text-sm text-red-600">{importError}</p>
-          )}
-          {importPreview && (
-            <>
-              <p class="mb-2 text-xs text-neutral-600">
-                {importPreview.headers.length} columns,{" "}
-                {importPreview.rows.length} rows. First 5 rows:
-              </p>
-              <div class="max-h-48 overflow-auto rounded border border-neutral-200 font-mono text-xs">
-                <table class="w-full border-collapse">
-                  <thead class="sticky top-0 bg-neutral-100">
-                    <tr>
-                      {importPreview.headers.map((h) => (
-                        <th
-                          key={h}
-                          class="border border-neutral-200 px-2 py-1 text-left"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importPreview.rows.slice(0, 5).map((row, ri) => (
-                      <tr key={ri}>
-                        {row.map((cell, ci) => (
-                          <td
-                            key={ci}
-                            class="max-w-[120px] truncate border border-neutral-200 px-2 py-1"
-                            title={cell}
-                          >
-                            {cell}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <button
-            type="button"
-            class="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-            onClick={() => {
-              setImportDialogOpen(false);
-              setImportPreview(null);
-              setImportError(null);
-            }}
-            disabled={importBusy}
-          >
-            Cancel
-          </button>
-          {importPreview && importPreview.rows.length > 0 && (
-            <button
-              type="button"
-              class="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-              onClick={handleImportConfirm}
-              disabled={importBusy}
-            >
-              {importBusy ? "Importing…" : "Import"}
-            </button>
-          )}
-        </DialogFooter>
-      </Dialog>
+      {importDialogOpen && (
+        <ImportTableDialog
+          open={importDialogOpen}
+          handleClose={onImportClose}
+          schema={activeTableWindow.table.schema}
+          tableName={activeTableWindow.table.name}
+          columns={meta.columns ?? []}
+          dataPreview={dataImportPreview}
+          error={importError}
+          importing={importBusy}
+          onImport={handleImport}
+        />
+      )}
     </div>
   );
 }

@@ -2,11 +2,11 @@
  * CSV serialize/parse for table data export and import.
  */
 
+import Papa from "papaparse";
 import { cellToString } from "./convert";
 
 export type CsvExportOptions = {
   delimiter?: string;
-  /** "quote_if_needed" | "always" | "never" */
   quoting?: "quote_if_needed" | "always" | "never";
   nullToEmpty?: boolean;
   lineBreakToSpace?: boolean;
@@ -62,7 +62,7 @@ export function serializeCsvChunk(
   columnNames: string[],
   rows: unknown[][],
   options: CsvExportOptions = {},
-  addHeader = false
+  addHeader = true
 ): string {
   const opts = { ...DEFAULT_CSV_OPTIONS, ...options };
   const delim = opts.delimiter;
@@ -96,51 +96,15 @@ export function serializeToCsv(
   return [header, ...lines].join("\n");
 }
 
-/** Parse a single CSV line into cells (handles quoted fields) */
-function parseCsvLine(line: string): string[] {
-  const row: string[] = [];
-  let pos = 0;
-  while (pos < line.length) {
-    if (line[pos] === '"') {
-      let end = pos + 1;
-      const parts: string[] = [];
-      while (end < line.length) {
-        const next = line.indexOf('"', end);
-        if (next === -1) {
-          parts.push(line.slice(end));
-          end = line.length;
-          break;
-        }
-        if (line[next + 1] === '"') {
-          parts.push(line.slice(end, next));
-          end = next + 2;
-        } else {
-          parts.push(line.slice(end, next));
-          end = next + 1;
-          break;
-        }
-      }
-      row.push(parts.join('"'));
-      pos = end;
-      if (pos < line.length && line[pos] === ",") pos++;
-    } else {
-      const comma = line.indexOf(",", pos);
-      const value = comma === -1 ? line.slice(pos) : line.slice(pos, comma);
-      row.push(value.trim());
-      pos = comma === -1 ? line.length : comma + 1;
-    }
-  }
-  return row;
-}
-
 /** Parse CSV string into rows (first row = headers, rest = data). Returns { headers, rows } */
 export function parseCsv(csvText: string): {
   headers: string[];
   rows: string[][];
 } {
-  const rawLines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const rows = rawLines.map(parseCsvLine);
+  const parse = Papa.parse(csvText);
+  const rows = parse.data;
+
   if (rows.length === 0) return { headers: [], rows: [] };
-  const headers = rows[0];
-  return { headers, rows: rows.slice(1) };
+  const headers = rows[0] as string[];
+  return { headers, rows: rows.slice(1) as string[][] };
 }

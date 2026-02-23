@@ -18,6 +18,24 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:allow-create",
-    "fs:allow-write-text-file"
+    "fs:allow-write-text-file",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-app-read",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" }
+      ]
+    }
   ]
 }
