@@ -299,3 +299,40 @@ export const createSchemaQuery = (schema: string) => {
   const queryStr = `CREATE SCHEMA ${qIdent(schema)};`;
   return regexEscape(queryStr);
 };
+
+export const copyTableDataQuery = (
+  schema: string,
+  tableName: string,
+  newTableName: string
+) => {
+  const queryStr = `INSERT INTO ${qIdent(schema)}.${qIdent(newTableName)} SELECT * FROM ${qIdent(schema)}.${qIdent(tableName)};`;
+  return regexEscape(queryStr);
+};
+
+export const cloneTableQuery = (
+  schema: string,
+  tableName: string,
+  newTableName: string
+) => {
+  const queryStr = `CREATE TABLE ${qIdent(schema)}.${qIdent(newTableName)} (LIKE ${qIdent(schema)}.${qIdent(tableName)} INCLUDING ALL);`;
+  return regexEscape(queryStr);
+};
+
+export const dropTableQuery = (schema: string, tableName: string) => {
+  const queryStr = `DROP TABLE ${qIdent(schema)}.${qIdent(tableName)};`;
+  return regexEscape(queryStr);
+};
+
+export const truncateTableQuery = (
+  schema: string,
+  tableName: string,
+  opts?: { restartIdentity?: boolean; cascade?: boolean }
+) => {
+  const parts = ["TRUNCATE TABLE", `${qIdent(schema)}.${qIdent(tableName)}`];
+  if (opts?.restartIdentity) {
+    parts.push("RESTART IDENTITY");
+  }
+  parts.push(opts?.cascade !== false ? "CASCADE" : "RESTRICT");
+  const queryStr = `${parts.join(" ")};`;
+  return regexEscape(queryStr);
+};

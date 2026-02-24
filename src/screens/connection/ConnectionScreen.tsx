@@ -68,7 +68,7 @@ export function ConnectionScreen() {
     null
   );
   const [pendingTableAction, setPendingTableAction] = useState<
-    "export" | "import" | "clone" | null
+    "export" | "import" | "clone" | "truncate" | null
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -257,6 +257,11 @@ export function ConnectionScreen() {
       cloneTable: (table: TableItem) => {
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("clone");
+        });
+      },
+      truncateTable: (table: TableItem) => {
+        void actionsRef.current.selectTable(table).then(() => {
+          setPendingTableAction("truncate");
         });
       },
     };

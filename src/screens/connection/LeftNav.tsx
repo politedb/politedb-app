@@ -133,7 +133,7 @@ export function LeftNav({
         {
           type: "item",
           label: "Truncate...",
-          onClick: () => actions.importTableData(tableMenu.table),
+          onClick: () => actions.truncateTable(tableMenu.table),
         },
         {
           type: "item",

@@ -10,6 +10,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import { ErrorDialog } from "./ErrorDialog";
+import { Checkbox } from "src/components/common/Checkbox";
 
 interface Props {
   open: boolean;
@@ -78,17 +79,12 @@ export function CloneTableDialog({
               className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
               disabled={loading}
             />
-            <label class="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={copyData}
-                onChange={(e: Event) =>
-                  setCopyData((e.target as HTMLInputElement).checked)
-                }
-                disabled={loading}
-              />
-              <span class="text-sm">Copy table data</span>
-            </label>
+            <Checkbox
+              checked={copyData}
+              onChange={(e) => setCopyData(e.currentTarget.checked)}
+              label="Copy table data"
+              disabled={loading}
+            />
           </div>
         </DialogContent>
         <DialogFooter>

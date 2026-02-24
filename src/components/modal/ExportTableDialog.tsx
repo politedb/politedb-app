@@ -16,9 +16,9 @@ import {
   type ExportFormat,
   useExportTableData,
 } from "src/hooks/useExportTableData";
-import { cn } from "src/utils/cn";
 import { sleep } from "src/utils/common";
 import { ErrorDialog } from "./ErrorDialog";
+import { Checkbox } from "src/components/common/Checkbox";
 
 interface Props {
   open: boolean;
@@ -187,22 +187,13 @@ export function ExportTableDialog({
               <div class="max-h-40 overflow-y-auto rounded-md border border-neutral-300 bg-white py-1">
                 {filteredColumnNames.length > 0 ? (
                   filteredColumnNames.map((name) => (
-                    <label
+                    <Checkbox
                       key={name}
-                      class={cn(
-                        "flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-neutral-50",
-                        exporting && "cursor-not-allowed opacity-50"
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedColumns.includes(name)}
-                        onChange={() => handleSelectColumn(name)}
-                        class="h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-                        disabled={exporting}
-                      />
-                      <span class="font-mono text-neutral-800">{name}</span>
-                    </label>
+                      checked={selectedColumns.includes(name)}
+                      onChange={() => handleSelectColumn(name)}
+                      label={name}
+                      disabled={exporting}
+                    />
                   ))
                 ) : (
                   <div class="flex items-center justify-center p-2 text-sm text-neutral-500">
