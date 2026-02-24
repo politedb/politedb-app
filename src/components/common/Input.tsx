@@ -11,6 +11,7 @@ export function Input(
     showSelect?: boolean;
     options?: InputOption[];
     value: string;
+    label?: string;
     placeholder?: string;
     type?: string;
     error?: boolean;
@@ -26,6 +27,7 @@ export function Input(
     showSelect,
     options = [],
     value,
+    label,
     onValueChange,
     onChange,
     onFocus,
@@ -105,6 +107,7 @@ export function Input(
             {props.left}
           </div>
         )}
+        {label && <label class="mb-1 block text-sm font-medium">{label}</label>}
         <input
           ref={inputRef}
           {...rest}

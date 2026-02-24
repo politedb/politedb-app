@@ -115,7 +115,7 @@ export function DialogTitle({
   className?: string;
 }) {
   return (
-    <h2 class={cn("text-lg font-semibold text-neutral-900", className)}>
+    <h2 class={cn("text-base font-semibold text-neutral-900", className)}>
       {children}
     </h2>
   );

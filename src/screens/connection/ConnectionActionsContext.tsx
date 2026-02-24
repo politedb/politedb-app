@@ -20,6 +20,8 @@ export type ConnectionActions = {
   exportTableData(table: TableItem): void;
   /** Open table tab then trigger import data (used from table context menu) */
   importTableData(table: TableItem): void;
+  /** Open table tab then trigger clone table (used from table context menu) */
+  cloneTable(table: TableItem): void;
 };
 
 const Ctx = createContext<ConnectionActions | null>(null);

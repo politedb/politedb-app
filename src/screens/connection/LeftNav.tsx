@@ -128,7 +128,7 @@ export function LeftNav({
         {
           type: "item",
           label: "Clone...",
-          onClick: () => actions.exportTableData(tableMenu.table),
+          onClick: () => actions.cloneTable(tableMenu.table),
         },
         {
           type: "item",

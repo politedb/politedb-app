@@ -28,6 +28,7 @@ import {
 import { useTableFilter } from "src/components/table/tableHooks";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
 import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
+import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { useImportTableData } from "src/hooks/useImportTableData";
 
 /* =============================================================================
@@ -119,6 +120,7 @@ export function MainTableDataPane(props: {
   const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -374,6 +376,42 @@ export function MainTableDataPane(props: {
     setImportDialogOpen(false);
   }, [resetImport, setImportDialogOpen]);
 
+  const onCloneOpen = useCallback(() => setCloneDialogOpen(true), []);
+  const onCloneClose = useCallback(() => setCloneDialogOpen(false), []);
+
+  const handleClone = useCallback(
+    async (newTableName: string, copyData: boolean) => {
+      if (!meta.connectionId) throw new Error("Not connected.");
+      const q = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+      const schemaQ = q(activeTableWindow.table.schema);
+      const sourceQ = q(activeTableWindow.table.name);
+      const newQ = q(newTableName);
+      const createSql = `CREATE TABLE ${schemaQ}.${newQ} (LIKE ${schemaQ}.${sourceQ} INCLUDING ALL);`;
+      await rt.runSqlWithHistory({
+        windowId: activeTableWindow.id,
+        connectionId: meta.connectionId,
+        sql: createSql,
+      });
+      if (copyData) {
+        const insertSql = `INSERT INTO ${schemaQ}.${newQ} SELECT * FROM ${schemaQ}.${sourceQ};`;
+        await rt.runSqlWithHistory({
+          windowId: activeTableWindow.id,
+          connectionId: meta.connectionId,
+          sql: insertSql,
+        });
+      }
+      await rt.refreshSchemaAndTables();
+    },
+    [
+      meta.connectionId,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      activeTableWindow.id,
+      rt.runSqlWithHistory,
+      rt.refreshSchemaAndTables,
+    ]
+  );
+
   const handleImport = useCallback(async () => {
     runImport({
       connectionId: meta.connectionId,
@@ -408,13 +446,14 @@ export function MainTableDataPane(props: {
     runImport,
   ]);
 
-  // When user chose Export/Import from table context menu in left nav
+  // When user chose Export/Import/Clone from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
     const t = setTimeout(() => {
       if (action === "export") onExportOpen();
       else if (action === "import") onImportOpen();
+      else if (action === "clone") onCloneOpen();
       rt.setPendingTableAction(null);
     }, 80);
     return () => clearTimeout(t);
@@ -423,6 +462,7 @@ export function MainTableDataPane(props: {
     rt.setPendingTableAction,
     onExportOpen,
     onImportOpen,
+    onCloneOpen,
   ]);
 
   /* ===========================================================================
@@ -556,6 +596,15 @@ export function MainTableDataPane(props: {
           error={importError}
           importing={importBusy}
           onImport={handleImport}
+        />
+      )}
+
+      {cloneDialogOpen && (
+        <CloneTableDialog
+          open={cloneDialogOpen}
+          onClose={onCloneClose}
+          sourceTableName={activeTableWindow.table.name}
+          onConfirm={handleClone}
         />
       )}
     </div>
