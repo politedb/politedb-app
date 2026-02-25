@@ -17,6 +17,7 @@ export type ImportConfig = {
   columns: ColumnMeta[];
   limit: number;
   offset: number;
+  firstIsHeaders?: boolean;
   onSuccess: () => Promise<void>;
 };
 
@@ -28,6 +29,10 @@ export function useImportTableData() {
   );
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    imported: number;
+    total: number;
+  } | null>(null);
 
   const loadDataImport = useCallback(async (): Promise<boolean> => {
     const path = await open({
@@ -56,18 +61,41 @@ export function useImportTableData() {
 
   const runImport = useCallback(
     async (config: ImportConfig) => {
-      const { connectionId, schema, tableName, columns, onSuccess } = config;
+      const {
+        connectionId,
+        schema,
+        tableName,
+        columns,
+        firstIsHeaders = true,
+        onSuccess,
+      } = config;
 
-      if (!dataPreview || dataPreview.rows.length === 0) return;
+      if (!dataPreview) return;
 
       const tableCols = columns.map((c) => c.name);
-      const headerToIndex = new Map(
-        dataPreview.headers.map((h, i) => [h.trim(), i])
-      );
-      const colOrder = tableCols.filter((name) => headerToIndex.has(name));
+      let colOrder: string[];
+      let headerToIndex: Map<string, number>;
+      let dataRows: string[][];
+
+      if (firstIsHeaders) {
+        if (dataPreview.rows.length === 0) return;
+        headerToIndex = new Map(
+          dataPreview.headers.map((h, i) => [h.trim(), i])
+        );
+        colOrder = tableCols.filter((name) => headerToIndex.has(name));
+        dataRows = dataPreview.rows;
+      } else {
+        colOrder = tableCols.slice(0, dataPreview.headers.length);
+        headerToIndex = new Map(colOrder.map((name, i) => [name, i]));
+        dataRows = [dataPreview.headers, ...dataPreview.rows];
+      }
 
       if (colOrder.length === 0) {
-        setError("No CSV columns match table columns.");
+        setError(
+          firstIsHeaders
+            ? "No CSV columns match table columns."
+            : "Table has no columns or CSV has no columns."
+        );
         return;
       }
 
@@ -78,6 +106,7 @@ export function useImportTableData() {
 
       setImporting(true);
       setError(null);
+      setImportProgress({ imported: 0, total: dataRows.length });
 
       const quotedTable = `"${schema.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
       const quotedCols = colOrder
@@ -86,8 +115,8 @@ export function useImportTableData() {
       const escape = (v: string) => `'${String(v).replace(/'/g, "''")}'`;
 
       try {
-        for (let i = 0; i < dataPreview.rows.length; i += BATCH) {
-          const batch = dataPreview.rows.slice(i, i + BATCH);
+        for (let i = 0; i < dataRows.length; i += BATCH) {
+          const batch = dataRows.slice(i, i + BATCH);
           const values = batch
             .map((row) => {
               const vals = colOrder.map((col) => {
@@ -100,6 +129,10 @@ export function useImportTableData() {
             .join(", ");
           const sql = `INSERT INTO ${quotedTable} (${quotedCols}) VALUES ${values}`;
           await runSqlQuery(connectionId, sql, { timeoutMs: 30_000 });
+          setImportProgress({
+            imported: Math.min(i + batch.length, dataRows.length),
+            total: dataRows.length,
+          });
         }
 
         setDataPreview(null);
@@ -116,12 +149,14 @@ export function useImportTableData() {
   const reset = useCallback(() => {
     setDataPreview(null);
     setError(null);
+    setImportProgress(null);
   }, []);
 
   return {
     dataPreview,
     error,
     importing,
+    importProgress,
     loadDataImport,
     runImport,
     reset,

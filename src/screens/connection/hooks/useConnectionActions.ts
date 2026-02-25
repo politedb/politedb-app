@@ -390,6 +390,35 @@ export function useConnectionActions(
     return { [activeTableWindow.id]: entry } as unknown as PatchMap;
   }, [activeProfileScreen, activeTableWindow]);
 
+  const syncTableMeta = useCallback(() => {
+    if (!activeTableWindow) return;
+
+    const s = useConnectionStore.getState();
+
+    const key = tableKey(
+      activeProfileScreen,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+    const fresh = s.tableDataMap[key];
+    if (fresh) {
+      if (Array.isArray(fresh.structure)) {
+        s.setTableStructure(
+          activeProfileScreen,
+          activeTableWindow.id,
+          fresh.structure
+        );
+      }
+      if (Array.isArray(fresh.constraints)) {
+        s.setTableConstraints(
+          activeProfileScreen,
+          activeTableWindow.id,
+          fresh.constraints
+        );
+      }
+    }
+  }, [activeProfileScreen, activeTableWindow]);
+
   const applyPatchesForActiveWindow = useCallback(async () => {
     if (!activeTableWindow || !runtimeConnectionId) return;
 
@@ -428,6 +457,9 @@ export function useConnectionActions(
         { limit, offset },
         { force: true, refreshRows, refreshMeta, refreshStats }
       );
+
+      // Sync edited structure/constraints from freshly loaded meta so UI shows new types
+      syncTableMeta();
     } catch (e) {
       setError(normalizeSqlError(e));
     }
@@ -442,6 +474,7 @@ export function useConnectionActions(
     limit,
     offset,
     setError,
+    syncTableMeta,
   ]);
 
   const beforeSaveChanges = useCallback(() => {

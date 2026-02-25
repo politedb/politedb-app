@@ -24,6 +24,8 @@ export type ConnectionActions = {
   cloneTable(table: TableItem): void;
   /** Open table tab then trigger truncate table (used from table context menu) */
   truncateTable(table: TableItem): void;
+  /** Open table tab then trigger delete table (used from table context menu) */
+  dropTable(table: TableItem): void;
 };
 
 const Ctx = createContext<ConnectionActions | null>(null);

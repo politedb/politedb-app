@@ -19,6 +19,7 @@ import { useTableDataOperations } from "src/screens/connection/hooks/useTableDat
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import {
   Dialog,
   DialogContent,
@@ -31,10 +32,12 @@ import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
 import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { useImportTableData } from "src/hooks/useImportTableData";
 import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
+import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import {
   cloneTableQuery,
   copyTableDataQuery,
   truncateTableQuery,
+  dropTableQuery,
 } from "src/hooks/queries";
 
 /* =============================================================================
@@ -108,6 +111,7 @@ export function MainTableDataPane(props: {
   } = props;
 
   const rt = useConnectionRuntimeCtx();
+  const actions = useConnectionActionsCtx();
   const { profileId, engine, limit, offset } = rt;
 
   const { loadTableData } = useLoadTableData();
@@ -115,6 +119,7 @@ export function MainTableDataPane(props: {
     dataPreview: dataImportPreview,
     error: importError,
     importing: importBusy,
+    importProgress: importProgressState,
     runImport,
     reset: resetImport,
     loadDataImport,
@@ -128,6 +133,7 @@ export function MainTableDataPane(props: {
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
+  const [dropDialogOpen, setDropDialogOpen] = useState(false);
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -384,7 +390,7 @@ export function MainTableDataPane(props: {
   );
 
   /* ===========================================================================
-   * Export / Import
+   * Export / Import / Clone / Truncate / Drop
    * =========================================================================== */
 
   const onExportOpen = useCallback(() => {
@@ -408,6 +414,9 @@ export function MainTableDataPane(props: {
   const onTruncateOpen = useCallback(() => setTruncateDialogOpen(true), []);
   const onTruncateClose = useCallback(() => setTruncateDialogOpen(false), []);
 
+  const onDropOpen = useCallback(() => setDropDialogOpen(true), []);
+  const onDropClose = useCallback(() => setDropDialogOpen(false), []);
+
   const handleTruncate = useCallback(
     async (opts: { restartIdentity: boolean; cascade: boolean }) => {
       if (!meta.connectionId) throw new Error("Not connected.");
@@ -430,6 +439,28 @@ export function MainTableDataPane(props: {
       reloadTableData,
     ]
   );
+
+  const handleDrop = useCallback(async () => {
+    if (!meta.connectionId) throw new Error("Not connected.");
+
+    const { schema, name } = activeTableWindow.table;
+    const sql = dropTableQuery(schema, name);
+    await rt.runSqlWithHistory({
+      windowId: activeTableWindow.id,
+      connectionId: meta.connectionId,
+      sql,
+    });
+    await rt.refreshSchemaAndTables();
+    await actions.closeWindow(activeTableWindow.id, new MouseEvent("click"));
+  }, [
+    meta.connectionId,
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name,
+    activeTableWindow.id,
+    rt.runSqlWithHistory,
+    rt.refreshSchemaAndTables,
+    actions.closeWindow,
+  ]);
 
   const handleClone = useCallback(
     async (newTableName: string, copyData: boolean) => {
@@ -461,29 +492,33 @@ export function MainTableDataPane(props: {
     ]
   );
 
-  const handleImport = useCallback(async () => {
-    const { schema, name } = activeTableWindow.table;
-    runImport({
-      connectionId: meta.connectionId,
-      schema,
-      tableName: name,
-      columns: meta.columns ?? [],
+  const handleImport = useCallback(
+    async (firstIsHeaders: boolean) => {
+      const { schema, name } = activeTableWindow.table;
+      runImport({
+        connectionId: meta.connectionId,
+        schema,
+        tableName: name,
+        columns: meta.columns ?? [],
+        limit,
+        offset,
+        firstIsHeaders,
+        onSuccess: async () => reloadTableData(schema, name),
+      });
+    },
+    [
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      meta.connectionId,
+      meta.columns,
       limit,
       offset,
-      onSuccess: async () => reloadTableData(schema, name),
-    });
-  }, [
-    activeTableWindow.table.schema,
-    activeTableWindow.table.name,
-    meta.connectionId,
-    meta.columns,
-    limit,
-    offset,
-    reloadTableData,
-    runImport,
-  ]);
+      reloadTableData,
+      runImport,
+    ]
+  );
 
-  // When user chose Export/Import/Clone/Truncate from table context menu in left nav
+  // When user chose Export/Import/Clone/Truncate/Drop from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
@@ -492,6 +527,7 @@ export function MainTableDataPane(props: {
       else if (action === "import") onImportOpen();
       else if (action === "clone") onCloneOpen();
       else if (action === "truncate") onTruncateOpen();
+      else if (action === "drop") onDropOpen();
       rt.setPendingTableAction(null);
     }, 80);
     return () => clearTimeout(t);
@@ -502,6 +538,7 @@ export function MainTableDataPane(props: {
     onImportOpen,
     onCloneOpen,
     onTruncateOpen,
+    onDropOpen,
   ]);
 
   /* ===========================================================================
@@ -634,6 +671,7 @@ export function MainTableDataPane(props: {
           dataPreview={dataImportPreview}
           error={importError}
           importing={importBusy}
+          progress={importProgressState}
           onImport={handleImport}
         />
       )}
@@ -653,6 +691,15 @@ export function MainTableDataPane(props: {
           onClose={onTruncateClose}
           tableName={activeTableWindow.table.name}
           onConfirm={handleTruncate}
+        />
+      )}
+
+      {dropDialogOpen && (
+        <DropTableDialog
+          open={dropDialogOpen}
+          onClose={onDropClose}
+          tableName={activeTableWindow.table.name}
+          onConfirm={handleDrop}
         />
       )}
     </div>

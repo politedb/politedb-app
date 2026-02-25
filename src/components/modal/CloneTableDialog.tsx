@@ -97,7 +97,7 @@ export function CloneTableDialog({
             onClick={handleConfirm}
             disabled={loading}
           >
-            {loading ? "Cloning…" : "Clone"}
+            {loading ? "Cloning..." : "Clone"}
           </Button>
         </DialogFooter>
       </Dialog>

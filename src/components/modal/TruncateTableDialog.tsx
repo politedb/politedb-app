@@ -86,7 +86,7 @@ export function TruncateTableDialog({
             onClick={() => void handleTruncate()}
             disabled={truncating}
           >
-            {truncating ? "Truncating…" : "Truncate"}
+            {truncating ? "Truncating..." : "Truncate"}
           </Button>
         </DialogFooter>
       </Dialog>

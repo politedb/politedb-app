@@ -16,7 +16,6 @@ import {
   type ExportFormat,
   useExportTableData,
 } from "src/hooks/useExportTableData";
-import { sleep } from "src/utils/common";
 import { ErrorDialog } from "./ErrorDialog";
 import { Checkbox } from "src/components/common/Checkbox";
 
@@ -124,8 +123,6 @@ export function ExportTableDialog({
       columns,
     };
     await handleExport(tableName, totalRows, exportConfig);
-    await sleep(500);
-    await onClose();
   }, [
     tableName,
     connectionId,
@@ -148,87 +145,89 @@ export function ExportTableDialog({
         </DialogHeader>
         <DialogContent className="py-0">
           <div class="space-y-4">
-            <div>
-              <label class="mb-1 block text-sm font-medium text-neutral-600">
-                File name
-              </label>
-              <Input
-                value={exportOptions.fileName || tableName}
-                onValueChange={(value) => setFileName(value, tableName)}
-                placeholder={tableName}
-                className="rounded-md border border-neutral-300 px-2 py-[6.25px] font-mono text-sm"
-                disabled={exporting}
-              />
-              <p class="mt-1 text-xs text-neutral-500">Export as .{format}</p>
-            </div>
-
-            <div>
-              <div class="mb-1 flex items-center justify-between">
-                <label class="block text-sm font-medium text-neutral-600">
-                  Select fields to export
-                </label>
-                <Button
-                  variant="ghost"
-                  onClick={selectAllColumns}
-                  class="px-0 text-xs text-blue-600 hover:bg-transparent hover:underline"
-                  disabled={exporting}
-                >
-                  Select all ({columnNames.length})
-                </Button>
-              </div>
-              <Input
-                type="text"
-                value={columnSearch}
-                onValueChange={setColumnSearch}
-                disabled={exporting}
-                placeholder="Search columns..."
-                className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
-              />
-              <div class="max-h-40 overflow-y-auto rounded-md border border-neutral-300 bg-white py-1">
-                {filteredColumnNames.length > 0 ? (
-                  filteredColumnNames.map((name) => (
-                    <Checkbox
-                      key={name}
-                      checked={selectedColumns.includes(name)}
-                      onChange={() => handleSelectColumn(name)}
-                      label={name}
+            {!progress ? (
+              <>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-neutral-600">
+                    File name
+                  </label>
+                  <Input
+                    value={exportOptions.fileName || tableName}
+                    onValueChange={(value) => setFileName(value, tableName)}
+                    placeholder={tableName}
+                    className="rounded-md border border-neutral-300 px-2 py-[6.25px] font-mono text-sm"
+                    disabled={exporting}
+                  />
+                  <p class="mt-1 text-xs text-neutral-500">
+                    Export as .{format}
+                  </p>
+                </div>
+                <div>
+                  <div class="mb-1 flex items-center justify-between">
+                    <label class="block text-sm font-medium text-neutral-600">
+                      Select fields to export
+                    </label>
+                    <Button
+                      variant="ghost"
+                      onClick={selectAllColumns}
+                      class="px-0 text-xs text-blue-600 hover:bg-transparent hover:underline"
                       disabled={exporting}
-                    />
-                  ))
-                ) : (
-                  <div class="flex items-center justify-center p-2 text-sm text-neutral-500">
-                    No columns found. Try a different search.
+                    >
+                      Select all ({columnNames.length})
+                    </Button>
                   </div>
-                )}
-              </div>
-              <p class="mt-1 text-xs text-neutral-500">
-                {selectedColumns.length === columnNames.length
-                  ? "All fields selected"
-                  : `${selectedColumns.length} of ${columnNames.length} columns selected`}
-              </p>
-            </div>
-
-            <div>
-              <label class="mb-1 block text-sm font-medium text-neutral-600">
-                Select format
-              </label>
-              <Select
-                value={format || "csv"}
-                className="w-full"
-                onChange={(e) =>
-                  handleChangeFormat(e.currentTarget.value as ExportFormat)
-                }
-                disabled={exporting}
-              >
-                {["csv", "json", "sql"].map((name) => (
-                  <option value={name} disabled={exporting}>
-                    {name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-            {progress && (
+                  <Input
+                    type="text"
+                    value={columnSearch}
+                    onValueChange={setColumnSearch}
+                    disabled={exporting}
+                    placeholder="Search columns..."
+                    className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
+                  />
+                  <div class="max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 bg-white p-2">
+                    {filteredColumnNames.length > 0 ? (
+                      filteredColumnNames.map((name) => (
+                        <Checkbox
+                          key={name}
+                          checked={selectedColumns.includes(name)}
+                          onChange={() => handleSelectColumn(name)}
+                          label={name}
+                          disabled={exporting}
+                        />
+                      ))
+                    ) : (
+                      <div class="flex items-center justify-center p-2 text-sm text-neutral-500">
+                        No columns found. Try a different search.
+                      </div>
+                    )}
+                  </div>
+                  <p class="mt-1 text-xs text-neutral-500">
+                    {selectedColumns.length === columnNames.length
+                      ? "All fields selected"
+                      : `${selectedColumns.length} of ${columnNames.length} columns selected`}
+                  </p>
+                </div>
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-neutral-600">
+                    Select format
+                  </label>
+                  <Select
+                    value={format || "csv"}
+                    className="w-full"
+                    onChange={(e) =>
+                      handleChangeFormat(e.currentTarget.value as ExportFormat)
+                    }
+                    disabled={exporting}
+                  >
+                    {["csv", "json", "sql"].map((name) => (
+                      <option value={name} disabled={exporting}>
+                        {name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </>
+            ) : (
               <div class="rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-xs">
                 <div class="space-y-2">
                   <div class="flex items-center justify-between gap-2">
@@ -257,14 +256,16 @@ export function ExportTableDialog({
           <Button variant="outline" onClick={onClose} disabled={exporting}>
             Cancel
           </Button>
-          <Button
-            variant="default"
-            class="border border-blue-500"
-            onClick={onExport}
-            disabled={exporting || columnNames.length === 0}
-          >
-            {exporting ? "Exporting…" : "Export…"}
-          </Button>
+          {!progress && (
+            <Button
+              variant="default"
+              class="border border-blue-500"
+              onClick={onExport}
+              disabled={exporting || columnNames.length === 0}
+            >
+              {exporting ? "Exporting..." : "Export"}
+            </Button>
+          )}
         </DialogFooter>
       </Dialog>
 

@@ -32,9 +32,17 @@ export type ConnectionRuntime = {
   // new table
   newTableSaveRef: { current: (() => Promise<void>) | null };
 
-  /** When set by context menu, MainTableDataPane runs export/import/clone/truncate then clears */
-  pendingTableAction: "export" | "import" | "clone" | "truncate" | null;
-  setPendingTableAction: (action: "export" | "import" | "clone" | "truncate" | null) => void;
+  /** When set by context menu, MainTableDataPane runs export/import/clone/truncate/delete then clears */
+  pendingTableAction:
+    | "export"
+    | "import"
+    | "clone"
+    | "truncate"
+    | "drop"
+    | null;
+  setPendingTableAction: (
+    action: "export" | "import" | "clone" | "truncate" | "drop" | null
+  ) => void;
 };
 
 const Ctx = createContext<ConnectionRuntime | null>(null);

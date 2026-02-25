@@ -102,12 +102,6 @@ export function LeftNav({
             void actions.selectTable(tableMenu.table);
           },
         },
-        { type: "sep" },
-        {
-          type: "item",
-          label: "Pin to top",
-          onClick: () => {},
-        },
         {
           type: "item",
           label: "Copy name",
@@ -121,7 +115,7 @@ export function LeftNav({
         },
         {
           type: "item",
-          label: "Import data",
+          label: "Import data from CSV",
           onClick: () => actions.importTableData(tableMenu.table),
         },
         { type: "sep" },
@@ -137,8 +131,8 @@ export function LeftNav({
         },
         {
           type: "item",
-          label: "Delete...",
-          onClick: () => actions.importTableData(tableMenu.table),
+          label: "Drop...",
+          onClick: () => actions.dropTable(tableMenu.table),
         },
       ]
     : [];
