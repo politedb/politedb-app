@@ -159,7 +159,7 @@ export const TableCell = memo(function TableCell({
   setEditingCell,
   updateData,
 }: TableCellProps) {
-  const displayValue = cellToString(value);
+  const displayValue = cellToString(value) ?? "";
 
   // Switch to Edit Mode trigger
   const handleMouseDown = useCallback(

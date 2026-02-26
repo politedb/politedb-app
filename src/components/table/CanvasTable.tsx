@@ -519,7 +519,7 @@ export function CanvasTable({
 
       const row = getRowAt(rowIdx);
       const s = cellToString(row?.[colIdx] ?? null);
-      setEditorValue(s);
+      setEditorValue(s ?? "");
 
       const r2 = getRect(rowIdx, colIdx, left, top);
       if (r2) setEditorRect(r2);

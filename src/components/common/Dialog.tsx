@@ -3,12 +3,14 @@ import type { ComponentChildren } from "preact";
 import { X } from "../icons";
 import { cn } from "../../utils/cn";
 
+export type DialogSize = "xs" | "sm" | "md" | "lg" | "xl" | "full";
+
 interface DialogProps {
   open: boolean;
   onClose?: () => void;
   children: ComponentChildren;
   className?: string;
-  size?: "sm" | "md" | "lg" | "xl" | "full";
+  size?: DialogSize;
   showCloseButton?: boolean;
   closeOnOutsideClick?: boolean;
   closeOnEsc?: boolean;
@@ -30,6 +32,7 @@ interface DialogFooterProps {
 }
 
 const sizeClasses = {
+  xs: "max-w-xs",
   sm: "max-w-md",
   md: "max-w-lg",
   lg: "max-w-2xl",
@@ -112,7 +115,7 @@ export function DialogTitle({
   className?: string;
 }) {
   return (
-    <h2 class={cn("text-lg font-semibold text-neutral-900", className)}>
+    <h2 class={cn("text-base font-semibold text-neutral-900", className)}>
       {children}
     </h2>
   );

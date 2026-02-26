@@ -15,6 +15,17 @@ export type ConnectionActions = {
 
   pageChange(limit: number, offset: number): Promise<void>;
   selectTable(table: TableItem): Promise<void>;
+
+  /** Open table tab then trigger export data (used from table context menu) */
+  exportTableData(table: TableItem): void;
+  /** Open table tab then trigger import data (used from table context menu) */
+  importTableData(table: TableItem): void;
+  /** Open table tab then trigger clone table (used from table context menu) */
+  cloneTable(table: TableItem): void;
+  /** Open table tab then trigger truncate table (used from table context menu) */
+  truncateTable(table: TableItem): void;
+  /** Open table tab then trigger delete table (used from table context menu) */
+  dropTable(table: TableItem): void;
 };
 
 const Ctx = createContext<ConnectionActions | null>(null);

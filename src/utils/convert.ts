@@ -9,7 +9,10 @@ export type CellValue =
   | { t: "BytesB64"; v: string };
 
 // utils
-export function cellToString(cell: any): string {
+export function cellToString(
+  cell: any,
+  allowNull: boolean = false
+): string | null {
   if (cell == null) return "";
 
   if (
@@ -24,7 +27,7 @@ export function cellToString(cell: any): string {
     // { t: "Str", v: "public" }
     if ("v" in cell) return String((cell as any).v ?? "");
     // { t: "Null" }
-    if ((cell as any).t === "Null") return "";
+    if ((cell as any).t === "Null") return allowNull ? null : "";
   }
 
   return "";

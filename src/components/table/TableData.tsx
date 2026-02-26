@@ -170,7 +170,7 @@ export function TableData({
         newRows
       );
 
-      const prev = cellToString(patchedValue).trim();
+      const prev = (cellToString(patchedValue) ?? "").trim();
       const next = (newValue ?? "").trim();
 
       const isNewRow = patchHelpers.isNewRow(rowIdx);

@@ -13,12 +13,13 @@ import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
 import { ErrorState } from "./ErrorState";
 
-import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
+import { DATA_KEYS } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,18 @@ import {
   DialogTitle,
 } from "src/components/common/Dialog";
 import { useTableFilter } from "src/components/table/tableHooks";
+import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
+import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
+import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
+import { useImportTableData } from "src/hooks/useImportTableData";
+import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
+import { DropTableDialog } from "src/components/modal/DropTableDialog";
+import {
+  cloneTableQuery,
+  copyTableDataQuery,
+  truncateTableQuery,
+  dropTableQuery,
+} from "src/hooks/queries";
 
 /* =============================================================================
  * Patch helpers
@@ -35,6 +48,10 @@ type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
   Record<DataAction, Partial<Record<DataKey, Record<string, RowPatch>>>>
 >;
+type ActiveTableWindow = {
+  id: string;
+  table: { schema: string; name: string };
+};
 
 const EMPTY_META = {
   columns: null,
@@ -72,10 +89,7 @@ function extractDeleted(patches: WindowPatches | null, key: DataKey) {
  * ============================================================================= */
 
 export function MainTableDataPane(props: {
-  activeTableWindow: {
-    id: string;
-    table: { schema: string; name: string };
-  };
+  activeTableWindow: ActiveTableWindow;
 
   // pagination from outer layer (actions ctx)
   pageChange: (limit: number, offset: number) => void;
@@ -97,14 +111,29 @@ export function MainTableDataPane(props: {
   } = props;
 
   const rt = useConnectionRuntimeCtx();
+  const actions = useConnectionActionsCtx();
   const { profileId, engine, limit, offset } = rt;
 
   const { loadTableData } = useLoadTableData();
+  const {
+    dataPreview: dataImportPreview,
+    error: importError,
+    importing: importBusy,
+    importProgress: importProgressState,
+    runImport,
+    reset: resetImport,
+    loadDataImport,
+  } = useImportTableData();
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
   const [sqlPreview, setSqlPreview] = useState("");
   const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
+  const [dropDialogOpen, setDropDialogOpen] = useState(false);
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -292,34 +321,12 @@ export function MainTableDataPane(props: {
     [profileId, meta, activeTableWindow, activeKey]
   );
 
-  const { handleAddRow } = useTableDataOperations({ activeKey, onDataChange });
-
-  const handleDeleteRow = useCallback(
-    (rowIndex: number) => {
-      const rowKey = String(rowIndex);
-      const store = useConnectionStore.getState();
-      const windowPatches =
-        store.dataPatchMap[profileId]?.[activeTableWindow.id]?.patches ?? null;
-
-      // If this row is a new row (only in create patch), remove the create patch
-      // and the row from the store so we don't generate INSERT + DELETE SQL
-      if (windowPatches?.create?.data?.[rowKey]) {
-        store.removeDataPatch(
-          profileId,
-          activeTableWindow.id,
-          DATA_ACTIONS.create,
-          DATA_KEYS.data,
-          rowKey
-        );
-        const globalRowIndex = offset + rowIndex;
-        store.removeRow(activeKey, globalRowIndex);
-        return;
-      }
-
-      onDataChange(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
-    },
-    [onDataChange, profileId, activeTableWindow.id, activeKey, offset]
-  );
+  const { handleAddRow, handleDeleteRow } = useTableDataOperations({
+    activeKey,
+    profileId,
+    activeTableWindowId: activeTableWindow.id,
+    onDataChange,
+  });
 
   /* ===========================================================================
    * Render guards
@@ -350,10 +357,189 @@ export function MainTableDataPane(props: {
     return Math.max(basePageTotal, storeRows);
   }, [rowsInfo, basePageTotal]);
 
-  const totalRows = offset + pageTotal;
+  const totalRows = useMemo(() => {
+    if (typeof rowsInfo?.loadedMax !== "number" || rowsInfo.loadedMax < 0) {
+      return 0;
+    }
+
+    return typeof meta.rowCount === "number"
+      ? meta.rowCount
+      : offset + pageTotal;
+  }, [meta.rowCount, rowsInfo?.loadedMax, pageTotal, offset]);
 
   const getRowAt = (i: number) =>
     useConnectionStore.getState().getRowAt(activeKey, offset + i);
+
+  const reloadTableData = useCallback(
+    async (schema: string, name: string) => {
+      startedRef.current = null;
+
+      await loadTableData(
+        schema,
+        name,
+        { limit, offset },
+        {
+          force: true,
+          refreshRows: true,
+          refreshMeta: false,
+          refreshStats: false,
+        }
+      );
+    },
+    [limit, offset, loadTableData]
+  );
+
+  /* ===========================================================================
+   * Export / Import / Clone / Truncate / Drop
+   * =========================================================================== */
+
+  const onExportOpen = useCallback(() => {
+    setExportDialogOpen(true);
+  }, [setExportDialogOpen]);
+
+  const onImportOpen = useCallback(async () => {
+    const loaded = await loadDataImport();
+    if (!loaded) return;
+    setImportDialogOpen(true);
+  }, [loadDataImport, setImportDialogOpen]);
+
+  const onImportClose = useCallback(() => {
+    resetImport();
+    setImportDialogOpen(false);
+  }, [resetImport, setImportDialogOpen]);
+
+  const onCloneOpen = useCallback(() => setCloneDialogOpen(true), []);
+  const onCloneClose = useCallback(() => setCloneDialogOpen(false), []);
+
+  const onTruncateOpen = useCallback(() => setTruncateDialogOpen(true), []);
+  const onTruncateClose = useCallback(() => setTruncateDialogOpen(false), []);
+
+  const onDropOpen = useCallback(() => setDropDialogOpen(true), []);
+  const onDropClose = useCallback(() => setDropDialogOpen(false), []);
+
+  const handleTruncate = useCallback(
+    async (opts: { restartIdentity: boolean; cascade: boolean }) => {
+      if (!meta.connectionId) throw new Error("Not connected.");
+
+      const { schema, name } = activeTableWindow.table;
+      const sql = truncateTableQuery(schema, name, opts);
+      await rt.runSqlWithHistory({
+        windowId: activeTableWindow.id,
+        connectionId: meta.connectionId,
+        sql,
+      });
+      await reloadTableData(schema, name);
+    },
+    [
+      meta.connectionId,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      activeTableWindow.id,
+      rt.runSqlWithHistory,
+      reloadTableData,
+    ]
+  );
+
+  const handleDrop = useCallback(async () => {
+    if (!meta.connectionId) throw new Error("Not connected.");
+
+    const { schema, name } = activeTableWindow.table;
+    const sql = dropTableQuery(schema, name);
+    await rt.runSqlWithHistory({
+      windowId: activeTableWindow.id,
+      connectionId: meta.connectionId,
+      sql,
+    });
+    await rt.refreshSchemaAndTables();
+    await actions.closeWindow(activeTableWindow.id, new MouseEvent("click"));
+  }, [
+    meta.connectionId,
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name,
+    activeTableWindow.id,
+    rt.runSqlWithHistory,
+    rt.refreshSchemaAndTables,
+    actions.closeWindow,
+  ]);
+
+  const handleClone = useCallback(
+    async (newTableName: string, copyData: boolean) => {
+      if (!meta.connectionId) throw new Error("Not connected.");
+      const { schema, name } = activeTableWindow.table;
+      const createSql = cloneTableQuery(schema, name, newTableName);
+      await rt.runSqlWithHistory({
+        windowId: activeTableWindow.id,
+        connectionId: meta.connectionId,
+        sql: createSql,
+      });
+      if (copyData) {
+        const insertSql = copyTableDataQuery(schema, name, newTableName);
+        await rt.runSqlWithHistory({
+          windowId: activeTableWindow.id,
+          connectionId: meta.connectionId,
+          sql: insertSql,
+        });
+      }
+      await rt.refreshSchemaAndTables();
+    },
+    [
+      meta.connectionId,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      activeTableWindow.id,
+      rt.runSqlWithHistory,
+      rt.refreshSchemaAndTables,
+    ]
+  );
+
+  const handleImport = useCallback(
+    async (firstIsHeaders: boolean) => {
+      const { schema, name } = activeTableWindow.table;
+      runImport({
+        connectionId: meta.connectionId,
+        schema,
+        tableName: name,
+        columns: meta.columns ?? [],
+        limit,
+        offset,
+        firstIsHeaders,
+        onSuccess: async () => reloadTableData(schema, name),
+      });
+    },
+    [
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      meta.connectionId,
+      meta.columns,
+      limit,
+      offset,
+      reloadTableData,
+      runImport,
+    ]
+  );
+
+  // When user chose Export/Import/Clone/Truncate/Drop from table context menu in left nav
+  useEffect(() => {
+    if (!rt.pendingTableAction) return;
+    const action = rt.pendingTableAction;
+    const t = setTimeout(() => {
+      if (action === "export") onExportOpen();
+      else if (action === "import") onImportOpen();
+      else if (action === "clone") onCloneOpen();
+      else if (action === "truncate") onTruncateOpen();
+      else if (action === "drop") onDropOpen();
+      rt.setPendingTableAction(null);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [
+    rt.pendingTableAction,
+    rt.setPendingTableAction,
+    onExportOpen,
+    onImportOpen,
+    onCloneOpen,
+    onTruncateOpen,
+    onDropOpen,
+  ]);
 
   /* ===========================================================================
    * Render
@@ -404,6 +590,8 @@ export function MainTableDataPane(props: {
                 onFilterCombineChange={setFilterCombine}
                 onApply={handleApplyFilters}
                 onClear={handleClearFilters}
+                onExport={onExportOpen}
+                onImport={onImportOpen}
                 onShowSql={(sql) => {
                   setSqlPreview(sql);
                   setSqlDialogOpen(true);
@@ -420,7 +608,7 @@ export function MainTableDataPane(props: {
               onAddRow={() =>
                 handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
               }
-              onDeleteRow={handleDeleteRow}
+              onDeleteRow={(rowIndex) => handleDeleteRow(rowIndex, offset)}
               deletedRows={extractDeleted(patches, DATA_KEYS.data)}
               rowsVersion={rowsInfo?.version ?? 0}
             />
@@ -458,6 +646,62 @@ export function MainTableDataPane(props: {
           </div>
         </DialogContent>
       </Dialog>
+
+      {exportDialogOpen && (
+        <ExportTableDialog
+          open={exportDialogOpen}
+          handleClose={() => setExportDialogOpen(false)}
+          connectionId={meta.connectionId}
+          schema={activeTableWindow.table.schema}
+          tableName={activeTableWindow.table.name}
+          columns={meta.columns ?? []}
+          totalRows={totalRows}
+          appliedFilters={appliedFilters}
+          appliedFilterCombine={appliedFilterCombine}
+        />
+      )}
+
+      {importDialogOpen && (
+        <ImportTableDialog
+          open={importDialogOpen}
+          handleClose={onImportClose}
+          schema={activeTableWindow.table.schema}
+          tableName={activeTableWindow.table.name}
+          columns={meta.columns ?? []}
+          dataPreview={dataImportPreview}
+          error={importError}
+          importing={importBusy}
+          progress={importProgressState}
+          onImport={handleImport}
+        />
+      )}
+
+      {cloneDialogOpen && (
+        <CloneTableDialog
+          open={cloneDialogOpen}
+          onClose={onCloneClose}
+          sourceTableName={activeTableWindow.table.name}
+          onConfirm={handleClone}
+        />
+      )}
+
+      {truncateDialogOpen && (
+        <TruncateTableDialog
+          open={truncateDialogOpen}
+          onClose={onTruncateClose}
+          tableName={activeTableWindow.table.name}
+          onConfirm={handleTruncate}
+        />
+      )}
+
+      {dropDialogOpen && (
+        <DropTableDialog
+          open={dropDialogOpen}
+          onClose={onDropClose}
+          tableName={activeTableWindow.table.name}
+          onConfirm={handleDrop}
+        />
+      )}
     </div>
   );
 }

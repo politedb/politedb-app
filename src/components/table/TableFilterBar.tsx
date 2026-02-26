@@ -7,6 +7,7 @@ import type { TableFilterCondition } from "src/hooks/queries";
 import { tableDataQuery } from "src/hooks/queries";
 import { cn } from "src/utils/cn";
 import { Input } from "src/components/common/Input";
+import { Checkbox } from "src/components/common/Checkbox";
 
 const OPERATORS = [
   "=",
@@ -40,6 +41,7 @@ interface TableFilterBarProps {
   onApply: (filters: TableFilterCondition[], combine: "AND" | "OR") => void;
   onClear: () => void;
   onExport?: () => void;
+  onImport?: () => void;
   onShowSql?: (sql: string) => void;
 }
 
@@ -134,18 +136,14 @@ export function TableFilterBar({
       <div class="flex flex-col gap-2">
         {filters.map((row, index) => (
           <div key={index} class="flex items-center gap-2">
-            <label class="flex cursor-pointer items-center">
-              <input
-                type="checkbox"
-                checked={row.enabled}
-                onChange={(e) =>
-                  updateRow(index, {
-                    enabled: (e.target as HTMLInputElement).checked,
-                  })
-                }
-                class="h-4 w-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-              />
-            </label>
+            <Checkbox
+              checked={row.enabled}
+              onChange={(e) =>
+                updateRow(index, {
+                  enabled: (e.target as HTMLInputElement).checked,
+                })
+              }
+            />
             <Select
               value={row.column}
               onChange={(e) =>
@@ -236,7 +234,7 @@ export function TableFilterBar({
           {onExport && (
             <Button
               variant="shadow"
-              className="px-3 py-1.5 text-xs"
+              className="px-3 text-xs"
               onClick={onExport}
             >
               Export

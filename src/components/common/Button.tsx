@@ -33,7 +33,7 @@ const variantStyles: Record<ButtonVariant, string> = {
 };
 
 const activeStyles: Record<ButtonVariant, string> = {
-  default: "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700",
+  default: "bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-600/90",
   shadow: "border border-neutral-200 shadow-md",
   primary: "bg-neutral-700 hover:bg-neutral-700 text-white",
   outline:

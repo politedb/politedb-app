@@ -32,6 +32,9 @@ export const CMD = {
   persistentLoad: "persistent_load",
   persistentSave: "persistent_save",
   persistentClear: "persistent_clear",
+
+  // Export (streaming append for large table export)
+  exportAppendToFile: "export_append_to_file",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];
