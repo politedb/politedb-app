@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import {
   DataAction,
   DataKey,
@@ -17,12 +17,15 @@ import { Input } from "src/components/common/Input";
 import { TagSelect } from "src/components/common/TagSelect";
 import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
+import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
 
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
   profileId: string;
   activeTableMeta: TableMetaState;
   activeTableWindow: TableWindow;
+  structPaneTab: StructPaneTab;
+  setStructPaneTab: (tab: StructPaneTab) => void;
   tableStructure: TableStructureType[];
   tableConstraints: TableConstraintType[];
   deletedStructureRows: Set<number>;
@@ -43,20 +46,18 @@ export function TableStructurePane(props: {
     profileId,
     activeTableMeta,
     activeTableWindow,
+    structPaneTab,
     tableStructure,
     tableConstraints,
     deletedStructureRows,
     deletedConstraintRows,
+    setStructPaneTab,
     onDataChange,
     onAddNewColumn,
     onDeleteColumn,
     onAddIndex,
     onDeleteIndex,
   } = props;
-
-  const [activeTab, setActiveTab] = useState<"columns" | "constraints">(
-    "columns"
-  );
 
   const {
     tableName,
@@ -120,22 +121,19 @@ export function TableStructurePane(props: {
               disabled={activeTableMeta.busy}
             />
           </div>
-          <div class="flex items-center gap-2">
-            <label class="text-xs font-semibold text-neutral-700">
-              Primary
-            </label>
-            <TagSelect
-              values={primaryKey}
-              onChange={togglePrimaryKey}
-              options={columnNames}
-            />
-          </div>
+          <TagSelect
+            className="w-full"
+            label="Primary"
+            values={primaryKey}
+            onChange={togglePrimaryKey}
+            options={columnNames}
+          />
         </div>
       </div>
 
       <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
+        value={structPaneTab}
+        onValueChange={setStructPaneTab}
         tabs={[
           {
             value: "columns",
@@ -165,6 +163,7 @@ export function TableStructurePane(props: {
                 activeProfileScreen={profileId}
                 activeTableWindowId={activeTableWindow.id}
                 initData={activeTableMeta.constraints}
+                columnNames={columnNames}
                 editedData={tableConstraints}
                 busy={activeTableMeta.busy}
                 error={activeTableMeta.error}

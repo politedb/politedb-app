@@ -4,7 +4,7 @@ import {
   Table,
   type TableColumn as CommonTableColumn,
 } from "src/components/common/Table";
-import { Input } from "src/components/common/Input";
+import { Input, InputOption } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
@@ -23,6 +23,7 @@ const COLUMNS_NAME: (keyof TableConstraint)[] = [
 
 interface Props {
   initData: TableConstraint[] | null;
+  columnNames: string[];
   activeProfileScreen: string;
   activeTableWindowId: string;
   busy: boolean;
@@ -42,6 +43,7 @@ interface Props {
 
 export function TableConstraints({
   initData,
+  columnNames,
   activeProfileScreen,
   activeTableWindowId,
   busy,
@@ -90,6 +92,25 @@ export function TableConstraints({
     return initData ?? [];
   }, [editedData, initData, error]);
 
+  const columnInputOptions = useMemo(
+    () =>
+      ({
+        index_algorithm: INDEX_ALGORITHMS[engine].map((type) => ({
+          label: type,
+          value: type,
+        })),
+        is_unique: [
+          { label: "TRUE", value: "true" },
+          { label: "FALSE", value: "false" },
+        ],
+        column_name: columnNames.map((name) => ({
+          label: name,
+          value: name,
+        })),
+      }) as Record<keyof TableConstraint, InputOption[]>,
+    [engine]
+  );
+
   const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(
     () => [
       ...COLUMNS_NAME.map((name) => ({
@@ -98,36 +119,33 @@ export function TableConstraints({
         className: "px-0",
         render: (_value: any, row: any, index: number) => {
           const initValue = initData?.[index]?.[name] ?? "";
-          const fieldValue = row[name];
+          const fieldValue = row[name] ?? "";
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRowIndex === index;
+          const showSelect = Object.keys(columnInputOptions).includes(name);
+          const columnOptions = columnInputOptions[name];
 
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! rounded-none text-sm",
+                "h-8 cursor-default! rounded-none text-sm text-ellipsis focus:bg-white!",
                 initValue !== fieldValue && "bg-amber-200",
-                isEmptyRow
-                  ? "focus:bg-transparent focus:outline-none"
-                  : "focus:bg-white!",
+                isEmptyRow && "focus:bg-transparent focus:outline-none",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
-              showSelect={!isEmptyRow && name === "index_algorithm"}
-              options={INDEX_ALGORITHMS[engine].map((type) => ({
-                label: type,
-                value: type,
-              }))}
+              showSelect={!isEmptyRow && showSelect}
+              options={columnOptions}
               onValueChange={
-                name === "index_algorithm"
+                showSelect
                   ? (value) => handleDataChange(index, name, value)
                   : undefined
               }
-              value={String(fieldValue ?? "")}
+              value={String(fieldValue)}
               placeholder={placeholder}
               onInput={
-                name !== "index_algorithm"
+                !showSelect
                   ? (e) => handleDataChange(index, name, e.currentTarget.value)
                   : undefined
               }

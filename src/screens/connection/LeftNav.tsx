@@ -232,9 +232,8 @@ export function LeftNav({
                           "overflow-hidden text-ellipsis select-none",
                           "transition-none",
                           !isActive && "hover:bg-neutral-200/60",
-                          hasChanges
-                            ? "bg-amber-100 text-neutral-600 hover:bg-amber-100/80"
-                            : ""
+                          hasChanges &&
+                            "bg-amber-200 text-neutral-600 hover:bg-amber-200/80"
                         )}
                         title={key}
                       >

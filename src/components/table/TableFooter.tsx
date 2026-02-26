@@ -3,6 +3,7 @@ import { Button } from "src/components/common/Button";
 import { ChevronLeft, ChevronRight, Plus } from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 import { Select } from "src/components/common/Select";
+import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
 
 interface Props {
   limit: number;
@@ -14,6 +15,7 @@ interface Props {
   // ✅ rows stream progress (global row index max loaded so far)
   loadedMax?: number;
 
+  structPaneTab: StructPaneTab;
   viewMode: TableViewMode;
   onViewModeChange: (mode: TableViewMode) => void;
   onPageChange: (limit: number, offset: number) => void;
@@ -29,6 +31,7 @@ export function TableFooter({
   totalRows,
   loadedMax,
   viewMode,
+  structPaneTab,
   onViewModeChange,
   onPageChange,
   onAddColumn,
@@ -96,14 +99,17 @@ export function TableFooter({
 
         {viewMode === "structure" && (
           <>
-            <Button variant="shadow" className="px-2" onClick={onAddIndex}>
-              <Plus className="size-3.5" />
-              Index
-            </Button>
-            <Button variant="shadow" className="px-2" onClick={onAddColumn}>
-              <Plus className="size-3.5" />
-              Column
-            </Button>
+            {structPaneTab === "columns" ? (
+              <Button variant="shadow" className="px-2" onClick={onAddColumn}>
+                <Plus className="size-3.5" />
+                Column
+              </Button>
+            ) : (
+              <Button variant="shadow" className="px-2" onClick={onAddIndex}>
+                <Plus className="size-3.5" />
+                Index
+              </Button>
+            )}
           </>
         )}
 

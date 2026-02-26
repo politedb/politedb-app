@@ -43,6 +43,26 @@ type Props = {
 // Utils
 // ============================================================================
 
+/** Truncate text with ellipsis to fit within maxWidth when drawn with ctx. */
+function ellipsize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string {
+  if (maxWidth <= 0) return "";
+  const full = ctx.measureText(text).width;
+  if (full <= maxWidth) return text;
+  const ellipsis = "...";
+  const ellipsisWidth = ctx.measureText(ellipsis).width;
+  const usable = maxWidth - ellipsisWidth;
+  if (usable <= 0) return ellipsis;
+  for (let i = text.length; i >= 0; i--) {
+    const part = text.slice(0, i);
+    if (ctx.measureText(part).width <= usable) return part + ellipsis;
+  }
+  return ellipsis;
+}
+
 function sumWidths(
   cols: ColumnMeta[],
   widthByName: Record<string, number>,
@@ -338,8 +358,11 @@ export function CanvasTable({
           ctx.rect(x + 8, y, w - 16, ROW_HEIGHT);
           ctx.clip();
 
+          const maxTextWidth = Math.max(0, w - 16);
+          const displayText = ellipsize(ctx, s, maxTextWidth);
+
           ctx.fillStyle = s === "NULL" ? "#9ca3af" : "#111827";
-          ctx.fillText(s, x + 8, y + ROW_HEIGHT / 2);
+          ctx.fillText(displayText, x + 8, y + ROW_HEIGHT / 2);
 
           ctx.restore();
         }

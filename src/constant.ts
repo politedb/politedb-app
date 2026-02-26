@@ -140,7 +140,7 @@ export const DATA_TYPES: Record<DatabaseEngine, readonly string[]> = {
 };
 
 export const INDEX_ALGORITHMS: Record<DatabaseEngine, readonly string[]> = {
-  postgres: ["BTREE", "HASH", "GIN", "GIST"],
+  postgres: ["BTREE", "HASH", "GIN", "GIST", "BRIN"],
   mysql: ["BTREE", "HASH", "RTREE"],
   sqlite: [],
   redis: [],

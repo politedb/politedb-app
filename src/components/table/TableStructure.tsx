@@ -4,7 +4,7 @@ import {
   Table,
   type TableColumn as CommonTableColumn,
 } from "src/components/common/Table";
-import { Input } from "src/components/common/Input";
+import { Input, InputOption } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { DATA_TYPES } from "src/constant";
@@ -87,6 +87,20 @@ export function TableStructure({
     return initData ?? [];
   }, [editedData, initData, error]);
 
+  const columnInputOptions = useMemo(
+    () => ({
+      data_type: DATA_TYPES[engine].map((type) => ({
+        label: type,
+        value: type,
+      })),
+      is_nullable: [
+        { label: "TRUE", value: "true" },
+        { label: "FALSE", value: "false" },
+      ],
+    }),
+    [engine]
+  ) as Record<keyof TableStructure, InputOption[]>;
+
   const tableColumns = useMemo<
     CommonTableColumn<TableStructure & { _rowNumber?: number }>[]
   >(
@@ -109,36 +123,33 @@ export function TableStructure({
         className: "px-0",
         render: (_value: any, row: any, index: number) => {
           const initValue = initData?.[index]?.[name] ?? "";
-          const fieldValue = row[name];
+          const fieldValue = row[name] ?? "";
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRowIndex === index;
+          const showSelect = Object.keys(columnInputOptions).includes(name);
+          const columnOptions = columnInputOptions[name];
 
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! rounded-none text-sm",
+                "h-8 cursor-default! rounded-none text-sm text-ellipsis focus:bg-white!",
                 initValue !== fieldValue && "bg-amber-100",
-                isEmptyRow
-                  ? "focus:bg-transparent focus:outline-none"
-                  : "focus:bg-white!",
+                isEmptyRow && "focus:bg-transparent focus:outline-none",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
-              showSelect={!isEmptyRow && name === "data_type"}
-              options={DATA_TYPES[engine].map((type) => ({
-                label: type,
-                value: type,
-              }))}
+              showSelect={!isEmptyRow && showSelect}
+              options={columnOptions}
               onValueChange={
-                name === "data_type"
+                showSelect
                   ? (value) => handleDataChange(index, name, value)
                   : undefined
               }
-              value={String(fieldValue ?? "")}
+              value={String(fieldValue)}
               placeholder={placeholder}
               onInput={
-                name !== "data_type"
+                !showSelect
                   ? (e) => handleDataChange(index, name, e.currentTarget.value)
                   : undefined
               }

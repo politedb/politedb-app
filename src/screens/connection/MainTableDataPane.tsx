@@ -44,6 +44,8 @@ import {
  * Patch helpers
  * ============================================================================= */
 
+export type StructPaneTab = "columns" | "constraints";
+
 type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
   Record<DataAction, Partial<Record<DataKey, Record<string, RowPatch>>>>
@@ -112,6 +114,7 @@ export function MainTableDataPane(props: {
 
   const rt = useConnectionRuntimeCtx();
   const actions = useConnectionActionsCtx();
+  const s = useConnectionStore.getState();
   const { profileId, engine, limit, offset } = rt;
 
   const { loadTableData } = useLoadTableData();
@@ -126,6 +129,7 @@ export function MainTableDataPane(props: {
   } = useImportTableData();
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
+  const [structPaneTab, setStructPaneTab] = useState<StructPaneTab>("columns");
   const [, forceUpdate] = useState(0);
   const [sqlPreview, setSqlPreview] = useState("");
   const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
@@ -554,15 +558,14 @@ export function MainTableDataPane(props: {
             profileId={profileId}
             activeTableWindow={activeTableWindow as any}
             activeTableMeta={meta}
+            structPaneTab={structPaneTab}
+            setStructPaneTab={setStructPaneTab}
             tableStructure={
-              useConnectionStore.getState().tableStructure[profileId]?.[
-                activeTableWindow.id
-              ] ?? EMPTY_ARRAY
+              s.tableStructure[profileId]?.[activeTableWindow.id] ?? EMPTY_ARRAY
             }
             tableConstraints={
-              useConnectionStore.getState().tableConstraints[profileId]?.[
-                activeTableWindow.id
-              ] ?? EMPTY_ARRAY
+              s.tableConstraints[profileId]?.[activeTableWindow.id] ??
+              EMPTY_ARRAY
             }
             onDataChange={onDataChange}
             onAddNewColumn={onAddColumn}
@@ -619,6 +622,7 @@ export function MainTableDataPane(props: {
       <TableFooter
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        structPaneTab={structPaneTab}
         limit={limit}
         offset={offset}
         loadedMax={loadedMax}
