@@ -1,13 +1,18 @@
 import { useMemo, useRef, useCallback, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
+import { useIndexedSort, type SortState } from "src/hooks/useIndexedSort";
+import { ArrowDown, ArrowUp } from "src/components/icons";
 
 export interface TableColumn<T = any> {
   key: string;
-  label: string;
+  label: string | ComponentChildren;
   className?: string;
   headerClassName?: string;
   render?: (value: any, row: T, index: number) => any;
+  sortable?: boolean;
+  sortKey?: keyof T;
 }
 
 interface TableProps<T = any> {
@@ -25,6 +30,7 @@ interface TableProps<T = any> {
   selectedRow?: number | null;
   onSelectRow?: (row: T, index: number) => void;
   onDoubleClickRow?: (row: T, index: number) => void;
+  enableSort?: boolean;
 }
 
 const TABLE_STYLE = { minHeight: "100%", tableLayout: "auto" } as const;
@@ -44,6 +50,7 @@ export function Table<T = any>({
   selectedRow,
   onSelectRow,
   onDoubleClickRow,
+  enableSort = true,
 }: TableProps<T>) {
   const [colWidths, setColWidths] = useState<(number | undefined)[]>(() =>
     columns.map(() => undefined)
@@ -62,6 +69,22 @@ export function Table<T = any>({
     estimatedRowHeight,
     fillViewport,
   });
+
+  const initialSortableColumn = useMemo<keyof T | undefined>(
+    () =>
+      columns.find((column) => column.sortable)?.sortKey as keyof T | undefined,
+    [columns]
+  );
+
+  const { sortState, sortedRows, indexMap, toggleSort, findDisplayIndex } =
+    useIndexedSort<T, keyof T>(data, {
+      initialKey: initialSortableColumn,
+    } as {
+      initialKey?: keyof T;
+      initialDirection?: SortState<keyof T>["direction"];
+    });
+
+  const displayRows = sortedRows;
 
   const handleResizeMove = useCallback(
     (e: MouseEvent) => {
@@ -216,7 +239,29 @@ export function Table<T = any>({
                   col.headerClassName
                 )}
               >
-                {col.label}
+                {col.sortable ? (
+                  <button
+                    class="flex w-full items-center justify-between gap-1 select-none"
+                    onClick={() => {
+                      if (!enableSort) return;
+                      const sortKey =
+                        (col.sortKey as keyof T | undefined) ??
+                        (col.key as keyof T);
+                      toggleSort(sortKey);
+                    }}
+                  >
+                    <span class="truncate">{col.label}</span>
+                    {enableSort &&
+                      sortState.key === (col.sortKey ?? (col.key as keyof T)) &&
+                      (sortState.direction === "asc" ? (
+                        <ArrowUp className="size-3" />
+                      ) : (
+                        <ArrowDown className="size-3" />
+                      ))}
+                  </button>
+                ) : (
+                  col.label
+                )}
                 <div
                   class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
                   onMouseDown={(e) => handleResizeStart(e, colIndex)}
@@ -227,18 +272,26 @@ export function Table<T = any>({
         </thead>
 
         <tbody>
-          {data.map((row, index) => {
-            const isSelected = selectedRow === index;
+          {displayRows.map((row, displayIndex) => {
+            const originalIndex = indexMap[displayIndex] ?? displayIndex;
+            const isSelected =
+              selectedRow != null
+                ? findDisplayIndex(selectedRow) === displayIndex
+                : false;
             const isNewRow = (row as any).isNew;
             const dynamicClassName =
               typeof rowClassName === "function"
-                ? rowClassName(row, index)
+                ? rowClassName(row, originalIndex)
                 : rowClassName;
 
             return (
               <tr
-                key={keyExtractor ? keyExtractor(row, index) : index}
-                data-row={index}
+                key={
+                  keyExtractor
+                    ? keyExtractor(row, originalIndex)
+                    : originalIndex
+                }
+                data-row={originalIndex}
                 class={cn(
                   isNewRow && "bg-green-200!",
                   isSelected && "bg-blue-200!",
@@ -255,7 +308,7 @@ export function Table<T = any>({
                     )}
                   >
                     {col.render
-                      ? col.render((row as any)[col.key], row, index)
+                      ? col.render((row as any)[col.key], row, originalIndex)
                       : (row as any)[col.key]}
                   </td>
                 ))}

@@ -121,6 +121,8 @@ export function TableConstraints({
       ...COLUMNS_NAME.map((name) => ({
         key: name,
         label: name,
+        sortable: true,
+        sortKey: name,
         className: "px-0",
         render: (_value: any, row: any, index: number) => {
           const initValue = initData?.[index]?.[name] ?? "";
@@ -186,6 +188,7 @@ export function TableConstraints({
       selectedColIndex,
       handleDataChange,
       onDeleteRecord,
+      initData,
     ]
   );
 

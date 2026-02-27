@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "preact/hooks";
-import { Input } from "src/components/common/Input";
+import { Input, InputOption } from "src/components/common/Input";
 import { Button } from "src/components/common/Button";
 import { Table } from "src/components/common/Table";
 import { Plus } from "src/components/icons";
@@ -87,8 +87,18 @@ export function NewTablePane({
     }
   }, [tableState.handleSave, onSaveRef]);
 
-  const dataTypes = useMemo(
-    () => DATA_TYPES[engine].map((type) => ({ label: type, value: type })),
+  const columnOptions = useMemo(
+    () =>
+      ({
+        data_type: DATA_TYPES[engine].map((type) => ({
+          label: type,
+          value: type,
+        })),
+        is_nullable: [
+          { label: "YES", value: "YES" },
+          { label: "NO", value: "NO" },
+        ],
+      }) as Record<keyof TableColumn, InputOption[]>,
     [engine]
   );
 
@@ -102,6 +112,7 @@ export function NewTablePane({
           const isEmptyRow = index + 1 > tableState.columns.length;
           const isRowSelected = selectedRowIndex === index;
           const placeholder = isEmptyRow ? "" : "NULL";
+          const showSelect = Object.keys(columnOptions).includes(colKey);
 
           return (
             <Input
@@ -112,12 +123,24 @@ export function NewTablePane({
                   : "bg-green-100! focus:bg-white!",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
-              showSelect={!isEmptyRow && colKey === "data_type"}
-              options={dataTypes}
+              showSelect={!isEmptyRow && showSelect}
+              options={columnOptions[colKey]}
               value={row[colKey]}
               placeholder={placeholder}
-              onInput={(e) =>
-                tableState.updateColumn(index, colKey, e.currentTarget.value)
+              onValueChange={
+                !isEmptyRow && showSelect
+                  ? (value) => tableState.updateColumn(index, colKey, value)
+                  : undefined
+              }
+              onInput={
+                !showSelect
+                  ? (e) =>
+                      tableState.updateColumn(
+                        index,
+                        colKey,
+                        e.currentTarget.value
+                      )
+                  : undefined
               }
               onMouseDown={(e) => {
                 // Prevent input focus if row is not selected yet
@@ -144,7 +167,7 @@ export function NewTablePane({
       tableState.columns.length,
       selectedRowIndex,
       busy,
-      dataTypes,
+      columnOptions,
       tableState.updateColumn,
     ]
   );

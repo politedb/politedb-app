@@ -92,6 +92,18 @@ export function TableStructure({
     return initData ?? [];
   }, [editedData, initData, error]);
 
+  const tableDataWithRowNumber = useMemo(
+    () =>
+      tableData.map(
+        (row, index) =>
+          ({
+            ...row,
+            _rowNumber: index + 1,
+          }) as TableStructure & { _rowNumber?: number }
+      ),
+    [tableData]
+  );
+
   const columnInputOptions = useMemo(
     () => ({
       data_type: DATA_TYPES[engine].map((type) => ({
@@ -113,11 +125,15 @@ export function TableStructure({
       {
         key: "_rowNumber",
         label: "#",
+        sortable: true,
+        sortKey: "_rowNumber",
         className: "min-w-12! text-center",
         headerClassName: "min-w-12! text-center",
-        render: (_value: any, _row: any, index: number) =>
+        render: (_value: any, row: any, index: number) =>
           index + 1 <= editedData.length ? (
-            <span class="text-sm text-neutral-500">{index + 1}</span>
+            <span class="text-sm text-neutral-500">
+              {row._rowNumber ?? index + 1}
+            </span>
           ) : (
             <></>
           ),
@@ -125,6 +141,8 @@ export function TableStructure({
       ...COLUMNS_NAME.map((name) => ({
         key: name,
         label: name,
+        sortable: true,
+        sortKey: name,
         className: "px-0",
         render: (_value: any, row: any, index: number) => {
           const initValue = initData?.[index]?.[name] ?? "";
@@ -192,6 +210,7 @@ export function TableStructure({
       selectedColIndex,
       handleDataChange,
       onDeleteRecord,
+      initData,
     ]
   );
 
@@ -212,7 +231,7 @@ export function TableStructure({
     >
       <Table
         columns={tableColumns}
-        data={tableData}
+        data={tableDataWithRowNumber}
         stickyHeader
         fillViewport
         showEmptyMessage={false}
