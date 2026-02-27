@@ -11,6 +11,8 @@ import type {
 } from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 import { PatchMap } from "src/utils/generateSql";
+import { cellToString } from "src/utils/convert";
+import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 
 /* =============================================================================
  * Row cache (max gain)
@@ -573,37 +575,142 @@ export const useConnectionStore = create<ConnectionState>()(
         const { dataKey, action, tableData, tableWindow, rowKey, data } = props;
         const tableWindowId = tableWindow.id;
 
-        set((s) => ({
-          dataPatchMap: {
-            ...s.dataPatchMap,
-            [tabId]: {
-              ...(s.dataPatchMap[tabId] ?? {}),
-              [tableWindowId]: {
-                tableData,
-                tableWindow,
-                patches: {
-                  ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches ?? {}),
-                  [action]: {
-                    ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[
-                      action
-                    ] ?? {}),
-                    [dataKey]: {
-                      ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[
-                        action
-                      ]?.[dataKey] ?? {}),
-                      [rowKey]: {
-                        ...(s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[
-                          action
-                        ]?.[dataKey]?.[rowKey] ?? {}),
-                        ...data,
+        set((s) => {
+          const existingRowPatch =
+            s.dataPatchMap[tabId]?.[tableWindowId]?.patches?.[action]?.[
+              dataKey
+            ]?.[rowKey];
+
+          let dataToWrite: Record<string, any> = {
+            ...(existingRowPatch ?? {}),
+            ...data,
+          };
+
+          // If changed value equals original, remove that key from the patch
+          if (action === DATA_ACTIONS.update) {
+            const tableKey = `${tabId}.${tableWindow.table.schema}.${tableWindow.table.name}`;
+            let original: Record<string, any> | undefined;
+
+            if (dataKey === DATA_KEYS.data) {
+              const rowIndex = parseInt(rowKey, 10);
+              if (!isNaN(rowIndex) && rowIndex >= 0) {
+                const cache = s.tableRowCacheByKey[tableKey];
+                const originalRow = cacheGet(cache, rowIndex) as
+                  | unknown[]
+                  | undefined;
+                const columns = tableData.columns ?? [];
+                if (
+                  originalRow &&
+                  Array.isArray(originalRow) &&
+                  columns.length
+                ) {
+                  original = {};
+                  for (let i = 0; i < columns.length; i++) {
+                    const col = columns[i];
+                    if (col?.name) original[col.name] = originalRow[i];
+                  }
+                }
+              }
+            } else if (dataKey === DATA_KEYS.structure) {
+              const rowIndex = parseInt(rowKey, 10);
+              if (!isNaN(rowIndex) && rowIndex >= 0) {
+                const meta = s.tableDataMap[tableKey];
+                const structure = meta?.structure;
+                original = structure?.[rowIndex] as
+                  | Record<string, any>
+                  | undefined;
+              }
+            } else if (dataKey === DATA_KEYS.constraints) {
+              const rowIndex = parseInt(rowKey, 10);
+              if (!isNaN(rowIndex) && rowIndex >= 0) {
+                const meta = s.tableDataMap[tableKey];
+                const constraints = meta?.constraints;
+                original = constraints?.[rowIndex] as
+                  | Record<string, any>
+                  | undefined;
+              }
+            }
+
+            if (original) {
+              const cleaned: Record<string, any> = {};
+              for (const [key, value] of Object.entries(dataToWrite)) {
+                if (key === "__rowKey") {
+                  cleaned[key] = value;
+                  continue;
+                }
+                const origVal = original[key];
+                const patchStr = cellToString(value);
+                const origStr = cellToString(origVal);
+                if (patchStr !== origStr) cleaned[key] = value;
+              }
+              dataToWrite = cleaned;
+            }
+          }
+
+          const windowData = s.dataPatchMap[tabId]?.[tableWindowId];
+          const patches = windowData?.patches ?? {};
+          const actionPatches = patches[action] ?? {};
+          const dataKeyPatches = actionPatches[dataKey] ?? {};
+
+          // If no keys left to write, remove this row from the patch.
+          // NOTE: For `delete` actions we still need an entry (the key itself
+          // is the information), so we only prune empty data for non-delete
+          // actions (primarily `update`).
+          if (
+            action !== DATA_ACTIONS.delete &&
+            Object.keys(dataToWrite).length === 0
+          ) {
+            if (!windowData?.patches?.[action]?.[dataKey]?.[rowKey]) return s;
+            const nextPatches = { ...patches };
+            const nextAction = { ...actionPatches };
+            const nextDataKey = { ...dataKeyPatches };
+            delete nextDataKey[rowKey];
+            if (Object.keys(nextDataKey).length === 0) {
+              delete nextAction[dataKey];
+              if (Object.keys(nextAction).length === 0)
+                delete nextPatches[action];
+              else nextPatches[action] = nextAction;
+            } else
+              nextPatches[action] = { ...nextAction, [dataKey]: nextDataKey };
+            const cleanedPatches =
+              Object.keys(nextPatches).length > 0 ? nextPatches : {};
+            return {
+              dataPatchMap: {
+                ...s.dataPatchMap,
+                [tabId]: {
+                  ...(s.dataPatchMap[tabId] ?? {}),
+                  [tableWindowId]: {
+                    ...windowData!,
+                    patches: cleanedPatches,
+                  },
+                },
+              },
+            };
+          }
+
+          return {
+            dataPatchMap: {
+              ...s.dataPatchMap,
+              [tabId]: {
+                ...(s.dataPatchMap[tabId] ?? {}),
+                [tableWindowId]: {
+                  tableData,
+                  tableWindow,
+                  patches: {
+                    ...patches,
+                    [action]: {
+                      ...actionPatches,
+                      [dataKey]: {
+                        ...dataKeyPatches,
+                        [rowKey]: dataToWrite,
                       },
                     },
                   },
                 },
               },
             },
-          },
-        }));
+          };
+        });
       },
 
       removeDataPatch: (tabId, tableWindowId, action, dataKey, rowKey) =>

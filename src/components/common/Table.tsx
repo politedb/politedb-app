@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback } from "preact/hooks";
+import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 
@@ -45,6 +45,15 @@ export function Table<T = any>({
   onSelectRow,
   onDoubleClickRow,
 }: TableProps<T>) {
+  const [colWidths, setColWidths] = useState<(number | undefined)[]>(() =>
+    columns.map(() => undefined)
+  );
+
+  const resizingRef = useRef<{
+    colIndex: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
   const tableRef = useRef<HTMLTableElement>(null);
 
   const { emptyRowsCount, containerRef } = useFillViewportTable({
@@ -53,6 +62,54 @@ export function Table<T = any>({
     estimatedRowHeight,
     fillViewport,
   });
+
+  const handleResizeMove = useCallback(
+    (e: MouseEvent) => {
+      const info = resizingRef.current;
+      if (!info) return;
+
+      const delta = e.clientX - info.startX;
+      const nextWidth = Math.max(50, info.startWidth + delta);
+
+      setColWidths((prev) => {
+        const arr =
+          prev && prev.length === columns.length
+            ? [...prev]
+            : columns.map(() => undefined);
+        arr[info.colIndex] = nextWidth;
+        return arr;
+      });
+    },
+    [columns]
+  );
+
+  const handleResizeEnd = useCallback(() => {
+    if (!resizingRef.current) return;
+    resizingRef.current = null;
+    window.removeEventListener("mousemove", handleResizeMove);
+    window.removeEventListener("mouseup", handleResizeEnd);
+  }, [handleResizeMove]);
+
+  const handleResizeStart = useCallback(
+    (e: MouseEvent, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = e.currentTarget as HTMLElement;
+      const th = target.closest("th") as HTMLTableCellElement | null;
+      const startWidth = th?.offsetWidth ?? 0;
+
+      resizingRef.current = {
+        colIndex,
+        startX: e.clientX,
+        startWidth,
+      };
+
+      window.addEventListener("mousemove", handleResizeMove);
+      window.addEventListener("mouseup", handleResizeEnd);
+    },
+    [handleResizeMove, handleResizeEnd]
+  );
 
   // Empty row template
   const emptyRow = useMemo(() => {
@@ -132,13 +189,26 @@ export function Table<T = any>({
         )}
         style={TABLE_STYLE}
       >
+        <colgroup>
+          {columns.map((_col, colIndex) => (
+            <col
+              key={_col.key}
+              style={
+                colWidths[colIndex]
+                  ? { width: `${colWidths[colIndex]}px` }
+                  : undefined
+              }
+            />
+          ))}
+        </colgroup>
+
         <thead class={cn("bg-neutral-50", headerClassName)}>
           <tr>
             {columns.map((col, colIndex) => (
               <th
                 key={col.key}
                 class={cn(
-                  "border-r border-b border-neutral-200",
+                  "relative border-r border-b border-neutral-200",
                   colIndex === 0 && "border-l",
                   "p-2 text-left text-xs font-semibold text-neutral-700",
                   stickyHeader &&
@@ -147,6 +217,10 @@ export function Table<T = any>({
                 )}
               >
                 {col.label}
+                <div
+                  class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
+                  onMouseDown={(e) => handleResizeStart(e, colIndex)}
+                />
               </th>
             ))}
           </tr>

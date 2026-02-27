@@ -70,7 +70,12 @@ export function TableConstraints({
   );
 
   // Use row selection hook
-  const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
+  const {
+    selectedRowIndex,
+    handleRowSelect,
+    selectedColIndex,
+    handleColSelect,
+  } = useTableRowSelection({
     onDeleteRow: handleDeleteRecord,
     deletedRows,
     containerRef: containerRef,
@@ -124,6 +129,7 @@ export function TableConstraints({
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRowIndex === index;
+          const colIndex = COLUMNS_NAME.indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
 
@@ -132,7 +138,7 @@ export function TableConstraints({
               className={cn(
                 "h-8 cursor-default! rounded-none text-sm text-ellipsis focus:bg-white!",
                 initValue !== fieldValue && "bg-amber-200",
-                isEmptyRow && "focus:bg-transparent focus:outline-none",
+                isEmptyRow && "focus:bg-transparent! focus:outline-none",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
               showSelect={!isEmptyRow && showSelect}
@@ -158,8 +164,11 @@ export function TableConstraints({
                 if (isRowSelected) {
                   e.preventDefault();
                   e.stopPropagation();
-                  const input = e.currentTarget as HTMLInputElement;
-                  input.select();
+                  if (selectedColIndex !== colIndex) {
+                    const input = e.currentTarget as HTMLInputElement;
+                    input.select();
+                    handleColSelect(colIndex);
+                  }
                 }
               }}
               disabled={busy || isDeleted}
@@ -172,8 +181,9 @@ export function TableConstraints({
     [
       busy,
       editedData.length,
-      selectedRowIndex,
       deletedRows,
+      selectedRowIndex,
+      selectedColIndex,
       handleDataChange,
       onDeleteRecord,
     ]

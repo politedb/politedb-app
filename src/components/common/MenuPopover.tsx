@@ -4,7 +4,10 @@ import { cn } from "src/utils/cn";
 
 type Align = "left" | "right" | "top";
 
+const DEFAULT_GAP = 8;
+
 export function MenuPopover(props: {
+  className?: string;
   open: boolean;
   onClose: () => void;
 
@@ -18,6 +21,7 @@ export function MenuPopover(props: {
   children: JSX.Element;
 }) {
   const {
+    className,
     open,
     onClose,
     anchorEl,
@@ -70,7 +74,7 @@ export function MenuPopover(props: {
   const style = useMemo(() => {
     // Context menu: fixed at cursor
     if (point) {
-      const pad = 8;
+      const pad = DEFAULT_GAP;
       const x = Math.max(pad, point.x);
       const y = Math.max(pad, point.y);
       return {
@@ -97,23 +101,23 @@ export function MenuPopover(props: {
             visibility: "hidden" as const,
           };
         }
-        const top = r.top - menuHeight - 8;
+        const top = r.top - menuHeight - DEFAULT_GAP;
         const left = r.left;
         return {
           position: "fixed",
-          left: `${Math.max(8, left)}px`,
-          top: `${Math.max(8, top)}px`,
+          left: `${Math.max(DEFAULT_GAP, left)}px`,
+          top: `${Math.max(DEFAULT_GAP, top)}px`,
           width: `${width}px`,
         };
       }
 
       // Default: position below the anchor
-      const top = r.bottom + 8;
+      const top = r.bottom + DEFAULT_GAP;
       const left = align === "right" ? r.right - width : r.left;
       return {
         position: "fixed",
-        left: `${Math.max(8, left)}px`,
-        top: `${Math.max(8, top)}px`,
+        left: `${Math.max(DEFAULT_GAP, left)}px`,
+        top: `${Math.max(DEFAULT_GAP, top)}px`,
         width: `${width}px`,
       };
     }
@@ -129,7 +133,8 @@ export function MenuPopover(props: {
       style={style}
       class={cn(
         "z-1000 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg",
-        "text-sm"
+        "text-sm",
+        className
       )}
       onClick={(e) => e.stopPropagation()}
     >

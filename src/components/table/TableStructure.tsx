@@ -65,7 +65,12 @@ export function TableStructure({
   });
 
   // Use row selection hook
-  const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
+  const {
+    selectedRowIndex,
+    handleRowSelect,
+    selectedColIndex,
+    handleColSelect,
+  } = useTableRowSelection({
     onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
     deletedRows,
     containerRef: containerRef,
@@ -128,6 +133,7 @@ export function TableStructure({
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRowIndex === index;
+          const colIndex = COLUMNS_NAME.indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
 
@@ -136,7 +142,7 @@ export function TableStructure({
               className={cn(
                 "h-8 cursor-default! rounded-none text-sm text-ellipsis focus:bg-white!",
                 initValue !== fieldValue && "bg-amber-100",
-                isEmptyRow && "focus:bg-transparent focus:outline-none",
+                isEmptyRow && "focus:bg-transparent! focus:outline-none",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"
               )}
               showSelect={!isEmptyRow && showSelect}
@@ -164,8 +170,11 @@ export function TableStructure({
                 if (isRowSelected) {
                   e.preventDefault();
                   e.stopPropagation();
-                  const input = e.currentTarget as HTMLInputElement;
-                  input.select();
+                  if (selectedColIndex !== colIndex) {
+                    const input = e.currentTarget as HTMLInputElement;
+                    input.select();
+                    handleColSelect(colIndex);
+                  }
                 }
               }}
               disabled={busy || isDeleted}
@@ -179,8 +188,8 @@ export function TableStructure({
       busy,
       editedData.length,
       deletedRows,
-      engine,
       selectedRowIndex,
+      selectedColIndex,
       handleDataChange,
       onDeleteRecord,
     ]

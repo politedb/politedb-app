@@ -14,6 +14,7 @@ export function useTableRowSelection({
   containerRef,
 }: UseTableRowSelectionProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [selectedColIndex, setSelectedColIndex] = useState<number | null>(null);
   const keyboardContainerRef = useRef<HTMLDivElement>(null);
 
   // Handle keyboard events for row deletion
@@ -58,10 +59,17 @@ export function useTableRowSelection({
     [containerRef]
   );
 
+  const handleColSelect = useCallback((colIndex: number) => {
+    setSelectedColIndex(colIndex);
+  }, []);
+
   return {
     selectedRowIndex,
-    setSelectedRowIndex,
-    handleRowSelect,
+    selectedColIndex,
     keyboardContainerRef,
+    setSelectedRowIndex,
+    setSelectedColIndex,
+    handleRowSelect,
+    handleColSelect,
   };
 }

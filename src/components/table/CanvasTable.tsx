@@ -581,6 +581,9 @@ export function CanvasTable({
       }`}
       tabIndex={0}
       onKeyDown={(e) => {
+        // When editing a cell, let the input handle Backspace/Delete
+        // instead of triggering row delete at the table level.
+        if (editing) return;
         if (!selected) return;
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
@@ -624,8 +627,7 @@ export function CanvasTable({
 
                   {/* --- RESIZE HANDLE --- */}
                   <div
-                    class="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
-                    style={{ right: 0, width: 2, cursor: "col-resize" }}
+                    class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
                     onMouseDown={(e) => handleResizeStart(e, col.name, w)}
                   />
                 </div>

@@ -63,6 +63,7 @@ export function TagSelect(props: Props) {
             anchorEl={containerRef.current}
             align="left"
             width={containerRef.current?.offsetWidth || 192}
+            className="rounded-md"
           >
             <div class="max-h-60 overflow-y-auto py-1">
               {options && options.length > 0 ? (
