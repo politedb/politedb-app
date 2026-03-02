@@ -48,6 +48,7 @@ export function SqlWindowPane(props: {
         minFirstPx={180}
         minSecondPx={160}
         splitterPx={8}
+        fixedPaneOnResize="second"
         first={
           <div class="h-full min-h-0">
             <SqlEditorPane

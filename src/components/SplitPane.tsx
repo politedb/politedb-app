@@ -5,11 +5,19 @@ type Direction = "vertical" | "horizontal";
 type Props = {
   first: preact.ComponentChildren;
   second: preact.ComponentChildren;
-
   direction: Direction;
 
   /** initial ratio of first pane (0..1) */
   initialRatio?: number;
+
+  /**
+   * Which pane should try to keep its pixel size when the
+   * container (window) is resized.
+   *
+   * - "first"  → keep first pane size (default)
+   * - "second" → keep second pane size (bottom/right panes)
+   */
+  fixedPaneOnResize?: "first" | "second";
 
   minFirstPx?: number;
   minSecondPx?: number;
@@ -26,6 +34,7 @@ export function SplitPane(props: Props) {
     second,
     direction,
     initialRatio = 0.5,
+    fixedPaneOnResize = "first",
     minFirstPx = 120,
     minSecondPx = 120,
     splitterPx = 8,
@@ -35,6 +44,7 @@ export function SplitPane(props: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const sizeRef = useRef<number | null>(null);
+  const lastTotalRef = useRef<number | null>(null);
 
   const [dragging, setDragging] = useState(false);
   const [, force] = useState(0);
@@ -62,20 +72,39 @@ export function SplitPane(props: Props) {
 
       if (sizeRef.current == null) {
         sizeRef.current = clampSize(Math.floor(total * initialRatio), total);
+        lastTotalRef.current = total;
         force((v) => v + 1);
       } else {
-        // keep existing size but clamp to new bounds
-        const clamped = clampSize(sizeRef.current, total);
+        // Adjust size when the container changes:
+        // - if fixedPaneOnResize === "first", keep first pane size (old behavior)
+        // - if fixedPaneOnResize === "second", keep second pane size in pixels
+        const prevTotal = lastTotalRef.current ?? total;
+        let nextFirst = sizeRef.current;
+
+        if (fixedPaneOnResize === "second") {
+          const prevSecond = Math.max(
+            0,
+            prevTotal - splitterPx - sizeRef.current
+          );
+          const desiredFirst = total - splitterPx - prevSecond;
+          nextFirst = desiredFirst;
+        }
+
+        const clamped = clampSize(nextFirst, total);
         if (clamped !== sizeRef.current) {
           sizeRef.current = clamped;
           force((v) => v + 1);
+        }
+
+        if (prevTotal !== total) {
+          lastTotalRef.current = total;
         }
       }
     });
 
     ro.observe(el);
     return () => ro.disconnect();
-  }, [initialRatio, splitterPx, minFirstPx, minSecondPx]);
+  }, [initialRatio, splitterPx, minFirstPx, minSecondPx, fixedPaneOnResize]);
 
   function onPointerDown(e: PointerEvent) {
     e.preventDefault();

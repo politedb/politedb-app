@@ -388,6 +388,7 @@ export function ConnectionScreen() {
       minFirstPx={200}
       minSecondPx={150}
       splitterPx={2}
+      fixedPaneOnResize="second"
       first={contentArea}
       second={
         <div class="h-full overflow-hidden border-t border-neutral-200">
@@ -421,6 +422,7 @@ export function ConnectionScreen() {
                 minFirstPx={200}
                 minSecondPx={300}
                 splitterPx={2}
+                fixedPaneOnResize="first"
                 first={
                   <div class="h-full overflow-hidden">
                     <LeftNav
@@ -446,6 +448,7 @@ export function ConnectionScreen() {
                         minFirstPx={300}
                         minSecondPx={200}
                         splitterPx={2}
+                        fixedPaneOnResize="second"
                         first={mainContent}
                         second={
                           <div class="h-full overflow-hidden border-l border-neutral-200">
@@ -468,6 +471,7 @@ export function ConnectionScreen() {
                     minFirstPx={300}
                     minSecondPx={200}
                     splitterPx={2}
+                    fixedPaneOnResize="second"
                     first={mainContent}
                     second={
                       <div class="h-full overflow-hidden border-l border-neutral-200">
