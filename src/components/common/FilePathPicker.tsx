@@ -61,12 +61,12 @@ export function FilePathPicker(props: {
           "flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm outline-none",
           borderCls,
           "focus:ring-2",
-          disabled ? "cursor-not-allowed" : "cursor-pointer hover:bg-slate-50"
+          disabled ? "cursor-not-allowed" : "hover:bg-slate-50"
         )}
       >
         <span
           class={cn(
-            "min-w-0 flex-1 truncate text-left",
+            "min-w-0 flex-1 cursor-default truncate text-left",
             hasValue ? "font-medium text-slate-900" : "text-slate-400"
           )}
         >

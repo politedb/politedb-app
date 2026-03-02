@@ -25,7 +25,7 @@ export function TagSelect(props: Props) {
       <div ref={containerRef} class="relative w-full">
         {/* Selected tags display */}
         <div
-          class="flex min-h-8 cursor-pointer flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500"
+          class="flex min-h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500"
           onClick={() => setIsOpen(!isOpen)}
         >
           {values.length > 0 ? (
@@ -40,7 +40,7 @@ export function TagSelect(props: Props) {
                   }}
                 >
                   {key}
-                  <X className="size-3 cursor-pointer hover:text-blue-900" />
+                  <X className="size-3 hover:text-blue-900" />
                 </span>
               ))}
             </>

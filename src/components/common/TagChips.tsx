@@ -15,11 +15,10 @@ export function TagChips(props: {
   const shown = list.slice(0, max);
   const rest = list.length - shown.length;
 
-  const chipCls =
-    size === "md" ? "h-6 px-2.5 text-[12px]" : "h-5 px-2 text-[11px]";
+  const chipCls = size === "md" ? "h-6 px-2.5 text-xs" : "h-5 px-2 text-xs";
 
   const baseCls = cn(
-    "inline-flex items-center rounded-md border",
+    "flex items-center justify-center rounded-md border",
     "border-neutral-200 bg-white",
     "font-semibold text-neutral-700",
     "shadow-[0_1px_0_rgba(0,0,0,0.02)]"

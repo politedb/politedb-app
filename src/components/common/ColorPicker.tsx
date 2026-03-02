@@ -45,7 +45,7 @@ export function ColorPicker(props: {
       <label
         title="Pick custom color"
         class={cn(
-          "group relative h-9 w-9 cursor-pointer rounded-xl border",
+          "group relative h-9 w-9 rounded-xl border",
           "transition-all duration-150",
           "hover:scale-[1.05] hover:ring-2 hover:ring-blue-200",
           isCustom
@@ -57,7 +57,7 @@ export function ColorPicker(props: {
           type="color"
           value={isCustom ? value : "#000000"}
           onInput={(e) => onChange((e.currentTarget as HTMLInputElement).value)}
-          class="absolute inset-0 cursor-pointer opacity-0"
+          class="absolute inset-0 opacity-0"
         />
 
         {/* Visual layer */}

@@ -185,7 +185,7 @@ export function ConnectionFormDialog({
         <Button
           onClick={onClose}
           variant="ghost"
-          className="absolute top-3 right-3 rounded-full p-2"
+          className="absolute top-3 right-3 rounded-full p-2 hover:bg-neutral-100"
         >
           <X className="size-4 text-slate-600" />
         </Button>

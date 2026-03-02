@@ -1,6 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { normalizeTag } from "src/utils/convert";
 import { X } from "../icons";
+import { Button } from "./Button";
 
 export function TagInput(props: {
   value: string[];
@@ -91,17 +92,17 @@ export function TagInput(props: {
       {filteredSuggestions.length ? (
         <div class="flex flex-wrap gap-2">
           {filteredSuggestions.map((s) => (
-            <button
+            <Button
               key={s}
-              type="button"
-              class="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              variant="outline"
+              className="cursor-default rounded-full border-slate-300 px-3"
               onClick={() => {
                 addTag(s);
                 setInput("");
               }}
             >
               {s}
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}

@@ -242,7 +242,7 @@ export function ConnectionBasicsSection(
                   : "border-slate-200 bg-white"
               }`}
             >
-              <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
                 <input
                   type="radio"
                   name="password-storage"
@@ -256,7 +256,7 @@ export function ConnectionBasicsSection(
                 Save in Keychain
               </label>
 
-              <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
                 <input
                   type="radio"
                   name="password-storage"

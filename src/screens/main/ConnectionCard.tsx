@@ -85,7 +85,7 @@ const KebabButton = memo(function KebabButton(props: {
       }}
       aria-label="Open menu"
       class={[
-        "cursor-pointer rounded-full p-2 text-slate-400 transition",
+        "rounded-full p-2 text-slate-400 transition",
         "hover:bg-slate-100 hover:text-slate-700",
         menuOpen
           ? "opacity-100"

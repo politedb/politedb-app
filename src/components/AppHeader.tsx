@@ -191,7 +191,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   setActiveProfileScreen(nav.id);
                 }}
                 class={[
-                  "inline-flex cursor-pointer items-center gap-1.5",
+                  "inline-flex items-center gap-1.5",
                   "h-7 rounded-lg px-2.5",
                   "border text-xs font-semibold transition-colors",
                   isActive
@@ -226,12 +226,12 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   }}
                   data-tauri-drag-region="false"
                   class={[
-                    "group w-44 shrink-0 cursor-pointer",
+                    "group w-44 shrink-0",
                     "flex items-center justify-between gap-2",
                     "rounded-md border px-3 py-1 transition-all",
                     isActive
                       ? "border-slate-300 bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04),0_2px_8px_rgba(0,0,0,0.06)]"
-                      : "border-transparent bg-slate-100 text-slate-600 hover:border-slate-200 hover:bg-slate-50",
+                      : "border-transparent bg-slate-100 text-slate-600 shadow-sm hover:border-slate-200 hover:bg-slate-50",
                   ].join(" ")}
                 >
                   <div class="flex min-w-0 items-center gap-2">

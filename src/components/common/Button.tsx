@@ -56,7 +56,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "flex cursor-pointer items-center justify-center gap-1.5 rounded-md px-4 py-1 text-xs font-medium transition-colors",
+        "flex items-center justify-center gap-1.5 rounded-md px-4 py-1 text-xs font-medium transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
         variantStyles[variant],
         active && activeStyles[variant],
