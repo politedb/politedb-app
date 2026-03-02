@@ -138,7 +138,7 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! rounded-none text-sm text-ellipsis focus:bg-white!",
+                "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
                 initValue !== fieldValue && "bg-amber-200",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
                 isRowSelected && !isEmptyRow && "bg-blue-200!"

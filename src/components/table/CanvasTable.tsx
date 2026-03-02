@@ -9,8 +9,8 @@ import {
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
 
-const ROW_HEIGHT = 32;
-const HEADER_HEIGHT = 32;
+const ROW_HEIGHT = 28;
+const HEADER_HEIGHT = 28;
 
 type EditingCell = { rowIdx: number; colIdx: number };
 
@@ -56,11 +56,20 @@ function ellipsize(
   const ellipsisWidth = ctx.measureText(ellipsis).width;
   const usable = maxWidth - ellipsisWidth;
   if (usable <= 0) return ellipsis;
-  for (let i = text.length; i >= 0; i--) {
-    const part = text.slice(0, i);
-    if (ctx.measureText(part).width <= usable) return part + ellipsis;
+  let lo = 0;
+  let hi = text.length;
+  let best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const part = text.slice(0, mid);
+    if (ctx.measureText(part).width <= usable) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  return ellipsis;
+  return text.slice(0, best) + ellipsis;
 }
 
 function sumWidths(
@@ -84,6 +93,51 @@ function buildColLefts(
     x += widthByName[cols[i]!.name] ?? 140;
   }
   return lefts;
+}
+
+function getVisibleColRange(
+  cols: ColumnMeta[],
+  lefts: number[],
+  widthByName: Record<string, number>,
+  scrollLeft: number,
+  viewportWidth: number
+) {
+  if (cols.length === 0) return { start: 0, end: -1 };
+
+  const visibleLeft = scrollLeft;
+  const visibleRight = scrollLeft + viewportWidth;
+
+  let lo = 0;
+  let hi = cols.length - 1;
+  let start = cols.length;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const right =
+      (lefts[mid] ?? 0) + (widthByName[cols[mid]!.name] ?? 140);
+    if (right >= visibleLeft) {
+      start = mid;
+      hi = mid - 1;
+    } else {
+      lo = mid + 1;
+    }
+  }
+
+  lo = 0;
+  hi = cols.length - 1;
+  let end = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const colLeft = lefts[mid] ?? 0;
+    if (colLeft <= visibleRight) {
+      end = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  if (start > end) return { start: 0, end: -1 };
+  return { start, end };
 }
 
 function hitTestCol(
@@ -144,6 +198,8 @@ export function CanvasTable({
   // --- Optimization: Scroll State via Refs ---
   const scrollRef = useRef({ top: 0, left: 0 });
   const rafRef = useRef<number | null>(null);
+  const textCacheRef = useRef<Map<string, string>>(new Map());
+  const cellTextCacheRef = useRef<Map<string, string>>(new Map());
 
   // --- Resize State ---
   const resizingRef = useRef<{
@@ -178,6 +234,11 @@ export function CanvasTable({
   );
 
   const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
+
+  useEffect(() => {
+    textCacheRef.current.clear();
+    cellTextCacheRef.current.clear();
+  }, [dataVersion, colWidths]);
 
   // --------------------------------------------------------------------------
   // Resize Observer
@@ -289,7 +350,15 @@ export function CanvasTable({
     ctx.moveTo(0.5, 0);
     ctx.lineTo(0.5, bodyH);
 
-    for (let c = 0; c < columns.length; c++) {
+    const visibleCols = getVisibleColRange(
+      columns,
+      colLefts,
+      colWidths,
+      left,
+      viewport.w
+    );
+
+    for (let c = visibleCols.start; c <= visibleCols.end; c++) {
       const col = columns[c]!;
       const x = (colLefts[c] ?? 0) - left;
       const w = colWidths[col.name] ?? 140; // Use state
@@ -314,7 +383,7 @@ export function CanvasTable({
       const row = getRowAt(r);
       if (!row) continue;
 
-      for (let c = 0; c < columns.length; c++) {
+      for (let c = visibleCols.start; c <= visibleCols.end; c++) {
         const col = columns[c]!;
         const x = (colLefts[c] ?? 0) - left;
         const w = colWidths[col.name] ?? 140; // Use state
@@ -322,7 +391,15 @@ export function CanvasTable({
         if (x + w < 0 || x > viewport.w) continue;
 
         const v = row[c] ?? null;
-        const s = cellToString(v) || "NULL";
+        const valueKey = `${r}|${c}`;
+        let s = cellTextCacheRef.current.get(valueKey);
+        if (!s) {
+          s = cellToString(v) || "NULL";
+          if (cellTextCacheRef.current.size > 50000) {
+            cellTextCacheRef.current.clear();
+          }
+          cellTextCacheRef.current.set(valueKey, s);
+        }
 
         const dirty = isCellDirty?.(r, col.name);
 
@@ -346,25 +423,25 @@ export function CanvasTable({
           ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
 
           if (selected.colIdx === c) {
-            ctx.strokeStyle = "#51a2ff";
+            ctx.strokeStyle = "#0000ff";
             ctx.strokeRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
-            ctx.restore();
           }
         }
 
         if (s) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(x + 8, y, w - 16, ROW_HEIGHT);
-          ctx.clip();
-
           const maxTextWidth = Math.max(0, w - 16);
-          const displayText = ellipsize(ctx, s, maxTextWidth);
+          const cacheKey = `${maxTextWidth}|${s}`;
+          let displayText = textCacheRef.current.get(cacheKey);
+          if (!displayText) {
+            displayText = ellipsize(ctx, s, maxTextWidth);
+            if (textCacheRef.current.size > 10000) {
+              textCacheRef.current.clear();
+            }
+            textCacheRef.current.set(cacheKey, displayText);
+          }
 
           ctx.fillStyle = s === "NULL" ? "#9ca3af" : "#111827";
           ctx.fillText(displayText, x + 8, y + ROW_HEIGHT / 2);
-
-          ctx.restore();
         }
       }
     }
@@ -377,7 +454,6 @@ export function CanvasTable({
     colWidths, // Dependent on width changes
     getRowAt,
     selected,
-    getRect,
   ]);
 
   useEffect(() => {
@@ -668,13 +744,13 @@ export function CanvasTable({
       {editorRect && editing && !isResizing && (
         <input
           ref={editorRef}
-          class="absolute z-60 border border-blue-400 bg-white px-2 text-sm shadow-sm outline-none"
+          class="absolute z-60 bg-white px-2 text-sm shadow-sm outline-none"
           placeholder="NULL"
           style={{
-            left: editorRect.x,
-            top: editorRect.y + HEADER_HEIGHT,
-            width: editorRect.w,
-            height: editorRect.h,
+            left: editorRect.x + 2,
+            top: editorRect.y + HEADER_HEIGHT + 3,
+            width: editorRect.w - 3,
+            height: editorRect.h - 3,
           }}
           value={editorValue}
           onInput={(e) =>
