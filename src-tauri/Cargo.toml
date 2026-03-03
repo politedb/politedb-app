@@ -53,6 +53,7 @@ tokio-postgres = { version = "0.7", optional = true, features = [
     "with-serde_json-1",
     "with-chrono-0_4",
 ] }
+rust_decimal = { version = "1", features = ["db-tokio-postgres"], optional = true }
 native-tls = { version = "0.2", optional = true }
 postgres-native-tls = { version = "0.5", optional = true }
 base64 = "0.22.1"
@@ -77,7 +78,7 @@ tokio-util = "0.7.18"
 
 [features]
 default = ["engine-postgres"]
-engine-postgres = ["dep:deadpool-postgres", "dep:tokio-postgres"]
+engine-postgres = ["dep:deadpool-postgres", "dep:tokio-postgres", "dep:rust_decimal"]
 pg-tls = ["dep:native-tls", "dep:postgres-native-tls"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

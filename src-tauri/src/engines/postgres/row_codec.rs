@@ -146,9 +146,7 @@ impl ColDecoder {
             // money: keep as text/b64
             ColDecoder::MoneyText => fallback_to_text_or_bytes(row, idx),
 
-            // numeric:
-            // - If pg_numeric_bigdecimal enabled: decode BigDecimal -> string
-            // - Otherwise: fallback to text/b64 (may be Null for binary protocol on some servers)
+            // numeric: decode via rust_decimal -> string (when engine-postgres + rust_decimal)
             ColDecoder::NumericText => decode_numeric(row, idx),
 
             // network
@@ -214,16 +212,17 @@ impl ColDecoder {
 
 #[inline]
 fn decode_numeric(row: &Row, idx: usize) -> CellValue {
-    #[cfg(feature = "pg_numeric_bigdecimal")]
+    #[cfg(feature = "engine-postgres")]
     {
-        match row.try_get::<usize, Option<BigDecimal>>(idx) {
+        use rust_decimal::Decimal;
+        match row.try_get::<usize, Option<Decimal>>(idx) {
             Ok(Some(v)) => CellValue::Str(v.to_string()),
             Ok(None) => CellValue::Null,
             Err(_) => fallback_to_text_or_bytes(row, idx),
         }
     }
 
-    #[cfg(not(feature = "pg_numeric_bigdecimal"))]
+    #[cfg(not(feature = "engine-postgres"))]
     {
         fallback_to_text_or_bytes(row, idx)
     }
