@@ -31,15 +31,34 @@ function qLiteral(v: any): string {
   return `'${str.replace(/'/g, "''")}'`;
 }
 
-function formatValue(value: any): string {
+/** PostgreSQL (and common) type names that expect numeric literals (unquoted) in SQL */
+const NUMERIC_TYPE_PATTERN =
+  /^(int2|int4|int8|smallint|integer|bigint|serial|bigserial|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?$/i;
+
+function isNumericColumnType(dbType: string | undefined): boolean {
+  if (!dbType || typeof dbType !== "string") return false;
+  return NUMERIC_TYPE_PATTERN.test(dbType.trim());
+}
+
+/**
+ * Format a value for use in SQL SET or WHERE. For numeric column types, outputs
+ * unquoted numeric literal so PostgreSQL accepts it (e.g. SET price = 0 not SET price = '0').
+ */
+function formatValue(value: any, dbType: string | undefined): string {
   if (value === null || value === undefined) {
     return "NULL";
   }
   if (typeof value === "boolean") {
     return value ? "TRUE" : "FALSE";
   }
-  if (typeof value === "number") {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return String(value);
+  }
+  if (isNumericColumnType(dbType)) {
+    const s = String(value).trim();
+    if (s === "" || s.toLowerCase() === "null") return "NULL";
+    const n = Number(s);
+    if (Number.isFinite(n)) return String(n);
   }
   return qLiteral(value);
 }
@@ -112,10 +131,12 @@ export function generateUpdateSqlFromPatches(
     // Build SET clause from patch data
     const setClauses: string[] = [];
     for (const [colName, newValue] of Object.entries(patchData)) {
-      const colIndex = columns.findIndex((c) => c.name === colName);
-      if (colIndex === -1) continue;
+      const col = columns.find((c) => c.name === colName);
+      if (!col) continue;
 
-      setClauses.push(`${qIdent(colName)} = ${formatValue(newValue)}`);
+      setClauses.push(
+        `${qIdent(colName)} = ${formatValue(newValue, col.db_type)}`
+      );
     }
 
     if (setClauses.length === 0) {
@@ -155,7 +176,9 @@ export function generateUpdateSqlFromPatches(
             continue;
           }
         }
-        whereClauses.push(`${colName} = ${formatValue(valueToCompare)}`);
+        whereClauses.push(
+          `${colName} = ${formatValue(valueToCompare, col.db_type)}`
+        );
       }
     }
 
@@ -177,7 +200,8 @@ export function generateInsertSqlFromPatches(
   patchMap: PatchData,
   schema: string,
   tableName: string,
-  _engine: string = "postgres"
+  _engine: string = "postgres",
+  columns?: Array<{ name: string; db_type?: string }>
 ): string[] {
   const sqlStatements: string[] = [];
   const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
@@ -190,20 +214,21 @@ export function generateInsertSqlFromPatches(
 
   // Process each new row
   for (const [_rowKey, patchData] of Object.entries(createPatches)) {
-    const columns: string[] = [];
+    const colNames: string[] = [];
     const values: string[] = [];
 
     for (const [colName, value] of Object.entries(patchData)) {
       if (colName === "__rowKey") continue; // Skip internal row key
-      columns.push(qIdent(colName));
-      values.push(formatValue(value));
+      const col = columns?.find((c) => c.name === colName);
+      colNames.push(qIdent(colName));
+      values.push(formatValue(value, col?.db_type));
     }
 
-    if (columns.length === 0) {
+    if (colNames.length === 0) {
       continue;
     }
 
-    const sql = `INSERT INTO ${tableIdent} (${columns.join(", ")})\nVALUES (${values.join(", ")});`;
+    const sql = `INSERT INTO ${tableIdent} (${colNames.join(", ")})\nVALUES (${values.join(", ")});`;
     sqlStatements.push(sql);
   }
 
@@ -610,7 +635,9 @@ export function generateDeleteSqlFromPatches(
             continue;
           }
         }
-        whereClauses.push(`${colName} = ${formatValue(valueToCompare)}`);
+        whereClauses.push(
+          `${colName} = ${formatValue(valueToCompare, col.db_type)}`
+        );
       }
     }
 
@@ -707,7 +734,8 @@ export function generateSqlFromPatches(
       patches,
       schema,
       tableName,
-      engine
+      engine,
+      columns ?? undefined
     );
     allStatements.push(...insertStatements);
 

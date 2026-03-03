@@ -210,9 +210,9 @@ export function CanvasTable({
   const scrollRef = useRef({ top: 0, left: 0 });
   const rafRef = useRef<number | null>(null);
   const textCacheRef = useRef<Map<string, string>>(new Map());
-  const cellTextCacheRef = useRef<
-    Map<string, { raw: unknown; text: string }>
-  >(new Map());
+  const cellTextCacheRef = useRef<Map<string, { raw: unknown; text: string }>>(
+    new Map()
+  );
 
   // --- Resize State ---
   const resizingRef = useRef<{
@@ -439,7 +439,12 @@ export function CanvasTable({
 
           if (selected.colIdx === c) {
             ctx.strokeStyle = "#0000ff";
-            ctx.strokeRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+            ctx.strokeRect(
+              x + 1,
+              c === visibleCols.start ? y + 2 : y + 1,
+              w - 1,
+              ROW_HEIGHT - 1
+            );
           }
         }
 
@@ -812,7 +817,7 @@ export function CanvasTable({
           placeholder="NULL"
           style={{
             left: editorRect.x + 2,
-            top: editorRect.y + HEADER_HEIGHT + 3,
+            top: editorRect.y + HEADER_HEIGHT + (editing.colIdx === 0 ? 5 : 4),
             width: editorRect.w - 3,
             height: editorRect.h - 3,
           }}
