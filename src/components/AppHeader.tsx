@@ -192,7 +192,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                 }}
                 class={[
                   "inline-flex items-center gap-1.5",
-                  "h-7 rounded-lg px-2.5",
+                  "h-7 rounded-lg px-2.5 shadow-sm",
                   "border text-xs font-semibold transition-colors",
                   isActive
                     ? "border-blue-300 bg-blue-100 text-blue-500"

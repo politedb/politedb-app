@@ -98,7 +98,6 @@ export function ConnectionFormDialog({
 
       setSuccess("Test OK");
     } catch (e: any) {
-      console.log(e);
       setError(e?.message ? String(e.message) : String(e));
     }
   });

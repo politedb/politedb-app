@@ -122,7 +122,7 @@ export function NavigationTabs({
                 }}
                 title={getWindowSubtitle(w)}
                 class={cn(
-                  "group flex shrink-0 cursor-pointer items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
+                  "group flex shrink-0 items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
                   active
                     ? "bg-white text-neutral-800 ring-1 ring-black/5"
                     : "bg-neutral-200/70 text-neutral-600 hover:bg-neutral-300/80"

@@ -8,6 +8,8 @@ import {
 } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
+import { ArrowDown, ArrowUp } from "src/components/icons";
+import { cn } from "src/utils/cn";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -24,6 +26,9 @@ type Props = {
   widthByName: Record<string, number>;
   emptyColumnWidth: number;
 
+  // Optional external sort state, used for sortable headers.
+  sortState?: { colName: string; direction: "asc" | "desc" } | null;
+
   selected?: { rowIdx: number; colIdx: number } | null;
   editing?: EditingCell | null;
   deletedRows?: Set<number>;
@@ -34,6 +39,11 @@ type Props = {
   onStartEdit?: (cell: EditingCell) => void;
   onCommitEdit?: (cell: EditingCell, value: string) => void;
   onExitEdit?: () => void;
+
+  // Called when user clicks a column header to change sort.
+  onChangeSort?: (
+    sort: { colName: string; direction: "asc" | "desc" } | null
+  ) => void;
 
   onDeleteRow?: (rowIdx: number) => void;
   onAddRow?: () => void;
@@ -112,8 +122,7 @@ function getVisibleColRange(
   let start = cols.length;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    const right =
-      (lefts[mid] ?? 0) + (widthByName[cols[mid]!.name] ?? 140);
+    const right = (lefts[mid] ?? 0) + (widthByName[cols[mid]!.name] ?? 140);
     if (right >= visibleLeft) {
       start = mid;
       hi = mid - 1;
@@ -169,6 +178,7 @@ export function CanvasTable({
   editing,
   deletedRows,
   dataVersion,
+  sortState,
   onSelect,
   onStartEdit,
   onCommitEdit,
@@ -177,6 +187,7 @@ export function CanvasTable({
   onAddRow,
   isCellDirty,
   isNewRow,
+  onChangeSort,
 }: Props) {
   // --- Refs for DOM elements ---
   const rootRef = useRef<HTMLDivElement>(null);
@@ -199,7 +210,9 @@ export function CanvasTable({
   const scrollRef = useRef({ top: 0, left: 0 });
   const rafRef = useRef<number | null>(null);
   const textCacheRef = useRef<Map<string, string>>(new Map());
-  const cellTextCacheRef = useRef<Map<string, string>>(new Map());
+  const cellTextCacheRef = useRef<
+    Map<string, { raw: unknown; text: string }>
+  >(new Map());
 
   // --- Resize State ---
   const resizingRef = useRef<{
@@ -335,7 +348,7 @@ export function CanvasTable({
 
     // 3. Grid Lines
     ctx.beginPath();
-    ctx.strokeStyle = "#f3f4f6";
+    ctx.strokeStyle = "#e5e5e5";
 
     // Horizontal
     const startY = -(top % ROW_HEIGHT || 0);
@@ -346,7 +359,7 @@ export function CanvasTable({
     }
 
     // Vertical
-    ctx.strokeStyle = "#e5e7eb";
+    ctx.strokeStyle = "#e5e5e5";
     ctx.moveTo(0.5, 0);
     ctx.lineTo(0.5, bodyH);
 
@@ -366,7 +379,8 @@ export function CanvasTable({
 
       if (xr < 0 || x > viewport.w) continue;
 
-      const xx = Math.floor(xr) + 0.5;
+      // Match CSS `border-right` on header cells (inside each box).
+      const xx = Math.floor(xr - 1) + 0.5;
       ctx.moveTo(xx, 0);
       ctx.lineTo(xx, bodyH);
     }
@@ -392,13 +406,14 @@ export function CanvasTable({
 
         const v = row[c] ?? null;
         const valueKey = `${r}|${c}`;
-        let s = cellTextCacheRef.current.get(valueKey);
-        if (!s) {
+        const cached = cellTextCacheRef.current.get(valueKey);
+        let s = cached?.text;
+        if (!cached || !Object.is(cached.raw, v)) {
           s = cellToString(v) || "NULL";
           if (cellTextCacheRef.current.size > 50000) {
             cellTextCacheRef.current.clear();
           }
-          cellTextCacheRef.current.set(valueKey, s);
+          cellTextCacheRef.current.set(valueKey, { raw: v, text: s });
         }
 
         const dirty = isCellDirty?.(r, col.name);
@@ -451,9 +466,12 @@ export function CanvasTable({
     totalRows,
     columns,
     colLefts,
-    colWidths, // Dependent on width changes
+    colWidths,
     getRowAt,
     selected,
+    deletedRows,
+    isCellDirty,
+    isNewRow,
   ]);
 
   useEffect(() => {
@@ -553,6 +571,30 @@ export function CanvasTable({
     onExitEdit?.();
     setEditorRect(null);
   }, [onExitEdit]);
+
+  // --------------------------------------------------------------------------
+  // Header click: sort toggling
+  // --------------------------------------------------------------------------
+  const handleHeaderClick = useCallback(
+    (colName: string) => {
+      if (!onChangeSort) return;
+
+      const currentDir =
+        sortState && sortState.colName === colName ? sortState.direction : null;
+
+      let next: { colName: string; direction: "asc" | "desc" } | null;
+      if (currentDir === "asc") {
+        next = { colName, direction: "desc" };
+      } else if (currentDir === "desc") {
+        next = null; // clear sort
+      } else {
+        next = { colName, direction: "asc" };
+      }
+
+      onChangeSort(next);
+    },
+    [onChangeSort, sortState]
+  );
 
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
@@ -669,7 +711,7 @@ export function CanvasTable({
     >
       <div
         ref={scrollerRef}
-        class="relative h-full w-full overflow-auto overscroll-none"
+        class="relative h-full w-full overflow-auto overscroll-none border-t border-neutral-200"
         style={{ overscrollBehavior: "none" }}
         onMouseDown={handleMouseDown}
         onDblClick={handleDblClick}
@@ -687,22 +729,44 @@ export function CanvasTable({
               height: HEADER_HEIGHT,
               width: Math.max(1, totalWidth),
               willChange: "transform",
-              paddingLeft: 1,
             }}
           >
             {columns.map((col) => {
               // Render using internal state
               const w = colWidths[col.name] ?? 140;
+              const isSorted = sortState?.colName === col.name;
+              const sortDir = isSorted ? sortState!.direction : null;
               return (
                 <div
                   key={col.name}
-                  class="relative box-border flex items-center border-r border-neutral-200 px-2 text-xs font-semibold whitespace-nowrap text-neutral-700"
+                  class={cn(
+                    "relative box-border flex items-center justify-between gap-1 border-r border-neutral-200",
+                    "px-2 text-sm font-semibold whitespace-nowrap text-neutral-700",
+                    onChangeSort && "select-none active:bg-neutral-100"
+                  )}
                   style={{ width: w, height: HEADER_HEIGHT }}
+                  onPointerDown={(e) => {
+                    if (!onChangeSort) return;
+                    if (
+                      (e.target as HTMLElement).closest("[data-resize-handle]")
+                    )
+                      return;
+                    e.stopPropagation();
+                    handleHeaderClick(col.name);
+                  }}
                 >
-                  <span class="truncate select-none">{col.name}</span>
+                  <span class="truncate">{col.name}</span>
+
+                  {isSorted &&
+                    (sortDir === "asc" ? (
+                      <ArrowUp className="size-3 shrink-0" />
+                    ) : (
+                      <ArrowDown className="size-3 shrink-0" />
+                    ))}
 
                   {/* --- RESIZE HANDLE --- */}
                   <div
+                    data-resize-handle
                     class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
                     onMouseDown={(e) => handleResizeStart(e, col.name, w)}
                   />

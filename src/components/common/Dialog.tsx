@@ -91,7 +91,10 @@ export function Dialog({
           <button
             type="button"
             onClick={onClose}
-            class="absolute top-4 right-4 z-10 rounded-md p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+            class={cn(
+              "absolute top-4 right-4 z-10 rounded-full p-1 text-neutral-400 transition-colors",
+              "hover:bg-neutral-100 hover:text-neutral-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+            )}
             aria-label="Close dialog"
           >
             <X className="size-4" />

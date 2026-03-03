@@ -174,11 +174,6 @@ export function ActiveWindowContent() {
     [activeTableWindow, onDataChange]
   );
 
-  const handleFilters = useCallback(() => {
-    // TODO: open filters UI
-    console.log("filters");
-  }, []);
-
   // -------------------------------------------------------------------------
   // Routing
   // -------------------------------------------------------------------------
@@ -232,7 +227,6 @@ export function ActiveWindowContent() {
         onDeleteColumn={handleDeleteColumn}
         onAddIndex={handleAddIndex}
         onDeleteIndex={handleDeleteIndex}
-        onFilters={handleFilters}
       />
     );
   }

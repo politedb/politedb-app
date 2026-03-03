@@ -207,7 +207,7 @@ export function Table<T = any>({
       <table
         ref={tableRef}
         class={cn(
-          "w-full border-collapse border border-neutral-200",
+          "w-full border-collapse border border-t-0 border-neutral-200",
           className
         )}
         style={TABLE_STYLE}
@@ -231,11 +231,10 @@ export function Table<T = any>({
               <th
                 key={col.key}
                 class={cn(
-                  "relative border-r border-b border-neutral-200",
-                  colIndex === 0 && "border-l",
+                  "relative border-r border-neutral-200 active:bg-neutral-100",
                   "p-2 text-left text-xs font-semibold text-neutral-700",
                   stickyHeader &&
-                    "sticky top-0 z-50 bg-neutral-50 shadow-[0_1px_0_0_rgba(0,0,0,0.12)]",
+                    "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",
                   col.headerClassName
                 )}
               >

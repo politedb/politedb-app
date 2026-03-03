@@ -29,7 +29,7 @@ export function Select({
           : "border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200/60",
 
         // disabled
-        disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+        disabled && "cursor-not-allowed opacity-60",
 
         className,
         classNames

@@ -220,7 +220,6 @@ export async function validateSqlQueryBE(
         onError: (err) => fail(err),
       });
     } catch (e) {
-      console.log(e);
       fail(e);
     }
   });

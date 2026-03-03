@@ -4,8 +4,10 @@ import { ChevronLeft, ChevronRight, Plus } from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 import { Select } from "src/components/common/Select";
 import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
+import { cn } from "src/utils/cn";
 
 interface Props {
+  filterBarVisible: boolean;
   limit: number;
   offset: number;
 
@@ -25,7 +27,10 @@ interface Props {
   onFilters: () => void;
 }
 
+const PAGE_SIZE_OPTIONS = [50, 100, 300, 500, 1000];
+
 export function TableFooter({
+  filterBarVisible,
   limit,
   offset,
   totalRows,
@@ -129,7 +134,14 @@ export function TableFooter({
       {/* RIGHT */}
       {viewMode === "data" && (
         <div class="flex items-center gap-2">
-          <Button variant="shadow" class="py-[2.5px]" onClick={onFilters}>
+          <Button
+            variant={filterBarVisible ? "default" : "shadow"}
+            class={cn(
+              "py-[2.5px]",
+              filterBarVisible && "border border-blue-500"
+            )}
+            onClick={onFilters}
+          >
             Filters
           </Button>
           <div class="flex items-center gap-0.5">
@@ -156,11 +168,9 @@ export function TableFooter({
               }
               class="h-fit px-2 py-1 text-sm"
             >
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-              <option value={300}>300</option>
-              <option value={500}>500</option>
-              <option value={1000}>1000</option>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option value={size}>{size}</option>
+              ))}
             </Select>
           </div>
         </div>

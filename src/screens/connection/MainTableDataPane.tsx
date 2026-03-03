@@ -20,12 +20,6 @@ import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "src/components/common/Dialog";
 import { useTableFilter } from "src/components/table/tableHooks";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
 import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
@@ -33,6 +27,7 @@ import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { useImportTableData } from "src/hooks/useImportTableData";
 import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
 import { DropTableDialog } from "src/components/modal/DropTableDialog";
+import { SqlPreviewModal } from "src/components/modal/SqlPreviewModal";
 import {
   cloneTableQuery,
   copyTableDataQuery,
@@ -101,7 +96,6 @@ export function MainTableDataPane(props: {
   onDeleteColumn: (rowIndex: number) => void;
   onAddIndex: () => void;
   onDeleteIndex: (rowIndex: number) => void;
-  onFilters: () => void;
 }) {
   const {
     activeTableWindow,
@@ -623,6 +617,7 @@ export function MainTableDataPane(props: {
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         structPaneTab={structPaneTab}
+        filterBarVisible={filterBarVisible}
         limit={limit}
         offset={offset}
         loadedMax={loadedMax}
@@ -635,21 +630,13 @@ export function MainTableDataPane(props: {
         onAddIndex={onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v)}
       />
-
-      <Dialog
-        open={sqlDialogOpen}
-        onClose={() => setSqlDialogOpen(false)}
-        size="lg"
-      >
-        <DialogHeader>
-          <DialogTitle>SQL Preview</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <div class="rounded border border-neutral-200 bg-neutral-100 p-2 font-mono text-xs break-all whitespace-pre-wrap">
-            {sqlPreview}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {sqlDialogOpen && (
+        <SqlPreviewModal
+          open={sqlDialogOpen}
+          onClose={() => setSqlDialogOpen(false)}
+          sqlPreview={sqlPreview}
+        />
+      )}
 
       {exportDialogOpen && (
         <ExportTableDialog

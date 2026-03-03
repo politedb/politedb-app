@@ -281,7 +281,7 @@ export function LeftNav({
 
           <Select
             className={cn(
-              "h-8 w-full rounded-lg border-neutral-300 bg-white",
+              "h-6 w-full rounded-lg border-neutral-300 bg-white",
               "text-xs! font-medium! text-neutral-800",
               "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
             )}

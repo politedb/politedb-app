@@ -43,7 +43,7 @@ export function NewTableMenu({ onOpenNewTable, className }: Props) {
           <Button
             variant="outline"
             className={cn(
-              "h-8 w-8 p-3",
+              "size-6 p-2",
               "border-neutral-300 bg-white text-neutral-800"
             )}
             title="New"

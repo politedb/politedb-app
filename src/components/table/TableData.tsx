@@ -1,4 +1,4 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback, useMemo, useState } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
 import type { DataAction, DataKey } from "src/stores/connection";
@@ -84,8 +84,6 @@ export function TableData({
     editedDataLength: baseLen,
   });
 
-  const totalDataLength = totalLen + newRows.length;
-
   // Unified row accessor (base + newRows)
   const getRowArray = useCallback(
     (idx: number): unknown[] | undefined => {
@@ -147,12 +145,64 @@ export function TableData({
   } | null>(null);
 
   // --------------------------------------------------------------------------
+  // Client-side sorting (per page)
+  // --------------------------------------------------------------------------
+
+  const [sortState, setSortState] = useState<{
+    colName: string;
+    direction: "asc" | "desc";
+  } | null>(null);
+
+  const totalDataLength = totalLen + newRows.length;
+
+  const rowOrder = useMemo(() => {
+    const n = totalDataLength;
+    const order = new Array<number>(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+
+    if (!sortState) return order;
+
+    const colIndex = columns.findIndex((c) => c.name === sortState.colName);
+    if (colIndex === -1) return order;
+
+    const dir = sortState.direction === "asc" ? 1 : -1;
+
+    order.sort((ai, bi) => {
+      const a = getRowArray(ai);
+      const b = getRowArray(bi);
+
+      const va = a ? (a as any)[colIndex] : null;
+      const vb = b ? (b as any)[colIndex] : null;
+
+      const sa = (cellToString(va) ?? "").toString();
+      const sb = (cellToString(vb) ?? "").toString();
+
+      if (sa < sb) return -1 * dir;
+      if (sa > sb) return 1 * dir;
+      return 0;
+    });
+
+    return order;
+  }, [totalDataLength, sortState, columns, getRowArray]);
+
+  const visibleDeletedRows = useMemo(() => {
+    if (!deletedRows || deletedRows.size === 0) return deletedRows;
+    const mapped = new Set<number>();
+    for (let i = 0; i < rowOrder.length; i++) {
+      const real = rowOrder[i]!;
+      if (deletedRows.has(real)) mapped.add(i);
+    }
+    return mapped;
+  }, [deletedRows, rowOrder]);
+
+  // --------------------------------------------------------------------------
   // Commit edit (IMPORTANT glue)
   // --------------------------------------------------------------------------
 
   const handleCommitEdit = useCallback(
     (cell: { rowIdx: number; colIdx: number }, newValue: string) => {
-      const { rowIdx, colIdx } = cell;
+      const { colIdx } = cell;
+      const rowIdx = rowOrder[cell.rowIdx] ?? -1;
       if (rowIdx < 0) return;
 
       const col = columns[colIdx];
@@ -194,7 +244,7 @@ export function TableData({
         changeData
       );
     },
-    [columns, getRowArray, patchHelpers, newRows, onCellChange]
+    [columns, patchHelpers, newRows, rowOrder, onCellChange, getRowArray]
   );
 
   // --------------------------------------------------------------------------
@@ -205,13 +255,15 @@ export function TableData({
     <div ref={containerRef} class="h-full w-full">
       <CanvasTable
         columns={columns}
-        totalRows={totalDataLength}
-        getRowAt={getRowArray}
+        totalRows={rowOrder.length}
+        getRowAt={(visibleIdx) =>
+          getRowArray(rowOrder[visibleIdx] ?? -1) ?? undefined
+        }
         widthByName={widthByName}
         emptyColumnWidth={emptyColumnWidth}
         selected={selected}
         editing={editing}
-        deletedRows={deletedRows}
+        deletedRows={visibleDeletedRows}
         onSelect={(rowIdx, colIdx) => {
           setSelected({ rowIdx, colIdx });
           setEditing(null);
@@ -221,16 +273,32 @@ export function TableData({
           setSelected(cell);
         }}
         onAddRow={onAddRow}
-        onDeleteRow={(rowIdx) => {
-          onDeleteRow?.(rowIdx);
+        onDeleteRow={(visibleRowIdx) => {
+          const rowIdx = rowOrder[visibleRowIdx] ?? -1;
+          if (rowIdx >= 0) {
+            onDeleteRow?.(rowIdx);
+          }
           setSelected(null);
           setEditing(null);
         }}
         onCommitEdit={handleCommitEdit}
         onExitEdit={() => setEditing(null)}
-        dataVersion={rowsVersion ?? 0}
-        isCellDirty={isCellDirty}
-        isNewRow={isNewRow}
+        dataVersion={
+          (rowsVersion ?? 0) * 1000 +
+          (sortState ? (sortState.direction === "asc" ? 1 : 2) : 0)
+        }
+        isCellDirty={(visibleRowIdx, colName) => {
+          const rowIdx = rowOrder[visibleRowIdx] ?? -1;
+          if (rowIdx < 0) return false;
+          return isCellDirty(rowIdx, colName);
+        }}
+        isNewRow={(visibleRowIdx) => {
+          const rowIdx = rowOrder[visibleRowIdx] ?? -1;
+          if (rowIdx < 0) return false;
+          return isNewRow(rowIdx);
+        }}
+        sortState={sortState ?? undefined}
+        onChangeSort={setSortState}
       />
     </div>
   );

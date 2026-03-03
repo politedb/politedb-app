@@ -38,3 +38,4 @@ export * from "./Revert";
 export * from "./Schema";
 export * from "./ChevronSort";
 export * from "./Copy";
+export * from "./CopyCheck";
