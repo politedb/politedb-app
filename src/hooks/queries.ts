@@ -1,11 +1,19 @@
-import type { TableColumn } from "src/types";
+import type { DatabaseEngine, TableColumn } from "src/types";
 
-function qIdent(ident: string) {
-  return `"${String(ident).replace(/"/g, `""`)}"`;
+function isMySqlLike(engine?: DatabaseEngine) {
+  return engine === "mysql" || engine === "mariadb";
+}
+
+function qIdent(ident: string, engine?: DatabaseEngine) {
+  const raw = String(ident);
+  if (isMySqlLike(engine)) {
+    return `\`${raw.replace(/`/g, "``")}\``;
+  }
+  return `"${raw.replace(/"/g, `""`)}"`;
 }
 
 function qLiteral(v: string) {
-  return `'${String(v).replace(/"/g, `""`)}'`;
+  return `'${String(v).replace(/'/g, `''`)}'`;
 }
 
 export function regexEscape(s: string) {
@@ -99,12 +107,13 @@ const NULL_OPS = ["IS NULL", "IS NOT NULL"];
 
 function buildWhereClause(
   filters: TableFilterCondition[],
-  combineWith: "AND" | "OR"
+  combineWith: "AND" | "OR",
+  engine?: DatabaseEngine
 ): string {
   const parts = filters
     .filter((f) => f.enabled && (f.column ?? "").trim())
     .map((f) => {
-      const col = qIdent(String(f.column).trim());
+      const col = qIdent(String(f.column).trim(), engine);
       const op = String(f.operator).toUpperCase();
       if (NULL_OPS.includes(op)) {
         return `${col} ${op}`;
@@ -139,12 +148,15 @@ export const tableDataQuery = (
   tableName: string,
   pagination?: { limit: number; offset: number },
   filters?: TableFilterCondition[],
-  combineWith: "AND" | "OR" = "AND"
+  combineWith: "AND" | "OR" = "AND",
+  engine?: DatabaseEngine
 ) => {
   const limit = pagination?.limit ?? 300;
   const offset = pagination?.offset ?? 0;
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
-  const where = filters?.length ? buildWhereClause(filters, combineWith) : "";
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const where = filters?.length
+    ? buildWhereClause(filters, combineWith, engine)
+    : "";
   const queryStr = `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
@@ -155,20 +167,27 @@ export const tableExportQuery = (
   tableName: string,
   columns?: string[],
   filters?: TableFilterCondition[],
-  combineWith: "AND" | "OR" = "AND"
+  combineWith: "AND" | "OR" = "AND",
+  engine?: DatabaseEngine
 ) => {
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
   const colList =
     columns && columns.length > 0
-      ? columns.map((c) => qIdent(c)).join(", ")
+      ? columns.map((c) => qIdent(c, engine)).join(", ")
       : "*";
-  const where = filters?.length ? buildWhereClause(filters, combineWith) : "";
+  const where = filters?.length
+    ? buildWhereClause(filters, combineWith, engine)
+    : "";
   const queryStr = `SELECT ${colList} FROM ${tableIdent}${where};`;
   return regexEscape(queryStr);
 };
 
-export const tableRowCountQuery = (schema: string, tableName: string) => {
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+export const tableRowCountQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
   const queryStr = `SELECT COUNT(*) FROM ${tableIdent};`;
   return regexEscape(queryStr);
 };
@@ -238,6 +257,49 @@ export const tableConstraintsQuery = (schema: string, tableName: string) => {
     WHERE
       t.relname = ${qLiteral(tableName)}
       AND n.nspname = ${qLiteral(schema)}
+  `;
+  return regexEscape(queryStr);
+};
+
+export const tableStructuresMySqlQuery = (
+  schema: string,
+  tableName: string
+) => {
+  const queryStr = `
+    SELECT
+      ordinal_position,
+      column_name,
+      column_type AS data_type,
+      is_nullable,
+      column_default,
+      column_comment,
+      character_set_name AS character_set,
+      collation_name AS collation,
+      extra,
+      column_name AS foreign_key
+    FROM information_schema.columns
+    WHERE table_schema = ${qLiteral(schema)}
+      AND table_name = ${qLiteral(tableName)}
+    ORDER BY ordinal_position;
+  `;
+  return regexEscape(queryStr);
+};
+
+export const tableConstraintsMySqlQuery = (
+  schema: string,
+  tableName: string
+) => {
+  const queryStr = `
+    SELECT
+      index_name,
+      index_type,
+      non_unique,
+      GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') AS column_name
+    FROM information_schema.statistics
+    WHERE table_schema = ${qLiteral(schema)}
+      AND table_name = ${qLiteral(tableName)}
+    GROUP BY index_name, index_type, non_unique
+    ORDER BY index_name;
   `;
   return regexEscape(queryStr);
 };

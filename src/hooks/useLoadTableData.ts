@@ -7,15 +7,18 @@ import {
   tableDataQuery,
   tableOidQuery,
   tableConstraintsQuery,
+  tableConstraintsMySqlQuery,
   tableRowCountQuery,
   tableSizeInfoQuery,
   tableStructuresQuery,
+  tableStructuresMySqlQuery,
   type TableFilterCondition,
 } from "./queries";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { operationCancel, TableChunk } from "src/lib/tauri";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
+import type { DatabaseEngine } from "src/types";
 
 // =============================================================================
 // Types & Constants
@@ -219,10 +222,11 @@ async function loadRowCount(params: {
   connId: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<number> {
-  const { connId, schema, tableName, addLogQuery } = params;
-  const q = tableRowCountQuery(schema, tableName);
+  const { connId, schema, tableName, engine, addLogQuery } = params;
+  const q = tableRowCountQuery(schema, tableName, engine);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
   return Number(cellToString((res.rows as unknown[][])?.[0]?.[0]));
@@ -251,9 +255,45 @@ async function loadMeta(params: {
   connId: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<{ structure: any[]; constraints: any[] }> {
-  const { connId, schema, tableName, addLogQuery } = params;
+  const { connId, schema, tableName, engine, addLogQuery } = params;
+
+  if (engine === "mysql" || engine === "mariadb") {
+    const qStructure = tableStructuresMySqlQuery(schema, tableName);
+    const structureRes = await runSqlQuery(connId, qStructure);
+    addLogQuery(qStructure);
+
+    const structure = (structureRes.rows as unknown[][]).map((row) => ({
+      column_name: cellToString(row?.[1]),
+      data_type: cellToString(row?.[2]),
+      is_nullable: (cellToString(row?.[3]) ?? "").toLowerCase() === "yes",
+      check: "",
+      column_default: cellToString(row?.[4]),
+      foreign_key: "",
+      comment: cellToString(row?.[5]) ?? "",
+    }));
+
+    const qConstraints = tableConstraintsMySqlQuery(schema, tableName);
+    const constraintsRes = await runSqlQuery(connId, qConstraints);
+    addLogQuery(qConstraints);
+
+    const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
+      index_name: cellToString(row?.[0]),
+      index_algorithm: cellToString(row?.[1]),
+      is_unique: Number(cellToString(row?.[2]) ?? "1") === 0,
+      index_definition: "",
+      column_name: cellToString(row?.[3]) ?? "",
+      condition: "",
+      include: "",
+      comment: "",
+    }));
+
+    console.log({ structure, constraints });
+
+    return { structure, constraints };
+  }
 
   // 1. Get OID
   const qOid = tableOidQuery(schema, tableName);
@@ -300,6 +340,7 @@ async function startRowsStream(params: {
   connId: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   limit: number;
   offset: number;
   addLogQuery: (sql: string) => void;
@@ -312,6 +353,7 @@ async function startRowsStream(params: {
     connId,
     schema,
     tableName,
+    engine,
     limit,
     offset,
     addLogQuery,
@@ -325,7 +367,8 @@ async function startRowsStream(params: {
     tableName,
     { limit, offset },
     filters,
-    filterCombine
+    filterCombine,
+    engine
   );
   addLogQuery(q);
 
@@ -455,6 +498,11 @@ export function useLoadTableData() {
 
         const limit = pagination?.limit ?? DEFAULT_LIMIT;
         const offset = pagination?.offset ?? DEFAULT_OFFSET;
+        const isPostgres = activeTab.engine === "postgres";
+        const supportsMeta =
+          activeTab.engine === "postgres" ||
+          activeTab.engine === "mysql" ||
+          activeTab.engine === "mariadb";
 
         // Set busy/error state
         if (plan.needAnyMetaWork)
@@ -539,6 +587,7 @@ export function useLoadTableData() {
                 connId,
                 schema,
                 tableName,
+                engine: activeTab.engine,
                 limit,
                 offset,
                 addLogQuery,
@@ -567,6 +616,7 @@ export function useLoadTableData() {
                 connId,
                 schema,
                 tableName,
+                engine: activeTab.engine,
                 addLogQuery,
               });
               patchMeta(setMeta, key, prev, { rowCount });
@@ -574,7 +624,7 @@ export function useLoadTableData() {
           );
         }
 
-        if (plan.needSizeInfo) {
+        if (plan.needSizeInfo && isPostgres) {
           metaTasks.push(
             (async () => {
               const sizeInfo = await loadSizeInfo({
@@ -591,13 +641,14 @@ export function useLoadTableData() {
           );
         }
 
-        if (plan.needMeta) {
+        if (plan.needMeta && supportsMeta) {
           metaTasks.push(
             (async () => {
               const { structure, constraints } = await loadMeta({
                 connId,
                 schema,
                 tableName,
+                engine: activeTab.engine,
                 addLogQuery,
               });
               patchMeta(setMeta, key, prev, { structure, constraints });

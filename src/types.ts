@@ -95,9 +95,9 @@ export type TableConstraint = {
   index_algorithm: string;
   is_unique: boolean | string;
   column_name: string;
-  condition: string;
-  include: string;
-  comment: string;
+  condition?: string;
+  include?: string;
+  comment?: string;
   isNew?: boolean;
 };
 

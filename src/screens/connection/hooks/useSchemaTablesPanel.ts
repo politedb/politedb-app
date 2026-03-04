@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 
@@ -37,6 +37,22 @@ export function useSchemaTablesPanel(args: {
     functions: false,
     tables: true,
   });
+
+  // Keep active schema valid across engines:
+  // - Postgres prefers "public" when available
+  // - Others fall back to first available schema
+  useEffect(() => {
+    const schemas = meta.schemas ?? [];
+    if (schemas.length === 0) return;
+    if (activeSchema && schemas.includes(activeSchema)) return;
+
+    const fallback =
+      engine === "postgres" && schemas.includes("public")
+        ? "public"
+        : schemas[0]!;
+
+    if (fallback !== activeSchema) setActiveSchema(fallback);
+  }, [meta.schemas, activeSchema, engine]);
 
   // Only change UI filter (metadata is global)
   const onSchemaChange = useCallback(

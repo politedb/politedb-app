@@ -3,6 +3,7 @@ import type {
   TableStructure as TableStructureType,
   TableConstraint as TableConstraintType,
   TableWindow,
+  DatabaseEngine,
 } from "src/types";
 import { cellToString } from "./convert";
 import { TableDataState } from "src/stores/connection";
@@ -18,7 +19,10 @@ export type PatchMap = {
   };
 };
 
-function qIdent(ident: string) {
+function qIdent(ident: string, engine?: DatabaseEngine) {
+  if (engine === "mysql" || engine === "mariadb") {
+    return `\`${String(ident).replace(/`/g, "``")}\``;
+  }
   return `"${String(ident).replace(/"/g, `""`)}"`;
 }
 
@@ -98,10 +102,10 @@ export function generateUpdateSqlFromPatches(
   tableName: string,
   tableData: TableDataType | null,
   constraints: TableConstraintType[] | null = null,
-  _engine: string = "postgres"
+  engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
 
   // Get update patches for data
   const updatePatches = patchMap["update"]?.["data"];
@@ -135,7 +139,7 @@ export function generateUpdateSqlFromPatches(
       if (!col) continue;
 
       setClauses.push(
-        `${qIdent(colName)} = ${formatValue(newValue, col.db_type)}`
+        `${qIdent(colName, engine)} = ${formatValue(newValue, col.db_type)}`
       );
     }
 
@@ -156,7 +160,7 @@ export function generateUpdateSqlFromPatches(
 
       const cellValue = originalRow[i];
       const originalValue = cellToString(cellValue);
-      const colName = qIdent(col.name);
+      const colName = qIdent(col.name, engine);
 
       // Handle null/empty values
       if (
@@ -200,11 +204,11 @@ export function generateInsertSqlFromPatches(
   patchMap: PatchData,
   schema: string,
   tableName: string,
-  _engine: string = "postgres",
+  engine: DatabaseEngine = "postgres",
   columns?: Array<{ name: string; db_type?: string }>
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
 
   // Get create patches for data only (not structure or constraints)
   const createPatches = patchMap["create"]?.["data"];
@@ -220,7 +224,7 @@ export function generateInsertSqlFromPatches(
     for (const [colName, value] of Object.entries(patchData)) {
       if (colName === "__rowKey") continue; // Skip internal row key
       const col = columns?.find((c) => c.name === colName);
-      colNames.push(qIdent(colName));
+      colNames.push(qIdent(colName, engine));
       values.push(formatValue(value, col?.db_type));
     }
 
@@ -244,10 +248,10 @@ export function generateStructureSqlFromPatches(
   tableName: string,
   initStructure: TableStructureType[] | null,
   initConstraints: TableConstraintType[] | null = null,
-  _engine: string = "postgres"
+  engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
 
   // Handle CREATE (new columns)
   const createPatches = patchMap["create"]?.["structure"];
@@ -259,7 +263,7 @@ export function generateStructureSqlFromPatches(
       const isNullable = patchData.is_nullable;
       const columnDefault = patchData.column_default;
 
-      let columnDef = `${qIdent(columnName)} ${dataType || "UNKNOWN"}`;
+      let columnDef = `${qIdent(columnName, engine)} ${dataType || "UNKNOWN"}`;
       if (!isNullable) {
         columnDef += " NOT NULL";
       }
@@ -290,7 +294,7 @@ export function generateStructureSqlFromPatches(
       // Handle table name change
       if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
         sqlStatements.push(
-          `ALTER TABLE ${tableIdent} RENAME TO ${qIdent(metadataPatch.tableName)};`
+          `ALTER TABLE ${tableIdent} RENAME TO ${qIdent(metadataPatch.tableName, engine)};`
         );
       }
 
@@ -323,14 +327,14 @@ export function generateStructureSqlFromPatches(
           // Drop existing primary key if it exists
           if (existingPkConstraint) {
             sqlStatements.push(
-              `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingPkConstraint.index_name)};`
+              `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingPkConstraint.index_name, engine)};`
             );
           }
 
           // Add new primary key if columns are specified
           if (newPrimaryKey.length > 0) {
             const pkColumns = newPrimaryKey
-              .map((col: string) => qIdent(col))
+              .map((col: string) => qIdent(col, engine))
               .join(", ");
             sqlStatements.push(
               `ALTER TABLE ${tableIdent} ADD PRIMARY KEY (${pkColumns});`
@@ -364,7 +368,7 @@ export function generateStructureSqlFromPatches(
         ) {
           const oldName = originalColumn.column_name;
           const newName = patchData.column_name.trim();
-          const sql = `ALTER TABLE ${tableIdent} RENAME COLUMN ${qIdent(oldName)} TO ${qIdent(newName)};`;
+          const sql = `ALTER TABLE ${tableIdent} RENAME COLUMN ${qIdent(oldName, engine)} TO ${qIdent(newName, engine)};`;
           sqlStatements.push(sql);
         }
       }
@@ -440,7 +444,7 @@ export function generateStructureSqlFromPatches(
 
         // Only generate ALTER COLUMN if there are changes (excluding column_name which is handled above)
         if (changes.length > 0) {
-          const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName)} ${changes.join(", ")};`;
+          const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName, engine)} ${changes.join(", ")};`;
           sqlStatements.push(sql);
         }
       }
@@ -459,7 +463,7 @@ export function generateStructureSqlFromPatches(
       const originalColumn = initStructure[rowIndex];
       if (!originalColumn) continue;
 
-      const sql = `ALTER TABLE ${tableIdent} DROP COLUMN ${qIdent(originalColumn.column_name)};`;
+      const sql = `ALTER TABLE ${tableIdent} DROP COLUMN ${qIdent(originalColumn.column_name, engine)};`;
       sqlStatements.push(sql);
     }
   }
@@ -475,10 +479,10 @@ export function generateConstraintSqlFromPatches(
   schema: string,
   tableName: string,
   initConstraints: TableConstraintType[] | null,
-  _engine: string = "postgres"
+  engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
 
   // Handle CREATE (new indexes/constraints)
   const createPatches = patchMap["create"]?.["constraints"];
@@ -492,7 +496,7 @@ export function generateConstraintSqlFromPatches(
       const uniqueClause = isUnique ? "UNIQUE " : "";
       const algorithmClause = ` USING ${algorithm || "BTREE"}`;
       const columnClause = columnName ? ` (${qIdent(columnName)})` : "";
-      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName)} ON ${tableIdent}${algorithmClause}${columnClause};`;
+      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName, engine)} ON ${tableIdent}${algorithmClause}${columnClause};`;
       sqlStatements.push(sql);
     }
   }
@@ -518,7 +522,7 @@ export function generateConstraintSqlFromPatches(
       // For updates, we typically need to drop and recreate
       // Drop the old index
       sqlStatements.push(
-        `DROP INDEX IF EXISTS ${qIdent(schema)}.${qIdent(indexName)};`
+        `DROP INDEX IF EXISTS ${qIdent(schema, engine)}.${qIdent(indexName, engine)};`
       );
 
       // Create the new index with updated properties
@@ -534,7 +538,7 @@ export function generateConstraintSqlFromPatches(
 
       const uniqueClause = isUnique ? "UNIQUE " : "";
       const algorithmClause = algorithm ? `USING ${algorithm} ` : "";
-      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(newIndexName)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName)});`;
+      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(newIndexName, engine)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName, engine)});`;
       sqlStatements.push(sql);
     }
   }
@@ -555,7 +559,7 @@ export function generateConstraintSqlFromPatches(
       const originalConstraint = initConstraints[rowIndex];
       if (!originalConstraint) continue;
 
-      const sql = `DROP INDEX IF EXISTS ${qIdent(schema)}.${qIdent(originalConstraint.index_name)};`;
+      const sql = `DROP INDEX IF EXISTS ${qIdent(schema, engine)}.${qIdent(originalConstraint.index_name, engine)};`;
       sqlStatements.push(sql);
     }
   }
@@ -572,10 +576,10 @@ export function generateDeleteSqlFromPatches(
   tableName: string,
   tableData: TableDataType | null,
   constraints: TableConstraintType[] | null = null,
-  _engine: string = "postgres"
+  engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema)}.${qIdent(tableName)}`;
+  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
 
   // Get delete patches for data
   const deletePatches = patchMap["delete"]?.["data"];
@@ -615,7 +619,7 @@ export function generateDeleteSqlFromPatches(
 
       const cellValue = originalRow[i];
       const originalValue = cellToString(cellValue);
-      const colName = qIdent(col.name);
+      const colName = qIdent(col.name, engine);
 
       // Handle null/empty values
       if (
@@ -657,7 +661,7 @@ export function generateDeleteSqlFromPatches(
  */
 export function generateSqlFromPatches(
   patchMap: PatchMap,
-  engine: string = "postgres",
+  engine: DatabaseEngine = "postgres",
   options?: {
     activeScreen?: string;
     getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;

@@ -241,6 +241,40 @@ export function MainTableDataPane(props: {
   const hasError = !!(meta.error || rowsInfo?.error);
   const errorText = String(meta.error || rowsInfo?.error || "");
 
+  // Lazy-load structure/constraints when switching to Structure view.
+  useEffect(() => {
+    if (viewMode !== "structure") return;
+    if (!activeTableWindow) return;
+    if (meta.busy) return;
+
+    const hasStructure =
+      Array.isArray(meta.structure) && meta.structure.length > 0;
+    const hasConstraints =
+      Array.isArray(meta.constraints) && meta.constraints.length > 0;
+
+    if (hasStructure && hasConstraints) return;
+
+    void loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        refreshRows: false,
+        refreshMeta: true,
+        refreshStats: false,
+      }
+    );
+  }, [
+    viewMode,
+    activeTableWindow,
+    meta.busy,
+    meta.structure,
+    meta.constraints,
+    loadTableData,
+    limit,
+    offset,
+  ]);
+
   /* ===========================================================================
    * Row state
    * =========================================================================== */

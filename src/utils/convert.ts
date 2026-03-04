@@ -9,6 +9,30 @@ export type CellValue =
   | { t: "BytesB64"; v: string };
 
 // utils
+function decodeBytesB64ToUtf8(b64: string): string {
+  try {
+    if (!b64) return "";
+
+    // Browser-safe base64 decode
+    const atobFn = globalThis.atob;
+    if (typeof atobFn !== "function") return b64;
+
+    const bin = atobFn(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+
+    if (typeof TextDecoder === "function") {
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    }
+
+    // Fallback: latin1-style string
+    return bin;
+  } catch {
+    // Keep original encoded value if decode fails
+    return b64;
+  }
+}
+
 export function cellToString(
   cell: any,
   allowNull: boolean = false
@@ -24,10 +48,14 @@ export function cellToString(
   }
 
   if (typeof cell === "object") {
-    // { t: "Str", v: "public" }
-    if ("v" in cell) return String((cell as any).v ?? "");
     // { t: "Null" }
     if ((cell as any).t === "Null") return allowNull ? null : "";
+    // { t: "BytesB64", v: "..." } -> decode for display/use
+    if ((cell as any).t === "BytesB64") {
+      return decodeBytesB64ToUtf8(String((cell as any).v ?? ""));
+    }
+    // { t: "Str", v: "public" } and other scalar wrappers
+    if ("v" in cell) return String((cell as any).v ?? "");
   }
 
   return "";

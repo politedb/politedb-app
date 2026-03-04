@@ -163,7 +163,7 @@ export function ConnectionScreen() {
     metaKey,
     engine,
     connectionId: runtimeConnectionId,
-    defaultSchema: "public",
+    defaultSchema: engine === "postgres" ? "public" : "",
   });
 
   const loadError = useMemo(() => {

@@ -9,17 +9,26 @@ import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
-import { INDEX_ALGORITHMS } from "../../constant";
+import { INDEX_ALGORITHMS } from "src/constant";
 
-const COLUMNS_NAME: (keyof TableConstraint)[] = [
-  "index_name",
-  "index_algorithm",
-  "is_unique",
-  "column_name",
-  "condition",
-  "include",
-  "comment",
-];
+const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
+  postgres: [
+    "index_name",
+    "index_algorithm",
+    "is_unique",
+    "column_name",
+    "condition",
+    "include",
+    "comment",
+  ],
+  mysql: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  redis: [],
+  mariadb: [],
+  sqlserver: [],
+  mongo: [],
+  sqlite: [],
+  oracle: [],
+};
 
 interface Props {
   initData: TableConstraint[] | null;
@@ -118,7 +127,7 @@ export function TableConstraints({
 
   const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(
     () => [
-      ...COLUMNS_NAME.map((name) => ({
+      ...COLUMNS_NAME[engine].map((name) => ({
         key: name,
         label: name,
         sortable: true,
@@ -131,7 +140,7 @@ export function TableConstraints({
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRowIndex === index;
-          const colIndex = COLUMNS_NAME.indexOf(name);
+          const colIndex = COLUMNS_NAME[engine].indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
 
