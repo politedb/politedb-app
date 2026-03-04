@@ -74,7 +74,15 @@ export function ConnectionFormDialog({
     const user = v.user?.trim();
     const database = v.database?.trim();
     const port = v.port;
-    return !!host && !!user && !!database && Number.isFinite(Number(port));
+
+    const hostOk = !!host && Number.isFinite(Number(port));
+
+    if (v.engine === "redis") {
+      // Redis: only host + port are required; user/password/db are optional
+      return hostOk;
+    }
+
+    return hostOk && !!user && !!database;
   }, [watch]);
 
   const onTest = handleSubmit(async (v) => {

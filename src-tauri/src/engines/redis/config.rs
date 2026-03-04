@@ -10,7 +10,7 @@ pub fn build_redis_url(input: &RedisConnectInput, password: &str) -> anyhow::Res
         return Err(anyhow!("REDIS_PORT_INVALID"));
     }
 
-    let ssl_mode = input.ssl_mode.as_deref().unwrap_or("prefer");
+    let ssl_mode = input.ssl_mode.as_deref().unwrap_or("disable");
     let scheme = match ssl_mode {
         "disable" => "redis",
         "prefer" | "require" => "rediss",

@@ -222,6 +222,7 @@ function buildRedisInput(v: FormValues): ConnectionCreateInput {
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
       : { kind: "inline", value: v.password },
+    ssl_mode: v.sslMode,
   };
 
   return {
@@ -279,7 +280,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     }) ?? defaultPortForEngine(engine);
 
   const user =
-    pickByEngine(engine, { postgres: pg?.user, mysql: my?.user }) || "root";
+    pickByEngine(engine, {
+      postgres: pg?.user,
+      mysql: my?.user,
+      redis: rd?.user,
+    }) || "root";
 
   const database =
     pickByEngine(engine, { postgres: pg?.database, mysql: my?.database }) ||
@@ -312,10 +317,12 @@ function makeSslDefaults(
 ) {
   const pg = input?.postgres;
   const my = input?.mysql;
+  const rd = input?.redis;
 
   const ssl_mode = pickByEngine(engine, {
     postgres: pg?.ssl_mode as SslMode | undefined,
     mysql: my?.ssl_mode as SslMode | undefined,
+    redis: rd?.ssl_mode as SslMode | undefined,
   });
 
   const ssl_key_path = pickByEngine(engine, {
@@ -333,8 +340,12 @@ function makeSslDefaults(
     mysql: my?.ssl_ca_path ?? undefined,
   });
 
+  // Redis: default to "disable" so local Redis works without TLS; Postgres/MySQL: default "prefer"
+  const defaultSsl =
+    engine === "redis" ? ("disable" as const) : ("prefer" as const);
+
   return {
-    sslMode: ssl_mode || "prefer",
+    sslMode: ssl_mode || defaultSsl,
     sslKey: ssl_key_path || "",
     sslCert: ssl_cert_path || "",
     sslCA: ssl_ca_path || "",

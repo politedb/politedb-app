@@ -13,6 +13,9 @@ export function ConnectionBasicsSection(
 ) {
   const { control, errors, onDirty, isCreateNewConnection } = props;
 
+  const engine = useWatch({ control, name: "engine" });
+  const isRedis = engine === "redis";
+
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
     control,
@@ -50,13 +53,23 @@ export function ConnectionBasicsSection(
   const database = useController({
     control,
     name: "database",
-    rules: { required: "Database is required." },
+    rules: {
+      validate: (v) => {
+        if (isRedis) return true;
+        return String(v ?? "").trim().length > 0 || "Database is required.";
+      },
+    },
   });
 
   const user = useController({
     control,
     name: "user",
-    rules: { required: "User is required." },
+    rules: {
+      validate: (v) => {
+        if (isRedis) return true;
+        return String(v ?? "").trim().length > 0 || "User is required.";
+      },
+    },
   });
 
   // Password: required ONLY when storeKeychain=false
@@ -65,6 +78,7 @@ export function ConnectionBasicsSection(
     name: "password",
     rules: {
       validate: (v) => {
+        if (isRedis) return true;
         if (storeKeychain) return true;
         return String(v ?? "").trim().length > 0 || "Password is required.";
       },
@@ -99,12 +113,18 @@ export function ConnectionBasicsSection(
     return v.trim().length > 0;
   }, [password.field.value]);
 
+  const defaultPort = useMemo(() => {
+    if (engine === "mysql") return 3306;
+    if (engine === "redis") return 6379;
+    return 5432;
+  }, [engine]);
+
   const nameErr = !!errors?.name;
   const hostErr = !!errors?.host;
   const portErr = !!errors?.port;
   const dbErr = !!errors?.database;
   const userErr = !!errors?.user;
-  const pwErr = !storeKeychain && !!errors?.password;
+  const pwErr = !storeKeychain && !isRedis && !!errors?.password;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -112,7 +132,9 @@ export function ConnectionBasicsSection(
         <div class="text-sm font-semibold text-slate-900">
           Connection basics
         </div>
-        <div class="text-xs text-slate-500">Host, Port, User, Database</div>
+        <div class="text-xs text-slate-500">
+          {isRedis ? "Host, Port, User" : "Host, Port, User, Database"}
+        </div>
       </div>
 
       <div class="space-y-4">
@@ -143,31 +165,36 @@ export function ConnectionBasicsSection(
             <Input
               value={String(port.field.value ?? "")}
               inputMode="numeric"
-              placeholder="5432"
+              placeholder={String(defaultPort)}
               error={portErr}
               onInput={(e: InputEvt) => {
-                port.field.onChange(toNumber(e.currentTarget.value, 5432));
+                port.field.onChange(
+                  toNumber(e.currentTarget.value, defaultPort)
+                );
                 dirty();
               }}
             />
           </div>
         </Field>
 
-        <Field label="Database / User" alignTop>
+        <Field label={isRedis ? "User" : "Database / User"} alignTop>
           <div class="grid grid-cols-2 gap-3">
-            <Input
-              value={database.field.value}
-              placeholder="database"
-              error={dbErr}
-              onInput={(e: InputEvt) => {
-                database.field.onChange(e.currentTarget.value);
-                dirty();
-              }}
-            />
+            {!isRedis && (
+              <Input
+                value={database.field.value}
+                placeholder="database"
+                error={dbErr}
+                onInput={(e: InputEvt) => {
+                  database.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              />
+            )}
             <Input
               value={user.field.value}
               placeholder="user"
               error={userErr}
+              class={isRedis ? "col-span-2" : ""}
               onInput={(e: InputEvt) => {
                 user.field.onChange(e.currentTarget.value);
                 dirty();
