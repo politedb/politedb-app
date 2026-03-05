@@ -10,6 +10,7 @@ import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
 import { ArrowDown, ArrowUp } from "src/components/icons";
 import { cn } from "src/utils/cn";
+import { TableForeignKey } from "src/types";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -35,10 +36,14 @@ type Props = {
 
   dataVersion: number;
 
+  foreignKeyMap?: Record<string, TableForeignKey>;
+
   onSelect?: (rowIdx: number, colIdx: number) => void;
   onStartEdit?: (cell: EditingCell) => void;
   onCommitEdit?: (cell: EditingCell, value: string) => void;
   onExitEdit?: () => void;
+
+  onCellActivate?: (cell: EditingCell) => boolean | void;
 
   // Called when user clicks a column header to change sort.
   onChangeSort?: (
@@ -171,7 +176,6 @@ function hitTestCol(
 export function CanvasTable({
   columns,
   totalRows,
-  getRowAt,
   widthByName = {}, // Default empty if not provided
   emptyColumnWidth,
   selected,
@@ -179,6 +183,8 @@ export function CanvasTable({
   deletedRows,
   dataVersion,
   sortState,
+  foreignKeyMap,
+  getRowAt,
   onSelect,
   onStartEdit,
   onCommitEdit,
@@ -188,6 +194,7 @@ export function CanvasTable({
   isCellDirty,
   isNewRow,
   onChangeSort,
+  onCellActivate,
 }: Props) {
   // --- Refs for DOM elements ---
   const rootRef = useRef<HTMLDivElement>(null);
@@ -449,7 +456,9 @@ export function CanvasTable({
         }
 
         if (s) {
-          const maxTextWidth = Math.max(0, w - 16);
+          const isFkCol = !!foreignKeyMap && !!foreignKeyMap[col.name];
+          const arrowWidth = isFkCol ? 14 : 0;
+          const maxTextWidth = Math.max(0, w - 16 - arrowWidth);
           const cacheKey = `${maxTextWidth}|${s}`;
           let displayText = textCacheRef.current.get(cacheKey);
           if (!displayText) {
@@ -460,7 +469,32 @@ export function CanvasTable({
             textCacheRef.current.set(cacheKey, displayText);
           }
 
-          ctx.fillStyle = s === "NULL" ? "#9ca3af" : "#111827";
+          const textColor = s === "NULL" ? "#9ca3af" : "#111827";
+
+          // Draw FK arrow on the right side of the cell (thin right arrow)
+          if (isFkCol && s !== "NULL") {
+            const centerY = y + ROW_HEIGHT / 2;
+            const arrowRight = x + w - 8;
+            const arrowLeft = arrowRight - 8;
+
+            ctx.strokeStyle = "#9ca3af";
+            ctx.lineWidth = 1;
+
+            // Shaft
+            ctx.beginPath();
+            ctx.moveTo(arrowLeft - 2, centerY);
+            ctx.lineTo(arrowRight - 1, centerY);
+            ctx.stroke();
+
+            // Head
+            ctx.beginPath();
+            ctx.moveTo(arrowRight - 3.5, centerY - 3.5);
+            ctx.lineTo(arrowRight, centerY);
+            ctx.lineTo(arrowRight - 3.5, centerY + 3.5);
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = textColor;
           ctx.fillText(displayText, x + 8, y + ROW_HEIGHT / 2);
         }
       }
@@ -624,6 +658,22 @@ export function CanvasTable({
 
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
+
+      // If this is an FK column and click is on the arrow area (right ~16px),
+      // trigger navigation instead of normal select.
+      if (foreignKeyMap && onCellActivate) {
+        const col = columns[colIdx];
+        const fk = foreignKeyMap[col.name];
+        if (fk) {
+          const colLeft = colLefts[colIdx] ?? 0;
+          const w = colWidths[col.name] ?? 140;
+          const relX = x - colLeft;
+          if (relX >= w - 18 && relX <= w) {
+            const handled = onCellActivate({ rowIdx, colIdx });
+            if (handled) return;
+          }
+        }
+      }
 
       // Commit any existing edit before selecting new cell
       if (editing) {

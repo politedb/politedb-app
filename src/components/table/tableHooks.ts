@@ -19,6 +19,8 @@ import {
   inferCellType,
 } from "./tableUtils";
 import { TableFilterCondition } from "src/hooks/queries";
+import { useConnectionStore } from "src/stores/connection";
+import { DEFAULT_FILTER_STATE } from "src/constant";
 
 // ============================================================================
 // useColumnSizing
@@ -297,41 +299,85 @@ export function useMergedRefs<T>(
   }, refs);
 }
 
-export function useTableFilter(startedRef: MutableRef<string | null>) {
-  const [filterBarVisible, setFilterBarVisible] = useState(false);
-  const [filters, setFilters] = useState<TableFilterCondition[]>([]);
-  const [filterCombine, setFilterCombine] = useState<"AND" | "OR">("AND");
-  const [appliedFilters, setAppliedFilters] = useState<TableFilterCondition[]>(
-    []
+// ============================================================================
+// useTableFilter
+// ============================================================================
+
+export function useTableFilter(
+  startedRef: MutableRef<string | null>,
+  key: string
+) {
+  const setTableFilter = useConnectionStore((s) => s.setTableFilter);
+  const clearTableFilter = useConnectionStore((s) => s.clearTableFilter);
+  const tableFilters = useConnectionStore((s) => s.tableFilterByKey);
+
+  const current = useMemo(
+    () => tableFilters[key] ?? DEFAULT_FILTER_STATE,
+    [tableFilters, key]
   );
-  const [appliedFilterCombine, setAppliedFilterCombine] = useState<
-    "AND" | "OR"
-  >("AND");
 
   const handleApplyFilters = useCallback(
-    (newFilters: TableFilterCondition[], combine: "AND" | "OR") => {
-      setAppliedFilters(newFilters);
-      setAppliedFilterCombine(combine);
-      setFilters(newFilters);
-      setFilterCombine(combine);
+    (
+      newFilters: TableFilterCondition[],
+      combine: "AND" | "OR",
+      tableKey: string
+    ) => {
+      console.log({
+        ...current,
+        appliedFilters: newFilters,
+        appliedFilterCombine: combine,
+      });
+
+      setTableFilter(tableKey, {
+        ...current,
+        filters: newFilters,
+        filterCombine: combine,
+        appliedFilters: newFilters,
+        appliedFilterCombine: combine,
+      });
       startedRef.current = null; // allow effect to run with new filters
     },
-    []
+    [setTableFilter, current]
   );
 
   const handleClearFilters = useCallback(() => {
-    setFilterCombine("AND");
-    setAppliedFilters([]);
-    setAppliedFilterCombine("AND");
+    clearTableFilter(key);
     startedRef.current = null; // allow effect to run without filters
-  }, []);
+  }, [clearTableFilter, key]);
+
+  const setFilters = useCallback(
+    (next: TableFilterCondition[]) => {
+      setTableFilter(key, { ...current, filters: next });
+    },
+    [setTableFilter, key, current]
+  );
+
+  const setFilterCombine = useCallback(
+    (combine: "AND" | "OR") => {
+      setTableFilter(key, { ...current, filterCombine: combine });
+    },
+    [setTableFilter, key, current]
+  );
+
+  const setFilterBarVisible = useCallback(
+    (visible: boolean | ((prev: boolean) => boolean), tableKey: string) => {
+      setTableFilter(tableKey, {
+        ...current,
+        filterBarVisible:
+          typeof visible === "function"
+            ? visible(current.filterBarVisible)
+            : visible,
+      });
+    },
+    [setTableFilter, current]
+  );
 
   return {
-    filterBarVisible,
-    filters,
-    filterCombine,
-    appliedFilters,
-    appliedFilterCombine,
+    filterBarVisible: current.filterBarVisible,
+    filters: current.filters ?? [],
+    filterCombine: current.filterCombine ?? "AND",
+    appliedFilters: current.appliedFilters ?? [],
+    appliedFilterCombine: current.appliedFilterCombine ?? "AND",
 
     setFilters,
     setFilterCombine,

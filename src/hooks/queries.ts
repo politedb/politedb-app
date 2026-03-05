@@ -216,7 +216,6 @@ export const tableStructuresQuery = (
       column_name AS CHECK,
       column_name AS check_constraint,
       column_default,
-      column_name AS foreign_key,
       pg_catalog.col_description (${oid}, ordinal_position) AS comment
     FROM
       information_schema.columns

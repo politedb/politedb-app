@@ -231,7 +231,7 @@ export function ForeignKeyDialog(props: {
           </Button>
         )}
         <Button
-          className="px-6!"
+          className="border border-blue-500 px-6!"
           variant="default"
           onClick={handleSubmit(onSubmit)}
           disabled={!isDirty}

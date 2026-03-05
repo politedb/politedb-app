@@ -29,6 +29,7 @@ const NULL_OPS = ["IS NULL", "IS NOT NULL"];
 const LIST_OPS = ["IN", "NOT IN"];
 
 interface TableFilterBarProps {
+  tableKey: string;
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
@@ -38,7 +39,11 @@ interface TableFilterBarProps {
   offset: number;
   onFiltersChange: (filters: TableFilterCondition[]) => void;
   onFilterCombineChange: (combine: "AND" | "OR") => void;
-  onApply: (filters: TableFilterCondition[], combine: "AND" | "OR") => void;
+  onApply: (
+    filters: TableFilterCondition[],
+    combine: "AND" | "OR",
+    tableKey: string
+  ) => void;
   onClear: () => void;
   onExport?: () => void;
   onImport?: () => void;
@@ -46,6 +51,7 @@ interface TableFilterBarProps {
 }
 
 export function TableFilterBar({
+  tableKey,
   schema,
   tableName,
   columns,
@@ -108,9 +114,9 @@ export function TableFilterBar({
     (combine: "AND" | "OR") => {
       setApplyAllOpen(false);
       onFilterCombineChange(combine);
-      onApply(filters, combine);
+      onApply(filters, combine, tableKey);
     },
-    [filters, onApply, onFilterCombineChange]
+    [filters, onApply, onFilterCombineChange, tableKey]
   );
 
   const currentSql = useMemo(() => {
@@ -201,7 +207,7 @@ export function TableFilterBar({
             <Button
               variant="shadow"
               className="px-3 py-[4.5px] text-xs"
-              onClick={() => onApply(filters, filterCombine)}
+              onClick={() => onApply(filters, filterCombine, tableKey)}
             >
               Apply
             </Button>

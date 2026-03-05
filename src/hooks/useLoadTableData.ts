@@ -273,7 +273,6 @@ async function loadMeta(params: {
       is_nullable: (cellToString(row?.[3]) ?? "").toLowerCase() === "yes",
       check: "",
       column_default: cellToString(row?.[4]),
-      foreign_key: "",
       comment: cellToString(row?.[5]) ?? "",
     }));
 
@@ -312,8 +311,7 @@ async function loadMeta(params: {
     is_nullable: cellToString(row?.[8])?.toLowerCase() === "yes",
     check: cellToString(row?.[9]),
     column_default: cellToString(row?.[11]),
-    foreign_key: cellToString(row?.[12]),
-    comment: cellToString(row?.[13]),
+    comment: cellToString(row?.[12]),
   }));
 
   // 3. Constraints
@@ -672,7 +670,11 @@ export function useLoadTableData() {
                 engine: activeTab.engine,
                 addLogQuery,
               });
-              patchMeta(setMeta, key, prev, { structure, constraints, foreignKeys });
+              patchMeta(setMeta, key, prev, {
+                structure,
+                constraints,
+                foreignKeys,
+              });
             })()
           );
         }

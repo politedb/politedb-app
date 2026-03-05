@@ -13,7 +13,8 @@ import type {
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 import { PatchMap } from "src/utils/generateSql";
 import { cellToString } from "src/utils/convert";
-import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
+import { DATA_ACTIONS, DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
+import { TableFilterCondition } from "src/hooks/queries";
 
 /* =============================================================================
  * Row cache (max gain)
@@ -109,6 +110,14 @@ export type NewTableDataState = {
   columns: TableColumn[];
 };
 
+export type TableFilterState = {
+  filterBarVisible: boolean;
+  filters: TableFilterCondition[];
+  filterCombine: "AND" | "OR";
+  appliedFilters: TableFilterCondition[];
+  appliedFilterCombine: "AND" | "OR";
+};
+
 /* =============================================================================
  * Rows windowing (max gain)
  * ============================================================================= */
@@ -189,6 +198,7 @@ export type ConnectionState = {
   tableConstraints: Record<string, Record<string, TableConstraint[]>>;
   dataPatchMap: Record<string, PatchMap>;
   newTableData: Record<string, Record<string, NewTableDataState>>;
+  tableFilterByKey: Record<string, TableFilterState>;
 
   tableRowsByKey: Record<string, TableRowState>;
   tableRowCacheByKey: Record<
@@ -241,6 +251,9 @@ export type ConnectionState = {
     field: keyof TableConstraint,
     value: string | boolean
   ) => void;
+
+  setTableFilter: (key: string, filter: TableFilterState) => void;
+  clearTableFilter: (key: string) => void;
 
   clearTableStructure: (tabId: string, tableWindowId?: string) => void;
   clearTableConstraints: (tabId: string, tableWindowId?: string) => void;
@@ -364,6 +377,8 @@ export const useConnectionStore = create<ConnectionState>()(
       tableConstraints: {},
       dataPatchMap: {},
       newTableData: {},
+
+      tableFilterByKey: {},
 
       tableRowsByKey: {},
       tableRowCacheByKey: {},
@@ -640,7 +655,29 @@ export const useConnectionStore = create<ConnectionState>()(
                   cleaned[key] = value;
                   continue;
                 }
-                const origVal = original[key];
+                let origVal = original[key];
+                if (dataKey === DATA_KEYS.structure && key === "foreign_key") {
+                  const rowColumn =
+                    typeof original.column_name === "string"
+                      ? original.column_name.trim()
+                      : "";
+                  if ((cellToString(origVal) ?? "") === "" && rowColumn) {
+                    const meta = s.tableDataMap[tableKey];
+                    const existingFk =
+                      meta?.foreignKeys?.find((fk) =>
+                        fk.column_names
+                          .split(",")
+                          .map((x) => x.trim())
+                          .includes(rowColumn)
+                      ) ?? null;
+                    if (
+                      existingFk?.ref_table_name &&
+                      existingFk?.ref_column_names
+                    ) {
+                      origVal = `${existingFk.ref_table_name}(${existingFk.ref_column_names})`;
+                    }
+                  }
+                }
                 const patchStr = cellToString(value);
                 const origStr = cellToString(origVal);
                 if (patchStr !== origStr) cleaned[key] = value;
@@ -1213,6 +1250,19 @@ export const useConnectionStore = create<ConnectionState>()(
         const st = get().tableRowsByKey[key];
         return st ?? null;
       },
+
+      setTableFilter: (key, filter) =>
+        set((s) => ({
+          tableFilterByKey: { ...s.tableFilterByKey, [key]: filter },
+        })),
+
+      clearTableFilter: (key) =>
+        set((s) => ({
+          tableFilterByKey: {
+            ...s.tableFilterByKey,
+            [key]: { ...DEFAULT_FILTER_STATE, filterBarVisible: true },
+          },
+        })),
     };
   })
 );

@@ -1,4 +1,4 @@
-import { DataAction, DataKey } from "./stores/connection";
+import { DataAction, DataKey, TableFilterState } from "./stores/connection";
 import { DatabaseType } from "./types";
 
 export const SUPPORTED_DATABASES: readonly (DatabaseType & {
@@ -138,4 +138,12 @@ export const DATA_ACTIONS: Record<DataAction, DataAction> = {
   create: "create",
   update: "update",
   delete: "delete",
+};
+
+export const DEFAULT_FILTER_STATE: TableFilterState = {
+  filterBarVisible: false,
+  filters: [],
+  filterCombine: "AND",
+  appliedFilters: [],
+  appliedFilterCombine: "AND",
 };

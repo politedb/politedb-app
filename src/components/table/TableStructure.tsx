@@ -11,7 +11,7 @@ import {
 } from "src/components/common/Table";
 import { Input, InputOption } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
-import { DataAction, DataKey } from "src/stores/connection";
+import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { getDbConfig } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
@@ -26,6 +26,12 @@ const COLUMNS_NAME: (keyof TableStructure)[] = [
   "foreign_key",
   "comment",
 ];
+
+function normalizeFkLabel(v: unknown): string {
+  return String(v ?? "")
+    .replace(/\s+/g, "")
+    .trim();
+}
 
 interface Props {
   initData: TableStructure[] | null;
@@ -73,6 +79,7 @@ export function TableStructure({
     openFkDialog,
     closeFkDialog,
     saveForeignKey,
+    deleteForeignKey,
     handleDataChange,
     handleDeleteRecord,
   } = useTableStructureOperations({
@@ -136,6 +143,15 @@ export function TableStructure({
     [dbConfig]
   ) as Record<keyof TableStructure, InputOption[]>;
 
+  const dataPatchMap = useConnectionStore(
+    (s) => s.dataPatchMap[activeProfileScreen]
+  );
+  const structureUpdatePatches = useMemo(
+    () =>
+      dataPatchMap?.[activeTableWindow.id]?.patches?.update?.structure ?? {},
+    [JSON.stringify(dataPatchMap)]
+  );
+
   const tableColumns = useMemo<
     CommonTableColumn<TableStructure & { _rowNumber?: number }>[]
   >(
@@ -179,13 +195,24 @@ export function TableStructure({
           const fkLabel = foreignKey
             ? `${foreignKey?.ref_table_name}(${foreignKey?.ref_column_names})`
             : "";
+          const rowPatch = structureUpdatePatches[String(index)] ?? null;
+          const hasForeignKeyPatch =
+            !!rowPatch &&
+            Object.prototype.hasOwnProperty.call(rowPatch, "foreign_key");
+          const fkDisplayValue = hasForeignKeyPatch
+            ? String(fieldValue)
+            : String(fieldValue || fkLabel);
+          const fkInitValue = String(initValue || fkLabel);
+          const isDirtyCell = isFkColumn
+            ? normalizeFkLabel(fkDisplayValue) !== normalizeFkLabel(fkInitValue)
+            : initValue !== fieldValue;
 
           return (
             <div class="relative">
               <Input
                 className={cn(
                   "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
-                  initValue !== fieldValue && "bg-amber-100",
+                  isDirtyCell && "bg-amber-100",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
                   isRowSelected && !isEmptyRow && "bg-blue-200!",
                   isFkColumn && !isEmptyRow && "pr-6"
@@ -197,7 +224,7 @@ export function TableStructure({
                     ? (value) => handleDataChange(index, name, value)
                     : undefined
                 }
-                value={isFkColumn ? fkLabel : String(fieldValue)}
+                value={isFkColumn ? fkDisplayValue : String(fieldValue)}
                 placeholder={placeholder}
                 onInput={
                   !showSelect
@@ -259,6 +286,9 @@ export function TableStructure({
       handleColSelect,
       initData,
       columnInputOptions,
+      foreignKeys,
+      findFkForColumn,
+      JSON.stringify(structureUpdatePatches),
       openFkDialog,
     ]
   );
@@ -303,7 +333,7 @@ export function TableStructure({
           tableList={tableList}
           originColumn={getFkColumnName()}
           activeScreen={activeProfileScreen}
-          onDelete={getEditingFk(foreignKeys) ? closeFkDialog : undefined}
+          onDelete={getEditingFk(foreignKeys) ? deleteForeignKey : undefined}
           onSave={saveForeignKey}
         />
       )}

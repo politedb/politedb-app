@@ -133,3 +133,9 @@ export type DatabaseConfig = {
   indexAlgorithms: readonly string[];
   allowFk?: boolean;
 };
+
+export type TableForeignKey = {
+  schema: string;
+  table: string;
+  column: string;
+};

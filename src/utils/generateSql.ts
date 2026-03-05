@@ -2,6 +2,7 @@ import type {
   TableData as TableDataType,
   TableStructure as TableStructureType,
   TableConstraint as TableConstraintType,
+  ForeignKeyInfo,
   TableWindow,
   DatabaseEngine,
 } from "src/types";
@@ -249,6 +250,7 @@ export function generateStructureSqlFromPatches(
   tableName: string,
   initStructure: TableStructureType[] | null,
   initConstraints: TableConstraintType[] | null = null,
+  initForeignKeys: ForeignKeyInfo[] | null = null,
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
@@ -458,10 +460,29 @@ export function generateStructureSqlFromPatches(
           "foreign_key" in patchData &&
           patchData.foreign_key !== undefined &&
           patchData.foreign_key !== originalColumn.foreign_key &&
-          typeof patchData.foreign_key === "string" &&
-          patchData.foreign_key.trim() !== ""
+          typeof patchData.foreign_key === "string"
         ) {
           const fkDef = patchData.foreign_key.trim();
+          const existingFk =
+            initForeignKeys?.find((fk) =>
+              fk.column_names
+                .split(",")
+                .map((s) => s.trim())
+                .includes(originalColumn.column_name)
+            ) ?? null;
+
+          if (fkDef === "" && existingFk?.constraint_name) {
+            if (engine === "mysql" || engine === "mariadb") {
+              sqlStatements.push(
+                `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+              );
+            } else {
+              sqlStatements.push(
+                `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+              );
+            }
+            continue;
+          }
 
           // Try to parse "schema.table(col)" or "table(col)"
           const fkMatch = fkDef.match(/^([\w.]+)\s*\(([^)]+)\)/);
@@ -476,8 +497,21 @@ export function generateStructureSqlFromPatches(
                 [refSchema, refTableName] = parts;
               }
 
-              // Simple deterministic constraint name
-              const constraintName = `${tableName}_${columnName}_fkey`;
+              const constraintName =
+                existingFk?.constraint_name ||
+                `${tableName}_${columnName}_fkey`;
+
+              if (existingFk?.constraint_name) {
+                if (engine === "mysql" || engine === "mariadb") {
+                  sqlStatements.push(
+                    `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+                  );
+                } else {
+                  sqlStatements.push(
+                    `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+                  );
+                }
+              }
 
               const fkSql = `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
                 constraintName,
@@ -725,7 +759,7 @@ export function generateSqlFromPatches(
     }
 
     const { schema, name: tableName } = tableWindow.table;
-    const { structure, constraints, columns } = tableData;
+    const { structure, constraints, columns, foreignKeys } = tableData;
 
     // Construct TableDataType for UPDATE and DELETE operations
     // These need row data to build WHERE clauses
@@ -819,6 +853,7 @@ export function generateSqlFromPatches(
       tableName,
       structure,
       constraints,
+      foreignKeys,
       engine
     );
     allStatements.push(...structureStatements);
