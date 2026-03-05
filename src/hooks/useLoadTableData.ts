@@ -8,6 +8,7 @@ import {
   tableOidQuery,
   tableConstraintsQuery,
   tableConstraintsMySqlQuery,
+  tableForeignKeysQuery,
   tableRowCountQuery,
   tableSizeInfoQuery,
   tableStructuresQuery,
@@ -40,6 +41,7 @@ const EMPTY_META = {
   columns: null,
   structure: null,
   constraints: null,
+  foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
   connectionId: null,
@@ -257,7 +259,7 @@ async function loadMeta(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
-}): Promise<{ structure: any[]; constraints: any[] }> {
+}): Promise<{ structure: any[]; constraints: any[]; foreignKeys: any[] }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (engine === "mysql" || engine === "mariadb") {
@@ -290,9 +292,7 @@ async function loadMeta(params: {
       comment: "",
     }));
 
-    console.log({ structure, constraints });
-
-    return { structure, constraints };
+    return { structure, constraints, foreignKeys: [] };
   }
 
   // 1. Get OID
@@ -332,7 +332,28 @@ async function loadMeta(params: {
     comment: cellToString(row?.[7]),
   }));
 
-  return { structure, constraints };
+  // 4. Foreign keys (Postgres only)
+  let foreignKeys: any[] = [];
+  try {
+    const qFk = tableForeignKeysQuery(schema, tableName);
+    const fkRes = await runSqlQuery(connId, qFk);
+    addLogQuery(qFk);
+    foreignKeys = (fkRes.rows as unknown[][]).map((row) => ({
+      constraint_name: cellToString(row?.[0]),
+      table_schema: cellToString(row?.[1]),
+      table_name: cellToString(row?.[2]),
+      column_names: cellToString(row?.[3]),
+      ref_table_schema: cellToString(row?.[4]),
+      ref_table_name: cellToString(row?.[5]),
+      ref_column_names: cellToString(row?.[6]),
+      on_update: cellToString(row?.[7]) || "NO ACTION",
+      on_delete: cellToString(row?.[8]) || "NO ACTION",
+    }));
+  } catch {
+    // Ignore if FK query fails
+  }
+
+  return { structure, constraints, foreignKeys };
 }
 
 async function startRowsStream(params: {
@@ -644,14 +665,14 @@ export function useLoadTableData() {
         if (plan.needMeta && supportsMeta) {
           metaTasks.push(
             (async () => {
-              const { structure, constraints } = await loadMeta({
+              const { structure, constraints, foreignKeys } = await loadMeta({
                 connId,
                 schema,
                 tableName,
                 engine: activeTab.engine,
                 addLogQuery,
               });
-              patchMeta(setMeta, key, prev, { structure, constraints });
+              patchMeta(setMeta, key, prev, { structure, constraints, foreignKeys });
             })()
           );
         }

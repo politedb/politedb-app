@@ -39,7 +39,7 @@ import {
  * Patch helpers
  * ============================================================================= */
 
-export type StructPaneTab = "columns" | "constraints";
+export type StructPaneTab = "columns" | "constraints" | "foreignKeys";
 
 type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
@@ -54,6 +54,7 @@ const EMPTY_META = {
   columns: null,
   structure: null,
   constraints: null,
+  foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
   busy: false,
@@ -595,6 +596,7 @@ export function MainTableDataPane(props: {
               s.tableConstraints[profileId]?.[activeTableWindow.id] ??
               EMPTY_ARRAY
             }
+            tableList={rt.metadata.get({ metaKey: rt.metaKey }).tables}
             onDataChange={onDataChange}
             onAddNewColumn={onAddColumn}
             onDeleteColumn={onDeleteColumn}

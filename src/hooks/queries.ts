@@ -261,6 +261,49 @@ export const tableConstraintsQuery = (schema: string, tableName: string) => {
   return regexEscape(queryStr);
 };
 
+/** Foreign keys for a table (Postgres). Returns one row per FK with aggregated columns. */
+export const tableForeignKeysQuery = (schema: string, tableName: string) => {
+  const queryStr = `
+    WITH fk AS (
+      SELECT
+        kcu.constraint_name,
+        kcu.table_schema,
+        kcu.table_name,
+        kcu.column_name,
+        kcu.ordinal_position,
+        ref_kcu.table_schema AS ref_table_schema,
+        ref_kcu.table_name AS ref_table_name,
+        ref_kcu.column_name AS ref_column_name,
+        rc.update_rule AS on_update,
+        rc.delete_rule AS on_delete
+      FROM information_schema.referential_constraints rc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = rc.constraint_name
+        AND kcu.constraint_schema = rc.constraint_schema
+      JOIN information_schema.key_column_usage ref_kcu
+        ON ref_kcu.constraint_name = rc.unique_constraint_name
+        AND ref_kcu.constraint_schema = rc.unique_constraint_schema
+        AND ref_kcu.ordinal_position = kcu.position_in_unique_constraint
+      WHERE kcu.table_schema = ${qLiteral(schema)}
+        AND kcu.table_name = ${qLiteral(tableName)}
+    )
+    SELECT
+      constraint_name,
+      table_schema,
+      table_name,
+      string_agg(column_name, ',' ORDER BY ordinal_position) AS column_names,
+      max(ref_table_schema) AS ref_table_schema,
+      max(ref_table_name) AS ref_table_name,
+      string_agg(ref_column_name, ',' ORDER BY ordinal_position) AS ref_column_names,
+      max(on_update) AS on_update,
+      max(on_delete) AS on_delete
+    FROM fk
+    GROUP BY constraint_name, table_schema, table_name
+    ORDER BY constraint_name;
+  `;
+  return regexEscape(queryStr);
+};
+
 export const tableStructuresMySqlQuery = (
   schema: string,
   tableName: string

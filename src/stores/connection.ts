@@ -6,6 +6,7 @@ import type {
   TableConstraint,
   TableStructure,
   TableColumn,
+  ForeignKeyInfo,
   SqlQuery,
   TableWindow,
 } from "src/types";
@@ -75,6 +76,7 @@ export type TableMetaState = {
   columns: ColumnMeta[] | null;
   structure: TableStructure[] | null;
   constraints: TableConstraint[] | null;
+  foreignKeys: ForeignKeyInfo[] | null;
   sizeInfo: TableSizeInfo | null;
   rowCount: number | null;
   connectionId: string | null; // profile / DB connection

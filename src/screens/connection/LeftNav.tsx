@@ -11,6 +11,7 @@ import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionStore } from "src/stores/connection";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { Input } from "src/components/common/Input";
 
 interface Props {
   profileId: string;
@@ -147,20 +148,13 @@ export function LeftNav({
       {/* Top: Search */}
       <div class="p-2">
         <div class="relative">
-          <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-neutral-500" />
-          <input
+          <Input
             type="text"
             placeholder="Search tables…"
+            left={<Search className="size-3.5 text-neutral-500" />}
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-            class={cn(
-              "w-full rounded-lg",
-              "border border-neutral-200 bg-white",
-              "py-1.5 pr-2 pl-8",
-              "text-xs text-neutral-800 placeholder:text-neutral-500",
-              "outline-none",
-              "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
-            )}
+            className={cn("rounded-lg border border-neutral-200 bg-white!")}
           />
         </div>
       </div>

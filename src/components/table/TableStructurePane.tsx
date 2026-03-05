@@ -40,6 +40,7 @@ export function TableStructurePane(props: {
   onDeleteColumn: (rowIndex: number) => void;
   onAddIndex: () => void;
   onDeleteIndex: (rowIndex: number) => void;
+  tableList?: { schema: string; name: string }[];
 }) {
   const {
     engine,
@@ -57,6 +58,7 @@ export function TableStructurePane(props: {
     onDeleteColumn,
     onAddIndex,
     onDeleteIndex,
+    tableList = [],
   } = props;
 
   const {
@@ -142,15 +144,17 @@ export function TableStructurePane(props: {
               <TableStructure
                 engine={engine}
                 activeProfileScreen={profileId}
-                activeTableWindowId={activeTableWindow.id}
+                activeTableWindow={activeTableWindow}
                 initData={activeTableMeta.structure}
                 editedData={tableStructure}
+                foreignKeys={activeTableMeta.foreignKeys}
                 busy={activeTableMeta.busy}
                 error={activeTableMeta.error}
                 onDataChange={onDataChange}
                 onAddNewRecord={onAddNewColumn}
                 onDeleteRecord={onDeleteColumn}
                 deletedRows={deletedStructureRows}
+                tableList={tableList}
               />
             ),
           },

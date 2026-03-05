@@ -39,3 +39,4 @@ export * from "./Schema";
 export * from "./ChevronSort";
 export * from "./Copy";
 export * from "./CopyCheck";
+export * from "./ArrowRight";

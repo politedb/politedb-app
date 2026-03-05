@@ -7,6 +7,7 @@ import type {
 } from "src/types";
 import { cellToString } from "./convert";
 import { TableDataState } from "src/stores/connection";
+import { getDbConfig } from "./dbConfig";
 
 // patchMap[action][dataKey][rowKey] = data
 export type PatchData = Record<string, Record<string, Record<string, any>>>;
@@ -446,6 +447,52 @@ export function generateStructureSqlFromPatches(
         if (changes.length > 0) {
           const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName, engine)} ${changes.join(", ")};`;
           sqlStatements.push(sql);
+        }
+
+        // Handle foreign key definition changes stored on the column's `foreign_key` field.
+        // For now we support simple single-column FKs in the form "ref_table(ref_column)"
+        // or "ref_schema.ref_table(ref_column)" for Postgres/MySQL engines.
+        const dbConfig = getDbConfig(engine);
+        if (
+          dbConfig.allowFk &&
+          "foreign_key" in patchData &&
+          patchData.foreign_key !== undefined &&
+          patchData.foreign_key !== originalColumn.foreign_key &&
+          typeof patchData.foreign_key === "string" &&
+          patchData.foreign_key.trim() !== ""
+        ) {
+          const fkDef = patchData.foreign_key.trim();
+
+          // Try to parse "schema.table(col)" or "table(col)"
+          const fkMatch = fkDef.match(/^([\w.]+)\s*\(([^)]+)\)/);
+          if (fkMatch) {
+            const refTableFull = fkMatch[1]; // schema.table or table
+            const refColRaw = fkMatch[2].split(",")[0]?.trim();
+            if (refColRaw) {
+              let refSchema = schema;
+              let refTableName = refTableFull;
+              const parts = refTableFull.split(".");
+              if (parts.length === 2) {
+                [refSchema, refTableName] = parts;
+              }
+
+              // Simple deterministic constraint name
+              const constraintName = `${tableName}_${columnName}_fkey`;
+
+              const fkSql = `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
+                constraintName,
+                engine
+              )} FOREIGN KEY (${qIdent(
+                columnName,
+                engine
+              )}) REFERENCES ${qIdent(refSchema, engine)}.${qIdent(
+                refTableName,
+                engine
+              )} (${qIdent(refColRaw, engine)});`;
+
+              sqlStatements.push(fkSql);
+            }
+          }
         }
       }
     }
