@@ -99,9 +99,11 @@ export function ConnectionScreen() {
   const engine = activeTab?.engine;
 
   const metaKey = useMemo(() => {
-    if (!activeTab?.profileId) return "";
-    return `${engine ?? "postgres"}:${activeTab.profileId}`;
-  }, [engine, activeTab?.profileId]);
+    if (!activeTab?.id) return "";
+    // Use tab-scoped key so tabs opened from the same profile but different
+    // databases do not share stale metadata cache.
+    return `${engine ?? "postgres"}:${activeTab.id}`;
+  }, [engine, activeTab?.id]);
 
   /* =============================================================================
    * Table loading (service) + active table meta snapshot

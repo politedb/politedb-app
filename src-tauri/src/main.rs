@@ -51,6 +51,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             // Connections
+            commands::connection::connection_create,
             commands::connection::connection_list,
             commands::connection::connection_remove,
             commands::connection::connection_test,

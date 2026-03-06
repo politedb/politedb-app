@@ -1,10 +1,10 @@
 import type { DatabaseEngine, TableColumn } from "src/types";
 
-function isMySqlLike(engine?: DatabaseEngine) {
+export function isMySqlLike(engine?: DatabaseEngine) {
   return engine === "mysql" || engine === "mariadb";
 }
 
-function qIdent(ident: string, engine?: DatabaseEngine) {
+export function qIdent(ident: string, engine?: DatabaseEngine) {
   const raw = String(ident);
   if (isMySqlLike(engine)) {
     return `\`${raw.replace(/`/g, "``")}\``;
@@ -12,7 +12,7 @@ function qIdent(ident: string, engine?: DatabaseEngine) {
   return `"${raw.replace(/"/g, `""`)}"`;
 }
 
-function qLiteral(v: string) {
+export function qLiteral(v: string) {
   return `'${String(v).replace(/'/g, `''`)}'`;
 }
 
@@ -438,5 +438,37 @@ export const truncateTableQuery = (
   }
   parts.push(opts?.cascade !== false ? "CASCADE" : "RESTRICT");
   const queryStr = `${parts.join(" ")};`;
+  return regexEscape(queryStr);
+};
+
+export const dbListQuery = (engine?: DatabaseEngine) => {
+  if (isMySqlLike(engine)) {
+    return "SHOW DATABASES;";
+  }
+  return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;";
+};
+
+export const createDatabaseQuery = (
+  database: string,
+  engine?: DatabaseEngine
+) => {
+  const queryStr = `CREATE DATABASE ${qIdent(database, engine)};`;
+  return regexEscape(queryStr);
+};
+
+export const renameDatabaseQuery = (
+  database: string,
+  newDatabase: string,
+  engine?: DatabaseEngine
+) => {
+  const queryStr = `ALTER DATABASE ${qIdent(database, engine)} RENAME TO ${qIdent(newDatabase, engine)};`;
+  return regexEscape(queryStr);
+};
+
+export const dropDatabaseQuery = (
+  database: string,
+  engine?: DatabaseEngine
+) => {
+  const queryStr = `DROP DATABASE ${qIdent(database, engine)};`;
   return regexEscape(queryStr);
 };
