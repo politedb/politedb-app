@@ -101,6 +101,19 @@ export type TableConstraint = {
   isNew?: boolean;
 };
 
+/** Foreign key constraint (for display in dialog: Table, Columns, Referenced Table, On Update/Delete) */
+export type ForeignKeyInfo = {
+  constraint_name: string;
+  table_schema: string;
+  table_name: string;
+  column_names: string;
+  ref_table_schema: string;
+  ref_table_name: string;
+  ref_column_names: string;
+  on_update: string;
+  on_delete: string;
+};
+
 export type TableColumn = {
   column_name: string;
   data_type: string;
@@ -113,4 +126,16 @@ export type Pagination = {
   endIndex: number;
   totalRows: number;
   totalPages: number;
+};
+
+export type DatabaseConfig = {
+  dataTypes: readonly string[];
+  indexAlgorithms: readonly string[];
+  allowFk?: boolean;
+};
+
+export type TableForeignKey = {
+  schema: string;
+  table: string;
+  column: string;
 };

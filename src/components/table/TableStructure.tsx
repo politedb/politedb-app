@@ -1,15 +1,22 @@
 import { useMemo, useCallback, useRef } from "preact/hooks";
-import type { DatabaseEngine, TableStructure } from "src/types";
+import type {
+  DatabaseEngine,
+  ForeignKeyInfo,
+  TableStructure,
+  TableWindow,
+} from "src/types";
 import {
   Table,
   type TableColumn as CommonTableColumn,
 } from "src/components/common/Table";
 import { Input, InputOption } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
-import { DataAction, DataKey } from "src/stores/connection";
-import { DATA_TYPES } from "src/constant";
+import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
+import { getDbConfig } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
+import { ArrowRight } from "src/components/icons";
+import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 
 const COLUMNS_NAME: (keyof TableStructure)[] = [
   "column_name",
@@ -20,10 +27,17 @@ const COLUMNS_NAME: (keyof TableStructure)[] = [
   "comment",
 ];
 
+function normalizeFkLabel(v: unknown): string {
+  return String(v ?? "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
 interface Props {
   initData: TableStructure[] | null;
+  foreignKeys: ForeignKeyInfo[] | null;
   activeProfileScreen: string;
-  activeTableWindowId: string;
+  activeTableWindow: TableWindow;
   busy: boolean;
   error: string | null;
   engine: DatabaseEngine;
@@ -37,12 +51,14 @@ interface Props {
     rowIndex: number,
     data: Record<string, any>
   ) => void;
+  tableList?: { schema: string; name: string }[];
 }
 
 export function TableStructure({
   initData,
+  foreignKeys,
   activeProfileScreen,
-  activeTableWindowId,
+  activeTableWindow,
   busy,
   error,
   editedData = [],
@@ -51,24 +67,34 @@ export function TableStructure({
   deletedRows = new Set(),
   onDataChange,
   engine,
+  tableList = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Use structure operations hook
-  const { handleDataChange, handleDeleteRecord } = useTableStructureOperations({
+  const {
+    fkRowIndex,
+    getEditingFk,
+    getFkColumnName,
+    findFkForColumn,
+    openFkDialog,
+    closeFkDialog,
+    saveForeignKey,
+    deleteForeignKey,
+    handleDataChange,
+    handleDeleteRecord,
+  } = useTableStructureOperations({
     activeProfileScreen,
-    activeTableWindowId,
+    activeTableWindowId: activeTableWindow.id,
     initData,
     editedData,
     onDataChange,
     onDeleteRecord,
   });
 
-  // Use row selection hook
   const {
     selectedRowIndex,
-    handleRowSelect,
     selectedColIndex,
+    handleRowSelect,
     handleColSelect,
   } = useTableRowSelection({
     onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
@@ -78,10 +104,7 @@ export function TableStructure({
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
-      // Check if it's an empty row (index >= editedData.length)
-      if (index >= editedData.length) {
-        onAddNewRecord();
-      }
+      if (index >= editedData.length) onAddNewRecord();
     },
     [editedData.length, onAddNewRecord]
   );
@@ -104,9 +127,11 @@ export function TableStructure({
     [tableData]
   );
 
+  const dbConfig = getDbConfig(engine);
+
   const columnInputOptions = useMemo(
     () => ({
-      data_type: DATA_TYPES[engine].map((type) => ({
+      data_type: dbConfig.dataTypes.map((type) => ({
         label: type,
         value: type,
       })),
@@ -115,8 +140,17 @@ export function TableStructure({
         { label: "FALSE", value: "false" },
       ],
     }),
-    [engine]
+    [dbConfig]
   ) as Record<keyof TableStructure, InputOption[]>;
+
+  const dataPatchMap = useConnectionStore(
+    (s) => s.dataPatchMap[activeProfileScreen]
+  );
+  const structureUpdatePatches = useMemo(
+    () =>
+      dataPatchMap?.[activeTableWindow.id]?.patches?.update?.structure ?? {},
+    [JSON.stringify(dataPatchMap)]
+  );
 
   const tableColumns = useMemo<
     CommonTableColumn<TableStructure & { _rowNumber?: number }>[]
@@ -154,63 +188,108 @@ export function TableStructure({
           const colIndex = COLUMNS_NAME.indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
+          const isFkColumn = name === "foreign_key";
+          const foreignKey = isFkColumn
+            ? findFkForColumn(foreignKeys, row.column_name)
+            : null;
+          const fkLabel = foreignKey
+            ? `${foreignKey?.ref_table_name}(${foreignKey?.ref_column_names})`
+            : "";
+          const rowPatch = structureUpdatePatches[String(index)] ?? null;
+          const hasForeignKeyPatch =
+            !!rowPatch &&
+            Object.prototype.hasOwnProperty.call(rowPatch, "foreign_key");
+          const fkDisplayValue = hasForeignKeyPatch
+            ? String(fieldValue)
+            : String(fieldValue || fkLabel);
+          const fkInitValue = String(initValue || fkLabel);
+          const isDirtyCell = isFkColumn
+            ? normalizeFkLabel(fkDisplayValue) !== normalizeFkLabel(fkInitValue)
+            : initValue !== fieldValue;
 
           return (
-            <Input
-              className={cn(
-                "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
-                initValue !== fieldValue && "bg-amber-100",
-                isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                isRowSelected && !isEmptyRow && "bg-blue-200!"
-              )}
-              showSelect={!isEmptyRow && showSelect}
-              options={columnOptions}
-              onValueChange={
-                showSelect
-                  ? (value) => handleDataChange(index, name, value)
-                  : undefined
-              }
-              value={String(fieldValue)}
-              placeholder={placeholder}
-              onInput={
-                !showSelect
-                  ? (e) => handleDataChange(index, name, e.currentTarget.value)
-                  : undefined
-              }
-              onMouseDown={(e) => {
-                // Prevent input focus if row is not selected yet
-                // This allows first click to select row, second click to focus input
-                if (!isRowSelected && !isEmptyRow && !isDeleted) {
-                  e.preventDefault();
+            <div class="relative">
+              <Input
+                className={cn(
+                  "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
+                  isDirtyCell && "bg-amber-100",
+                  isEmptyRow && "focus:bg-transparent! focus:outline-none",
+                  isRowSelected && !isEmptyRow && "bg-blue-200!",
+                  isFkColumn && !isEmptyRow && "pr-6"
+                )}
+                showSelect={!isEmptyRow && showSelect}
+                options={columnOptions}
+                onValueChange={
+                  showSelect
+                    ? (value) => handleDataChange(index, name, value)
+                    : undefined
                 }
-              }}
-              onClick={(e) => {
-                if (isRowSelected) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (selectedColIndex !== colIndex) {
-                    const input = e.currentTarget as HTMLInputElement;
-                    input.select();
-                    handleColSelect(colIndex);
+                value={isFkColumn ? fkDisplayValue : String(fieldValue)}
+                placeholder={placeholder}
+                onInput={
+                  !showSelect
+                    ? (e) =>
+                        handleDataChange(index, name, e.currentTarget.value)
+                    : undefined
+                }
+                onMouseDown={(e) => {
+                  if (!isRowSelected && !isEmptyRow && !isDeleted) {
+                    e.preventDefault();
                   }
-                }
-              }}
-              disabled={busy || isDeleted}
-              readOnly={isEmptyRow || isDeleted}
-            />
+                }}
+                onClick={(e) => {
+                  if (isRowSelected) {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    if (selectedColIndex !== colIndex) {
+                      const input = e.currentTarget as HTMLInputElement;
+                      if (isFkColumn) {
+                        openFkDialog(index);
+                        input.blur();
+                        return;
+                      }
+                      input.select();
+                      handleColSelect(colIndex);
+                    }
+                  }
+                }}
+                disabled={busy || isDeleted}
+                readOnly={isEmptyRow || isDeleted}
+              />
+
+              {!isEmptyRow && isFkColumn && (
+                <button
+                  type="button"
+                  aria-label="Edit foreign key"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFkDialog(index);
+                  }}
+                  class="absolute top-1/2 right-2 z-50 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                >
+                  <ArrowRight className="size-3" />
+                </button>
+              )}
+            </div>
           );
         },
       })),
     ],
     [
       busy,
-      editedData.length,
+      editedData,
       deletedRows,
       selectedRowIndex,
       selectedColIndex,
       handleDataChange,
-      onDeleteRecord,
+      handleColSelect,
       initData,
+      columnInputOptions,
+      foreignKeys,
+      findFkForColumn,
+      JSON.stringify(structureUpdatePatches),
+      openFkDialog,
     ]
   );
 
@@ -220,7 +299,6 @@ export function TableStructure({
       class="h-full w-full"
       tabIndex={0}
       onMouseDown={(e) => {
-        // Focus container when clicking to enable keyboard events
         if (
           e.target === e.currentTarget ||
           (e.target as HTMLElement).closest("table")
@@ -244,6 +322,21 @@ export function TableStructure({
         }}
         onDoubleClickRow={handleDoubleClickRow}
       />
+
+      {fkRowIndex !== null && (
+        <ForeignKeyDialog
+          open={true}
+          onClose={closeFkDialog}
+          fk={getEditingFk(foreignKeys)}
+          tableName={activeTableWindow.table.name}
+          schema={activeTableWindow.table.schema}
+          tableList={tableList}
+          originColumn={getFkColumnName()}
+          activeScreen={activeProfileScreen}
+          onDelete={getEditingFk(foreignKeys) ? deleteForeignKey : undefined}
+          onSave={saveForeignKey}
+        />
+      )}
     </div>
   );
 }

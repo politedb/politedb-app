@@ -109,12 +109,12 @@ export function TableFooter({
                 <Plus className="size-3.5" />
                 Column
               </Button>
-            ) : (
+            ) : structPaneTab === "constraints" ? (
               <Button variant="shadow" className="px-2" onClick={onAddIndex}>
                 <Plus className="size-3.5" />
                 Index
               </Button>
-            )}
+            ) : null}
           </>
         )}
 

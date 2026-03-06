@@ -13,7 +13,7 @@ import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
 import { ErrorState } from "./ErrorState";
 
-import { DATA_KEYS } from "src/constant";
+import { DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
@@ -34,12 +34,13 @@ import {
   truncateTableQuery,
   dropTableQuery,
 } from "src/hooks/queries";
+import { TableForeignKey } from "src/types";
 
 /* =============================================================================
  * Patch helpers
  * ============================================================================= */
 
-export type StructPaneTab = "columns" | "constraints";
+export type StructPaneTab = "columns" | "constraints" | "foreignKeys";
 
 type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
@@ -54,6 +55,7 @@ const EMPTY_META = {
   columns: null,
   structure: null,
   constraints: null,
+  foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
   busy: false,
@@ -137,6 +139,16 @@ export function MainTableDataPane(props: {
 
   const startedRef = useRef<string | null>(null);
 
+  const activeKey = useMemo(
+    () =>
+      tableKey(
+        profileId,
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name
+      ),
+    [profileId, activeTableWindow]
+  );
+
   const {
     filterBarVisible,
     filters,
@@ -148,17 +160,7 @@ export function MainTableDataPane(props: {
     setFilterBarVisible,
     handleApplyFilters,
     handleClearFilters,
-  } = useTableFilter(startedRef);
-
-  const activeKey = useMemo(
-    () =>
-      tableKey(
-        profileId,
-        activeTableWindow.table.schema,
-        activeTableWindow.table.name
-      ),
-    [profileId, activeTableWindow]
-  );
+  } = useTableFilter(startedRef, activeKey);
 
   /* ===========================================================================
    * Subscribe minimal state
@@ -402,6 +404,53 @@ export function MainTableDataPane(props: {
   const getRowAt = (i: number) =>
     useConnectionStore.getState().getRowAt(activeKey, offset + i);
 
+  const foreignKeyMap = useMemo(() => {
+    const out: Record<string, TableForeignKey> = {};
+    const fks = meta.foreignKeys ?? [];
+    for (const fk of fks) {
+      if (!fk.column_names || !fk.ref_column_names) continue;
+      out[fk.column_names] = {
+        schema: fk.ref_table_schema,
+        table: fk.ref_table_name,
+        column: fk.ref_column_names,
+      };
+    }
+    return out;
+  }, [meta.foreignKeys, activeTableWindow.table.schema]);
+
+  const handleNavigateFk = useCallback(
+    async (args: {
+      value: string;
+      refSchema: string;
+      refTable: string;
+      refColumn: string;
+    }) => {
+      const { value, refSchema, refTable, refColumn } = args;
+      const refKey = tableKey(profileId, refSchema, refTable);
+      const newFilters = [
+        { column: refColumn, operator: "=", value, enabled: true },
+      ] as const;
+
+      await actions.selectTable({ schema: refSchema, name: refTable });
+
+      const s = useConnectionStore.getState();
+      const currentFilter = s.tableFilterByKey[refKey] ?? DEFAULT_FILTER_STATE;
+
+      s.setTableFilter(refKey, {
+        ...currentFilter,
+        filterBarVisible: true,
+        filters: [...newFilters],
+        filterCombine: "AND",
+        appliedFilters: [...newFilters],
+        appliedFilterCombine: "AND",
+      });
+
+      // Allow row load effect to run even when navigating within the same table.
+      startedRef.current = null;
+    },
+    [actions, profileId]
+  );
+
   const reloadTableData = useCallback(
     async (schema: string, name: string) => {
       startedRef.current = null;
@@ -595,6 +644,7 @@ export function MainTableDataPane(props: {
               s.tableConstraints[profileId]?.[activeTableWindow.id] ??
               EMPTY_ARRAY
             }
+            tableList={rt.metadata.get({ metaKey: rt.metaKey }).tables}
             onDataChange={onDataChange}
             onAddNewColumn={onAddColumn}
             onDeleteColumn={onDeleteColumn}
@@ -610,11 +660,13 @@ export function MainTableDataPane(props: {
           <>
             {filterBarVisible && (
               <TableFilterBar
+                tableKey={activeKey}
                 schema={activeTableWindow.table.schema}
                 tableName={activeTableWindow.table.name}
                 columns={meta.columns ?? []}
                 filters={filters}
                 filterCombine={filterCombine}
+                appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
                 onFiltersChange={setFilters}
@@ -642,6 +694,8 @@ export function MainTableDataPane(props: {
               onDeleteRow={(rowIndex) => handleDeleteRow(rowIndex, offset)}
               deletedRows={extractDeleted(patches, DATA_KEYS.data)}
               rowsVersion={rowsInfo?.version ?? 0}
+              foreignKeyMap={foreignKeyMap}
+              onNavigateFk={handleNavigateFk}
             />
           </>
         )}
@@ -662,7 +716,7 @@ export function MainTableDataPane(props: {
         }
         onAddColumn={onAddColumn}
         onAddIndex={onAddIndex}
-        onFilters={() => setFilterBarVisible((v) => !v)}
+        onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
       />
       {sqlDialogOpen && (
         <SqlPreviewModal

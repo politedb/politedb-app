@@ -1,5 +1,5 @@
-import { DataAction, DataKey } from "./stores/connection";
-import { DatabaseEngine, DatabaseType } from "./types";
+import { DataAction, DataKey, TableFilterState } from "./stores/connection";
+import { DatabaseType } from "./types";
 
 export const SUPPORTED_DATABASES: readonly (DatabaseType & {
   desc?: string;
@@ -128,28 +128,6 @@ export const MYSQL_DATA_TYPES = [
   "set",
 ];
 
-export const DATA_TYPES: Record<DatabaseEngine, readonly string[]> = {
-  postgres: POSTGRES_DATA_TYPES,
-  mysql: MYSQL_DATA_TYPES,
-  sqlite: [],
-  redis: [],
-  mariadb: [],
-  sqlserver: [],
-  oracle: [],
-  mongo: [],
-};
-
-export const INDEX_ALGORITHMS: Record<DatabaseEngine, readonly string[]> = {
-  postgres: ["BTREE", "HASH", "GIN", "GIST", "BRIN"],
-  mysql: ["BTREE", "HASH", "RTREE"],
-  sqlite: [],
-  redis: [],
-  mariadb: [],
-  sqlserver: [],
-  oracle: [],
-  mongo: [],
-};
-
 export const DATA_KEYS: Record<DataKey, DataKey> = {
   structure: "structure",
   constraints: "constraints",
@@ -160,4 +138,12 @@ export const DATA_ACTIONS: Record<DataAction, DataAction> = {
   create: "create",
   update: "update",
   delete: "delete",
+};
+
+export const DEFAULT_FILTER_STATE: TableFilterState = {
+  filterBarVisible: false,
+  filters: [],
+  filterCombine: "AND",
+  appliedFilters: [],
+  appliedFilterCombine: "AND",
 };

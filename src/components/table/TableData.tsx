@@ -9,6 +9,7 @@ import { useColumnSizing, useContainerWidth, useNewRows } from "./tableHooks";
 
 import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
 import { CanvasTable } from "./CanvasTable";
+import { TableForeignKey } from "src/types";
 
 // ============================================================================
 // Types
@@ -32,6 +33,15 @@ interface Props {
   newRowKeys?: string[];
   deletedRows?: Set<number>;
   rowsVersion: number;
+
+  foreignKeyMap?: Record<string, TableForeignKey>;
+
+  onNavigateFk?: (args: {
+    value: string;
+    refSchema: string;
+    refTable: string;
+    refColumn: string;
+  }) => void;
 }
 
 // ============================================================================
@@ -52,6 +62,8 @@ export function TableData({
   newRowKeys = EMPTY_ARRAY,
   deletedRows = EMPTY_SET,
   rowsVersion = 0,
+  foreignKeyMap,
+  onNavigateFk,
 }: Props) {
   const baseLen = Math.max(0, baseRows || 0);
   const totalLen = Math.max(0, totalRows || 0);
@@ -247,6 +259,36 @@ export function TableData({
     [columns, patchHelpers, newRows, rowOrder, onCellChange, getRowArray]
   );
 
+  const handleCellActivate = useCallback(
+    (cell: { rowIdx: number; colIdx: number }): boolean => {
+      if (!foreignKeyMap || !onNavigateFk) return false;
+
+      const col = columns[cell.colIdx];
+      if (!col) return false;
+
+      const fk = foreignKeyMap[col.name];
+      if (!fk) return false;
+
+      const rowArr = getRowArray(cell.rowIdx);
+      if (!rowArr) return false;
+
+      const raw = rowArr[cell.colIdx];
+      const v = cellToString(raw);
+      const value = (v ?? "").toString().trim();
+      if (!value) return false;
+
+      onNavigateFk({
+        value,
+        refSchema: fk.schema,
+        refTable: fk.table,
+        refColumn: fk.column,
+      });
+
+      return true;
+    },
+    [columns, foreignKeyMap, getRowArray, onNavigateFk]
+  );
+
   // --------------------------------------------------------------------------
   // Render
   // --------------------------------------------------------------------------
@@ -299,6 +341,8 @@ export function TableData({
         }}
         sortState={sortState ?? undefined}
         onChangeSort={setSortState}
+        foreignKeyMap={foreignKeyMap}
+        onCellActivate={handleCellActivate}
       />
     </div>
   );

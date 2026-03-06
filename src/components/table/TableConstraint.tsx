@@ -9,7 +9,7 @@ import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
-import { INDEX_ALGORITHMS } from "src/constant";
+import { getDbConfig } from "src/utils/dbConfig";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   postgres: [
@@ -106,10 +106,12 @@ export function TableConstraints({
     return initData ?? [];
   }, [editedData, initData, error]);
 
+  const dbConfig = getDbConfig(engine);
+
   const columnInputOptions = useMemo(
     () =>
       ({
-        index_algorithm: INDEX_ALGORITHMS[engine].map((type) => ({
+        index_algorithm: dbConfig.indexAlgorithms.map((type) => ({
           label: type,
           value: type,
         })),
@@ -122,7 +124,7 @@ export function TableConstraints({
           value: name,
         })),
       }) as Record<keyof TableConstraint, InputOption[]>,
-    [engine]
+    [dbConfig]
   );
 
   const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(

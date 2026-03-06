@@ -2,11 +2,13 @@ import type {
   TableData as TableDataType,
   TableStructure as TableStructureType,
   TableConstraint as TableConstraintType,
+  ForeignKeyInfo,
   TableWindow,
   DatabaseEngine,
 } from "src/types";
 import { cellToString } from "./convert";
 import { TableDataState } from "src/stores/connection";
+import { getDbConfig } from "./dbConfig";
 
 // patchMap[action][dataKey][rowKey] = data
 export type PatchData = Record<string, Record<string, Record<string, any>>>;
@@ -248,6 +250,7 @@ export function generateStructureSqlFromPatches(
   tableName: string,
   initStructure: TableStructureType[] | null,
   initConstraints: TableConstraintType[] | null = null,
+  initForeignKeys: ForeignKeyInfo[] | null = null,
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
@@ -446,6 +449,84 @@ export function generateStructureSqlFromPatches(
         if (changes.length > 0) {
           const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName, engine)} ${changes.join(", ")};`;
           sqlStatements.push(sql);
+        }
+
+        // Handle foreign key definition changes stored on the column's `foreign_key` field.
+        // For now we support simple single-column FKs in the form "ref_table(ref_column)"
+        // or "ref_schema.ref_table(ref_column)" for Postgres/MySQL engines.
+        const dbConfig = getDbConfig(engine);
+        if (
+          dbConfig.allowFk &&
+          "foreign_key" in patchData &&
+          patchData.foreign_key !== undefined &&
+          patchData.foreign_key !== originalColumn.foreign_key &&
+          typeof patchData.foreign_key === "string"
+        ) {
+          const fkDef = patchData.foreign_key.trim();
+          const existingFk =
+            initForeignKeys?.find((fk) =>
+              fk.column_names
+                .split(",")
+                .map((s) => s.trim())
+                .includes(originalColumn.column_name)
+            ) ?? null;
+
+          if (fkDef === "" && existingFk?.constraint_name) {
+            if (engine === "mysql" || engine === "mariadb") {
+              sqlStatements.push(
+                `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+              );
+            } else {
+              sqlStatements.push(
+                `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+              );
+            }
+            continue;
+          }
+
+          // Try to parse "schema.table(col)" or "table(col)"
+          const fkMatch = fkDef.match(/^([\w.]+)\s*\(([^)]+)\)/);
+          if (fkMatch) {
+            const refTableFull = fkMatch[1]; // schema.table or table
+            const refColRaw = fkMatch[2].split(",")[0]?.trim();
+            if (refColRaw) {
+              let refSchema = schema;
+              let refTableName = refTableFull;
+              const parts = refTableFull.split(".");
+              if (parts.length === 2) {
+                [refSchema, refTableName] = parts;
+              }
+
+              const constraintName =
+                existingFk?.constraint_name ||
+                `${tableName}_${columnName}_fkey`;
+
+              if (existingFk?.constraint_name) {
+                if (engine === "mysql" || engine === "mariadb") {
+                  sqlStatements.push(
+                    `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+                  );
+                } else {
+                  sqlStatements.push(
+                    `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+                  );
+                }
+              }
+
+              const fkSql = `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
+                constraintName,
+                engine
+              )} FOREIGN KEY (${qIdent(
+                columnName,
+                engine
+              )}) REFERENCES ${qIdent(refSchema, engine)}.${qIdent(
+                refTableName,
+                engine
+              )} (${qIdent(refColRaw, engine)});`;
+
+              sqlStatements.push(fkSql);
+            }
+          }
         }
       }
     }
@@ -678,7 +759,7 @@ export function generateSqlFromPatches(
     }
 
     const { schema, name: tableName } = tableWindow.table;
-    const { structure, constraints, columns } = tableData;
+    const { structure, constraints, columns, foreignKeys } = tableData;
 
     // Construct TableDataType for UPDATE and DELETE operations
     // These need row data to build WHERE clauses
@@ -772,6 +853,7 @@ export function generateSqlFromPatches(
       tableName,
       structure,
       constraints,
+      foreignKeys,
       engine
     );
     allStatements.push(...structureStatements);

@@ -10,9 +10,9 @@ import { useConnectionStore } from "src/stores/connection";
 import { TableViewToggle } from "./TableViewToggle";
 import { TagSelect } from "src/components/common/TagSelect";
 import { useNewTableState } from "src/hooks/useNewTableState";
-import { DATA_TYPES } from "src/constant";
+import { getDbConfig } from "src/utils/dbConfig";
 import { cn } from "src/utils/cn";
-import { useTableRowSelection } from "../../screens/connection/hooks/useTableRowSelection";
+import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -87,10 +87,12 @@ export function NewTablePane({
     }
   }, [tableState.handleSave, onSaveRef]);
 
+  const dbConfig = getDbConfig(engine);
+
   const columnOptions = useMemo(
     () =>
       ({
-        data_type: DATA_TYPES[engine].map((type) => ({
+        data_type: dbConfig.dataTypes.map((type) => ({
           label: type,
           value: type,
         })),
@@ -99,7 +101,7 @@ export function NewTablePane({
           { label: "NO", value: "NO" },
         ],
       }) as Record<keyof TableColumn, InputOption[]>,
-    [engine]
+    [dbConfig]
   );
 
   const tableColumns = useMemo<CommonColumn<TableColumn>[]>(

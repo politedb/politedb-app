@@ -8,6 +8,7 @@ import {
   tableOidQuery,
   tableConstraintsQuery,
   tableConstraintsMySqlQuery,
+  tableForeignKeysQuery,
   tableRowCountQuery,
   tableSizeInfoQuery,
   tableStructuresQuery,
@@ -19,6 +20,7 @@ import { operationBus } from "src/lib/tauri/operationBus";
 import { operationCancel, TableChunk } from "src/lib/tauri";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
 import type { DatabaseEngine } from "src/types";
+import { retryAsync } from "src/utils/common";
 
 // =============================================================================
 // Types & Constants
@@ -36,10 +38,14 @@ export type TablePagination = { limit: number; offset: number };
 export const DEFAULT_LIMIT = 300;
 export const DEFAULT_OFFSET = 0;
 
+const RETRY_ATTEMPTS = 8;
+const inflightLoadBySignature = new Map<string, Promise<void>>();
+
 const EMPTY_META = {
   columns: null,
   structure: null,
   constraints: null,
+  foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
   connectionId: null,
@@ -195,6 +201,38 @@ function patchMeta(
   setMeta(key, { ...cur, ...patch });
 }
 
+function parseBusyOpId(err: unknown): string | null {
+  const msg = getErrorMessage(err);
+  const m = /^ERR_SQL_BUSY:([0-9a-f-]{36})$/i.exec(msg.trim());
+  return m?.[1] ?? null;
+}
+
+function buildLoadSignature(params: {
+  key: string;
+  pagination?: TablePagination;
+  flags: LoadFlags;
+}) {
+  const { key, pagination, flags } = params;
+  const filters = (flags.filters ?? []).map((f) => ({
+    column: f.column ?? "",
+    operator: f.operator ?? "",
+    value: f.value ?? "",
+    enabled: !!f.enabled,
+  }));
+
+  return JSON.stringify({
+    key,
+    limit: pagination?.limit ?? DEFAULT_LIMIT,
+    offset: pagination?.offset ?? DEFAULT_OFFSET,
+    force: !!flags.force,
+    refreshRows: flags.refreshRows ?? true,
+    refreshMeta: flags.refreshMeta ?? false,
+    refreshStats: flags.refreshStats ?? false,
+    filterCombine: flags.filterCombine ?? "AND",
+    filters,
+  });
+}
+
 // =============================================================================
 // Loaders (Single Responsibility)
 // =============================================================================
@@ -257,7 +295,7 @@ async function loadMeta(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
-}): Promise<{ structure: any[]; constraints: any[] }> {
+}): Promise<{ structure: any[]; constraints: any[]; foreignKeys: any[] }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (engine === "mysql" || engine === "mariadb") {
@@ -271,7 +309,6 @@ async function loadMeta(params: {
       is_nullable: (cellToString(row?.[3]) ?? "").toLowerCase() === "yes",
       check: "",
       column_default: cellToString(row?.[4]),
-      foreign_key: "",
       comment: cellToString(row?.[5]) ?? "",
     }));
 
@@ -290,9 +327,7 @@ async function loadMeta(params: {
       comment: "",
     }));
 
-    console.log({ structure, constraints });
-
-    return { structure, constraints };
+    return { structure, constraints, foreignKeys: [] };
   }
 
   // 1. Get OID
@@ -312,8 +347,7 @@ async function loadMeta(params: {
     is_nullable: cellToString(row?.[8])?.toLowerCase() === "yes",
     check: cellToString(row?.[9]),
     column_default: cellToString(row?.[11]),
-    foreign_key: cellToString(row?.[12]),
-    comment: cellToString(row?.[13]),
+    comment: cellToString(row?.[12]),
   }));
 
   // 3. Constraints
@@ -332,7 +366,28 @@ async function loadMeta(params: {
     comment: cellToString(row?.[7]),
   }));
 
-  return { structure, constraints };
+  // 4. Foreign keys (Postgres only)
+  let foreignKeys: any[] = [];
+  try {
+    const qFk = tableForeignKeysQuery(schema, tableName);
+    const fkRes = await runSqlQuery(connId, qFk);
+    addLogQuery(qFk);
+    foreignKeys = (fkRes.rows as unknown[][]).map((row) => ({
+      constraint_name: cellToString(row?.[0]),
+      table_schema: cellToString(row?.[1]),
+      table_name: cellToString(row?.[2]),
+      column_names: cellToString(row?.[3]),
+      ref_table_schema: cellToString(row?.[4]),
+      ref_table_name: cellToString(row?.[5]),
+      ref_column_names: cellToString(row?.[6]),
+      on_update: cellToString(row?.[7]) || "NO ACTION",
+      on_delete: cellToString(row?.[8]) || "NO ACTION",
+    }));
+  } catch {
+    // Ignore if FK query fails
+  }
+
+  return { structure, constraints, foreignKeys };
 }
 
 async function startRowsStream(params: {
@@ -385,10 +440,27 @@ async function startRowsStream(params: {
     } catch {}
   }
 
-  const rowsOpId = await startSqlQueryStream(connId, q, {
-    batchSize: 200,
-    maxRows: limit,
-  });
+  const rowsOpId = await retryAsync(
+    () =>
+      startSqlQueryStream(connId, q, {
+        batchSize: 200,
+        maxRows: limit,
+      }),
+    {
+      attempts: RETRY_ATTEMPTS,
+      shouldRetry: (err) => Boolean(parseBusyOpId(err)),
+      onRetry: async (err) => {
+        const busyOpId = parseBusyOpId(err);
+        if (!busyOpId) return;
+
+        // Best effort: ask backend to cancel the stream currently holding the lock.
+        try {
+          await operationCancel(busyOpId);
+        } catch {}
+      },
+      delayMs: (attempt) => 40 * attempt,
+    }
+  );
 
   const cap = Math.max(1000, limit * 4);
 
@@ -482,208 +554,229 @@ export function useLoadTableData() {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
 
       const key = tableKey(activeProfileScreen, schema, tableName);
-
-      // --- DEDUPLICATION CHECK ---
-      // If already loading this key and not forced, skip to avoid race conditions
-      if (loadingKeysRef.current.has(key) && !flags.force) {
-        return;
+      const loadSignature = buildLoadSignature({ key, pagination, flags });
+      const existingLoad = inflightLoadBySignature.get(loadSignature);
+      if (existingLoad) {
+        return existingLoad;
       }
-      loadingKeysRef.current.add(key);
 
-      try {
-        const prev = tableDataMap[key] ?? EMPTY_META;
-        const plan = computeLoadPlan({ key, prev, flags, pagination });
-
-        if (!shouldDoAnything(plan)) return;
-
-        const limit = pagination?.limit ?? DEFAULT_LIMIT;
-        const offset = pagination?.offset ?? DEFAULT_OFFSET;
-        const isPostgres = activeTab.engine === "postgres";
-        const supportsMeta =
-          activeTab.engine === "postgres" ||
-          activeTab.engine === "mysql" ||
-          activeTab.engine === "mariadb";
-
-        // Set busy/error state
-        if (plan.needAnyMetaWork)
-          patchMeta(setMeta, key, prev, { busy: true, error: null });
-        else patchMeta(setMeta, key, prev, { error: null });
-
-        // Ensure connection
-        let connId: string;
-        try {
-          connId = activeTab.runtimeConnectionId
-            ? activeTab.runtimeConnectionId
-            : await ensureRuntimeConn(key);
-        } catch (e) {
-          patchMeta(setMeta, key, prev, {
-            busy: false,
-            error: getErrorMessage(e),
-          });
+      const task = (async () => {
+        // --- DEDUPLICATION CHECK ---
+        // If already loading this key and not forced, skip to avoid race conditions
+        if (loadingKeysRef.current.has(key) && !flags.force) {
           return;
         }
+        loadingKeysRef.current.add(key);
 
-        patchMeta(setMeta, key, prev, {
-          connectionId: prev.connectionId ?? connId,
-        });
+        try {
+          const prev = tableDataMap[key] ?? EMPTY_META;
+          const plan = computeLoadPlan({ key, prev, flags, pagination });
 
-        // --- 1. APPLY CACHES (Instant UI Feedback) ---
-        const cachedCols = columnsCache[key];
-        if (
-          (!Array.isArray(prev.columns) || prev.columns.length === 0) &&
-          Array.isArray(cachedCols) &&
-          cachedCols.length > 0
-        ) {
-          patchMeta(setMeta, key, prev, { columns: cachedCols });
-        }
+          if (!shouldDoAnything(plan)) return;
 
-        const cachedSize = sizeInfoCache[key];
-        if (!prev.sizeInfo && cachedSize) {
-          patchMeta(setMeta, key, prev, { sizeInfo: cachedSize });
-        }
+          const limit = pagination?.limit ?? DEFAULT_LIMIT;
+          const offset = pagination?.offset ?? DEFAULT_OFFSET;
+          const isPostgres = activeTab.engine === "postgres";
+          const supportsMeta =
+            activeTab.engine === "postgres" ||
+            activeTab.engine === "mysql" ||
+            activeTab.engine === "mariadb";
 
-        // --- 2. LOAD COLUMNS (Blocking) ---
-        // We must have columns before processing rows to ensure correct data mapping.
-        if (plan.needColumns) {
+          // Set busy/error state
+          if (plan.needAnyMetaWork)
+            patchMeta(setMeta, key, prev, { busy: true, error: null });
+          else patchMeta(setMeta, key, prev, { error: null });
+
+          // Ensure connection
+          let connId: string;
           try {
-            const columns = await loadColumns({
-              connId,
-              schema,
-              tableName,
-              addLogQuery,
-            });
-
-            const curPrev =
-              useConnectionStore.getState().tableDataMap[key] ?? prev;
-
-            patchMeta(setMeta, key, curPrev, {
-              columns,
-              connectionId: curPrev.connectionId ?? connId,
-            });
-
-            try {
-              setColumnsCache(key, columns as any);
-            } catch {}
+            connId = activeTab.runtimeConnectionId
+              ? activeTab.runtimeConnectionId
+              : await ensureRuntimeConn(key);
           } catch (e) {
             patchMeta(setMeta, key, prev, {
               busy: false,
               error: getErrorMessage(e),
             });
-            // Stop here if columns fail
             return;
           }
-        }
 
-        // --- 3. START ROWS STREAM (Fire & Forget) ---
-        // Runs independently of meta tasks.
-        if (plan.needRows) {
-          void (async () => {
+          patchMeta(setMeta, key, prev, {
+            connectionId: prev.connectionId ?? connId,
+          });
+
+          // --- 1. APPLY CACHES (Instant UI Feedback) ---
+          const cachedCols = columnsCache[key];
+          if (
+            (!Array.isArray(prev.columns) || prev.columns.length === 0) &&
+            Array.isArray(cachedCols) &&
+            cachedCols.length > 0
+          ) {
+            patchMeta(setMeta, key, prev, { columns: cachedCols });
+          }
+
+          const cachedSize = sizeInfoCache[key];
+          if (!prev.sizeInfo && cachedSize) {
+            patchMeta(setMeta, key, prev, { sizeInfo: cachedSize });
+          }
+
+          // --- 2. LOAD COLUMNS (Blocking) ---
+          // We must have columns before processing rows to ensure correct data mapping.
+          if (plan.needColumns) {
             try {
-              // Force refresh means we should invalidate existing cache
-              const shouldReset = !!flags.force;
-
-              await startRowsStream({
-                key,
+              const columns = await loadColumns({
                 connId,
                 schema,
                 tableName,
-                engine: activeTab.engine,
-                limit,
-                offset,
                 addLogQuery,
-                resetCache: shouldReset,
-                filters: flags.filters,
-                filterCombine: flags.filterCombine ?? "AND",
               });
-            } catch (e) {
-              const curMeta =
+
+              const curPrev =
                 useConnectionStore.getState().tableDataMap[key] ?? prev;
-              patchMeta(setMeta, key, curMeta, {
+
+              patchMeta(setMeta, key, curPrev, {
+                columns,
+                connectionId: curPrev.connectionId ?? connId,
+              });
+
+              try {
+                setColumnsCache(key, columns as any);
+              } catch {}
+            } catch (e) {
+              patchMeta(setMeta, key, prev, {
                 busy: false,
                 error: getErrorMessage(e),
               });
+              // Stop here if columns fail
+              return;
             }
-          })();
-        }
-
-        // --- 4. LOAD META (Parallel) ---
-        const metaTasks: Promise<void>[] = [];
-
-        if (plan.needRowCount) {
-          metaTasks.push(
-            (async () => {
-              const rowCount = await loadRowCount({
-                connId,
-                schema,
-                tableName,
-                engine: activeTab.engine,
-                addLogQuery,
-              });
-              patchMeta(setMeta, key, prev, { rowCount });
-            })()
-          );
-        }
-
-        if (plan.needSizeInfo && isPostgres) {
-          metaTasks.push(
-            (async () => {
-              const sizeInfo = await loadSizeInfo({
-                connId,
-                schema,
-                tableName,
-                addLogQuery,
-              });
-              patchMeta(setMeta, key, prev, { sizeInfo });
-              try {
-                setSizeInfoCache(key, sizeInfo as any);
-              } catch {}
-            })()
-          );
-        }
-
-        if (plan.needMeta && supportsMeta) {
-          metaTasks.push(
-            (async () => {
-              const { structure, constraints } = await loadMeta({
-                connId,
-                schema,
-                tableName,
-                engine: activeTab.engine,
-                addLogQuery,
-              });
-              patchMeta(setMeta, key, prev, { structure, constraints });
-            })()
-          );
-        }
-
-        // If no meta tasks needed, we are done
-        if (metaTasks.length === 0) {
-          // Only clear busy if we set it earlier
-          if (plan.needAnyMetaWork) {
-            patchMeta(setMeta, key, prev, { busy: false });
           }
-          return;
+
+          // --- 3. START ROWS STREAM (Fire & Forget) ---
+          // Runs independently of meta tasks.
+          if (plan.needRows) {
+            void (async () => {
+              try {
+                // Force refresh means we should invalidate existing cache
+                const shouldReset = !!flags.force;
+
+                await startRowsStream({
+                  key,
+                  connId,
+                  schema,
+                  tableName,
+                  engine: activeTab.engine,
+                  limit,
+                  offset,
+                  addLogQuery,
+                  resetCache: shouldReset,
+                  filters: flags.filters,
+                  filterCombine: flags.filterCombine ?? "AND",
+                });
+              } catch (e) {
+                const curMeta =
+                  useConnectionStore.getState().tableDataMap[key] ?? prev;
+                patchMeta(setMeta, key, curMeta, {
+                  busy: false,
+                  error: getErrorMessage(e),
+                });
+              }
+            })();
+          }
+
+          // --- 4. LOAD META (Parallel) ---
+          const metaTasks: Promise<void>[] = [];
+
+          if (plan.needRowCount) {
+            metaTasks.push(
+              (async () => {
+                const rowCount = await loadRowCount({
+                  connId,
+                  schema,
+                  tableName,
+                  engine: activeTab.engine,
+                  addLogQuery,
+                });
+                patchMeta(setMeta, key, prev, { rowCount });
+              })()
+            );
+          }
+
+          if (plan.needSizeInfo && isPostgres) {
+            metaTasks.push(
+              (async () => {
+                const sizeInfo = await loadSizeInfo({
+                  connId,
+                  schema,
+                  tableName,
+                  addLogQuery,
+                });
+                patchMeta(setMeta, key, prev, { sizeInfo });
+                try {
+                  setSizeInfoCache(key, sizeInfo as any);
+                } catch {}
+              })()
+            );
+          }
+
+          if (plan.needMeta && supportsMeta) {
+            metaTasks.push(
+              (async () => {
+                const { structure, constraints, foreignKeys } = await loadMeta({
+                  connId,
+                  schema,
+                  tableName,
+                  engine: activeTab.engine,
+                  addLogQuery,
+                });
+                patchMeta(setMeta, key, prev, {
+                  structure,
+                  constraints,
+                  foreignKeys,
+                });
+              })()
+            );
+          }
+
+          // If no meta tasks needed, we are done
+          if (metaTasks.length === 0) {
+            // Only clear busy if we set it earlier
+            if (plan.needAnyMetaWork) {
+              patchMeta(setMeta, key, prev, { busy: false });
+            }
+            return;
+          }
+
+          // Wait for all meta tasks to settle
+          const results = await Promise.allSettled(metaTasks);
+          const firstErr = results.find((r) => r.status === "rejected") as
+            | PromiseRejectedResult
+            | undefined;
+
+          if (firstErr) {
+            patchMeta(setMeta, key, prev, {
+              busy: false,
+              error: getErrorMessage(firstErr.reason),
+            });
+            return;
+          }
+
+          // All done
+          patchMeta(setMeta, key, prev, { busy: false });
+        } finally {
+          // CLEANUP: Always remove deduplication lock
+          loadingKeysRef.current.delete(key);
         }
+      })();
 
-        // Wait for all meta tasks to settle
-        const results = await Promise.allSettled(metaTasks);
-        const firstErr = results.find((r) => r.status === "rejected") as
-          | PromiseRejectedResult
-          | undefined;
-
-        if (firstErr) {
-          patchMeta(setMeta, key, prev, {
-            busy: false,
-            error: getErrorMessage(firstErr.reason),
-          });
-          return;
-        }
-
-        // All done
-        patchMeta(setMeta, key, prev, { busy: false });
+      inflightLoadBySignature.set(loadSignature, task);
+      try {
+        await task;
       } finally {
-        // CLEANUP: Always remove deduplication lock
-        loadingKeysRef.current.delete(key);
+        const current = inflightLoadBySignature.get(loadSignature);
+        if (current === task) {
+          inflightLoadBySignature.delete(loadSignature);
+        }
       }
     },
     [
