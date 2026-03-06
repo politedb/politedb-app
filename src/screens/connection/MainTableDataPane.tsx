@@ -666,6 +666,7 @@ export function MainTableDataPane(props: {
                 columns={meta.columns ?? []}
                 filters={filters}
                 filterCombine={filterCombine}
+                appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
                 onFiltersChange={setFilters}

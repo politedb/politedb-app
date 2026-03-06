@@ -322,12 +322,6 @@ export function useTableFilter(
       combine: "AND" | "OR",
       tableKey: string
     ) => {
-      console.log({
-        ...current,
-        appliedFilters: newFilters,
-        appliedFilterCombine: combine,
-      });
-
       setTableFilter(tableKey, {
         ...current,
         filters: newFilters,

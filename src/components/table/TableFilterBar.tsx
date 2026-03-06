@@ -35,6 +35,7 @@ interface TableFilterBarProps {
   columns: ColumnMeta[];
   filters: TableFilterCondition[];
   filterCombine: "AND" | "OR";
+  appliedFilters: TableFilterCondition[];
   limit: number;
   offset: number;
   onFiltersChange: (filters: TableFilterCondition[]) => void;
@@ -57,6 +58,7 @@ export function TableFilterBar({
   columns,
   filters,
   filterCombine,
+  appliedFilters,
   limit,
   offset,
   onFiltersChange,
@@ -119,6 +121,23 @@ export function TableFilterBar({
     [filters, onApply, onFilterCombineChange, tableKey]
   );
 
+  const checkFilterApplied = useCallback(
+    (filter: TableFilterCondition) => {
+      const filterApplied = appliedFilters.find(
+        (f) =>
+          f.column === filter.column &&
+          f.operator === filter.operator &&
+          f.value === filter.value
+      );
+      return (
+        filterApplied &&
+        filterApplied.enabled &&
+        Boolean((filterApplied.column ?? "").trim())
+      );
+    },
+    [appliedFilters]
+  );
+
   const currentSql = useMemo(() => {
     const enabled = filters.filter((f) => f.enabled && (f.column ?? "").trim());
     if (enabled.length === 0) return null;
@@ -140,98 +159,103 @@ export function TableFilterBar({
     <div class="flex flex-col gap-2.5 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
       {/* Filter row(s) */}
       <div class="flex flex-col gap-2">
-        {filters.map((row, index) => (
-          <div key={index} class="flex items-center gap-2">
-            <Checkbox
-              checked={row.enabled}
-              onChange={(e) =>
-                updateRow(index, {
-                  enabled: (e.target as HTMLInputElement).checked,
-                })
-              }
-            />
-            <Select
-              value={row.column}
-              onChange={(e) =>
-                updateRow(index, {
-                  column: (e.target as HTMLSelectElement).value,
-                })
-              }
-              class="h-7 w-32 border-neutral-300"
-            >
-              {columnNames.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </Select>
-            <Select
-              value={row.operator}
-              onChange={(e) =>
-                updateRow(index, {
-                  operator: (e.target as HTMLSelectElement).value,
-                })
-              }
-              class="h-7 w-32 border-neutral-300 text-center"
-            >
-              {OPERATORS.map((op) => (
-                <option key={op} value={op}>
-                  {op}
-                </option>
-              ))}
-            </Select>
-            <div class="flex-1">
-              <Input
-                type="text"
-                placeholder={
-                  NULL_OPS.includes(row.operator)
-                    ? ""
-                    : LIST_OPS.includes(row.operator)
-                      ? "value1, value2, ..."
-                      : "EMPTY"
-                }
-                value={NULL_OPS.includes(row.operator) ? "" : row.value}
-                disabled={NULL_OPS.includes(row.operator)}
-                onInput={(e) =>
+        {filters.map((row, index) => {
+          const isAppliedFilter = checkFilterApplied(row);
+
+          return (
+            <div key={index} class="flex items-center gap-2">
+              <Checkbox
+                checked={row.enabled}
+                onChange={(e) =>
                   updateRow(index, {
-                    value: (e.target as HTMLInputElement).value,
+                    enabled: (e.target as HTMLInputElement).checked,
                   })
                 }
-                className={cn(
-                  "min-w-[140px] flex-1 px-3 py-[2.5px] text-sm outline-none",
-                  "border border-neutral-300 bg-white focus:border-blue-400"
-                )}
               />
-            </div>
+              <Select
+                value={row.column}
+                onChange={(e) =>
+                  updateRow(index, {
+                    column: (e.target as HTMLSelectElement).value,
+                  })
+                }
+                class="h-7 w-32 border-neutral-300"
+              >
+                {columnNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={row.operator}
+                onChange={(e) =>
+                  updateRow(index, {
+                    operator: (e.target as HTMLSelectElement).value,
+                  })
+                }
+                class="h-7 w-32 border-neutral-300 text-center"
+              >
+                {OPERATORS.map((op) => (
+                  <option key={op} value={op}>
+                    {op}
+                  </option>
+                ))}
+              </Select>
+              <div class="flex-1">
+                <Input
+                  type="text"
+                  placeholder={
+                    NULL_OPS.includes(row.operator)
+                      ? ""
+                      : LIST_OPS.includes(row.operator)
+                        ? "value1, value2, ..."
+                        : "EMPTY"
+                  }
+                  value={NULL_OPS.includes(row.operator) ? "" : row.value}
+                  disabled={NULL_OPS.includes(row.operator)}
+                  onInput={(e) =>
+                    updateRow(index, {
+                      value: (e.target as HTMLInputElement).value,
+                    })
+                  }
+                  className={cn(
+                    "min-w-[140px] flex-1 px-3 py-[2.5px] text-sm outline-none",
+                    "border border-neutral-300 bg-white focus:border-blue-400",
+                    isAppliedFilter && "bg-green-100!"
+                  )}
+                />
+              </div>
 
-            <Button
-              variant="shadow"
-              className="px-3 py-[4.5px] text-xs"
-              onClick={() => onApply(filters, filterCombine, tableKey)}
-            >
-              Apply
-            </Button>
-            <Button
-              variant="shadow"
-              className="p-[6.5px] text-xs"
-              onClick={() => removeRow(index)}
-              aria-label="Remove filter"
-            >
-              <Minus className="size-2.5" />
-            </Button>
-            <Button
-              variant="shadow"
-              className={cn(
-                "invisible p-[6.5px] text-xs",
-                index === 0 && "visible"
-              )}
-              onClick={addRow}
-              aria-label="Add filter"
-            >
-              <Plus className="size-2.5" />
-            </Button>
-          </div>
-        ))}
+              <Button
+                variant="shadow"
+                className="px-3 py-[4.5px] text-xs"
+                onClick={() => onApply(filters, filterCombine, tableKey)}
+              >
+                Apply
+              </Button>
+              <Button
+                variant="shadow"
+                className="p-[6.5px] text-xs"
+                onClick={() => removeRow(index)}
+                aria-label="Remove filter"
+              >
+                <Minus className="size-2.5" />
+              </Button>
+              <Button
+                variant="shadow"
+                className={cn(
+                  "invisible p-[6.5px] text-xs",
+                  index === 0 && "visible"
+                )}
+                onClick={addRow}
+                aria-label="Add filter"
+              >
+                <Plus className="size-2.5" />
+              </Button>
+            </div>
+          );
+        })}
       </div>
 
       {/* Action row */}
