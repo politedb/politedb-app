@@ -90,6 +90,24 @@ export function useSchemaTablesPanel(args: {
     );
   }, [meta.tables, activeSchema, tableSearchQuery]);
 
+  const filteredFunctions = useMemo(() => {
+    const list = meta.functions ?? [];
+    const q = tableSearchQuery.trim().toLowerCase();
+
+    const bySchema = activeSchema
+      ? list.filter((f) => f.schema === activeSchema)
+      : list;
+
+    if (!q) return bySchema;
+
+    return bySchema.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        (f.args ?? "").toLowerCase().includes(q) ||
+        f.schema.toLowerCase().includes(q)
+    );
+  }, [meta.functions, activeSchema, tableSearchQuery]);
+
   // For editor autocomplete: use full metadata (not filtered)
   const schemasForEditor = useMemo(() => meta.schemas ?? [], [meta.schemas]);
   const tablesForEditor = useMemo(() => meta.tables ?? [], [meta.tables]);
@@ -117,6 +135,7 @@ export function useSchemaTablesPanel(args: {
     setExpandedSections,
 
     filteredTables,
+    filteredFunctions,
 
     schemasForEditor,
     tablesForEditor,

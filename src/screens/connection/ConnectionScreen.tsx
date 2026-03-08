@@ -158,6 +158,7 @@ export function ConnectionScreen() {
     expandedSections,
     setExpandedSections,
     filteredTables,
+    filteredFunctions,
     schemasForEditor,
     isConnecting,
   } = useSchemaTablesPanel({
@@ -437,6 +438,7 @@ export function ConnectionScreen() {
                       expandedSections={expandedSections}
                       setExpandedSections={setExpandedSections}
                       filteredTables={filteredTables}
+                      filteredFunctions={filteredFunctions}
                       activeWindowId={activeWindowId}
                     />
                   </div>

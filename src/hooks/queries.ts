@@ -443,7 +443,7 @@ export const truncateTableQuery = (
 
 export const dbListQuery = (engine?: DatabaseEngine) => {
   if (isMySqlLike(engine)) {
-    return "SHOW DATABASES;";
+    return "SELECT schema_name FROM information_schema.schemata WHERE schema_name = DATABASE() ORDER BY schema_name;";
   }
   return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;";
 };
