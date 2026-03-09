@@ -7,6 +7,7 @@ type ShortcutActions = {
   refresh: () => Promise<void> | void;
   closeWindow: (id: string, e: MouseEvent) => Promise<void> | void;
   closeTab: (tabId: string, skipCheck?: boolean) => Promise<void> | void;
+  openSearch?: () => void;
 };
 
 export function useConnectionShortcuts(params: {
@@ -51,6 +52,13 @@ export function useConnectionShortcuts(params: {
           e.stopPropagation();
           void actionsRef.current.beforeSaveChanges();
         }
+        return;
+      }
+
+      if (key === "p" || key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsRef.current.openSearch?.();
         return;
       }
 

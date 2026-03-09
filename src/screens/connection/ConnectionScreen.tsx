@@ -24,6 +24,7 @@ import { SplitPane } from "src/components/SplitPane";
 import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
+import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -72,6 +73,7 @@ export function ConnectionScreen() {
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
 
   const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
 
@@ -281,6 +283,7 @@ export function ConnectionScreen() {
           setPendingTableAction("drop");
         });
       },
+      openSearch: () => setSearchDialogOpen(true),
     };
   }, []);
 
@@ -424,6 +427,7 @@ export function ConnectionScreen() {
             onViewModeChange={toggleViewMode}
             openSQLWindow={actions.openSql}
             onRefresh={() => void actions.refresh()}
+            onSearchOpen={() => setSearchDialogOpen(true)}
           />
 
           <div class="flex h-full flex-1 overflow-hidden">
@@ -541,6 +545,15 @@ export function ConnectionScreen() {
             onRetry={() => void reloadRuntime()}
           />
         )}
+
+        <DatabaseSearchDialog
+          open={searchDialogOpen}
+          onClose={() => setSearchDialogOpen(false)}
+          tables={meta.tables ?? []}
+          schemas={meta.schemas ?? []}
+          onSelectTable={(table) => void actions.selectTable(table)}
+          onSelectSchema={onSchemaChange}
+        />
       </ConnectionRuntimeProvider>
     </ConnectionActionsProvider>
   );

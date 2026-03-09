@@ -30,6 +30,7 @@ interface Props {
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
+  onSearchOpen?: () => void;
 }
 
 function ToolbarDivider() {
@@ -186,6 +187,7 @@ export function MenuBar({
   onViewModeChange,
   onRefresh,
   openSQLWindow,
+  onSearchOpen,
 }: Props) {
   const getProfileById = useProfileStore((s) => s.getProfileById);
   const { activeProfileScreen, profileTabs, addTab, setActiveProfileScreen } =
@@ -376,7 +378,7 @@ export function MenuBar({
             <RefreshCw className="size-4.5 text-neutral-700" />
           </IconButton>
 
-          <IconButton title="Search">
+          <IconButton title="Search" onClick={onSearchOpen}>
             <Search className="size-4 text-neutral-700" />
           </IconButton>
 
