@@ -1,5 +1,4 @@
 // macOS needs objc macros in THIS module (because msg_send! is used here).
-#[cfg(target_os = "macos")]
 use tauri::Manager;
 
 pub fn apply(app: &tauri::App) {
@@ -12,6 +11,8 @@ pub fn apply(app: &tauri::App) {
     windows_apply(&win);
 
     // Linux: no-op (WM/compositor dependent)
+    #[cfg(target_os = "linux")]
+    linux_apply(&win);
 }
 
 fn get_main_webview_window(app: &tauri::App) -> tauri::WebviewWindow {
@@ -163,7 +164,7 @@ fn force_rounded_corners(win: &tauri::WebviewWindow) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWINDOWATTRIBUTE};
 
-        let hwnd = HWND(hwnd_isize);
+        let hwnd = HWND(hwnd_isize as *mut std::ffi::c_void);
         let pref: u32 = DWMWCP_ROUND;
 
         let _ = DwmSetWindowAttribute(
@@ -173,4 +174,10 @@ fn force_rounded_corners(win: &tauri::WebviewWindow) {
             std::mem::size_of::<u32>() as u32,
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_apply(_win: &tauri::WebviewWindow) {
+    // Keep this hook explicit for Linux-specific tuning later.
+    // Window chrome behavior depends on the WM/compositor.
 }
