@@ -4,6 +4,7 @@ import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { useIndexedSort, type SortState } from "src/hooks/useIndexedSort";
 import { ArrowDown, ArrowUp } from "src/components/icons";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
 export interface TableColumn<T = any> {
   key: string;
@@ -34,6 +35,7 @@ interface TableProps<T = any> {
 }
 
 const TABLE_STYLE = { minHeight: "100%", tableLayout: "auto" } as const;
+type HeaderMenuState<T> = { x: number; y: number; column: TableColumn<T> };
 
 export function Table<T = any>({
   columns,
@@ -52,6 +54,7 @@ export function Table<T = any>({
   onDoubleClickRow,
   enableSort = true,
 }: TableProps<T>) {
+  const [headerMenu, setHeaderMenu] = useState<HeaderMenuState<T> | null>(null);
   const [colWidths, setColWidths] = useState<(number | undefined)[]>(() =>
     columns.map(() => undefined)
   );
@@ -76,15 +79,78 @@ export function Table<T = any>({
     [columns]
   );
 
-  const { sortState, sortedRows, indexMap, toggleSort, findDisplayIndex } =
-    useIndexedSort<T, keyof T>(data, {
-      initialKey: initialSortableColumn,
-    } as {
-      initialKey?: keyof T;
-      initialDirection?: SortState<keyof T>["direction"];
-    });
+  const {
+    sortState,
+    sortedRows,
+    indexMap,
+    toggleSort,
+    setSort,
+    findDisplayIndex,
+  } = useIndexedSort<T, keyof T>(data, {
+    initialKey: initialSortableColumn,
+  } as {
+    initialKey?: keyof T;
+    initialDirection?: SortState<keyof T>["direction"];
+  });
 
   const displayRows = sortedRows;
+  const resolveSortKey = useCallback(
+    (col: TableColumn<T>) =>
+      (col.sortKey as keyof T | undefined) ?? (col.key as keyof T),
+    []
+  );
+
+  const headerMenuItems = useMemo<MenuItem[]>(() => {
+    const col = headerMenu?.column;
+    const canSort = !!(enableSort && col?.sortable);
+    const sortKey = col ? resolveSortKey(col) : null;
+    const copyText = col
+      ? typeof col.label === "string"
+        ? col.label
+        : col.key
+      : "";
+
+    return [
+      {
+        type: "item",
+        label: "Copy name",
+        disabled: !col,
+        onClick: () => {
+          if (!copyText) return;
+          void navigator.clipboard.writeText(copyText);
+        },
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Sort ascending",
+        disabled: !canSort || !sortKey,
+        onClick: () => {
+          if (!canSort || !sortKey) return;
+          setSort(sortKey, "asc");
+        },
+      },
+      {
+        type: "item",
+        label: "Sort descending",
+        disabled: !canSort || !sortKey,
+        onClick: () => {
+          if (!canSort || !sortKey) return;
+          setSort(sortKey, "desc");
+        },
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Remove sort",
+        disabled: !enableSort || sortState.key == null,
+        onClick: () => {
+          if (!enableSort) return;
+          setSort(null);
+        },
+      },
+    ];
+  }, [headerMenu, enableSort, resolveSortKey, setSort, sortState.key]);
 
   const handleResizeMove = useCallback(
     (e: MouseEvent) => {
@@ -237,15 +303,24 @@ export function Table<T = any>({
                     "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",
                   col.headerClassName
                 )}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setHeaderMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    column: col,
+                  });
+                }}
               >
                 {col.sortable ? (
                   <button
                     class="flex w-full items-center justify-between gap-1 select-none"
-                    onClick={() => {
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
                       if (!enableSort) return;
-                      const sortKey =
-                        (col.sortKey as keyof T | undefined) ??
-                        (col.key as keyof T);
+                      const sortKey = resolveSortKey(col);
+                      e.stopPropagation();
                       toggleSort(sortKey);
                     }}
                   >
@@ -360,6 +435,14 @@ export function Table<T = any>({
           })}
         </tbody>
       </table>
+
+      <ContextMenu
+        open={headerMenu !== null}
+        x={headerMenu?.x ?? 0}
+        y={headerMenu?.y ?? 0}
+        items={headerMenuItems}
+        onClose={() => setHeaderMenu(null)}
+      />
     </div>
   );
 }

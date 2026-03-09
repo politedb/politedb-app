@@ -13,6 +13,13 @@ function isTauriRuntime() {
 
 async function boot() {
   if (isTauriRuntime()) {
+    // Keep native context menu in dev for debugging; disable it in production.
+    if (!import.meta.env.DEV) {
+      window.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+      });
+    }
+
     // ✅ init op bus early (prevents missing done/meta)
     await operationBus.ensureInit();
     await gcSqlDrafts({ ttlDays: 14, maxFiles: 200 });

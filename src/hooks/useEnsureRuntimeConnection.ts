@@ -4,6 +4,8 @@ import { ProfileTab, useScreenStore } from "src/stores/screen";
 
 export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
   const { updateTab } = useScreenStore();
+
+  const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
@@ -18,8 +20,11 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     void (async () => {
       try {
         const res = await profileConnect(activeTab.profileId);
+        setError(null);
         if (canceled) return;
         updateTab(activeTab.id, { runtimeConnectionId: res.connection.id });
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : String(e));
       } finally {
         if (!canceled) setConnecting(false);
       }
@@ -35,14 +40,17 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     updateTab,
   ]);
 
-  const ensure = useCallback(async () => {
+  const reload = useCallback(async () => {
     if (!activeTab?.profileId) return null;
     if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
     setConnecting(true);
     try {
       const res = await profileConnect(activeTab.profileId);
+      setError(null);
       updateTab(activeTab.id, { runtimeConnectionId: res.connection.id });
       return res.connection.id;
+    } catch (e: any) {
+      setError(e?.message ? String(e.message) : String(e));
     } finally {
       setConnecting(false);
     }
@@ -53,5 +61,5 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     updateTab,
   ]);
 
-  return { connecting, ensure };
+  return { connecting, error, setError, reload };
 }

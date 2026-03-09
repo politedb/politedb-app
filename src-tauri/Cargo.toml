@@ -69,7 +69,7 @@ deadpool-redis = "0.22.0"
 redis = "0.32.2"
 raw-window-handle = "0.6.2"
 tauri-plugin-dialog = "2"
-ssh2 = "0.9.5"
+ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
 dirs = "6.0.0"
 tauri-plugin-os = "2"
 chrono = { version = "0.4.42", features = ["serde"] }

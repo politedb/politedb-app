@@ -52,9 +52,9 @@ export function ConnectionScreen() {
   const {
     activeProfileScreen,
     profileTabs,
+    openWindows,
     removeTab,
     setActiveProfileScreen,
-    openWindows,
   } = useScreenStore();
 
   /* =============================================================================
@@ -89,8 +89,12 @@ export function ConnectionScreen() {
     closeWindow,
   } = useConnectionWindows(activeProfileScreen);
 
-  const { connecting: connectingRuntime } =
-    useEnsureRuntimeConnection(activeTab);
+  const {
+    connecting: connectingRuntime,
+    error: errorRuntime,
+    reload: reloadRuntime,
+    setError: setErrorRuntime,
+  } = useEnsureRuntimeConnection(activeTab);
 
   /* =============================================================================
    * Engine/metaKey (depends on activeTab)
@@ -170,8 +174,12 @@ export function ConnectionScreen() {
   });
 
   const loadError = useMemo(() => {
-    return meta.error || (activeTableWindow ? activeTableData.error : null);
-  }, [meta.error, activeTableWindow, activeTableData.error]);
+    return (
+      errorRuntime ||
+      meta.error ||
+      (activeTableWindow ? activeTableData.error : null)
+    );
+  }, [errorRuntime, meta.error, activeTableWindow, activeTableData.error]);
 
   /* =============================================================================
    * New table save ref (runtime)
@@ -224,6 +232,7 @@ export function ConnectionScreen() {
     setActiveProfileScreen,
 
     newTableSaveRef,
+    refreshRuntimeConnection: reloadRuntime,
   });
 
   // ✅ stable provider value (avoid context rerender cascades)
@@ -523,6 +532,15 @@ export function ConnectionScreen() {
             />
           )}
         </div>
+
+        {errorRuntime && (
+          <ErrorDialog
+            open={!!errorRuntime}
+            error={errorRuntime}
+            onClose={() => setErrorRuntime(null)}
+            onRetry={() => void reloadRuntime()}
+          />
+        )}
       </ConnectionRuntimeProvider>
     </ConnectionActionsProvider>
   );

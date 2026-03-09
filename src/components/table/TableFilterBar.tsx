@@ -138,8 +138,6 @@ export function TableFilterBar({
     [appliedFilters]
   );
 
-  console.log(appliedFilters);
-
   const currentSql = useMemo(() => {
     const enabled = filters.filter((f) => f.enabled && (f.column ?? "").trim());
     if (enabled.length === 0) return null;

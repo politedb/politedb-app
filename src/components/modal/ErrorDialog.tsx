@@ -14,6 +14,7 @@ interface Props {
   title?: string;
   size?: DialogSize;
   onClose: () => void;
+  onRetry?: () => void;
 }
 
 export function ErrorDialog({
@@ -22,6 +23,7 @@ export function ErrorDialog({
   title = "Error",
   size = "xs",
   onClose,
+  onRetry,
 }: Props) {
   return (
     <Dialog
@@ -43,8 +45,17 @@ export function ErrorDialog({
           <p>All changes were reverted (DDL statements can't be reverted).</p>
         </div>
       </DialogContent>
-      <DialogFooter className="justify-center">
-        <Button className="w-full py-1.5" variant="default" onClick={onClose}>
+      <DialogFooter className="flex-col justify-center">
+        {onRetry && (
+          <Button className="w-full py-1.5" variant="default" onClick={onRetry}>
+            Try Again
+          </Button>
+        )}
+        <Button
+          className="w-full py-1.5"
+          variant={onRetry ? "shadow" : "default"}
+          onClick={onClose}
+        >
           OK
         </Button>
       </DialogFooter>

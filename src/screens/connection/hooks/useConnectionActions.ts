@@ -59,6 +59,8 @@ export type UseConnectionActionsArgs = {
   setLimit: (n: number) => void;
   setOffset: (n: number) => void;
 
+  refreshRuntimeConnection: () => Promise<string | null | undefined>;
+
   setWarningRefresh: (v: boolean) => void;
   setPendingCloseTabId: (v: string | null) => void;
   setError: (v: string | null) => void;
@@ -243,6 +245,7 @@ export function useConnectionActions(
     removeTab,
     setActiveProfileScreen,
     newTableSaveRef,
+    refreshRuntimeConnection,
   } = args;
 
   const clearChanges = useCallback((tabId: string, tableWindowId?: string) => {
@@ -314,6 +317,10 @@ export function useConnectionActions(
   );
 
   const refresh = useCallback(async () => {
+    if (!runtimeConnectionId) {
+      await refreshRuntimeConnection();
+    }
+
     const tabDirty = tabHasChanges(activeProfileScreen);
     if (tabDirty) {
       setWarningRefresh(true);

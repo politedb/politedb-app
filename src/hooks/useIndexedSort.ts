@@ -17,6 +17,7 @@ export interface UseIndexedSortResult<TRow, TKey extends keyof TRow> {
   sortedRows: TRow[];
   indexMap: number[];
   toggleSort: (key: TKey) => void;
+  setSort: (key: TKey | null, direction?: SortDirection) => void;
   findDisplayIndex: (originalIndex: number | null | undefined) => number | null;
 }
 
@@ -83,6 +84,13 @@ export function useIndexedSort<TRow, TKey extends keyof TRow>(
     []
   );
 
+  const setSort = useCallback((key: TKey | null, direction: SortDirection = "asc") => {
+    setSortState({
+      key,
+      direction,
+    });
+  }, []);
+
   const findDisplayIndex = useCallback(
     (originalIndex: number | null | undefined): number | null => {
       if (originalIndex == null || originalIndex < 0) return null;
@@ -97,7 +105,7 @@ export function useIndexedSort<TRow, TKey extends keyof TRow>(
     sortedRows,
     indexMap,
     toggleSort,
+    setSort,
     findDisplayIndex,
   };
 }
-

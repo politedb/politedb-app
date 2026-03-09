@@ -11,11 +11,13 @@ import { cellToString } from "src/utils/convert";
 import { ArrowDown, ArrowUp } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
 
 type EditingCell = { rowIdx: number; colIdx: number };
+type HeaderMenuState = { x: number; y: number; colName: string };
 
 type Props = {
   columns: ColumnMeta[];
@@ -238,6 +240,7 @@ export function CanvasTable({
     w: number;
     h: number;
   } | null>(null);
+  const [headerMenu, setHeaderMenu] = useState<HeaderMenuState | null>(null);
 
   // --- Viewport ---
   const [viewport, setViewport] = useState({ w: 1, h: 1 });
@@ -635,6 +638,51 @@ export function CanvasTable({
     [onChangeSort, sortState]
   );
 
+  const headerMenuItems = useMemo<MenuItem[]>(() => {
+    const colName = headerMenu?.colName;
+    const hasSort = !!sortState;
+    return [
+      {
+        type: "item",
+        label: "Copy name",
+        disabled: !colName,
+        onClick: () => {
+          if (!colName) return;
+          void navigator.clipboard.writeText(colName);
+        },
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Sort ascending",
+        disabled: !onChangeSort || !colName,
+        onClick: () => {
+          if (!onChangeSort || !colName) return;
+          onChangeSort({ colName, direction: "asc" });
+        },
+      },
+      {
+        type: "item",
+        label: "Sort descending",
+        disabled: !onChangeSort || !colName,
+        onClick: () => {
+          if (!onChangeSort || !colName) return;
+          onChangeSort({ colName, direction: "desc" });
+        },
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Remove sort",
+        disabled: !onChangeSort || !hasSort,
+        onClick: () => {
+          if (!onChangeSort) return;
+          onChangeSort(null);
+        },
+      },
+    ];
+  }, [headerMenu?.colName, onChangeSort, sortState]);
+
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
   // --------------------------------------------------------------------------
@@ -802,12 +850,22 @@ export function CanvasTable({
                   style={{ width: w, height: HEADER_HEIGHT }}
                   onPointerDown={(e) => {
                     if (!onChangeSort) return;
+                    if (e.button !== 0) return;
                     if (
                       (e.target as HTMLElement).closest("[data-resize-handle]")
                     )
                       return;
                     e.stopPropagation();
                     handleHeaderClick(col.name);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setHeaderMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      colName: col.name,
+                    });
                   }}
                 >
                   <span class="truncate">{col.name}</span>
@@ -882,6 +940,14 @@ export function CanvasTable({
           onBlur={commitAndExit}
         />
       )}
+
+      <ContextMenu
+        open={headerMenu !== null}
+        x={headerMenu?.x ?? 0}
+        y={headerMenu?.y ?? 0}
+        items={headerMenuItems}
+        onClose={() => setHeaderMenu(null)}
+      />
     </div>
   );
 }

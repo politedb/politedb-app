@@ -28,6 +28,7 @@ interface Props {
 }
 
 const PAGE_SIZE_OPTIONS = [50, 100, 300, 500, 1000];
+const numberFormatter = new Intl.NumberFormat("en-US");
 
 export function TableFooter({
   filterBarVisible,
@@ -73,6 +74,7 @@ export function TableFooter({
   // ✅ Loaded label in the middle
   const loadedLabel = useMemo(() => {
     if (viewMode !== "data") return "";
+    const formatNumber = (value: number) => numberFormatter.format(value);
 
     if (typeof loadedMax !== "number" || loadedMax < 0) {
       return "Rows loaded: 0";
@@ -85,12 +87,12 @@ export function TableFooter({
     const start = offset + 1;
     const end = Math.min(offset + limit, loadedCount);
 
-    if (end < start) return `Rows loaded: ${loadedCount}`;
+    if (end < start) return `Rows loaded: ${formatNumber(loadedCount)}`;
 
     // If totalRows is unknown, you can pass 0. We won't show "of N".
-    const totalPart = totalRows > 0 ? ` of ${totalRows}` : "";
+    const totalPart = totalRows > 0 ? ` of ${formatNumber(totalRows)}` : "";
 
-    return `Rows loaded: ${start}–${end}${totalPart}`;
+    return `Rows loaded: ${formatNumber(start)}–${formatNumber(end)}${totalPart}`;
   }, [viewMode, loadedMax, offset, limit, totalRows]);
 
   return (
