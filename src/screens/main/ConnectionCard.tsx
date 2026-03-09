@@ -6,6 +6,7 @@ import { Edit, Ssh, Trash, MoreVertical } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ConfirmPopover } from "src/components/modal/ConfirmPopover";
 import { useProfileStore } from "src/stores/profile";
+import { cn } from "src/utils/cn";
 
 /* -------------------------------------------------- */
 /* utils */
@@ -291,13 +292,13 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           openMenuAtAnchor();
         }
       }}
-      class={[
+      class={cn(
         "group relative flex items-center justify-between gap-3",
         "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
         selected
           ? "border-blue-600 bg-blue-50"
-          : "border-slate-200 bg-white hover:bg-neutral-50",
-      ].join(" ")}
+          : "border-slate-200 bg-white hover:bg-neutral-50"
+      )}
     >
       {/* LEFT */}
       <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
@@ -310,10 +311,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           <div class="flex min-w-0 items-center gap-2">
             {/* Indicator */}
             <span
-              class={[
+              class={cn(
                 "h-2.5 w-2.5 shrink-0 rounded-full",
-                hasCustomIndicator ? "" : "opacity-60",
-              ].join(" ")}
+                hasCustomIndicator ? "" : "opacity-60"
+              )}
               style={{ backgroundColor: indicatorColor }}
               title={hasCustomIndicator ? "Indicator color" : "Default color"}
             />

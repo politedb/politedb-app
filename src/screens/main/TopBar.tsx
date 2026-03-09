@@ -1,16 +1,24 @@
 import type { TargetedEvent } from "preact";
 import { Button } from "src/components/common/Button";
 import { Grid, List, Plus, Search } from "src/components/icons";
-import type { ViewMode } from "src/types";
+import type { NavId, ViewMode } from "src/types";
 
 export function TopBar(props: {
+  mode: NavId;
   searchQuery: string;
   onSearchChange: (v: string) => void;
   onNew: () => void;
   viewMode: ViewMode;
   onViewMode: (v: ViewMode) => void;
 }) {
-  const { searchQuery, onSearchChange, onNew, viewMode, onViewMode } = props;
+  const { mode, searchQuery, onSearchChange, onNew, viewMode, onViewMode } =
+    props;
+  const isConnections = mode === "connections";
+  const searchPlaceholder = isConnections
+    ? "Search connections or paste a URL..."
+    : "Search keychain keys...";
+  const newLabel = isConnections ? "New Connection" : "New Key";
+  const newTitle = isConnections ? "New connection" : "New keychain key";
 
   return (
     <div class="flex shrink-0 items-center gap-2 bg-white px-3 py-2">
@@ -18,7 +26,7 @@ export function TopBar(props: {
       <div class="relative min-w-0 flex-1">
         <input
           type="text"
-          placeholder="Search connections or paste a URL…"
+          placeholder={searchPlaceholder}
           value={searchQuery}
           onInput={(e: TargetedEvent<HTMLInputElement>) =>
             onSearchChange(e.currentTarget.value)
@@ -33,10 +41,10 @@ export function TopBar(props: {
         variant="default"
         onClick={onNew}
         class="h-9 rounded-lg px-3"
-        title="New connection"
+        title={newTitle}
       >
         <Plus className="size-3.5" />
-        <span class="text-[12px] font-semibold">New Connection</span>
+        <span class="text-[12px] font-semibold">{newLabel}</span>
       </Button>
 
       {/* View mode */}

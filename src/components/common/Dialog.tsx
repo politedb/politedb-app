@@ -1,7 +1,7 @@
 import { useEffect } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { X } from "../icons";
-import { cn } from "../../utils/cn";
+import { cn } from "src/utils/cn";
 
 export type DialogSize = "xs" | "sm" | "md" | "lg" | "xl" | "full";
 

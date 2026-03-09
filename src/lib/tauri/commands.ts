@@ -17,6 +17,7 @@ export const CMD = {
   secretsGet: "secrets_get",
   secretsSet: "secrets_set",
   secretsDelete: "secrets_delete",
+  secretsList: "secrets_list",
 
   // Operations
   operationExecute: "operation_execute",

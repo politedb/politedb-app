@@ -1,10 +1,13 @@
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import type { JSX } from "preact";
 import { cn } from "src/utils/cn";
 
 export type MenuItem =
   | {
       type: "item";
       label: string;
+      color?: string;
+      icon?: JSX.Element;
       shortcut?: string;
       disabled?: boolean;
       onClick: () => void;
@@ -99,17 +102,16 @@ export function ContextMenu(props: {
                 // tighter row height like native menus
                 "mx-1 flex w-[calc(100%-0.5rem)] items-center justify-between gap-6",
                 "rounded-md px-2.5 py-1.5 text-left text-[13px] leading-5",
-                disabled
-                  ? "text-neutral-400"
-                  : [
-                      "text-neutral-900",
-                      // native-ish hover highlight (not too saturated)
-                      "hover:bg-blue-600 hover:text-white",
-                      "active:bg-blue-700",
-                    ]
+                it.color
+                  ? `text-${it.color}-700 hover:bg-${it.color}-50 active:bg-${it.color}-100`
+                  : "text-neutral-900 hover:bg-blue-600 hover:text-white active:bg-blue-700",
+                disabled && "text-neutral-400"
               )}
             >
-              <span class="truncate">{it.label}</span>
+              <div class="flex items-center gap-2">
+                {it.icon ? <span class="shrink-0">{it.icon}</span> : null}
+                <span class="truncate">{it.label}</span>
+              </div>
 
               {it.shortcut ? (
                 <span

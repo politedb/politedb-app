@@ -1,16 +1,29 @@
 #![cfg(target_os = "macos")]
 
+use std::ffi::CStr;
+
 use core_foundation::base::{CFTypeRef, TCFType};
 use core_foundation::boolean::CFBoolean;
 use core_foundation::data::CFData;
 use core_foundation::dictionary::CFMutableDictionary;
 use core_foundation::string::{CFString, CFStringRef};
+use core_foundation_sys::array::{
+    CFArrayGetCount, CFArrayGetTypeID, CFArrayGetValueAtIndex, CFArrayRef,
+};
 use core_foundation_sys::base::OSStatus;
+use core_foundation_sys::base::{CFGetTypeID, CFRelease};
+use core_foundation_sys::dictionary::{
+    CFDictionaryGetTypeID, CFDictionaryGetValueIfPresent, CFDictionaryRef,
+};
+use core_foundation_sys::string::{
+    CFStringGetCString, CFStringGetLength, CFStringGetMaximumSizeForEncoding,
+    kCFStringEncodingUTF8,
+};
 
 use security_framework_sys::base::{errSecDuplicateItem, errSecItemNotFound, errSecSuccess};
 use security_framework_sys::item::{
     kSecAttrAccount, kSecAttrService, kSecAttrSynchronizable, kSecClass, kSecClassGenericPassword,
-    kSecMatchLimit, kSecReturnData, kSecValueData,
+    kSecMatchLimit, kSecReturnAttributes, kSecReturnData, kSecValueData,
 };
 use security_framework_sys::keychain_item::{
     SecItemAdd, SecItemCopyMatching, SecItemDelete, SecItemUpdate,
@@ -21,6 +34,7 @@ extern "C" {
     static kSecAttrAccessible: CFStringRef;
     static kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly: CFStringRef;
     static kSecMatchLimitOne: CFStringRef;
+    static kSecMatchLimitAll: CFStringRef;
 }
 
 /* =============================================================================
@@ -52,9 +66,8 @@ fn os_err(code: OSStatus, ctx: &str) -> String {
  * Query builder (stable, TablePlus-like)
  * ============================================================================= */
 
-fn build_query(service: &str, account: &str) -> CFMutableDictionary {
+fn build_query_service(service: &str) -> CFMutableDictionary {
     let service_cf = cfstr(service);
-    let account_cf = cfstr(account);
 
     unsafe {
         let mut d = CFMutableDictionary::from_CFType_pairs(&[
@@ -62,10 +75,6 @@ fn build_query(service: &str, account: &str) -> CFMutableDictionary {
             (
                 k_str(kSecAttrService),
                 service_cf.as_concrete_TypeRef() as CFTypeRef,
-            ),
-            (
-                k_str(kSecAttrAccount),
-                account_cf.as_concrete_TypeRef() as CFTypeRef,
             ),
         ]);
 
@@ -77,6 +86,54 @@ fn build_query(service: &str, account: &str) -> CFMutableDictionary {
 
         d
     }
+}
+
+fn build_query(service: &str, account: &str) -> CFMutableDictionary {
+    let account_cf = cfstr(account);
+    let mut d = build_query_service(service);
+    d.add(
+        &unsafe { k_str(kSecAttrAccount) },
+        &(account_cf.as_concrete_TypeRef() as CFTypeRef),
+    );
+    d
+}
+
+fn cfstring_to_string(value: CFStringRef) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+
+    let len = unsafe { CFStringGetLength(value) };
+    let max = unsafe { CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1 };
+    if max <= 1 {
+        return Some(String::new());
+    }
+
+    let mut buf = vec![0i8; max as usize];
+    let ok = unsafe { CFStringGetCString(value, buf.as_mut_ptr(), max, kCFStringEncodingUTF8) };
+    if ok == 0 {
+        return None;
+    }
+
+    let s = unsafe { CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned();
+    Some(s)
+}
+
+fn extract_account_from_dict(dict: CFDictionaryRef) -> Option<String> {
+    if dict.is_null() {
+        return None;
+    }
+
+    let mut value: CFTypeRef = std::ptr::null_mut();
+    let found = unsafe {
+        CFDictionaryGetValueIfPresent(dict, kSecAttrAccount as CFTypeRef, &mut value as *mut _)
+    };
+    if found == 0 || value.is_null() {
+        return None;
+    }
+    cfstring_to_string(value as CFStringRef)
 }
 
 /* =============================================================================
@@ -178,4 +235,58 @@ pub fn delete_password(service: &str, account: &str) -> Result<(), String> {
     } else {
         Err(os_err(status, "KEYCHAIN_DELETE_FAILED"))
     }
+}
+
+pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
+    if service.trim().is_empty() {
+        return Err("SECRET_SERVICE_EMPTY".into());
+    }
+
+    let mut query = build_query_service(service);
+    query.add(
+        &unsafe { k_str(kSecReturnAttributes) },
+        &(CFBoolean::true_value().as_concrete_TypeRef() as CFTypeRef),
+    );
+    query.add(&unsafe { k_str(kSecMatchLimit) }, &unsafe {
+        k_str(kSecMatchLimitAll)
+    });
+
+    let mut out: CFTypeRef = std::ptr::null_mut();
+    let status = unsafe { SecItemCopyMatching(query.as_concrete_TypeRef(), &mut out) };
+
+    if status == errSecItemNotFound {
+        return Ok(Vec::new());
+    }
+    if status != errSecSuccess {
+        return Err(os_err(status, "KEYCHAIN_LIST_FAILED"));
+    }
+    if out.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let mut keys: Vec<String> = Vec::new();
+    let out_type = unsafe { CFGetTypeID(out) };
+    if out_type == unsafe { CFArrayGetTypeID() } {
+        let arr = out as CFArrayRef;
+        let count = unsafe { CFArrayGetCount(arr) };
+        for i in 0..count {
+            let item = unsafe { CFArrayGetValueAtIndex(arr, i) };
+            if item.is_null() {
+                continue;
+            }
+            if let Some(account) = extract_account_from_dict(item as CFDictionaryRef) {
+                keys.push(account);
+            }
+        }
+    } else if out_type == unsafe { CFDictionaryGetTypeID() } {
+        if let Some(account) = extract_account_from_dict(out as CFDictionaryRef) {
+            keys.push(account);
+        }
+    }
+
+    unsafe { CFRelease(out) };
+
+    keys.sort();
+    keys.dedup();
+    Ok(keys)
 }

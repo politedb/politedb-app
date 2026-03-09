@@ -64,6 +64,20 @@ pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
     }
 }
 
+pub fn keychain_list(app: &AppHandle) -> Result<Vec<String>, String> {
+    let service = service_name(app);
+
+    #[cfg(target_os = "macos")]
+    {
+        return crate::security::keychain_macos::list_accounts(&service);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("KEYCHAIN_LIST_UNSUPPORTED_ON_THIS_PLATFORM".into())
+    }
+}
+
 /* ===============================
  * Tauri commands (FE invoke)
  * =============================== */
@@ -81,4 +95,9 @@ pub async fn secrets_get(app: AppHandle, key: String) -> Result<String, String> 
 #[tauri::command]
 pub async fn secrets_delete(app: AppHandle, key: String) -> Result<(), String> {
     keychain_delete(&app, &key)
+}
+
+#[tauri::command]
+pub async fn secrets_list(app: AppHandle) -> Result<Vec<String>, String> {
+    keychain_list(&app)
 }

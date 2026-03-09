@@ -11,6 +11,7 @@ import { useProfileStore } from "src/stores/profile";
 import { LeftNav } from "./LeftNav";
 import { TopBar } from "./TopBar";
 import { ConnectionsSection } from "./ConnectionsSection";
+import { KeychainSection } from "./KeychainSection";
 
 import { filterConnections } from "src/utils/connection";
 import type { DatabaseEngine, NavId, ViewMode } from "src/types";
@@ -42,6 +43,8 @@ export function MainScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [keychainNewSignal, setKeychainNewSignal] = useState(0);
+  const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
@@ -103,9 +106,17 @@ export function MainScreen() {
           <div class="shrink-0 border-b border-slate-200 bg-white">
             <div class="px-3 py-2">
               <TopBar
+                mode={activeNav}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                onNew={openNew}
+                onNew={() => {
+                  if (activeNav === "connections") {
+                    openNew();
+                  } else {
+                    setKeychainEditorOpen(true);
+                    setKeychainNewSignal((n) => n + 1);
+                  }
+                }}
                 viewMode={viewMode}
                 onViewMode={setViewMode}
               />
@@ -138,16 +149,13 @@ export function MainScreen() {
                 </div>
               </div>
             ) : (
-              <div class="px-4 py-6">
-                <div class="mx-auto w-full max-w-3xl">
-                  <div class="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-                    <p class="text-sm font-medium text-slate-700">Keychain</p>
-                    <p class="mt-1 text-sm text-slate-500">
-                      Keychain feature coming soon
-                    </p>
-                  </div>
-                </div>
-              </div>
+              <KeychainSection
+                searchQuery={searchQuery}
+                viewMode={viewMode}
+                newSignal={keychainNewSignal}
+                editorOpen={keychainEditorOpen}
+                onEditorOpenChange={setKeychainEditorOpen}
+              />
             )}
           </div>
         </div>

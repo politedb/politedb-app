@@ -73,6 +73,7 @@ fn main() {
             secrets::secrets_set,
             secrets::secrets_get,
             secrets::secrets_delete,
+            secrets::secrets_list,
             // sql draft
             commands::sql_draft::sql_draft_save,
             commands::sql_draft::sql_draft_load,
