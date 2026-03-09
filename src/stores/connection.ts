@@ -13,7 +13,7 @@ import type {
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 import { PatchMap } from "src/utils/generateSql";
 import { cellToString } from "src/utils/convert";
-import { DATA_ACTIONS, DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
+import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 import { TableFilterCondition } from "src/hooks/queries";
 
 /* =============================================================================
@@ -253,7 +253,7 @@ export type ConnectionState = {
   ) => void;
 
   setTableFilter: (key: string, filter: TableFilterState) => void;
-  clearTableFilter: (key: string) => void;
+  clearTableFilter: (key: string, visible?: boolean) => void;
 
   clearTableStructure: (tabId: string, tableWindowId?: string) => void;
   clearTableConstraints: (tabId: string, tableWindowId?: string) => void;
@@ -1256,11 +1256,16 @@ export const useConnectionStore = create<ConnectionState>()(
           tableFilterByKey: { ...s.tableFilterByKey, [key]: filter },
         })),
 
-      clearTableFilter: (key) =>
+      clearTableFilter: (key, visible = true) =>
         set((s) => ({
           tableFilterByKey: {
             ...s.tableFilterByKey,
-            [key]: { ...DEFAULT_FILTER_STATE, filterBarVisible: true },
+            [key]: {
+              ...s.tableFilterByKey[key],
+              appliedFilters: [],
+              appliedFilterCombine: "AND",
+              filterBarVisible: visible,
+            },
           },
         })),
     };

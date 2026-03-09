@@ -40,3 +40,4 @@ export * from "./ChevronSort";
 export * from "./Copy";
 export * from "./CopyCheck";
 export * from "./ArrowRight";
+export * from "./SquareFunction";

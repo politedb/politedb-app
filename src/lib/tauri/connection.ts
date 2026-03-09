@@ -23,6 +23,12 @@ export async function connectionTest(
   });
 }
 
+export async function connectionCreate(
+  input: ConnectionCreateInput
+): Promise<ConnectionInfo> {
+  return invoke<ConnectionInfo>(CMD.connectionCreate, { input });
+}
+
 export async function connectionList(): Promise<ConnectionInfo[]> {
   return invoke<ConnectionInfo[]>(CMD.connectionList);
 }

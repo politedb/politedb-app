@@ -38,6 +38,20 @@ fn is_explainable(sql: &str) -> bool {
         || up.starts_with("DELETE")
 }
 
+fn is_non_transactional_database_ddl(sql: &str) -> bool {
+    let normalized = sql
+        .trim_start()
+        .split_whitespace()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_uppercase();
+
+    normalized.starts_with("CREATE DATABASE")
+        || normalized.starts_with("ALTER DATABASE")
+        || normalized.starts_with("DROP DATABASE")
+}
+
 /* =============================================================================
  * Runner
  * ============================================================================= */
@@ -98,6 +112,42 @@ pub async fn run_pg_sql_query(
             backend_pid,
         }
         .cancel();
+    }
+
+    // CREATE/ALTER/DROP DATABASE are not allowed inside a transaction block.
+    // Run them on the raw client path and finish without row streaming.
+    if is_non_transactional_database_ddl(&sql_input.sql) {
+        if let Err(e) = client.batch_execute(&sql_input.sql).await {
+            if is_cancelled(&e) {
+                emit_done(
+                    &ctx.app,
+                    op_id,
+                    false,
+                    0,
+                    started_at.elapsed().as_millis(),
+                    None,
+                );
+                return;
+            }
+
+            emit_error(
+                &ctx.app,
+                op_id,
+                format_pg_error(&e, &sql_input.sql),
+                started_at.elapsed().as_millis(),
+            );
+            return;
+        }
+
+        emit_done(
+            &ctx.app,
+            op_id,
+            false,
+            0,
+            started_at.elapsed().as_millis(),
+            None,
+        );
+        return;
     }
 
     // Transaction for SET LOCAL scoping (won't leak to pooled connection)

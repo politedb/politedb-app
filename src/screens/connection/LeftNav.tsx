@@ -1,6 +1,12 @@
 import { SetStateAction } from "preact/compat";
 import { Dispatch, useState } from "preact/hooks";
-import { ChevronDown, ChevronRight, Search, Table } from "src/components/icons";
+import {
+  ChevronDown,
+  ChevronRight,
+  SquareFunction,
+  Search,
+  Table,
+} from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { NewTableMenu } from "src/components/table/NewTableMenu";
@@ -8,6 +14,7 @@ import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
+import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionStore } from "src/stores/connection";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
@@ -28,6 +35,7 @@ interface Props {
   >;
 
   filteredTables: TableItem[];
+  filteredFunctions: FunctionItem[];
   activeWindowId: string | null;
 }
 
@@ -82,6 +90,7 @@ export function LeftNav({
   expandedSections,
   setExpandedSections,
   filteredTables,
+  filteredFunctions,
   activeWindowId,
 }: Props) {
   const actions = useConnectionActionsCtx();
@@ -175,7 +184,33 @@ export function LeftNav({
           />
 
           {expandedSections.functions && (
-            <div class="mt-1 rounded-lg bg-white/60 p-2 text-xs text-neutral-500"></div>
+            <div class="mt-1">
+              {filteredFunctions.length === 0 ? (
+                <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
+                  No functions found
+                </div>
+              ) : (
+                <div class="space-y-1 pl-3">
+                  {filteredFunctions.map((fn) => {
+                    const key = `${fn.schema}.${fn.name}(${fn.args ?? ""})`;
+
+                    return (
+                      <div
+                        key={key}
+                        class={cn(
+                          "flex items-center gap-2 rounded-md px-2.5 py-1.5",
+                          "text-left text-sm text-neutral-700"
+                        )}
+                        title={key}
+                      >
+                        <SquareFunction className="size-4 shrink-0 text-blue-500" />
+                        <TableName name={fn.name} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -235,8 +270,8 @@ export function LeftNav({
                           className={cn(
                             "size-4 shrink-0",
                             isActive && !hasChanges
-                              ? "text-white"
-                              : "text-neutral-500"
+                              ? "text-neutral-100"
+                              : "text-blue-500"
                           )}
                         />
                         <TableName name={table.name} />

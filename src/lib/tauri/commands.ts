@@ -1,5 +1,6 @@
 export const CMD = {
   // Connection
+  connectionCreate: "connection_create",
   connectionTest: "connection_test",
   connectionList: "connection_list",
   connectionRemove: "connection_remove",

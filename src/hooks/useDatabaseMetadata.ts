@@ -4,10 +4,17 @@ import { runSqlQuery } from "src/lib/tauri/query";
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
 
+export type FunctionItem = {
+  schema: string;
+  name: string;
+  args?: string;
+};
+
 export type DbMetadata = {
   engine?: DatabaseEngine;
 
   schemas: string[];
+  functions: FunctionItem[];
   tables: TableItem[];
   columnsByTable: Record<string, string[]>;
 
@@ -16,13 +23,21 @@ export type DbMetadata = {
   error: string | null;
 
   progress: number; // 0..100
-  stage: "idle" | "schemas" | "tables" | "columns" | "done" | "error";
+  stage:
+    | "idle"
+    | "schemas"
+    | "functions"
+    | "tables"
+    | "columns"
+    | "done"
+    | "error";
 };
 
 function emptyMeta(engine?: DatabaseEngine): DbMetadata {
   return {
     engine,
     schemas: [],
+    functions: [],
     tables: [],
     columnsByTable: {},
     loading: false,
@@ -73,6 +88,7 @@ export function useDatabaseMetadata() {
       setCache(metaKey, {
         engine,
         schemas: force ? [] : (existing?.schemas ?? []),
+        functions: force ? [] : (existing?.functions ?? []),
         tables: force ? [] : (existing?.tables ?? []),
         columnsByTable: force ? {} : (existing?.columnsByTable ?? {}),
         loading: true,
@@ -91,9 +107,21 @@ export function useDatabaseMetadata() {
           const schemas = (schemasRes.rows ?? [])
             .map((r: any) => cellToString(r?.[0]) ?? "")
             .filter(Boolean);
-          setCache(metaKey, { schemas, progress: 10, stage: "tables" });
+          setCache(metaKey, { schemas, progress: 10, stage: "functions" });
 
-          // Tables (10 -> 25)
+          // Functions (10 -> 20)
+          const functionsRes = await runSqlQuery(connectionId, q.functionsQuery);
+          const functions: FunctionItem[] = (functionsRes.rows ?? [])
+            .map((r: any): FunctionItem => {
+              const schema = cellToString(r?.[0]) ?? "";
+              const name = cellToString(r?.[1]) ?? "";
+              const args = cellToString(r?.[2]) ?? "";
+              return { schema, name, args };
+            })
+            .filter((f: FunctionItem) => Boolean(f.schema && f.name));
+          setCache(metaKey, { functions, progress: 20, stage: "tables" });
+
+          // Tables (20 -> 35)
           const tablesRes = await runSqlQuery(connectionId, q.tablesQuery);
           const tables: TableItem[] = (tablesRes.rows ?? [])
             .map((r: any): TableItem => {
@@ -108,9 +136,9 @@ export function useDatabaseMetadata() {
               };
             })
             .filter((t: TableItem) => Boolean(t.schema && t.name));
-          setCache(metaKey, { tables, progress: 25, stage: "columns" });
+          setCache(metaKey, { tables, progress: 35, stage: "columns" });
 
-          // Columns (25 -> 100)
+          // Columns (35 -> 100)
           const colsRes = await runSqlQuery(connectionId, q.columnsQuery);
           const rows = colsRes.rows ?? [];
           const columnsByTable: Record<string, string[]> = {};
@@ -129,7 +157,7 @@ export function useDatabaseMetadata() {
 
             // throttle progress updates
             if (i % 250 === 0) {
-              const prog = 25 + Math.floor((i / total) * 75);
+              const prog = 35 + Math.floor((i / total) * 65);
               setCache(metaKey, { progress: Math.min(99, prog) });
             }
           }

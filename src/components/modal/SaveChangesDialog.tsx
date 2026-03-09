@@ -10,9 +10,10 @@ import {
 } from "../common/Dialog";
 import type { PatchData, PatchMap } from "src/utils/generateSql";
 import { generateSqlFromPatches } from "src/utils/generateSql";
-import { DATA_ACTIONS } from "../../constant";
+import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
-import { highlightSql } from "../../screens/connection/QueryHistory";
+import { highlightSql } from "src/screens/connection/QueryHistory";
+import type { DatabaseEngine } from "src/types";
 
 type ChangeSummary = {
   inserts: number;
@@ -36,7 +37,7 @@ function countByAction(patches: PatchData, key: DataKey): number {
 
 function analyzePatches(
   patchMap: PatchMap,
-  engine: string = "postgres",
+  engine: DatabaseEngine = "postgres",
   options?: {
     activeScreen?: string;
     getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
@@ -128,7 +129,7 @@ interface Props {
   onClose: () => void;
   onConfirm: () => void;
   patchMap: PatchMap;
-  engine: string;
+  engine: DatabaseEngine;
   newTableSql?: string[];
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
