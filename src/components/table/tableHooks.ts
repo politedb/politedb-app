@@ -324,8 +324,6 @@ export function useTableFilter(
     ) => {
       setTableFilter(tableKey, {
         ...current,
-        filters: newFilters,
-        filterCombine: combine,
         appliedFilters: newFilters,
         appliedFilterCombine: combine,
       });
@@ -334,10 +332,13 @@ export function useTableFilter(
     [setTableFilter, current]
   );
 
-  const handleClearFilters = useCallback(() => {
-    clearTableFilter(key);
-    startedRef.current = null; // allow effect to run without filters
-  }, [clearTableFilter, key]);
+  const handleClearFilters = useCallback(
+    (visible: boolean = true) => {
+      clearTableFilter(key, visible);
+      startedRef.current = null; // allow effect to run without filters
+    },
+    [clearTableFilter, key]
+  );
 
   const setFilters = useCallback(
     (next: TableFilterCondition[]) => {

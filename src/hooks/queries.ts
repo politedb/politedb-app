@@ -95,6 +95,7 @@ export const tableColumnsQuery = (schema: string, tableName: string) => {
 
 // Filter condition for table data (WHERE clause)
 export type TableFilterCondition = {
+  id: number;
   column: string;
   operator: string;
   value: string;

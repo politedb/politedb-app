@@ -45,7 +45,11 @@ interface TableFilterBarProps {
     combine: "AND" | "OR",
     tableKey: string
   ) => void;
-  onClear: () => void;
+  onClear: (visible?: boolean) => void;
+  setFilterVisible: (
+    visible: boolean | ((prev: boolean) => boolean),
+    tableKey: string
+  ) => void;
   onExport?: () => void;
   onImport?: () => void;
   onShowSql?: (sql: string) => void;
@@ -77,6 +81,7 @@ export function TableFilterBar({
 
   const defaultFilter = useMemo(() => {
     return {
+      id: 0,
       column: columns[0]?.name ?? "",
       operator: "=",
       value: "",
@@ -85,18 +90,18 @@ export function TableFilterBar({
   }, [columns[0]?.name]);
 
   const addRow = useCallback(() => {
-    onFiltersChange([...filters, defaultFilter]);
-  }, [filters, onFiltersChange]);
+    onFiltersChange([...filters, { ...defaultFilter, id: filters.length }]);
+  }, [filters, defaultFilter, onFiltersChange]);
 
   const removeRow = useCallback(
     (index: number) => {
       if (filters.length <= 1) {
-        onFiltersChange([]);
+        onClear(false);
         return;
       }
       onFiltersChange(filters.filter((_, i) => i !== index));
     },
-    [filters, onFiltersChange]
+    [filters, onFiltersChange, onClear]
   );
 
   const updateRow = useCallback(
@@ -123,12 +128,7 @@ export function TableFilterBar({
 
   const checkFilterApplied = useCallback(
     (filter: TableFilterCondition) => {
-      const filterApplied = appliedFilters.find(
-        (f) =>
-          f.column === filter.column &&
-          f.operator === filter.operator &&
-          f.value === filter.value
-      );
+      const filterApplied = appliedFilters.find((f) => f.id === filter.id);
       return (
         filterApplied &&
         filterApplied.enabled &&
@@ -137,6 +137,8 @@ export function TableFilterBar({
     },
     [appliedFilters]
   );
+
+  console.log(appliedFilters);
 
   const currentSql = useMemo(() => {
     const enabled = filters.filter((f) => f.enabled && (f.column ?? "").trim());
@@ -230,7 +232,7 @@ export function TableFilterBar({
               <Button
                 variant="shadow"
                 className="px-3 py-[4.5px] text-xs"
-                onClick={() => onApply(filters, filterCombine, tableKey)}
+                onClick={() => onApply([row], filterCombine, tableKey)}
               >
                 Apply
               </Button>
@@ -282,7 +284,11 @@ export function TableFilterBar({
         </div>
         {filters.length > 0 && (
           <div class="flex items-center gap-2">
-            <Button variant="shadow" className="px-3 text-xs" onClick={onClear}>
+            <Button
+              variant="shadow"
+              className="px-3 text-xs"
+              onClick={() => onClear(true)}
+            >
               Clear
             </Button>
             <div class="relative">

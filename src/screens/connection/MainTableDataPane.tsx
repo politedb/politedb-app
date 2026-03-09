@@ -428,7 +428,7 @@ export function MainTableDataPane(props: {
       const { value, refSchema, refTable, refColumn } = args;
       const refKey = tableKey(profileId, refSchema, refTable);
       const newFilters = [
-        { column: refColumn, operator: "=", value, enabled: true },
+        { id: 0, column: refColumn, operator: "=", value, enabled: true },
       ] as const;
 
       await actions.selectTable({ schema: refSchema, name: refTable });
@@ -669,6 +669,7 @@ export function MainTableDataPane(props: {
                 appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
+                setFilterVisible={setFilterBarVisible}
                 onFiltersChange={setFilters}
                 onFilterCombineChange={setFilterCombine}
                 onApply={handleApplyFilters}
