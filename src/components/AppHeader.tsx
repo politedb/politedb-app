@@ -1,5 +1,5 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { X, Database } from "./icons";
+import { X, Database, Lock } from "./icons";
 import { ReactNode } from "preact/compat";
 import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
@@ -107,6 +107,8 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const handleTabClose = useCallback(
     async (tabId: string) => {
       const currentTab = profileTabs.find((tab) => tab.id === tabId);
+      if (currentTab?.isLocked) return;
+
       const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
 
       removeTab(tabId);
@@ -203,7 +205,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
 
   return (
     <div
-      class="relative z-10 h-11 w-full shrink-0 border-b border-slate-200 select-none"
+      class="relative z-20 h-11 w-full shrink-0 border-b border-slate-200 select-none"
       onMouseDown={handleHeaderMouseDown}
     >
       <div
@@ -297,23 +299,29 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     </span>
                   </div>
 
-                  <Button
-                    variant="ghost"
-                    title="Close tab"
-                    data-tauri-drag-region="false"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleTabClose(tab.id);
-                    }}
-                    class={[
-                      "rounded-full p-0.5 transition",
-                      isActive
-                        ? "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                        : "text-slate-400 opacity-60 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700",
-                    ].join(" ")}
-                  >
-                    <X className="size-3.5" />
-                  </Button>
+                  {!tab.isLocked ? (
+                    <Button
+                      variant="ghost"
+                      title="Close tab"
+                      data-tauri-drag-region="false"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTabClose(tab.id);
+                      }}
+                      class={[
+                        "rounded-full p-0.5 transition",
+                        isActive
+                          ? "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                          : "text-slate-400 opacity-60 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700",
+                      ].join(" ")}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  ) : (
+                    <div class="p-0.5">
+                      <Lock className="size-3.5 text-neutral-500" />
+                    </div>
+                  )}
                 </div>
               );
             })}

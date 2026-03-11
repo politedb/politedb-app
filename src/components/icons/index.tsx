@@ -22,6 +22,7 @@ export * from "./Trash";
 export * from "./ChevronLeft";
 export * from "./Eye";
 export * from "./Unlock";
+export * from "./Lock";
 export * from "./BarChart";
 export * from "./RefreshCw";
 export * from "./MoreVertical";

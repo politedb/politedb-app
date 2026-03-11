@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Backup,
   Restore,
+  Lock,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -195,13 +196,20 @@ export function MenuBar({
   openSQLWindow,
   onSearchOpen,
 }: Props) {
-  const getProfileById = useProfileStore((s) => s.getProfileById);
-  const { activeProfileScreen, profileTabs, addTab, setActiveProfileScreen } =
-    useScreenStore();
-  const activeTab = profileTabs.find((tab) => tab.id === activeProfileScreen);
+  const rt = useConnectionRuntimeCtx();
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
-  const rt = useConnectionRuntimeCtx();
+
+  const getProfileById = useProfileStore((s) => s.getProfileById);
+
+  const {
+    activeProfileScreen,
+    profileTabs,
+    addTab,
+    updateTab,
+    setActiveProfileScreen,
+  } = useScreenStore();
+
   const {
     dbBackupRunning,
     dbRestoreRunning,
@@ -210,6 +218,10 @@ export function MenuBar({
     onBackupDatabase,
     onRestoreDatabase,
   } = useDatabaseBackup();
+
+  const activeTab = useMemo(() => {
+    return profileTabs.find((tab) => tab.id === activeProfileScreen);
+  }, [profileTabs, activeProfileScreen]);
 
   const profile = useMemo(() => {
     if (!activeTab?.profileId) return null;
@@ -295,8 +307,19 @@ export function MenuBar({
       <div class="flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
         <div class="flex items-center">
           <div class="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
-            <IconButton disabled title="Unlock">
-              <Unlock className="size-4 text-neutral-600" />
+            <IconButton
+              title={activeTab?.isLocked ? "Unlock" : "Lock"}
+              onClick={(e: any) => {
+                e.stopPropagation();
+                if (!activeTab) return;
+                updateTab(activeTab.id, { isLocked: !activeTab.isLocked });
+              }}
+            >
+              {activeTab?.isLocked ? (
+                <Lock className="size-4 text-neutral-600" />
+              ) : (
+                <Unlock className="size-4 text-neutral-600" />
+              )}
             </IconButton>
 
             <IconButton
