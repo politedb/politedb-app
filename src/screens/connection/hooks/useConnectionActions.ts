@@ -16,7 +16,7 @@ import {
   type DataKey,
   useConnectionStore,
 } from "src/stores/connection";
-import type { ProfileTab } from "src/stores/screen";
+import { type ProfileTab, useScreenStore } from "src/stores/screen";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/hooks/queries";
 
@@ -397,15 +397,16 @@ export function useConnectionActions(
     return { [activeTableWindow.id]: entry } as unknown as PatchMap;
   }, [activeProfileScreen, activeTableWindow]);
 
-  const syncTableMeta = useCallback(() => {
+  const syncTableMeta = useCallback((targetTableName?: string) => {
     if (!activeTableWindow) return;
 
     const s = useConnectionStore.getState();
+    const tableNameToUse = targetTableName ?? activeTableWindow.table.name;
 
     const key = tableKey(
       activeProfileScreen,
       activeTableWindow.table.schema,
-      activeTableWindow.table.name
+      tableNameToUse
     );
     const fresh = s.tableDataMap[key];
     if (fresh) {
@@ -458,15 +459,40 @@ export function useConnectionActions(
       const { refreshRows, refreshMeta, refreshStats } =
         inferRefreshFlagsFromEntry(entry);
 
+      let targetTableName = activeTableWindow.table.name;
+      const metadataPatch = entry?.patches?.update?.structure?.["-1"];
+      
+      if (
+        metadataPatch && 
+        typeof metadataPatch.tableName === "string" && 
+        metadataPatch.tableName !== activeTableWindow.table.name
+      ) {
+        targetTableName = metadataPatch.tableName;
+        
+        const screenStore = useScreenStore.getState();
+        const windows = screenStore.openWindows[activeProfileScreen] ?? [];
+        const nextWindows = windows.map(w => {
+          if (w.id === activeTableWindow.id && w.type === "table") {
+            return {
+              ...w,
+              table: { ...w.table, name: targetTableName }
+            };
+          }
+          return w;
+        });
+        screenStore.replaceWindows(activeProfileScreen, nextWindows);
+        await refreshSchemaAndTables();
+      }
+
       await loadTableData(
         activeTableWindow.table.schema,
-        activeTableWindow.table.name,
+        targetTableName,
         { limit, offset },
         { force: true, refreshRows, refreshMeta, refreshStats }
       );
 
       // Sync edited structure/constraints from freshly loaded meta so UI shows new types
-      syncTableMeta();
+      syncTableMeta(targetTableName);
     } catch (e) {
       setError(normalizeSqlError(e));
     }

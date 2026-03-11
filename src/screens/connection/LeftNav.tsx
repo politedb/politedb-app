@@ -293,6 +293,10 @@ export function LeftNav({
         onClose={() => setTableMenu(null)}
       />
 
+      <div class="m-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 text-xs text-slate-600">
+        Tip: Shift+Click to select multiple rows
+      </div>
+
       {/* Bottom: Toolbar */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">

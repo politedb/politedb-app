@@ -33,6 +33,7 @@ type Props = {
   sortState?: { colName: string; direction: "asc" | "desc" } | null;
 
   selected?: { rowIdx: number; colIdx: number } | null;
+  selectedRows?: Set<number>;
   editing?: EditingCell | null;
   deletedRows?: Set<number>;
 
@@ -40,7 +41,12 @@ type Props = {
 
   foreignKeyMap?: Record<string, TableForeignKey>;
 
-  onSelect?: (rowIdx: number, colIdx: number) => void;
+  onSelect?: (
+    rowIdx: number,
+    colIdx: number,
+    multi?: boolean,
+    range?: boolean
+  ) => void;
   onStartEdit?: (cell: EditingCell) => void;
   onCommitEdit?: (cell: EditingCell, value: string) => void;
   onExitEdit?: () => void;
@@ -53,6 +59,7 @@ type Props = {
   ) => void;
 
   onDeleteRow?: (rowIdx: number) => void;
+  onDeleteRows?: (rowIndices: number[]) => void;
   onAddRow?: () => void;
 };
 
@@ -181,6 +188,7 @@ export function CanvasTable({
   widthByName = {}, // Default empty if not provided
   emptyColumnWidth,
   selected,
+  selectedRows,
   editing,
   deletedRows,
   dataVersion,
@@ -192,6 +200,7 @@ export function CanvasTable({
   onCommitEdit,
   onExitEdit,
   onDeleteRow,
+  onDeleteRows,
   onAddRow,
   isCellDirty,
   isNewRow,
@@ -429,32 +438,30 @@ export function CanvasTable({
         const dirty = isCellDirty?.(r, col.name);
 
         if (dirty) {
-          ctx.fillStyle = "#FEF3C7"; // amber-100
-          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+          ctx.fillStyle = "#fde68a"; // amber-100
+          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
         }
 
         if (deletedRows?.has(r)) {
           ctx.fillStyle = "#ffa2a2";
-          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
         }
 
         if (isNewRow?.(r)) {
           ctx.fillStyle = "#dcfce7";
-          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
         }
 
-        if (selected && selected.rowIdx === r) {
-          ctx.fillStyle = "#bedbff";
-          ctx.fillRect(x + 1, y + 1, w - 1, ROW_HEIGHT - 1);
+        const isRowSelected =
+          selectedRows?.has(r) || (selected && selected.rowIdx === r);
 
-          if (selected.colIdx === c) {
+        if (isRowSelected) {
+          ctx.fillStyle = "#bedbff";
+          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
+
+          if (selected && selected.colIdx === c && selected.rowIdx === r) {
             ctx.strokeStyle = "#0000ff";
-            ctx.strokeRect(
-              x + 1,
-              c === visibleCols.start ? y + 2 : y + 1,
-              w - 1,
-              ROW_HEIGHT - 1
-            );
+            ctx.strokeRect(x + 1, y + 1, w - 2, ROW_HEIGHT - 1);
           }
         }
 
@@ -511,6 +518,7 @@ export function CanvasTable({
     colWidths,
     getRowAt,
     selected,
+    selectedRows,
     deletedRows,
     isCellDirty,
     isNewRow,
@@ -613,6 +621,40 @@ export function CanvasTable({
     onExitEdit?.();
     setEditorRect(null);
   }, [onExitEdit]);
+
+  // --------------------------------------------------------------------------
+  // Auto-scroll on new row
+  // --------------------------------------------------------------------------
+  const prevTotalRows = useRef(totalRows);
+  useEffect(() => {
+    if (totalRows === prevTotalRows.current + 1) {
+      let newlyAddedVisibleIdx = -1;
+      for (let r = totalRows - 1; r >= 0; r--) {
+        if (isNewRow?.(r)) {
+          newlyAddedVisibleIdx = r;
+          break;
+        }
+      }
+      
+      if (newlyAddedVisibleIdx >= 0) {
+        const el = scrollerRef.current;
+        if (el) {
+          const yRowTop = newlyAddedVisibleIdx * ROW_HEIGHT;
+          const toSeeTop = yRowTop;
+          const toSeeBottom = yRowTop + ROW_HEIGHT + HEADER_HEIGHT - el.clientHeight;
+          
+          if (el.scrollTop > toSeeTop - ROW_HEIGHT) {
+            el.scrollTop = Math.max(0, toSeeTop - ROW_HEIGHT * 2);
+          } else if (el.scrollTop < toSeeBottom + ROW_HEIGHT) {
+            el.scrollTop = toSeeBottom + ROW_HEIGHT * 2;
+          }
+        }
+        
+        onSelect?.(newlyAddedVisibleIdx, 0);
+      }
+    }
+    prevTotalRows.current = totalRows;
+  }, [totalRows, isNewRow, onSelect]);
 
   // --------------------------------------------------------------------------
   // Header click: sort toggling
@@ -728,7 +770,7 @@ export function CanvasTable({
         commitAndExit();
       }
 
-      onSelect?.(rowIdx, colIdx);
+      onSelect?.(rowIdx, colIdx, e.metaKey || e.ctrlKey, e.shiftKey);
     },
     [columns, editing, totalRows, colLefts, colWidths, onSelect, commitAndExit]
   );
@@ -805,10 +847,23 @@ export function CanvasTable({
         // When editing a cell, let the input handle Backspace/Delete
         // instead of triggering row delete at the table level.
         if (editing) return;
-        if (!selected) return;
+
+        const hasSelection =
+          (selectedRows && selectedRows.size > 0) || selected;
+        if (!hasSelection) return;
+
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
-          onDeleteRow?.(selected.rowIdx);
+
+          if (onDeleteRows && selectedRows && selectedRows.size > 0) {
+            onDeleteRows(Array.from(selectedRows));
+          } else if (selected) {
+            if (onDeleteRows) {
+              onDeleteRows([selected.rowIdx]);
+            } else {
+              onDeleteRow?.(selected.rowIdx);
+            }
+          }
         }
       }}
     >
@@ -921,12 +976,12 @@ export function CanvasTable({
       {editorRect && editing && !isResizing && (
         <input
           ref={editorRef}
-          class="absolute z-60 bg-white px-2 text-sm shadow-sm outline-none"
+          class="absolute z-60 bg-white px-2 text-sm shadow-sm"
           placeholder="NULL"
           style={{
             left: editorRect.x + 2,
-            top: editorRect.y + HEADER_HEIGHT + (editing.colIdx === 0 ? 5 : 4),
-            width: editorRect.w - 3,
+            top: editorRect.y + HEADER_HEIGHT + 4,
+            width: editorRect.w - 4,
             height: editorRect.h - 3,
           }}
           value={editorValue}

@@ -23,7 +23,7 @@ export function RightNav({ sizeInfo }: Props) {
         </div>
       </div>
       <div class="space-y-1 rounded-md">
-        <div class="mb-1 text-xs font-medium text-neutral-500">Table Size</div>
+        <div class="mb-1 text-xs font-medium text-neutral-500">Data Size</div>
         <div class="rounded-md border border-neutral-200 px-2 py-1 text-sm font-semibold capitalize">
           {sizeInfo.dataSize || "0 KB"}
         </div>

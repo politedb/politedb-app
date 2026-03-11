@@ -81,6 +81,7 @@ export function TableConstraints({
   // Use row selection hook
   const {
     selectedRowIndex,
+    selectedRows,
     handleRowSelect,
     selectedColIndex,
     handleColSelect,
@@ -141,7 +142,7 @@ export function TableConstraints({
           const isEmptyRow = index + 1 > editedData.length;
           const isDeleted = deletedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
-          const isRowSelected = selectedRowIndex === index;
+          const isRowSelected = selectedRows.has(index);
           const colIndex = COLUMNS_NAME[engine].indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
@@ -195,6 +196,7 @@ export function TableConstraints({
       busy,
       editedData.length,
       deletedRows,
+      selectedRows,
       selectedRowIndex,
       selectedColIndex,
       handleDataChange,
@@ -225,11 +227,12 @@ export function TableConstraints({
         fillViewport
         showEmptyMessage={false}
         selectedRow={selectedRowIndex}
+        selectedRows={selectedRows}
         rowClassName={(_row, index) => {
           return deletedRows.has(index) ? "bg-red-300!" : "";
         }}
-        onSelectRow={(_row, index) => {
-          handleRowSelect(index);
+        onSelectRow={(_row, index, multi, range) => {
+          handleRowSelect(index, multi, range);
         }}
         onDoubleClickRow={handleDoubleClickRow}
       />

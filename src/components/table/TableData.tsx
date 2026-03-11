@@ -151,6 +151,10 @@ export function TableData({
     rowIdx: number;
     colIdx: number;
   } | null>(null);
+  
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [lastSelectedRow, setLastSelectedRow] = useState<number | null>(null);
+  
   const [editing, setEditing] = useState<{
     rowIdx: number;
     colIdx: number;
@@ -304,15 +308,43 @@ export function TableData({
         widthByName={widthByName}
         emptyColumnWidth={emptyColumnWidth}
         selected={selected}
+        selectedRows={selectedRows}
         editing={editing}
         deletedRows={visibleDeletedRows}
-        onSelect={(rowIdx, colIdx) => {
+        onSelect={(rowIdx, colIdx, multi, range) => {
           setSelected({ rowIdx, colIdx });
           setEditing(null);
+          
+          if (range && lastSelectedRow !== null) {
+            // Shift click
+            const min = Math.min(lastSelectedRow, rowIdx);
+            const max = Math.max(lastSelectedRow, rowIdx);
+            const newSelection = new Set(selectedRows);
+            for (let i = min; i <= max; i++) {
+               newSelection.add(i);
+            }
+            setSelectedRows(newSelection);
+          } else if (multi) {
+            // Ctrl/Cmd click
+            const newSelection = new Set(selectedRows);
+            if (newSelection.has(rowIdx)) {
+              newSelection.delete(rowIdx);
+            } else {
+              newSelection.add(rowIdx);
+            }
+            setSelectedRows(newSelection);
+            setLastSelectedRow(rowIdx);
+          } else {
+            // Normal click
+            setSelectedRows(new Set([rowIdx]));
+            setLastSelectedRow(rowIdx);
+          }
         }}
         onStartEdit={(cell) => {
           setEditing(cell);
           setSelected(cell);
+          setSelectedRows(new Set([cell.rowIdx]));
+          setLastSelectedRow(cell.rowIdx);
         }}
         onAddRow={onAddRow}
         onDeleteRow={(visibleRowIdx) => {
@@ -321,6 +353,18 @@ export function TableData({
             onDeleteRow?.(rowIdx);
           }
           setSelected(null);
+          setSelectedRows(new Set());
+          setEditing(null);
+        }}
+        onDeleteRows={(visibleRowIndices) => {
+          visibleRowIndices.forEach(visibleIdx => {
+             const realIdx = rowOrder[visibleIdx] ?? -1;
+             if (realIdx >= 0) {
+               onDeleteRow?.(realIdx);
+             }
+          });
+          setSelected(null);
+          setSelectedRows(new Set());
           setEditing(null);
         }}
         onCommitEdit={handleCommitEdit}

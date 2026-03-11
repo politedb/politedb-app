@@ -13,7 +13,10 @@ export function useTableRowSelection({
   isNewRow,
   containerRef,
 }: UseTableRowSelectionProps) {
-  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // Kept for backwards compatibility
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [lastSelectedRow, setLastSelectedRow] = useState<number | null>(null);
+  
   const [selectedColIndex, setSelectedColIndex] = useState<number | null>(null);
   const keyboardContainerRef = useRef<HTMLDivElement>(null);
 
@@ -23,19 +26,22 @@ export function useTableRowSelection({
       // Only handle backspace if:
       // 1. Backspace key is pressed
       // 2. No input field is focused (user is not editing a cell)
-      // 3. A row is selected
-      // 4. The row is not already deleted
-      // 5. The row is not a new row (if isNewRow function is provided)
+      // 3. At least one row is selected
       if (
         e.key === "Backspace" &&
         document.activeElement?.tagName !== "INPUT" &&
-        selectedRowIndex !== null &&
-        !deletedRows.has(selectedRowIndex) &&
-        (!isNewRow || !isNewRow(selectedRowIndex))
+        selectedRows.size > 0
       ) {
         e.preventDefault();
         e.stopPropagation();
-        onDeleteRow?.(selectedRowIndex);
+        
+        const rowsToDelete = Array.from(selectedRows).filter(idx => 
+          !deletedRows.has(idx) && (!isNewRow || !isNewRow(idx))
+        );
+        
+        rowsToDelete.forEach(idx => onDeleteRow?.(idx));
+        
+        setSelectedRows(new Set());
         setSelectedRowIndex(null);
       }
     };
@@ -47,16 +53,46 @@ export function useTableRowSelection({
         container.removeEventListener("keydown", handleKeyDown);
       };
     }
-  }, [selectedRowIndex, deletedRows, onDeleteRow, isNewRow, containerRef]);
+  }, [selectedRows, deletedRows, onDeleteRow, isNewRow, containerRef]);
 
   const handleRowSelect = useCallback(
-    (rowIndex: number) => {
+    (rowIndex: number, multi?: boolean, range?: boolean) => {
       setSelectedRowIndex(rowIndex);
+      
+      if (range && lastSelectedRow !== null) {
+        // Shift click
+        const min = Math.min(lastSelectedRow, rowIndex);
+        const max = Math.max(lastSelectedRow, rowIndex);
+        setSelectedRows(prev => {
+           const newSelection = new Set(prev);
+           for (let i = min; i <= max; i++) {
+              newSelection.add(i);
+           }
+           return newSelection;
+        });
+      } else if (multi) {
+        // Ctrl/Cmd click
+        setSelectedRows(prev => {
+           const newSelection = new Set(prev);
+           if (newSelection.has(rowIndex)) {
+             newSelection.delete(rowIndex);
+           } else {
+             newSelection.add(rowIndex);
+           }
+           return newSelection;
+        });
+        setLastSelectedRow(rowIndex);
+      } else {
+        // Normal click
+        setSelectedRows(new Set([rowIndex]));
+        setLastSelectedRow(rowIndex);
+      }
+
       // Focus the container to enable keyboard events
       const container = containerRef?.current || keyboardContainerRef.current;
       container?.focus();
     },
-    [containerRef]
+    [containerRef, lastSelectedRow]
   );
 
   const handleColSelect = useCallback((colIndex: number) => {
@@ -65,9 +101,11 @@ export function useTableRowSelection({
 
   return {
     selectedRowIndex,
+    selectedRows,
     selectedColIndex,
     keyboardContainerRef,
     setSelectedRowIndex,
+    setSelectedRows,
     setSelectedColIndex,
     handleRowSelect,
     handleColSelect,

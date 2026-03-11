@@ -29,7 +29,8 @@ interface TableProps<T = any> {
   fillViewport?: boolean;
   estimatedRowHeight?: number;
   selectedRow?: number | null;
-  onSelectRow?: (row: T, index: number) => void;
+  selectedRows?: Set<number>;
+  onSelectRow?: (row: T, index: number, multi?: boolean, range?: boolean) => void;
   onDoubleClickRow?: (row: T, index: number) => void;
   enableSort?: boolean;
 }
@@ -50,6 +51,7 @@ export function Table<T = any>({
   fillViewport = false,
   estimatedRowHeight,
   selectedRow,
+  selectedRows,
   onSelectRow,
   onDoubleClickRow,
   enableSort = true,
@@ -225,7 +227,7 @@ export function Table<T = any>({
       const row = isEmpty ? emptyRow : data[rowIndex];
 
       if (row !== undefined) {
-        onSelectRow(row, rowIndex);
+        onSelectRow(row, rowIndex, e.metaKey || e.ctrlKey, e.shiftKey);
       }
     },
     [onSelectRow, data, emptyRow]
@@ -348,10 +350,15 @@ export function Table<T = any>({
         <tbody>
           {displayRows.map((row, displayIndex) => {
             const originalIndex = indexMap[displayIndex] ?? displayIndex;
-            const isSelected =
-              selectedRow != null
-                ? findDisplayIndex(selectedRow) === displayIndex
-                : false;
+            
+            let isSelected = false;
+            
+            if (selectedRows) {
+               isSelected = selectedRows.has(originalIndex);
+            } else if (selectedRow != null) {
+               isSelected = findDisplayIndex(selectedRow) === displayIndex;
+            }
+            
             const isNewRow = (row as any).isNew;
             const dynamicClassName =
               typeof rowClassName === "function"
