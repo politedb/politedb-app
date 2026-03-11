@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "preact/hooks";
 import type { SqlResultSlot } from "src/lib/tauri";
@@ -38,6 +37,12 @@ const CONCURRENCY = 2;
 // Gate settings
 const RUN_THROTTLE_MS = 400;
 
+// Persist SQL result state across component remounts (e.g. toggling bottom panel).
+const stateByWindowId = new Map<string, WindowState>();
+const runIdByWindow = new Map<string, number>();
+const inflightByWindow = new Map<string, boolean>();
+const lastRunAtByWindow = new Map<string, number>();
+
 export function useSqlRunner(args: {
   activeSqlWindowId?: string;
   runtimeConnectionId?: string;
@@ -51,21 +56,12 @@ export function useSqlRunner(args: {
     stopOnError = false,
   } = args;
 
-  const stateByWindowIdRef = useRef<Map<string, WindowState>>(new Map());
-  const runIdByWindowRef = useRef<Map<string, number>>(new Map());
-
-  // ✅ Gate: per-window in-flight flag + throttle
-  const inflightByWindowRef = useRef<Map<string, boolean>>(new Map());
-  const lastRunAtByWindowRef = useRef<Map<string, number>>(new Map());
-
   const getSaved = useCallback((): WindowState => {
     if (!activeSqlWindowId) return { slots: null, activeIndex: 0 };
-    return (
-      stateByWindowIdRef.current.get(activeSqlWindowId) ?? {
-        slots: null,
-        activeIndex: 0,
-      }
-    );
+    return stateByWindowId.get(activeSqlWindowId) ?? {
+      slots: null,
+      activeIndex: 0,
+    };
   }, [activeSqlWindowId]);
 
   const initial = useMemo(() => getSaved(), [getSaved]);
@@ -79,27 +75,27 @@ export function useSqlRunner(args: {
 
   useEffect(() => {
     if (!activeSqlWindowId) return;
-    const saved = stateByWindowIdRef.current.get(activeSqlWindowId);
+    const saved = stateByWindowId.get(activeSqlWindowId);
     setSqlSlots(saved?.slots ?? null);
     setActiveResultIndex(saved?.activeIndex ?? 0);
   }, [activeSqlWindowId]);
 
   useEffect(() => {
     if (!activeSqlWindowId) return;
-    stateByWindowIdRef.current.set(activeSqlWindowId, {
+    stateByWindowId.set(activeSqlWindowId, {
       slots: sqlSlots,
       activeIndex: activeResultIndex,
     });
   }, [activeSqlWindowId, sqlSlots, activeResultIndex]);
 
   const bumpRunId = useCallback((windowId: string) => {
-    const next = (runIdByWindowRef.current.get(windowId) ?? 0) + 1;
-    runIdByWindowRef.current.set(windowId, next);
+    const next = (runIdByWindow.get(windowId) ?? 0) + 1;
+    runIdByWindow.set(windowId, next);
     return next;
   }, []);
 
   const currentRunId = useCallback((windowId: string) => {
-    return runIdByWindowRef.current.get(windowId) ?? 0;
+    return runIdByWindow.get(windowId) ?? 0;
   }, []);
 
   const startRun = useCallback(
@@ -109,13 +105,13 @@ export function useSqlRunner(args: {
 
       // ✅ Gate 1: throttle
       const now = Date.now();
-      const lastAt = lastRunAtByWindowRef.current.get(winId) ?? 0;
+      const lastAt = lastRunAtByWindow.get(winId) ?? 0;
       if (now - lastAt < RUN_THROTTLE_MS) return;
-      lastRunAtByWindowRef.current.set(winId, now);
+      lastRunAtByWindow.set(winId, now);
 
       // ✅ Gate 2: single in-flight run per window
-      if (inflightByWindowRef.current.get(winId)) return;
-      inflightByWindowRef.current.set(winId, true);
+      if (inflightByWindow.get(winId)) return;
+      inflightByWindow.set(winId, true);
 
       try {
         const v = validateSqlClient(payload.sql);
@@ -131,7 +127,7 @@ export function useSqlRunner(args: {
           ];
           setSqlSlots(slots);
           setActiveResultIndex(0);
-          stateByWindowIdRef.current.set(winId, { slots, activeIndex: 0 });
+          stateByWindowId.set(winId, { slots, activeIndex: 0 });
           bumpRunId(winId);
           return;
         }
@@ -140,7 +136,7 @@ export function useSqlRunner(args: {
         const runId = bumpRunId(winId);
 
         // clear previous stream caches for this window
-        const prev = stateByWindowIdRef.current.get(winId)?.slots;
+        const prev = stateByWindowId.get(winId)?.slots;
         for (const s of prev ?? []) {
           if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
         }
@@ -153,7 +149,7 @@ export function useSqlRunner(args: {
 
         setSqlSlots(initialSlots);
         setActiveResultIndex(0);
-        stateByWindowIdRef.current.set(winId, {
+        stateByWindowId.set(winId, {
           slots: initialSlots,
           activeIndex: 0,
         });
@@ -166,11 +162,11 @@ export function useSqlRunner(args: {
             return next;
           });
 
-          const cached = stateByWindowIdRef.current.get(winId);
+          const cached = stateByWindowId.get(winId);
           if (!cached?.slots || !cached.slots[i]) return;
           const nextSlots = cached.slots.slice();
           nextSlots[i] = { ...nextSlots[i], ...patch } as SqlResultSlot;
-          stateByWindowIdRef.current.set(winId, {
+          stateByWindowId.set(winId, {
             slots: nextSlots,
             activeIndex: cached.activeIndex,
           });
@@ -247,7 +243,7 @@ export function useSqlRunner(args: {
         await Promise.all(workers);
       } finally {
         // ✅ release inflight flag no matter what
-        inflightByWindowRef.current.set(winId, false);
+        inflightByWindow.set(winId, false);
       }
     },
     [bumpRunId, currentRunId, onRunSql, runtimeConnectionId, stopOnError]
@@ -257,28 +253,28 @@ export function useSqlRunner(args: {
     if (!activeSqlWindowId) return;
     const winId = activeSqlWindowId;
 
-    const prev = stateByWindowIdRef.current.get(winId)?.slots;
+    const prev = stateByWindowId.get(winId)?.slots;
     for (const s of prev ?? []) {
       if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
     }
 
     setSqlSlots(null);
     setActiveResultIndex(0);
-    stateByWindowIdRef.current.set(winId, { slots: null, activeIndex: 0 });
+    stateByWindowId.set(winId, { slots: null, activeIndex: 0 });
     bumpRunId(winId);
   }, [activeSqlWindowId, bumpRunId]);
 
   const clearWindow = useCallback((windowId: string) => {
-    const prev = stateByWindowIdRef.current.get(windowId)?.slots;
+    const prev = stateByWindowId.get(windowId)?.slots;
     for (const s of prev ?? []) {
       if (s.mode === "stream" && s.opId) clearSqlStream(s.opId);
     }
-    stateByWindowIdRef.current.delete(windowId);
-    runIdByWindowRef.current.delete(windowId);
+    stateByWindowId.delete(windowId);
+    runIdByWindow.delete(windowId);
 
     // cleanup gate refs
-    inflightByWindowRef.current.delete(windowId);
-    lastRunAtByWindowRef.current.delete(windowId);
+    inflightByWindow.delete(windowId);
+    lastRunAtByWindow.delete(windowId);
   }, []);
 
   return {

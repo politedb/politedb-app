@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 
 type Direction = "vertical" | "horizontal";
 
@@ -62,9 +62,21 @@ export function SplitPane(props: Props) {
     return Math.min(Math.max(px, minFirstPx), maxFirst);
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // Initialize synchronously to avoid first-paint flicker
+    // (second pane taking full size before observer callback runs).
+    const initialTotal = getContainerSize();
+    if (initialTotal && sizeRef.current == null) {
+      sizeRef.current = clampSize(
+        Math.floor(initialTotal * initialRatio),
+        initialTotal
+      );
+      lastTotalRef.current = initialTotal;
+      force((v) => v + 1);
+    }
 
     const ro = new ResizeObserver(() => {
       const total = getContainerSize();
