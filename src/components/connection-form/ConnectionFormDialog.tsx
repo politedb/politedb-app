@@ -172,6 +172,7 @@ export function ConnectionFormDialog({
       addTab(newTab);
       setActiveProfileScreen(newTab.id);
       onSaved?.();
+      onClose?.();
     } catch (e: any) {
       setError(e?.message ? String(e.message) : String(e));
     }

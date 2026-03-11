@@ -9,6 +9,9 @@ import {
   TabBottom,
   TabRight,
   TabLeft,
+  ChevronRight,
+  Backup,
+  Restore,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -21,6 +24,9 @@ import { canManageDatabases } from "src/hooks/useDatabases";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { v4 as uuid } from "uuid";
+import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 
 interface Props {
   activeSchema?: string;
@@ -97,7 +103,7 @@ function EnvBadge({ text }: { text: string }) {
         : "bg-neutral-100 text-neutral-600";
 
   return (
-    <span class={cn("rounded-md px-1.5 py-0.5 text-[10px] font-semibold", cls)}>
+    <span class={cn("rounded-md px-1.5 py-0.5 text-xs font-semibold", cls)}>
       {t}
     </span>
   );
@@ -120,7 +126,7 @@ function MetaPill({
   return (
     <span
       class={cn(
-        "inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-semibold",
+        "inline-flex h-5 items-center rounded-md border px-1.5 text-xs font-semibold",
         cls
       )}
     >
@@ -195,6 +201,15 @@ export function MenuBar({
   const activeTab = profileTabs.find((tab) => tab.id === activeProfileScreen);
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
+  const rt = useConnectionRuntimeCtx();
+  const {
+    dbBackupRunning,
+    dbRestoreRunning,
+    opError,
+    setOpError,
+    onBackupDatabase,
+    onRestoreDatabase,
+  } = useDatabaseBackup();
 
   const profile = useMemo(() => {
     if (!activeTab?.profileId) return null;
@@ -345,11 +360,11 @@ export function MenuBar({
               )}
 
               {connectionInfo ? (
-                <div class="min-w-0 flex-1 truncate">
+                <div class="flex min-w-0 flex-1 items-center gap-1 truncate">
                   <span class="text-xs font-semibold text-neutral-800">
                     {dbLabel.db}
                   </span>
-                  <span class="mx-1 text-neutral-400">›</span>
+                  <ChevronRight className="size-2" />
                   <span class="text-xs font-medium text-neutral-600">
                     {dbLabel.target}
                   </span>
@@ -373,6 +388,28 @@ export function MenuBar({
 
         <div class="flex items-center gap-1">
           <div class="mx-1 h-5 w-px bg-neutral-200" />
+
+          <IconButton
+            title={dbBackupRunning ? "Backing up..." : "Backup database"}
+            onClick={() => void onBackupDatabase(connectionInfo?.database)}
+            disabled={
+              !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
+            }
+          >
+            <Backup className="size-4 text-neutral-700" />
+          </IconButton>
+
+          <IconButton
+            title={dbRestoreRunning ? "Restoring..." : "Restore database"}
+            onClick={() => void onRestoreDatabase(onRefresh)}
+            disabled={
+              !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
+            }
+          >
+            <Restore className="size-4 text-neutral-700" />
+          </IconButton>
+
+          <ToolbarDivider />
 
           <IconButton title="Refresh" onClick={onRefresh}>
             <RefreshCw className="size-4.5 text-neutral-700" />
@@ -441,6 +478,15 @@ export function MenuBar({
         onOpenDatabase={onOpenDatabase}
         onClose={() => setDbDialogOpen(false)}
       />
+
+      {opError && (
+        <ErrorDialog
+          open={true}
+          error={opError}
+          onClose={() => setOpError(null)}
+          size="md"
+        />
+      )}
     </>
   );
 }

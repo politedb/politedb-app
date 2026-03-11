@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
-import { useMemo, useRef, useCallback } from "preact/hooks";
+import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
 import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
@@ -9,6 +9,7 @@ import { connectionRemove } from "src/lib/tauri";
 import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
 import { useConnectionStore } from "../stores/connection";
 import { DbIcon } from "./icons/DbIcon";
+import { ContextMenu, type MenuItem } from "./common/ContextMenu";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -58,6 +59,11 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
 
   const lastClickAtRef = useRef<number>(0);
   const DOUBLE_CLICK_MS = 280;
+  const [ctx, setCtx] = useState<{
+    x: number;
+    y: number;
+    tabId: string;
+  } | null>(null);
 
   const handleHeaderMouseDown = useCallback(
     async (e: MouseEvent) => {
@@ -156,6 +162,45 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     ]
   );
 
+  const closeTabs = useCallback(
+    async (tabIds: string[]) => {
+      for (const id of tabIds) {
+        await handleTabClose(id);
+      }
+    },
+    [handleTabClose]
+  );
+
+  const menuItems: MenuItem[] = ctx
+    ? [
+        {
+          type: "item",
+          label: "Close",
+          shortcut: "⌘W",
+          onClick: () => void handleTabClose(ctx.tabId),
+        },
+        {
+          type: "item",
+          label: "Close Others",
+          disabled: profileTabs.length <= 1,
+          onClick: () =>
+            void closeTabs(
+              profileTabs
+                .filter((tab) => tab.id !== ctx.tabId)
+                .map((tab) => tab.id)
+            ),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Close All",
+          shortcut: "⌘⇧W",
+          disabled: profileTabs.length === 0,
+          onClick: () => void closeTabs(profileTabs.map((tab) => tab.id)),
+        },
+      ]
+    : [];
+
   return (
     <div
       class="relative z-10 h-11 w-full shrink-0 border-b border-slate-200 select-none"
@@ -224,6 +269,15 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     e.stopPropagation();
                     handleTabSelect(tab.id);
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCtx({
+                      x: e.clientX,
+                      y: e.clientY,
+                      tabId: tab.id,
+                    });
+                  }}
                   data-tauri-drag-region="false"
                   class={[
                     "group w-44 shrink-0",
@@ -266,6 +320,14 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
           </div>
         </div>
       </div>
+
+      <ContextMenu
+        open={!!ctx}
+        x={ctx?.x ?? 0}
+        y={ctx?.y ?? 0}
+        items={menuItems}
+        onClose={() => setCtx(null)}
+      />
     </div>
   );
 }

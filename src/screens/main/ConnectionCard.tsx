@@ -293,7 +293,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         }
       }}
       class={cn(
-        "group relative flex items-center justify-between gap-3",
+        "group relative flex cursor-default items-center justify-between gap-3",
         "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
         selected
           ? "border-blue-600 bg-blue-50"

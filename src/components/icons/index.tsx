@@ -41,3 +41,5 @@ export * from "./Copy";
 export * from "./CopyCheck";
 export * from "./ArrowRight";
 export * from "./SquareFunction";
+export * from "./Backup";
+export * from "./Restore";
