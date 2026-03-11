@@ -14,6 +14,49 @@ type RunSqlOptions = {
   timeoutMs?: number;
 };
 
+const SQL_BUSY_RETRY_MAX = 8;
+const SQL_BUSY_RETRY_BASE_MS = 80;
+const SQL_BUSY_RETRY_CAP_MS = 1_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isSqlBusyError(err: unknown): boolean {
+  const msg =
+    typeof err === "string"
+      ? err
+      : err instanceof Error
+        ? err.message
+        : String(err ?? "");
+  return msg.includes("ERR_SQL_BUSY");
+}
+
+async function operationExecuteWithBusyRetry(payload: Parameters<
+  typeof operationExecute
+>[0]) {
+  let lastErr: unknown;
+
+  for (let attempt = 0; attempt <= SQL_BUSY_RETRY_MAX; attempt++) {
+    try {
+      return await operationExecute(payload);
+    } catch (err) {
+      lastErr = err;
+      if (!isSqlBusyError(err) || attempt >= SQL_BUSY_RETRY_MAX) {
+        throw err;
+      }
+
+      const delay = Math.min(
+        SQL_BUSY_RETRY_BASE_MS * Math.pow(2, attempt),
+        SQL_BUSY_RETRY_CAP_MS
+      );
+      await sleep(delay);
+    }
+  }
+
+  throw lastErr;
+}
+
 function normalizeDoneColumns(done: any): ColumnMeta[] {
   const cols = done?.columns ?? [];
   if (!Array.isArray(cols)) return [];
@@ -35,7 +78,7 @@ export async function runSqlQuery(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<QueryResult> {
-  const opId = await operationExecute({
+  const opId = await operationExecuteWithBusyRetry({
     connection_id,
     kind: "sql_query",
     sql: {
@@ -131,7 +174,7 @@ export async function startSqlQueryStream(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<string> {
-  const opId = await operationExecute({
+  const opId = await operationExecuteWithBusyRetry({
     connection_id,
     kind: "sql_query",
     sql: {
