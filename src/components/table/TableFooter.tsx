@@ -25,6 +25,7 @@ interface Props {
   onAddIndex: () => void;
   onAddRow: () => void;
   onFilters: () => void;
+  readOnly?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [50, 100, 300, 500, 1000];
@@ -44,6 +45,7 @@ export function TableFooter({
   onAddIndex,
   onAddRow,
   onFilters,
+  readOnly = false,
 }: Props) {
   // Calculate pagination
   const pagination = useMemo(() => {
@@ -106,12 +108,22 @@ export function TableFooter({
         {viewMode === "structure" && (
           <>
             {structPaneTab === "columns" ? (
-              <Button variant="shadow" className="px-2" onClick={onAddColumn}>
+              <Button
+                variant="shadow"
+                className="px-2"
+                onClick={onAddColumn}
+                disabled={readOnly}
+              >
                 <Plus className="size-3.5" />
                 Column
               </Button>
             ) : structPaneTab === "constraints" ? (
-              <Button variant="shadow" className="px-2" onClick={onAddIndex}>
+              <Button
+                variant="shadow"
+                className="px-2"
+                onClick={onAddIndex}
+                disabled={readOnly}
+              >
                 <Plus className="size-3.5" />
                 Index
               </Button>
@@ -120,7 +132,12 @@ export function TableFooter({
         )}
 
         {viewMode === "data" && (
-          <Button variant="shadow" className="px-2" onClick={onAddRow}>
+          <Button
+            variant="shadow"
+            className="px-2"
+            onClick={onAddRow}
+            disabled={readOnly}
+          >
             <Plus className="size-3.5" />
             Row
           </Button>

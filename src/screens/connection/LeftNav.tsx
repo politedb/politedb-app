@@ -17,6 +17,7 @@ import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionStore } from "src/stores/connection";
+import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
 
@@ -95,6 +96,9 @@ export function LeftNav({
 }: Props) {
   const actions = useConnectionActionsCtx();
   const { dataPatchMap } = useConnectionStore();
+  const isProfileLocked = useScreenStore(
+    (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
+  );
   const { windowHasPatchChanges } = useConnectionWindows(profileId);
 
   const [tableMenu, setTableMenu] = useState<{
@@ -132,16 +136,19 @@ export function LeftNav({
         {
           type: "item",
           label: "Clone...",
+          disabled: isProfileLocked,
           onClick: () => actions.cloneTable(tableMenu.table),
         },
         {
           type: "item",
           label: "Truncate...",
+          disabled: isProfileLocked,
           onClick: () => actions.truncateTable(tableMenu.table),
         },
         {
           type: "item",
           label: "Drop...",
+          disabled: isProfileLocked,
           onClick: () => actions.dropTable(tableMenu.table),
         },
       ]
@@ -294,13 +301,18 @@ export function LeftNav({
       />
 
       <div class="m-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 text-xs text-slate-600">
-        Tip: Shift+Click to select multiple rows
+        Tips:
+        <ul class="list-decimal pl-4.5">
+          <li>Right-click a table for actions.</li>
+          <li>Shift+Click to select multiple rows.</li>
+        </ul>
       </div>
 
       {/* Bottom: Toolbar */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">
           <NewTableMenu
+            disabled={isProfileLocked}
             onOpenNewTable={() => {
               const t: TableItem = {
                 schema: currSchema,

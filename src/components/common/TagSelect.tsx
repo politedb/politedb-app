@@ -9,10 +9,11 @@ interface Props {
   values: string[];
   onChange: (value: string) => void;
   options?: string[];
+  disabled?: boolean;
 }
 
 export function TagSelect(props: Props) {
-  const { className, label, values, onChange, options } = props;
+  const { className, label, values, onChange, options, disabled = false } = props;
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -25,8 +26,16 @@ export function TagSelect(props: Props) {
       <div ref={containerRef} class="relative w-full">
         {/* Selected tags display */}
         <div
-          class="flex min-h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500"
-          onClick={() => setIsOpen(!isOpen)}
+          class={cn(
+            "flex min-h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs",
+            !disabled &&
+              "focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500",
+            disabled && "cursor-not-allowed bg-neutral-100 text-neutral-400"
+          )}
+          onClick={() => {
+            if (disabled) return;
+            setIsOpen(!isOpen);
+          }}
         >
           {values.length > 0 ? (
             <>
@@ -35,6 +44,7 @@ export function TagSelect(props: Props) {
                   key={key}
                   class="flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700"
                   onClick={(e) => {
+                    if (disabled) return;
                     e.stopPropagation();
                     onChange(key);
                   }}
@@ -50,13 +60,14 @@ export function TagSelect(props: Props) {
           <ChevronSort
             className={cn(
               "ml-auto size-4 text-neutral-400",
-              isOpen && "rotate-180"
+              isOpen && "rotate-180",
+              disabled && "opacity-60"
             )}
           />
         </div>
 
         {/* Dropdown menu */}
-        {isOpen && (
+        {isOpen && !disabled && (
           <MenuPopover
             open={isOpen}
             onClose={() => setIsOpen(false)}

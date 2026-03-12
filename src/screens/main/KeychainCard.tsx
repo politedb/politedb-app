@@ -1,16 +1,14 @@
 import { useMemo, useRef, useState } from "preact/hooks";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import { TagChips } from "src/components/common/TagChips";
 import { Copy, Edit, Key, MoreVertical, Trash } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
 function parseKeyName(keyName: string) {
   const parts = keyName.split(":").filter(Boolean);
-  const label =
-    parts[parts.length - 1].split("/").slice(-2).join("/") || keyName;
-  const tags = parts.slice(0, Math.max(0, parts.length - 1));
+  const labelParts = parts[parts.length - 1].split("/").slice(-3);
+  const label = labelParts.slice(-2).join("/") || keyName;
 
-  return { label, tags };
+  return { label, tag: labelParts[0] };
 }
 
 export function KeychainCard(props: {
@@ -27,7 +25,7 @@ export function KeychainCard(props: {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const { label, tags } = useMemo(() => parseKeyName(keyName), [keyName]);
+  const { label, tag } = useMemo(() => parseKeyName(keyName), [keyName]);
 
   const menuItems = useMemo<MenuItem[]>(
     () => [
@@ -79,7 +77,7 @@ export function KeychainCard(props: {
           }
         }}
         class={cn(
-          "group relative flex items-center justify-between gap-3",
+          "group relative flex cursor-default items-center justify-between gap-3",
           "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
           selected
             ? "border-blue-600 bg-blue-50"
@@ -92,11 +90,11 @@ export function KeychainCard(props: {
           </div>
 
           <div class="min-w-0 flex-1">
-            <div class="flex min-w-0 items-center gap-2">
+            <div class="flex flex-col justify-start gap-1">
               <div class="truncate text-sm font-semibold text-slate-800">
                 {label}
               </div>
-              <TagChips tags={tags} max={2} className="shrink-0" />
+              <span class="text-xs text-neutral-600">{tag}</span>
             </div>
           </div>
         </div>

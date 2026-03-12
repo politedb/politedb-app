@@ -27,6 +27,7 @@ interface Props {
   engine: DatabaseEngine;
   activeProfileScreen: string;
   tableWindowId: string;
+  isProfileLocked?: boolean;
   onSuccess?: (tableName: string) => void;
   onSaveRef?: (saveFn: () => Promise<void>) => void;
 }
@@ -36,6 +37,7 @@ export function NewTablePane({
   engine,
   activeProfileScreen,
   tableWindowId,
+  isProfileLocked = false,
   onSuccess,
   onSaveRef,
 }: Props) {
@@ -55,6 +57,7 @@ export function NewTablePane({
     activeProfileScreen: activeProfileScreen,
     initialData: savedData,
     activeWindowId: tableWindowId,
+    isProfileLocked,
     onSuccess,
   });
 
@@ -159,8 +162,8 @@ export function NewTablePane({
                   input.select();
                 }
               }}
-              disabled={busy}
-              readOnly={isEmptyRow}
+              disabled={busy || isProfileLocked}
+              readOnly={isEmptyRow || isProfileLocked}
             />
           );
         },
@@ -169,6 +172,7 @@ export function NewTablePane({
       tableState.columns.length,
       selectedRowIndex,
       busy,
+      isProfileLocked,
       columnOptions,
       tableState.updateColumn,
     ]
@@ -186,7 +190,7 @@ export function NewTablePane({
               onInput={(e) => tableState.setTableName(e.currentTarget.value)}
               placeholder="table_name"
               className="border border-neutral-200 bg-white text-xs"
-              disabled={busy}
+              disabled={busy || isProfileLocked}
             />
           </div>
           <div class="flex items-center gap-2">
@@ -197,6 +201,7 @@ export function NewTablePane({
               values={tableState.primaryKey}
               onChange={tableState.togglePrimaryKey}
               options={tableState.columnNames}
+              disabled={isProfileLocked}
             />
           </div>
         </div>
@@ -243,6 +248,7 @@ export function NewTablePane({
           <Button
             variant="shadow"
             className="px-2"
+            disabled={isProfileLocked}
             onClick={() =>
               tableState.addColumn(null, tableState.columns.length)
             }

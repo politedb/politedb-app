@@ -18,6 +18,7 @@ export type ConnectionRuntime = {
 
   activeSchema: string;
   runtimeConnectionId?: string;
+  isProfileLocked: boolean;
 
   // pagination currently kept in screen
   limit: number;

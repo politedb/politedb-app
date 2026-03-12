@@ -89,6 +89,7 @@ function extractDeleted(patches: WindowPatches | null, key: DataKey) {
 
 export function MainTableDataPane(props: {
   activeTableWindow: ActiveTableWindow;
+  isProfileLocked?: boolean;
 
   // pagination from outer layer (actions ctx)
   pageChange: (limit: number, offset: number) => void;
@@ -101,6 +102,7 @@ export function MainTableDataPane(props: {
 }) {
   const {
     activeTableWindow,
+    isProfileLocked = false,
     pageChange,
     onAddColumn,
     onDeleteColumn,
@@ -311,6 +313,7 @@ export function MainTableDataPane(props: {
       rowIndex: number,
       data: Record<string, any>
     ) => {
+      if (isProfileLocked) return;
       const rowKey =
         rowIndex === -1 && data.__rowKey
           ? String(data.__rowKey)
@@ -352,13 +355,14 @@ export function MainTableDataPane(props: {
       // Update the row in the store
       useConnectionStore.getState().updateRow(activeKey, rowIdx, updatedRow);
     },
-    [profileId, meta, activeTableWindow, activeKey]
+    [isProfileLocked, profileId, meta, activeTableWindow, activeKey]
   );
 
   const { handleAddRow, handleDeleteRow } = useTableDataOperations({
     activeKey,
     profileId,
     activeTableWindowId: activeTableWindow.id,
+    isLocked: isProfileLocked,
     onDataChange,
   });
 
@@ -479,27 +483,38 @@ export function MainTableDataPane(props: {
   }, [setExportDialogOpen]);
 
   const onImportOpen = useCallback(async () => {
+    if (isProfileLocked) return;
     const loaded = await loadDataImport();
     if (!loaded) return;
     setImportDialogOpen(true);
-  }, [loadDataImport, setImportDialogOpen]);
+  }, [isProfileLocked, loadDataImport, setImportDialogOpen]);
 
   const onImportClose = useCallback(() => {
     resetImport();
     setImportDialogOpen(false);
   }, [resetImport, setImportDialogOpen]);
 
-  const onCloneOpen = useCallback(() => setCloneDialogOpen(true), []);
+  const onCloneOpen = useCallback(() => {
+    if (isProfileLocked) return;
+    setCloneDialogOpen(true);
+  }, [isProfileLocked]);
   const onCloneClose = useCallback(() => setCloneDialogOpen(false), []);
 
-  const onTruncateOpen = useCallback(() => setTruncateDialogOpen(true), []);
+  const onTruncateOpen = useCallback(() => {
+    if (isProfileLocked) return;
+    setTruncateDialogOpen(true);
+  }, [isProfileLocked]);
   const onTruncateClose = useCallback(() => setTruncateDialogOpen(false), []);
 
-  const onDropOpen = useCallback(() => setDropDialogOpen(true), []);
+  const onDropOpen = useCallback(() => {
+    if (isProfileLocked) return;
+    setDropDialogOpen(true);
+  }, [isProfileLocked]);
   const onDropClose = useCallback(() => setDropDialogOpen(false), []);
 
   const handleTruncate = useCallback(
     async (opts: { restartIdentity: boolean; cascade: boolean }) => {
+      if (isProfileLocked) return;
       if (!meta.connectionId) throw new Error("Not connected.");
 
       const { schema, name } = activeTableWindow.table;
@@ -512,6 +527,7 @@ export function MainTableDataPane(props: {
       await reloadTableData(schema, name);
     },
     [
+      isProfileLocked,
       meta.connectionId,
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
@@ -522,6 +538,7 @@ export function MainTableDataPane(props: {
   );
 
   const handleDrop = useCallback(async () => {
+    if (isProfileLocked) return;
     if (!meta.connectionId) throw new Error("Not connected.");
 
     const { schema, name } = activeTableWindow.table;
@@ -534,6 +551,7 @@ export function MainTableDataPane(props: {
     await rt.refreshSchemaAndTables();
     await actions.closeWindow(activeTableWindow.id, new MouseEvent("click"));
   }, [
+    isProfileLocked,
     meta.connectionId,
     activeTableWindow.table.schema,
     activeTableWindow.table.name,
@@ -545,6 +563,7 @@ export function MainTableDataPane(props: {
 
   const handleClone = useCallback(
     async (newTableName: string, copyData: boolean) => {
+      if (isProfileLocked) return;
       if (!meta.connectionId) throw new Error("Not connected.");
       const { schema, name } = activeTableWindow.table;
       const createSql = cloneTableQuery(schema, name, newTableName);
@@ -564,6 +583,7 @@ export function MainTableDataPane(props: {
       await rt.refreshSchemaAndTables();
     },
     [
+      isProfileLocked,
       meta.connectionId,
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
@@ -575,6 +595,7 @@ export function MainTableDataPane(props: {
 
   const handleImport = useCallback(
     async (firstIsHeaders: boolean) => {
+      if (isProfileLocked) return;
       const { schema, name } = activeTableWindow.table;
       runImport({
         connectionId: meta.connectionId,
@@ -588,6 +609,7 @@ export function MainTableDataPane(props: {
       });
     },
     [
+      isProfileLocked,
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       meta.connectionId,
@@ -602,6 +624,10 @@ export function MainTableDataPane(props: {
   // When user chose Export/Import/Clone/Truncate/Drop from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
+    if (isProfileLocked) {
+      rt.setPendingTableAction(null);
+      return;
+    }
     const action = rt.pendingTableAction;
     const t = setTimeout(() => {
       if (action === "export") onExportOpen();
@@ -613,6 +639,7 @@ export function MainTableDataPane(props: {
     }, 80);
     return () => clearTimeout(t);
   }, [
+    isProfileLocked,
     rt.pendingTableAction,
     rt.setPendingTableAction,
     onExportOpen,
@@ -633,6 +660,7 @@ export function MainTableDataPane(props: {
           <TableStructurePane
             engine={engine}
             profileId={profileId}
+            readOnly={isProfileLocked}
             activeTableWindow={activeTableWindow as any}
             activeTableMeta={meta}
             structPaneTab={structPaneTab}
@@ -687,12 +715,17 @@ export function MainTableDataPane(props: {
               baseRows={hasAnyRowData ? basePageTotal : 0}
               totalRows={hasAnyRowData ? pageTotal : 0}
               getRowAt={getRowAt}
-              onCellChange={onDataChange}
+              readOnly={isProfileLocked}
+              onCellChange={isProfileLocked ? undefined : onDataChange}
               patches={extractPatches(patches)}
-              onAddRow={() =>
-                handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
-              }
-              onDeleteRow={(rowIndex) => handleDeleteRow(rowIndex, offset)}
+              onAddRow={() => {
+                if (isProfileLocked) return;
+                handleAddRow(meta.columns ?? [], pageTotal, onDataChange);
+              }}
+              onDeleteRow={(rowIndex) => {
+                if (isProfileLocked) return;
+                handleDeleteRow(rowIndex, offset);
+              }}
               deletedRows={extractDeleted(patches, DATA_KEYS.data)}
               rowsVersion={rowsInfo?.version ?? 0}
               foreignKeyMap={foreignKeyMap}
@@ -712,12 +745,14 @@ export function MainTableDataPane(props: {
         loadedMax={loadedMax}
         totalRows={totalRows}
         onPageChange={pageChange}
-        onAddRow={() =>
+        onAddRow={() => {
+          if (isProfileLocked) return;
           handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
-        }
-        onAddColumn={onAddColumn}
-        onAddIndex={onAddIndex}
+        }}
+        onAddColumn={isProfileLocked ? () => {} : onAddColumn}
+        onAddIndex={isProfileLocked ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
+        readOnly={isProfileLocked}
       />
       {sqlDialogOpen && (
         <SqlPreviewModal

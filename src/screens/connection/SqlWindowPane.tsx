@@ -15,14 +15,22 @@ export function SqlWindowPane(props: {
   metaKey: string;
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
+  isProfileLocked?: boolean;
   onRunSql: (args: {
     windowId: string;
     connectionId: string;
     sql: string;
   }) => Promise<RunSqlReturn>;
 }) {
-  const { win, engine, metaKey, metadata, runtimeConnectionId, onRunSql } =
-    props;
+  const {
+    win,
+    engine,
+    metaKey,
+    metadata,
+    runtimeConnectionId,
+    isProfileLocked = false,
+    onRunSql,
+  } = props;
 
   const meta = useMemo(() => {
     return metadata.get({
@@ -37,6 +45,7 @@ export function SqlWindowPane(props: {
     useSqlRunner({
       activeSqlWindowId: win.id,
       runtimeConnectionId,
+      isProfileLocked,
       onRunSql,
     });
 

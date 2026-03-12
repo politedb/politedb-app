@@ -38,6 +38,7 @@ interface Props {
   busy: boolean;
   error: string | null;
   editedData: TableConstraint[];
+  readOnly?: boolean;
   onAddNewRecord: () => void;
   onDeleteRecord?: (rowIndex: number) => void;
   deletedRows?: Set<number>;
@@ -58,6 +59,7 @@ export function TableConstraints({
   busy,
   error,
   editedData,
+  readOnly = false,
   onAddNewRecord,
   onDeleteRecord,
   deletedRows = new Set(),
@@ -73,6 +75,7 @@ export function TableConstraints({
       activeTableWindowId,
       initData,
       editedData,
+      isLocked: readOnly,
       onDataChange,
       onDeleteRecord,
     }
@@ -93,12 +96,13 @@ export function TableConstraints({
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
+      if (readOnly) return;
       // Check if it's an empty row (index >= editedData.length)
       if (index >= editedData.length) {
         onAddNewRecord();
       }
     },
-    [editedData.length, onAddNewRecord]
+    [readOnly, editedData.length, onAddNewRecord]
   );
 
   const tableData = useMemo(() => {
@@ -175,6 +179,7 @@ export function TableConstraints({
                 }
               }}
               onClick={(e) => {
+                if (readOnly) return;
                 if (isRowSelected) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -185,8 +190,8 @@ export function TableConstraints({
                   }
                 }
               }}
-              disabled={busy || isDeleted}
-              readOnly={isEmptyRow || isDeleted}
+              disabled={busy || isDeleted || readOnly}
+              readOnly={isEmptyRow || isDeleted || readOnly}
             />
           );
         },
@@ -202,6 +207,7 @@ export function TableConstraints({
       handleDataChange,
       onDeleteRecord,
       initData,
+      readOnly,
     ]
   );
 

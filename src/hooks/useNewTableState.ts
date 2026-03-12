@@ -7,6 +7,7 @@ interface Props {
   schema: string;
   activeProfileScreen: string;
   activeWindowId: string;
+  isProfileLocked?: boolean;
   initialData?: NewTableDataState | null;
   onSuccess?: (tableName: string) => void;
 }
@@ -14,6 +15,7 @@ export function useNewTableState({
   schema,
   activeProfileScreen,
   activeWindowId,
+  isProfileLocked = false,
   initialData,
   onSuccess,
 }: Props) {
@@ -52,13 +54,15 @@ export function useNewTableState({
   );
 
   const togglePrimaryKey = useCallback((name: string) => {
+    if (isProfileLocked) return;
     setPrimaryKey((prev) =>
       prev.includes(name) ? prev.filter((k) => k !== name) : [...prev, name]
     );
-  }, []);
+  }, [isProfileLocked]);
 
   const addColumn = useCallback(
     (_row: any, index: number) => {
+      if (isProfileLocked) return;
       if (index >= columns.length) {
         setColumns((prev) => [
           ...prev,
@@ -71,10 +75,11 @@ export function useNewTableState({
         ]);
       }
     },
-    [columns.length]
+    [columns.length, isProfileLocked]
   );
 
   const removeColumn = useCallback((index: number) => {
+    if (isProfileLocked) return;
     setColumns((prev) => {
       const removed = prev[index]?.column_name;
       const next = prev.filter((_, i) => i !== index);
@@ -90,10 +95,11 @@ export function useNewTableState({
 
       return next;
     });
-  }, []);
+  }, [isProfileLocked]);
 
   const updateColumn = useCallback(
     (index: number, field: keyof TableColumn, value: string) => {
+      if (isProfileLocked) return;
       setColumns((prev) => {
         const next = [...prev];
         const oldName = next[index]?.column_name;
@@ -109,10 +115,11 @@ export function useNewTableState({
         return next;
       });
     },
-    []
+    [isProfileLocked]
   );
 
   const handleSave = useCallback(async () => {
+    if (isProfileLocked) return;
     const finalTableName = tableName.trim();
     if (!finalTableName) return;
 
@@ -150,6 +157,7 @@ export function useNewTableState({
     onSuccess,
     createTable,
     clearNewTableData,
+    isProfileLocked,
   ]);
 
   return {

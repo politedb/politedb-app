@@ -242,6 +242,7 @@ export function ConnectionScreen() {
   useEffect(() => {
     actionsRef.current = actionsRaw;
   }, [actionsRaw]);
+  const isProfileLocked = !!activeTab?.isLocked;
 
   const actions = useMemo(() => {
     return {
@@ -259,33 +260,38 @@ export function ConnectionScreen() {
       pageChange: (l: number, o: number) => actionsRef.current.pageChange(l, o),
       selectTable: (t: TableItem) => actionsRef.current.selectTable(t),
       exportTableData: (table: TableItem) => {
+        if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("export");
         });
       },
       importTableData: (table: TableItem) => {
+        if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("import");
         });
       },
       cloneTable: (table: TableItem) => {
+        if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("clone");
         });
       },
       truncateTable: (table: TableItem) => {
+        if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("truncate");
         });
       },
       dropTable: (table: TableItem) => {
+        if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("drop");
         });
       },
       openSearch: () => setSearchDialogOpen(true),
     };
-  }, []);
+  }, [isProfileLocked]);
 
   const patchMap = useMemo(() => {
     return actions.getPatchMap() || ({} as PatchMap);
@@ -346,6 +352,7 @@ export function ConnectionScreen() {
       metadata,
       activeSchema,
       runtimeConnectionId,
+      isProfileLocked,
       limit,
       offset,
       loadError,
@@ -362,6 +369,7 @@ export function ConnectionScreen() {
       metadata,
       activeSchema,
       runtimeConnectionId,
+      isProfileLocked,
       limit,
       offset,
       loadError,

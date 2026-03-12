@@ -325,6 +325,7 @@ export function MenuBar({
             <IconButton
               title="Database"
               disabled={
+                activeTab?.isLocked ||
                 !runtimeConnectionId ||
                 !canManageDatabases(connectionInfo?.engine)
               }
@@ -426,7 +427,10 @@ export function MenuBar({
             title={dbRestoreRunning ? "Restoring..." : "Restore database"}
             onClick={() => void onRestoreDatabase(onRefresh)}
             disabled={
-              !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
+              !!activeTab?.isLocked ||
+              !rt.runtimeConnectionId ||
+              dbBackupRunning ||
+              dbRestoreRunning
             }
           >
             <Restore className="size-4 text-neutral-700" />

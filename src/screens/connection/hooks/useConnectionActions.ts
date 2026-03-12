@@ -218,6 +218,7 @@ export function useConnectionActions(
   args: UseConnectionActionsArgs
 ): ConnectionActions {
   const closingRef = useRef(false);
+  const isActiveTabLocked = !!args.activeTab?.isLocked;
 
   const {
     activeProfileScreen,
@@ -428,6 +429,7 @@ export function useConnectionActions(
   }, [activeProfileScreen, activeTableWindow]);
 
   const applyPatchesForActiveWindow = useCallback(async () => {
+    if (isActiveTabLocked) return;
     if (!activeTableWindow || !runtimeConnectionId) return;
 
     try {
@@ -497,6 +499,7 @@ export function useConnectionActions(
       setError(normalizeSqlError(e));
     }
   }, [
+    isActiveTabLocked,
     activeTableWindow,
     runtimeConnectionId,
     activeProfileScreen,
@@ -511,6 +514,7 @@ export function useConnectionActions(
   ]);
 
   const beforeSaveChanges = useCallback(() => {
+    if (isActiveTabLocked) return;
     const newTableSql = getNewTableSql();
     const hasNewTable = !newTableSql.error && newTableSql.data.length > 0;
 
@@ -525,7 +529,7 @@ export function useConnectionActions(
     if (!hasPatches && !hasNewTable) return;
 
     setShowSaveDialog(true);
-  }, [getNewTableSql, getPatchMap, setError]);
+  }, [isActiveTabLocked, getNewTableSql, getPatchMap, setError]);
 
   const saveNewTable = useCallback(async () => {
     if (newTableSaveRef.current) {
@@ -534,6 +538,7 @@ export function useConnectionActions(
   }, [newTableSaveRef]);
 
   const saveChanges = useCallback(async () => {
+    if (isActiveTabLocked) return;
     if (!activeTableWindow || !runtimeConnectionId) return;
 
     const tabDirty = tabHasChanges(activeProfileScreen);
@@ -546,6 +551,7 @@ export function useConnectionActions(
 
     if (jobs.length) await Promise.all(jobs);
   }, [
+    isActiveTabLocked,
     activeTableWindow,
     runtimeConnectionId,
     tabHasChanges,

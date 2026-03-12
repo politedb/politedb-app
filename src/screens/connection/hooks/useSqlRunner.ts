@@ -15,6 +15,7 @@ import {
   ensureSqlStreamStarted,
   clearSqlStream,
 } from "src/screens/connection/hooks/useSqlStreamResult";
+import { isMutatingStatement } from "src/utils/detect";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);
@@ -46,12 +47,14 @@ const lastRunAtByWindow = new Map<string, number>();
 export function useSqlRunner(args: {
   activeSqlWindowId?: string;
   runtimeConnectionId?: string;
+  isProfileLocked?: boolean;
   onRunSql: RunSqlFn;
   stopOnError?: boolean;
 }) {
   const {
     activeSqlWindowId,
     runtimeConnectionId,
+    isProfileLocked = false,
     onRunSql,
     stopOnError = false,
   } = args;
@@ -133,6 +136,28 @@ export function useSqlRunner(args: {
         }
 
         const list = v.statements;
+
+        if (isProfileLocked) {
+          const blockedIndex = list.findIndex((stmt) => isMutatingStatement(stmt));
+          if (blockedIndex >= 0) {
+            const slots: SqlResultSlot[] = [
+              {
+                index: 0,
+                sql: list[blockedIndex],
+                status: "error",
+                error:
+                  "This profile tab is locked. SQL statements that modify the database are blocked.",
+                finishedAt: Date.now(),
+              },
+            ];
+            setSqlSlots(slots);
+            setActiveResultIndex(0);
+            stateByWindowId.set(winId, { slots, activeIndex: 0 });
+            bumpRunId(winId);
+            return;
+          }
+        }
+
         const runId = bumpRunId(winId);
 
         // clear previous stream caches for this window
@@ -246,7 +271,14 @@ export function useSqlRunner(args: {
         inflightByWindow.set(winId, false);
       }
     },
-    [bumpRunId, currentRunId, onRunSql, runtimeConnectionId, stopOnError]
+    [
+      bumpRunId,
+      currentRunId,
+      isProfileLocked,
+      onRunSql,
+      runtimeConnectionId,
+      stopOnError,
+    ]
   );
 
   const reset = useCallback(() => {

@@ -8,6 +8,7 @@ import { DATA_KEYS } from "src/constant";
 export interface UseTableStructureOperationsProps {
   activeProfileScreen: string;
   activeTableWindowId: string;
+  isLocked?: boolean;
   initData: TableStructure[] | null;
   editedData: TableStructure[];
   onDataChange?: (
@@ -22,6 +23,7 @@ export interface UseTableStructureOperationsProps {
 export function useTableStructureOperations({
   activeProfileScreen,
   activeTableWindowId,
+  isLocked = false,
   initData,
   editedData,
   onDataChange,
@@ -39,6 +41,7 @@ export function useTableStructureOperations({
       field: keyof TableStructure,
       value: string | boolean
     ) => {
+      if (isLocked) return;
       setEditedData(
         activeProfileScreen,
         activeTableWindowId,
@@ -54,6 +57,7 @@ export function useTableStructureOperations({
       });
     },
     [
+      isLocked,
       initData?.length,
       activeProfileScreen,
       activeTableWindowId,
@@ -64,6 +68,7 @@ export function useTableStructureOperations({
 
   const handleDeleteRecord = useCallback(
     (rowIndex: number, _deletedRows: Set<number>) => {
+      if (isLocked) return;
       // Check if the row is new (not in initData)
       const isNewRow = !initData || rowIndex >= initData.length;
 
@@ -93,6 +98,7 @@ export function useTableStructureOperations({
       }
     },
     [
+      isLocked,
       initData,
       editedData,
       activeProfileScreen,
@@ -105,6 +111,7 @@ export function useTableStructureOperations({
 
   const handleAddNewRecord = useCallback(
     (onAddNewRecord: () => void, newRecord: TableStructure) => {
+      if (isLocked) return;
       setTableStructure(activeProfileScreen, activeTableWindowId, [
         ...editedData,
         newRecord,
@@ -120,6 +127,7 @@ export function useTableStructureOperations({
       onAddNewRecord();
     },
     [
+      isLocked,
       activeProfileScreen,
       activeTableWindowId,
       editedData,
@@ -227,8 +235,9 @@ export function useTableStructureOperations({
   }, [fkRowIndex, editedData]);
 
   const openFkDialog = useCallback((rowIndex: number) => {
+    if (isLocked) return;
     setFkRowIndex(rowIndex);
-  }, []);
+  }, [isLocked]);
 
   const closeFkDialog = useCallback(() => {
     setFkRowIndex(null);
@@ -236,6 +245,7 @@ export function useTableStructureOperations({
 
   const saveForeignKey = useCallback(
     (draft: Partial<ForeignKeyInfo>) => {
+      if (isLocked) return;
       // Update the structure row's foreign_key cell so it participates in the normal patch/save flow.
       const labelParts: string[] = [];
       const refTable = draft.ref_table_name;
@@ -252,14 +262,15 @@ export function useTableStructureOperations({
 
       closeFkDialog();
     },
-    [fkRowIndex, handleDataChange, closeFkDialog]
+    [isLocked, fkRowIndex, handleDataChange, closeFkDialog]
   );
 
   const deleteForeignKey = useCallback(() => {
+    if (isLocked) return;
     if (fkRowIndex == null) return;
     handleDataChange(fkRowIndex, "foreign_key", "");
     closeFkDialog();
-  }, [fkRowIndex, handleDataChange, closeFkDialog]);
+  }, [isLocked, fkRowIndex, handleDataChange, closeFkDialog]);
 
   return {
     fkRowIndex,

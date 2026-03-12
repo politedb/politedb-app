@@ -43,7 +43,7 @@ export function ActiveWindowContent() {
   const actions = useConnectionActionsCtx();
   const rt = useConnectionRuntimeCtx();
 
-  const { profileId } = rt;
+  const { profileId, isProfileLocked } = rt;
   const { hasAnyWindow, activeId, activeSqlWindow, activeTableWindow } =
     useConnectionWindows(profileId);
 
@@ -71,6 +71,7 @@ export function ActiveWindowContent() {
       rowIndex: number,
       data: Record<string, any>
     ) => {
+      if (isProfileLocked) return;
       if (!profileId || !activeTableWindow || !activeKey) return;
 
       const currentMeta = getTableMeta(activeKey);
@@ -96,10 +97,11 @@ export function ActiveWindowContent() {
         data: patchData,
       });
     },
-    [profileId, activeTableWindow, activeKey]
+    [isProfileLocked, profileId, activeTableWindow, activeKey]
   );
 
   const handleAddColumn = useCallback(() => {
+    if (isProfileLocked) return;
     if (!activeTableWindow || !activeId) return;
 
     const currentStructure = getTableStructure(profileId, activeId);
@@ -125,17 +127,19 @@ export function ActiveWindowContent() {
       currentStructure.length,
       newRecord
     );
-  }, [profileId, activeId, activeTableWindow, onDataChange]);
+  }, [isProfileLocked, profileId, activeId, activeTableWindow, onDataChange]);
 
   const handleDeleteColumn = useCallback(
     (rowIndex: number) => {
+      if (isProfileLocked) return;
       if (!activeTableWindow) return;
       onDataChange("delete", DATA_KEYS.structure, rowIndex, {});
     },
-    [activeTableWindow, onDataChange]
+    [isProfileLocked, activeTableWindow, onDataChange]
   );
 
   const handleAddIndex = useCallback(() => {
+    if (isProfileLocked) return;
     if (!activeTableWindow || !activeId) return;
 
     const currentConstraints = getTableConstraints(profileId, activeId);
@@ -164,14 +168,15 @@ export function ActiveWindowContent() {
       currentConstraints.length,
       newRecord
     );
-  }, [profileId, activeId, activeTableWindow, onDataChange]);
+  }, [isProfileLocked, profileId, activeId, activeTableWindow, onDataChange]);
 
   const handleDeleteIndex = useCallback(
     (rowIndex: number) => {
+      if (isProfileLocked) return;
       if (!activeTableWindow) return;
       onDataChange("delete", DATA_KEYS.constraints, rowIndex, {});
     },
-    [activeTableWindow, onDataChange]
+    [isProfileLocked, activeTableWindow, onDataChange]
   );
 
   // -------------------------------------------------------------------------
@@ -188,6 +193,7 @@ export function ActiveWindowContent() {
         win={activeSqlWindow}
         engine={rt.engine}
         runtimeConnectionId={rt.runtimeConnectionId}
+        isProfileLocked={isProfileLocked}
         metaKey={rt.metaKey}
         metadata={rt.metadata}
         onRunSql={rt.runSqlWithHistory}
@@ -214,6 +220,7 @@ export function ActiveWindowContent() {
           await actions.selectTable(t);
         }}
         saveRef={rt.newTableSaveRef}
+        isProfileLocked={isProfileLocked}
       />
     );
   }
@@ -227,6 +234,7 @@ export function ActiveWindowContent() {
         onDeleteColumn={handleDeleteColumn}
         onAddIndex={handleAddIndex}
         onDeleteIndex={handleDeleteIndex}
+        isProfileLocked={isProfileLocked}
       />
     );
   }

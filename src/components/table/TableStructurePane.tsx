@@ -22,6 +22,7 @@ import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
   profileId: string;
+  readOnly?: boolean;
   activeTableMeta: TableMetaState;
   activeTableWindow: TableWindow;
   structPaneTab: StructPaneTab;
@@ -45,6 +46,7 @@ export function TableStructurePane(props: {
   const {
     engine,
     profileId,
+    readOnly = false,
     activeTableMeta,
     activeTableWindow,
     structPaneTab,
@@ -120,7 +122,7 @@ export function TableStructurePane(props: {
               onInput={(e) => changeTableName(e.currentTarget.value)}
               placeholder="table_name"
               className="border border-neutral-200 bg-white text-xs"
-              disabled={activeTableMeta.busy}
+              disabled={activeTableMeta.busy || readOnly}
             />
           </div>
           <TagSelect
@@ -129,6 +131,7 @@ export function TableStructurePane(props: {
             values={primaryKey}
             onChange={togglePrimaryKey}
             options={columnNames}
+            disabled={readOnly}
           />
         </div>
       </div>
@@ -150,6 +153,7 @@ export function TableStructurePane(props: {
                 foreignKeys={activeTableMeta.foreignKeys}
                 busy={activeTableMeta.busy}
                 error={activeTableMeta.error}
+                readOnly={readOnly}
                 onDataChange={onDataChange}
                 onAddNewRecord={onAddNewColumn}
                 onDeleteRecord={onDeleteColumn}
@@ -171,6 +175,7 @@ export function TableStructurePane(props: {
                 editedData={tableConstraints}
                 busy={activeTableMeta.busy}
                 error={activeTableMeta.error}
+                readOnly={readOnly}
                 onDataChange={onDataChange}
                 onAddNewRecord={onAddIndex}
                 onDeleteRecord={onDeleteIndex}

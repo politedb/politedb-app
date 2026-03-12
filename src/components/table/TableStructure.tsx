@@ -42,6 +42,7 @@ interface Props {
   error: string | null;
   engine: DatabaseEngine;
   editedData: TableStructure[];
+  readOnly?: boolean;
   onAddNewRecord: () => void;
   onDeleteRecord?: (rowIndex: number) => void;
   deletedRows?: Set<number>;
@@ -62,6 +63,7 @@ export function TableStructure({
   busy,
   error,
   editedData = [],
+  readOnly = false,
   onAddNewRecord,
   onDeleteRecord,
   deletedRows = new Set(),
@@ -87,6 +89,7 @@ export function TableStructure({
     activeTableWindowId: activeTableWindow.id,
     initData,
     editedData,
+    isLocked: readOnly,
     onDataChange,
     onDeleteRecord,
   });
@@ -105,9 +108,10 @@ export function TableStructure({
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
+      if (readOnly) return;
       if (index >= editedData.length) onAddNewRecord();
     },
-    [editedData.length, onAddNewRecord]
+    [readOnly, editedData.length, onAddNewRecord]
   );
 
   const tableData = useMemo(() => {
@@ -239,6 +243,7 @@ export function TableStructure({
                   }
                 }}
                 onClick={(e) => {
+                  if (readOnly) return;
                   if (isRowSelected) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -255,8 +260,8 @@ export function TableStructure({
                     }
                   }
                 }}
-                disabled={busy || isDeleted}
-                readOnly={isEmptyRow || isDeleted}
+                disabled={busy || isDeleted || readOnly}
+                readOnly={isEmptyRow || isDeleted || readOnly}
               />
 
               {!isEmptyRow && isFkColumn && (
@@ -264,10 +269,17 @@ export function TableStructure({
                   type="button"
                   aria-label="Edit foreign key"
                   onClick={(e) => {
+                    if (readOnly) return;
                     e.stopPropagation();
                     openFkDialog(index);
                   }}
-                  class="absolute top-1/2 right-2 z-50 -translate-y-1/2 text-neutral-400 hover:text-neutral-600"
+                  class={cn(
+                    "absolute top-1/2 right-2 z-50 -translate-y-1/2",
+                    readOnly
+                      ? "cursor-not-allowed text-neutral-300"
+                      : "text-neutral-400 hover:text-neutral-600"
+                  )}
+                  disabled={readOnly}
                 >
                   <ArrowRight className="size-3" />
                 </button>
@@ -292,6 +304,7 @@ export function TableStructure({
       findFkForColumn,
       JSON.stringify(structureUpdatePatches),
       openFkDialog,
+      readOnly,
     ]
   );
 
@@ -336,8 +349,14 @@ export function TableStructure({
           tableList={tableList}
           originColumn={getFkColumnName()}
           activeScreen={activeProfileScreen}
-          onDelete={getEditingFk(foreignKeys) ? deleteForeignKey : undefined}
-          onSave={saveForeignKey}
+          onDelete={
+            readOnly
+              ? undefined
+              : getEditingFk(foreignKeys)
+                ? deleteForeignKey
+                : undefined
+          }
+          onSave={readOnly ? () => {} : saveForeignKey}
         />
       )}
     </div>

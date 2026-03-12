@@ -17,9 +17,14 @@ import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
 interface Props {
   onOpenNewTable?: () => void;
   className?: string;
+  disabled?: boolean;
 }
 
-export function NewTableMenu({ onOpenNewTable, className }: Props) {
+export function NewTableMenu({
+  onOpenNewTable,
+  className,
+  disabled = false,
+}: Props) {
   const [openSchema, setOpenSchema] = useState(false);
 
   const items: MenuDropdownItem[] = [
@@ -47,6 +52,7 @@ export function NewTableMenu({ onOpenNewTable, className }: Props) {
               "border-neutral-300 bg-white text-neutral-800"
             )}
             title="New"
+            disabled={disabled}
           >
             +
           </Button>

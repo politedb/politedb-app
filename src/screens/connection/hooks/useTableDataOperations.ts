@@ -6,6 +6,7 @@ export interface UseTableDataOperationsProps {
   activeKey: string;
   profileId: string;
   activeTableWindowId: string;
+  isLocked?: boolean;
   onDataChange?: (
     action: DataAction,
     dataKey: DataKey,
@@ -18,6 +19,7 @@ export function useTableDataOperations({
   activeKey,
   profileId,
   activeTableWindowId,
+  isLocked = false,
   onDataChange,
 }: UseTableDataOperationsProps) {
   const handleCellChange = useCallback(
@@ -28,6 +30,7 @@ export function useTableDataOperations({
       isNewRow: boolean,
       rowKey?: string
     ) => {
+      if (isLocked) return;
       const dataKey: DataKey = "data";
       const changeData: Record<string, any> = { ...data };
 
@@ -38,11 +41,12 @@ export function useTableDataOperations({
 
       onDataChange?.(action, dataKey, isNewRow ? -1 : rowIndex, changeData);
     },
-    [onDataChange]
+    [isLocked, onDataChange]
   );
 
   const handleDeleteRow = useCallback(
     (rowIndex: number, offset: number) => {
+      if (isLocked) return;
       const rowKey = String(rowIndex);
       const store = useConnectionStore.getState();
       const windowPatches =
@@ -65,7 +69,7 @@ export function useTableDataOperations({
 
       onDataChange?.(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
     },
-    [activeKey, onDataChange]
+    [isLocked, activeKey, onDataChange]
   );
 
   const handleAddRow = useCallback(
@@ -79,6 +83,7 @@ export function useTableDataOperations({
         data: Record<string, any>
       ) => void
     ) => {
+      if (isLocked) return;
       if (!columns || columns.length === 0) {
         console.warn("handleAddRow: columns is missing or empty");
         return;
@@ -106,7 +111,7 @@ export function useTableDataOperations({
         });
       }
     },
-    [activeKey]
+    [isLocked, activeKey]
   );
 
   return {

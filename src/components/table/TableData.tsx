@@ -42,6 +42,7 @@ interface Props {
     refTable: string;
     refColumn: string;
   }) => void;
+  readOnly?: boolean;
 }
 
 // ============================================================================
@@ -64,6 +65,7 @@ export function TableData({
   rowsVersion = 0,
   foreignKeyMap,
   onNavigateFk,
+  readOnly = false,
 }: Props) {
   const baseLen = Math.max(0, baseRows || 0);
   const totalLen = Math.max(0, totalRows || 0);
@@ -341,13 +343,15 @@ export function TableData({
           }
         }}
         onStartEdit={(cell) => {
+          if (readOnly) return;
           setEditing(cell);
           setSelected(cell);
           setSelectedRows(new Set([cell.rowIdx]));
           setLastSelectedRow(cell.rowIdx);
         }}
-        onAddRow={onAddRow}
+        onAddRow={readOnly ? undefined : onAddRow}
         onDeleteRow={(visibleRowIdx) => {
+          if (readOnly) return;
           const rowIdx = rowOrder[visibleRowIdx] ?? -1;
           if (rowIdx >= 0) {
             onDeleteRow?.(rowIdx);
@@ -357,6 +361,7 @@ export function TableData({
           setEditing(null);
         }}
         onDeleteRows={(visibleRowIndices) => {
+          if (readOnly) return;
           visibleRowIndices.forEach(visibleIdx => {
              const realIdx = rowOrder[visibleIdx] ?? -1;
              if (realIdx >= 0) {

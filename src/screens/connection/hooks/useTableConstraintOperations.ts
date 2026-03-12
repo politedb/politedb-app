@@ -6,6 +6,7 @@ import { DATA_KEYS } from "src/constant";
 export interface UseTableConstraintOperationsProps {
   activeProfileScreen: string;
   activeTableWindowId: string;
+  isLocked?: boolean;
   initData: TableConstraint[] | null;
   editedData: TableConstraint[];
   onDataChange?: (
@@ -20,6 +21,7 @@ export interface UseTableConstraintOperationsProps {
 export function useTableConstraintOperations({
   activeProfileScreen,
   activeTableWindowId,
+  isLocked = false,
   initData,
   editedData,
   onDataChange,
@@ -34,6 +36,7 @@ export function useTableConstraintOperations({
       field: keyof TableConstraint,
       value: string | boolean
     ) => {
+      if (isLocked) return;
       setEditedData(
         activeProfileScreen,
         activeTableWindowId,
@@ -49,6 +52,7 @@ export function useTableConstraintOperations({
       });
     },
     [
+      isLocked,
       initData?.length,
       activeProfileScreen,
       activeTableWindowId,
@@ -59,14 +63,16 @@ export function useTableConstraintOperations({
 
   const handleDeleteRecord = useCallback(
     (rowIndex: number) => {
+      if (isLocked) return;
       // For constraints, always mark as deleted (will create a delete patch)
       onDeleteRecord?.(rowIndex);
     },
-    [onDeleteRecord]
+    [isLocked, onDeleteRecord]
   );
 
   const handleAddNewRecord = useCallback(
     (onAddNewRecord: () => void, newRecord: TableConstraint) => {
+      if (isLocked) return;
       setTableConstraints(activeProfileScreen, activeTableWindowId, [
         ...editedData,
         newRecord,
@@ -82,6 +88,7 @@ export function useTableConstraintOperations({
       onAddNewRecord();
     },
     [
+      isLocked,
       activeProfileScreen,
       activeTableWindowId,
       editedData,

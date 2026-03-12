@@ -7,6 +7,7 @@ export function NewTableRoute(props: {
   engine: DatabaseEngine;
   activeSchema: string;
   profileId: string;
+  isProfileLocked?: boolean;
   onCreated: (tableName: string) => Promise<void>;
   saveRef: { current: (() => Promise<void>) | null };
 }) {
@@ -15,6 +16,7 @@ export function NewTableRoute(props: {
     engine,
     activeSchema,
     profileId,
+    isProfileLocked = false,
     onCreated,
     saveRef,
   } = props;
@@ -26,6 +28,7 @@ export function NewTableRoute(props: {
       table={activeTableWindow.table}
       activeProfileScreen={profileId}
       tableWindowId={activeTableWindow.id}
+      isProfileLocked={isProfileLocked}
       onSuccess={onCreated}
       onSaveRef={(fn) => {
         saveRef.current = fn;
