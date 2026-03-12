@@ -235,6 +235,7 @@ export const tableConstraintsQuery = (schema: string, tableName: string) => {
       ix.relname AS index_name,
       upper(am.amname) AS index_algorithm,
       indisunique AS is_unique,
+      indisprimary AS is_primary,
       pg_get_indexdef(indexrelid) AS index_definition,
       replace(regexp_replace(regexp_replace(regexp_replace(pg_get_indexdef(indexrelid), ' WHERE .+|INCLUDE .+', ''), ' WITH .+', ''), '.*\\((.*)\\)', '\\1'), ' ', '') AS column_name,
       CASE
@@ -337,6 +338,7 @@ export const tableConstraintsMySqlQuery = (
       index_name,
       index_type,
       non_unique,
+      CASE WHEN UPPER(index_name) = 'PRIMARY' THEN TRUE ELSE FALSE END AS is_primary,
       GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') AS column_name
     FROM information_schema.statistics
     WHERE table_schema = ${qLiteral(schema)}

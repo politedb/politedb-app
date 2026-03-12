@@ -28,8 +28,13 @@ export function useTableMetaState(props: Props) {
   const primaryKeyFromDB = useMemo(() => {
     if (!constraints?.length) return [];
 
+    const isTruthy = (v: unknown) =>
+      v === true || String(v ?? "").toLowerCase() === "true";
+
     const pk = constraints.find(
       (c) =>
+        isTruthy(c.is_primary) ||
+        c.index_name.toLowerCase() === "primary" ||
         c.index_name.toLowerCase().includes("pkey") ||
         (c.is_unique && c.index_name.toLowerCase().includes("primary"))
     );

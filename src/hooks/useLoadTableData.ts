@@ -320,8 +320,9 @@ async function loadMeta(params: {
       index_name: cellToString(row?.[0]),
       index_algorithm: cellToString(row?.[1]),
       is_unique: Number(cellToString(row?.[2]) ?? "1") === 0,
+      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
       index_definition: "",
-      column_name: cellToString(row?.[3]) ?? "",
+      column_name: cellToString(row?.[4]) ?? "",
       condition: "",
       include: "",
       comment: "",
@@ -359,11 +360,12 @@ async function loadMeta(params: {
     index_name: cellToString(row?.[0]),
     index_algorithm: cellToString(row?.[1]),
     is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
-    index_definition: cellToString(row?.[3]),
-    column_name: cellToString(row?.[4]),
-    condition: cellToString(row?.[5]),
-    include: cellToString(row?.[6]),
-    comment: cellToString(row?.[7]),
+    is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+    index_definition: cellToString(row?.[4]),
+    column_name: cellToString(row?.[5]),
+    condition: cellToString(row?.[6]),
+    include: cellToString(row?.[7]),
+    comment: cellToString(row?.[8]),
   }));
 
   // 4. Foreign keys (Postgres only)

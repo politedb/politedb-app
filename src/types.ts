@@ -94,6 +94,7 @@ export type TableConstraint = {
   index_name: string;
   index_algorithm: string;
   is_unique: boolean | string;
+  is_primary?: boolean | string;
   column_name: string;
   condition?: string;
   include?: string;

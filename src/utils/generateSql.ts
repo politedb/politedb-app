@@ -79,8 +79,13 @@ function getPrimaryKeyColumns(
     return [];
   }
 
+  const isTruthy = (v: unknown) =>
+    v === true || String(v ?? "").toLowerCase() === "true";
+
   const pkConstraint = constraints.find(
     (c) =>
+      isTruthy(c.is_primary) ||
+      c.index_name.toLowerCase() === "primary" ||
       c.index_name.toLowerCase().includes("pkey") ||
       (c.is_unique && c.index_name.toLowerCase().includes("primary"))
   );
