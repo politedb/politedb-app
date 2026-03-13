@@ -839,7 +839,7 @@ export function CanvasTable({
   return (
     <div
       ref={rootRef}
-      class={`relative h-full w-full bg-white ${
+      class={`relative h-full min-h-0 w-full bg-white ${
         isResizing ? "cursor-col-resize select-none" : ""
       }`}
       tabIndex={0}
@@ -869,7 +869,7 @@ export function CanvasTable({
     >
       <div
         ref={scrollerRef}
-        class="relative h-full w-full overflow-auto overscroll-none border-t border-neutral-200"
+        class="relative h-full min-h-0 w-full overflow-auto overscroll-none border-t border-neutral-200"
         style={{ overscrollBehavior: "none" }}
         onMouseDown={handleMouseDown}
         onDblClick={handleDblClick}

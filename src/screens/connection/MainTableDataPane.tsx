@@ -64,6 +64,7 @@ const EMPTY_META = {
 
 const EMPTY_ARRAY: any[] = [];
 const EMPTY_SET = new Set<number>();
+const loadedQuerySignatureByTable = new Map<string, string>();
 
 function extractPatches(patches: WindowPatches | null) {
   if (!patches) return null;
@@ -164,39 +165,67 @@ export function MainTableDataPane(props: {
     handleClearFilters,
   } = useTableFilter(startedRef, activeKey);
 
+  const filterSignature = useMemo(
+    () =>
+      JSON.stringify(
+        appliedFilters.map((filter) => ({
+          id: filter.id,
+          column: filter.column,
+          operator: filter.operator,
+          value: filter.value,
+          enabled: filter.enabled,
+        }))
+      ),
+    [appliedFilters]
+  );
+
+  const activeQuerySignature = useMemo(
+    () =>
+      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}`,
+    [activeKey, limit, offset, appliedFilterCombine, filterSignature]
+  );
+
   /* ===========================================================================
    * Subscribe minimal state
    * =========================================================================== */
 
   const handleLoadRows = useCallback(async () => {
-    const effectiveKey = `${activeKey}:${limit}:${offset}:${appliedFilters.length}:${appliedFilterCombine}`;
-    if (startedRef.current === effectiveKey) return;
-    startedRef.current = effectiveKey;
+    if (startedRef.current === activeQuerySignature) return;
+    startedRef.current = activeQuerySignature;
+
+    const shouldForceReload =
+      loadedQuerySignatureByTable.get(activeKey) !== activeQuerySignature;
+    const currentMeta =
+      useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
 
     useConnectionStore.getState().initRows(activeKey, 5000);
 
-    // Always refetch when filter state changes so cache matches current filters.
-    // (If we had filters and then cleared, cache would still hold filtered rows.)
+    // Reuse cached table state when switching back to a table with the same
+    // query signature. Force a reload only when the effective query changed.
     await loadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       { limit, offset },
       {
-        force: true,
-        refreshRows: true,
-        refreshMeta: false,
+        forceRows: shouldForceReload,
+        refreshRowCount: shouldForceReload,
+        refreshRows: shouldForceReload,
+        refreshMeta:
+          !Array.isArray(currentMeta.columns) ||
+          !Array.isArray(currentMeta.foreignKeys),
         refreshStats: false,
         filters: appliedFilters.length ? appliedFilters : undefined,
         filterCombine: appliedFilterCombine,
       }
     );
+    loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
+    rerender();
   }, [
     activeTableWindow,
     activeKey,
-    limit,
-    offset,
     appliedFilters,
     appliedFilterCombine,
+    activeQuerySignature,
   ]);
 
   useEffect(() => {
@@ -211,8 +240,10 @@ export function MainTableDataPane(props: {
       const rows = s.getRowsWindowInfo(activeKey);
       const sig = JSON.stringify([
         meta?.error,
+        meta?.busy,
         meta?.columns?.length,
         meta?.rowCount,
+        meta?.foreignKeys?.length,
         rows?.version,
         rows?.running,
         rows?.loadedMax,
@@ -286,21 +317,40 @@ export function MainTableDataPane(props: {
   const rowsRunning = !!rowsInfo?.running;
   const streamOffset = rowsInfo?.streamOffset ?? 0;
   const loadedMax = rowsInfo?.loadedMax ?? -1;
+  const loadedRowCount =
+    loadedMax >= streamOffset ? loadedMax - streamOffset + 1 : 0;
 
-  const hasAnyRowData = useMemo(() => {
-    if (loadedMax >= streamOffset) return true;
-    const base = rowsInfo?.base ?? 0;
-    for (let i = 0; i < 5; i++) {
-      if (useConnectionStore.getState().getRowAt(activeKey, base + i))
-        return true;
+  const basePageTotal = useMemo(() => {
+    if (typeof meta.rowCount === "number") {
+      return Math.min(limit, Math.max(0, meta.rowCount - offset));
     }
-    return false;
-  }, [loadedMax, streamOffset, activeKey]);
+    return limit;
+  }, [meta.rowCount, limit, offset]);
 
+  const columnsLoaded =
+    Array.isArray(meta.columns) && meta.columns.length > 0;
+  const foreignKeysLoaded = Array.isArray(meta.foreignKeys);
   const rowsKnownEmpty = !!rowsInfo && !rowsRunning && loadedMax < streamOffset;
+  const hasAppliedFilters = appliedFilters.some(
+    (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
+  );
+  const currentPageLoaded =
+    rowsKnownEmpty ||
+    (!rowsRunning &&
+      (hasAppliedFilters ||
+        typeof meta.rowCount !== "number" ||
+        loadedRowCount >= basePageTotal));
+  const hasRenderedTableBefore = loadedQuerySignatureByTable.has(activeKey);
+  const queryMatchesRenderedData =
+    loadedQuerySignatureByTable.get(activeKey) === activeQuerySignature;
 
   const shouldShowLoading =
-    !hasError && !hasAnyRowData && !rowsKnownEmpty && rowsRunning;
+    !hasError &&
+    (!columnsLoaded ||
+      !foreignKeysLoaded ||
+      !rowsInfo ||
+      (!hasRenderedTableBefore &&
+        (!currentPageLoaded || !queryMatchesRenderedData)));
 
   /* ===========================================================================
    * Mutations
@@ -377,23 +427,18 @@ export function MainTableDataPane(props: {
    * Paging
    * =========================================================================== */
 
-  const basePageTotal = useMemo(() => {
-    if (typeof meta.rowCount === "number") {
-      return Math.min(limit, Math.max(0, meta.rowCount - offset));
-    }
-    return limit;
-  }, [meta.rowCount, limit, offset]);
-
   const pageTotal = useMemo(() => {
     if (!rowsInfo) return 0;
 
-    const storeRows =
-      rowsInfo.loadedMax >= rowsInfo.streamOffset
-        ? rowsInfo.loadedMax - rowsInfo.streamOffset + 1
-        : 0;
+    return Math.max(basePageTotal, loadedRowCount);
+  }, [rowsInfo, basePageTotal, loadedRowCount]);
 
-    return Math.max(basePageTotal, storeRows);
-  }, [rowsInfo, basePageTotal]);
+  const visiblePageTotal = useMemo(() => {
+    if (hasAppliedFilters) {
+      return loadedRowCount;
+    }
+    return pageTotal;
+  }, [hasAppliedFilters, loadedRowCount, pageTotal]);
 
   const totalRows = useMemo(() => {
     if (typeof rowsInfo?.loadedMax !== "number" || rowsInfo.loadedMax < 0) {
@@ -404,6 +449,13 @@ export function MainTableDataPane(props: {
       ? meta.rowCount
       : offset + pageTotal;
   }, [meta.rowCount, rowsInfo?.loadedMax, pageTotal, offset]);
+
+  const footerTotalRows = useMemo(() => {
+    if (hasAppliedFilters) {
+      return typeof meta.rowCount === "number" ? meta.rowCount : loadedRowCount;
+    }
+    return totalRows;
+  }, [hasAppliedFilters, meta.rowCount, loadedRowCount, totalRows]);
 
   const getRowAt = (i: number) =>
     useConnectionStore.getState().getRowAt(activeKey, offset + i);
@@ -685,7 +737,7 @@ export function MainTableDataPane(props: {
             )}
           />
         ) : (
-          <>
+          <div class="flex h-full min-h-0 flex-col">
             {filterBarVisible && (
               <TableFilterBar
                 tableKey={activeKey}
@@ -710,28 +762,30 @@ export function MainTableDataPane(props: {
                 }}
               />
             )}
-            <TableData
-              columns={meta.columns ?? []}
-              baseRows={hasAnyRowData ? basePageTotal : 0}
-              totalRows={hasAnyRowData ? pageTotal : 0}
-              getRowAt={getRowAt}
-              readOnly={isProfileLocked}
-              onCellChange={isProfileLocked ? undefined : onDataChange}
-              patches={extractPatches(patches)}
-              onAddRow={() => {
-                if (isProfileLocked) return;
-                handleAddRow(meta.columns ?? [], pageTotal, onDataChange);
-              }}
-              onDeleteRow={(rowIndex) => {
-                if (isProfileLocked) return;
-                handleDeleteRow(rowIndex, offset);
-              }}
-              deletedRows={extractDeleted(patches, DATA_KEYS.data)}
-              rowsVersion={rowsInfo?.version ?? 0}
-              foreignKeyMap={foreignKeyMap}
-              onNavigateFk={handleNavigateFk}
-            />
-          </>
+            <div class="min-h-0 flex-1">
+              <TableData
+                columns={meta.columns ?? []}
+                baseRows={basePageTotal}
+                totalRows={visiblePageTotal}
+                getRowAt={getRowAt}
+                readOnly={isProfileLocked}
+                onCellChange={isProfileLocked ? undefined : onDataChange}
+                patches={extractPatches(patches)}
+                onAddRow={() => {
+                  if (isProfileLocked) return;
+                  handleAddRow(meta.columns ?? [], visiblePageTotal, onDataChange);
+                }}
+                onDeleteRow={(rowIndex) => {
+                  if (isProfileLocked) return;
+                  handleDeleteRow(rowIndex, offset);
+                }}
+                deletedRows={extractDeleted(patches, DATA_KEYS.data)}
+                rowsVersion={rowsInfo?.version ?? 0}
+                foreignKeyMap={foreignKeyMap}
+                onNavigateFk={handleNavigateFk}
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -743,7 +797,7 @@ export function MainTableDataPane(props: {
         limit={limit}
         offset={offset}
         loadedMax={loadedMax}
-        totalRows={totalRows}
+        totalRows={footerTotalRows}
         onPageChange={pageChange}
         onAddRow={() => {
           if (isProfileLocked) return;

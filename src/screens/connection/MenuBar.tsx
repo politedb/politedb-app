@@ -308,6 +308,7 @@ export function MenuBar({
         <div class="flex items-center">
           <div class="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
             <IconButton
+              className="size-6"
               title={activeTab?.isLocked ? "Unlock" : "Lock"}
               onClick={(e: any) => {
                 e.stopPropagation();
@@ -323,6 +324,7 @@ export function MenuBar({
             </IconButton>
 
             <IconButton
+              className="size-6"
               title="Database"
               disabled={
                 activeTab?.isLocked ||
@@ -338,7 +340,7 @@ export function MenuBar({
 
             <Button
               variant="ghost"
-              className="h-7 rounded-md px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
+              className="h-6 rounded-md px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
               onClick={openSQLWindow}
             >
               SQL

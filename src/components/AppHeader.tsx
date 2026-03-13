@@ -1,5 +1,5 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { X, Database, Lock } from "./icons";
+import { X, Database } from "./icons";
 import { ReactNode } from "preact/compat";
 import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
@@ -10,6 +10,7 @@ import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
 import { useConnectionStore } from "../stores/connection";
 import { DbIcon } from "./icons/DbIcon";
 import { ContextMenu, type MenuItem } from "./common/ContextMenu";
+import { cn } from "../utils/cn";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -282,46 +283,40 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   }}
                   data-tauri-drag-region="false"
                   class={[
-                    "group w-44 shrink-0",
+                    "group w-48 shrink-0",
                     "flex items-center justify-between gap-2",
-                    "rounded-md border px-3 py-1 transition-all",
+                    "rounded-md border px-2 py-1 transition-all",
                     isActive
                       ? "border-slate-300 bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04),0_2px_8px_rgba(0,0,0,0.06)]"
                       : "border-transparent bg-slate-100 text-slate-600 shadow-sm hover:border-slate-200 hover:bg-slate-50",
                   ].join(" ")}
                 >
                   <div class="flex min-w-0 items-center gap-2">
-                    <span class="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+                    <span class="flex size-5 items-center justify-center rounded-full bg-slate-100 text-slate-600">
                       <DbIcon engine={tab.engine} px={16} />
                     </span>
+
                     <span class="truncate text-xs font-medium">
                       {tab.label}
                     </span>
                   </div>
 
-                  {!tab.isLocked ? (
-                    <Button
-                      variant="ghost"
-                      title="Close tab"
-                      data-tauri-drag-region="false"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleTabClose(tab.id);
-                      }}
-                      class={[
-                        "rounded-full p-0.5 transition",
-                        isActive
-                          ? "text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                          : "text-slate-400 opacity-60 group-hover:opacity-100 hover:bg-slate-200 hover:text-slate-700",
-                      ].join(" ")}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  ) : (
-                    <div class="p-0.5">
-                      <Lock className="size-3.5 text-neutral-500" />
-                    </div>
-                  )}
+                  <Button
+                    variant="ghost"
+                    title="Close tab"
+                    data-tauri-drag-region="false"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleTabClose(tab.id);
+                    }}
+                    class={cn(
+                      "rounded-full p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
+                      !isActive &&
+                        "opacity-60 group-hover:opacity-100 hover:bg-transparent"
+                    )}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
                 </div>
               );
             })}

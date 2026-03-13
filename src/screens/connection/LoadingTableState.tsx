@@ -44,9 +44,9 @@ export function LoadingTableState() {
   }, [elapsedMs]);
 
   return (
-    <Box className="bg-neutral-100">
+    <Box className="bg-neutral-50">
       <div class="flex h-full w-full items-center justify-center">
-        <div class="w-120 max-w-[90vw] px-6 py-6">
+        <div class="w-120 max-w-[90vw] rounded-xl border border-neutral-200 bg-white px-6 py-6 shadow-sm">
           {/* Row 1: icon + headline */}
           <div class="flex items-center gap-1">
             <Database className="size-4 text-neutral-900" />

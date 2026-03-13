@@ -130,6 +130,7 @@ export function LeftNav({
         {
           type: "item",
           label: "Import data from CSV",
+          disabled: isProfileLocked,
           onClick: () => actions.importTableData(tableMenu.table),
         },
         { type: "sep" },

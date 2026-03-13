@@ -300,7 +300,7 @@ export function TableData({
   // --------------------------------------------------------------------------
 
   return (
-    <div ref={containerRef} class="h-full w-full">
+    <div ref={containerRef} class="h-full min-h-0 w-full">
       <CanvasTable
         columns={columns}
         totalRows={rowOrder.length}

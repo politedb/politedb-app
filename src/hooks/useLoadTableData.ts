@@ -40,6 +40,7 @@ export const DEFAULT_OFFSET = 0;
 
 const RETRY_ATTEMPTS = 8;
 const inflightLoadBySignature = new Map<string, Promise<void>>();
+const latestLoadSignatureByKey = new Map<string, string>();
 
 const EMPTY_META = {
   columns: null,
@@ -55,6 +56,8 @@ const EMPTY_META = {
 
 export type LoadFlags = {
   force?: boolean; // Force refresh everything (bypasses dedup check)
+  forceRows?: boolean; // Force rows reload without refreshing meta/stats
+  refreshRowCount?: boolean; // Refresh COUNT(*) without reloading other stats
   refreshRows?: boolean; // Default true (but first-load always fetches rows)
   refreshMeta?: boolean; // Structure + constraints (default false)
   refreshStats?: boolean; // RowCount + sizeInfo (default false)
@@ -110,6 +113,8 @@ function computeLoadPlan(params: {
   const { key, prev, flags, pagination } = params;
 
   const force = !!flags.force;
+  const forceRows = !!flags.forceRows;
+  const refreshRowCount = !!flags.refreshRowCount;
   const refreshRows = flags.refreshRows ?? true;
   const refreshMeta = flags.refreshMeta ?? false;
   const refreshStats = flags.refreshStats ?? false;
@@ -146,16 +151,19 @@ function computeLoadPlan(params: {
   const paginationChanged = !rowsMatchOffset;
   const needRows =
     force ||
+    forceRows ||
     isFirstLoad ||
     refreshRows ||
     paginationChanged ||
     (!hasAnyRowForPage && !rowsInfo?.running);
 
   const needRowCount =
-    force || (!isFirstLoad && (!hasRowCount || refreshStats));
+    force ||
+    refreshRowCount ||
+    (!isFirstLoad && (!hasRowCount || refreshStats));
   const needSizeInfo =
     force || (!isFirstLoad && (!hasSizeInfo || refreshStats));
-  const needMeta = force || (!isFirstLoad && (metaMissing || refreshMeta));
+  const needMeta = force || refreshMeta || (!isFirstLoad && metaMissing);
 
   const needAnyMetaWork =
     needColumns || needRowCount || needSizeInfo || needMeta;
@@ -164,7 +172,8 @@ function computeLoadPlan(params: {
   const desiredCap = Math.max(1000, limit * 4);
   const capMismatch = rowsInfo ? rowsInfo.cap !== desiredCap : true;
   const needRowsWithLimit =
-    needRows || (capMismatch && (refreshRows || force || paginationChanged));
+    needRows ||
+    (capMismatch && (refreshRows || force || forceRows || paginationChanged));
 
   return {
     key,
@@ -225,6 +234,8 @@ function buildLoadSignature(params: {
     limit: pagination?.limit ?? DEFAULT_LIMIT,
     offset: pagination?.offset ?? DEFAULT_OFFSET,
     force: !!flags.force,
+    forceRows: !!flags.forceRows,
+    refreshRowCount: !!flags.refreshRowCount,
     refreshRows: flags.refreshRows ?? true,
     refreshMeta: flags.refreshMeta ?? false,
     refreshStats: flags.refreshStats ?? false,
@@ -262,9 +273,25 @@ async function loadRowCount(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
 }): Promise<number> {
-  const { connId, schema, tableName, engine, addLogQuery } = params;
-  const q = tableRowCountQuery(schema, tableName, engine);
+  const {
+    connId,
+    schema,
+    tableName,
+    engine,
+    addLogQuery,
+    filters,
+    filterCombine = "AND",
+  } = params;
+  const q = tableRowCountQuery(
+    schema,
+    tableName,
+    filters,
+    filterCombine,
+    engine
+  );
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
   return Number(cellToString((res.rows as unknown[][])?.[0]?.[0]));
@@ -563,9 +590,11 @@ export function useLoadTableData() {
       }
 
       const task = (async () => {
+        latestLoadSignatureByKey.set(key, loadSignature);
+
         // --- DEDUPLICATION CHECK ---
         // If already loading this key and not forced, skip to avoid race conditions
-        if (loadingKeysRef.current.has(key) && !flags.force) {
+        if (loadingKeysRef.current.has(key) && !flags.force && !flags.forceRows) {
           return;
         }
         loadingKeysRef.current.add(key);
@@ -659,8 +688,8 @@ export function useLoadTableData() {
           if (plan.needRows) {
             void (async () => {
               try {
-                // Force refresh means we should invalidate existing cache
-                const shouldReset = !!flags.force;
+                // Force rows refresh invalidates only the rows cache.
+                const shouldReset = !!flags.force || !!flags.forceRows;
 
                 await startRowsStream({
                   key,
@@ -698,7 +727,10 @@ export function useLoadTableData() {
                   tableName,
                   engine: activeTab.engine,
                   addLogQuery,
+                  filters: flags.filters,
+                  filterCombine: flags.filterCombine ?? "AND",
                 });
+                if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
                 patchMeta(setMeta, key, prev, { rowCount });
               })()
             );
@@ -713,6 +745,7 @@ export function useLoadTableData() {
                   tableName,
                   addLogQuery,
                 });
+                if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
                 patchMeta(setMeta, key, prev, { sizeInfo });
                 try {
                   setSizeInfoCache(key, sizeInfo as any);
@@ -731,6 +764,7 @@ export function useLoadTableData() {
                   engine: activeTab.engine,
                   addLogQuery,
                 });
+                if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
                 patchMeta(setMeta, key, prev, {
                   structure,
                   constraints,

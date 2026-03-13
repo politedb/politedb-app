@@ -105,7 +105,8 @@ export function ContextMenu(props: {
                 it.color
                   ? `text-${it.color}-700 hover:bg-${it.color}-50 active:bg-${it.color}-100`
                   : "text-neutral-900 hover:bg-blue-600 hover:text-white active:bg-blue-700",
-                disabled && "text-neutral-400"
+                disabled &&
+                  "text-neutral-500 opacity-50 hover:bg-transparent hover:text-neutral-500 active:bg-transparent active:text-neutral-500"
               )}
             >
               <div class="flex items-center gap-2">

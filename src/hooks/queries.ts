@@ -186,10 +186,15 @@ export const tableExportQuery = (
 export const tableRowCountQuery = (
   schema: string,
   tableName: string,
+  filters?: TableFilterCondition[],
+  combineWith: "AND" | "OR" = "AND",
   engine?: DatabaseEngine
 ) => {
   const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
-  const queryStr = `SELECT COUNT(*) FROM ${tableIdent};`;
+  const where = filters?.length
+    ? buildWhereClause(filters, combineWith, engine)
+    : "";
+  const queryStr = `SELECT COUNT(*) FROM ${tableIdent}${where};`;
   return regexEscape(queryStr);
 };
 
