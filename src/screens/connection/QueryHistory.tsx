@@ -129,12 +129,12 @@ export function QueryHistory({ activeProfileId }: Props) {
 
       <div class="flex-1 overflow-y-auto">
         {queries.length === 0 ? (
-          <Box className="p-8 text-center">
+          <Box className="text-center">
             <Clock className="mx-auto mb-2 size-8 text-neutral-300" />
             <p class="text-sm text-neutral-500">No query history</p>
           </Box>
         ) : (
-          <div class="font-mono text-[12px] leading-5">
+          <div class="font-mono text-sm leading-5">
             {queries.map((q, idx) => {
               const sqlRaw = q.sql ?? "";
               const sql = normalizeSql(sqlRaw);

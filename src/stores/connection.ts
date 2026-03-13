@@ -80,6 +80,7 @@ export type TableMetaState = {
   foreignKeys: ForeignKeyInfo[] | null;
   sizeInfo: TableSizeInfo | null;
   rowCount: number | null;
+  rowCountIsEstimated?: boolean;
   connectionId: string | null; // profile / DB connection
   busy: boolean;
   error: string | null;
@@ -896,32 +897,31 @@ export const useConnectionStore = create<ConnectionState>()(
           const sameStream = prev.streamOffset === nextStreamOffset;
 
           // If resetCache is true, we must assume prev.rows contains stale data (e.g. from previous sort order),
-          // so we force a fresh start (no overlap reuse).
+          // so we force a fresh start (no overlap reuse). We still keep prev.rows visible so the UI
+          // doesn't flicker to empty during refresh — new chunks will overwrite in place.
           const forceFresh = resetCache;
 
           if (!forceFresh && sameCap && sameStream) {
             nextRows = prev.rows;
+          } else if (forceFresh && sameCap && sameStream) {
+            // Silent refresh: keep previous rows visible until new stream chunks overwrite them
+            nextRows = Array.from(prev.rows);
           } else {
             nextRows = new Array(nextCap).fill(undefined);
 
-            // Only copy overlap if we are NOT forcing a fresh start
-            if (!forceFresh) {
-              const prevBase = prev.base;
-              const prevEnd = prev.base + prev.cap;
-
-              const newBase = nextStreamOffset; // align base to streamOffset
-              const newEnd = newBase + nextCap;
-
-              const overlapStart = Math.max(prevBase, newBase);
-              const overlapEnd = Math.min(prevEnd, newEnd);
-
-              if (overlapEnd > overlapStart) {
-                const len = overlapEnd - overlapStart;
-                const srcOff = overlapStart - prevBase;
-                const dstOff = overlapStart - newBase;
-                for (let i = 0; i < len; i++) {
-                  nextRows[dstOff + i] = prev.rows[srcOff + i];
-                }
+            // Copy overlap: when !forceFresh for normal load; when forceFresh (refresh) keep overlap visible so UI doesn't flicker to empty
+            const prevBase = prev.base;
+            const prevEnd = prev.base + prev.cap;
+            const newBase = nextStreamOffset;
+            const newEnd = newBase + nextCap;
+            const overlapStart = Math.max(prevBase, newBase);
+            const overlapEnd = Math.min(prevEnd, newEnd);
+            if (overlapEnd > overlapStart) {
+              const len = overlapEnd - overlapStart;
+              const srcOff = overlapStart - prevBase;
+              const dstOff = overlapStart - newBase;
+              for (let i = 0; i < len; i++) {
+                nextRows[dstOff + i] = prev.rows[srcOff + i];
               }
             }
 
@@ -947,10 +947,13 @@ export const useConnectionStore = create<ConnectionState>()(
 
             rows: nextRows,
 
-            // If resetting cache, ensure loadedMax is reset so UI doesn't think we have data
-            loadedMax: forceFresh
-              ? nextStreamOffset - 1
-              : Math.max(prev.loadedMax, nextStreamOffset - 1),
+            // When forceFresh we keep prev.rows visible, so keep loadedMax so UI state stays consistent
+            loadedMax:
+              forceFresh && sameCap && sameStream
+                ? prev.loadedMax
+                : forceFresh
+                  ? nextStreamOffset - 1
+                  : Math.max(prev.loadedMax, nextStreamOffset - 1),
 
             running: true,
             error: null,

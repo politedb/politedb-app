@@ -304,17 +304,8 @@ export function useConnectionActions(
     async (nextLimit: number, nextOffset: number) => {
       setLimit(nextLimit);
       setOffset(nextOffset);
-
-      if (!activeTableWindow) return;
-
-      await loadTableData(
-        activeTableWindow.table.schema,
-        activeTableWindow.table.name,
-        { limit: nextLimit, offset: nextOffset },
-        { refreshRows: true }
-      );
     },
-    [setLimit, setOffset, activeTableWindow, loadTableData]
+    [setLimit, setOffset]
   );
 
   const refresh = useCallback(async () => {
@@ -398,35 +389,38 @@ export function useConnectionActions(
     return { [activeTableWindow.id]: entry } as unknown as PatchMap;
   }, [activeProfileScreen, activeTableWindow]);
 
-  const syncTableMeta = useCallback((targetTableName?: string) => {
-    if (!activeTableWindow) return;
+  const syncTableMeta = useCallback(
+    (targetTableName?: string) => {
+      if (!activeTableWindow) return;
 
-    const s = useConnectionStore.getState();
-    const tableNameToUse = targetTableName ?? activeTableWindow.table.name;
+      const s = useConnectionStore.getState();
+      const tableNameToUse = targetTableName ?? activeTableWindow.table.name;
 
-    const key = tableKey(
-      activeProfileScreen,
-      activeTableWindow.table.schema,
-      tableNameToUse
-    );
-    const fresh = s.tableDataMap[key];
-    if (fresh) {
-      if (Array.isArray(fresh.structure)) {
-        s.setTableStructure(
-          activeProfileScreen,
-          activeTableWindow.id,
-          fresh.structure
-        );
+      const key = tableKey(
+        activeProfileScreen,
+        activeTableWindow.table.schema,
+        tableNameToUse
+      );
+      const fresh = s.tableDataMap[key];
+      if (fresh) {
+        if (Array.isArray(fresh.structure)) {
+          s.setTableStructure(
+            activeProfileScreen,
+            activeTableWindow.id,
+            fresh.structure
+          );
+        }
+        if (Array.isArray(fresh.constraints)) {
+          s.setTableConstraints(
+            activeProfileScreen,
+            activeTableWindow.id,
+            fresh.constraints
+          );
+        }
       }
-      if (Array.isArray(fresh.constraints)) {
-        s.setTableConstraints(
-          activeProfileScreen,
-          activeTableWindow.id,
-          fresh.constraints
-        );
-      }
-    }
-  }, [activeProfileScreen, activeTableWindow]);
+    },
+    [activeProfileScreen, activeTableWindow]
+  );
 
   const applyPatchesForActiveWindow = useCallback(async () => {
     if (isActiveTabLocked) return;
@@ -463,21 +457,21 @@ export function useConnectionActions(
 
       let targetTableName = activeTableWindow.table.name;
       const metadataPatch = entry?.patches?.update?.structure?.["-1"];
-      
+
       if (
-        metadataPatch && 
-        typeof metadataPatch.tableName === "string" && 
+        metadataPatch &&
+        typeof metadataPatch.tableName === "string" &&
         metadataPatch.tableName !== activeTableWindow.table.name
       ) {
         targetTableName = metadataPatch.tableName;
-        
+
         const screenStore = useScreenStore.getState();
         const windows = screenStore.openWindows[activeProfileScreen] ?? [];
-        const nextWindows = windows.map(w => {
+        const nextWindows = windows.map((w) => {
           if (w.id === activeTableWindow.id && w.type === "table") {
             return {
               ...w,
-              table: { ...w.table, name: targetTableName }
+              table: { ...w.table, name: targetTableName },
             };
           }
           return w;

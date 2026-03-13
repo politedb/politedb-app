@@ -198,6 +198,37 @@ export const tableRowCountQuery = (
   return regexEscape(queryStr);
 };
 
+export const tableEstimatedRowCountQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  if (engine === "postgres") {
+    const queryStr = `
+      SELECT GREATEST(pc.reltuples::bigint, 0)::bigint
+      FROM pg_class pc
+      JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+      WHERE pn.nspname = ${qLiteral(schema)}
+        AND pc.relname = ${qLiteral(tableName)}
+        AND pc.relkind IN ('r', 'p', 'm');
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (isMySqlLike(engine)) {
+    const queryStr = `
+      SELECT COALESCE(table_rows, 0)
+      FROM information_schema.tables
+      WHERE table_schema = ${qLiteral(schema)}
+        AND table_name = ${qLiteral(tableName)}
+      LIMIT 1;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  return null;
+};
+
 export const tableOidQuery = (schema: string, tableName: string) => {
   const queryStr = `SELECT '${qIdent(schema)}.${qIdent(tableName)}'::regclass::oid;`;
   return regexEscape(queryStr);

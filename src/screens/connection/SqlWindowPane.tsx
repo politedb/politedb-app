@@ -37,6 +37,7 @@ export function SqlWindowPane(props: {
       metaKey,
       engine,
       connectionId: runtimeConnectionId,
+      includeColumns: true,
       lazy: true,
     });
   }, [metadata, metaKey, engine, runtimeConnectionId]);

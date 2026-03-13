@@ -58,6 +58,7 @@ const EMPTY_META = {
   foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
+  rowCountIsEstimated: false,
   busy: false,
   error: null,
 };
@@ -65,6 +66,8 @@ const EMPTY_META = {
 const EMPTY_ARRAY: any[] = [];
 const EMPTY_SET = new Set<number>();
 const loadedQuerySignatureByTable = new Map<string, string>();
+const loadedRowCountSignatureByTable = new Map<string, string>();
+const loadedRowsDataSignatureByTable = new Map<string, string>();
 
 function extractPatches(patches: WindowPatches | null) {
   if (!patches) return null;
@@ -185,6 +188,16 @@ export function MainTableDataPane(props: {
     [activeKey, limit, offset, appliedFilterCombine, filterSignature]
   );
 
+  const rowCountSignature = useMemo(
+    () => `${activeKey}:${appliedFilterCombine}:${filterSignature}`,
+    [activeKey, appliedFilterCombine, filterSignature]
+  );
+
+  const rowsDataSignature = useMemo(
+    () => `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}`,
+    [activeKey, offset, appliedFilterCombine, filterSignature]
+  );
+
   /* ===========================================================================
    * Subscribe minimal state
    * =========================================================================== */
@@ -197,35 +210,54 @@ export function MainTableDataPane(props: {
       loadedQuerySignatureByTable.get(activeKey) !== activeQuerySignature;
     const currentMeta =
       useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
+    const shouldRefreshRowCount =
+      typeof currentMeta.rowCount !== "number" ||
+      loadedRowCountSignatureByTable.get(activeKey) !== rowCountSignature;
+    const shouldResetRowsCache =
+      loadedRowsDataSignatureByTable.get(activeKey) !== rowsDataSignature;
 
     useConnectionStore.getState().initRows(activeKey, 5000);
 
+    // Mark this query signature as the active render target immediately so
+    // slow auxiliary metadata work (COUNT, size info, FK/structure) does not
+    // keep the whole table pane in a blocking loading state.
+    loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
+    rerender();
+
     // Reuse cached table state when switching back to a table with the same
     // query signature. Force a reload only when the effective query changed.
-    await loadTableData(
+    void loadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       { limit, offset },
       {
-        forceRows: shouldForceReload,
-        refreshRowCount: shouldForceReload,
+        forceRows: shouldResetRowsCache,
+        refreshRowCount: shouldRefreshRowCount,
         refreshRows: shouldForceReload,
-        refreshMeta:
-          !Array.isArray(currentMeta.columns) ||
-          !Array.isArray(currentMeta.foreignKeys),
+        // Foreign keys are useful for cross-table navigation, but structure /
+        // constraints should stay lazy until the Structure tab is opened.
+        refreshForeignKeys: !Array.isArray(currentMeta.foreignKeys),
         refreshStats: false,
         filters: appliedFilters.length ? appliedFilters : undefined,
         filterCombine: appliedFilterCombine,
       }
-    );
-    loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
-    rerender();
+    ).catch(() => {
+      // Error state is already written into the store by loadTableData.
+      rerender();
+    });
+
+    if (shouldRefreshRowCount) {
+      loadedRowCountSignatureByTable.set(activeKey, rowCountSignature);
+    }
+    loadedRowsDataSignatureByTable.set(activeKey, rowsDataSignature);
   }, [
     activeTableWindow,
     activeKey,
     appliedFilters,
     appliedFilterCombine,
     activeQuerySignature,
+    rowCountSignature,
+    rowsDataSignature,
   ]);
 
   useEffect(() => {
@@ -296,6 +328,7 @@ export function MainTableDataPane(props: {
       {
         refreshRows: false,
         refreshMeta: true,
+        refreshForeignKeys: false,
         refreshStats: false,
       }
     );
@@ -344,13 +377,48 @@ export function MainTableDataPane(props: {
   const queryMatchesRenderedData =
     loadedQuerySignatureByTable.get(activeKey) === activeQuerySignature;
 
+  // Only show full-page loading on initial load. During refresh keep the table visible with
+  // existing (stale) data so the screen state stays the same and data updates silently.
   const shouldShowLoading =
     !hasError &&
     (!columnsLoaded ||
-      !foreignKeysLoaded ||
       !rowsInfo ||
       (!hasRenderedTableBefore &&
         (!currentPageLoaded || !queryMatchesRenderedData)));
+
+  // Foreign key metadata powers cross-table navigation, but it can be loaded
+  // after the first page of rows is already visible.
+  useEffect(() => {
+    if (viewMode !== "data") return;
+    if (!activeTableWindow) return;
+    if (meta.busy) return;
+    if (foreignKeysLoaded) return;
+    if (!columnsLoaded) return;
+    if (!rowsInfo) return;
+    if (!currentPageLoaded) return;
+
+    void loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        refreshRows: false,
+        refreshForeignKeys: true,
+        refreshStats: false,
+      }
+    );
+  }, [
+    viewMode,
+    activeTableWindow,
+    meta.busy,
+    foreignKeysLoaded,
+    columnsLoaded,
+    rowsInfo,
+    currentPageLoaded,
+    loadTableData,
+    limit,
+    offset,
+  ]);
 
   /* ===========================================================================
    * Mutations
@@ -430,15 +498,18 @@ export function MainTableDataPane(props: {
   const pageTotal = useMemo(() => {
     if (!rowsInfo) return 0;
 
-    return Math.max(basePageTotal, loadedRowCount);
-  }, [rowsInfo, basePageTotal, loadedRowCount]);
-
-  const visiblePageTotal = useMemo(() => {
     if (hasAppliedFilters) {
       return loadedRowCount;
     }
-    return pageTotal;
-  }, [hasAppliedFilters, loadedRowCount, pageTotal]);
+
+    if (loadedRowCount <= 0) {
+      return basePageTotal;
+    }
+
+    return Math.min(basePageTotal, loadedRowCount);
+  }, [rowsInfo, hasAppliedFilters, basePageTotal, loadedRowCount]);
+
+  const visiblePageTotal = pageTotal;
 
   const totalRows = useMemo(() => {
     if (typeof rowsInfo?.loadedMax !== "number" || rowsInfo.loadedMax < 0) {
@@ -487,8 +558,6 @@ export function MainTableDataPane(props: {
         { id: 0, column: refColumn, operator: "=", value, enabled: true },
       ] as const;
 
-      await actions.selectTable({ schema: refSchema, name: refTable });
-
       const s = useConnectionStore.getState();
       const currentFilter = s.tableFilterByKey[refKey] ?? DEFAULT_FILTER_STATE;
 
@@ -501,8 +570,14 @@ export function MainTableDataPane(props: {
         appliedFilterCombine: "AND",
       });
 
+      // Force the destination table to reload with the new FK filter instead
+      // of briefly reusing the previous query signature / stale rows.
+      loadedQuerySignatureByTable.delete(refKey);
+
       // Allow row load effect to run even when navigating within the same table.
       startedRef.current = null;
+
+      await actions.selectTable({ schema: refSchema, name: refTable });
     },
     [actions, profileId]
   );
@@ -525,6 +600,32 @@ export function MainTableDataPane(props: {
     },
     [limit, offset, loadTableData]
   );
+
+  const handleCountExact = useCallback(async (includeFilters: boolean) => {
+    await loadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name,
+      { limit, offset },
+      {
+        refreshRows: false,
+        refreshMeta: false,
+        refreshStats: false,
+        refreshRowCount: true,
+        exactRowCount: true,
+        filters:
+          includeFilters && appliedFilters.length ? appliedFilters : undefined,
+        filterCombine: includeFilters ? appliedFilterCombine : "AND",
+      }
+    );
+  }, [
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name,
+    limit,
+    offset,
+    loadTableData,
+    appliedFilters,
+    appliedFilterCombine,
+  ]);
 
   /* ===========================================================================
    * Export / Import / Clone / Truncate / Drop
@@ -798,7 +899,9 @@ export function MainTableDataPane(props: {
         offset={offset}
         loadedMax={loadedMax}
         totalRows={footerTotalRows}
+        rowCountIsEstimated={!!meta.rowCountIsEstimated}
         onPageChange={pageChange}
+        onCountExact={handleCountExact}
         onAddRow={() => {
           if (isProfileLocked) return;
           handleAddRow(meta.columns ?? [], pageTotal, onDataChange)

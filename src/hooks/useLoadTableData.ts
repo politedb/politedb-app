@@ -10,6 +10,7 @@ import {
   tableConstraintsMySqlQuery,
   tableForeignKeysQuery,
   tableRowCountQuery,
+  tableEstimatedRowCountQuery,
   tableSizeInfoQuery,
   tableStructuresQuery,
   tableStructuresMySqlQuery,
@@ -49,6 +50,7 @@ const EMPTY_META = {
   foreignKeys: null,
   sizeInfo: null,
   rowCount: null,
+  rowCountIsEstimated: false,
   connectionId: null,
   busy: false,
   error: null,
@@ -58,8 +60,10 @@ export type LoadFlags = {
   force?: boolean; // Force refresh everything (bypasses dedup check)
   forceRows?: boolean; // Force rows reload without refreshing meta/stats
   refreshRowCount?: boolean; // Refresh COUNT(*) without reloading other stats
+  exactRowCount?: boolean; // Force exact COUNT(*) instead of estimate
   refreshRows?: boolean; // Default true (but first-load always fetches rows)
   refreshMeta?: boolean; // Structure + constraints (default false)
+  refreshForeignKeys?: boolean; // Foreign keys only (default false)
   refreshStats?: boolean; // RowCount + sizeInfo (default false)
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
@@ -96,6 +100,7 @@ type LoadPlan = {
   needRowCount: boolean;
   needSizeInfo: boolean;
   needMeta: boolean;
+  needForeignKeys: boolean;
 
   // busy should reflect only meta/columns/stats work, NOT rows streaming
   needAnyMetaWork: boolean;
@@ -117,6 +122,7 @@ function computeLoadPlan(params: {
   const refreshRowCount = !!flags.refreshRowCount;
   const refreshRows = flags.refreshRows ?? true;
   const refreshMeta = flags.refreshMeta ?? false;
+  const refreshForeignKeys = flags.refreshForeignKeys ?? false;
   const refreshStats = flags.refreshStats ?? false;
 
   const limit = pagination?.limit ?? DEFAULT_LIMIT;
@@ -141,6 +147,7 @@ function computeLoadPlan(params: {
     Array.isArray(prev.structure) && prev.structure.length > 0;
   const hasConstraints =
     Array.isArray(prev.constraints) && prev.constraints.length > 0;
+  const hasForeignKeys = Array.isArray(prev.foreignKeys);
 
   const isFirstLoad = !hasColumns || !hasRowsWindow;
   const metaMissing = !hasStructure || !hasConstraints;
@@ -164,9 +171,14 @@ function computeLoadPlan(params: {
   const needSizeInfo =
     force || (!isFirstLoad && (!hasSizeInfo || refreshStats));
   const needMeta = force || refreshMeta || (!isFirstLoad && metaMissing);
+  const needForeignKeys = force || refreshForeignKeys || !hasForeignKeys;
 
   const needAnyMetaWork =
-    needColumns || needRowCount || needSizeInfo || needMeta;
+    needColumns ||
+    needRowCount ||
+    needSizeInfo ||
+    needMeta ||
+    needForeignKeys;
 
   // Check if rows capacity needs update
   const desiredCap = Math.max(1000, limit * 4);
@@ -185,6 +197,7 @@ function computeLoadPlan(params: {
     needRowCount,
     needSizeInfo,
     needMeta,
+    needForeignKeys,
     needAnyMetaWork,
   };
 }
@@ -195,7 +208,8 @@ function shouldDoAnything(p: LoadPlan) {
     p.needRows ||
     p.needRowCount ||
     p.needSizeInfo ||
-    p.needMeta
+    p.needMeta ||
+    p.needForeignKeys
   );
 }
 
@@ -238,6 +252,7 @@ function buildLoadSignature(params: {
     refreshRowCount: !!flags.refreshRowCount,
     refreshRows: flags.refreshRows ?? true,
     refreshMeta: flags.refreshMeta ?? false,
+    refreshForeignKeys: flags.refreshForeignKeys ?? false,
     refreshStats: flags.refreshStats ?? false,
     filterCombine: flags.filterCombine ?? "AND",
     filters,
@@ -275,7 +290,8 @@ async function loadRowCount(params: {
   addLogQuery: (sql: string) => void;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
-}): Promise<number> {
+  exact?: boolean;
+}): Promise<{ value: number; estimated: boolean }> {
   const {
     connId,
     schema,
@@ -284,17 +300,24 @@ async function loadRowCount(params: {
     addLogQuery,
     filters,
     filterCombine = "AND",
+    exact = false,
   } = params;
-  const q = tableRowCountQuery(
-    schema,
-    tableName,
-    filters,
-    filterCombine,
-    engine
+  const hasFilters = Boolean(
+    filters?.some((f) => f.enabled && (f.column ?? "").trim())
   );
+  const estimatedQ =
+    !exact && !hasFilters
+      ? tableEstimatedRowCountQuery(schema, tableName, engine)
+      : null;
+  const q =
+    estimatedQ ??
+    tableRowCountQuery(schema, tableName, filters, filterCombine, engine);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
-  return Number(cellToString((res.rows as unknown[][])?.[0]?.[0]));
+  return {
+    value: Number(cellToString((res.rows as unknown[][])?.[0]?.[0])),
+    estimated: Boolean(estimatedQ),
+  };
 }
 
 async function loadSizeInfo(params: {
@@ -322,13 +345,20 @@ async function loadMeta(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
-}): Promise<{ structure: any[]; constraints: any[]; foreignKeys: any[] }> {
+}): Promise<{ structure: any[]; constraints: any[] }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (engine === "mysql" || engine === "mariadb") {
     const qStructure = tableStructuresMySqlQuery(schema, tableName);
-    const structureRes = await runSqlQuery(connId, qStructure);
+    const qConstraints = tableConstraintsMySqlQuery(schema, tableName);
+
+    const [structureRes, constraintsRes] = await Promise.all([
+      runSqlQuery(connId, qStructure),
+      runSqlQuery(connId, qConstraints),
+    ]);
+
     addLogQuery(qStructure);
+    addLogQuery(qConstraints);
 
     const structure = (structureRes.rows as unknown[][]).map((row) => ({
       column_name: cellToString(row?.[1]),
@@ -338,10 +368,6 @@ async function loadMeta(params: {
       column_default: cellToString(row?.[4]),
       comment: cellToString(row?.[5]) ?? "",
     }));
-
-    const qConstraints = tableConstraintsMySqlQuery(schema, tableName);
-    const constraintsRes = await runSqlQuery(connId, qConstraints);
-    addLogQuery(qConstraints);
 
     const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
       index_name: cellToString(row?.[0]),
@@ -355,7 +381,7 @@ async function loadMeta(params: {
       comment: "",
     }));
 
-    return { structure, constraints, foreignKeys: [] };
+    return { structure, constraints };
   }
 
   // 1. Get OID
@@ -366,8 +392,15 @@ async function loadMeta(params: {
 
   // 2. Structure
   const qStructure = tableStructuresQuery(schema, tableName, oid);
-  const structureRes = await runSqlQuery(connId, qStructure);
+  const qConstraints = tableConstraintsQuery(schema, tableName);
+
+  const [structureRes, constraintsRes] = await Promise.all([
+    runSqlQuery(connId, qStructure),
+    runSqlQuery(connId, qConstraints),
+  ]);
+
   addLogQuery(qStructure);
+  addLogQuery(qConstraints);
 
   const structure = (structureRes.rows as unknown[][]).map((row) => ({
     column_name: cellToString(row?.[1]),
@@ -379,9 +412,6 @@ async function loadMeta(params: {
   }));
 
   // 3. Constraints
-  const qConstraints = tableConstraintsQuery(schema, tableName);
-  const constraintsRes = await runSqlQuery(connId, qConstraints);
-  addLogQuery(qConstraints);
 
   const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
     index_name: cellToString(row?.[0]),
@@ -395,28 +425,37 @@ async function loadMeta(params: {
     comment: cellToString(row?.[8]),
   }));
 
-  // 4. Foreign keys (Postgres only)
-  let foreignKeys: any[] = [];
-  try {
-    const qFk = tableForeignKeysQuery(schema, tableName);
-    const fkRes = await runSqlQuery(connId, qFk);
-    addLogQuery(qFk);
-    foreignKeys = (fkRes.rows as unknown[][]).map((row) => ({
-      constraint_name: cellToString(row?.[0]),
-      table_schema: cellToString(row?.[1]),
-      table_name: cellToString(row?.[2]),
-      column_names: cellToString(row?.[3]),
-      ref_table_schema: cellToString(row?.[4]),
-      ref_table_name: cellToString(row?.[5]),
-      ref_column_names: cellToString(row?.[6]),
-      on_update: cellToString(row?.[7]) || "NO ACTION",
-      on_delete: cellToString(row?.[8]) || "NO ACTION",
-    }));
-  } catch {
-    // Ignore if FK query fails
+  return { structure, constraints };
+}
+
+async function loadForeignKeys(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+  engine?: DatabaseEngine;
+  addLogQuery: (sql: string) => void;
+}): Promise<any[]> {
+  const { connId, schema, tableName, engine, addLogQuery } = params;
+
+  if (engine === "mysql" || engine === "mariadb") {
+    return [];
   }
 
-  return { structure, constraints, foreignKeys };
+  const qFk = tableForeignKeysQuery(schema, tableName);
+  const fkRes = await runSqlQuery(connId, qFk);
+  addLogQuery(qFk);
+
+  return (fkRes.rows as unknown[][]).map((row) => ({
+    constraint_name: cellToString(row?.[0]),
+    table_schema: cellToString(row?.[1]),
+    table_name: cellToString(row?.[2]),
+    column_names: cellToString(row?.[3]),
+    ref_table_schema: cellToString(row?.[4]),
+    ref_table_name: cellToString(row?.[5]),
+    ref_column_names: cellToString(row?.[6]),
+    on_update: cellToString(row?.[7]) || "NO ACTION",
+    on_delete: cellToString(row?.[8]) || "NO ACTION",
+  }));
 }
 
 async function startRowsStream(params: {
@@ -594,7 +633,11 @@ export function useLoadTableData() {
 
         // --- DEDUPLICATION CHECK ---
         // If already loading this key and not forced, skip to avoid race conditions
-        if (loadingKeysRef.current.has(key) && !flags.force && !flags.forceRows) {
+        if (
+          loadingKeysRef.current.has(key) &&
+          !flags.force &&
+          !flags.forceRows
+        ) {
           return;
         }
         loadingKeysRef.current.add(key);
@@ -729,9 +772,13 @@ export function useLoadTableData() {
                   addLogQuery,
                   filters: flags.filters,
                   filterCombine: flags.filterCombine ?? "AND",
+                  exact: !!flags.exactRowCount,
                 });
                 if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
-                patchMeta(setMeta, key, prev, { rowCount });
+                patchMeta(setMeta, key, prev, {
+                  rowCount: rowCount.value,
+                  rowCountIsEstimated: rowCount.estimated,
+                });
               })()
             );
           }
@@ -757,7 +804,7 @@ export function useLoadTableData() {
           if (plan.needMeta && supportsMeta) {
             metaTasks.push(
               (async () => {
-                const { structure, constraints, foreignKeys } = await loadMeta({
+                const { structure, constraints } = await loadMeta({
                   connId,
                   schema,
                   tableName,
@@ -768,8 +815,23 @@ export function useLoadTableData() {
                 patchMeta(setMeta, key, prev, {
                   structure,
                   constraints,
-                  foreignKeys,
                 });
+              })()
+            );
+          }
+
+          if (plan.needForeignKeys && supportsMeta) {
+            metaTasks.push(
+              (async () => {
+                const foreignKeys = await loadForeignKeys({
+                  connId,
+                  schema,
+                  tableName,
+                  engine: activeTab.engine,
+                  addLogQuery,
+                });
+                if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
+                patchMeta(setMeta, key, prev, { foreignKeys });
               })()
             );
           }

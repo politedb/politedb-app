@@ -139,11 +139,6 @@ function getOrCreate(opId: string): StreamEntry {
 export function ensureSqlStreamStarted(opId: string) {
   const entry = getOrCreate(opId);
   if (entry.started) return;
-  console.log(
-    "[hook] ensure start",
-    opId,
-    "FILE=connection/hooks/useSqlStreamResult"
-  );
   entry.started = true;
   entry.status = "running";
   entry.lastEventAt = Date.now();
@@ -171,7 +166,6 @@ export function ensureSqlStreamStarted(opId: string) {
     .subscribe(opId, {
       onChunk: (chunk: TableChunk) => {
         if (entry.status === "error" || entry.status === "done") return;
-        console.log("[hook] chunk", opId, chunk.seq, chunk.rows?.length);
         entry.lastEventAt = Date.now();
 
         const maybeCols = (chunk as any)?.columns;
@@ -256,7 +250,6 @@ export function ensureSqlStreamStarted(opId: string) {
  * ============================================================================= */
 
 export function clearSqlStream(opId: string) {
-  console.log("[hook] clear", opId, new Error().stack);
   const entry = streams.get(opId);
   if (!entry) return;
 

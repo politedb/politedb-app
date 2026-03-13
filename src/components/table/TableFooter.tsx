@@ -1,10 +1,12 @@
-import { useCallback, useMemo } from "preact/hooks";
+import { useCallback, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { ChevronLeft, ChevronRight, Plus } from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 import { Select } from "src/components/common/Select";
 import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
 import { cn } from "src/utils/cn";
+import { Checkbox } from "src/components/common/Checkbox";
+import { Popover } from "src/components/common/Popover";
 
 interface Props {
   filterBarVisible: boolean;
@@ -13,6 +15,7 @@ interface Props {
 
   // total rows (rowCount if known, else whatever you pass today)
   totalRows: number;
+  rowCountIsEstimated?: boolean;
 
   // ✅ rows stream progress (global row index max loaded so far)
   loadedMax?: number;
@@ -21,6 +24,7 @@ interface Props {
   viewMode: TableViewMode;
   onViewModeChange: (mode: TableViewMode) => void;
   onPageChange: (limit: number, offset: number) => void;
+  onCountExact?: (includeFilters: boolean) => void | Promise<void>;
   onAddColumn: () => void;
   onAddIndex: () => void;
   onAddRow: () => void;
@@ -36,17 +40,23 @@ export function TableFooter({
   limit,
   offset,
   totalRows,
+  rowCountIsEstimated = false,
   loadedMax,
   viewMode,
   structPaneTab,
   onViewModeChange,
   onPageChange,
+  onCountExact,
   onAddColumn,
   onAddIndex,
   onAddRow,
   onFilters,
   readOnly = false,
 }: Props) {
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [countBusy, setCountBusy] = useState(false);
+  const [includeFilters, setIncludeFilters] = useState(true);
+
   // Calculate pagination
   const pagination = useMemo(() => {
     const startIndex = offset;
@@ -79,7 +89,9 @@ export function TableFooter({
     const formatNumber = (value: number) => numberFormatter.format(value);
 
     if (typeof loadedMax !== "number" || loadedMax < 0) {
-      return "Rows loaded: 0";
+      return rowCountIsEstimated && totalRows > 0
+        ? `0 of ~${formatNumber(totalRows)} rows`
+        : "0 rows";
     }
 
     // loadedMax is 0-based index => +1 rows count
@@ -89,13 +101,25 @@ export function TableFooter({
     const start = offset + 1;
     const end = Math.min(offset + limit, loadedCount);
 
-    if (end < start) return `Rows loaded: ${formatNumber(loadedCount)}`;
+    if (end < start) return `${formatNumber(loadedCount)} rows`;
 
     // If totalRows is unknown, you can pass 0. We won't show "of N".
-    const totalPart = totalRows > 0 ? ` of ${formatNumber(totalRows)}` : "";
+    const totalPrefix = rowCountIsEstimated ? "~" : "";
+    const totalPart =
+      totalRows > 0 ? ` of ${totalPrefix}${formatNumber(totalRows)} rows` : "";
 
-    return `Rows loaded: ${formatNumber(start)}–${formatNumber(end)}${totalPart}`;
-  }, [viewMode, loadedMax, offset, limit, totalRows]);
+    return `${formatNumber(start)}-${formatNumber(end)}${totalPart}`;
+  }, [viewMode, loadedMax, offset, limit, totalRows, rowCountIsEstimated]);
+
+  const handleCountConfirm = useCallback(async () => {
+    if (!onCountExact) return;
+    try {
+      setCountBusy(true);
+      await onCountExact(includeFilters);
+    } finally {
+      setCountBusy(false);
+    }
+  }, [onCountExact, includeFilters]);
 
   return (
     <div class="flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
@@ -146,7 +170,62 @@ export function TableFooter({
 
       {/* CENTER */}
       {viewMode === "data" && (
-        <div class="text-xs text-neutral-600 tabular-nums">{loadedLabel}</div>
+        <div class="flex items-center text-xs text-neutral-600 tabular-nums">
+          <Popover
+            open={isPopoverOpen}
+            onOpenChange={setIsPopoverOpen}
+            positions={["top", "bottom"]}
+            align="center"
+            padding={14}
+            contentClassName="max-w-lg rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+            content={
+              <div>
+                <div class="text-center text-sm font-medium text-neutral-800">
+                  {countBusy ? "Counting..." : loadedLabel}
+                </div>
+
+                <p class="mt-2 text-sm text-orange-500">
+                  This is the estimated value, click "Count" to retrieve the
+                  exact value. It may affect your server performance
+                </p>
+
+                <div class="mt-2 w-fit">
+                  <Checkbox
+                    checked={includeFilters}
+                    onChange={(e) =>
+                      setIncludeFilters((e.target as HTMLInputElement).checked)
+                    }
+                    label="Include current filter conditions"
+                    className="size-4 rounded-md"
+                  />
+                </div>
+
+                <div class="mt-4 flex justify-center">
+                  <Button
+                    variant="shadow"
+                    disabled={countBusy}
+                    onClick={async () => {
+                      await handleCountConfirm();
+                      setIsPopoverOpen(false);
+                    }}
+                  >
+                    {countBusy ? "Counting..." : "Count"}
+                  </Button>
+                </div>
+              </div>
+            }
+          >
+            <button
+              type="button"
+              onClick={() => setIsPopoverOpen((open) => !open)}
+              aria-expanded={isPopoverOpen}
+              aria-haspopup="dialog"
+              class="rounded-full px-2 py-1 text-sm transition-colors hover:bg-neutral-200"
+            >
+              {loadedLabel}
+            </button>
+          </Popover>
+        </div>
       )}
 
       {/* RIGHT */}

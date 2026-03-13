@@ -17,6 +17,7 @@ export type DbMetadata = {
   functions: FunctionItem[];
   tables: TableItem[];
   columnsByTable: Record<string, string[]>;
+  columnsLoaded: boolean;
 
   loading: boolean;
   loaded: boolean;
@@ -40,6 +41,7 @@ function emptyMeta(engine?: DatabaseEngine): DbMetadata {
     functions: [],
     tables: [],
     columnsByTable: {},
+    columnsLoaded: false,
     loading: false,
     loaded: false,
     error: null,
@@ -65,19 +67,42 @@ export function useDatabaseMetadata() {
     touch();
   };
 
+  const runMetadataQuery = useCallback(
+    (connectionId: string, sql: string) =>
+      runSqlQuery(connectionId, sql, {
+        // Metadata queries often return many rows; larger batches reduce FE/BE
+        // event churn and speed up sidebar hydration noticeably.
+        batchSize: 1000,
+      }),
+    []
+  );
+
   const load = useCallback(
     async (args: {
       metaKey: string; // ✅ stable
       engine?: DatabaseEngine;
       connectionId: string; // ✅ runtime id for executing queries
       force?: boolean;
+      includeColumns?: boolean;
     }) => {
-      const { metaKey, engine, connectionId, force = false } = args;
+      const {
+        metaKey,
+        engine,
+        connectionId,
+        force = false,
+        includeColumns = false,
+      } = args;
 
       const existing = cacheRef.current[metaKey];
 
       // If loaded and not forced -> fast path
-      if (existing?.loaded && !force) return existing;
+      if (
+        existing?.loaded &&
+        !force &&
+        (!includeColumns || existing.columnsLoaded)
+      ) {
+        return existing;
+      }
 
       // If already loading -> reuse inflight
       if (existing?.loading && inflightRef.current[metaKey]) {
@@ -90,7 +115,12 @@ export function useDatabaseMetadata() {
         schemas: force ? [] : (existing?.schemas ?? []),
         functions: force ? [] : (existing?.functions ?? []),
         tables: force ? [] : (existing?.tables ?? []),
-        columnsByTable: force ? {} : (existing?.columnsByTable ?? {}),
+        columnsByTable:
+          force && includeColumns ? {} : (existing?.columnsByTable ?? {}),
+        columnsLoaded:
+          includeColumns && force
+            ? false
+            : (existing?.columnsLoaded ?? false),
         loading: true,
         loaded: false,
         error: null,
@@ -102,15 +132,21 @@ export function useDatabaseMetadata() {
         try {
           const q = getMetadataQueries(engine);
 
-          // Schemas (0 -> 10)
-          const schemasRes = await runSqlQuery(connectionId, q.schemasQuery);
+          const [schemasRes, functionsRes, tablesRes, colsRes] =
+            await Promise.all([
+              runMetadataQuery(connectionId, q.schemasQuery),
+              runMetadataQuery(connectionId, q.functionsQuery),
+              runMetadataQuery(connectionId, q.tablesQuery),
+              includeColumns
+                ? runMetadataQuery(connectionId, q.columnsQuery)
+                : Promise.resolve(null),
+            ]);
+
           const schemas = (schemasRes.rows ?? [])
             .map((r: any) => cellToString(r?.[0]) ?? "")
             .filter(Boolean);
           setCache(metaKey, { schemas, progress: 10, stage: "functions" });
 
-          // Functions (10 -> 20)
-          const functionsRes = await runSqlQuery(connectionId, q.functionsQuery);
           const functions: FunctionItem[] = (functionsRes.rows ?? [])
             .map((r: any): FunctionItem => {
               const schema = cellToString(r?.[0]) ?? "";
@@ -121,8 +157,6 @@ export function useDatabaseMetadata() {
             .filter((f: FunctionItem) => Boolean(f.schema && f.name));
           setCache(metaKey, { functions, progress: 20, stage: "tables" });
 
-          // Tables (20 -> 35)
-          const tablesRes = await runSqlQuery(connectionId, q.tablesQuery);
           const tables: TableItem[] = (tablesRes.rows ?? [])
             .map((r: any): TableItem => {
               const rawKind = cellToString(r?.[2])?.toUpperCase() ?? "";
@@ -138,32 +172,38 @@ export function useDatabaseMetadata() {
             .filter((t: TableItem) => Boolean(t.schema && t.name));
           setCache(metaKey, { tables, progress: 35, stage: "columns" });
 
-          // Columns (35 -> 100)
-          const colsRes = await runSqlQuery(connectionId, q.columnsQuery);
-          const rows = colsRes.rows ?? [];
-          const columnsByTable: Record<string, string[]> = {};
-          const total = rows.length || 1;
+          let columnsByTable = existing?.columnsByTable ?? {};
+          let columnsLoaded = existing?.columnsLoaded ?? false;
 
-          for (let i = 0; i < rows.length; i++) {
-            const r = rows[i];
-            const schema = cellToString(r?.[0]);
-            const table = cellToString(r?.[1]);
-            const col = cellToString(r?.[2]);
-            if (!schema || !table || !col) continue;
+          if (includeColumns && colsRes) {
+            const rows = colsRes.rows ?? [];
+            columnsByTable = {};
+            const total = rows.length || 1;
 
-            const k = `${schema}.${table}`;
-            if (!columnsByTable[k]) columnsByTable[k] = [];
-            columnsByTable[k].push(col);
+            for (let i = 0; i < rows.length; i++) {
+              const r = rows[i];
+              const schema = cellToString(r?.[0]);
+              const table = cellToString(r?.[1]);
+              const col = cellToString(r?.[2]);
+              if (!schema || !table || !col) continue;
 
-            // throttle progress updates
-            if (i % 250 === 0) {
-              const prog = 35 + Math.floor((i / total) * 65);
-              setCache(metaKey, { progress: Math.min(99, prog) });
+              const k = `${schema}.${table}`;
+              if (!columnsByTable[k]) columnsByTable[k] = [];
+              columnsByTable[k].push(col);
+
+              // throttle progress updates
+              if (i % 250 === 0) {
+                const prog = 35 + Math.floor((i / total) * 65);
+                setCache(metaKey, { progress: Math.min(99, prog) });
+              }
             }
+
+            columnsLoaded = true;
           }
 
           setCache(metaKey, {
             columnsByTable,
+            columnsLoaded,
             loading: false,
             loaded: true,
             error: null,
@@ -194,7 +234,7 @@ export function useDatabaseMetadata() {
       inflightRef.current[metaKey] = p;
       return p;
     },
-    []
+    [runMetadataQuery]
   );
 
   const get = useCallback(
@@ -203,8 +243,15 @@ export function useDatabaseMetadata() {
       engine?: DatabaseEngine;
       lazy?: boolean;
       connectionId?: string;
+      includeColumns?: boolean;
     }) => {
-      const { metaKey, engine, lazy = true, connectionId } = args;
+      const {
+        metaKey,
+        engine,
+        lazy = true,
+        connectionId,
+        includeColumns = false,
+      } = args;
 
       const meta = cacheRef.current[metaKey] ?? emptyMeta(engine);
 
@@ -212,11 +259,11 @@ export function useDatabaseMetadata() {
       if (
         lazy &&
         connectionId &&
-        !meta.loaded &&
+        (!meta.loaded || (includeColumns && !meta.columnsLoaded)) &&
         !meta.loading &&
         !meta.error
       ) {
-        void load({ metaKey, engine, connectionId });
+        void load({ metaKey, engine, connectionId, includeColumns });
       }
 
       return meta;
@@ -236,10 +283,17 @@ export function useDatabaseMetadata() {
       metaKey: string;
       engine?: DatabaseEngine;
       connectionId: string;
+      includeColumns?: boolean;
     }) => {
-      const { metaKey, engine, connectionId } = args;
+      const { metaKey, engine, connectionId, includeColumns = false } = args;
       invalidate({ metaKey });
-      return await load({ metaKey, engine, connectionId, force: true });
+      return await load({
+        metaKey,
+        engine,
+        connectionId,
+        force: true,
+        includeColumns,
+      });
     },
     [invalidate, load]
   );
