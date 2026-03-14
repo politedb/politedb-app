@@ -28,6 +28,7 @@ pub struct OperationError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableChunk {
     pub op_id: Uuid,
+    pub columns: Option<Vec<ColumnMeta>>,
     pub rows: Vec<Vec<CellValue>>,
     pub row_offset: u64,
     pub seq: u64,

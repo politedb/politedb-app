@@ -78,6 +78,9 @@ export async function runSqlQuery(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<QueryResult> {
+  // Ensure operationBus listeners are attached before the backend starts emitting.
+  await operationBus.ensureInit();
+
   const opId = await operationExecuteWithBusyRetry({
     connection_id,
     kind: "sql_query",
@@ -174,6 +177,9 @@ export async function startSqlQueryStream(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<string> {
+  // Ensure operationBus listeners are attached before the backend starts emitting.
+  await operationBus.ensureInit();
+
   const opId = await operationExecuteWithBusyRetry({
     connection_id,
     kind: "sql_query",

@@ -30,6 +30,12 @@ interface Props {
   onAddRow: () => void;
   onFilters: () => void;
   readOnly?: boolean;
+  className?: string;
+
+  // Optional UI flags (for reuse outside table view)
+  showViewToggle?: boolean;
+  showActions?: boolean;
+  showFiltersAndPaging?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [50, 100, 300, 500, 1000];
@@ -52,6 +58,10 @@ export function TableFooter({
   onAddRow,
   onFilters,
   readOnly = false,
+  showViewToggle = true,
+  showActions = true,
+  showFiltersAndPaging = true,
+  className,
 }: Props) {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [countBusy, setCountBusy] = useState(false);
@@ -122,14 +132,21 @@ export function TableFooter({
   }, [onCountExact, includeFilters]);
 
   return (
-    <div class="flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]">
+    <div
+      class={cn(
+        "flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]",
+        className
+      )}
+    >
       <div class="flex items-center gap-1.5">
-        <TableViewToggle
-          viewMode={viewMode}
-          onViewModeChange={onViewModeChange}
-        />
+        {showViewToggle && (
+          <TableViewToggle
+            viewMode={viewMode}
+            onViewModeChange={onViewModeChange}
+          />
+        )}
 
-        {viewMode === "structure" && (
+        {showActions && viewMode === "structure" && (
           <>
             {structPaneTab === "columns" ? (
               <Button
@@ -155,7 +172,7 @@ export function TableFooter({
           </>
         )}
 
-        {viewMode === "data" && (
+        {showActions && viewMode === "data" && (
           <Button
             variant="shadow"
             className="px-2"
@@ -184,34 +201,38 @@ export function TableFooter({
                   {countBusy ? "Counting..." : loadedLabel}
                 </div>
 
-                <p class="mt-2 text-sm text-orange-500">
-                  This is the estimated value, click "Count" to retrieve the
-                  exact value. It may affect your server performance
-                </p>
-
-                <div class="mt-2 w-fit">
-                  <Checkbox
-                    checked={includeFilters}
-                    onChange={(e) =>
-                      setIncludeFilters((e.target as HTMLInputElement).checked)
-                    }
-                    label="Include current filter conditions"
-                    className="size-4 rounded-md"
-                  />
-                </div>
-
-                <div class="mt-4 flex justify-center">
-                  <Button
-                    variant="shadow"
-                    disabled={countBusy}
-                    onClick={async () => {
-                      await handleCountConfirm();
-                      setIsPopoverOpen(false);
-                    }}
-                  >
-                    {countBusy ? "Counting..." : "Count"}
-                  </Button>
-                </div>
+                {(rowCountIsEstimated || countBusy) && (
+                  <>
+                    <p class="mt-2 text-sm text-orange-500">
+                      This is the estimated value, click "Count" to retrieve the
+                      exact value. It may affect your server performance
+                    </p>
+                    <div class="mt-2 w-fit">
+                      <Checkbox
+                        checked={includeFilters}
+                        onChange={(e) =>
+                          setIncludeFilters(
+                            (e.target as HTMLInputElement).checked
+                          )
+                        }
+                        label="Include current filter conditions"
+                        className="size-4 rounded-md"
+                      />
+                    </div>
+                    <div class="mt-4 flex justify-center">
+                      <Button
+                        variant="shadow"
+                        disabled={countBusy}
+                        onClick={async () => {
+                          await handleCountConfirm();
+                          setIsPopoverOpen(false);
+                        }}
+                      >
+                        {countBusy ? "Counting..." : "Count"}
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             }
           >
@@ -229,7 +250,7 @@ export function TableFooter({
       )}
 
       {/* RIGHT */}
-      {viewMode === "data" && (
+      {viewMode === "data" && showFiltersAndPaging && (
         <div class="flex items-center gap-2">
           <Button
             variant={filterBarVisible ? "default" : "shadow"}

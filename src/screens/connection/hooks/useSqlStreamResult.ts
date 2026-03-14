@@ -37,6 +37,7 @@ type StreamEntry = {
   // failsafe
   lastEventAt: number;
   idleTimer: number | null;
+  notifyScheduled: boolean;
 
   error?: string;
 };
@@ -106,6 +107,16 @@ function notify(entry: StreamEntry) {
   for (const fn of entry.listeners) fn();
 }
 
+function scheduleNotify(entry: StreamEntry) {
+  if (entry.notifyScheduled) return;
+  entry.notifyScheduled = true;
+
+  requestAnimationFrame(() => {
+    entry.notifyScheduled = false;
+    notify(entry);
+  });
+}
+
 function getOrCreate(opId: string): StreamEntry {
   let entry = streams.get(opId);
   if (!entry) {
@@ -126,6 +137,7 @@ function getOrCreate(opId: string): StreamEntry {
 
       lastEventAt: Date.now(),
       idleTimer: null,
+      notifyScheduled: false,
     };
     streams.set(opId, entry);
   }
@@ -165,7 +177,13 @@ export function ensureSqlStreamStarted(opId: string) {
   operationBus
     .subscribe(opId, {
       onChunk: (chunk: TableChunk) => {
-        if (entry.status === "error" || entry.status === "done") return;
+        if (entry.status === "error") return;
+
+        // If a failsafe marked the stream done early, accept late chunks and
+        // flip back to running so data can render.
+        if (entry.status === "done") {
+          entry.status = "running";
+        }
         entry.lastEventAt = Date.now();
 
         const maybeCols = (chunk as any)?.columns;
@@ -197,7 +215,7 @@ export function ensureSqlStreamStarted(opId: string) {
         }
 
         entry.totalRows = Math.max(entry.totalRows, base + rows.length);
-        notify(entry);
+        scheduleNotify(entry);
       },
 
       onDone: (done: OperationDone) => {

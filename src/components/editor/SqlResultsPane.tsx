@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
+import { TableFooter } from "src/components/table/TableFooter";
 import type { SqlResultSlot } from "src/lib/tauri";
 import { useSqlStreamResult } from "src/screens/connection/hooks/useSqlStreamResult";
 
@@ -254,6 +255,17 @@ export function SqlResultsPane(props: {
 
   const stream = useSqlStreamResult(streamOpId);
 
+  const footerTotalRows =
+    slot.mode === "direct" && slot.status === "done" && slot.result
+      ? slot.result.rows.length
+      : slot.mode === "stream" && stream
+        ? stream.totalRows
+        : 0;
+
+  const footerLoadedMax = footerTotalRows > 0 ? footerTotalRows - 1 : -1;
+  const footerLimit = Math.max(footerTotalRows, 50);
+  const footerOffset = 0;
+
   // Decide scroll mode: tables manage their own scrolling
   const isDirectTable =
     slot.mode === "direct" && slot.status === "done" && !!slot.result;
@@ -283,6 +295,29 @@ export function SqlResultsPane(props: {
           stream={slot.mode === "stream" ? stream : null}
         />
       </div>
+
+      <TableFooter
+        className="justify-center"
+        viewMode="data"
+        onViewModeChange={() => {}}
+        structPaneTab="columns"
+        filterBarVisible={false}
+        limit={footerLimit}
+        offset={footerOffset}
+        loadedMax={footerLoadedMax}
+        totalRows={footerTotalRows}
+        rowCountIsEstimated={false}
+        onCountExact={undefined}
+        onPageChange={() => {}}
+        onAddRow={() => {}}
+        onAddColumn={() => {}}
+        onAddIndex={() => {}}
+        onFilters={() => {}}
+        readOnly
+        showViewToggle={false}
+        showActions={false}
+        showFiltersAndPaging={false}
+      />
     </div>
   );
 }

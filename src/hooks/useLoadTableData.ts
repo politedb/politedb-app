@@ -11,6 +11,7 @@ import {
   tableForeignKeysQuery,
   tableRowCountQuery,
   tableEstimatedRowCountQuery,
+  ESTIMATE_USE_EXACT_BELOW,
   tableSizeInfoQuery,
   tableStructuresQuery,
   tableStructuresMySqlQuery,
@@ -309,14 +310,46 @@ async function loadRowCount(params: {
     !exact && !hasFilters
       ? tableEstimatedRowCountQuery(schema, tableName, engine)
       : null;
-  const q =
-    estimatedQ ??
-    tableRowCountQuery(schema, tableName, filters, filterCombine, engine);
+
+  if (estimatedQ) {
+    const estQ = estimatedQ;
+    const estRes = await runSqlQuery(connId, estQ);
+    addLogQuery(estQ);
+    const estimatedValue = Number(
+      cellToString((estRes.rows as unknown[][])?.[0]?.[0])
+    );
+    if (estimatedValue < ESTIMATE_USE_EXACT_BELOW) {
+      const exactQ = tableRowCountQuery(
+        schema,
+        tableName,
+        filters,
+        filterCombine,
+        engine
+      );
+      const exactRes = await runSqlQuery(connId, exactQ);
+      addLogQuery(exactQ);
+      return {
+        value: Number(
+          cellToString((exactRes.rows as unknown[][])?.[0]?.[0])
+        ),
+        estimated: false,
+      };
+    }
+    return { value: estimatedValue, estimated: true };
+  }
+
+  const q = tableRowCountQuery(
+    schema,
+    tableName,
+    filters,
+    filterCombine,
+    engine
+  );
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
   return {
     value: Number(cellToString((res.rows as unknown[][])?.[0]?.[0])),
-    estimated: Boolean(estimatedQ),
+    estimated: false,
   };
 }
 

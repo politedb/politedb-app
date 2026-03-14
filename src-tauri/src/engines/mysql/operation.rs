@@ -226,6 +226,7 @@ pub async fn run_mysql_sql_query(
     let mut row_count: u64 = 0;
     let mut row_offset: u64 = 0;
     let mut batch_rows: Vec<Vec<CellValue>> = Vec::with_capacity(batch_size);
+    let mut sent_columns = false;
 
     // Adaptive batching
     // NOTE: We keep a fixed batch_size here and rely on FE-ACK flow control to apply
@@ -277,6 +278,12 @@ pub async fn run_mysql_sql_query(
                     let chunk = TableChunk {
                         op_id,
                         seq,
+                        columns: if !sent_columns {
+                            sent_columns = true;
+                            done_columns.clone()
+                        } else {
+                            None
+                        },
                         rows: std::mem::take(&mut batch_rows),
                         row_offset,
                     };
@@ -308,6 +315,7 @@ pub async fn run_mysql_sql_query(
         let chunk = TableChunk {
             op_id,
             seq,
+            columns: if sent_columns { None } else { done_columns.clone() },
             rows: batch_rows,
             row_offset,
         };

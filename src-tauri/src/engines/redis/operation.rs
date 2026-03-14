@@ -253,6 +253,7 @@ pub async fn run_redis_command(
 
                     let chunk = TableChunk {
                         op_id,
+                        columns: None,
                         seq,
                         rows: vec![row],
                         row_offset: 0,
@@ -360,6 +361,7 @@ pub async fn run_redis_command(
 
                             let chunk = TableChunk {
                                 op_id,
+                                columns: None,
                                 seq,
                                 rows: std::mem::take(&mut rows),
                                 row_offset,
@@ -389,6 +391,7 @@ pub async fn run_redis_command(
 
                         let chunk = TableChunk {
                             op_id,
+                            columns: None,
                             seq,
                             rows,
                             row_offset,
@@ -491,6 +494,7 @@ pub async fn run_redis_command(
 
                                 let chunk = TableChunk {
                                     op_id,
+                                    columns: None,
                                     seq,
                                     rows: std::mem::take(&mut rows),
                                     row_offset,
@@ -526,6 +530,7 @@ pub async fn run_redis_command(
 
                 let chunk = TableChunk {
                     op_id,
+                    columns: None,
                     seq,
                     rows,
                     row_offset,
@@ -598,6 +603,7 @@ pub async fn run_redis_command(
 
                     let chunk = TableChunk {
                         op_id,
+                        columns: None,
                         seq,
                         rows: vec![vec![value_to_cell(v)]],
                         row_offset: 0,

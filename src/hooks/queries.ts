@@ -229,6 +229,9 @@ export const tableEstimatedRowCountQuery = (
   return null;
 };
 
+/** If estimated row count is below this, we use SELECT COUNT(*) to show the real count. */
+export const ESTIMATE_USE_EXACT_BELOW = 100_000;
+
 export const tableOidQuery = (schema: string, tableName: string) => {
   const queryStr = `SELECT '${qIdent(schema)}.${qIdent(tableName)}'::regclass::oid;`;
   return regexEscape(queryStr);
