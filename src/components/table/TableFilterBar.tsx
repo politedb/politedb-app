@@ -156,7 +156,7 @@ export function TableFilterBar({
   }, [defaultFilter, filters.length, onFiltersChange]);
 
   return (
-    <div class="flex flex-col gap-2.5 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+    <div class="flex flex-col gap-2.5 border-t border-neutral-200 bg-neutral-50 px-4 py-3">
       {/* Filter row(s) */}
       <div class="flex flex-col gap-2">
         {filters.map((row, index) => {

@@ -499,6 +499,12 @@ export function MainTableDataPane(props: {
     if (!rowsInfo) return 0;
 
     if (hasAppliedFilters) {
+      // When filters are applied, rowCount is the source of truth for the
+      // filtered result size. loadedRowCount may still reflect stale rows from
+      // a previous unfiltered window while new chunks are arriving.
+      if (typeof meta.rowCount === "number") {
+        return Math.min(Math.max(meta.rowCount, 0), loadedRowCount);
+      }
       return loadedRowCount;
     }
 

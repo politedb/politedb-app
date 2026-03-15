@@ -98,6 +98,11 @@ export function TableFooter({
     if (viewMode !== "data") return "";
     const formatNumber = (value: number) => numberFormatter.format(value);
 
+    // No matched rows (e.g. filter result is empty)
+    if (totalRows <= 0) {
+      return "0 rows";
+    }
+
     if (typeof loadedMax !== "number" || loadedMax < 0) {
       return rowCountIsEstimated && totalRows > 0
         ? `0 of ~${formatNumber(totalRows)} rows`
@@ -109,7 +114,13 @@ export function TableFooter({
 
     // show "x–y" for current page, based on loadedMax
     const start = offset + 1;
-    const end = Math.min(offset + limit, loadedCount);
+    // Clamp by totalRows so filtered totals like "1 row" never display as
+    // "1-300 of 1 rows" when loadedMax still reflects a previous window.
+    const end = Math.min(
+      offset + limit,
+      loadedCount,
+      totalRows > 0 ? totalRows : loadedCount
+    );
 
     if (end < start) return `${formatNumber(loadedCount)} rows`;
 
