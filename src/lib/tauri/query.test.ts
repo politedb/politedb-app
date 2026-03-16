@@ -7,17 +7,19 @@ if (!g.window) g.window = g;
 
 // ---- Mocks
 const subscribeMock = vi.fn();
+const ensureInitMock = vi.fn();
 const operationExecuteMock = vi.fn();
 const operationCancelMock = vi.fn();
 const toErrorMessageMock = vi.fn((e: any) => String(e?.message ?? e ?? "ERR"));
 
-vi.mock("../lib/tauri/operationBus", () => ({
+vi.mock("./operationBus", () => ({
   operationBus: {
+    ensureInit: (...args: any[]) => ensureInitMock(...args),
     subscribe: (...args: any[]) => subscribeMock(...args),
   },
 }));
 
-vi.mock("../lib/tauri", () => ({
+vi.mock("src/lib/tauri", () => ({
   operationExecute: (...args: any[]) => operationExecuteMock(...args),
   operationCancel: (...args: any[]) => operationCancelMock(...args),
 }));
@@ -61,10 +63,12 @@ beforeEach(() => {
   vi.useFakeTimers();
 
   subscribeMock.mockReset();
+  ensureInitMock.mockReset();
   operationExecuteMock.mockReset();
   operationCancelMock.mockReset();
   toErrorMessageMock.mockClear();
 
+  ensureInitMock.mockResolvedValue(undefined);
   operationExecuteMock.mockResolvedValue("op_1");
   operationCancelMock.mockResolvedValue(undefined);
 });
@@ -98,7 +102,12 @@ describe("runSqlQuery", () => {
     expect(operationExecuteMock).toHaveBeenCalledWith({
       connection_id: "conn_1",
       kind: "sql_query",
-      sql: { sql: "select 1", batch_size: 200, max_rows: 50_000 },
+      sql: {
+        sql: "select 1",
+        batch_size: 100,
+        max_rows: undefined,
+        client_mode: "direct",
+      },
     });
 
     expect(res.columns).toEqual([{ name: "id", db_type: "int4" }]);
@@ -127,7 +136,12 @@ describe("runSqlQuery", () => {
     expect(operationExecuteMock).toHaveBeenCalledWith({
       connection_id: "c",
       kind: "sql_query",
-      sql: { sql: "q", batch_size: 999, max_rows: 123 },
+      sql: {
+        sql: "q",
+        batch_size: 999,
+        max_rows: 123,
+        client_mode: "direct",
+      },
     });
   });
 

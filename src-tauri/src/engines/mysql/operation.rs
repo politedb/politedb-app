@@ -315,7 +315,11 @@ pub async fn run_mysql_sql_query(
         let chunk = TableChunk {
             op_id,
             seq,
-            columns: if sent_columns { None } else { done_columns.clone() },
+            columns: if sent_columns {
+                None
+            } else {
+                done_columns.clone()
+            },
             rows: batch_rows,
             row_offset,
         };

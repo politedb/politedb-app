@@ -16,8 +16,7 @@ use core_foundation_sys::dictionary::{
     CFDictionaryGetTypeID, CFDictionaryGetValueIfPresent, CFDictionaryRef,
 };
 use core_foundation_sys::string::{
-    CFStringGetCString, CFStringGetLength, CFStringGetMaximumSizeForEncoding,
-    kCFStringEncodingUTF8,
+    kCFStringEncodingUTF8, CFStringGetCString, CFStringGetLength, CFStringGetMaximumSizeForEncoding,
 };
 
 use security_framework_sys::base::{errSecDuplicateItem, errSecItemNotFound, errSecSuccess};
