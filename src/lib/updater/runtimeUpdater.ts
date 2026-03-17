@@ -1,31 +1,22 @@
+import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 
-function isTauriRuntime() {
+export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-function shouldRunUpdaterCheck() {
+export function shouldRunUpdaterCheck() {
   return isTauriRuntime() && !import.meta.env.DEV;
 }
 
-function shouldInstallUpdate(version: string) {
-  return window.confirm(
-    `A new version (${version}) is available. Download and install now?`
-  );
+export type RuntimeUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;
+
+export async function checkForRuntimeUpdate(): Promise<RuntimeUpdate | null> {
+  if (!shouldRunUpdaterCheck()) return null;
+  return check();
 }
 
-function notifyInstalled() {
-  window.alert("Update installed. Please restart the app to apply it.");
-}
-
-export async function runRuntimeUpdaterCheck() {
-  if (!shouldRunUpdaterCheck()) return;
-
-  const update = await check();
-  if (!update) return;
-
-  if (!shouldInstallUpdate(update.version)) return;
-
+export async function installRuntimeUpdate(update: RuntimeUpdate) {
   await update.downloadAndInstall();
-  notifyInstalled();
+  await relaunch();
 }

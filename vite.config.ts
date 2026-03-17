@@ -18,6 +18,7 @@ export default defineConfig(async () => ({
   },
   resolve: {
     alias: {
+      "@root": resolve(__dirname, "."),
       src: resolve(__dirname, "src"),
     },
   },

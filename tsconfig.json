@@ -22,6 +22,7 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
+      "@root/*": ["./*"],
       "src/*": ["src/*"]
     },
     "types": ["node"]

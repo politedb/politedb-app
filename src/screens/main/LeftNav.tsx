@@ -1,5 +1,7 @@
 import { Database, Key } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
+import { useAppUpdater } from "src/hooks/useAppUpdater";
+import { Button } from "src/components/common/Button";
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -15,6 +17,9 @@ export function LeftNav(props: {
   onChange: (id: NavId) => void;
 }) {
   const { active, onChange } = props;
+  const { appVersion, updateAvailable, installUpdate, isInstallingUpdate } =
+    useAppUpdater();
+  const envSuffix = import.meta.env.DEV ? " (Dev)" : "";
 
   return (
     <aside
@@ -88,9 +93,22 @@ export function LeftNav(props: {
       </nav>
 
       {/* Bottom spacer */}
-      <div class="mt-auto px-3 pb-3">
+      <div class="mt-auto space-y-2.5 px-3 pb-3">
         <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600">
-          Tip: Right-click a connection for actions.
+          <div>Tip: Right-click a connection for actions.</div>
+        </div>
+        {updateAvailable && (
+          <Button
+            onClick={() => void installUpdate()}
+            disabled={isInstallingUpdate}
+            class="w-full rounded-xl text-sm disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {isInstallingUpdate ? "Installing update..." : "Update"}
+          </Button>
+        )}
+        <div class="mx-auto flex w-fit items-center gap-2 text-sm text-slate-600">
+          Version {appVersion}
+          {envSuffix}
         </div>
       </div>
     </aside>

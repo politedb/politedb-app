@@ -20,7 +20,8 @@
         "minHeight": 500,
         "decorations": true,
         "transparent": true,
-        "titleBarStyle": "Overlay"
+        "titleBarStyle": "Overlay",
+        "devtools": true
       }
     ],
     "security": {
@@ -44,11 +45,12 @@
     "fs": {
       "requireLiteralLeadingDot": true
     },
+    "process": {
+      "relaunch": true
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFODhBNENDQUIyOTQ2QTUKUldTbFJpbXJ6S1NJM241b2crd0RraU1EbkRPVmFjY09oY2tCRnVXanAxNG83M1FsVTkxMnY3NzIK",
-      "endpoints": [
-        "https://github.com/tonyphamvn/politedb-universal/releases/latest/download/latest.json"
-      ]
+      "endpoints": ["https://proxy-api.politedb.com"]
     }
   }
 }
