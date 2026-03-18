@@ -53,6 +53,7 @@ interface Props {
     data: Record<string, any>
   ) => void;
   tableList?: { schema: string; name: string }[];
+  searchQuery?: string;
 }
 
 export function TableStructure({
@@ -70,6 +71,7 @@ export function TableStructure({
   onDataChange,
   engine,
   tableList = [],
+  searchQuery = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -109,9 +111,10 @@ export function TableStructure({
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
       if (readOnly) return;
+      if (searchQuery.trim()) return;
       if (index >= editedData.length) onAddNewRecord();
     },
-    [readOnly, editedData.length, onAddNewRecord]
+    [readOnly, searchQuery, editedData.length, onAddNewRecord]
   );
 
   const tableData = useMemo(() => {
@@ -127,10 +130,24 @@ export function TableStructure({
           ({
             ...row,
             _rowNumber: index + 1,
-          }) as TableStructure & { _rowNumber?: number }
+            _sourceIndex: index,
+          }) as TableStructure & { _rowNumber?: number; _sourceIndex: number }
       ),
     [tableData]
   );
+
+  const filteredTableData = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return tableDataWithRowNumber;
+
+    return tableDataWithRowNumber.filter((row) =>
+      COLUMNS_NAME.some((column) =>
+        String(row[column] ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery)
+      )
+    );
+  }, [searchQuery, tableDataWithRowNumber]);
 
   const dbConfig = getDbConfig(engine);
 
@@ -158,7 +175,9 @@ export function TableStructure({
   );
 
   const tableColumns = useMemo<
-    CommonTableColumn<TableStructure & { _rowNumber?: number }>[]
+    CommonTableColumn<
+      TableStructure & { _rowNumber?: number; _sourceIndex: number }
+    >[]
   >(
     () => [
       {
@@ -169,7 +188,7 @@ export function TableStructure({
         className: "min-w-12! text-center",
         headerClassName: "min-w-12! text-center",
         render: (_value: any, row: any, index: number) =>
-          index + 1 <= editedData.length ? (
+          typeof row._sourceIndex === "number" ? (
             <span class="text-sm text-neutral-500">
               {row._rowNumber ?? index + 1}
             </span>
@@ -183,13 +202,15 @@ export function TableStructure({
         sortable: true,
         sortKey: name,
         className: "px-0",
-        render: (_value: any, row: any, index: number) => {
-          const initValue = initData?.[index]?.[name] ?? "";
+        render: (_value: any, row: any, _index: number) => {
+          const hasSourceIndex = typeof row._sourceIndex === "number";
+          const sourceIndex = hasSourceIndex ? row._sourceIndex : -1;
+          const initValue = initData?.[sourceIndex]?.[name] ?? "";
           const fieldValue = row[name] ?? "";
-          const isEmptyRow = index + 1 > editedData.length;
-          const isDeleted = deletedRows.has(index);
+          const isEmptyRow = !hasSourceIndex;
+          const isDeleted = deletedRows.has(sourceIndex);
           const placeholder = isEmptyRow ? "" : "NULL";
-          const isRowSelected = selectedRows.has(index);
+          const isRowSelected = selectedRows.has(sourceIndex);
           const colIndex = COLUMNS_NAME.indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
@@ -200,7 +221,7 @@ export function TableStructure({
           const fkLabel = foreignKey
             ? `${foreignKey?.ref_table_name}(${foreignKey?.ref_column_names})`
             : "";
-          const rowPatch = structureUpdatePatches[String(index)] ?? null;
+          const rowPatch = structureUpdatePatches[String(sourceIndex)] ?? null;
           const hasForeignKeyPatch =
             !!rowPatch &&
             Object.prototype.hasOwnProperty.call(rowPatch, "foreign_key");
@@ -226,7 +247,7 @@ export function TableStructure({
                 options={columnOptions}
                 onValueChange={
                   showSelect
-                    ? (value) => handleDataChange(index, name, value)
+                    ? (value) => handleDataChange(sourceIndex, name, value)
                     : undefined
                 }
                 value={isFkColumn ? fkDisplayValue : String(fieldValue)}
@@ -234,7 +255,11 @@ export function TableStructure({
                 onInput={
                   !showSelect
                     ? (e) =>
-                        handleDataChange(index, name, e.currentTarget.value)
+                        handleDataChange(
+                          sourceIndex,
+                          name,
+                          e.currentTarget.value
+                        )
                     : undefined
                 }
                 onMouseDown={(e) => {
@@ -251,7 +276,7 @@ export function TableStructure({
                     if (selectedColIndex !== colIndex) {
                       const input = e.currentTarget as HTMLInputElement;
                       if (isFkColumn) {
-                        openFkDialog(index);
+                        openFkDialog(sourceIndex);
                         input.blur();
                         return;
                       }
@@ -271,7 +296,7 @@ export function TableStructure({
                   onClick={(e) => {
                     if (readOnly) return;
                     e.stopPropagation();
-                    openFkDialog(index);
+                    openFkDialog(sourceIndex);
                   }}
                   class={cn(
                     "absolute top-1/2 right-2 z-50 -translate-y-1/2",
@@ -324,7 +349,8 @@ export function TableStructure({
     >
       <Table
         columns={tableColumns}
-        data={tableDataWithRowNumber}
+        data={filteredTableData}
+        rowIndexExtractor={(row) => row._sourceIndex}
         stickyHeader
         fillViewport
         showEmptyMessage={false}

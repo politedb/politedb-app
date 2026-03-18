@@ -27,7 +27,16 @@ export function Input(
   );
 
   if (!left && !right) {
-    return <input {...rest} disabled={disabled} class={cls} />;
+    return (
+      <input
+        {...rest}
+        autoCapitalize={props.autoCapitalize ?? "off"}
+        autoCorrect={props.autoCorrect ?? "off"}
+        spellcheck={props.spellcheck ?? false}
+        disabled={disabled}
+        class={cls}
+      />
+    );
   }
 
   return (
@@ -38,7 +47,14 @@ export function Input(
         </div>
       ) : null}
 
-      <input {...rest} disabled={disabled} class={cls} />
+      <input
+        {...rest}
+        autoCapitalize={props.autoCapitalize ?? "off"}
+        autoCorrect={props.autoCorrect ?? "off"}
+        spellcheck={props.spellcheck ?? false}
+        disabled={disabled}
+        class={cls}
+      />
 
       {right ? (
         <div class="absolute top-1/2 right-2 -translate-y-1/2">{right}</div>

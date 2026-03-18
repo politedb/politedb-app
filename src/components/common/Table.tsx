@@ -20,6 +20,7 @@ interface TableProps<T = any> {
   columns: TableColumn<T>[];
   data: T[];
   keyExtractor?: (row: T, index: number) => string | number;
+  rowIndexExtractor?: (row: T, index: number) => number;
   rowClassName?: string | ((row: T, index: number) => string);
   headerClassName?: string;
   stickyHeader?: boolean;
@@ -42,6 +43,7 @@ export function Table<T = any>({
   columns,
   data,
   keyExtractor,
+  rowIndexExtractor,
   rowClassName,
   headerClassName,
   stickyHeader = true,
@@ -224,13 +226,18 @@ export function Table<T = any>({
       if (!Number.isFinite(rowIndex)) return;
 
       const isEmpty = (tr as HTMLElement).dataset.empty === "true";
-      const row = isEmpty ? emptyRow : data[rowIndex];
+      const row = isEmpty
+        ? emptyRow
+        : data.find(
+            (candidate, index) =>
+              (rowIndexExtractor?.(candidate, index) ?? index) === rowIndex
+          );
 
       if (row !== undefined) {
         onSelectRow(row, rowIndex, e.metaKey || e.ctrlKey, e.shiftKey);
       }
     },
-    [onSelectRow, data, emptyRow]
+    [onSelectRow, data, emptyRow, rowIndexExtractor]
   );
 
   const handleTableDblClick = useCallback(
@@ -244,13 +251,18 @@ export function Table<T = any>({
       if (!Number.isFinite(rowIndex)) return;
 
       const isEmpty = (tr as HTMLElement).dataset.empty === "true";
-      const row = isEmpty ? emptyRow : data[rowIndex];
+      const row = isEmpty
+        ? emptyRow
+        : data.find(
+            (candidate, index) =>
+              (rowIndexExtractor?.(candidate, index) ?? index) === rowIndex
+          );
 
       if (row !== undefined) {
         onDoubleClickRow(row, rowIndex);
       }
     },
-    [onDoubleClickRow, data, emptyRow]
+    [onDoubleClickRow, data, emptyRow, rowIndexExtractor]
   );
 
   // Early return for empty data
@@ -349,7 +361,9 @@ export function Table<T = any>({
 
         <tbody>
           {displayRows.map((row, displayIndex) => {
-            const originalIndex = indexMap[displayIndex] ?? displayIndex;
+            const sortedIndex = indexMap[displayIndex] ?? displayIndex;
+            const originalIndex =
+              rowIndexExtractor?.(row, sortedIndex) ?? sortedIndex;
             
             let isSelected = false;
             

@@ -49,6 +49,7 @@ interface Props {
     data: Record<string, any>
   ) => void;
   engine: DatabaseEngine;
+  searchQuery?: string;
 }
 
 export function TableConstraints({
@@ -65,6 +66,7 @@ export function TableConstraints({
   deletedRows = new Set(),
   onDataChange,
   engine,
+  searchQuery = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -97,12 +99,13 @@ export function TableConstraints({
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
       if (readOnly) return;
+      if (searchQuery.trim()) return;
       // Check if it's an empty row (index >= editedData.length)
       if (index >= editedData.length) {
         onAddNewRecord();
       }
     },
-    [readOnly, editedData.length, onAddNewRecord]
+    [readOnly, searchQuery, editedData.length, onAddNewRecord]
   );
 
   const tableData = useMemo(() => {
@@ -110,6 +113,30 @@ export function TableConstraints({
     if (editedData.length > 0) return editedData;
     return initData ?? [];
   }, [editedData, initData, error]);
+
+  const searchableTableData = useMemo(
+    () =>
+      tableData.map(
+        (row, index) =>
+          ({ ...row, _sourceIndex: index }) as TableConstraint & {
+            _sourceIndex: number;
+          }
+      ),
+    [tableData]
+  );
+
+  const filteredTableData = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return searchableTableData;
+
+    return searchableTableData.filter((row) =>
+      COLUMNS_NAME[engine].some((column) =>
+        String(row[column] ?? "")
+          .toLowerCase()
+          .includes(normalizedQuery)
+      )
+    );
+  }, [searchQuery, searchableTableData, engine]);
 
   const dbConfig = getDbConfig(engine);
 
@@ -132,7 +159,9 @@ export function TableConstraints({
     [dbConfig]
   );
 
-  const tableColumns = useMemo<CommonTableColumn<TableConstraint>[]>(
+  const tableColumns = useMemo<
+    CommonTableColumn<TableConstraint & { _sourceIndex: number }>[]
+  >(
     () => [
       ...COLUMNS_NAME[engine].map((name) => ({
         key: name,
@@ -140,13 +169,15 @@ export function TableConstraints({
         sortable: true,
         sortKey: name,
         className: "px-0",
-        render: (_value: any, row: any, index: number) => {
-          const initValue = initData?.[index]?.[name] ?? "";
+        render: (_value: any, row: any, _index: number) => {
+          const hasSourceIndex = typeof row._sourceIndex === "number";
+          const sourceIndex = hasSourceIndex ? row._sourceIndex : -1;
+          const initValue = initData?.[sourceIndex]?.[name] ?? "";
           const fieldValue = row[name] ?? "";
-          const isEmptyRow = index + 1 > editedData.length;
-          const isDeleted = deletedRows.has(index);
+          const isEmptyRow = !hasSourceIndex;
+          const isDeleted = deletedRows.has(sourceIndex);
           const placeholder = isEmptyRow ? "" : "NULL";
-          const isRowSelected = selectedRows.has(index);
+          const isRowSelected = selectedRows.has(sourceIndex);
           const colIndex = COLUMNS_NAME[engine].indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
@@ -161,18 +192,23 @@ export function TableConstraints({
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions}
-              onValueChange={
-                showSelect
-                  ? (value) => handleDataChange(index, name, value)
-                  : undefined
-              }
+                onValueChange={
+                  showSelect
+                    ? (value) => handleDataChange(sourceIndex, name, value)
+                    : undefined
+                }
               value={String(fieldValue)}
               placeholder={placeholder}
-              onInput={
-                !showSelect
-                  ? (e) => handleDataChange(index, name, e.currentTarget.value)
-                  : undefined
-              }
+                onInput={
+                  !showSelect
+                    ? (e) =>
+                        handleDataChange(
+                          sourceIndex,
+                          name,
+                          e.currentTarget.value
+                        )
+                    : undefined
+                }
               onMouseDown={(e) => {
                 if (!isRowSelected && !isEmptyRow && !isDeleted) {
                   e.preventDefault();
@@ -228,7 +264,8 @@ export function TableConstraints({
     >
       <Table
         columns={tableColumns}
-        data={tableData}
+        data={filteredTableData}
+        rowIndexExtractor={(row) => row._sourceIndex}
         stickyHeader
         fillViewport
         showEmptyMessage={false}

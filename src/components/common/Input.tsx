@@ -111,6 +111,9 @@ export function Input(
         <input
           ref={inputRef}
           {...rest}
+          autoCapitalize={props.autoCapitalize ?? "off"}
+          autoCorrect={props.autoCorrect ?? "off"}
+          spellcheck={props.spellcheck ?? false}
           readOnly={readOnly}
           value={value}
           onChange={handleInputChange}
@@ -118,7 +121,7 @@ export function Input(
           onBlur={handleBlur}
           class={cn(
             "w-full rounded-md p-2 text-xs focus:bg-white focus:outline-2 focus:outline-blue-500",
-            props.left && "pl-8",
+            props.left && "pl-7",
             (showSelect || props.right) && "pr-8",
             className
           )}

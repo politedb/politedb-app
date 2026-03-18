@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ChevronSort, X } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { MenuItem, MenuPopover } from "./MenuPopover";
@@ -10,13 +10,38 @@ interface Props {
   onChange: (value: string) => void;
   options?: string[];
   disabled?: boolean;
+  enableSearch?: boolean;
 }
 
 export function TagSelect(props: Props) {
-  const { className, label, values, onChange, options, disabled = false } = props;
+  const {
+    className,
+    label,
+    values,
+    onChange,
+    options,
+    disabled = false,
+    enableSearch = false,
+  } = props;
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) return options ?? [];
+
+    return (options ?? []).filter((option) =>
+      option.toLowerCase().includes(normalizedQuery)
+    );
+  }, [options, searchQuery]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearchQuery("");
+    }
+  }, [isOpen]);
 
   return (
     <div class={cn("flex items-center gap-2", className)}>
@@ -76,26 +101,42 @@ export function TagSelect(props: Props) {
             width={containerRef.current?.offsetWidth || 192}
             className="rounded-md"
           >
-            <div class="max-h-60 overflow-y-auto py-1">
-              {options && options.length > 0 ? (
-                options.map((name) => (
-                  <MenuItem
-                    key={name}
-                    onClick={() => onChange(name)}
-                    right={
-                      values.includes(name) ? (
-                        <span class="text-blue-600">✓</span>
-                      ) : null
-                    }
-                  >
-                    {name}
-                  </MenuItem>
-                ))
-              ) : (
-                <div class="px-3 py-2 text-xs text-neutral-500">
-                  No columns available
+            <div>
+              {enableSearch ? (
+                <div class="border-b border-neutral-200 p-2">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                    placeholder="Search columns..."
+                    class="w-full rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-500 focus:outline-2 focus:outline-blue-500"
+                    autoFocus
+                  />
                 </div>
-              )}
+              ) : null}
+              <div class="max-h-60 overflow-y-auto py-1">
+                {filteredOptions.length > 0 ? (
+                  filteredOptions.map((name) => (
+                    <MenuItem
+                      key={name}
+                      onClick={() => onChange(name)}
+                      right={
+                        values.includes(name) ? (
+                          <span class="text-blue-600">✓</span>
+                        ) : null
+                      }
+                    >
+                      {name}
+                    </MenuItem>
+                  ))
+                ) : (
+                  <div class="px-3 py-2 text-xs text-neutral-500">
+                    {options && options.length > 0
+                      ? "No matching columns"
+                      : "No columns available"}
+                  </div>
+                )}
+              </div>
             </div>
           </MenuPopover>
         )}

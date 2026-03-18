@@ -12,6 +12,13 @@ function isTauriRuntime() {
 }
 
 async function boot() {
+  document.documentElement.setAttribute("autocapitalize", "off");
+  document.documentElement.setAttribute("autocorrect", "off");
+  document.documentElement.setAttribute("spellcheck", "false");
+  document.body?.setAttribute("autocapitalize", "off");
+  document.body?.setAttribute("autocorrect", "off");
+  document.body?.setAttribute("spellcheck", "false");
+
   if (isTauriRuntime()) {
     // Keep native context menu in dev for debugging; disable it in production.
     if (!import.meta.env.DEV) {

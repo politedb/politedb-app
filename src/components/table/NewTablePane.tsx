@@ -193,14 +193,16 @@ export function NewTablePane({
               disabled={busy || isProfileLocked}
             />
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-1 items-center gap-2">
             <label class="text-xs font-semibold text-neutral-700">
               Primary
             </label>
             <TagSelect
+              className="w-full"
               values={tableState.primaryKey}
               onChange={tableState.togglePrimaryKey}
               options={tableState.columnNames}
+              enableSearch
               disabled={isProfileLocked}
             />
           </div>
