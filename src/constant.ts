@@ -39,16 +39,16 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     color: "bg-teal-500",
     available: true,
     desc: "Community-driven MySQL-compatible database.",
-    defaultLabels: ["Gaia"],
+    defaultLabels: ["Artemis", "Ares", "Gaia"],
   },
   {
     engine: "mongo",
     label: "MongoDB",
     abbreviation: "Mg",
     color: "bg-green-500",
-    available: false,
+    available: true,
     desc: "Document-oriented NoSQL database.",
-    defaultLabels: ["Proteus"],
+    defaultLabels: ["Prometheus", "Hades", "Proteus"],
   },
   {
     engine: "sqlite",
@@ -57,7 +57,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     color: "bg-purple-600",
     available: false,
     desc: "Embedded database stored as a single file.",
-    defaultLabels: ["Hestia"],
+    defaultLabels: ["Aphrodite", "Poseidon", "Hestia"],
   },
   {
     engine: "oracle",
@@ -66,7 +66,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     color: "bg-red-600",
     available: false,
     desc: "Enterprise-grade relational database.",
-    defaultLabels: ["Zeus"],
+    defaultLabels: ["Zeus", "Cronus", "Nereus"],
   },
 ] as const;
 

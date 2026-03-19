@@ -193,6 +193,29 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "mongo") {
+    const mongo = input.mongo;
+    if (!mongo) throw new Error("MONGO_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      mongo: {
+        ...mongo,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "redis") {
     const rd = input.redis;
     if (!rd) throw new Error("REDIS_CONFIG_MISSING");
@@ -226,6 +249,7 @@ export function preparePayloadWithSecret(
     ssh,
     postgres: input.postgres,
     mysql: input.mysql,
+    mongo: input.mongo,
     redis: input.redis,
   };
 }

@@ -118,6 +118,7 @@ export function MainTableDataPane(props: {
   const actions = useConnectionActionsCtx();
   const s = useConnectionStore.getState();
   const { profileId, engine, limit, offset } = rt;
+  const isReadOnly = isProfileLocked || engine === "mongo";
 
   const { loadTableData } = useLoadTableData();
   const {
@@ -819,7 +820,7 @@ export function MainTableDataPane(props: {
           <TableStructurePane
             engine={engine}
             profileId={profileId}
-            readOnly={isProfileLocked}
+            readOnly={isReadOnly}
             activeTableWindow={activeTableWindow as any}
             activeTableMeta={meta}
             structPaneTab={structPaneTab}
@@ -875,15 +876,15 @@ export function MainTableDataPane(props: {
                 baseRows={basePageTotal}
                 totalRows={visiblePageTotal}
                 getRowAt={getRowAt}
-                readOnly={isProfileLocked}
-                onCellChange={isProfileLocked ? undefined : onDataChange}
+                readOnly={isReadOnly}
+                onCellChange={isReadOnly ? undefined : onDataChange}
                 patches={extractPatches(patches)}
                 onAddRow={() => {
-                  if (isProfileLocked) return;
+                  if (isReadOnly) return;
                   handleAddRow(meta.columns ?? [], visiblePageTotal, onDataChange);
                 }}
                 onDeleteRow={(rowIndex) => {
-                  if (isProfileLocked) return;
+                  if (isReadOnly) return;
                   handleDeleteRow(rowIndex, offset);
                 }}
                 deletedRows={extractDeleted(patches, DATA_KEYS.data)}
@@ -909,13 +910,13 @@ export function MainTableDataPane(props: {
         onPageChange={pageChange}
         onCountExact={handleCountExact}
         onAddRow={() => {
-          if (isProfileLocked) return;
+          if (isReadOnly) return;
           handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
         }}
-        onAddColumn={isProfileLocked ? () => {} : onAddColumn}
-        onAddIndex={isProfileLocked ? () => {} : onAddIndex}
+        onAddColumn={isReadOnly ? () => {} : onAddColumn}
+        onAddIndex={isReadOnly ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
-        readOnly={isProfileLocked}
+        readOnly={isReadOnly}
       />
       {sqlDialogOpen && (
         <SqlPreviewModal

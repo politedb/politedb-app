@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::{
     ssh_tunnel::types::SshTunnelInput,
     types::{
-        engine::{EngineKind, MySqlConnectInput, PgConnectInput},
+        engine::{EngineKind, MongoConnectInput, MySqlConnectInput, PgConnectInput},
         RedisConnectInput,
     },
 };
@@ -23,6 +23,7 @@ pub struct ConnectionCreateInput {
 
     pub postgres: Option<PgConnectInput>,
     pub mysql: Option<MySqlConnectInput>,
+    pub mongo: Option<MongoConnectInput>,
     pub redis: Option<RedisConnectInput>,
 
     pub ssh: Option<SshTunnelInput>,

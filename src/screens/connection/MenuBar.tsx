@@ -32,8 +32,10 @@ import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 interface Props {
   activeSchema?: string;
   activeTable?: string;
+  schemas?: string[];
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
+  onSchemaChange?: (schema: string) => void;
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
@@ -183,6 +185,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "mongo") {
+    if (!input.mongo) throw new Error("MONGO_CONFIG_MISSING");
+    return {
+      ...input,
+      mongo: {
+        ...input.mongo,
+        database,
+      },
+    };
+  }
+
   throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
 }
 
@@ -239,7 +252,7 @@ export function MenuBar({
       version: "16.3", // TODO: fetch from connection
       database,
       user,
-      schema: activeSchema || "public",
+      schema: activeSchema || database || "",
       table: activeTable || "",
       isSsh,
     };
@@ -247,6 +260,7 @@ export function MenuBar({
 
   const connected = !!connectionInfo && !loadTableError;
   const runtimeConnectionId = activeTab?.runtimeConnectionId ?? "";
+  const canOpenSql = connectionInfo?.engine !== "mongo";
 
   const tags = useMemo(() => {
     const raw = (profile?.input?.tags ?? []).map(String);
@@ -255,10 +269,15 @@ export function MenuBar({
 
   const dbLabel = useMemo(() => {
     if (!connectionInfo) return { db: "", target: "" };
-    const { database, schema, table } = connectionInfo;
+    const { database, schema, table, engine } = connectionInfo;
+
     return {
       db: database,
-      target: table ? `${schema}.${table}` : schema,
+      target: table
+        ? engine === "postgres"
+          ? `${schema}.${table}`
+          : table
+        : schema,
     };
   }, [connectionInfo]);
 
@@ -341,6 +360,7 @@ export function MenuBar({
             <Button
               variant="ghost"
               className="h-6 rounded-md px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
+              disabled={!canOpenSql}
               onClick={openSQLWindow}
             >
               SQL

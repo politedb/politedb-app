@@ -37,6 +37,12 @@ export const CMD = {
 
   // Export (streaming append for large table export)
   exportAppendToFile: "export_append_to_file",
+
+  // Mongo
+  mongoListDatabases: "mongo_list_databases",
+  mongoListCollections: "mongo_list_collections",
+  mongoCollectionOverview: "mongo_collection_overview",
+  mongoFindDocuments: "mongo_find_documents",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];

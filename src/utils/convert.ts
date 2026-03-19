@@ -140,6 +140,7 @@ export function normalizeEngineName(
     postgresql: "Postgres",
     mysql: "MySQL",
     mariadb: "MariaDB",
+    mongo: "MongoDB",
     sqlite: "SQLite",
     redis: "Redis",
   };

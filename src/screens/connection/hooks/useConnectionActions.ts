@@ -284,7 +284,7 @@ export function useConnectionActions(
 
   const openSql = useCallback(() => {
     openSqlEditor();
-  }, [openSqlEditor]);
+  }, [engine, openSqlEditor]);
 
   const selectTable = useCallback(
     async (table: TableItem) => {

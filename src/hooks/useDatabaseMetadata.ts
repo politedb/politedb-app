@@ -1,6 +1,11 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { runSqlQuery } from "src/lib/tauri/query";
+import {
+  mongoCollectionOverview,
+  mongoListCollections,
+  mongoListDatabases,
+} from "src/lib/tauri";
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
 
@@ -118,9 +123,7 @@ export function useDatabaseMetadata() {
         columnsByTable:
           force && includeColumns ? {} : (existing?.columnsByTable ?? {}),
         columnsLoaded:
-          includeColumns && force
-            ? false
-            : (existing?.columnsLoaded ?? false),
+          includeColumns && force ? false : (existing?.columnsLoaded ?? false),
         loading: true,
         loaded: false,
         error: null,
@@ -130,6 +133,56 @@ export function useDatabaseMetadata() {
 
       const p = (async (): Promise<DbMetadata> => {
         try {
+          if (engine === "mongo") {
+            const schemas = await mongoListDatabases(connectionId);
+            setCache(metaKey, { schemas, progress: 20, stage: "tables" });
+
+            const tables: TableItem[] = [];
+            const columnsByTable: Record<string, string[]> = {};
+
+            for (let i = 0; i < schemas.length; i++) {
+              const schema = schemas[i]!;
+              const collections = await mongoListCollections(
+                connectionId,
+                schema
+              );
+
+              for (const name of collections) {
+                tables.push({ schema, name, kind: "table" });
+
+                if (includeColumns) {
+                  const overview = await mongoCollectionOverview({
+                    connectionId,
+                    database: schema,
+                    collection: name,
+                    sampleSize: 50,
+                  });
+                  columnsByTable[`${schema}.${name}`] = overview.columns.map(
+                    (c) => c.name
+                  );
+                }
+              }
+
+              const prog =
+                20 + Math.floor(((i + 1) / Math.max(1, schemas.length)) * 70);
+              setCache(metaKey, { progress: Math.min(95, prog) });
+            }
+
+            setCache(metaKey, {
+              functions: [],
+              tables,
+              columnsByTable,
+              columnsLoaded: includeColumns,
+              loading: false,
+              loaded: true,
+              error: null,
+              progress: 100,
+              stage: "done",
+            });
+
+            return cacheRef.current[metaKey]!;
+          }
+
           const q = getMetadataQueries(engine);
 
           const [schemasRes, functionsRes, tablesRes, colsRes] =

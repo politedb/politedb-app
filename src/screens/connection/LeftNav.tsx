@@ -12,7 +12,7 @@ import { Select } from "src/components/common/Select";
 import { NewTableMenu } from "src/components/table/NewTableMenu";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { cn } from "src/utils/cn";
-import type { TableItem } from "src/types";
+import type { DatabaseEngine, TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -22,10 +22,15 @@ import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
 
 interface Props {
+  engine?: DatabaseEngine;
   profileId: string;
   schemas: string[];
   currSchema: string;
   onSchemaChange: (schema: string) => void;
+  /** e.g. "Database" for Mongo, "Schema" for SQL engines */
+  schemaLabel?: string;
+  /** e.g. "Collections" for Mongo, "Tables" for SQL engines */
+  tablesSectionTitle?: string;
 
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<SetStateAction<string>>;
@@ -82,10 +87,13 @@ function TableName({ name }: { name: string }) {
 }
 
 export function LeftNav({
+  engine,
   profileId,
   schemas,
   currSchema,
   onSchemaChange,
+  schemaLabel = "Schema",
+  tablesSectionTitle = "Tables",
   tableSearchQuery,
   setTableSearchQuery,
   expandedSections,
@@ -100,6 +108,8 @@ export function LeftNav({
     (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
   );
   const { windowHasPatchChanges } = useConnectionWindows(profileId);
+  const isMongo = engine === "mongo";
+  const supportsTableMutations = !isMongo;
 
   const [tableMenu, setTableMenu] = useState<{
     x: number;
@@ -130,26 +140,26 @@ export function LeftNav({
         {
           type: "item",
           label: "Import data from CSV",
-          disabled: isProfileLocked,
+          disabled: isProfileLocked || !supportsTableMutations,
           onClick: () => actions.importTableData(tableMenu.table),
         },
         { type: "sep" },
         {
           type: "item",
           label: "Clone...",
-          disabled: isProfileLocked,
+          disabled: isProfileLocked || !supportsTableMutations,
           onClick: () => actions.cloneTable(tableMenu.table),
         },
         {
           type: "item",
           label: "Truncate...",
-          disabled: isProfileLocked,
+          disabled: isProfileLocked || !supportsTableMutations,
           onClick: () => actions.truncateTable(tableMenu.table),
         },
         {
           type: "item",
           label: "Drop...",
-          disabled: isProfileLocked,
+          disabled: isProfileLocked || !supportsTableMutations,
           onClick: () => actions.dropTable(tableMenu.table),
         },
       ]
@@ -178,54 +188,56 @@ export function LeftNav({
 
       {/* Middle: Sections */}
       <div class="flex-1 overflow-y-auto px-2 pb-2">
-        {/* Functions */}
-        <div class="mb-2">
-          <SectionHeader
-            title="Functions"
-            expanded={expandedSections.functions}
-            onToggle={() =>
-              setExpandedSections((prev) => ({
-                ...prev,
-                functions: !prev.functions,
-              }))
-            }
-          />
+        {/* Functions (hidden for Mongo; schema = database, no SQL functions) */}
+        {!isMongo && (
+          <div class="mb-2">
+            <SectionHeader
+              title="Functions"
+              expanded={expandedSections.functions}
+              onToggle={() =>
+                setExpandedSections((prev) => ({
+                  ...prev,
+                  functions: !prev.functions,
+                }))
+              }
+            />
 
-          {expandedSections.functions && (
-            <div class="mt-1">
-              {filteredFunctions.length === 0 ? (
-                <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
-                  No functions found
-                </div>
-              ) : (
-                <div class="space-y-1 pl-3">
-                  {filteredFunctions.map((fn) => {
-                    const key = `${fn.schema}.${fn.name}(${fn.args ?? ""})`;
+            {expandedSections.functions && (
+              <div class="mt-1">
+                {filteredFunctions.length === 0 ? (
+                  <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
+                    No functions found
+                  </div>
+                ) : (
+                  <div class="space-y-1 pl-3">
+                    {filteredFunctions.map((fn) => {
+                      const key = `${fn.schema}.${fn.name}(${fn.args ?? ""})`;
 
-                    return (
-                      <div
-                        key={key}
-                        class={cn(
-                          "flex items-center gap-2 rounded-md px-2.5 py-1.5",
-                          "text-left text-sm text-neutral-700"
-                        )}
-                        title={key}
-                      >
-                        <SquareFunction className="size-4 shrink-0 text-blue-500" />
-                        <TableName name={fn.name} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                      return (
+                        <div
+                          key={key}
+                          class={cn(
+                            "flex items-center gap-2 rounded-md px-2.5 py-1.5",
+                            "text-left text-sm text-neutral-700"
+                          )}
+                          title={key}
+                        >
+                          <SquareFunction className="size-4 shrink-0 text-blue-500" />
+                          <TableName name={fn.name} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Tables */}
+        {/* Tables / Collections */}
         <div>
           <SectionHeader
-            title="Tables"
+            title={tablesSectionTitle}
             expanded={expandedSections.tables}
             onToggle={() =>
               setExpandedSections((prev) => ({
@@ -239,7 +251,7 @@ export function LeftNav({
             <div class="mt-1">
               {filteredTables.length === 0 ? (
                 <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
-                  No tables found
+                  {isMongo ? "No collections found" : "No tables found"}
                 </div>
               ) : (
                 <div class="space-y-1 pl-3">
@@ -309,11 +321,12 @@ export function LeftNav({
         </ul>
       </div>
 
-      {/* Bottom: Toolbar */}
+      {/* Bottom: Toolbar — Database (Mongo) / Schema (SQL) selector */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">
           <NewTableMenu
-            disabled={isProfileLocked}
+            disabled={isProfileLocked || !supportsTableMutations}
+            enableNewSchema={engine === "postgres"}
             onOpenNewTable={() => {
               const t: TableItem = {
                 schema: currSchema,
@@ -326,15 +339,17 @@ export function LeftNav({
           />
 
           <Select
+            aria-label={schemaLabel}
+            title={schemaLabel}
             className={cn(
               "h-6 w-full rounded-lg border-neutral-300 bg-white",
               "text-xs! font-medium! text-neutral-800",
               "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
             )}
-            defaultValue={currSchema}
+            value={currSchema}
             onChange={(e) => onSchemaChange(e.currentTarget.value)}
           >
-            {schemas.map((schema) => (
+            {(isMongo ? [schemas[0]] : schemas).map((schema) => (
               <option value={schema}>{schema}</option>
             ))}
           </Select>

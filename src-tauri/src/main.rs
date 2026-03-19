@@ -34,6 +34,7 @@ fn main() {
         Arc::new(engines::postgres::driver::PostgresDriver),
         Arc::new(engines::mysql::driver::MySqlDriver),
         Arc::new(engines::mysql::driver::MariaDbDriver),
+        Arc::new(engines::mongo::driver::MongoDriver),
         Arc::new(engines::redis::driver::RedisDriver),
     ];
 
@@ -88,6 +89,11 @@ fn main() {
             commands::persistent::persistent_clear,
             // export (streaming append for large table export)
             commands::export::export_append_to_file,
+            // mongo
+            commands::mongo::mongo_list_databases,
+            commands::mongo::mongo_list_collections,
+            commands::mongo::mongo_collection_overview,
+            commands::mongo::mongo_find_documents,
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

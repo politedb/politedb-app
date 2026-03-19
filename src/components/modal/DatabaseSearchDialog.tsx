@@ -13,6 +13,8 @@ interface Props {
   onSelectSchema: (schema: string) => void;
   tables: TableItem[];
   schemas: string[];
+  /** e.g. "Database" for Mongo, "Schema" for SQL engines */
+  schemaLabel?: string;
 }
 
 type SearchResult =
@@ -26,6 +28,7 @@ export function DatabaseSearchDialog({
   onSelectSchema,
   tables,
   schemas,
+  schemaLabel = "Schema",
 }: Props) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -121,7 +124,7 @@ export function DatabaseSearchDialog({
             value={query}
             onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search schemas, tables, and views..."
+            placeholder={`Search ${schemaLabel.toLowerCase()}s, tables, and views...`}
             left={<Search className="size-4 text-neutral-500" />}
             className="rounded-lg border border-neutral-300 text-sm"
             autoFocus={true}
@@ -167,7 +170,7 @@ export function DatabaseSearchDialog({
                               {res.data}
                             </span>
                           </div>
-                          <span class="text-neutral-600">Schema</span>
+                          <span class="text-neutral-600">{schemaLabel}</span>
                         </>
                       ) : (
                         <>
@@ -177,7 +180,7 @@ export function DatabaseSearchDialog({
                               {res.data.name}
                             </span>
                           </div>
-                          <span class="text-neutral-600">
+                          <span class="text-neutral-600" title={schemaLabel}>
                             {res.data.schema}
                           </span>
                         </>

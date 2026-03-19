@@ -1,6 +1,7 @@
 pub mod cancel;
 pub mod driver;
 pub mod merge;
+pub mod mongo;
 pub mod mysql;
 pub mod postgres;
 pub mod redis;
@@ -19,6 +20,7 @@ use crate::types::{OperationKind, RedisCommandInput};
 pub enum EngineConnection {
     Postgres(postgres::connection::PgConn),
     MySql(mysql::connection::MySqlConn),
+    Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
 }
 
@@ -57,6 +59,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.id,
             EngineConnection::MySql(c) => c.id,
+            EngineConnection::Mongo(c) => c.id,
             EngineConnection::Redis(c) => c.id,
         }
     }
@@ -65,6 +68,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.label.clone(),
             EngineConnection::MySql(c) => c.label.clone(),
+            EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
         }
     }
@@ -73,6 +77,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(_) => EngineKind::Postgres,
             EngineConnection::MySql(c) => c.engine,
+            EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Redis(_) => EngineKind::Redis,
         }
     }
@@ -85,7 +90,19 @@ impl EngineConnection {
                 EngineKind::Mariadb => "mariadb",
                 _ => "mysql",
             },
+            EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Redis(_) => "redis",
+        }
+    }
+
+    pub async fn close(self) {
+        match self {
+            EngineConnection::Postgres(pg) => drop(pg.pool),
+            EngineConnection::MySql(my) => {
+                let _ = my.pool.clone().disconnect().await;
+            }
+            EngineConnection::Mongo(mongo) => drop(mongo.client),
+            EngineConnection::Redis(r) => drop(r.pool),
         }
     }
 
@@ -161,6 +178,7 @@ impl EngineConnection {
                 Ok(())
             }
 
+            EngineConnection::Mongo(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
             EngineConnection::Redis(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
         }
     }

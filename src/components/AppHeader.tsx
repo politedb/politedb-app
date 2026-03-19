@@ -259,7 +259,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         </div>
 
         <div class="flex min-w-0 flex-1 items-center">
-          <div class="flex items-center gap-1 overflow-x-auto rounded-lg p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg p-1 pr-2">
             {profileTabs.map((tab) => {
               const isActive = activeProfileScreen === tab.id;
 

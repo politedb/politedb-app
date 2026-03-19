@@ -184,7 +184,12 @@ export function ActiveWindowContent() {
   // -------------------------------------------------------------------------
 
   if (!hasAnyWindow) {
-    return <EmptyWindow onNewSql={actions.openSql} />;
+    return (
+      <EmptyWindow
+        onNewSql={actions.openSql}
+        canOpenSql={rt.engine !== "mongo"}
+      />
+    );
   }
 
   if (activeSqlWindow) {

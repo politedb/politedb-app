@@ -11,7 +11,7 @@ use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
     ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MySqlConnectInput,
-    PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
+    MongoConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
 };
 
 /* ============================================================================
@@ -107,6 +107,16 @@ fn validate_redis_input(r: &RedisConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_mongo_input(m: &MongoConnectInput) -> Result<(), String> {
+    if m.host.trim().is_empty() {
+        return Err("MONGO_HOST_REQUIRED".into());
+    }
+    if m.port == 0 {
+        return Err("MONGO_PORT_INVALID".into());
+    }
+    Ok(())
+}
+
 fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
     if input.label.trim().is_empty() {
         return Err("LABEL_REQUIRED".into());
@@ -124,6 +134,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
         EngineKind::Mariadb => {
             let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
             validate_mysql_input(my)
+        }
+        EngineKind::Mongo => {
+            let mongo = input.mongo.as_ref().ok_or("MONGO_CONFIG_MISSING")?;
+            validate_mongo_input(mongo)
         }
         EngineKind::Redis => {
             let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
@@ -144,6 +158,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Postgres => "postgres",
         EngineKind::Mysql => "mysql",
         EngineKind::Mariadb => "mariadb",
+        EngineKind::Mongo => "mongo",
         EngineKind::Redis => "redis",
         #[allow(unreachable_patterns)]
         _ => "unknown",
@@ -226,6 +241,17 @@ pub fn persist_input_with_secrets(
                 EngineKind::Mariadb,
                 persist_secrets,
                 &mut my.password,
+            )?;
+        }
+
+        EngineKind::Mongo => {
+            let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Mongo,
+                persist_secrets,
+                &mut mongo.password,
             )?;
         }
 

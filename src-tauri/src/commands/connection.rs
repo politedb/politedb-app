@@ -1,7 +1,6 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::engines::EngineConnection;
 use crate::ssh_tunnel;
 use crate::ssh_tunnel::pool::{acquire_shared_tunnel, release_shared_tunnel_by_conn};
 use crate::state::AppState;
@@ -27,6 +26,11 @@ fn rewrite_input_host_port(
             let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
             my.host = host.into();
             my.port = port;
+        }
+        crate::types::EngineKind::Mongo => {
+            let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
+            mongo.host = host.into();
+            mongo.port = port;
         }
         crate::types::EngineKind::Redis => {
             let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
@@ -194,6 +198,16 @@ pub async fn connection_test(
                         }
                     }
                 }
+                crate::types::EngineKind::Mongo => {
+                    if let Some(mongo) = input.mongo.as_mut() {
+                        if mongo.password.kind == crate::types::SecretRefKind::Keychain
+                            && mongo.password.value.trim().is_empty()
+                        {
+                            mongo.password.kind = crate::types::SecretRefKind::Inline;
+                            mongo.password.value = pw.to_string();
+                        }
+                    }
+                }
                 crate::types::EngineKind::Redis => {
                     if let Some(rd) = input.redis.as_mut() {
                         if rd.password.kind == crate::types::SecretRefKind::Keychain
@@ -341,17 +355,7 @@ pub async fn connection_remove(
 
     // 2) close DB connection resources
     if let Some((_id, conn)) = state.connections.remove(&connection_id) {
-        match conn {
-            EngineConnection::Postgres(pg) => {
-                drop(pg.pool);
-            }
-            EngineConnection::MySql(my) => {
-                let _ = my.pool.clone().disconnect().await;
-            }
-            EngineConnection::Redis(r) => {
-                drop(r.pool);
-            }
-        }
+        conn.close().await;
     }
 
     // 3) release SSH tunnel

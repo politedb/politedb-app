@@ -385,17 +385,11 @@ export function ConnectionScreen() {
   const contentArea = (
     <div class="transition-smooth flex flex-1 flex-col overflow-hidden">
       {activeWindows.length > 0 && (
-        <div
-          class={cn(
-            "flex shrink-0 items-end overflow-x-auto overflow-y-hidden pt-1"
-          )}
-        >
-          <NavigationTabs
-            openWindows={activeWindows}
-            setActiveWindowId={(id) => selectWindow(id)}
-            activeWindowId={activeWindowId}
-          />
-        </div>
+        <NavigationTabs
+          openWindows={activeWindows}
+          setActiveWindowId={(id) => selectWindow(id)}
+          activeWindowId={activeWindowId}
+        />
       )}
 
       <div class={cn("flex-1 overflow-auto")}>
@@ -428,7 +422,11 @@ export function ConnectionScreen() {
       <ConnectionRuntimeProvider value={runtimeValue}>
         <div class="flex h-full flex-1 flex-col">
           <MenuBar
-            activeSchema={activeTableWindow?.table.schema}
+            activeSchema={
+              activeTableWindow?.table.name
+                ? activeTableWindow?.table.schema
+                : activeSchema
+            }
             activeTable={activeTableWindow?.table.name}
             viewMode={viewMode}
             loadTableError={loadError}
@@ -450,10 +448,15 @@ export function ConnectionScreen() {
                 first={
                   <div class="h-full overflow-hidden">
                     <LeftNav
+                      engine={engine}
                       profileId={activeProfileScreen}
                       schemas={schemasForEditor}
                       currSchema={activeSchema}
                       onSchemaChange={onSchemaChange}
+                      schemaLabel={engine === "mongo" ? "Database" : "Schema"}
+                      tablesSectionTitle={
+                        engine === "mongo" ? "Collections" : "Tables"
+                      }
                       tableSearchQuery={tableSearchQuery}
                       setTableSearchQuery={setTableSearchQuery}
                       expandedSections={expandedSections}
@@ -559,6 +562,7 @@ export function ConnectionScreen() {
           onClose={() => setSearchDialogOpen(false)}
           tables={meta.tables ?? []}
           schemas={meta.schemas ?? []}
+          schemaLabel={engine === "mongo" ? "Database" : "Schema"}
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}
         />

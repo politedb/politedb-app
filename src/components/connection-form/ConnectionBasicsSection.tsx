@@ -15,6 +15,7 @@ export function ConnectionBasicsSection(
 
   const engine = useWatch({ control, name: "engine" });
   const isRedis = engine === "redis";
+  const isMongo = engine === "mongo";
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -55,7 +56,7 @@ export function ConnectionBasicsSection(
     name: "database",
     rules: {
       validate: (v) => {
-        if (isRedis) return true;
+        if (isRedis || isMongo) return true;
         return String(v ?? "").trim().length > 0 || "Database is required.";
       },
     },
@@ -66,7 +67,7 @@ export function ConnectionBasicsSection(
     name: "user",
     rules: {
       validate: (v) => {
-        if (isRedis) return true;
+        if (isRedis || isMongo) return true;
         return String(v ?? "").trim().length > 0 || "User is required.";
       },
     },
@@ -78,7 +79,7 @@ export function ConnectionBasicsSection(
     name: "password",
     rules: {
       validate: (v) => {
-        if (isRedis) return true;
+        if (isRedis || isMongo) return true;
         if (storeKeychain) return true;
         return String(v ?? "").trim().length > 0 || "Password is required.";
       },
@@ -115,6 +116,7 @@ export function ConnectionBasicsSection(
 
   const defaultPort = useMemo(() => {
     if (engine === "mysql" || engine === "mariadb") return 3306;
+    if (engine === "mongo") return 27017;
     if (engine === "redis") return 6379;
     return 5432;
   }, [engine]);
@@ -122,9 +124,9 @@ export function ConnectionBasicsSection(
   const nameErr = !!errors?.name;
   const hostErr = !!errors?.host;
   const portErr = !!errors?.port;
-  const dbErr = !!errors?.database;
-  const userErr = !!errors?.user;
-  const pwErr = !storeKeychain && !isRedis && !!errors?.password;
+  const dbErr = !isMongo && !!errors?.database;
+  const userErr = !isMongo && !!errors?.user;
+  const pwErr = !storeKeychain && !isRedis && !isMongo && !!errors?.password;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">

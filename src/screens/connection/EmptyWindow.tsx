@@ -1,6 +1,10 @@
 import { Database } from "src/components/icons";
 
-export function EmptyWindow(props: { onNewSql: () => void }) {
+export function EmptyWindow(props: {
+  onNewSql: () => void;
+  canOpenSql?: boolean;
+}) {
+  const { canOpenSql = true } = props;
   return (
     <div class="relative flex h-full w-full items-center justify-center">
       {/* subtle backdrop */}
@@ -20,20 +24,23 @@ export function EmptyWindow(props: { onNewSql: () => void }) {
         <div class="mt-2 text-sm leading-relaxed text-neutral-600">
           This connection is ready.
           <br />
-          Select a table from the sidebar, or open the SQL editor to run
-          queries.
+          {canOpenSql
+            ? "Select a table from the sidebar, or open the SQL editor to run queries."
+            : "Select a collection from the sidebar to start browsing documents."}
         </div>
 
         <div class="mt-6 flex flex-col items-center gap-2">
-          <button
-            class="h-9 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-900 hover:bg-neutral-50 active:bg-neutral-100"
-            onClick={props.onNewSql}
-          >
-            Open SQL Editor
-          </button>
+          {canOpenSql ? (
+            <button
+              class="h-9 rounded-md border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-900 hover:bg-neutral-50 active:bg-neutral-100"
+              onClick={props.onNewSql}
+            >
+              Open SQL Editor
+            </button>
+          ) : null}
 
           <div class="text-xs text-neutral-400">
-            or choose a table from the left panel
+            or choose a {canOpenSql ? "table" : "collection"} from the left panel
           </div>
         </div>
       </div>

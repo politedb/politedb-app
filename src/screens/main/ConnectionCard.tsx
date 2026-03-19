@@ -22,6 +22,7 @@ function firstNonEmpty(...xs: Array<string | undefined | null>) {
 type EngineInput =
   | ConnectionProfile["input"]["postgres"]
   | ConnectionProfile["input"]["mysql"]
+  | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["redis"];
 
 function getEngineInput(profile: ConnectionProfile): {
@@ -34,6 +35,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "mysql" || engine === "mariadb") {
     return { engine, input: profile.input?.mysql };
+  }
+  if (engine === "mongo") {
+    return { engine, input: profile.input?.mongo };
   }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
@@ -52,6 +56,8 @@ function buildSubtitle(profile: ConnectionProfile) {
       ? (profile.input?.postgres?.database ?? "")
       : engine === "mysql" || engine === "mariadb"
         ? (profile.input?.mysql?.database ?? "")
+        : engine === "mongo"
+          ? (profile.input?.mongo?.database ?? "")
         : engine === "redis"
           ? profile.input?.redis?.db != null
             ? `db ${profile.input.redis.db}`

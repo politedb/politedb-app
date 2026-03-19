@@ -16,12 +16,14 @@ import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
 
 interface Props {
   onOpenNewTable?: () => void;
+  enableNewSchema?: boolean;
   className?: string;
   disabled?: boolean;
 }
 
 export function NewTableMenu({
   onOpenNewTable,
+  enableNewSchema = true,
   className,
   disabled = false,
 }: Props) {
@@ -37,6 +39,7 @@ export function NewTableMenu({
       label: "New Schema",
       onClick: () => setOpenSchema(true),
       icon: <Schema className="size-4 text-neutral-600" />,
+      hidden: !enableNewSchema,
     },
   ];
 
@@ -51,7 +54,7 @@ export function NewTableMenu({
               "size-6 p-2",
               "border-neutral-300 bg-white text-neutral-800"
             )}
-            title="New"
+            title={disabled ? "Not supported" : "New"}
             disabled={disabled}
           >
             +
@@ -61,7 +64,13 @@ export function NewTableMenu({
         width={220}
         className={className}
       />
-      <NewSchemaDialog open={openSchema} onClose={() => setOpenSchema(false)} />
+
+      {enableNewSchema && openSchema && (
+        <NewSchemaDialog
+          open={openSchema}
+          onClose={() => setOpenSchema(false)}
+        />
+      )}
     </>
   );
 }
