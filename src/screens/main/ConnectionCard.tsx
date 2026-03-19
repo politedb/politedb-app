@@ -29,9 +29,15 @@ function getEngineInput(profile: ConnectionProfile): {
   input: EngineInput | undefined;
 } {
   const engine = String(profile.engine || profile.input?.engine || "");
-  if (engine === "postgres") return { engine, input: profile.input?.postgres };
-  if (engine === "mysql") return { engine, input: profile.input?.mysql };
-  if (engine === "redis") return { engine, input: profile.input?.redis };
+  if (engine === "postgres") {
+    return { engine, input: profile.input?.postgres };
+  }
+  if (engine === "mysql" || engine === "mariadb") {
+    return { engine, input: profile.input?.mysql };
+  }
+  if (engine === "redis") {
+    return { engine, input: profile.input?.redis };
+  }
   return { engine, input: undefined };
 }
 
@@ -44,7 +50,7 @@ function buildSubtitle(profile: ConnectionProfile) {
   const database =
     engine === "postgres"
       ? (profile.input?.postgres?.database ?? "")
-      : engine === "mysql"
+      : engine === "mysql" || engine === "mariadb"
         ? (profile.input?.mysql?.database ?? "")
         : engine === "redis"
           ? profile.input?.redis?.db != null

@@ -33,6 +33,7 @@ fn main() {
     let drivers: Vec<Arc<dyn EngineDriver>> = vec![
         Arc::new(engines::postgres::driver::PostgresDriver),
         Arc::new(engines::mysql::driver::MySqlDriver),
+        Arc::new(engines::mysql::driver::MariaDbDriver),
         Arc::new(engines::redis::driver::RedisDriver),
     ];
 

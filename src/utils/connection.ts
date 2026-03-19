@@ -16,7 +16,7 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
-  if (engine === "mysql") {
+  if (engine === "mysql" || engine === "mariadb") {
     const my = conn.input?.mysql;
     return {
       host: my?.host ?? "",

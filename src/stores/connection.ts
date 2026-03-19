@@ -50,6 +50,44 @@ function cacheGet(
   return cache.map.get(idx);
 }
 
+function normalizePrimaryKeyValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+      .sort();
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .sort();
+  }
+
+  return [];
+}
+
+function getPrimaryKeyColumnsFromConstraints(
+  constraints: TableConstraint[] | null | undefined
+): string[] {
+  if (!constraints?.length) return [];
+
+  const isTruthy = (v: unknown) =>
+    v === true || String(v ?? "").toLowerCase() === "true";
+
+  const pkConstraint = constraints.find(
+    (c) =>
+      isTruthy(c.is_primary) ||
+      c.index_name?.toLowerCase() === "primary" ||
+      c.index_name?.toLowerCase().includes("pkey") ||
+      (isTruthy(c.is_unique) && c.index_name?.toLowerCase().includes("primary"))
+  );
+
+  return normalizePrimaryKeyValue(pkConstraint?.column_name);
+}
+
 /* =============================================================================
  * Base states
  * ============================================================================= */
@@ -637,6 +675,14 @@ export const useConnectionStore = create<ConnectionState>()(
                 original = structure?.[rowIndex] as
                   | Record<string, any>
                   | undefined;
+              } else if (rowKey === "-1") {
+                const meta = s.tableDataMap[tableKey];
+                original = {
+                  tableName: tableWindow.table.name,
+                  primaryKey: getPrimaryKeyColumnsFromConstraints(
+                    meta?.constraints
+                  ),
+                };
               }
             } else if (dataKey === DATA_KEYS.constraints) {
               const rowIndex = parseInt(rowKey, 10);
@@ -654,6 +700,15 @@ export const useConnectionStore = create<ConnectionState>()(
               for (const [key, value] of Object.entries(dataToWrite)) {
                 if (key === "__rowKey") {
                   cleaned[key] = value;
+                  continue;
+                }
+                if (key === "primaryKey") {
+                  const patchPk = normalizePrimaryKeyValue(value);
+                  const origPk = normalizePrimaryKeyValue(original[key]);
+                  const samePk =
+                    patchPk.length === origPk.length &&
+                    patchPk.every((col, index) => col === origPk[index]);
+                  if (!samePk) cleaned[key] = patchPk;
                   continue;
                 }
                 let origVal = original[key];

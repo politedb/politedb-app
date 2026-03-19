@@ -15,6 +15,7 @@ use crate::types::{
     SecretRefKind,
 };
 pub struct MySqlDriver;
+pub struct MariaDbDriver;
 
 #[async_trait]
 impl EngineDriver for MySqlDriver {
@@ -31,7 +32,7 @@ impl EngineDriver for MySqlDriver {
     ) -> Result<EngineConnection, String> {
         let my = input.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
 
-        let conn = connect_mysql(app, conn_id, label, my)
+        let conn = connect_mysql(app, conn_id, label, EngineKind::Mysql, my)
             .await
             .map_err(|e| format!("MYSQL_CONNECT_FAILED: {e}"))?;
 
@@ -74,6 +75,67 @@ impl EngineDriver for MySqlDriver {
                     value: pw,
                 };
             }
+        }
+
+        base.mysql = Some(b);
+        Ok(base)
+    }
+}
+
+#[async_trait]
+impl EngineDriver for MariaDbDriver {
+    fn kind(&self) -> EngineKind {
+        EngineKind::Mariadb
+    }
+
+    async fn connect(
+        &self,
+        app: &AppHandle,
+        conn_id: Uuid,
+        label: String,
+        input: ConnectionCreateInput,
+    ) -> Result<EngineConnection, String> {
+        let my = input.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
+
+        let conn = connect_mysql(app, conn_id, label, EngineKind::Mariadb, my)
+            .await
+            .map_err(|e| format!("MARIADB_CONNECT_FAILED: {e}"))?;
+
+        Ok(EngineConnection::MySql(conn))
+    }
+
+    async fn test(
+        &self,
+        app: &AppHandle,
+        input: ConnectionCreateInput,
+        secrets_opt: Option<ConnectionTestSecrets>,
+    ) -> Result<(), String> {
+        let my = input.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
+
+        test_mysql_direct(app, my, secrets_opt)
+            .await
+            .map_err(|e| format!("MARIADB_TEST_FAILED: {e}"))?;
+
+        Ok(())
+    }
+
+    fn merge_for_test(
+        &self,
+        mut base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String> {
+        base = merge_ssh_for_test(base, &ov, &secrets);
+
+        let mut b = base.mysql.ok_or("MYSQL_CONFIG_MISSING")?;
+
+        if let Some(ov_my) = ov.mysql {
+            b = merge_mysql(b, ov_my, &secrets);
+        } else if let Some(pw) = inline_db_pw(&secrets) {
+            b.password = SecretRef {
+                kind: SecretRefKind::Inline,
+                value: pw,
+            };
         }
 
         base.mysql = Some(b);
@@ -147,6 +209,7 @@ pub async fn connect_mysql(
     app: &AppHandle,
     conn_id: Uuid,
     label: String,
+    engine: EngineKind,
     input: MySqlConnectInput,
 ) -> Result<MySqlConn, String> {
     // connect path: ALWAYS resolve from SecretRef (inline/keychain)
@@ -177,6 +240,7 @@ pub async fn connect_mysql(
     Ok(MySqlConn {
         id: conn_id,
         label,
+        engine,
         pool,
         default_statement_timeout_ms: input.statement_timeout_ms,
     })

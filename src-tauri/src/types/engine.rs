@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum EngineKind {
     Postgres,
     Mysql,
+    Mariadb,
     Redis,
     // Mongo,
     // Sqlite,

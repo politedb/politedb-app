@@ -172,7 +172,7 @@ function withDatabaseInput(
     };
   }
 
-  if (input.engine === "mysql") {
+  if (input.engine === "mysql" || input.engine === "mariadb") {
     if (!input.mysql) throw new Error("MYSQL_CONFIG_MISSING");
     return {
       ...input,

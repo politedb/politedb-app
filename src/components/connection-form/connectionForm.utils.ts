@@ -69,6 +69,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
     case "postgres":
       return 5432;
     case "mysql":
+    case "mariadb":
       return 3306;
     case "redis":
       return 6379;
@@ -86,7 +87,7 @@ function pickByEngine<T>(
   by: { postgres?: T; mysql?: T; redis?: T }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
-  if (engine === "mysql") return by.mysql;
+  if (engine === "mysql" || engine === "mariadb") return by.mysql;
   if (engine === "redis") return by.redis;
   return undefined;
 }
@@ -187,7 +188,10 @@ function buildPostgresInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
-function buildMySqlInput(v: FormValues): ConnectionCreateInput {
+function buildMySqlInput(
+  v: FormValues,
+  engine: "mysql" | "mariadb" = "mysql"
+): ConnectionCreateInput {
   const port = toNumber(v.port, 3306);
 
   const mysql: ConnectionCreateInput["mysql"] = {
@@ -203,7 +207,7 @@ function buildMySqlInput(v: FormValues): ConnectionCreateInput {
   };
 
   return {
-    engine: "mysql",
+    engine,
     label: v.name,
     tags: v.tags.map(normalizeTag),
     indicator_color: v.indicator_color,
@@ -241,6 +245,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildPostgresInput(v);
     case "mysql":
       return buildMySqlInput(v);
+    case "mariadb":
+      return buildMySqlInput(v, "mariadb");
     case "redis":
       return buildRedisInput(v);
     default:
@@ -295,7 +301,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       ? pg?.password?.kind === "inline"
         ? (pg.password.value ?? "")
         : ""
-      : engine === "mysql"
+      : engine === "mysql" || engine === "mariadb"
         ? my?.password?.kind === "inline"
           ? (my.password.value ?? "")
           : ""
@@ -304,7 +310,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const storeKeychain =
     engine === "postgres"
       ? pg?.password?.kind !== "inline"
-      : engine === "mysql"
+      : engine === "mysql" || engine === "mariadb"
         ? my?.password?.kind !== "inline"
         : true;
 

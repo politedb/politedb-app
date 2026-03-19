@@ -16,11 +16,12 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: ["BTREE", "HASH", "RTREE"],
     allowFk: true,
   },
-  redis: {
-    dataTypes: [],
-    indexAlgorithms: [],
-  },
   mariadb: {
+    dataTypes: MYSQL_DATA_TYPES,
+    indexAlgorithms: ["BTREE", "HASH", "RTREE"],
+    allowFk: true,
+  },
+  redis: {
     dataTypes: [],
     indexAlgorithms: [],
   },

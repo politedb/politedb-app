@@ -121,6 +121,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
             validate_mysql_input(my)
         }
+        EngineKind::Mariadb => {
+            let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
+            validate_mysql_input(my)
+        }
         EngineKind::Redis => {
             let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
             validate_redis_input(r)
@@ -139,6 +143,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
     match engine {
         EngineKind::Postgres => "postgres",
         EngineKind::Mysql => "mysql",
+        EngineKind::Mariadb => "mariadb",
         EngineKind::Redis => "redis",
         #[allow(unreachable_patterns)]
         _ => "unknown",
@@ -208,6 +213,17 @@ pub fn persist_input_with_secrets(
                 app,
                 profile_id,
                 EngineKind::Mysql,
+                persist_secrets,
+                &mut my.password,
+            )?;
+        }
+
+        EngineKind::Mariadb => {
+            let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Mariadb,
                 persist_secrets,
                 &mut my.password,
             )?;

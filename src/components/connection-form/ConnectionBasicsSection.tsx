@@ -114,7 +114,7 @@ export function ConnectionBasicsSection(
   }, [password.field.value]);
 
   const defaultPort = useMemo(() => {
-    if (engine === "mysql") return 3306;
+    if (engine === "mysql" || engine === "mariadb") return 3306;
     if (engine === "redis") return 6379;
     return 5432;
   }, [engine]);

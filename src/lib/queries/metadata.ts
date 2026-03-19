@@ -112,6 +112,7 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
     case "postgres":
       return PG;
     case "mysql":
+    case "mariadb":
       return MYSQL;
     case "sqlite":
       return SQLITE;

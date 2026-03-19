@@ -37,7 +37,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     label: "MariaDB",
     abbreviation: "Mr",
     color: "bg-teal-500",
-    available: false,
+    available: true,
     desc: "Community-driven MySQL-compatible database.",
     defaultLabels: ["Gaia"],
   },

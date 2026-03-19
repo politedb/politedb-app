@@ -23,6 +23,11 @@ fn rewrite_input_host_port(
             my.host = host.into();
             my.port = port;
         }
+        crate::types::EngineKind::Mariadb => {
+            let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
+            my.host = host.into();
+            my.port = port;
+        }
         crate::types::EngineKind::Redis => {
             let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
             r.host = host.into();
@@ -170,6 +175,16 @@ pub async fn connection_test(
                     }
                 }
                 crate::types::EngineKind::Mysql => {
+                    if let Some(my) = input.mysql.as_mut() {
+                        if my.password.kind == crate::types::SecretRefKind::Keychain
+                            && my.password.value.trim().is_empty()
+                        {
+                            my.password.kind = crate::types::SecretRefKind::Inline;
+                            my.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Mariadb => {
                     if let Some(my) = input.mysql.as_mut() {
                         if my.password.kind == crate::types::SecretRefKind::Keychain
                             && my.password.value.trim().is_empty()

@@ -170,7 +170,7 @@ export function preparePayloadWithSecret(
     };
   }
 
-  if (engine === "mysql") {
+  if (engine === "mysql" || engine === "mariadb") {
     const my = input.mysql;
     if (!my) throw new Error("MYSQL_CONFIG_MISSING");
 

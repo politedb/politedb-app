@@ -72,7 +72,7 @@ impl EngineConnection {
     pub fn engine_kind(&self) -> EngineKind {
         match self {
             EngineConnection::Postgres(_) => EngineKind::Postgres,
-            EngineConnection::MySql(_) => EngineKind::Mysql,
+            EngineConnection::MySql(c) => c.engine,
             EngineConnection::Redis(_) => EngineKind::Redis,
         }
     }
@@ -81,7 +81,10 @@ impl EngineConnection {
     pub fn engine_name(&self) -> &'static str {
         match self {
             EngineConnection::Postgres(_) => "postgres",
-            EngineConnection::MySql(_) => "mysql",
+            EngineConnection::MySql(c) => match c.engine {
+                EngineKind::Mariadb => "mariadb",
+                _ => "mysql",
+            },
             EngineConnection::Redis(_) => "redis",
         }
     }
