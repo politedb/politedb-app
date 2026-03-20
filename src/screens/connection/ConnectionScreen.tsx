@@ -428,6 +428,7 @@ export function ConnectionScreen() {
                 : activeSchema
             }
             activeTable={activeTableWindow?.table.name}
+            connectionVersion={meta.version}
             viewMode={viewMode}
             loadTableError={loadError}
             onViewModeChange={toggleViewMode}

@@ -32,6 +32,7 @@ import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 interface Props {
   activeSchema?: string;
   activeTable?: string;
+  connectionVersion?: string;
   schemas?: string[];
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
@@ -202,6 +203,7 @@ function withDatabaseInput(
 export function MenuBar({
   activeSchema,
   activeTable,
+  connectionVersion: databaseVersion = "",
   viewMode = ["left"],
   loadTableError,
   onViewModeChange,
@@ -249,14 +251,14 @@ export function MenuBar({
 
     return {
       engine: profile.engine,
-      version: "16.3", // TODO: fetch from connection
+      version: databaseVersion,
       database,
       user,
       schema: activeSchema || database || "",
       table: activeTable || "",
       isSsh,
     };
-  }, [profile, activeSchema, activeTable]);
+  }, [profile, activeSchema, activeTable, databaseVersion]);
 
   const connected = !!connectionInfo && !loadTableError;
   const runtimeConnectionId = activeTab?.runtimeConnectionId ?? "";
@@ -288,7 +290,7 @@ export function MenuBar({
       upper: true,
     });
 
-    return `${pretty} ${connectionInfo.version}`;
+    return [pretty, connectionInfo.version].filter(Boolean).join(" ");
   }, [connectionInfo]);
 
   const onOpenDatabase = useCallback(

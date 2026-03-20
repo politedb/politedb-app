@@ -118,10 +118,11 @@ type LoadPlan = {
 function computeLoadPlan(params: {
   key: string;
   prev: any;
+  engine?: DatabaseEngine;
   flags: LoadFlags;
   pagination?: TablePagination;
 }): LoadPlan {
-  const { key, prev, flags, pagination } = params;
+  const { key, prev, engine, flags, pagination } = params;
 
   const force = !!flags.force;
   const forceRows = !!flags.forceRows;
@@ -134,7 +135,11 @@ function computeLoadPlan(params: {
   const limit = pagination?.limit ?? DEFAULT_LIMIT;
   const offset = pagination?.offset ?? DEFAULT_OFFSET;
 
-  const hasColumns = Array.isArray(prev.columns) && prev.columns.length > 0;
+  const hasColumnsArray = Array.isArray(prev.columns);
+  const hasColumns =
+    engine === "mongo"
+      ? hasColumnsArray
+      : hasColumnsArray && prev.columns.length > 0;
 
   const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(key);
   const hasRowsWindow = !!rowsInfo;
@@ -756,7 +761,13 @@ export function useLoadTableData() {
 
         try {
           const prev = tableDataMap[key] ?? EMPTY_META;
-          const plan = computeLoadPlan({ key, prev, flags, pagination });
+          const plan = computeLoadPlan({
+            key,
+            prev,
+            engine: activeTab.engine,
+            flags,
+            pagination,
+          });
 
           if (!shouldDoAnything(plan)) return;
 
@@ -794,7 +805,7 @@ export function useLoadTableData() {
           if (activeTab.engine === "mongo") {
             try {
               let mongoColumns =
-                Array.isArray(prev.columns) && prev.columns.length > 0
+                Array.isArray(prev.columns)
                   ? (prev.columns as ColumnRow[])
                   : [];
               let mongoStructure = prev.structure ?? [];

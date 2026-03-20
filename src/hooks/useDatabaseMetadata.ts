@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { runSqlQuery } from "src/lib/tauri/query";
 import {
+  connectionVersion,
   mongoCollectionOverview,
   mongoListCollections,
   mongoListDatabases,
@@ -17,6 +18,7 @@ export type FunctionItem = {
 
 export type DbMetadata = {
   engine?: DatabaseEngine;
+  version: string;
 
   schemas: string[];
   functions: FunctionItem[];
@@ -47,6 +49,7 @@ function emptyMeta(engine?: DatabaseEngine): DbMetadata {
     tables: [],
     columnsByTable: {},
     columnsLoaded: false,
+    version: "",
     loading: false,
     loaded: false,
     error: null,
@@ -124,6 +127,7 @@ export function useDatabaseMetadata() {
           force && includeColumns ? {} : (existing?.columnsByTable ?? {}),
         columnsLoaded:
           includeColumns && force ? false : (existing?.columnsLoaded ?? false),
+        version: force ? "" : (existing?.version ?? ""),
         loading: true,
         loaded: false,
         error: null,
@@ -133,6 +137,8 @@ export function useDatabaseMetadata() {
 
       const p = (async (): Promise<DbMetadata> => {
         try {
+          const version = await connectionVersion(connectionId);
+
           if (engine === "mongo") {
             const schemas = await mongoListDatabases(connectionId);
             setCache(metaKey, { schemas, progress: 20, stage: "tables" });
@@ -173,6 +179,7 @@ export function useDatabaseMetadata() {
               tables,
               columnsByTable,
               columnsLoaded: includeColumns,
+              version: (version ?? "").trim(),
               loading: false,
               loaded: true,
               error: null,
@@ -257,6 +264,7 @@ export function useDatabaseMetadata() {
           setCache(metaKey, {
             columnsByTable,
             columnsLoaded,
+            version: (version ?? "").trim(),
             loading: false,
             loaded: true,
             error: null,

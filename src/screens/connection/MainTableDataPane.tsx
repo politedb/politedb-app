@@ -362,7 +362,8 @@ export function MainTableDataPane(props: {
   }, [meta.rowCount, limit, offset]);
 
   const columnsLoaded =
-    Array.isArray(meta.columns) && meta.columns.length > 0;
+    Array.isArray(meta.columns) &&
+    (engine === "mongo" || meta.columns.length > 0);
   const foreignKeysLoaded = Array.isArray(meta.foreignKeys);
   const rowsKnownEmpty = !!rowsInfo && !rowsRunning && loadedMax < streamOffset;
   const hasAppliedFilters = appliedFilters.some(
@@ -608,31 +609,36 @@ export function MainTableDataPane(props: {
     [limit, offset, loadTableData]
   );
 
-  const handleCountExact = useCallback(async (includeFilters: boolean) => {
-    await loadTableData(
+  const handleCountExact = useCallback(
+    async (includeFilters: boolean) => {
+      await loadTableData(
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        { limit, offset },
+        {
+          refreshRows: false,
+          refreshMeta: false,
+          refreshStats: false,
+          refreshRowCount: true,
+          exactRowCount: true,
+          filters:
+            includeFilters && appliedFilters.length
+              ? appliedFilters
+              : undefined,
+          filterCombine: includeFilters ? appliedFilterCombine : "AND",
+        }
+      );
+    },
+    [
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
-      { limit, offset },
-      {
-        refreshRows: false,
-        refreshMeta: false,
-        refreshStats: false,
-        refreshRowCount: true,
-        exactRowCount: true,
-        filters:
-          includeFilters && appliedFilters.length ? appliedFilters : undefined,
-        filterCombine: includeFilters ? appliedFilterCombine : "AND",
-      }
-    );
-  }, [
-    activeTableWindow.table.schema,
-    activeTableWindow.table.name,
-    limit,
-    offset,
-    loadTableData,
-    appliedFilters,
-    appliedFilterCombine,
-  ]);
+      limit,
+      offset,
+      loadTableData,
+      appliedFilters,
+      appliedFilterCombine,
+    ]
+  );
 
   /* ===========================================================================
    * Export / Import / Clone / Truncate / Drop
@@ -881,7 +887,11 @@ export function MainTableDataPane(props: {
                 patches={extractPatches(patches)}
                 onAddRow={() => {
                   if (isReadOnly) return;
-                  handleAddRow(meta.columns ?? [], visiblePageTotal, onDataChange);
+                  handleAddRow(
+                    meta.columns ?? [],
+                    visiblePageTotal,
+                    onDataChange
+                  );
                 }}
                 onDeleteRow={(rowIndex) => {
                   if (isReadOnly) return;
@@ -911,7 +921,7 @@ export function MainTableDataPane(props: {
         onCountExact={handleCountExact}
         onAddRow={() => {
           if (isReadOnly) return;
-          handleAddRow(meta.columns ?? [], pageTotal, onDataChange)
+          handleAddRow(meta.columns ?? [], pageTotal, onDataChange);
         }}
         onAddColumn={isReadOnly ? () => {} : onAddColumn}
         onAddIndex={isReadOnly ? () => {} : onAddIndex}

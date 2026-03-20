@@ -57,6 +57,7 @@ fn main() {
             // Connections
             commands::connection::connection_create,
             commands::connection::connection_list,
+            commands::connection::connection_version,
             commands::connection::connection_remove,
             commands::connection::connection_test,
             // Operations

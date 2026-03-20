@@ -3,6 +3,7 @@ export const CMD = {
   connectionCreate: "connection_create",
   connectionTest: "connection_test",
   connectionList: "connection_list",
+  connectionVersion: "connection_version",
   connectionRemove: "connection_remove",
 
   // Profiles
