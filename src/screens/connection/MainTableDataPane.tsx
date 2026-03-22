@@ -118,7 +118,8 @@ export function MainTableDataPane(props: {
   const actions = useConnectionActionsCtx();
   const s = useConnectionStore.getState();
   const { profileId, engine, limit, offset } = rt;
-  const isReadOnly = isProfileLocked || engine === "mongo";
+  const isDataReadOnly = isProfileLocked;
+  const isStructureReadOnly = isProfileLocked || engine === "mongo";
 
   const { loadTableData } = useLoadTableData();
   const {
@@ -305,6 +306,10 @@ export function MainTableDataPane(props: {
     useConnectionStore.getState().dataPatchMap[profileId]?.[
       activeTableWindow.id
     ]?.patches ?? null;
+  const newRowKeys = useMemo(
+    () => Object.keys((patches?.create?.data ?? {}) as Record<string, unknown>),
+    [patches]
+  );
 
   const hasError = !!(meta.error || rowsInfo?.error);
   const errorText = String(meta.error || rowsInfo?.error || "");
@@ -433,7 +438,7 @@ export function MainTableDataPane(props: {
       rowIndex: number,
       data: Record<string, any>
     ) => {
-      if (isProfileLocked) return;
+      if (isDataReadOnly) return;
       const rowKey =
         rowIndex === -1 && data.__rowKey
           ? String(data.__rowKey)
@@ -475,14 +480,14 @@ export function MainTableDataPane(props: {
       // Update the row in the store
       useConnectionStore.getState().updateRow(activeKey, rowIdx, updatedRow);
     },
-    [isProfileLocked, profileId, meta, activeTableWindow, activeKey]
+    [isDataReadOnly, profileId, meta, activeTableWindow, activeKey]
   );
 
   const { handleAddRow, handleDeleteRow } = useTableDataOperations({
     activeKey,
     profileId,
     activeTableWindowId: activeTableWindow.id,
-    isLocked: isProfileLocked,
+    isLocked: isDataReadOnly,
     onDataChange,
   });
 
@@ -826,7 +831,7 @@ export function MainTableDataPane(props: {
           <TableStructurePane
             engine={engine}
             profileId={profileId}
-            readOnly={isReadOnly}
+            readOnly={isStructureReadOnly}
             activeTableWindow={activeTableWindow as any}
             activeTableMeta={meta}
             structPaneTab={structPaneTab}
@@ -882,19 +887,20 @@ export function MainTableDataPane(props: {
                 baseRows={basePageTotal}
                 totalRows={visiblePageTotal}
                 getRowAt={getRowAt}
-                readOnly={isReadOnly}
-                onCellChange={isReadOnly ? undefined : onDataChange}
+                readOnly={isDataReadOnly}
+                onCellChange={isDataReadOnly ? undefined : onDataChange}
                 patches={extractPatches(patches)}
+                newRowKeys={newRowKeys}
                 onAddRow={() => {
-                  if (isReadOnly) return;
+                  if (isDataReadOnly) return;
                   handleAddRow(
                     meta.columns ?? [],
-                    visiblePageTotal,
+                    loadedRowCount,
                     onDataChange
                   );
                 }}
                 onDeleteRow={(rowIndex) => {
-                  if (isReadOnly) return;
+                  if (isDataReadOnly) return;
                   handleDeleteRow(rowIndex, offset);
                 }}
                 deletedRows={extractDeleted(patches, DATA_KEYS.data)}
@@ -920,13 +926,13 @@ export function MainTableDataPane(props: {
         onPageChange={pageChange}
         onCountExact={handleCountExact}
         onAddRow={() => {
-          if (isReadOnly) return;
-          handleAddRow(meta.columns ?? [], pageTotal, onDataChange);
+          if (isDataReadOnly) return;
+          handleAddRow(meta.columns ?? [], loadedRowCount, onDataChange);
         }}
-        onAddColumn={isReadOnly ? () => {} : onAddColumn}
-        onAddIndex={isReadOnly ? () => {} : onAddIndex}
+        onAddColumn={isStructureReadOnly ? () => {} : onAddColumn}
+        onAddIndex={isStructureReadOnly ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
-        readOnly={isReadOnly}
+        readOnly={viewMode === "structure" ? isStructureReadOnly : isDataReadOnly}
       />
       {sqlDialogOpen && (
         <SqlPreviewModal

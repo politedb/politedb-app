@@ -44,6 +44,10 @@ export const CMD = {
   mongoListCollections: "mongo_list_collections",
   mongoCollectionOverview: "mongo_collection_overview",
   mongoFindDocuments: "mongo_find_documents",
+  mongoListIndexes: "mongo_list_indexes",
+  mongoInsertDocuments: "mongo_insert_documents",
+  mongoUpdateDocuments: "mongo_update_documents",
+  mongoDeleteDocuments: "mongo_delete_documents",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];

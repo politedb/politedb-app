@@ -876,3 +876,119 @@ export function generateSqlFromPatches(
 
   return allStatements;
 }
+
+export function formatMongoScalar(v: unknown): string {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "string") return JSON.stringify(v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return JSON.stringify(String(v));
+  }
+}
+
+export function formatMongoObject(v: Record<string, unknown>): string {
+  const entries = Object.entries(v).filter(([k]) => k !== "__rowKey");
+  if (entries.length === 0) return "{}";
+  const parts = entries.map(([k, val]) => `${k}: ${formatMongoScalar(val)}`);
+  return `{ ${parts.join(", ")} }`;
+}
+
+export function buildMongoOperations(
+  patchMap: PatchMap,
+  options?: {
+    activeScreen?: string;
+    getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+    offset?: number;
+  }
+): string[] {
+  const out: string[] = [];
+  const { activeScreen, getRowAt, offset = 0 } = options || {};
+
+  for (const { tableWindow, tableData, patches } of Object.values(patchMap)) {
+    const db = tableWindow.table.schema;
+    const coll = tableWindow.table.name;
+    const ref = `db.${coll}`;
+    const tableKey = activeScreen ? `${activeScreen}.${db}.${coll}` : "";
+
+    const columns = tableData?.columns ?? [];
+    const idColIdx = columns.findIndex((c) => c.name === "_id");
+
+    const inserts = Object.values(
+      (patches.create?.data ?? {}) as Record<string, Record<string, unknown>>
+    );
+    const updates = Object.entries(
+      (patches.update?.data ?? {}) as Record<string, Record<string, unknown>>
+    );
+    const deletes = Object.keys(
+      (patches.delete?.data ?? {}) as Record<string, Record<string, unknown>>
+    );
+
+    if (inserts.length > 0) {
+      for (const doc of inserts) {
+        out.push(`${ref}.insertOne(${formatMongoObject(doc)})`);
+      }
+    }
+
+    if (updates.length > 0) {
+      for (const [rowKey, patch] of updates) {
+        const setData: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(patch)) {
+          if (k === "__rowKey") continue;
+          setData[k] = v;
+        }
+
+        let idExpr = "/* _id unresolved */";
+        if (idColIdx >= 0 && getRowAt && tableKey) {
+          const localIdx = Number(rowKey);
+          const candidates = [localIdx, localIdx + offset];
+          for (const idx of candidates) {
+            if (!Number.isFinite(idx) || idx < 0) continue;
+            const row = getRowAt(tableKey, idx);
+            const idCell = row?.[idColIdx];
+            const idText = cellToString(idCell);
+            if (idText && idText.trim()) {
+              idExpr = JSON.stringify(idText);
+              break;
+            }
+          }
+        }
+
+        out.push(
+          `${ref}.updateOne({ _id: ${idExpr} }, { $set: ${formatMongoObject(setData)} })`
+        );
+      }
+    }
+
+    if (deletes.length > 0) {
+      const ids: string[] = [];
+      if (idColIdx >= 0 && getRowAt && tableKey) {
+        for (const rowKey of deletes) {
+          const localIdx = Number(rowKey);
+          const candidates = [localIdx, localIdx + offset];
+          let found: string | null = null;
+          for (const idx of candidates) {
+            if (!Number.isFinite(idx) || idx < 0) continue;
+            const row = getRowAt(tableKey, idx);
+            const idCell = row?.[idColIdx];
+            const idText = cellToString(idCell);
+            if (idText && idText.trim()) {
+              found = JSON.stringify(idText);
+              break;
+            }
+          }
+          if (found) ids.push(found);
+        }
+      }
+
+      if (ids.length > 0) {
+        out.push(`${ref}.deleteMany({ _id: { $in: [${ids.join(", ")}] } })`);
+      } else {
+        out.push(`${ref}.deleteMany({ _id: { $in: [/* unresolved */] } })`);
+      }
+    }
+  }
+
+  return out;
+}

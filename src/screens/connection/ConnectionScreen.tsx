@@ -545,6 +545,7 @@ export function ConnectionScreen() {
               newTableSql={newTableSql}
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
+              offset={offset}
             />
           )}
         </div>
