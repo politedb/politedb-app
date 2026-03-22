@@ -34,6 +34,7 @@ fn main() {
         Arc::new(engines::postgres::driver::PostgresDriver),
         Arc::new(engines::mysql::driver::MySqlDriver),
         Arc::new(engines::mysql::driver::MariaDbDriver),
+        Arc::new(engines::sqlite::driver::SqliteDriver),
         Arc::new(engines::mongo::driver::MongoDriver),
         Arc::new(engines::redis::driver::RedisDriver),
     ];

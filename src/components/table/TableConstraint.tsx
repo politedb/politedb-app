@@ -26,7 +26,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   mongo: ["index_name", "index_algorithm", "is_unique", "column_name"],
   redis: [],
   sqlserver: [],
-  sqlite: [],
+  sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],
   oracle: [],
 };
 

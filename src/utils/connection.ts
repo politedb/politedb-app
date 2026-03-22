@@ -34,6 +34,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "sqlite") {
+    const sqlite = conn.input?.sqlite;
+    return {
+      host: "",
+      database: sqlite?.path ?? "",
+      user: "",
+    };
+  }
+
   if (engine === "redis") {
     const rd = conn.input?.redis;
     return { host: rd?.host ?? "", database: "", user: "" };

@@ -216,6 +216,22 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "sqlite") {
+    const sqlite = input.sqlite;
+    if (!sqlite) throw new Error("SQLITE_CONFIG_MISSING");
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      sqlite: {
+        ...sqlite,
+      },
+    };
+  }
+
   if (engine === "redis") {
     const rd = input.redis;
     if (!rd) throw new Error("REDIS_CONFIG_MISSING");
@@ -249,6 +265,7 @@ export function preparePayloadWithSecret(
     ssh,
     postgres: input.postgres,
     mysql: input.mysql,
+    sqlite: input.sqlite,
     mongo: input.mongo,
     redis: input.redis,
   };

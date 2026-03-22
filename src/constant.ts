@@ -55,7 +55,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     label: "SQLite",
     abbreviation: "Sl",
     color: "bg-purple-600",
-    available: false,
+    available: true,
     desc: "Embedded database stored as a single file.",
     defaultLabels: ["Aphrodite", "Poseidon", "Hestia"],
   },
@@ -127,6 +127,8 @@ export const MYSQL_DATA_TYPES = [
   "enum",
   "set",
 ];
+
+export const SQLITE_DATA_TYPES = ["INTEGER", "TEXT", "BLOB", "REAL", "NUMERIC"];
 
 export const DATA_KEYS: Record<DataKey, DataKey> = {
   structure: "structure",

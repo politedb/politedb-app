@@ -140,6 +140,11 @@ export type MongoConnectInput = {
   connect_timeout_ms?: number | null;
 };
 
+export type SqliteConnectInput = {
+  path: string;
+  statement_timeout_ms?: number | null;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -156,6 +161,7 @@ export type ConnectionCreateInput = {
 
   postgres?: PgConnectInput;
   mysql?: MySqlConnectInput;
+  sqlite?: SqliteConnectInput;
   mongo?: MongoConnectInput;
   redis?: RedisConnectInput;
 };

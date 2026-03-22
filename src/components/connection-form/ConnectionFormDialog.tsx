@@ -68,8 +68,8 @@ export function ConnectionFormDialog({
     setIdleIfFinal();
   }
 
+  const v = watch();
   const requiredOk = useMemo(() => {
-    const v = watch();
     const host = v.host?.trim();
     const user = v.user?.trim();
     const database = v.database?.trim();
@@ -77,13 +77,17 @@ export function ConnectionFormDialog({
 
     const hostOk = !!host && Number.isFinite(Number(port));
 
+    if (v.engine === "sqlite") {
+      return !!database;
+    }
+
     if (v.engine === "redis" || v.engine === "mongo") {
       // Redis: only host + port are required; user/password/db are optional
       return hostOk;
     }
 
     return hostOk && !!user && !!database;
-  }, [watch]);
+  }, [v]);
 
   const onTest = handleSubmit(async (v) => {
     setTesting();
@@ -178,8 +182,6 @@ export function ConnectionFormDialog({
     }
   });
 
-  const v = watch();
-
   return (
     <div class="mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
       <div class="relative border-b border-slate-200 px-6 py-4">
@@ -217,6 +219,11 @@ export function ConnectionFormDialog({
           status={status}
           requiredOk={requiredOk}
           storeKeychain={v.storeKeychain}
+          requiredHint={
+            v.engine === "sqlite"
+              ? "Required: Database file path."
+              : "Required: Host, Port, Database, User."
+          }
           onTest={onTest}
           onSave={onSave}
           onConnect={onConnect}

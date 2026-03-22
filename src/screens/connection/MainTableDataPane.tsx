@@ -220,6 +220,18 @@ export function MainTableDataPane(props: {
 
     useConnectionStore.getState().initRows(activeKey, 5000);
 
+    // Keep table-local error stable. Avoid auto-retrying the exact same query
+    // signature continuously, which causes error-state flicker.
+    if (
+      currentMeta.error &&
+      !shouldForceReload &&
+      !shouldRefreshRowCount &&
+      !shouldResetRowsCache
+    ) {
+      loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
+      return;
+    }
+
     // Mark this query signature as the active render target immediately so
     // slow auxiliary metadata work (COUNT, size info, FK/structure) does not
     // keep the whole table pane in a blocking loading state.
@@ -319,6 +331,7 @@ export function MainTableDataPane(props: {
     if (viewMode !== "structure") return;
     if (!activeTableWindow) return;
     if (meta.busy) return;
+    if (meta.error) return;
 
     const hasStructure =
       Array.isArray(meta.structure) && meta.structure.length > 0;
@@ -399,6 +412,7 @@ export function MainTableDataPane(props: {
     if (viewMode !== "data") return;
     if (!activeTableWindow) return;
     if (meta.busy) return;
+    if (meta.error || rowsInfo?.error) return;
     if (foreignKeysLoaded) return;
     if (!columnsLoaded) return;
     if (!rowsInfo) return;

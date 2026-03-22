@@ -27,19 +27,27 @@ export function ConnectionFooter(props: {
   status: Status;
   requiredOk: boolean;
   storeKeychain: boolean;
+  requiredHint?: string;
 
   onTest: () => void;
   onSave: () => void;
   onConnect: () => void;
 }) {
-  const { status, requiredOk, storeKeychain, onTest, onSave, onConnect } =
-    props;
+  const {
+    status,
+    requiredOk,
+    storeKeychain,
+    requiredHint,
+    onTest,
+    onSave,
+    onConnect,
+  } = props;
   const busy = isBusy(status);
 
   const statusNode = (() => {
     if (status.kind === "idle") {
       const msg = !requiredOk
-        ? "Required: Host, Port, Database, User."
+        ? requiredHint || "Required: Host, Port, Database, User."
         : storeKeychain
           ? "Tip: In Keychain mode, Test may fail if password isn’t resolved."
           : "Ready";

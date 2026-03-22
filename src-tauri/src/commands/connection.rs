@@ -35,6 +35,7 @@ fn rewrite_input_host_port(
             my.host = host.into();
             my.port = port;
         }
+        crate::types::EngineKind::Sqlite => {}
         crate::types::EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
             mongo.host = host.into();
@@ -206,6 +207,7 @@ pub async fn connection_test(
                         }
                     }
                 }
+                crate::types::EngineKind::Sqlite => {}
                 crate::types::EngineKind::Mongo => {
                     if let Some(mongo) = input.mongo.as_mut() {
                         if mongo.password.kind == crate::types::SecretRefKind::Keychain
@@ -347,7 +349,11 @@ pub async fn connection_version(
 
     match conn.value() {
         crate::engines::EngineConnection::Postgres(pg) => {
-            let client = pg.pool.get().await.map_err(|e| format!("PG_POOL_GET_FAILED: {e}"))?;
+            let client = pg
+                .pool
+                .get()
+                .await
+                .map_err(|e| format!("PG_POOL_GET_FAILED: {e}"))?;
             let row = client
                 .query_one("SHOW server_version", &[])
                 .await
@@ -366,6 +372,20 @@ pub async fn connection_version(
                 .await
                 .map_err(|e| format!("MYSQL_VERSION_QUERY_FAILED: {e}"))?;
             version.ok_or("MYSQL_VERSION_NOT_FOUND".into())
+        }
+        crate::engines::EngineConnection::Sqlite(sqlite) => {
+            let path = sqlite.db_path.clone();
+            let version = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                let conn = rusqlite::Connection::open(&path)
+                    .map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
+                let version: String = conn
+                    .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+                    .map_err(|e| format!("SQLITE_VERSION_QUERY_FAILED: {e}"))?;
+                Ok(version)
+            })
+            .await
+            .map_err(|e| format!("SQLITE_VERSION_JOIN_FAILED: {e}"))??;
+            Ok(version)
         }
         crate::engines::EngineConnection::Mongo(mongo) => {
             let db = mongo.client.database("admin");

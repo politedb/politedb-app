@@ -45,6 +45,16 @@ export const dbSchemasQuery = () => {
 };
 
 export const tableSizeInfoQuery = (schema: string, tableName: string) => {
+  if (schema === "main") {
+    const queryStr = `
+      SELECT
+        'N/A' AS total_size,
+        'N/A' AS data_size,
+        'N/A' AS index_size;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT
       pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
@@ -82,7 +92,20 @@ export const tableSizeInfoQuery = (schema: string, tableName: string) => {
   return regexEscape(queryStr);
 };
 
-export const tableColumnsQuery = (schema: string, tableName: string) => {
+export const tableColumnsQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  if (engine === "sqlite") {
+    const queryStr = `
+      SELECT name AS column_name, type AS data_type
+      FROM pragma_table_info(${qLiteral(tableName)})
+      ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT column_name, data_type
     FROM information_schema.columns
@@ -232,7 +255,15 @@ export const tableEstimatedRowCountQuery = (
 /** If estimated row count is below this, we use SELECT COUNT(*) to show the real count. */
 export const ESTIMATE_USE_EXACT_BELOW = 100_000;
 
-export const tableOidQuery = (schema: string, tableName: string) => {
+export const tableOidQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  if (engine === "sqlite") {
+    return "SELECT 0;";
+  }
+
   const queryStr = `SELECT '${qIdent(schema)}.${qIdent(tableName)}'::regclass::oid;`;
   return regexEscape(queryStr);
 };
@@ -240,8 +271,31 @@ export const tableOidQuery = (schema: string, tableName: string) => {
 export const tableStructuresQuery = (
   schema: string,
   tableName: string,
-  oid: number
+  oid: number,
+  engine?: DatabaseEngine
 ) => {
+  if (engine === "sqlite") {
+    const queryStr = `
+      SELECT
+        cid + 1 AS ordinal_position,
+        name AS column_name,
+        type AS data_type,
+        type AS format_type,
+        NULL AS numeric_precision,
+        NULL AS datetime_precision,
+        NULL AS numeric_scale,
+        NULL AS data_length,
+        CASE WHEN "notnull" = 1 THEN 'NO' ELSE 'YES' END AS is_nullable,
+        '' AS "check",
+        '' AS check_constraint,
+        dflt_value AS column_default,
+        '' AS comment
+      FROM pragma_table_info(${qLiteral(tableName)})
+      ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT
       ordinal_position,
@@ -268,7 +322,61 @@ export const tableStructuresQuery = (
   return regexEscape(queryStr);
 };
 
-export const tableConstraintsQuery = (schema: string, tableName: string) => {
+export const tableConstraintsQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  if (engine === "sqlite") {
+    const queryStr = `
+      WITH pk AS (
+        SELECT
+          'PRIMARY' AS index_name,
+          'BTREE' AS index_algorithm,
+          'true' AS is_unique,
+          'true' AS is_primary,
+          '' AS index_definition,
+          group_concat(name, ',') AS column_name,
+          '' AS condition,
+          '' AS include,
+          '' AS comment
+        FROM (
+          SELECT name
+          FROM pragma_table_info(${qLiteral(tableName)})
+          WHERE pk > 0
+          ORDER BY pk
+        )
+      ),
+      idx AS (
+        SELECT
+          il.name AS index_name,
+          'BTREE' AS index_algorithm,
+          CASE WHEN il."unique" = 1 THEN 'true' ELSE 'false' END AS is_unique,
+          CASE WHEN il.origin = 'pk' THEN 'true' ELSE 'false' END AS is_primary,
+          '' AS index_definition,
+          (
+            SELECT group_concat(ii.name, ',')
+            FROM pragma_index_info(il.name) ii
+          ) AS column_name,
+          '' AS condition,
+          '' AS include,
+          '' AS comment
+        FROM pragma_index_list(${qLiteral(tableName)}) il
+      )
+      SELECT *
+      FROM (
+        SELECT *
+        FROM pk
+        WHERE column_name IS NOT NULL AND trim(column_name) <> ''
+        UNION ALL
+        SELECT *
+        FROM idx
+      )
+      ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 ELSE 1 END, index_name;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT
       ix.relname AS index_name,
@@ -303,6 +411,12 @@ export const tableConstraintsQuery = (schema: string, tableName: string) => {
 
 /** Foreign keys for a table (Postgres). Returns one row per FK with aggregated columns. */
 export const tableForeignKeysQuery = (schema: string, tableName: string) => {
+  if (schema === "main") {
+    return `
+      SELECT '' WHERE 1=0;
+    `;
+  }
+
   const queryStr = `
     WITH fk AS (
       SELECT

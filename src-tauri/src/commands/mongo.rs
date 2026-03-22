@@ -393,7 +393,9 @@ pub async fn mongo_list_indexes(
     let (client, default_database) = as_mongo_client(&conn)?;
     let database = normalize_database_arg(database, default_database)?;
 
-    let coll = client.database(&database).collection::<Document>(&collection);
+    let coll = client
+        .database(&database)
+        .collection::<Document>(&collection);
     let indexes = coll
         .list_indexes(None)
         .await
@@ -487,7 +489,9 @@ pub async fn mongo_update_documents(
         return Ok(0);
     }
 
-    let coll = client.database(&database).collection::<Document>(&collection);
+    let coll = client
+        .database(&database)
+        .collection::<Document>(&collection);
     let mut modified_total: u64 = 0;
 
     for (idx, item) in updates.into_iter().enumerate() {

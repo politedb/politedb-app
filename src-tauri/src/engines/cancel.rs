@@ -10,6 +10,9 @@ pub enum CancelHandle {
     MySql {
         notify: Arc<Notify>,
     },
+    Sqlite {
+        notify: Arc<Notify>,
+    },
     Redis {
         notify: Arc<Notify>,
     },
@@ -32,6 +35,10 @@ impl CancelHandle {
             }
 
             CancelHandle::MySql { notify } => {
+                notify.notify_waiters();
+            }
+
+            CancelHandle::Sqlite { notify } => {
                 notify.notify_waiters();
             }
 

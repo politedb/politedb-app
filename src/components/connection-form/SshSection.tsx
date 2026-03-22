@@ -12,6 +12,8 @@ type InputEvt = TargetedEvent<HTMLInputElement>;
 
 export function SSHSection(props: SectionProps) {
   const { control, onDirty } = props;
+  const engine = useWatch({ control, name: "engine" });
+  const isSqlite = engine === "sqlite";
 
   const sshEnabled = useController({ control, name: "sshEnabled" });
 
@@ -94,6 +96,8 @@ export function SSHSection(props: SectionProps) {
   const authErr = sshAuthType.fieldState.error?.message;
   const keyErr = sshKeyPath.fieldState.error?.message;
   const pwErr = sshPassword.fieldState.error?.message;
+
+  if (isSqlite) return null;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">

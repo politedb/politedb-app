@@ -10,8 +10,9 @@ use crate::profiles::types::{
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MySqlConnectInput,
-    MongoConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
+    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MongoConnectInput,
+    MySqlConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
+    SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -117,6 +118,13 @@ fn validate_mongo_input(m: &MongoConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_sqlite_input(s: &SqliteConnectInput) -> Result<(), String> {
+    if s.path.trim().is_empty() {
+        return Err("SQLITE_PATH_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
     if input.label.trim().is_empty() {
         return Err("LABEL_REQUIRED".into());
@@ -134,6 +142,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
         EngineKind::Mariadb => {
             let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
             validate_mysql_input(my)
+        }
+        EngineKind::Sqlite => {
+            let s = input.sqlite.as_ref().ok_or("SQLITE_CONFIG_MISSING")?;
+            validate_sqlite_input(s)
         }
         EngineKind::Mongo => {
             let mongo = input.mongo.as_ref().ok_or("MONGO_CONFIG_MISSING")?;
@@ -158,6 +170,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Postgres => "postgres",
         EngineKind::Mysql => "mysql",
         EngineKind::Mariadb => "mariadb",
+        EngineKind::Sqlite => "sqlite",
         EngineKind::Mongo => "mongo",
         EngineKind::Redis => "redis",
         #[allow(unreachable_patterns)]
@@ -243,6 +256,7 @@ pub fn persist_input_with_secrets(
                 &mut my.password,
             )?;
         }
+        EngineKind::Sqlite => {}
 
         EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;

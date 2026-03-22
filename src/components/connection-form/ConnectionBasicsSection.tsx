@@ -16,6 +16,7 @@ export function ConnectionBasicsSection(
   const engine = useWatch({ control, name: "engine" });
   const isRedis = engine === "redis";
   const isMongo = engine === "mongo";
+  const isSqlite = engine === "sqlite";
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -34,7 +35,12 @@ export function ConnectionBasicsSection(
   const host = useController({
     control,
     name: "host",
-    rules: { required: "Host is required." },
+    rules: {
+      validate: (v) => {
+        if (isSqlite) return true;
+        return String(v ?? "").trim().length > 0 || "Host is required.";
+      },
+    },
   });
 
   const port = useController({
@@ -43,6 +49,7 @@ export function ConnectionBasicsSection(
     rules: {
       required: "Port is required.",
       validate: (v) => {
+        if (isSqlite) return true;
         const n = Number(v);
         if (!Number.isFinite(n)) return "Port is invalid.";
         if (n <= 0 || n > 65535) return "Port must be 1..65535.";
@@ -57,6 +64,9 @@ export function ConnectionBasicsSection(
     rules: {
       validate: (v) => {
         if (isRedis || isMongo) return true;
+        if (isSqlite) {
+          return String(v ?? "").trim().length > 0 || "Database is required.";
+        }
         return String(v ?? "").trim().length > 0 || "Database is required.";
       },
     },
@@ -67,7 +77,7 @@ export function ConnectionBasicsSection(
     name: "user",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo) return true;
+        if (isRedis || isMongo || isSqlite) return true;
         return String(v ?? "").trim().length > 0 || "User is required.";
       },
     },
@@ -79,7 +89,7 @@ export function ConnectionBasicsSection(
     name: "password",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo) return true;
+        if (isRedis || isMongo || isSqlite) return true;
         if (storeKeychain) return true;
         return String(v ?? "").trim().length > 0 || "Password is required.";
       },
@@ -118,6 +128,7 @@ export function ConnectionBasicsSection(
     if (engine === "mysql" || engine === "mariadb") return 3306;
     if (engine === "mongo") return 27017;
     if (engine === "redis") return 6379;
+    if (engine === "sqlite") return 0;
     return 5432;
   }, [engine]);
 
@@ -125,8 +136,9 @@ export function ConnectionBasicsSection(
   const hostErr = !!errors?.host;
   const portErr = !!errors?.port;
   const dbErr = !isMongo && !!errors?.database;
-  const userErr = !isMongo && !!errors?.user;
-  const pwErr = !storeKeychain && !isRedis && !isMongo && !!errors?.password;
+  const userErr = !isMongo && !isSqlite && !!errors?.user;
+  const pwErr =
+    !storeKeychain && !isRedis && !isMongo && !isSqlite && !!errors?.password;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -135,7 +147,11 @@ export function ConnectionBasicsSection(
           Connection basics
         </div>
         <div class="text-xs text-slate-500">
-          {isRedis ? "Host, Port, User" : "Host, Port, User, Database"}
+          {isSqlite
+            ? "SQLite file path"
+            : isRedis
+              ? "Host, Port, User"
+              : "Host, Port, User, Database"}
         </div>
       </div>
 
@@ -152,61 +168,72 @@ export function ConnectionBasicsSection(
           />
         </Field>
 
-        <Field label="Host / Port" alignTop>
-          <div class="grid grid-cols-3 gap-3">
-            <Input
-              class="col-span-2"
-              value={host.field.value}
-              placeholder="127.0.0.1 or /tmp/..."
-              error={hostErr}
-              onInput={(e: InputEvt) => {
-                host.field.onChange(e.currentTarget.value);
-                dirty();
-              }}
-            />
-            <Input
-              value={String(port.field.value ?? "")}
-              inputMode="numeric"
-              placeholder={String(defaultPort)}
-              error={portErr}
-              onInput={(e: InputEvt) => {
-                port.field.onChange(
-                  toNumber(e.currentTarget.value, defaultPort)
-                );
-                dirty();
-              }}
-            />
-          </div>
-        </Field>
+        {!isSqlite && (
+          <Field label="Host / Port" alignTop>
+            <div class="grid grid-cols-3 gap-3">
+              <Input
+                class="col-span-2"
+                value={host.field.value}
+                placeholder="127.0.0.1 or /tmp/..."
+                error={hostErr}
+                onInput={(e: InputEvt) => {
+                  host.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              />
+              <Input
+                value={String(port.field.value ?? "")}
+                inputMode="numeric"
+                placeholder={String(defaultPort)}
+                error={portErr}
+                onInput={(e: InputEvt) => {
+                  port.field.onChange(
+                    toNumber(e.currentTarget.value, defaultPort)
+                  );
+                  dirty();
+                }}
+              />
+            </div>
+          </Field>
+        )}
 
-        <Field label={isRedis ? "User" : "Database / User"} alignTop>
-          <div class="grid grid-cols-2 gap-3">
+        <Field
+          label={isSqlite ? "Database File Path" : isRedis ? "User" : "Database / User"}
+          alignTop
+        >
+          <div class={isSqlite ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
             {!isRedis && (
               <Input
                 value={database.field.value}
-                placeholder="database"
+                placeholder={
+                  isSqlite ? "/absolute/path/to/file.db" : "database"
+                }
                 error={dbErr}
+                class={isSqlite ? "col-span-2" : ""}
                 onInput={(e: InputEvt) => {
                   database.field.onChange(e.currentTarget.value);
                   dirty();
                 }}
               />
             )}
-            <Input
-              value={user.field.value}
-              placeholder="user"
-              error={userErr}
-              class={isRedis ? "col-span-2" : ""}
-              onInput={(e: InputEvt) => {
-                user.field.onChange(e.currentTarget.value);
-                dirty();
-              }}
-            />
+            {!isSqlite && (
+              <Input
+                value={user.field.value}
+                placeholder="user"
+                error={userErr}
+                class={isRedis ? "col-span-2" : ""}
+                onInput={(e: InputEvt) => {
+                  user.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              />
+            )}
           </div>
         </Field>
 
         {/* Password + Storage (merged) */}
-        <Field label="Password" alignTop>
+        {!isSqlite && (
+          <Field label="Password" alignTop>
           <div class="space-y-2">
             {/* Password row */}
             {shouldShowMasked ? (
@@ -325,30 +352,33 @@ export function ConnectionBasicsSection(
               <div class="text-xs text-rose-600">{passwordError}</div>
             ) : null}
           </div>
-        </Field>
+          </Field>
+        )}
 
-        <SSLSection
-          sslMode={sslMode.field.value}
-          sslKey={sslKey.field.value}
-          sslCert={sslCert.field.value}
-          sslCA={sslCA.field.value}
-          onChangeSslMode={(m) => {
-            sslMode.field.onChange(m);
-            dirty();
-          }}
-          onChangeSslKey={(v) => {
-            sslKey.field.onChange(v);
-            dirty();
-          }}
-          onChangeSslCert={(v) => {
-            sslCert.field.onChange(v);
-            dirty();
-          }}
-          onChangeSslCA={(v) => {
-            sslCA.field.onChange(v);
-            dirty();
-          }}
-        />
+        {!isSqlite && (
+          <SSLSection
+            sslMode={sslMode.field.value}
+            sslKey={sslKey.field.value}
+            sslCert={sslCert.field.value}
+            sslCA={sslCA.field.value}
+            onChangeSslMode={(m) => {
+              sslMode.field.onChange(m);
+              dirty();
+            }}
+            onChangeSslKey={(v) => {
+              sslKey.field.onChange(v);
+              dirty();
+            }}
+            onChangeSslCert={(v) => {
+              sslCert.field.onChange(v);
+              dirty();
+            }}
+            onChangeSslCA={(v) => {
+              sslCA.field.onChange(v);
+              dirty();
+            }}
+          />
+        )}
       </div>
     </section>
   );

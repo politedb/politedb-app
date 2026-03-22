@@ -275,10 +275,11 @@ async function loadColumns(params: {
   connId: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<ColumnRow[]> {
-  const { connId, schema, tableName, addLogQuery } = params;
-  const q = tableColumnsQuery(schema, tableName);
+  const { connId, schema, tableName, engine, addLogQuery } = params;
+  const q = tableColumnsQuery(schema, tableName, engine);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
 
@@ -483,7 +484,43 @@ async function loadMeta(params: {
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<{ structure: any[]; constraints: any[] }> {
-  const { connId, schema, tableName, engine, addLogQuery } = params;
+    const { connId, schema, tableName, engine, addLogQuery } = params;
+
+  if (engine === "sqlite") {
+    const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
+    const qConstraints = tableConstraintsQuery(schema, tableName, engine);
+
+    const [structureRes, constraintsRes] = await Promise.all([
+      runSqlQuery(connId, qStructure),
+      runSqlQuery(connId, qConstraints),
+    ]);
+
+    addLogQuery(qStructure);
+    addLogQuery(qConstraints);
+
+    const structure = (structureRes.rows as unknown[][]).map((row) => ({
+      column_name: cellToString(row?.[1]),
+      data_type: cellToString(row?.[2]),
+      is_nullable: cellToString(row?.[8])?.toLowerCase() === "yes",
+      check: cellToString(row?.[9]) ?? "",
+      column_default: cellToString(row?.[11]),
+      comment: cellToString(row?.[12]) ?? "",
+    }));
+
+    const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
+      index_name: cellToString(row?.[0]),
+      index_algorithm: cellToString(row?.[1]) ?? "BTREE",
+      is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
+      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+      index_definition: cellToString(row?.[4]) ?? "",
+      column_name: cellToString(row?.[5]) ?? "",
+      condition: "",
+      include: "",
+      comment: "",
+    }));
+
+    return { structure, constraints };
+  }
 
   if (engine === "mysql" || engine === "mariadb") {
     const qStructure = tableStructuresMySqlQuery(schema, tableName);
@@ -522,14 +559,14 @@ async function loadMeta(params: {
   }
 
   // 1. Get OID
-  const qOid = tableOidQuery(schema, tableName);
+  const qOid = tableOidQuery(schema, tableName, engine);
   const oidRes = await runSqlQuery(connId, qOid);
   addLogQuery(qOid);
   const oid = Number(cellToString((oidRes.rows as unknown[][])?.[0]?.[0]));
 
   // 2. Structure
-  const qStructure = tableStructuresQuery(schema, tableName, oid);
-  const qConstraints = tableConstraintsQuery(schema, tableName);
+  const qStructure = tableStructuresQuery(schema, tableName, oid, engine);
+  const qConstraints = tableConstraintsQuery(schema, tableName, engine);
 
   const [structureRes, constraintsRes] = await Promise.all([
     runSqlQuery(connId, qStructure),
@@ -575,6 +612,10 @@ async function loadForeignKeys(params: {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (engine === "mysql" || engine === "mariadb") {
+    return [];
+  }
+
+  if (engine === "sqlite") {
     return [];
   }
 
@@ -797,12 +838,13 @@ export function useLoadTableData() {
           const supportsMeta =
             activeTab.engine === "postgres" ||
             activeTab.engine === "mysql" ||
-            activeTab.engine === "mariadb";
+            activeTab.engine === "mariadb" ||
+            activeTab.engine === "sqlite";
 
           // Set busy/error state
           if (plan.needAnyMetaWork)
             patchMeta(setMeta, key, prev, { busy: true, error: null });
-          else patchMeta(setMeta, key, prev, { error: null });
+          else if (!prev.error) patchMeta(setMeta, key, prev, { error: null });
 
           // Ensure connection
           let connId: string;
@@ -915,6 +957,7 @@ export function useLoadTableData() {
                 connId,
                 schema,
                 tableName,
+                engine: activeTab.engine,
                 addLogQuery,
               });
 

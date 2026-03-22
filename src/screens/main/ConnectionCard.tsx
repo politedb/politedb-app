@@ -22,6 +22,7 @@ function firstNonEmpty(...xs: Array<string | undefined | null>) {
 type EngineInput =
   | ConnectionProfile["input"]["postgres"]
   | ConnectionProfile["input"]["mysql"]
+  | ConnectionProfile["input"]["sqlite"]
   | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["redis"];
 
@@ -39,6 +40,9 @@ function getEngineInput(profile: ConnectionProfile): {
   if (engine === "mongo") {
     return { engine, input: profile.input?.mongo };
   }
+  if (engine === "sqlite") {
+    return { engine, input: profile.input?.sqlite };
+  }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
   }
@@ -48,14 +52,18 @@ function getEngineInput(profile: ConnectionProfile): {
 function buildSubtitle(profile: ConnectionProfile) {
   const { engine, input } = getEngineInput(profile);
 
-  const host = input?.host as string | undefined;
-  const port = input?.port as number | undefined;
+  const host =
+    input && "host" in input ? (input.host as string | undefined) : undefined;
+  const port =
+    input && "port" in input ? (input.port as number | undefined) : undefined;
 
   const database =
     engine === "postgres"
       ? (profile.input?.postgres?.database ?? "")
       : engine === "mysql" || engine === "mariadb"
         ? (profile.input?.mysql?.database ?? "")
+        : engine === "sqlite"
+          ? (profile.input?.sqlite?.path ?? "")
         : engine === "mongo"
           ? (profile.input?.mongo?.database ?? "")
         : engine === "redis"

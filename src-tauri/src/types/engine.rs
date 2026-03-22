@@ -6,9 +6,9 @@ pub enum EngineKind {
     Postgres,
     Mysql,
     Mariadb,
+    Sqlite,
     Mongo,
     Redis,
-    // Sqlite,
 }
 
 use crate::types::secret::SecretRef;
@@ -64,6 +64,12 @@ pub struct MongoConnectInput {
 
     pub ssl_mode: Option<String>,
     pub connect_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqliteConnectInput {
+    pub path: String,
+    pub statement_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

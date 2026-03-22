@@ -197,6 +197,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "sqlite") {
+    if (!input.sqlite) throw new Error("SQLITE_CONFIG_MISSING");
+    return {
+      ...input,
+      sqlite: {
+        ...input.sqlite,
+        path: database,
+      },
+    };
+  }
+
   throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
 }
 
