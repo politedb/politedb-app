@@ -38,6 +38,12 @@ export function useSchemaTablesPanel(args: {
     tables: true,
   });
 
+  // Important: each tab/metaKey should start from its own default schema/db.
+  // This prevents Mongo tabs from inheriting the previous tab's database.
+  useEffect(() => {
+    setActiveSchema(defaultSchema);
+  }, [metaKey, defaultSchema]);
+
   // Keep active schema valid across engines:
   // - Postgres prefers "public" when available
   // - Others fall back to first available schema
@@ -47,12 +53,13 @@ export function useSchemaTablesPanel(args: {
     if (activeSchema && schemas.includes(activeSchema)) return;
 
     const fallback =
-      engine === "postgres" && schemas.includes("public")
+      (defaultSchema && schemas.includes(defaultSchema) && defaultSchema) ||
+      (engine === "postgres" && schemas.includes("public")
         ? "public"
-        : schemas[0]!;
+        : schemas[0]!);
 
     if (fallback !== activeSchema) setActiveSchema(fallback);
-  }, [meta.schemas, activeSchema, engine]);
+  }, [meta.schemas, activeSchema, engine, defaultSchema]);
 
   // Only change UI filter (metadata is global)
   const onSchemaChange = useCallback(
@@ -90,7 +97,12 @@ export function useSchemaTablesPanel(args: {
     );
   }, [meta.tables, activeSchema, tableSearchQuery]);
 
+  const isMongo = engine === "mongo";
+
   const filteredFunctions = useMemo(() => {
+    // MongoDB has no SQL-style functions; keep empty for Mongo.
+    if (isMongo) return [];
+
     const list = meta.functions ?? [];
     const q = tableSearchQuery.trim().toLowerCase();
 
@@ -106,9 +118,10 @@ export function useSchemaTablesPanel(args: {
         (f.args ?? "").toLowerCase().includes(q) ||
         f.schema.toLowerCase().includes(q)
     );
-  }, [meta.functions, activeSchema, tableSearchQuery]);
+  }, [meta.functions, activeSchema, tableSearchQuery, isMongo]);
 
-  // For editor autocomplete: use full metadata (not filtered)
+  // For editor autocomplete: use full metadata (not filtered).
+  // For Mongo, schemas = databases (used for Database dropdown).
   const schemasForEditor = useMemo(() => meta.schemas ?? [], [meta.schemas]);
   const tablesForEditor = useMemo(() => meta.tables ?? [], [meta.tables]);
   const columnsByTable = useMemo(

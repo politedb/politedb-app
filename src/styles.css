@@ -113,6 +113,18 @@ table {
   background-color: rgba(0, 0, 0, 0.3);
 }
 
+/* Hide scrollbar while preserving scroll behavior (mouse wheel / trackpad). */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none;
+}
+
 .transition-smooth {
   @apply transition-all duration-300 ease-in-out;
 }
@@ -170,6 +182,7 @@ table {
   0% {
     transform: translateX(-100%);
   }
+
   100% {
     transform: translateX(100%);
   }

@@ -7,6 +7,11 @@ import type {
   TableWindow,
 } from "src/types";
 import { connectionRemove } from "src/lib/tauri";
+import {
+  mongoDeleteDocuments,
+  mongoInsertDocuments,
+  mongoUpdateDocuments,
+} from "src/lib/tauri/mongo";
 import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
@@ -249,6 +254,27 @@ export function useConnectionActions(
     refreshRuntimeConnection,
   } = args;
 
+  const mongoCellToValue = useCallback((cell: unknown): unknown => {
+    if (cell == null) return null;
+    if (typeof cell !== "object") return cell;
+
+    const c = cell as { t?: string; v?: unknown };
+    switch (c.t) {
+      case "Null":
+        return null;
+      case "Str":
+      case "Json":
+      case "BytesB64":
+      case "I64":
+      case "F64":
+      case "Bool":
+        return c.v ?? null;
+      default:
+        if ("v" in c) return c.v ?? null;
+        return cell;
+    }
+  }, []);
+
   const clearChanges = useCallback((tabId: string, tableWindowId?: string) => {
     const s = useConnectionStore.getState();
     s.clearTableConstraints(tabId, tableWindowId);
@@ -284,7 +310,7 @@ export function useConnectionActions(
 
   const openSql = useCallback(() => {
     openSqlEditor();
-  }, [openSqlEditor]);
+  }, [engine, openSqlEditor]);
 
   const selectTable = useCallback(
     async (table: TableItem) => {
@@ -431,6 +457,168 @@ export function useConnectionActions(
 
       if (!onlyActive) return;
 
+      const entry = onlyActive[activeTableWindow.id];
+
+      if (engine === "mongo") {
+        const patches = entry?.patches;
+        const createData = patches?.create?.data ?? {};
+        const updateData = patches?.update?.data ?? {};
+        const deleteData = patches?.delete?.data ?? {};
+
+        const hasUnsupportedPatches =
+          Object.keys(patches?.create?.structure ?? {}).length > 0 ||
+          Object.keys(patches?.update?.structure ?? {}).length > 0 ||
+          Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
+          Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
+          Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
+          Object.keys(patches?.delete?.constraints ?? {}).length > 0;
+
+        if (hasUnsupportedPatches) {
+          throw new Error(
+            "Mongo does not support structure/constraint patches in table view."
+          );
+        }
+
+        const store = useConnectionStore.getState();
+        const key = tableKey(
+          activeProfileScreen,
+          activeTableWindow.table.schema,
+          activeTableWindow.table.name
+        );
+        const cols = store.tableDataMap[key]?.columns ?? [];
+        const idColIdx = cols.findIndex((c) => c.name === "_id");
+        if (idColIdx < 0) {
+          throw new Error("MONGO_ID_COLUMN_NOT_FOUND");
+        }
+        const cache = store.tableRowCacheByKey[key];
+
+        const documents = Object.values(createData).map((patch) => {
+          const raw = (patch ?? {}) as Record<string, unknown>;
+          const doc: Record<string, unknown> = {};
+
+          for (const [k, v] of Object.entries(raw)) {
+            if (k === "__rowKey") continue;
+            if (k === "_id" && (v === null || String(v ?? "").trim() === "")) {
+              continue;
+            }
+            doc[k] = v;
+          }
+
+          return doc;
+        });
+
+        const updates = Object.entries(updateData)
+          .map(([rowKey, patch]) => {
+            const rowIndex = Number(rowKey);
+            if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
+
+            const raw = (patch ?? {}) as Record<string, unknown>;
+            if ("_id" in raw) {
+              throw new Error("Mongo _id is immutable and cannot be updated.");
+            }
+
+            const candidateIndices = [rowIndex, rowIndex + offset];
+            const resolvedIndex =
+              candidateIndices.find(
+                (idx) =>
+                  Boolean(cache?.map.get(idx)) ||
+                  Boolean(store.getRowAt(key, idx))
+              ) ?? rowIndex;
+
+            const originalRow = cache?.map.get(resolvedIndex);
+            const fallbackRow = store.getRowAt(key, resolvedIndex);
+            const sourceRow = Array.isArray(originalRow)
+              ? originalRow
+              : fallbackRow;
+            if (!sourceRow || !Array.isArray(sourceRow)) return null;
+
+            const idValue = mongoCellToValue(sourceRow[idColIdx]);
+            if (idValue == null || String(idValue).trim() === "") {
+              return null;
+            }
+
+            const set: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(raw)) {
+              if (k === "__rowKey" || k === "_id") continue;
+              set[k] = v;
+            }
+
+            if (Object.keys(set).length === 0) return null;
+            return { id: idValue, set };
+          })
+          .filter(Boolean) as Array<{
+          id: unknown;
+          set: Record<string, unknown>;
+        }>;
+
+        const deleteIds = Object.keys(deleteData)
+          .map((rowKey) => {
+            const rowIndex = Number(rowKey);
+            if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
+
+            const candidateIndices = [rowIndex, rowIndex + offset];
+            const resolvedIndex =
+              candidateIndices.find(
+                (idx) =>
+                  Boolean(cache?.map.get(idx)) ||
+                  Boolean(store.getRowAt(key, idx))
+              ) ?? rowIndex;
+
+            const originalRow = cache?.map.get(resolvedIndex);
+            const fallbackRow = store.getRowAt(key, resolvedIndex);
+            const sourceRow = Array.isArray(originalRow)
+              ? originalRow
+              : fallbackRow;
+            if (!sourceRow || !Array.isArray(sourceRow)) return null;
+
+            const idValue = mongoCellToValue(sourceRow[idColIdx]);
+            if (idValue == null || String(idValue).trim() === "") {
+              return null;
+            }
+            return idValue;
+          })
+          .filter((v) => v !== null) as unknown[];
+
+        if (documents.length > 0) {
+          await mongoInsertDocuments({
+            connectionId: runtimeConnectionId,
+            database: activeTableWindow.table.schema,
+            collection: activeTableWindow.table.name,
+            documents,
+          });
+        }
+        if (updates.length > 0) {
+          await mongoUpdateDocuments({
+            connectionId: runtimeConnectionId,
+            database: activeTableWindow.table.schema,
+            collection: activeTableWindow.table.name,
+            updates,
+          });
+        }
+        if (deleteIds.length > 0) {
+          await mongoDeleteDocuments({
+            connectionId: runtimeConnectionId,
+            database: activeTableWindow.table.schema,
+            collection: activeTableWindow.table.name,
+            ids: deleteIds,
+          });
+        }
+
+        clearChanges(activeProfileScreen, activeTableWindow.id);
+        await loadTableData(
+          activeTableWindow.table.schema,
+          activeTableWindow.table.name,
+          { limit, offset },
+          {
+            force: true,
+            refreshRows: true,
+            refreshMeta: true,
+            refreshStats: true,
+          }
+        );
+        return;
+      }
+
       const store = useConnectionStore.getState();
       const sql = generateSqlFromPatches(onlyActive, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
@@ -449,8 +637,6 @@ export function useConnectionActions(
       }
 
       clearChanges(activeProfileScreen, activeTableWindow.id);
-
-      const entry = onlyActive[activeTableWindow.id];
 
       const { refreshRows, refreshMeta, refreshStats } =
         inferRefreshFlagsFromEntry(entry);
@@ -505,6 +691,7 @@ export function useConnectionActions(
     offset,
     setError,
     syncTableMeta,
+    mongoCellToValue,
   ]);
 
   const beforeSaveChanges = useCallback(() => {

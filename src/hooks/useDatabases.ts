@@ -9,11 +9,12 @@ import {
   renameDatabaseQuery,
 } from "./queries";
 import { cellToString } from "src/utils/convert";
+import { mongoListDatabases } from "src/lib/tauri/mongo";
 
 export type DatabaseEditorMode = null | "create" | "rename";
 
 export function canManageDatabases(engine?: DatabaseEngine) {
-  return engine === "postgres" || isMySqlLike(engine);
+  return engine === "postgres" || engine === "mongo" || isMySqlLike(engine);
 }
 
 interface UseDatabasesParams {
@@ -48,14 +49,18 @@ export function useDatabases({
     setBusy(true);
     setError("");
     try {
-      const res = await runSqlQuery(runtimeConnectionId, dbListQuery(engine));
-      const list = (res.rows ?? [])
-        .map((r) => cellToString(r?.[0]) ?? "")
-        .filter(Boolean);
-      setDbs(list);
-      if (!selectedDb || !list.includes(selectedDb)) {
-        setSelectedDb(list[0] ?? "");
+      let list = [];
+
+      if (engine === "mongo") {
+        list = await mongoListDatabases(runtimeConnectionId);
+      } else {
+        const res = await runSqlQuery(runtimeConnectionId, dbListQuery(engine));
+        list = (res.rows ?? [])
+          .map((r) => cellToString(r?.[0]) ?? "")
+          .filter(Boolean);
       }
+
+      setDbs(list);
     } catch (e) {
       setError(String((e as any)?.message ?? e ?? "LOAD_DATABASES_FAILED"));
     } finally {
@@ -154,6 +159,7 @@ export function useDatabases({
     nameDraft,
     visibleDbs,
     setSearch,
+    setError,
     setSelectedDb,
     setEditorMode,
     setNameDraft,

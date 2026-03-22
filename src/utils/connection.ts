@@ -25,6 +25,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "mongo") {
+    const mongo = conn.input?.mongo;
+    return {
+      host: mongo?.host ?? "",
+      database: mongo?.database ?? "",
+      user: mongo?.user ?? "",
+    };
+  }
+
   if (engine === "redis") {
     const rd = conn.input?.redis;
     return { host: rd?.host ?? "", database: "", user: "" };

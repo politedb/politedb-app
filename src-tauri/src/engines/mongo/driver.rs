@@ -1,0 +1,207 @@
+use async_trait::async_trait;
+use mongodb::Client;
+use tauri::AppHandle;
+use uuid::Uuid;
+
+use crate::engines::driver::EngineDriver;
+use crate::engines::merge::{inline_db_pw, merge_secret_ref_for_test, merge_ssh_for_test};
+use crate::engines::mongo::connection::MongoConn;
+use crate::engines::EngineConnection;
+use crate::types::{
+    ConnectionCreateInput, ConnectionTestSecrets, EngineKind, MongoConnectInput, SecretRef,
+    SecretRefKind,
+};
+
+pub struct MongoDriver;
+
+#[async_trait]
+impl EngineDriver for MongoDriver {
+    fn kind(&self) -> EngineKind {
+        EngineKind::Mongo
+    }
+
+    async fn connect(
+        &self,
+        app: &AppHandle,
+        conn_id: Uuid,
+        label: String,
+        input: ConnectionCreateInput,
+    ) -> Result<EngineConnection, String> {
+        let mongo = input.mongo.ok_or("MONGO_CONFIG_MISSING")?;
+        let client = connect_mongo(app, &mongo).await?;
+
+        Ok(EngineConnection::Mongo(MongoConn {
+            id: conn_id,
+            label,
+            client,
+            default_database: sanitize_opt(&mongo.database),
+        }))
+    }
+
+    async fn test(
+        &self,
+        app: &AppHandle,
+        input: ConnectionCreateInput,
+        secrets_opt: Option<ConnectionTestSecrets>,
+    ) -> Result<(), String> {
+        let mongo = input.mongo.ok_or("MONGO_CONFIG_MISSING")?;
+        test_mongo_direct(app, mongo, secrets_opt).await
+    }
+
+    fn merge_for_test(
+        &self,
+        mut base: ConnectionCreateInput,
+        ov: ConnectionCreateInput,
+        secrets: Option<ConnectionTestSecrets>,
+    ) -> Result<ConnectionCreateInput, String> {
+        base = merge_ssh_for_test(base, &ov, &secrets);
+
+        let mut b = base.mongo.ok_or("MONGO_CONFIG_MISSING")?;
+
+        if let Some(ov_mongo) = ov.mongo {
+            b.host = ov_mongo.host;
+            b.port = ov_mongo.port;
+            b.database = ov_mongo.database;
+            b.user = ov_mongo.user;
+            b.ssl_mode = ov_mongo.ssl_mode;
+            b.connect_timeout_ms = ov_mongo.connect_timeout_ms;
+
+            let inline = inline_db_pw(&secrets);
+            merge_secret_ref_for_test(&mut b.password, &ov_mongo.password, inline.as_ref());
+        } else if let Some(pw) = inline_db_pw(&secrets) {
+            b.password = SecretRef {
+                kind: SecretRefKind::Inline,
+                value: pw,
+            };
+        }
+
+        base.mongo = Some(b);
+        Ok(base)
+    }
+}
+
+fn sanitize_opt(v: &Option<String>) -> Option<String> {
+    v.as_ref()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn encode_uri_component(value: &str) -> String {
+    urlencoding::encode(value).into_owned()
+}
+
+fn mongo_uri(input: &MongoConnectInput, password: &str) -> String {
+    let host = input.host.trim();
+    let port = input.port;
+    let user = sanitize_opt(&input.user);
+    let database = sanitize_opt(&input.database);
+
+    let mut uri = String::from("mongodb://");
+
+    if let Some(user) = user {
+        uri.push_str(&encode_uri_component(&user));
+        if !password.is_empty() {
+            uri.push(':');
+            uri.push_str(&encode_uri_component(password));
+        }
+        uri.push('@');
+    }
+
+    uri.push_str(host);
+    uri.push(':');
+    uri.push_str(&port.to_string());
+    uri.push('/');
+    uri.push_str(&database.as_deref().unwrap_or(""));
+
+    let mut params: Vec<String> = Vec::new();
+
+    // Default to admin database for authentication
+    params.push(format!("authSource=admin"));
+    // Avoid driver creating sessions on config.system.sessions, which can fail
+    // with Unauthorized for restricted users.
+    params.push("retryWrites=false".to_string());
+
+    if matches!(
+        input.ssl_mode.as_deref(),
+        Some("require") | Some("verify-ca") | Some("verify-full")
+    ) {
+        params.push("tls=true".to_string());
+    }
+
+    if let Some(ms) = input.connect_timeout_ms {
+        let ms = ms.clamp(200, 60_000);
+        params.push(format!("connectTimeoutMS={ms}"));
+        params.push(format!("serverSelectionTimeoutMS={ms}"));
+    }
+
+    if !params.is_empty() {
+        uri.push('?');
+        uri.push_str(&params.join("&"));
+    }
+
+    uri
+}
+
+async fn resolve_mongo_password(
+    app: &AppHandle,
+    secret_ref: &SecretRef,
+    override_plain: Option<&str>,
+) -> Result<String, String> {
+    if let Some(pw) = override_plain {
+        return Ok(pw.to_string());
+    }
+
+    match secret_ref.kind {
+        SecretRefKind::Inline => Ok(secret_ref.value.clone()),
+        SecretRefKind::Keychain => {
+            let key = secret_ref.value.trim();
+            if key.is_empty() {
+                return Ok(String::new());
+            }
+            crate::security::secrets::keychain_get(app, key).map_err(|e| {
+                if e == "KEYCHAIN_ITEM_NOT_FOUND" {
+                    "CREDENTIALS_INVALID".to_string()
+                } else {
+                    e
+                }
+            })
+        }
+    }
+}
+
+async fn smoke_mongo(client: &Client) -> Result<(), String> {
+    client
+        .list_database_names(None, None)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("MONGO_CONNECT_FAILED: {e}"))
+}
+
+async fn connect_mongo(app: &AppHandle, input: &MongoConnectInput) -> Result<Client, String> {
+    let password = resolve_mongo_password(app, &input.password, None).await?;
+    let uri = mongo_uri(input, &password);
+    let client = Client::with_uri_str(uri)
+        .await
+        .map_err(|e| format!("MONGO_CONNECT_FAILED: {e}"))?;
+    smoke_mongo(&client).await?;
+    Ok(client)
+}
+
+async fn test_mongo_direct(
+    app: &AppHandle,
+    input: MongoConnectInput,
+    secrets_opt: Option<ConnectionTestSecrets>,
+) -> Result<(), String> {
+    let override_plain = secrets_opt
+        .as_ref()
+        .and_then(|s| s.db_password.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let password = resolve_mongo_password(app, &input.password, override_plain).await?;
+    let uri = mongo_uri(&input, &password);
+    let client = Client::with_uri_str(uri)
+        .await
+        .map_err(|e| format!("MONGO_TEST_FAILED: {e}"))?;
+    smoke_mongo(&client).await?;
+    Ok(())
+}

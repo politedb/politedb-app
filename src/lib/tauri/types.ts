@@ -130,6 +130,16 @@ export type RedisConnectInput = {
   pool_max_size?: number | null;
 };
 
+export type MongoConnectInput = {
+  host: string;
+  port: number;
+  database?: string | null;
+  user?: string | null;
+  password: SecretRef;
+  ssl_mode?: SslMode | null;
+  connect_timeout_ms?: number | null;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -146,6 +156,7 @@ export type ConnectionCreateInput = {
 
   postgres?: PgConnectInput;
   mysql?: MySqlConnectInput;
+  mongo?: MongoConnectInput;
   redis?: RedisConnectInput;
 };
 
@@ -314,6 +325,11 @@ export type QueryResult = {
   columns: ColumnMeta[];
   rows: any[][];
   rowCount: number;
+};
+
+export type MongoCollectionOverview = {
+  columns: ColumnMeta[];
+  row_count: number;
 };
 
 export type SqlResultSlot = {

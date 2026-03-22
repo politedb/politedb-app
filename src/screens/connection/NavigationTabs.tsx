@@ -84,17 +84,21 @@ export function NavigationTabs({
     : [];
 
   return (
-    <>
+    <div
+      class={cn(
+        "flex shrink-0 items-end overflow-x-auto overflow-y-hidden pt-1"
+      )}
+    >
       <div class="flex w-full items-stretch bg-neutral-100">
         {/* Left */}
         <div class="flex shrink-0 items-center px-1">
           <Button
             variant="ghost"
-            className="h-7 w-7 rounded-md p-0"
+            className="group size-7 rounded-md p-0 hover:bg-transparent"
             onClick={() => scrollBy(-1)}
             title="Scroll left"
           >
-            <ChevronLeft className="size-4 text-neutral-600" />
+            <ChevronLeft className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
           </Button>
         </div>
 
@@ -153,7 +157,7 @@ export function NavigationTabs({
                     e.stopPropagation();
                     closeNow(w.id);
                   }}
-                  class="ml-1 p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-200"
+                  class="ml-1 rounded-full p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-100"
                   title="Close"
                 >
                   <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
@@ -167,11 +171,11 @@ export function NavigationTabs({
         <div class="flex shrink-0 items-center px-1">
           <Button
             variant="ghost"
-            className="h-7 w-7 rounded-md p-0"
+            className="group size-7 rounded-md p-0 hover:bg-transparent"
             onClick={() => scrollBy(1)}
             title="Scroll right"
           >
-            <ChevronRight className="size-4 text-neutral-600" />
+            <ChevronRight className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
           </Button>
         </div>
       </div>
@@ -183,6 +187,6 @@ export function NavigationTabs({
         items={menuItems}
         onClose={() => setCtx(null)}
       />
-    </>
+    </div>
   );
 }

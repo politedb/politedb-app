@@ -23,9 +23,9 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   ],
   mysql: ["index_name", "index_algorithm", "is_unique", "column_name"],
   mariadb: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  mongo: ["index_name", "index_algorithm", "is_unique", "column_name"],
   redis: [],
   sqlserver: [],
-  mongo: [],
   sqlite: [],
   oracle: [],
 };
@@ -192,23 +192,19 @@ export function TableConstraints({
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions}
-                onValueChange={
-                  showSelect
-                    ? (value) => handleDataChange(sourceIndex, name, value)
-                    : undefined
-                }
+              onValueChange={
+                showSelect
+                  ? (value) => handleDataChange(sourceIndex, name, value)
+                  : undefined
+              }
               value={String(fieldValue)}
               placeholder={placeholder}
-                onInput={
-                  !showSelect
-                    ? (e) =>
-                        handleDataChange(
-                          sourceIndex,
-                          name,
-                          e.currentTarget.value
-                        )
-                    : undefined
-                }
+              onInput={
+                !showSelect
+                  ? (e) =>
+                      handleDataChange(sourceIndex, name, e.currentTarget.value)
+                  : undefined
+              }
               onMouseDown={(e) => {
                 if (!isRowSelected && !isEmptyRow && !isDeleted) {
                   e.preventDefault();

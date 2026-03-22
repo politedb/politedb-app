@@ -253,6 +253,7 @@ export function CanvasTable({
 
   // --- Viewport ---
   const [viewport, setViewport] = useState({ w: 1, h: 1 });
+  const viewportRef = useRef(viewport);
 
   // --- Memoized Computations (Using colWidths state) ---
   const totalWidth = useMemo(
@@ -279,16 +280,34 @@ export function CanvasTable({
     const el = scrollerRef.current;
     if (!el) return;
 
+    let rafId: number | null = null;
+    let nextW = Math.max(1, Math.floor(el.clientWidth));
+    let nextH = Math.max(1, Math.floor(el.clientHeight));
+
+    const commitViewport = () => {
+      rafId = null;
+      const prev = viewportRef.current;
+      if (prev.w === nextW && prev.h === nextH) return;
+      const next = { w: nextW, h: nextH };
+      viewportRef.current = next;
+      setViewport(next);
+    };
+
     const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        setViewport({
-          w: Math.max(1, Math.floor(e.contentRect.width)),
-          h: Math.max(1, Math.floor(e.contentRect.height)),
-        });
-      }
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      nextW = Math.max(1, Math.floor(rect.width));
+      nextH = Math.max(1, Math.floor(rect.height));
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(commitViewport);
     });
+
+    commitViewport();
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // --------------------------------------------------------------------------

@@ -9,6 +9,7 @@ export interface MenuDropdownItem {
   icon?: JSX.Element;
   danger?: boolean;
   disabled?: boolean;
+  hidden?: boolean;
   right?: JSX.Element;
   separator?: boolean; // Add separator after this item
 }
@@ -60,6 +61,7 @@ export function MenuDropdown({
       >
         <div role="menu" className="py-1">
           {items.map((item, index) => {
+            if (item?.hidden) return null;
             const showSeparator = item.separator && index > 0;
 
             return (

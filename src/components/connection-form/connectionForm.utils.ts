@@ -71,6 +71,8 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "mongo":
+      return 27017;
     case "redis":
       return 6379;
     default:
@@ -84,10 +86,11 @@ function defaultHostForEngine(_engine: DatabaseEngine): string {
 
 function pickByEngine<T>(
   engine: DatabaseEngine,
-  by: { postgres?: T; mysql?: T; redis?: T }
+  by: { postgres?: T; mysql?: T; mongo?: T; redis?: T }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
   if (engine === "mysql" || engine === "mariadb") return by.mysql;
+  if (engine === "mongo") return by.mongo;
   if (engine === "redis") return by.redis;
   return undefined;
 }
@@ -239,6 +242,31 @@ function buildRedisInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildMongoInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 27017);
+
+  const mongo: ConnectionCreateInput["mongo"] = {
+    host: v.host,
+    port,
+    database: v.database?.trim() || null,
+    user: v.user?.trim() || null,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    connect_timeout_ms: 60_000,
+    ssl_mode: v.sslMode,
+  };
+
+  return {
+    engine: "mongo",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    mongo,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
 export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   switch (v.engine) {
     case "postgres":
@@ -247,6 +275,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildMySqlInput(v);
     case "mariadb":
       return buildMySqlInput(v, "mariadb");
+    case "mongo":
+      return buildMongoInput(v);
     case "redis":
       return buildRedisInput(v);
     default:
@@ -269,12 +299,14 @@ function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
 function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const pg = input?.postgres;
   const my = input?.mysql;
+  const mongo = input?.mongo;
   const rd = input?.redis;
 
   const host =
     pickByEngine(engine, {
       postgres: pg?.host,
       mysql: my?.host,
+      mongo: mongo?.host,
       redis: rd?.host,
     }) || defaultHostForEngine(engine);
 
@@ -282,6 +314,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.port,
       mysql: my?.port,
+      mongo: mongo?.port,
       redis: rd?.port,
     }) ?? defaultPortForEngine(engine);
 
@@ -289,12 +322,16 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.user,
       mysql: my?.user,
+      mongo: mongo?.user,
       redis: rd?.user,
-    }) || "root";
+    }) || (engine === "mongo" ? "" : "root");
 
   const database =
-    pickByEngine(engine, { postgres: pg?.database, mysql: my?.database }) ||
-    "root";
+    pickByEngine(engine, {
+      postgres: pg?.database,
+      mysql: my?.database,
+      mongo: mongo?.database ?? undefined,
+    }) || (engine === "mongo" ? "" : "root");
 
   const password =
     engine === "postgres"
@@ -305,14 +342,20 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
         ? my?.password?.kind === "inline"
           ? (my.password.value ?? "")
           : ""
-        : "";
+        : engine === "mongo"
+          ? mongo?.password?.kind === "inline"
+            ? (mongo.password.value ?? "")
+            : ""
+          : "";
 
   const storeKeychain =
     engine === "postgres"
       ? pg?.password?.kind !== "inline"
       : engine === "mysql" || engine === "mariadb"
         ? my?.password?.kind !== "inline"
-        : true;
+        : engine === "mongo"
+          ? mongo?.password?.kind !== "inline"
+          : true;
 
   return { host, port, user, database, password, storeKeychain };
 }
@@ -323,11 +366,13 @@ function makeSslDefaults(
 ) {
   const pg = input?.postgres;
   const my = input?.mysql;
+  const mongo = input?.mongo;
   const rd = input?.redis;
 
   const ssl_mode = pickByEngine(engine, {
     postgres: pg?.ssl_mode as SslMode | undefined,
     mysql: my?.ssl_mode as SslMode | undefined,
+    mongo: mongo?.ssl_mode as SslMode | undefined,
     redis: rd?.ssl_mode as SslMode | undefined,
   });
 
@@ -346,9 +391,12 @@ function makeSslDefaults(
     mysql: my?.ssl_ca_path ?? undefined,
   });
 
-  // Redis: default to "disable" so local Redis works without TLS; Postgres/MySQL: default "prefer"
+  // Redis/Mongo: default to "disable" so local instances work without TLS.
+  // Postgres/MySQL keep "prefer" for smoother dev/prod behavior.
   const defaultSsl =
-    engine === "redis" ? ("disable" as const) : ("prefer" as const);
+    engine === "redis" || engine === "mongo"
+      ? ("disable" as const)
+      : ("prefer" as const);
 
   return {
     sslMode: ssl_mode || defaultSsl,

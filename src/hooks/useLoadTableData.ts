@@ -19,7 +19,13 @@ import {
 } from "./queries";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
-import { operationCancel, TableChunk } from "src/lib/tauri";
+import {
+  mongoCollectionOverview,
+  mongoFindDocuments,
+  mongoListIndexes,
+  operationCancel,
+  TableChunk,
+} from "src/lib/tauri";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
 import type { DatabaseEngine } from "src/types";
 import { retryAsync } from "src/utils/common";
@@ -113,10 +119,11 @@ type LoadPlan = {
 function computeLoadPlan(params: {
   key: string;
   prev: any;
+  engine?: DatabaseEngine;
   flags: LoadFlags;
   pagination?: TablePagination;
 }): LoadPlan {
-  const { key, prev, flags, pagination } = params;
+  const { key, prev, engine, flags, pagination } = params;
 
   const force = !!flags.force;
   const forceRows = !!flags.forceRows;
@@ -129,7 +136,11 @@ function computeLoadPlan(params: {
   const limit = pagination?.limit ?? DEFAULT_LIMIT;
   const offset = pagination?.offset ?? DEFAULT_OFFSET;
 
-  const hasColumns = Array.isArray(prev.columns) && prev.columns.length > 0;
+  const hasColumnsArray = Array.isArray(prev.columns);
+  const hasColumns =
+    engine === "mongo"
+      ? hasColumnsArray
+      : hasColumnsArray && prev.columns.length > 0;
 
   const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(key);
   const hasRowsWindow = !!rowsInfo;
@@ -175,11 +186,7 @@ function computeLoadPlan(params: {
   const needForeignKeys = force || refreshForeignKeys || !hasForeignKeys;
 
   const needAnyMetaWork =
-    needColumns ||
-    needRowCount ||
-    needSizeInfo ||
-    needMeta ||
-    needForeignKeys;
+    needColumns || needRowCount || needSizeInfo || needMeta || needForeignKeys;
 
   // Check if rows capacity needs update
   const desiredCap = Math.max(1000, limit * 4);
@@ -329,9 +336,7 @@ async function loadRowCount(params: {
       const exactRes = await runSqlQuery(connId, exactQ);
       addLogQuery(exactQ);
       return {
-        value: Number(
-          cellToString((exactRes.rows as unknown[][])?.[0]?.[0])
-        ),
+        value: Number(cellToString((exactRes.rows as unknown[][])?.[0]?.[0])),
         estimated: false,
       };
     }
@@ -369,6 +374,105 @@ async function loadSizeInfo(params: {
     totalSize: cellToString(r0?.[0]) ?? "0",
     dataSize: cellToString(r0?.[1]) ?? "0",
     indexSize: cellToString(r0?.[2]) ?? "0",
+  };
+}
+
+async function loadMongoOverview(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+}): Promise<{
+  columns: ColumnRow[];
+  structure: any[];
+  constraints: any[];
+  rowCount: number;
+}> {
+  const { connId, schema, tableName } = params;
+  const [overview, indexes] = await Promise.all([
+    mongoCollectionOverview({
+      connectionId: connId,
+      database: schema,
+      collection: tableName,
+      sampleSize: 100,
+    }),
+    mongoListIndexes({
+      connectionId: connId,
+      database: schema,
+      collection: tableName,
+    }),
+  ]);
+
+  const columns = (overview.columns ?? []).map((col) => ({
+    name: col.name,
+    db_type: col.db_type,
+  }));
+
+  const structure = columns.map((col) => ({
+    column_name: col.name,
+    data_type: col.db_type,
+    is_nullable: true,
+    check: "",
+    column_default: "",
+    comment: "",
+  }));
+
+  const constraints = (indexes ?? []).map((idx) => ({
+    index_name: idx.index_name ?? "",
+    index_algorithm: idx.index_algorithm ?? "",
+    is_unique: !!idx.is_unique,
+    is_primary: !!idx.is_primary,
+    index_definition: idx.index_definition ?? "",
+    column_name: idx.column_name ?? "",
+    condition: "",
+    include: "",
+    comment: "",
+  }));
+
+  return {
+    columns,
+    structure,
+    constraints,
+    rowCount: Number(overview.row_count ?? 0),
+  };
+}
+
+async function loadMongoRows(params: {
+  key: string;
+  connId: string;
+  schema: string;
+  tableName: string;
+  limit: number;
+  offset: number;
+  resetCache?: boolean;
+}): Promise<{ columns: ColumnRow[]; rowCount: number }> {
+  const { key, connId, schema, tableName, limit, offset, resetCache } = params;
+  const result = await mongoFindDocuments({
+    connectionId: connId,
+    database: schema,
+    collection: tableName,
+    limit,
+    offset,
+  });
+
+  const store = useConnectionStore.getState();
+  const opId = `mongo:${key}:${offset}:${limit}`;
+  const cap = Math.max(1000, limit * 4);
+
+  store.initRows(key, DEFAULT_ROWS_CAP);
+  store.beginRowsStream(key, opId, cap, offset, !!resetCache);
+  store.applyRowsChunk(key, opId, {
+    rows: result.rows ?? [],
+    row_offset: 0,
+    seq: 0,
+  } as TableChunk);
+  store.endRowsStream(key, opId);
+
+  return {
+    columns: (result.columns ?? []).map((col) => ({
+      name: col.name,
+      db_type: col.db_type,
+    })),
+    rowCount: Number(result.rowCount ?? 0),
   };
 }
 
@@ -677,7 +781,13 @@ export function useLoadTableData() {
 
         try {
           const prev = tableDataMap[key] ?? EMPTY_META;
-          const plan = computeLoadPlan({ key, prev, flags, pagination });
+          const plan = computeLoadPlan({
+            key,
+            prev,
+            engine: activeTab.engine,
+            flags,
+            pagination,
+          });
 
           if (!shouldDoAnything(plan)) return;
 
@@ -711,6 +821,76 @@ export function useLoadTableData() {
           patchMeta(setMeta, key, prev, {
             connectionId: prev.connectionId ?? connId,
           });
+
+          if (activeTab.engine === "mongo") {
+            try {
+              let mongoColumns = Array.isArray(prev.columns)
+                ? (prev.columns as ColumnRow[])
+                : [];
+              let mongoStructure = prev.structure ?? [];
+              let mongoRowCount =
+                typeof prev.rowCount === "number" ? prev.rowCount : 0;
+
+              if (plan.needColumns || plan.needMeta || plan.needRowCount) {
+                const overview = await loadMongoOverview({
+                  connId,
+                  schema,
+                  tableName,
+                });
+                mongoColumns = overview.columns;
+                mongoStructure = overview.structure;
+                const mongoConstraints = overview.constraints;
+                mongoRowCount = overview.rowCount;
+
+                patchMeta(setMeta, key, prev, {
+                  columns: mongoColumns,
+                  structure: mongoStructure,
+                  constraints: mongoConstraints,
+                  foreignKeys: [],
+                  rowCount: mongoRowCount,
+                  rowCountIsEstimated: false,
+                  connectionId: prev.connectionId ?? connId,
+                  busy: false,
+                });
+                try {
+                  setColumnsCache(key, mongoColumns as any);
+                } catch {}
+              }
+
+              if (plan.needRows) {
+                const rowsRes = await loadMongoRows({
+                  key,
+                  connId,
+                  schema,
+                  tableName,
+                  limit,
+                  offset,
+                  resetCache: !!flags.force || !!flags.forceRows,
+                });
+
+                if (rowsRes.columns.length > 0) {
+                  mongoColumns = rowsRes.columns;
+                }
+                mongoRowCount = rowsRes.rowCount || mongoRowCount;
+
+                patchMeta(setMeta, key, prev, {
+                  columns: mongoColumns,
+                  rowCount: mongoRowCount,
+                  rowCountIsEstimated: false,
+                  connectionId: prev.connectionId ?? connId,
+                  busy: false,
+                });
+              }
+
+              patchMeta(setMeta, key, prev, { busy: false, error: null });
+            } catch (e) {
+              patchMeta(setMeta, key, prev, {
+                busy: false,
+                error: getErrorMessage(e),
+              });
+            }
+            return;
+          }
 
           // --- 1. APPLY CACHES (Instant UI Feedback) ---
           const cachedCols = columnsCache[key];

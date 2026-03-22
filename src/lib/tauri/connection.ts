@@ -33,6 +33,10 @@ export async function connectionList(): Promise<ConnectionInfo[]> {
   return invoke<ConnectionInfo[]>(CMD.connectionList);
 }
 
+export async function connectionVersion(connectionId: string): Promise<string> {
+  return invoke<string>(CMD.connectionVersion, { connectionId });
+}
+
 export async function connectionRemove(connectionId: string): Promise<void> {
   await invoke(CMD.connectionRemove, { connectionId });
 }

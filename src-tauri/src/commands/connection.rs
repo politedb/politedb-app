@@ -1,11 +1,18 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::engines::EngineConnection;
 use crate::ssh_tunnel;
 use crate::ssh_tunnel::pool::{acquire_shared_tunnel, release_shared_tunnel_by_conn};
 use crate::state::AppState;
 use crate::types::{ConnectionCreateInput, ConnectionInfo, ConnectionTestInput};
+
+fn parse_redis_version(info: &str) -> Option<String> {
+    info.lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
 
 fn rewrite_input_host_port(
     mut input: ConnectionCreateInput,
@@ -27,6 +34,11 @@ fn rewrite_input_host_port(
             let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
             my.host = host.into();
             my.port = port;
+        }
+        crate::types::EngineKind::Mongo => {
+            let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
+            mongo.host = host.into();
+            mongo.port = port;
         }
         crate::types::EngineKind::Redis => {
             let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
@@ -194,6 +206,16 @@ pub async fn connection_test(
                         }
                     }
                 }
+                crate::types::EngineKind::Mongo => {
+                    if let Some(mongo) = input.mongo.as_mut() {
+                        if mongo.password.kind == crate::types::SecretRefKind::Keychain
+                            && mongo.password.value.trim().is_empty()
+                        {
+                            mongo.password.kind = crate::types::SecretRefKind::Inline;
+                            mongo.password.value = pw.to_string();
+                        }
+                    }
+                }
                 crate::types::EngineKind::Redis => {
                     if let Some(rd) = input.redis.as_mut() {
                         if rd.password.kind == crate::types::SecretRefKind::Keychain
@@ -312,6 +334,67 @@ pub async fn connection_list(state: State<'_, AppState>) -> Result<Vec<Connectio
 }
 
 #[tauri::command]
+pub async fn connection_version(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+) -> Result<String, String> {
+    use mysql_async::prelude::Queryable as _;
+
+    let conn = state
+        .connections
+        .get(&connection_id)
+        .ok_or("CONNECTION_NOT_FOUND")?;
+
+    match conn.value() {
+        crate::engines::EngineConnection::Postgres(pg) => {
+            let client = pg.pool.get().await.map_err(|e| format!("PG_POOL_GET_FAILED: {e}"))?;
+            let row = client
+                .query_one("SHOW server_version", &[])
+                .await
+                .map_err(|e| format!("PG_VERSION_QUERY_FAILED: {e}"))?;
+            let version: String = row.get(0);
+            Ok(version)
+        }
+        crate::engines::EngineConnection::MySql(my) => {
+            let mut conn = my
+                .pool
+                .get_conn()
+                .await
+                .map_err(|e| format!("MYSQL_POOL_GET_FAILED: {e}"))?;
+            let version: Option<String> = conn
+                .query_first("SELECT VERSION()")
+                .await
+                .map_err(|e| format!("MYSQL_VERSION_QUERY_FAILED: {e}"))?;
+            version.ok_or("MYSQL_VERSION_NOT_FOUND".into())
+        }
+        crate::engines::EngineConnection::Mongo(mongo) => {
+            let db = mongo.client.database("admin");
+            let res = db
+                .run_command(mongodb::bson::doc! { "buildInfo": 1 }, None)
+                .await
+                .map_err(|e| format!("MONGO_VERSION_QUERY_FAILED: {e}"))?;
+            let version = res
+                .get_str("version")
+                .map_err(|e| format!("MONGO_VERSION_PARSE_FAILED: {e}"))?;
+            Ok(version.to_string())
+        }
+        crate::engines::EngineConnection::Redis(redis) => {
+            let mut conn = redis
+                .pool
+                .get()
+                .await
+                .map_err(|e| format!("REDIS_POOL_GET_FAILED: {e}"))?;
+            let info: String = redis::cmd("INFO")
+                .arg("server")
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| format!("REDIS_INFO_QUERY_FAILED: {e}"))?;
+            parse_redis_version(&info).ok_or("REDIS_VERSION_NOT_FOUND".into())
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn connection_remove(
     state: State<'_, AppState>,
     connection_id: Uuid,
@@ -341,17 +424,7 @@ pub async fn connection_remove(
 
     // 2) close DB connection resources
     if let Some((_id, conn)) = state.connections.remove(&connection_id) {
-        match conn {
-            EngineConnection::Postgres(pg) => {
-                drop(pg.pool);
-            }
-            EngineConnection::MySql(my) => {
-                let _ = my.pool.clone().disconnect().await;
-            }
-            EngineConnection::Redis(r) => {
-                drop(r.pool);
-            }
-        }
+        conn.close().await;
     }
 
     // 3) release SSH tunnel

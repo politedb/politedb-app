@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { canManageDatabases, useDatabases } from "src/hooks/useDatabases";
 import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
+import { ErrorDialog } from "../../components/modal/ErrorDialog";
 
 type MenuState = {
   x: number;
@@ -49,6 +50,7 @@ export function DatabaseManagerDialog({
     nameDraft,
     visibleDbs,
     setSearch,
+    setError,
     setSelectedDb,
     setEditorMode,
     setNameDraft,
@@ -153,12 +155,6 @@ export function DatabaseManagerDialog({
           </div>
         )}
 
-        {error && (
-          <div class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
         <div class="min-h-80 gap-4">
           <div class="flex flex-col gap-1.5 overflow-auto rounded-lg">
             {visibleDbs.length === 0 ? (
@@ -244,6 +240,10 @@ export function DatabaseManagerDialog({
           onClose={closeEditor}
           onSave={editorMode === "create" ? onCreateDb : onRenameDb}
         />
+      )}
+
+      {error && (
+        <ErrorDialog open={true} error={error} onClose={() => setError("")} />
       )}
 
       <Dialog

@@ -3,6 +3,7 @@ export const CMD = {
   connectionCreate: "connection_create",
   connectionTest: "connection_test",
   connectionList: "connection_list",
+  connectionVersion: "connection_version",
   connectionRemove: "connection_remove",
 
   // Profiles
@@ -37,6 +38,16 @@ export const CMD = {
 
   // Export (streaming append for large table export)
   exportAppendToFile: "export_append_to_file",
+
+  // Mongo
+  mongoListDatabases: "mongo_list_databases",
+  mongoListCollections: "mongo_list_collections",
+  mongoCollectionOverview: "mongo_collection_overview",
+  mongoFindDocuments: "mongo_find_documents",
+  mongoListIndexes: "mongo_list_indexes",
+  mongoInsertDocuments: "mongo_insert_documents",
+  mongoUpdateDocuments: "mongo_update_documents",
+  mongoDeleteDocuments: "mongo_delete_documents",
 } as const;
 
 export type CommandName = (typeof CMD)[keyof typeof CMD];

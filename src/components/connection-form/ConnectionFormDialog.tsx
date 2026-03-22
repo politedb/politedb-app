@@ -77,7 +77,7 @@ export function ConnectionFormDialog({
 
     const hostOk = !!host && Number.isFinite(Number(port));
 
-    if (v.engine === "redis") {
+    if (v.engine === "redis" || v.engine === "mongo") {
       // Redis: only host + port are required; user/password/db are optional
       return hostOk;
     }

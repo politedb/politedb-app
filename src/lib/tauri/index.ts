@@ -3,4 +3,5 @@ export * from "./secrets";
 export * from "./connection";
 export * from "./profile";
 export * from "./operation";
+export * from "./mongo";
 export * from "./sql";

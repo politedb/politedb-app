@@ -9,7 +9,10 @@ import {
   DialogTitle,
 } from "../common/Dialog";
 import type { PatchData, PatchMap } from "src/utils/generateSql";
-import { generateSqlFromPatches } from "src/utils/generateSql";
+import {
+  buildMongoOperations,
+  generateSqlFromPatches,
+} from "src/utils/generateSql";
 import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/QueryHistory";
@@ -41,6 +44,7 @@ function analyzePatches(
   options?: {
     activeScreen?: string;
     getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+    offset?: number;
   }
 ): ChangeSummary {
   let inserts = 0;
@@ -60,7 +64,10 @@ function analyzePatches(
     constraintChanges += countByAction(patches, "constraints");
   }
 
-  const sqlStatements = generateSqlFromPatches(patchMap, engine, options);
+  const sqlStatements =
+    engine === "mongo"
+      ? buildMongoOperations(patchMap, options)
+      : generateSqlFromPatches(patchMap, engine, options);
 
   return {
     inserts,
@@ -110,6 +117,12 @@ function getSqlType(sql: string): keyof typeof SQL_BORDER_COLORS {
   if (upperSql.startsWith("INSERT")) return "insert";
   if (upperSql.startsWith("UPDATE")) return "update";
   if (upperSql.startsWith("DELETE")) return "delete";
+  if (upperSql.includes(".INSERTONE(") || upperSql.includes(".INSERTMANY("))
+    return "insert";
+  if (upperSql.includes(".UPDATEONE(") || upperSql.includes(".UPDATEMANY("))
+    return "update";
+  if (upperSql.includes(".DELETEONE(") || upperSql.includes(".DELETEMANY("))
+    return "delete";
   if (upperSql.startsWith("ALTER TABLE")) {
     // Check if it's a constraint change
     if (
@@ -133,6 +146,7 @@ interface Props {
   newTableSql?: string[];
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  offset?: number;
 }
 
 export function SaveChangesDialog({
@@ -144,10 +158,13 @@ export function SaveChangesDialog({
   newTableSql = [],
   activeScreen,
   getRowAt,
+  offset = 0,
 }: Props) {
+  const isMongo = engine === "mongo";
+
   const summary = useMemo(
-    () => analyzePatches(patchMap, engine, { activeScreen, getRowAt }),
-    [patchMap, engine, activeScreen, getRowAt]
+    () => analyzePatches(patchMap, engine, { activeScreen, getRowAt, offset }),
+    [patchMap, engine, activeScreen, getRowAt, offset]
   );
 
   const allSqlStatements = useMemo(() => {
@@ -193,19 +210,19 @@ export function SaveChangesDialog({
             )}
             <SummaryItem
               label="INSERT"
-              entity="row"
+              entity={isMongo ? "document" : "row"}
               count={summary.inserts}
               color="bg-green-100 text-green-800"
             />
             <SummaryItem
               label="UPDATE"
-              entity="row"
+              entity={isMongo ? "document" : "row"}
               count={summary.updates}
               color="bg-amber-100 text-amber-800"
             />
             <SummaryItem
               label="DELETE"
-              entity="row"
+              entity={isMongo ? "document" : "row"}
               count={summary.deletes}
               color="bg-red-100 text-red-800"
             />
@@ -228,13 +245,17 @@ export function SaveChangesDialog({
         <div class="rounded-lg border border-neutral-200">
           <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
             <h3 class="text-sm font-semibold text-neutral-900">
-              SQL Statements to Execute ({allSqlStatements.length})
+              {isMongo
+                ? `Mongo Operations to Execute (${allSqlStatements.length})`
+                : `SQL Statements to Execute (${allSqlStatements.length})`}
             </h3>
           </div>
           <div class="max-h-64 overflow-y-auto p-4">
             {allSqlStatements.length === 0 ? (
               <p class="text-sm text-neutral-500">
-                No SQL statements to execute.
+                {isMongo
+                  ? "No Mongo operations to execute."
+                  : "No SQL statements to execute."}
               </p>
             ) : (
               <div class="space-y-3">
