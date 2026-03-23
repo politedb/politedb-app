@@ -134,6 +134,41 @@ const ORACLE: MetadataQueries = {
   `,
 };
 
+const SQLSERVER: MetadataQueries = {
+  schemasQuery: `
+    SELECT name AS schema_name
+    FROM sys.schemas
+    WHERE name NOT IN ('sys', 'INFORMATION_SCHEMA')
+    ORDER BY name;
+  `,
+  functionsQuery: `
+    SELECT
+      ROUTINE_SCHEMA AS function_schema,
+      ROUTINE_NAME AS function_name,
+      '' AS function_args
+    FROM INFORMATION_SCHEMA.ROUTINES
+    WHERE ROUTINE_TYPE = 'FUNCTION'
+    ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME;
+  `,
+  tablesQuery: `
+    SELECT
+      TABLE_SCHEMA AS table_schema,
+      TABLE_NAME AS table_name,
+      TABLE_TYPE AS table_type
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+    ORDER BY TABLE_SCHEMA, TABLE_TYPE, TABLE_NAME;
+  `,
+  columnsQuery: `
+    SELECT
+      TABLE_SCHEMA AS table_schema,
+      TABLE_NAME AS table_name,
+      COLUMN_NAME AS column_name
+    FROM INFORMATION_SCHEMA.COLUMNS
+    ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
+  `,
+};
+
 // Engines without relational schema/tables
 const EMPTY: MetadataQueries = {
   schemasQuery: `SELECT '' WHERE 1=0;`,
@@ -153,6 +188,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
       return SQLITE;
     case "oracle":
       return ORACLE;
+    case "sqlserver":
+      return SQLSERVER;
 
     // not supported for table/column completion
     case "redis":

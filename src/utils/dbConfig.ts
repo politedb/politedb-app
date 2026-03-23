@@ -3,6 +3,7 @@ import {
   MYSQL_DATA_TYPES,
   ORACLE_DATA_TYPES,
   POSTGRES_DATA_TYPES,
+  SQLSERVER_DATA_TYPES,
   SQLITE_DATA_TYPES,
 } from "src/constant";
 
@@ -31,8 +32,9 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: [],
   },
   sqlserver: {
-    dataTypes: [],
-    indexAlgorithms: [],
+    dataTypes: SQLSERVER_DATA_TYPES,
+    indexAlgorithms: ["CLUSTERED", "NONCLUSTERED", "COLUMNSTORE", "HASH"],
+    allowFk: true,
   },
   mongo: {
     dataTypes: [],

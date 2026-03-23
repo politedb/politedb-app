@@ -12,7 +12,7 @@ use crate::state::AppState;
 use crate::types::{
     ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MongoConnectInput,
     MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef,
-    SecretRefKind, SqliteConnectInput,
+    SecretRefKind, SqlServerConnectInput, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -125,6 +125,22 @@ fn validate_sqlite_input(s: &SqliteConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_sqlserver_input(ss: &SqlServerConnectInput) -> Result<(), String> {
+    if ss.host.trim().is_empty() {
+        return Err("SQLSERVER_HOST_REQUIRED".into());
+    }
+    if ss.database.trim().is_empty() {
+        return Err("SQLSERVER_DATABASE_REQUIRED".into());
+    }
+    if ss.user.trim().is_empty() {
+        return Err("SQLSERVER_USER_REQUIRED".into());
+    }
+    if ss.port == 0 {
+        return Err("SQLSERVER_PORT_INVALID".into());
+    }
+    Ok(())
+}
+
 fn validate_oracle_input(oc: &OracleConnectInput) -> Result<(), String> {
     if oc.host.trim().is_empty() {
         return Err("ORACLE_HOST_REQUIRED".into());
@@ -159,6 +175,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let my = input.mysql.as_ref().ok_or("MYSQL_CONFIG_MISSING")?;
             validate_mysql_input(my)
         }
+        EngineKind::Sqlserver => {
+            let ss = input.sqlserver.as_ref().ok_or("SQLSERVER_CONFIG_MISSING")?;
+            validate_sqlserver_input(ss)
+        }
         EngineKind::Sqlite => {
             let s = input.sqlite.as_ref().ok_or("SQLITE_CONFIG_MISSING")?;
             validate_sqlite_input(s)
@@ -190,6 +210,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Postgres => "postgres",
         EngineKind::Mysql => "mysql",
         EngineKind::Mariadb => "mariadb",
+        EngineKind::Sqlserver => "sqlserver",
         EngineKind::Sqlite => "sqlite",
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
@@ -275,6 +296,19 @@ pub fn persist_input_with_secrets(
                 EngineKind::Mariadb,
                 persist_secrets,
                 &mut my.password,
+            )?;
+        }
+        EngineKind::Sqlserver => {
+            let ss = input
+                .sqlserver
+                .as_mut()
+                .ok_or("SQLSERVER_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Sqlserver,
+                persist_secrets,
+                &mut ss.password,
             )?;
         }
         EngineKind::Oracle => {

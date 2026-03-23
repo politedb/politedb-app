@@ -126,6 +126,7 @@ export function ConnectionBasicsSection(
 
   const defaultPort = useMemo(() => {
     if (engine === "mysql" || engine === "mariadb") return 3306;
+    if (engine === "sqlserver") return 1433;
     if (engine === "mongo") return 27017;
     if (engine === "redis") return 6379;
     if (engine === "sqlite") return 0;

@@ -871,6 +871,7 @@ export function useLoadTableData() {
             activeTab.engine === "postgres" ||
             activeTab.engine === "mysql" ||
             activeTab.engine === "mariadb" ||
+            activeTab.engine === "sqlserver" ||
             activeTab.engine === "sqlite" ||
             activeTab.engine === "oracle";
 

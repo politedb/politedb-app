@@ -35,6 +35,14 @@ fn rewrite_input_host_port(
             my.host = host.into();
             my.port = port;
         }
+        crate::types::EngineKind::Sqlserver => {
+            let ss = input
+                .sqlserver
+                .as_mut()
+                .ok_or("SQLSERVER_CONFIG_MISSING")?;
+            ss.host = host.into();
+            ss.port = port;
+        }
         crate::types::EngineKind::Oracle => {
             let oracle = input.oracle.as_mut().ok_or("ORACLE_CONFIG_MISSING")?;
             oracle.host = host.into();
@@ -212,6 +220,16 @@ pub async fn connection_test(
                         }
                     }
                 }
+                crate::types::EngineKind::Sqlserver => {
+                    if let Some(ss) = input.sqlserver.as_mut() {
+                        if ss.password.kind == crate::types::SecretRefKind::Keychain
+                            && ss.password.value.trim().is_empty()
+                        {
+                            ss.password.kind = crate::types::SecretRefKind::Inline;
+                            ss.password.value = pw.to_string();
+                        }
+                    }
+                }
                 crate::types::EngineKind::Oracle => {
                     if let Some(oracle) = input.oracle.as_mut() {
                         if oracle.password.kind == crate::types::SecretRefKind::Keychain
@@ -356,6 +374,7 @@ pub async fn connection_version(
     connection_id: Uuid,
 ) -> Result<String, String> {
     use mysql_async::prelude::Queryable as _;
+    use tokio_util::compat::TokioAsyncWriteCompatExt as _;
 
     let conn = state
         .connections
@@ -387,6 +406,46 @@ pub async fn connection_version(
                 .await
                 .map_err(|e| format!("MYSQL_VERSION_QUERY_FAILED: {e}"))?;
             version.ok_or("MYSQL_VERSION_NOT_FOUND".into())
+        }
+        crate::engines::EngineConnection::SqlServer(ss) => {
+            let mut config = tiberius::Config::new();
+            config.host(&ss.host);
+            config.port(ss.port);
+            config.database(&ss.database);
+            config.authentication(tiberius::AuthMethod::sql_server(&ss.user, &ss.password));
+            if ss.encrypt {
+                config.encryption(tiberius::EncryptionLevel::Required);
+                config.trust_cert();
+            } else {
+                config.encryption(tiberius::EncryptionLevel::NotSupported);
+            }
+
+            let addr = config.get_addr();
+            let tcp = tokio::net::TcpStream::connect(addr)
+                .await
+                .map_err(|e| format!("SQLSERVER_TCP_CONNECT_FAILED: {e}"))?;
+            tcp.set_nodelay(true)
+                .map_err(|e| format!("SQLSERVER_TCP_NODELAY_FAILED: {e}"))?;
+            let mut client = tiberius::Client::connect(config, tcp.compat_write())
+                .await
+                .map_err(|e| format!("SQLSERVER_CONNECT_FAILED: {e}"))?;
+            let row = client
+                .simple_query("SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS version")
+                .await
+                .map_err(|e| format!("SQLSERVER_VERSION_QUERY_FAILED: {e}"))?
+                .into_row()
+                .await
+                .map_err(|e| format!("SQLSERVER_VERSION_ROW_FAILED: {e}"))?
+                .ok_or("SQLSERVER_VERSION_NOT_FOUND")?;
+            let version = row
+                .get::<&str, _>(0)
+                .unwrap_or("")
+                .to_string();
+            if version.is_empty() {
+                Err("SQLSERVER_VERSION_NOT_FOUND".into())
+            } else {
+                Ok(version)
+            }
         }
         crate::engines::EngineConnection::Sqlite(sqlite) => {
             let path = sqlite.db_path.clone();

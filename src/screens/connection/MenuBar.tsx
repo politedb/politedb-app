@@ -186,6 +186,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "sqlserver") {
+    if (!input.sqlserver) throw new Error("SQLSERVER_CONFIG_MISSING");
+    return {
+      ...input,
+      sqlserver: {
+        ...input.sqlserver,
+        database,
+      },
+    };
+  }
+
   if (input.engine === "mongo") {
     if (!input.mongo) throw new Error("MONGO_CONFIG_MISSING");
     return {

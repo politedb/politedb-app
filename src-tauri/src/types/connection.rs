@@ -6,7 +6,7 @@ use crate::{
     types::{
         engine::{
             EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
-            SqliteConnectInput,
+            SqlServerConnectInput, SqliteConnectInput,
         },
         RedisConnectInput,
     },
@@ -26,6 +26,7 @@ pub struct ConnectionCreateInput {
 
     pub postgres: Option<PgConnectInput>,
     pub mysql: Option<MySqlConnectInput>,
+    pub sqlserver: Option<SqlServerConnectInput>,
     pub sqlite: Option<SqliteConnectInput>,
     pub oracle: Option<OracleConnectInput>,
     pub mongo: Option<MongoConnectInput>,

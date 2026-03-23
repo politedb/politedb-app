@@ -198,6 +198,8 @@ export const tableDataQuery = (
   const queryStr =
     engine === "oracle"
       ? `SELECT * FROM ${tableIdent}${where} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
+      : engine === "sqlserver"
+        ? `SELECT * FROM ${tableIdent}${where} ORDER BY (SELECT NULL) OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
       : `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
@@ -277,7 +279,7 @@ export const tableOidQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite" || engine === "oracle") {
+  if (engine === "sqlite" || engine === "oracle" || engine === "sqlserver") {
     return "SELECT 0;";
   }
 
@@ -333,6 +335,30 @@ export const tableStructuresQuery = (
       WHERE owner = ${qLiteral(schema.toUpperCase())}
         AND table_name = ${qLiteral(tableName.toUpperCase())}
       ORDER BY column_id;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "sqlserver") {
+    const queryStr = `
+      SELECT
+        c.ORDINAL_POSITION AS ordinal_position,
+        c.COLUMN_NAME AS column_name,
+        c.DATA_TYPE AS data_type,
+        c.DATA_TYPE AS format_type,
+        c.NUMERIC_PRECISION AS numeric_precision,
+        c.DATETIME_PRECISION AS datetime_precision,
+        c.NUMERIC_SCALE AS numeric_scale,
+        c.CHARACTER_MAXIMUM_LENGTH AS data_length,
+        CASE WHEN c.IS_NULLABLE = 'YES' THEN 'YES' ELSE 'NO' END AS is_nullable,
+        '' AS check_expr_txt,
+        '' AS check_constraint_txt,
+        c.COLUMN_DEFAULT AS column_default_txt,
+        '' AS comment_txt
+      FROM INFORMATION_SCHEMA.COLUMNS c
+      WHERE c.TABLE_SCHEMA = ${qLiteral(schema)}
+        AND c.TABLE_NAME = ${qLiteral(tableName)}
+      ORDER BY c.ORDINAL_POSITION;
     `;
     return regexEscape(queryStr);
   }
@@ -451,6 +477,38 @@ export const tableConstraintsQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "sqlserver") {
+    const queryStr = `
+      SELECT
+        i.name AS index_name,
+        i.type_desc AS index_algorithm,
+        CASE WHEN i.is_unique = 1 THEN 'true' ELSE 'false' END AS is_unique,
+        CASE WHEN i.is_primary_key = 1 THEN 'true' ELSE 'false' END AS is_primary,
+        '' AS index_definition_txt,
+        STRING_AGG(col.name, ',') WITHIN GROUP (ORDER BY ic.key_ordinal) AS column_name,
+        '' AS condition_txt,
+        '' AS include_txt,
+        '' AS comment_txt
+      FROM sys.tables t
+      JOIN sys.schemas s ON s.schema_id = t.schema_id
+      JOIN sys.indexes i ON i.object_id = t.object_id
+      JOIN sys.index_columns ic
+        ON ic.object_id = i.object_id
+       AND ic.index_id = i.index_id
+       AND ic.is_included_column = 0
+      JOIN sys.columns col
+        ON col.object_id = ic.object_id
+       AND col.column_id = ic.column_id
+      WHERE s.name = ${qLiteral(schema)}
+        AND t.name = ${qLiteral(tableName)}
+        AND i.index_id > 0
+        AND i.name IS NOT NULL
+      GROUP BY i.name, i.type_desc, i.is_unique, i.is_primary_key
+      ORDER BY i.name;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT
       ix.relname AS index_name,
@@ -554,6 +612,57 @@ export const tableForeignKeysQuery = (
        AND pk.position = fk.position
       GROUP BY fk.constraint_name, fk.table_schema, fk.table_name
       ORDER BY fk.constraint_name;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "sqlserver") {
+    const queryStr = `
+      WITH fk AS (
+        SELECT
+          fk.name AS constraint_name,
+          s.name AS table_schema,
+          t.name AS table_name,
+          c.name AS column_name,
+          rs.name AS ref_table_schema,
+          rt.name AS ref_table_name,
+          rc.name AS ref_column_name,
+          fkc.constraint_column_id AS ordinal_position,
+          fk.update_referential_action_desc AS on_update,
+          fk.delete_referential_action_desc AS on_delete
+        FROM sys.foreign_keys fk
+        JOIN sys.foreign_key_columns fkc
+          ON fkc.constraint_object_id = fk.object_id
+        JOIN sys.tables t
+          ON t.object_id = fk.parent_object_id
+        JOIN sys.schemas s
+          ON s.schema_id = t.schema_id
+        JOIN sys.columns c
+          ON c.object_id = t.object_id
+         AND c.column_id = fkc.parent_column_id
+        JOIN sys.tables rt
+          ON rt.object_id = fk.referenced_object_id
+        JOIN sys.schemas rs
+          ON rs.schema_id = rt.schema_id
+        JOIN sys.columns rc
+          ON rc.object_id = rt.object_id
+         AND rc.column_id = fkc.referenced_column_id
+        WHERE s.name = ${qLiteral(schema)}
+          AND t.name = ${qLiteral(tableName)}
+      )
+      SELECT
+        constraint_name,
+        table_schema,
+        table_name,
+        STRING_AGG(column_name, ',') WITHIN GROUP (ORDER BY ordinal_position) AS column_names,
+        MAX(ref_table_schema) AS ref_table_schema,
+        MAX(ref_table_name) AS ref_table_name,
+        STRING_AGG(ref_column_name, ',') WITHIN GROUP (ORDER BY ordinal_position) AS ref_column_names,
+        MAX(on_update) AS on_update,
+        MAX(on_delete) AS on_delete
+      FROM fk
+      GROUP BY constraint_name, table_schema, table_name
+      ORDER BY constraint_name;
     `;
     return regexEscape(queryStr);
   }
@@ -742,6 +851,9 @@ export const dbListQuery = (engine?: DatabaseEngine) => {
   if (isMySqlLike(engine)) {
     return "SELECT schema_name FROM information_schema.schemata WHERE schema_name = DATABASE() ORDER BY schema_name;";
   }
+  if (engine === "sqlserver") {
+    return "SELECT name FROM sys.databases WHERE state = 0 ORDER BY name;";
+  }
   return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;";
 };
 
@@ -758,6 +870,11 @@ export const renameDatabaseQuery = (
   newDatabase: string,
   engine?: DatabaseEngine
 ) => {
+  if (engine === "sqlserver") {
+    return regexEscape(
+      `ALTER DATABASE ${qIdent(database, engine)} MODIFY NAME = ${qIdent(newDatabase, engine)};`
+    );
+  }
   const queryStr = `ALTER DATABASE ${qIdent(database, engine)} RENAME TO ${qIdent(newDatabase, engine)};`;
   return regexEscape(queryStr);
 };

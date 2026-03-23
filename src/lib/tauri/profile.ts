@@ -216,6 +216,29 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "sqlserver") {
+    const sqlserver = input.sqlserver;
+    if (!sqlserver) throw new Error("SQLSERVER_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      sqlserver: {
+        ...sqlserver,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "sqlite") {
     const sqlite = input.sqlite;
     if (!sqlite) throw new Error("SQLITE_CONFIG_MISSING");
@@ -288,6 +311,7 @@ export function preparePayloadWithSecret(
     ssh,
     postgres: input.postgres,
     mysql: input.mysql,
+    sqlserver: input.sqlserver,
     sqlite: input.sqlite,
     oracle: input.oracle,
     mongo: input.mongo,

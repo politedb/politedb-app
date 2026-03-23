@@ -71,6 +71,8 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "sqlserver":
+      return 1433;
     case "mongo":
       return 27017;
     case "redis":
@@ -94,6 +96,7 @@ function pickByEngine<T>(
   by: {
     postgres?: T;
     mysql?: T;
+    sqlserver?: T;
     sqlite?: T;
     oracle?: T;
     mongo?: T;
@@ -102,6 +105,7 @@ function pickByEngine<T>(
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
   if (engine === "mysql" || engine === "mariadb") return by.mysql;
+  if (engine === "sqlserver") return by.sqlserver;
   if (engine === "sqlite") return by.sqlite;
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
@@ -233,6 +237,32 @@ function buildMySqlInput(
   };
 }
 
+function buildSqlServerInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 1433);
+
+  const sqlserver: ConnectionCreateInput["sqlserver"] = {
+    host: v.host,
+    port,
+    database: v.database,
+    user: v.user,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    encrypt: v.sslMode !== "disable",
+    connect_timeout_ms: 60_000,
+    statement_timeout_ms: 60_000,
+  };
+
+  return {
+    engine: "sqlserver",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    sqlserver,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
 function buildRedisInput(v: FormValues): ConnectionCreateInput {
   const port = toNumber(v.port, 6379);
 
@@ -329,6 +359,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildMySqlInput(v);
     case "mariadb":
       return buildMySqlInput(v, "mariadb");
+    case "sqlserver":
+      return buildSqlServerInput(v);
     case "mongo":
       return buildMongoInput(v);
     case "sqlite":
@@ -357,6 +389,7 @@ function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
 function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const pg = input?.postgres;
   const my = input?.mysql;
+  const ss = input?.sqlserver;
   const sqlite = input?.sqlite;
   const oracle = input?.oracle;
   const mongo = input?.mongo;
@@ -366,6 +399,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.host,
       mysql: my?.host,
+      sqlserver: ss?.host,
       sqlite: "",
       oracle: oracle?.host,
       mongo: mongo?.host,
@@ -376,6 +410,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.port,
       mysql: my?.port,
+      sqlserver: ss?.port,
       sqlite: 0,
       oracle: oracle?.port,
       mongo: mongo?.port,
@@ -386,6 +421,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.user,
       mysql: my?.user,
+      sqlserver: ss?.user,
       sqlite: "",
       oracle: oracle?.user,
       mongo: mongo?.user,
@@ -396,6 +432,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.database,
       mysql: my?.database,
+      sqlserver: ss?.database ?? "master",
       sqlite: sqlite?.path,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
@@ -406,34 +443,40 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       ? pg?.password?.kind === "inline"
         ? (pg.password.value ?? "")
         : ""
-        : engine === "mysql" || engine === "mariadb"
-          ? my?.password?.kind === "inline"
-            ? (my.password.value ?? "")
+      : engine === "mysql" || engine === "mariadb"
+        ? my?.password?.kind === "inline"
+          ? (my.password.value ?? "")
+          : ""
+        : engine === "sqlserver"
+          ? ss?.password?.kind === "inline"
+            ? (ss.password.value ?? "")
             : ""
           : engine === "oracle"
             ? oracle?.password?.kind === "inline"
               ? (oracle.password.value ?? "")
               : ""
-        : engine === "mongo"
-          ? mongo?.password?.kind === "inline"
-            ? (mongo.password.value ?? "")
-            : ""
-          : engine === "sqlite"
-            ? ""
-          : "";
+            : engine === "mongo"
+              ? mongo?.password?.kind === "inline"
+                ? (mongo.password.value ?? "")
+                : ""
+              : engine === "sqlite"
+                ? ""
+                : "";
 
   const storeKeychain =
     engine === "postgres"
       ? pg?.password?.kind !== "inline"
       : engine === "mysql" || engine === "mariadb"
         ? my?.password?.kind !== "inline"
-        : engine === "oracle"
-          ? oracle?.password?.kind !== "inline"
-        : engine === "mongo"
-          ? mongo?.password?.kind !== "inline"
-          : engine === "sqlite"
-            ? false
-          : true;
+        : engine === "sqlserver"
+          ? ss?.password?.kind !== "inline"
+          : engine === "oracle"
+            ? oracle?.password?.kind !== "inline"
+            : engine === "mongo"
+              ? mongo?.password?.kind !== "inline"
+              : engine === "sqlite"
+                ? false
+                : true;
 
   return { host, port, user, database, password, storeKeychain };
 }
@@ -444,12 +487,14 @@ function makeSslDefaults(
 ) {
   const pg = input?.postgres;
   const my = input?.mysql;
+  const ss = input?.sqlserver;
   const mongo = input?.mongo;
   const rd = input?.redis;
 
-  const ssl_mode = pickByEngine(engine, {
+  const ssl_mode = pickByEngine<FormValues["sslMode"]>(engine, {
     postgres: pg?.ssl_mode as SslMode | undefined,
     mysql: my?.ssl_mode as SslMode | undefined,
+    sqlserver: ss?.encrypt === false ? "disable" : "prefer",
     oracle: undefined,
     mongo: mongo?.ssl_mode as SslMode | undefined,
     redis: rd?.ssl_mode as SslMode | undefined,
@@ -477,8 +522,10 @@ function makeSslDefaults(
       ? ("disable" as const)
       : ("prefer" as const);
 
+  const sslMode: FormValues["sslMode"] = ssl_mode ?? defaultSsl;
+
   return {
-    sslMode: ssl_mode || defaultSsl,
+    sslMode,
     sslKey: ssl_key_path || "",
     sslCert: ssl_cert_path || "",
     sslCA: ssl_ca_path || "",

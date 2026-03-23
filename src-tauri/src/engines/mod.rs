@@ -8,6 +8,7 @@ pub mod postgres;
 pub mod redis;
 pub mod registry;
 pub mod secrets_util;
+pub mod sqlserver;
 pub mod sqlite;
 
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use crate::types::{OperationKind, RedisCommandInput};
 pub enum EngineConnection {
     Postgres(postgres::connection::PgConn),
     MySql(mysql::connection::MySqlConn),
+    SqlServer(sqlserver::connection::SqlServerConn),
     Sqlite(sqlite::connection::SqliteConn),
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
@@ -63,6 +65,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.id,
             EngineConnection::MySql(c) => c.id,
+            EngineConnection::SqlServer(c) => c.id,
             EngineConnection::Sqlite(c) => c.id,
             EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
@@ -74,6 +77,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(c) => c.label.clone(),
             EngineConnection::MySql(c) => c.label.clone(),
+            EngineConnection::SqlServer(c) => c.label.clone(),
             EngineConnection::Sqlite(c) => c.label.clone(),
             EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
@@ -85,6 +89,7 @@ impl EngineConnection {
         match self {
             EngineConnection::Postgres(_) => EngineKind::Postgres,
             EngineConnection::MySql(c) => c.engine,
+            EngineConnection::SqlServer(_) => EngineKind::Sqlserver,
             EngineConnection::Sqlite(_) => EngineKind::Sqlite,
             EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
@@ -100,6 +105,7 @@ impl EngineConnection {
                 EngineKind::Mariadb => "mariadb",
                 _ => "mysql",
             },
+            EngineConnection::SqlServer(_) => "sqlserver",
             EngineConnection::Sqlite(_) => "sqlite",
             EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
@@ -113,6 +119,7 @@ impl EngineConnection {
             EngineConnection::MySql(my) => {
                 let _ = my.pool.clone().disconnect().await;
             }
+            EngineConnection::SqlServer(_) => {}
             EngineConnection::Sqlite(_) => {}
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
@@ -182,6 +189,48 @@ impl EngineConnection {
                     crate::engines::mysql::operation::run_mysql_sql_query(
                         ctx,
                         pool,
+                        input,
+                        default_timeout,
+                    )
+                    .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+            EngineConnection::SqlServer(ss) => {
+                let host = ss.host.clone();
+                let port = ss.port;
+                let database = ss.database.clone();
+                let user = ss.user.clone();
+                let password = ss.password.clone();
+                let encrypt = ss.encrypt;
+                let connect_timeout_ms = ss.connect_timeout_ms;
+                let default_timeout = ss.default_statement_timeout_ms;
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::sqlserver::operation::run_sqlserver_sql_query(
+                        ctx,
+                        host,
+                        port,
+                        database,
+                        user,
+                        password,
+                        encrypt,
+                        connect_timeout_ms,
                         input,
                         default_timeout,
                     )

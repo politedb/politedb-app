@@ -14,7 +14,12 @@ import { mongoListDatabases } from "src/lib/tauri/mongo";
 export type DatabaseEditorMode = null | "create" | "rename";
 
 export function canManageDatabases(engine?: DatabaseEngine) {
-  return engine === "postgres" || engine === "mongo" || isMySqlLike(engine);
+  return (
+    engine === "postgres" ||
+    engine === "mongo" ||
+    engine === "sqlserver" ||
+    isMySqlLike(engine)
+  );
 }
 
 interface UseDatabasesParams {

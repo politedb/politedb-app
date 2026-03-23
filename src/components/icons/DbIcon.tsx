@@ -8,6 +8,7 @@ import mariadb from "src/assets/db/mariadb.svg";
 import mongo from "src/assets/db/mongodb.svg";
 import sqlite from "src/assets/db/sqlite.svg";
 import oracle from "src/assets/db/oracle.svg";
+import sqlserver from "src/assets/db/sqlserver.svg";
 
 // Nếu mày đã có type ở chỗ khác thì import, còn không thì để local như này:
 export type DatabaseEngine =
@@ -15,6 +16,7 @@ export type DatabaseEngine =
   | "mysql"
   | "redis"
   | "mariadb"
+  | "sqlserver"
   | "mongo"
   | "sqlite"
   | "oracle";
@@ -26,6 +28,7 @@ const DB_ICON_MAP: Record<DatabaseEngine, DbIconSrc> = {
   mysql,
   redis,
   mariadb,
+  sqlserver,
   mongo,
   sqlite,
   oracle,
@@ -39,7 +42,7 @@ function normalizeEngine(engine?: string): DatabaseEngine | null {
   if (k === "postgresql") return "postgres";
   if (k === "mongodb") return "mongo";
   if (k === "maria") return "mariadb";
-  if (k === "mssql" || k === "sqlserver") return null; // chưa có icon -> fallback
+  if (k === "mssql") return "sqlserver";
 
   // exact
   if (k in DB_ICON_MAP) return k as DatabaseEngine;
@@ -53,6 +56,7 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "ms") return "mysql";
   if (k === "re") return "redis";
   if (k === "mr") return "mariadb";
+  if (k === "ss") return "sqlserver";
   if (k === "mg") return "mongo";
   if (k === "sl") return "sqlite";
   if (k === "oc") return "oracle";

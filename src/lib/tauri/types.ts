@@ -155,6 +155,17 @@ export type OracleConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type SqlServerConnectInput = {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: SecretRef;
+  encrypt?: boolean | null;
+  connect_timeout_ms?: number | null;
+  statement_timeout_ms?: number | null;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -171,6 +182,7 @@ export type ConnectionCreateInput = {
 
   postgres?: PgConnectInput;
   mysql?: MySqlConnectInput;
+  sqlserver?: SqlServerConnectInput;
   sqlite?: SqliteConnectInput;
   oracle?: OracleConnectInput;
   mongo?: MongoConnectInput;

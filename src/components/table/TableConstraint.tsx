@@ -25,7 +25,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   mariadb: ["index_name", "index_algorithm", "is_unique", "column_name"],
   mongo: ["index_name", "index_algorithm", "is_unique", "column_name"],
   redis: [],
-  sqlserver: [],
+  sqlserver: ["index_name", "index_algorithm", "is_unique", "column_name"],
   sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],
   oracle: ["index_name", "index_algorithm", "is_unique", "column_name"],
 };

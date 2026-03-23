@@ -22,6 +22,7 @@ function firstNonEmpty(...xs: Array<string | undefined | null>) {
 type EngineInput =
   | ConnectionProfile["input"]["postgres"]
   | ConnectionProfile["input"]["mysql"]
+  | ConnectionProfile["input"]["sqlserver"]
   | ConnectionProfile["input"]["sqlite"]
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
@@ -37,6 +38,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "mysql" || engine === "mariadb") {
     return { engine, input: profile.input?.mysql };
+  }
+  if (engine === "sqlserver") {
+    return { engine, input: profile.input?.sqlserver };
   }
   if (engine === "mongo") {
     return { engine, input: profile.input?.mongo };
@@ -66,6 +70,8 @@ function buildSubtitle(profile: ConnectionProfile) {
       ? (profile.input?.postgres?.database ?? "")
       : engine === "mysql" || engine === "mariadb"
         ? (profile.input?.mysql?.database ?? "")
+        : engine === "sqlserver"
+          ? (profile.input?.sqlserver?.database ?? "")
         : engine === "sqlite"
           ? (profile.input?.sqlite?.path ?? "")
         : engine === "oracle"
