@@ -99,6 +99,41 @@ const SQLITE: MetadataQueries = {
   `,
 };
 
+const ORACLE: MetadataQueries = {
+  schemasQuery: `
+    SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS schema_name
+    FROM dual;
+  `,
+  functionsQuery: `
+    SELECT
+      owner AS function_schema,
+      object_name AS function_name,
+      '' AS function_args
+    FROM all_procedures
+    WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+      AND object_type = 'FUNCTION'
+    ORDER BY owner, object_name;
+  `,
+  tablesQuery: `
+    SELECT
+      owner AS table_schema,
+      table_name,
+      'BASE TABLE' AS table_type
+    FROM all_tables
+    WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+    ORDER BY owner, table_name;
+  `,
+  columnsQuery: `
+    SELECT
+      owner AS table_schema,
+      table_name,
+      column_name
+    FROM all_tab_columns
+    WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
+    ORDER BY owner, table_name, column_id;
+  `,
+};
+
 // Engines without relational schema/tables
 const EMPTY: MetadataQueries = {
   schemasQuery: `SELECT '' WHERE 1=0;`,
@@ -116,6 +151,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
       return MYSQL;
     case "sqlite":
       return SQLITE;
+    case "oracle":
+      return ORACLE;
 
     // not supported for table/column completion
     case "redis":

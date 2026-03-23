@@ -7,6 +7,7 @@ pub enum EngineKind {
     Mysql,
     Mariadb,
     Sqlite,
+    Oracle,
     Mongo,
     Redis,
 }
@@ -69,6 +70,17 @@ pub struct MongoConnectInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqliteConnectInput {
     pub path: String,
+    pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OracleConnectInput {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: crate::types::SecretRef,
+    pub connect_timeout_ms: Option<u64>,
     pub statement_timeout_ms: Option<u64>,
 }
 

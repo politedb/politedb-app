@@ -3,6 +3,7 @@ pub mod driver;
 pub mod merge;
 pub mod mongo;
 pub mod mysql;
+pub mod oracle;
 pub mod postgres;
 pub mod redis;
 pub mod registry;
@@ -22,6 +23,7 @@ pub enum EngineConnection {
     Postgres(postgres::connection::PgConn),
     MySql(mysql::connection::MySqlConn),
     Sqlite(sqlite::connection::SqliteConn),
+    Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
 }
@@ -62,6 +64,7 @@ impl EngineConnection {
             EngineConnection::Postgres(c) => c.id,
             EngineConnection::MySql(c) => c.id,
             EngineConnection::Sqlite(c) => c.id,
+            EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
             EngineConnection::Redis(c) => c.id,
         }
@@ -72,6 +75,7 @@ impl EngineConnection {
             EngineConnection::Postgres(c) => c.label.clone(),
             EngineConnection::MySql(c) => c.label.clone(),
             EngineConnection::Sqlite(c) => c.label.clone(),
+            EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
         }
@@ -82,6 +86,7 @@ impl EngineConnection {
             EngineConnection::Postgres(_) => EngineKind::Postgres,
             EngineConnection::MySql(c) => c.engine,
             EngineConnection::Sqlite(_) => EngineKind::Sqlite,
+            EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Redis(_) => EngineKind::Redis,
         }
@@ -96,6 +101,7 @@ impl EngineConnection {
                 _ => "mysql",
             },
             EngineConnection::Sqlite(_) => "sqlite",
+            EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Redis(_) => "redis",
         }
@@ -108,6 +114,7 @@ impl EngineConnection {
                 let _ = my.pool.clone().disconnect().await;
             }
             EngineConnection::Sqlite(_) => {}
+            EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Redis(r) => drop(r.pool),
         }
@@ -205,6 +212,40 @@ impl EngineConnection {
                     crate::engines::sqlite::operation::run_sqlite_sql_query(
                         ctx,
                         db_path,
+                        input,
+                        default_timeout,
+                    )
+                    .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+            EngineConnection::Oracle(oracle) => {
+                let connect_string = oracle.connect_string.clone();
+                let user = oracle.user.clone();
+                let password = oracle.password.clone();
+                let default_timeout = oracle.default_statement_timeout_ms;
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::oracle::operation::run_oracle_sql_query(
+                        ctx,
+                        connect_string,
+                        user,
+                        password,
                         input,
                         default_timeout,
                     )

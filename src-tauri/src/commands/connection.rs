@@ -35,6 +35,11 @@ fn rewrite_input_host_port(
             my.host = host.into();
             my.port = port;
         }
+        crate::types::EngineKind::Oracle => {
+            let oracle = input.oracle.as_mut().ok_or("ORACLE_CONFIG_MISSING")?;
+            oracle.host = host.into();
+            oracle.port = port;
+        }
         crate::types::EngineKind::Sqlite => {}
         crate::types::EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
@@ -204,6 +209,16 @@ pub async fn connection_test(
                         {
                             my.password.kind = crate::types::SecretRefKind::Inline;
                             my.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Oracle => {
+                    if let Some(oracle) = input.oracle.as_mut() {
+                        if oracle.password.kind == crate::types::SecretRefKind::Keychain
+                            && oracle.password.value.trim().is_empty()
+                        {
+                            oracle.password.kind = crate::types::SecretRefKind::Inline;
+                            oracle.password.value = pw.to_string();
                         }
                     }
                 }
@@ -385,6 +400,27 @@ pub async fn connection_version(
             })
             .await
             .map_err(|e| format!("SQLITE_VERSION_JOIN_FAILED: {e}"))??;
+            Ok(version)
+        }
+        crate::engines::EngineConnection::Oracle(oracle_conn) => {
+            crate::engines::oracle::ensure_oracle_client_initialized()
+                .map_err(|e| format!("ORACLE_VERSION_INIT_FAILED: {e}"))?;
+            let user = oracle_conn.user.clone();
+            let password = oracle_conn.password.clone();
+            let connect_string = oracle_conn.connect_string.clone();
+            let version = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                let conn = oracle::Connection::connect(&user, &password, &connect_string)
+                    .map_err(|e| format!("ORACLE_CONNECT_FAILED: {e}"))?;
+                let version: String = conn
+                    .query_row_as(
+                        "SELECT version FROM product_component_version WHERE product LIKE 'Oracle%' AND ROWNUM = 1",
+                        &[],
+                    )
+                    .map_err(|e| format!("ORACLE_VERSION_QUERY_FAILED: {e}"))?;
+                Ok(version)
+            })
+            .await
+            .map_err(|e| format!("ORACLE_VERSION_JOIN_FAILED: {e}"))??;
             Ok(version)
         }
         crate::engines::EngineConnection::Mongo(mongo) => {

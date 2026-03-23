@@ -232,6 +232,29 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "oracle") {
+    const oracle = input.oracle;
+    if (!oracle) throw new Error("ORACLE_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      oracle: {
+        ...oracle,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "redis") {
     const rd = input.redis;
     if (!rd) throw new Error("REDIS_CONFIG_MISSING");
@@ -266,6 +289,7 @@ export function preparePayloadWithSecret(
     postgres: input.postgres,
     mysql: input.mysql,
     sqlite: input.sqlite,
+    oracle: input.oracle,
     mongo: input.mongo,
     redis: input.redis,
   };

@@ -64,7 +64,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     label: "Oracle",
     abbreviation: "Oc",
     color: "bg-red-600",
-    available: false,
+    available: true,
     desc: "Enterprise-grade relational database.",
     defaultLabels: ["Zeus", "Cronus", "Nereus"],
   },
@@ -129,6 +129,31 @@ export const MYSQL_DATA_TYPES = [
 ];
 
 export const SQLITE_DATA_TYPES = ["INTEGER", "TEXT", "BLOB", "REAL", "NUMERIC"];
+
+export const ORACLE_DATA_TYPES = [
+  "NUMBER",
+  "FLOAT",
+  "BINARY_FLOAT",
+  "BINARY_DOUBLE",
+  "CHAR",
+  "NCHAR",
+  "VARCHAR2",
+  "NVARCHAR2",
+  "CLOB",
+  "NCLOB",
+  "BLOB",
+  "RAW",
+  "LONG",
+  "LONG RAW",
+  "DATE",
+  "TIMESTAMP",
+  "TIMESTAMP WITH TIME ZONE",
+  "TIMESTAMP WITH LOCAL TIME ZONE",
+  "INTERVAL YEAR TO MONTH",
+  "INTERVAL DAY TO SECOND",
+  "XMLTYPE",
+  "JSON",
+];
 
 export const DATA_KEYS: Record<DataKey, DataKey> = {
   structure: "structure",

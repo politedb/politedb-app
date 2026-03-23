@@ -13,6 +13,9 @@ pub enum CancelHandle {
     Sqlite {
         notify: Arc<Notify>,
     },
+    Oracle {
+        notify: Arc<Notify>,
+    },
     Redis {
         notify: Arc<Notify>,
     },
@@ -39,6 +42,9 @@ impl CancelHandle {
             }
 
             CancelHandle::Sqlite { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Oracle { notify } => {
                 notify.notify_waiters();
             }
 

@@ -27,7 +27,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   redis: [],
   sqlserver: [],
   sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],
-  oracle: [],
+  oracle: ["index_name", "index_algorithm", "is_unique", "column_name"],
 };
 
 interface Props {

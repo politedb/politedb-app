@@ -1,6 +1,7 @@
 import { DatabaseConfig, DatabaseEngine } from "src/types";
 import {
   MYSQL_DATA_TYPES,
+  ORACLE_DATA_TYPES,
   POSTGRES_DATA_TYPES,
   SQLITE_DATA_TYPES,
 } from "src/constant";
@@ -42,7 +43,7 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: [],
   },
   oracle: {
-    dataTypes: [],
+    dataTypes: ORACLE_DATA_TYPES,
     indexAlgorithms: [],
   },
 };

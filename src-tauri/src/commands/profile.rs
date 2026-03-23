@@ -11,8 +11,8 @@ use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
     ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MongoConnectInput,
-    MySqlConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
-    SqliteConnectInput,
+    MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef,
+    SecretRefKind, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -125,6 +125,22 @@ fn validate_sqlite_input(s: &SqliteConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_oracle_input(oc: &OracleConnectInput) -> Result<(), String> {
+    if oc.host.trim().is_empty() {
+        return Err("ORACLE_HOST_REQUIRED".into());
+    }
+    if oc.database.trim().is_empty() {
+        return Err("ORACLE_DATABASE_REQUIRED".into());
+    }
+    if oc.user.trim().is_empty() {
+        return Err("ORACLE_USER_REQUIRED".into());
+    }
+    if oc.port == 0 {
+        return Err("ORACLE_PORT_INVALID".into());
+    }
+    Ok(())
+}
+
 fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
     if input.label.trim().is_empty() {
         return Err("LABEL_REQUIRED".into());
@@ -146,6 +162,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
         EngineKind::Sqlite => {
             let s = input.sqlite.as_ref().ok_or("SQLITE_CONFIG_MISSING")?;
             validate_sqlite_input(s)
+        }
+        EngineKind::Oracle => {
+            let oc = input.oracle.as_ref().ok_or("ORACLE_CONFIG_MISSING")?;
+            validate_oracle_input(oc)
         }
         EngineKind::Mongo => {
             let mongo = input.mongo.as_ref().ok_or("MONGO_CONFIG_MISSING")?;
@@ -171,6 +191,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Mysql => "mysql",
         EngineKind::Mariadb => "mariadb",
         EngineKind::Sqlite => "sqlite",
+        EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
         EngineKind::Redis => "redis",
         #[allow(unreachable_patterns)]
@@ -254,6 +275,16 @@ pub fn persist_input_with_secrets(
                 EngineKind::Mariadb,
                 persist_secrets,
                 &mut my.password,
+            )?;
+        }
+        EngineKind::Oracle => {
+            let oc = input.oracle.as_mut().ok_or("ORACLE_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Oracle,
+                persist_secrets,
+                &mut oc.password,
             )?;
         }
         EngineKind::Sqlite => {}

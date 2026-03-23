@@ -23,6 +23,7 @@ type EngineInput =
   | ConnectionProfile["input"]["postgres"]
   | ConnectionProfile["input"]["mysql"]
   | ConnectionProfile["input"]["sqlite"]
+  | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["redis"];
 
@@ -42,6 +43,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "sqlite") {
     return { engine, input: profile.input?.sqlite };
+  }
+  if (engine === "oracle") {
+    return { engine, input: profile.input?.oracle };
   }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
@@ -64,6 +68,8 @@ function buildSubtitle(profile: ConnectionProfile) {
         ? (profile.input?.mysql?.database ?? "")
         : engine === "sqlite"
           ? (profile.input?.sqlite?.path ?? "")
+        : engine === "oracle"
+          ? (profile.input?.oracle?.database ?? "")
         : engine === "mongo"
           ? (profile.input?.mongo?.database ?? "")
         : engine === "redis"

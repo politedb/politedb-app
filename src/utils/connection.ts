@@ -43,6 +43,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "oracle") {
+    const oc = conn.input?.oracle;
+    return {
+      host: oc?.host ?? "",
+      database: oc?.database ?? "",
+      user: oc?.user ?? "",
+    };
+  }
+
   if (engine === "redis") {
     const rd = conn.input?.redis;
     return { host: rd?.host ?? "", database: "", user: "" };

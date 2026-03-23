@@ -208,6 +208,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "oracle") {
+    if (!input.oracle) throw new Error("ORACLE_CONFIG_MISSING");
+    return {
+      ...input,
+      oracle: {
+        ...input.oracle,
+        database,
+      },
+    };
+  }
+
   throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
 }
 

@@ -106,6 +106,17 @@ export const tableColumnsQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "oracle") {
+    const queryStr = `
+      SELECT column_name, data_type
+      FROM all_tab_columns
+      WHERE owner = ${qLiteral(schema.toUpperCase())}
+        AND table_name = ${qLiteral(tableName.toUpperCase())}
+      ORDER BY column_id;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT column_name, data_type
     FROM information_schema.columns
@@ -156,6 +167,9 @@ function buildWhereClause(
         const val = (f.value ?? "").trim();
         if (op === "LIKE" || op === "ILIKE") {
           const literal = qLiteral(`%${val}%`);
+          if (engine === "oracle" && op === "ILIKE") {
+            return `LOWER(${col}) LIKE LOWER(${literal})`;
+          }
           return `${col} ${op} ${literal}`;
         }
         return `${col} ${op} ${qLiteral(val)}`;
@@ -181,7 +195,10 @@ export const tableDataQuery = (
   const where = filters?.length
     ? buildWhereClause(filters, combineWith, engine)
     : "";
-  const queryStr = `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
+  const queryStr =
+    engine === "oracle"
+      ? `SELECT * FROM ${tableIdent}${where} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
+      : `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
 
@@ -260,7 +277,7 @@ export const tableOidQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite") {
+  if (engine === "sqlite" || engine === "oracle") {
     return "SELECT 0;";
   }
 
@@ -292,6 +309,30 @@ export const tableStructuresQuery = (
         '' AS comment
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "oracle") {
+    const queryStr = `
+      SELECT
+        column_id AS ordinal_position,
+        column_name,
+        data_type,
+        data_type AS format_type,
+        data_precision AS numeric_precision,
+        NULL AS datetime_precision,
+        data_scale AS numeric_scale,
+        data_length,
+        CASE WHEN nullable = 'Y' THEN 'YES' ELSE 'NO' END AS is_nullable,
+        '' AS check_expr_txt,
+        '' AS check_constraint_txt,
+        data_default AS column_default_txt,
+        '' AS comment_txt
+      FROM all_tab_columns
+      WHERE owner = ${qLiteral(schema.toUpperCase())}
+        AND table_name = ${qLiteral(tableName.toUpperCase())}
+      ORDER BY column_id;
     `;
     return regexEscape(queryStr);
   }
@@ -377,6 +418,39 @@ export const tableConstraintsQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "oracle") {
+    const queryStr = `
+      SELECT
+        ai.index_name AS index_name,
+        ai.index_type AS index_algorithm,
+        CASE WHEN ai.uniqueness = 'UNIQUE' THEN 'true' ELSE 'false' END AS is_unique,
+        CASE WHEN ac.constraint_type = 'P' THEN 'true' ELSE 'false' END AS is_primary,
+        '' AS index_definition_txt,
+        LISTAGG(aic.column_name, ',') WITHIN GROUP (ORDER BY aic.column_position) AS column_name,
+        '' AS condition_txt,
+        '' AS include_txt,
+        '' AS comment_txt
+      FROM all_indexes ai
+      JOIN all_ind_columns aic
+        ON aic.index_owner = ai.owner
+       AND aic.index_name = ai.index_name
+      LEFT JOIN all_constraints ac
+        ON ac.owner = ai.table_owner
+       AND ac.table_name = ai.table_name
+       AND ac.index_name = ai.index_name
+       AND ac.constraint_type = 'P'
+      WHERE ai.table_owner = ${qLiteral(schema.toUpperCase())}
+        AND ai.table_name = ${qLiteral(tableName.toUpperCase())}
+      GROUP BY
+        ai.index_name,
+        ai.index_type,
+        ai.uniqueness,
+        ac.constraint_type
+      ORDER BY ai.index_name;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT
       ix.relname AS index_name,
@@ -410,11 +484,78 @@ export const tableConstraintsQuery = (
 };
 
 /** Foreign keys for a table (Postgres). Returns one row per FK with aggregated columns. */
-export const tableForeignKeysQuery = (schema: string, tableName: string) => {
+export const tableForeignKeysQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
   if (schema === "main") {
     return `
       SELECT '' WHERE 1=0;
     `;
+  }
+
+  if (engine === "oracle") {
+    const queryStr = `
+      WITH fk_cols AS (
+        SELECT
+          c.owner AS table_schema,
+          c.table_name,
+          c.constraint_name,
+          c.r_owner,
+          c.r_constraint_name,
+          cc.column_name,
+          cc.position
+        FROM all_constraints c
+        JOIN all_cons_columns cc
+          ON cc.owner = c.owner
+         AND cc.constraint_name = c.constraint_name
+        WHERE c.constraint_type = 'R'
+          AND c.owner = ${qLiteral(schema.toUpperCase())}
+          AND c.table_name = ${qLiteral(tableName.toUpperCase())}
+      ),
+      pk_cols AS (
+        SELECT
+          c.owner AS ref_table_schema,
+          c.table_name AS ref_table_name,
+          c.constraint_name,
+          cc.column_name,
+          cc.position
+        FROM all_constraints c
+        JOIN all_cons_columns cc
+          ON cc.owner = c.owner
+         AND cc.constraint_name = c.constraint_name
+        WHERE c.constraint_type IN ('P', 'U')
+      )
+      SELECT
+        fk.constraint_name,
+        fk.table_schema,
+        fk.table_name,
+        LISTAGG(fk.column_name, ',') WITHIN GROUP (ORDER BY fk.position) AS column_names,
+        MAX(pk.ref_table_schema) AS ref_table_schema,
+        MAX(pk.ref_table_name) AS ref_table_name,
+        LISTAGG(pk.column_name, ',') WITHIN GROUP (ORDER BY fk.position) AS ref_column_names,
+        'NO ACTION' AS on_update,
+        (
+          SELECT
+            CASE c.delete_rule
+              WHEN 'CASCADE' THEN 'CASCADE'
+              WHEN 'SET NULL' THEN 'SET NULL'
+              ELSE 'NO ACTION'
+            END
+          FROM all_constraints c
+          WHERE c.owner = fk.table_schema
+            AND c.constraint_name = fk.constraint_name
+        ) AS on_delete
+      FROM fk_cols fk
+      JOIN pk_cols pk
+        ON pk.ref_table_schema = fk.r_owner
+       AND pk.constraint_name = fk.r_constraint_name
+       AND pk.position = fk.position
+      GROUP BY fk.constraint_name, fk.table_schema, fk.table_name
+      ORDER BY fk.constraint_name;
+    `;
+    return regexEscape(queryStr);
   }
 
   const queryStr = `

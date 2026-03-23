@@ -522,6 +522,42 @@ async function loadMeta(params: {
     return { structure, constraints };
   }
 
+  if (engine === "oracle") {
+    const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
+    const qConstraints = tableConstraintsQuery(schema, tableName, engine);
+
+    const [structureRes, constraintsRes] = await Promise.all([
+      runSqlQuery(connId, qStructure),
+      runSqlQuery(connId, qConstraints),
+    ]);
+
+    addLogQuery(qStructure);
+    addLogQuery(qConstraints);
+
+    const structure = (structureRes.rows as unknown[][]).map((row) => ({
+      column_name: cellToString(row?.[1]),
+      data_type: cellToString(row?.[2]),
+      is_nullable: cellToString(row?.[8])?.toLowerCase() === "yes",
+      check: cellToString(row?.[9]) ?? "",
+      column_default: cellToString(row?.[11]),
+      comment: cellToString(row?.[12]) ?? "",
+    }));
+
+    const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
+      index_name: cellToString(row?.[0]),
+      index_algorithm: cellToString(row?.[1]) ?? "BTREE",
+      is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
+      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+      index_definition: cellToString(row?.[4]) ?? "",
+      column_name: cellToString(row?.[5]) ?? "",
+      condition: cellToString(row?.[6]) ?? "",
+      include: cellToString(row?.[7]) ?? "",
+      comment: cellToString(row?.[8]) ?? "",
+    }));
+
+    return { structure, constraints };
+  }
+
   if (engine === "mysql" || engine === "mariadb") {
     const qStructure = tableStructuresMySqlQuery(schema, tableName);
     const qConstraints = tableConstraintsMySqlQuery(schema, tableName);
@@ -611,15 +647,11 @@ async function loadForeignKeys(params: {
 }): Promise<any[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
-  if (engine === "mysql" || engine === "mariadb") {
+  if (engine === "mysql" || engine === "mariadb" || engine === "sqlite") {
     return [];
   }
 
-  if (engine === "sqlite") {
-    return [];
-  }
-
-  const qFk = tableForeignKeysQuery(schema, tableName);
+  const qFk = tableForeignKeysQuery(schema, tableName, engine);
   const fkRes = await runSqlQuery(connId, qFk);
   addLogQuery(qFk);
 
@@ -839,7 +871,8 @@ export function useLoadTableData() {
             activeTab.engine === "postgres" ||
             activeTab.engine === "mysql" ||
             activeTab.engine === "mariadb" ||
-            activeTab.engine === "sqlite";
+            activeTab.engine === "sqlite" ||
+            activeTab.engine === "oracle";
 
           // Set busy/error state
           if (plan.needAnyMetaWork)
