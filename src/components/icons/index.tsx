@@ -44,3 +44,5 @@ export * from "./ArrowRight";
 export * from "./SquareFunction";
 export * from "./Backup";
 export * from "./Restore";
+export * from "./Analytics";
+export * from "./Settings";

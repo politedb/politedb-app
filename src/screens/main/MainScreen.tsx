@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 import { ConnectionModal } from "src/components/SelectConnEngineModal";
 import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
+import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
@@ -16,6 +17,7 @@ import { KeychainSection } from "./KeychainSection";
 import { filterConnections } from "src/utils/connection";
 import type { DatabaseEngine, NavId, ViewMode } from "src/types";
 import type { ConnectionProfile } from "src/lib/tauri";
+import { needsTelemetryConsent } from "src/lib/analytics";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -45,6 +47,7 @@ export function MainScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(needsTelemetryConsent());
 
   useEffect(() => {
     void loadProfiles();
@@ -117,6 +120,7 @@ export function MainScreen() {
                     setKeychainNewSignal((n) => n + 1);
                   }
                 }}
+                onPrivacy={() => setPrivacyOpen(true)}
                 viewMode={viewMode}
                 onViewMode={setViewMode}
               />
@@ -185,6 +189,8 @@ export function MainScreen() {
             }
           />
         </OverlayModal>
+
+        <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
       </div>
     </div>
   );

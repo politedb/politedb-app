@@ -5,6 +5,7 @@ import {
   QueryResult,
   TableChunk,
 } from "src/lib/tauri";
+import { detectSqlKind, trackEvent } from "src/lib/analytics";
 import { toErrorMessage } from "./queryValidate";
 import { operationBus } from "./operationBus";
 
@@ -78,6 +79,9 @@ export async function runSqlQuery(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<QueryResult> {
+  const startedAt = Date.now();
+  const sqlKind = detectSqlKind(sql);
+
   // Ensure operationBus listeners are attached before the backend starts emitting.
   await operationBus.ensureInit();
 
@@ -123,13 +127,27 @@ export async function runSqlQuery(
       rows,
       rowCount: done?.row_count ?? rows.length,
     });
+
+    trackEvent("sql_query_success", {
+      sql_kind: sqlKind,
+      sql_length: sql.length,
+      duration_ms: Date.now() - startedAt,
+      row_count: Number(done?.row_count ?? rows.length),
+    });
   };
 
   const finalizeErr = (err: any, reject: (e: Error) => void) => {
     if (finished) return;
     finished = true;
     cleanup();
-    reject(new Error(toErrorMessage(err)));
+    const message = toErrorMessage(err);
+    trackEvent("sql_query_error", {
+      sql_kind: sqlKind,
+      sql_length: sql.length,
+      duration_ms: Date.now() - startedAt,
+      error: message.slice(0, 240),
+    });
+    reject(new Error(message));
   };
 
   return await new Promise<QueryResult>(async (resolve, reject) => {
@@ -144,6 +162,12 @@ export async function runSqlQuery(
           await operationCancel(opId);
         } catch {}
 
+        trackEvent("sql_query_timeout", {
+          sql_kind: sqlKind,
+          sql_length: sql.length,
+          duration_ms: Date.now() - startedAt,
+          timeout_ms: timeoutMs,
+        });
         reject(new Error("SQL_QUERY_TIMEOUT"));
       }, timeoutMs);
     }
@@ -177,18 +201,36 @@ export async function startSqlQueryStream(
   sql: string,
   opts?: RunSqlOptions
 ): Promise<string> {
+  const startedAt = Date.now();
+  const sqlKind = detectSqlKind(sql);
+
   // Ensure operationBus listeners are attached before the backend starts emitting.
   await operationBus.ensureInit();
 
-  const opId = await operationExecuteWithBusyRetry({
-    connection_id,
-    kind: "sql_query",
-    sql: {
-      sql,
-      batch_size: opts?.batchSize ?? 100,
-      max_rows: opts?.maxRows,
-      client_mode: "stream",
-    },
-  });
-  return opId;
+  try {
+    const opId = await operationExecuteWithBusyRetry({
+      connection_id,
+      kind: "sql_query",
+      sql: {
+        sql,
+        batch_size: opts?.batchSize ?? 100,
+        max_rows: opts?.maxRows,
+        client_mode: "stream",
+      },
+    });
+    trackEvent("sql_query_stream_start", {
+      sql_kind: sqlKind,
+      sql_length: sql.length,
+      duration_ms: Date.now() - startedAt,
+    });
+    return opId;
+  } catch (e: any) {
+    trackEvent("sql_query_stream_error", {
+      sql_kind: sqlKind,
+      sql_length: sql.length,
+      duration_ms: Date.now() - startedAt,
+      error: String(e?.message ?? e ?? "").slice(0, 240),
+    });
+    throw e;
+  }
 }

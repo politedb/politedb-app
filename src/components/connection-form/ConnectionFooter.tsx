@@ -1,5 +1,6 @@
-import { cn } from "src/utils/cn";
-import { Button } from "../common/Button";
+import { useEffect, useState } from "preact/hooks";
+import { Button } from "src/components/common/Button";
+import { ErrorDialog } from "src/components/modal/ErrorDialog";
 
 type Status =
   | { kind: "idle" }
@@ -42,7 +43,15 @@ export function ConnectionFooter(props: {
     onSave,
     onConnect,
   } = props;
+
   const busy = isBusy(status);
+  const [openErrorDialog, setOpenErrorDialog] = useState(false);
+
+  useEffect(() => {
+    if (status.kind === "error") {
+      setOpenErrorDialog(true);
+    }
+  }, [status.kind]);
 
   const statusNode = (() => {
     if (status.kind === "idle") {
@@ -143,15 +152,13 @@ export function ConnectionFooter(props: {
       </div>
 
       {/* Error detail – ONLY when error */}
-      {status.kind === "error" ? (
-        <div
-          class={cn(
-            "mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700"
-          )}
-        >
-          {status.message}
-        </div>
-      ) : null}
+      {openErrorDialog && status.kind === "error" && (
+        <ErrorDialog
+          open={openErrorDialog}
+          onClose={() => setOpenErrorDialog(false)}
+          error={status.message}
+        />
+      )}
     </>
   );
 }

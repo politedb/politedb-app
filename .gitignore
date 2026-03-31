@@ -27,3 +27,5 @@ dist-ssr
 yarn.*
 
 dataset-sample
+
+.env

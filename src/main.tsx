@@ -3,6 +3,7 @@ import "./monacoEnv";
 import { render } from "preact";
 import App from "./App";
 import "./styles.css";
+import { initAnalytics, trackAppLifecycle } from "./lib/analytics";
 import { operationBus } from "./lib/tauri/operationBus";
 import { gcSqlDrafts } from "./lib/tauri/sql";
 import { usePersistentStore } from "src/stores/persistentStore";
@@ -12,6 +13,8 @@ function isTauriRuntime() {
 }
 
 async function boot() {
+  initAnalytics();
+
   document.documentElement.setAttribute("autocapitalize", "off");
   document.documentElement.setAttribute("autocorrect", "off");
   document.documentElement.setAttribute("spellcheck", "false");
@@ -48,6 +51,11 @@ async function boot() {
   } else {
     document.documentElement.dataset.platform = "web";
   }
+
+  trackAppLifecycle({
+    runtime: isTauriRuntime() ? "tauri" : "web",
+    mode: import.meta.env.DEV ? "dev" : "prod",
+  });
 
   window.addEventListener("unhandledrejection", (e) => {
     const r: any = e.reason;

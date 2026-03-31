@@ -29,6 +29,7 @@ import {
 import { useConnectionStatus } from "./useConnectionStatus";
 import { DatabaseEngine } from "../../types";
 import { SUPPORTED_DATABASES } from "../../constant";
+import { trackEvent } from "src/lib/analytics";
 
 export function ConnectionFormDialog({
   onClose,
@@ -90,6 +91,7 @@ export function ConnectionFormDialog({
   }, [v]);
 
   const onTest = handleSubmit(async (v) => {
+    const startedAt = Date.now();
     setTesting();
     try {
       const input = buildConnectionInput(v);
@@ -109,12 +111,25 @@ export function ConnectionFormDialog({
       }
 
       setSuccess("Test OK");
+      trackEvent("connection_test_success", {
+        engine: input.engine,
+        has_profile: Boolean(profileId),
+        duration_ms: Date.now() - startedAt,
+      });
     } catch (e: any) {
-      setError(e?.message ? String(e.message) : String(e));
+      const msg = e?.message ? String(e.message) : String(e);
+      setError(msg);
+      trackEvent("connection_test_error", {
+        engine: v.engine,
+        has_profile: Boolean(profileId),
+        duration_ms: Date.now() - startedAt,
+        error: msg.slice(0, 240),
+      });
     }
   });
 
   const onSave = handleSubmit(async (v) => {
+    const startedAt = Date.now();
     // Save profile only (no connect)
     setConnecting(); // reuse spinner state; or create setSaving() if you want distinct
     try {
@@ -137,12 +152,25 @@ export function ConnectionFormDialog({
 
       setSuccess(`Saved ✅ ${savedProfile.label}`);
       onSaved?.(savedProfile);
+      trackEvent("connection_save_success", {
+        engine: connectionInput.engine,
+        mode: profileId ? "update" : "create",
+        duration_ms: Date.now() - startedAt,
+      });
     } catch (e: any) {
-      setError(e?.message ? String(e.message) : String(e));
+      const msg = e?.message ? String(e.message) : String(e);
+      setError(msg);
+      trackEvent("connection_save_error", {
+        engine: v.engine,
+        mode: profileId ? "update" : "create",
+        duration_ms: Date.now() - startedAt,
+        error: msg.slice(0, 240),
+      });
     }
   });
 
   const onConnect = handleSubmit(async (v) => {
+    const startedAt = Date.now();
     setConnecting();
     try {
       const connectionInput = buildConnectionInput(v);
@@ -177,8 +205,20 @@ export function ConnectionFormDialog({
       setActiveProfileScreen(newTab.id);
       onSaved?.();
       onClose?.();
+      trackEvent("connection_connect_success", {
+        engine: connectionInput.engine,
+        mode: profileId ? "update" : "create",
+        duration_ms: Date.now() - startedAt,
+      });
     } catch (e: any) {
-      setError(e?.message ? String(e.message) : String(e));
+      const msg = e?.message ? String(e.message) : String(e);
+      setError(msg);
+      trackEvent("connection_connect_error", {
+        engine: v.engine,
+        mode: profileId ? "update" : "create",
+        duration_ms: Date.now() - startedAt,
+        error: msg.slice(0, 240),
+      });
     }
   });
 

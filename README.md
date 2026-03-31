@@ -69,3 +69,52 @@ The CI release workflow is defined in `.github/workflows/release.yml` and runs o
 
 - Current updater endpoint is configured in `src-tauri/tauri.conf.json`.
 - Current release workflow is set up for macOS targets.
+
+## Analytics (PostHog)
+
+The app can send product telemetry to PostHog so you can measure installs and usage.
+Telemetry is privacy-first:
+
+- essential telemetry is always on for installs, app opens, daily active usage, and app update events
+- detailed product analytics are off by default until the user explicitly allows them
+- users can disable detailed analytics later from the in-app Privacy dialog
+- no raw SQL or query text is sent
+- file paths and sensitive database identifiers are masked before capture
+
+Setup:
+
+```bash
+cp .env.example .env
+```
+
+Then configure:
+
+```bash
+VITE_ANALYTICS_ENABLED=true
+VITE_POSTHOG_KEY=phc_your_project_api_key
+VITE_POSTHOG_HOST=https://us.i.posthog.com
+VITE_ANALYTICS_DEBUG=true
+```
+
+Common hosts:
+- US Cloud: `https://us.i.posthog.com`
+- EU Cloud: `https://eu.i.posthog.com`
+- Self-host: your PostHog domain
+
+Tracked lifecycle events:
+- `app_installed`: fired once per machine/browser profile
+- `app_opened`: fired on each launch
+- `app_active_daily`: fired once per day per machine/browser profile
+
+Tracked usage events:
+- `runtime_connection_opened`, `runtime_connection_open_error`
+- `connection_test_success`, `connection_test_error`
+- `connection_save_success`, `connection_save_error`
+- `connection_connect_success`, `connection_connect_error`
+- `sql_query_success`, `sql_query_error`, `sql_query_timeout`
+- `sql_query_stream_start`, `sql_query_stream_error`
+- `app_update_available`, `app_update_install_started`
+
+Consent model:
+- always tracked: `app_installed`, `app_opened`, `app_active_daily`, `app_update_available`, `app_update_install_started`
+- allow-only: connection and SQL usage events

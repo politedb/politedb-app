@@ -1,6 +1,13 @@
 import type { TargetedEvent } from "preact";
 import { Button } from "src/components/common/Button";
-import { Grid, List, Plus, Search } from "src/components/icons";
+import {
+  Grid,
+  List,
+  Analytics,
+  Plus,
+  Search,
+  Settings,
+} from "src/components/icons";
 import type { NavId, ViewMode } from "src/types";
 
 export function TopBar(props: {
@@ -8,11 +15,19 @@ export function TopBar(props: {
   searchQuery: string;
   onSearchChange: (v: string) => void;
   onNew: () => void;
+  onPrivacy: () => void;
   viewMode: ViewMode;
   onViewMode: (v: ViewMode) => void;
 }) {
-  const { mode, searchQuery, onSearchChange, onNew, viewMode, onViewMode } =
-    props;
+  const {
+    mode,
+    searchQuery,
+    onSearchChange,
+    onNew,
+    onPrivacy,
+    viewMode,
+    onViewMode,
+  } = props;
   const isConnections = mode === "connections";
   const searchPlaceholder = isConnections
     ? "Search connections or paste a URL..."
@@ -79,6 +94,15 @@ export function TopBar(props: {
           <List className="size-4" />
         </button>
       </div>
+
+      <Button
+        variant="outline"
+        onClick={onPrivacy}
+        class="h-9 rounded-lg border border-slate-300 px-2"
+        title="Privacy settings"
+      >
+        <Settings className="size-5" />
+      </Button>
     </div>
   );
 }

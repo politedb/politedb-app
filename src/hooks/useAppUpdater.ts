@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import packageJson from "@root/package.json";
 import { getVersion } from "@tauri-apps/api/app";
+import { trackEssentialEvent } from "src/lib/analytics";
 import {
   checkForRuntimeUpdate,
   installRuntimeUpdate,
@@ -36,19 +37,29 @@ export function useAppUpdater() {
   useEffect(() => {
     (async () => {
       const update = await checkForRuntimeUpdate();
-      if (update) setPendingUpdate(update);
+      if (update) {
+        setPendingUpdate(update);
+        trackEssentialEvent("app_update_available", {
+          current_version: appVersion,
+          next_version: update.version,
+        });
+      }
     })();
-  }, []);
+  }, [appVersion]);
 
   const installUpdate = useCallback(async () => {
     if (!pendingUpdate || isUpdating) return;
     setIsUpdating(true);
     try {
+      trackEssentialEvent("app_update_install_started", {
+        current_version: appVersion,
+        next_version: pendingUpdate.version,
+      });
       await installRuntimeUpdate(pendingUpdate);
     } finally {
       setIsUpdating(false);
     }
-  }, [pendingUpdate, isUpdating]);
+  }, [pendingUpdate, isUpdating, appVersion]);
 
   return {
     appVersion,
