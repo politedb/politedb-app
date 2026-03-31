@@ -1,13 +1,6 @@
 import type { TargetedEvent } from "preact";
 import { Button } from "src/components/common/Button";
-import {
-  Grid,
-  List,
-  Analytics,
-  Plus,
-  Search,
-  Settings,
-} from "src/components/icons";
+import { Grid, List, Plus, Search, Settings } from "src/components/icons";
 import type { NavId, ViewMode } from "src/types";
 
 export function TopBar(props: {
@@ -101,7 +94,7 @@ export function TopBar(props: {
         class="h-9 rounded-lg border border-slate-300 px-2"
         title="Privacy settings"
       >
-        <Settings className="size-5" />
+        <Settings className="size-4" />
       </Button>
     </div>
   );

@@ -11,7 +11,7 @@ export function OverlayModal(props: {
       onClick={props.onClose}
     >
       <div
-        class="max-h-[90vh] overflow-y-auto"
+        class="flex max-h-[85vh] w-full items-center justify-center overflow-hidden px-4"
         onClick={(e) => e.stopPropagation()}
       >
         {props.children}

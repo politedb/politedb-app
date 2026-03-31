@@ -223,8 +223,8 @@ export function ConnectionFormDialog({
   });
 
   return (
-    <div class="mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
-      <div class="relative border-b border-slate-200 px-6 py-4">
+    <div class="mx-auto flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+      <div class="relative shrink-0 border-b border-slate-200 px-6 py-4">
         <div class="text-center">
           <div class="text-lg font-semibold text-slate-900">
             {SUPPORTED_DATABASES.find((d) => d.engine === engine)?.label}{" "}
@@ -241,20 +241,24 @@ export function ConnectionFormDialog({
         </Button>
       </div>
 
-      <div class="bg-slate-50 p-6">
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ConnectionBasicsSection
-            control={control}
-            errors={errors}
-            onDirty={onDirty}
-            isCreateNewConnection={!profileId}
-          />
-          <div class="space-y-3">
-            <IdentitySection control={control} onDirty={onDirty} />
-            <SSHSection control={control} onDirty={onDirty} />
+      <div class="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+        <div class="h-full overflow-y-auto p-6">
+          <div class="grid grid-cols-2 gap-6">
+            <ConnectionBasicsSection
+              control={control}
+              errors={errors}
+              onDirty={onDirty}
+              isCreateNewConnection={!profileId}
+            />
+            <div class="space-y-3">
+              <IdentitySection control={control} onDirty={onDirty} />
+              <SSHSection control={control} onDirty={onDirty} />
+            </div>
           </div>
         </div>
+      </div>
 
+      <div class="shrink-0 border-t border-slate-200 bg-slate-50 px-6 py-4">
         <ConnectionFooter
           status={status}
           requiredOk={requiredOk}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { cn } from "src/utils/cn";
 
 type Status =
   | { kind: "idle" }
@@ -25,6 +26,8 @@ function Spinner() {
 }
 
 export function ConnectionFooter(props: {
+  className?: string;
+
   status: Status;
   requiredOk: boolean;
   storeKeychain: boolean;
@@ -35,6 +38,7 @@ export function ConnectionFooter(props: {
   onConnect: () => void;
 }) {
   const {
+    className,
     status,
     requiredOk,
     storeKeychain,
@@ -114,7 +118,12 @@ export function ConnectionFooter(props: {
 
   return (
     <>
-      <div class="mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-4">
+      <div
+        class={cn(
+          "mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-4",
+          className
+        )}
+      >
         <div class="flex items-center justify-between">
           {/* LEFT: Status */}
           <div class="flex items-center gap-2 text-sm">{statusNode}</div>

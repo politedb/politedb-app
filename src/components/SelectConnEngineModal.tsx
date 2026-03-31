@@ -241,7 +241,7 @@ export function ConnectionModal(props: {
   return (
     <OverlayModal open onClose={onClose}>
       <div
-        class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        class="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
@@ -287,7 +287,7 @@ export function ConnectionModal(props: {
         </div>
 
         {/* Search */}
-        <div class="border-b border-slate-200 bg-slate-50 px-6 py-3">
+        <div class="shrink-0 border-b border-slate-200 bg-slate-50 px-6 py-3">
           <div class="relative">
             <input
               ref={searchRef}
@@ -312,7 +312,7 @@ export function ConnectionModal(props: {
         </div>
 
         {/* List */}
-        <div class="max-h-[64vh] overflow-y-auto bg-white p-4">
+        <div class="min-h-0 flex-1 overflow-y-auto bg-white p-4">
           {filtered.length === 0 ? (
             <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
               <div class="text-sm font-semibold text-slate-800">No results</div>
@@ -335,7 +335,7 @@ export function ConnectionModal(props: {
         </div>
 
         {/* Footer (optional minimal) */}
-        <div class="flex items-center justify-between border-t border-slate-200 bg-white px-6 py-3">
+        <div class="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 py-3">
           <div class="text-xs text-slate-500"></div>
           <div class="flex gap-2">
             <Button variant="outline" onClick={onClose}>
