@@ -1,4 +1,10 @@
-import { useState, useMemo, useEffect, useRef } from "preact/hooks";
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+} from "preact/hooks";
 
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
@@ -74,8 +80,14 @@ export function ConnectionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [rightNavTab, setRightNavTab] = useState<"ai" | "table-size">(
+    "table-size"
+  );
 
-  const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
+  const { viewMode, toggleViewMode, setViewMode } = useViewMode([
+    "left",
+    "bottom",
+  ]);
 
   /* =============================================================================
    * Windows orchestration (depends on activeProfileScreen)
@@ -84,6 +96,7 @@ export function ConnectionScreen() {
     activeTab,
     windows: activeWindows,
     activeId: activeWindowId,
+    activeSqlWindow,
     activeTableWindow,
     selectWindow,
     openSqlEditor,
@@ -308,6 +321,53 @@ export function ConnectionScreen() {
     return getProfileById(activeTab.profileId);
   }, [activeTab, getProfileById]);
 
+  const onInsertSqlIntoActiveEditor = useCallback(
+    (sql: string) => {
+      const next = sql.trim();
+      if (!next) return;
+
+      let targetWindowId = activeSqlWindow?.id;
+      let current = activeSqlWindow?.content?.trim() ?? "";
+      let title = activeSqlWindow?.title ?? "SQL Query";
+
+      if (!targetWindowId) {
+        targetWindowId = openSqlEditor();
+      }
+
+      if (!activeSqlWindow && targetWindowId) {
+        const windows =
+          useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+        const createdWindow = windows.find(
+          (window) => window.id === targetWindowId && window.type === "sql"
+        );
+        if (createdWindow?.type === "sql") {
+          current = createdWindow.content?.trim() ?? "";
+          title = createdWindow.title ?? "SQL Query";
+        }
+      }
+
+      if (!targetWindowId) return;
+
+      const merged = current ? `${current}\n\n${next}` : next;
+      useScreenStore
+        .getState()
+        .updateSqlWindowContent(activeProfileScreen, targetWindowId, {
+          content: merged,
+          title,
+        });
+    },
+    [activeProfileScreen, activeSqlWindow, openSqlEditor]
+  );
+
+  const openAiAssistant = useMemo(() => {
+    return () => {
+      setRightNavTab("ai");
+      setViewMode((prev) =>
+        prev.includes("right") ? prev : [...prev, "right"]
+      );
+    };
+  }, [setViewMode]);
+
   /* =============================================================================
    * Keyboard shortcuts (uses stable actions)
    * ============================================================================= */
@@ -435,6 +495,7 @@ export function ConnectionScreen() {
             openSQLWindow={actions.openSql}
             onRefresh={() => void actions.refresh()}
             onSearchOpen={() => setSearchDialogOpen(true)}
+            onOpenAiAssistant={openAiAssistant}
           />
 
           <div class="flex h-full flex-1 overflow-hidden">
@@ -481,7 +542,18 @@ export function ConnectionScreen() {
                         first={mainContent}
                         second={
                           <div class="h-full overflow-hidden border-l border-neutral-200">
-                            <RightNav sizeInfo={activeTableData.sizeInfo} />
+                            <RightNav
+                              activeTab={rightNavTab}
+                              onTabChange={setRightNavTab}
+                              sizeInfo={activeTableData.sizeInfo}
+                              engine={engine || "postgres"}
+                              runtimeConnectionId={runtimeConnectionId}
+                              activeSchema={activeSchema}
+                              tables={meta.tables}
+                              columnsByTable={meta.columnsByTable}
+                              currentSql={activeSqlWindow?.content}
+                              onInsertSql={onInsertSqlIntoActiveEditor}
+                            />
                           </div>
                         }
                       />
@@ -504,7 +576,18 @@ export function ConnectionScreen() {
                     first={mainContent}
                     second={
                       <div class="h-full overflow-hidden border-l border-neutral-200">
-                        <RightNav sizeInfo={activeTableData.sizeInfo} />
+                        <RightNav
+                          activeTab={rightNavTab}
+                          onTabChange={setRightNavTab}
+                          sizeInfo={activeTableData.sizeInfo}
+                          engine={engine || "postgres"}
+                          runtimeConnectionId={runtimeConnectionId}
+                          activeSchema={activeSchema}
+                          tables={meta.tables}
+                          columnsByTable={meta.columnsByTable}
+                          currentSql={activeSqlWindow?.content}
+                          onInsertSql={onInsertSqlIntoActiveEditor}
+                        />
                       </div>
                     }
                   />

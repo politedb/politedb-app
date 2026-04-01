@@ -1,4 +1,9 @@
 export const CMD = {
+  // AI runtime
+  aiRuntimeStatus: "ai_runtime_status",
+  aiRuntimeStart: "ai_runtime_start",
+  aiRuntimeStop: "ai_runtime_stop",
+
   // Connection
   connectionCreate: "connection_create",
   connectionTest: "connection_test",

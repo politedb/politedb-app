@@ -140,3 +140,15 @@ export type TableForeignKey = {
   table: string;
   column: string;
 };
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  sql?: string;
+  assumptions?: string[];
+  clarification?: string;
+  resultPreview?: Record<string, unknown>[];
+  rowCount?: number | null;
+  confidence?: "high" | "medium" | "low";
+};

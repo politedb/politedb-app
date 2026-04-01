@@ -1,6 +1,6 @@
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
-import { RunIcon } from "src/components/icons";
+import { PlayIcon } from "src/components/icons";
 
 type Props = {
   onExport?: () => void;
@@ -34,7 +34,7 @@ export function SqlEditorToolbar(props: Props) {
   const canCancel = isExecuting && !!onCancel;
 
   return (
-    <div class="flex h-10 items-center border-b border-neutral-200 bg-neutral-50 px-3">
+    <div class="flex h-10 items-center border-y border-neutral-200 bg-neutral-50 px-3">
       {/* Left actions */}
       <div class="flex items-center gap-1">
         <Button
@@ -67,8 +67,8 @@ export function SqlEditorToolbar(props: Props) {
 
       {/* Right: Run */}
       <div class="ml-auto flex items-center">
-        <button
-          type="button"
+        <Button
+          variant="default"
           onClick={canCancel ? onCancel : onRun}
           disabled={isExecuting && !canCancel}
           title={
@@ -78,16 +78,9 @@ export function SqlEditorToolbar(props: Props) {
                 ? "Run Selected (⌘⏎)"
                 : "Run Current (⌘⏎)"
           }
-          class={cn(
-            "inline-flex items-center gap-1.5",
-            "h-8 rounded-md px-3",
-            "bg-blue-700 text-white",
-            "hover:bg-blue-600 active:bg-blue-800",
-            "shadow-sm",
-            "disabled:opacity-60"
-          )}
+          class={cn("py-1.5 disabled:opacity-60")}
         >
-          <RunIcon class="size-4" />
+          <PlayIcon class="size-4" />
           <span class="text-xs font-semibold">
             {canCancel
               ? "Cancel"
@@ -98,7 +91,7 @@ export function SqlEditorToolbar(props: Props) {
                   : "Run Current"}
           </span>
           <span class="ml-1 text-[10px] text-white/70">⌘⏎</span>
-        </button>
+        </Button>
       </div>
     </div>
   );

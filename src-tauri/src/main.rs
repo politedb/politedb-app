@@ -2,6 +2,7 @@
 extern crate objc2;
 
 mod commands;
+mod ai_runtime;
 mod engines;
 mod file_storage;
 mod operations;
@@ -57,6 +58,9 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::ai::ai_runtime_status,
+            commands::ai::ai_runtime_start,
+            commands::ai::ai_runtime_stop,
             // Connections
             commands::connection::connection_create,
             commands::connection::connection_list,

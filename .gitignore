@@ -29,3 +29,9 @@ yarn.*
 dataset-sample
 
 .env
+
+# Local AI runtime assets
+.tmp/
+src-tauri/resources/ai/bin/
+src-tauri/resources/ai/models/
+!src-tauri/resources/ai/README.md

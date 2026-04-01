@@ -1,0 +1,374 @@
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use tauri::Manager;
+use tokio::net::TcpStream;
+use tokio::process::{Child, Command};
+use tokio::time::sleep;
+
+use crate::state::AppState;
+
+const DEFAULT_CONTEXT_SIZE: u32 = 16384;
+const DEFAULT_HOST: &str = "127.0.0.1";
+const START_TIMEOUT: Duration = Duration::from_secs(90);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AiRuntimePhase {
+    Missing,
+    Stopped,
+    Starting,
+    Ready,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiRuntimeStatus {
+    pub phase: AiRuntimePhase,
+    pub endpoint: Option<String>,
+    pub model_name: Option<String>,
+    pub server_bin: Option<String>,
+    pub model_path: Option<String>,
+    pub pid: Option<u32>,
+    pub managed_by_app: bool,
+    pub missing: Vec<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct AiRuntimeHandle {
+    pub child: Option<Child>,
+    pub phase: AiRuntimePhase,
+    pub endpoint: Option<String>,
+    pub port: Option<u16>,
+    pub model_name: Option<String>,
+    pub model_path: Option<PathBuf>,
+    pub server_bin: Option<PathBuf>,
+    pub last_error: Option<String>,
+    pub managed_by_app: bool,
+}
+
+impl Default for AiRuntimeHandle {
+    fn default() -> Self {
+        Self {
+            child: None,
+            phase: AiRuntimePhase::Stopped,
+            endpoint: None,
+            port: None,
+            model_name: None,
+            model_path: None,
+            server_bin: None,
+            last_error: None,
+            managed_by_app: false,
+        }
+    }
+}
+
+impl AiRuntimeHandle {
+    fn to_status(&self, missing: Vec<String>) -> AiRuntimeStatus {
+        let pid = self.child.as_ref().and_then(|child| child.id());
+        AiRuntimeStatus {
+            phase: self.phase.clone(),
+            endpoint: self.endpoint.clone(),
+            model_name: self.model_name.clone(),
+            server_bin: self
+                .server_bin
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            model_path: self
+                .model_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            pid,
+            managed_by_app: self.managed_by_app,
+            missing,
+            last_error: self.last_error.clone(),
+        }
+    }
+}
+
+fn os_bin_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "llama-server.exe"
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        "llama-server"
+    }
+}
+
+fn resources_root_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        roots.push(resource_dir);
+    }
+
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
+    roots
+}
+
+fn resolve_bundled_server_bin(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(from_env) = std::env::var("POLITEDB_LLM_SERVER_BIN") {
+        let path = PathBuf::from(from_env);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let relative = PathBuf::from("ai")
+        .join("bin")
+        .join(std::env::consts::OS)
+        .join(os_bin_name());
+
+    resources_root_candidates(app)
+        .into_iter()
+        .map(|root| root.join(&relative))
+        .find(|path| path.exists())
+}
+
+fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(from_env) = std::env::var("POLITEDB_LLM_MODEL_PATH") {
+        let path = PathBuf::from(from_env);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        let path = app_data_dir.join("ai").join("models").join("default.gguf");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    let relative = PathBuf::from("ai").join("models").join("default.gguf");
+
+    resources_root_candidates(app)
+        .into_iter()
+        .map(|root| root.join(&relative))
+        .find(|path| path.exists())
+}
+
+fn detect_missing(app: &tauri::AppHandle) -> (Option<PathBuf>, Option<PathBuf>, Vec<String>) {
+    let server_bin = resolve_bundled_server_bin(app);
+    let model_path = resolve_bundled_model_path(app);
+
+    let mut missing = Vec::new();
+    if server_bin.is_none() {
+        missing.push(
+            "Missing llama-server binary. Put it at src-tauri/resources/ai/bin/<os>/llama-server"
+                .to_string(),
+        );
+    }
+    if model_path.is_none() {
+        missing.push(
+            "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf".to_string(),
+        );
+    }
+
+    (server_bin, model_path, missing)
+}
+
+#[cfg(unix)]
+fn ensure_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let meta = std::fs::metadata(path).map_err(|e| format!("Read metadata failed: {e}"))?;
+    let mut perms = meta.permissions();
+    let mode = perms.mode();
+    if mode & 0o111 == 0 {
+        perms.set_mode(mode | 0o755);
+        std::fs::set_permissions(path, perms)
+            .map_err(|e| format!("Failed to mark binary executable: {e}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn pick_free_port() -> Result<u16, String> {
+    let listener =
+        TcpListener::bind((DEFAULT_HOST, 0)).map_err(|e| format!("Bind free port failed: {e}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Read local addr failed: {e}"))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+async fn wait_until_port_ready(port: u16) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        if TcpStream::connect((DEFAULT_HOST, port)).await.is_ok() {
+            return Ok(());
+        }
+
+        if started.elapsed() > START_TIMEOUT {
+            return Err("Timed out waiting for local AI runtime to accept connections.".into());
+        }
+
+        sleep(Duration::from_millis(350)).await;
+    }
+}
+
+async fn ensure_child_not_exited(handle: &mut AiRuntimeHandle) -> Result<bool, String> {
+    if let Some(child) = handle.child.as_mut() {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                handle.child = None;
+                handle.phase = AiRuntimePhase::Error;
+                handle.last_error = Some(format!("AI runtime exited early with status {status}"));
+                Ok(false)
+            }
+            Ok(None) => Ok(true),
+            Err(e) => Err(format!("Failed to inspect AI runtime process: {e}")),
+        }
+    } else {
+        Ok(false)
+    }
+}
+
+fn model_name_from_path(path: &Path) -> String {
+    path.file_stem()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "local-model".to_string())
+}
+
+pub async fn ai_runtime_status(app: &tauri::AppHandle, state: &AppState) -> AiRuntimeStatus {
+    let (server_bin, model_path, missing) = detect_missing(app);
+    let mut runtime = state.ai_runtime.lock().await;
+
+    if ensure_child_not_exited(&mut runtime).await.unwrap_or(false) && runtime.endpoint.is_some() {
+        return runtime.to_status(missing);
+    }
+
+    if runtime.child.is_none() {
+        runtime.server_bin = server_bin;
+        runtime.model_path = model_path.clone();
+        runtime.model_name = model_path.as_deref().map(model_name_from_path);
+        if !missing.is_empty() {
+            runtime.phase = AiRuntimePhase::Missing;
+        } else if !matches!(runtime.phase, AiRuntimePhase::Error) {
+            runtime.phase = AiRuntimePhase::Stopped;
+        }
+    }
+
+    runtime.to_status(missing)
+}
+
+pub async fn ai_runtime_start(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<AiRuntimeStatus, String> {
+    let (server_bin, model_path, missing) = detect_missing(app);
+    let Some(server_bin) = server_bin else {
+        let mut runtime = state.ai_runtime.lock().await;
+        runtime.phase = AiRuntimePhase::Missing;
+        runtime.last_error = Some("Local AI server binary not found.".to_string());
+        return Ok(runtime.to_status(missing));
+    };
+
+    let Some(model_path) = model_path else {
+        let mut runtime = state.ai_runtime.lock().await;
+        runtime.phase = AiRuntimePhase::Missing;
+        runtime.last_error = Some("Local AI GGUF model not found.".to_string());
+        return Ok(runtime.to_status(missing));
+    };
+
+    ensure_executable(&server_bin)?;
+
+    {
+        let mut runtime = state.ai_runtime.lock().await;
+        if ensure_child_not_exited(&mut runtime).await? && runtime.endpoint.is_some() {
+            return Ok(runtime.to_status(Vec::new()));
+        }
+        runtime.phase = AiRuntimePhase::Starting;
+        runtime.last_error = None;
+        runtime.server_bin = Some(server_bin.clone());
+        runtime.model_path = Some(model_path.clone());
+        runtime.model_name = Some(model_name_from_path(&model_path));
+    }
+
+    let port = pick_free_port()?;
+    let endpoint = format!("http://{DEFAULT_HOST}:{port}/v1");
+
+    let mut command = Command::new(&server_bin);
+    command
+        .arg("-m")
+        .arg(&model_path)
+        .arg("--host")
+        .arg(DEFAULT_HOST)
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("-c")
+        .arg(DEFAULT_CONTEXT_SIZE.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+
+    let child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start bundled AI runtime: {e}"))?;
+
+    {
+        let mut runtime = state.ai_runtime.lock().await;
+        runtime.port = Some(port);
+        runtime.endpoint = Some(endpoint.clone());
+        runtime.child = Some(child);
+        runtime.managed_by_app = true;
+    }
+
+    if let Err(e) = wait_until_port_ready(port).await {
+        let mut runtime = state.ai_runtime.lock().await;
+        if let Some(child) = runtime.child.as_mut() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+        runtime.child = None;
+        runtime.phase = AiRuntimePhase::Error;
+        runtime.last_error = Some(e.clone());
+        return Err(e);
+    }
+
+    let mut runtime = state.ai_runtime.lock().await;
+    runtime.phase = AiRuntimePhase::Ready;
+    runtime.to_status(Vec::new()).pipe(Ok)
+}
+
+pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String> {
+    let mut runtime = state.ai_runtime.lock().await;
+    if let Some(child) = runtime.child.as_mut() {
+        child
+            .kill()
+            .await
+            .map_err(|e| format!("Failed to stop local AI runtime: {e}"))?;
+        let _ = child.wait().await;
+    }
+
+    runtime.child = None;
+    runtime.phase = AiRuntimePhase::Stopped;
+    runtime.endpoint = None;
+    runtime.port = None;
+    runtime.managed_by_app = false;
+
+    Ok(runtime.to_status(Vec::new()))
+}
+
+trait Pipe: Sized {
+    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
+        f(self)
+    }
+}
+
+impl<T> Pipe for T {}

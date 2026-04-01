@@ -46,3 +46,5 @@ export * from "./Backup";
 export * from "./Restore";
 export * from "./Analytics";
 export * from "./Settings";
+export * from "./Stop";
+export * from "./Chat";

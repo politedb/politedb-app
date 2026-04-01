@@ -9,7 +9,7 @@ import type {
 import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
-import { PatchData } from "../../../utils/generateSql";
+import { PatchData } from "src/utils/generateSql";
 
 /* =============================================================================
  * Helpers
@@ -90,6 +90,7 @@ export function useConnectionWindows(activeProfileScreen: string) {
     };
     addWindow(activeProfileScreen, win);
     setActiveWindowId(activeProfileScreen, win.id);
+    return win.id;
   }, [activeProfileScreen, addWindow, setActiveWindowId]);
 
   const openTable = useCallback(

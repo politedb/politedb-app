@@ -27,8 +27,8 @@ import {
   type FormValues,
 } from "./connectionForm.utils";
 import { useConnectionStatus } from "./useConnectionStatus";
-import { DatabaseEngine } from "../../types";
-import { SUPPORTED_DATABASES } from "../../constant";
+import { DatabaseEngine } from "src/types";
+import { SUPPORTED_DATABASES } from "src/constant";
 import { trackEvent } from "src/lib/analytics";
 
 export function ConnectionFormDialog({

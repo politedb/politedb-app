@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { canManageDatabases, useDatabases } from "src/hooks/useDatabases";
 import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
-import { ErrorDialog } from "../../components/modal/ErrorDialog";
+import { ErrorDialog } from "src/components/modal/ErrorDialog";
 
 type MenuState = {
   x: number;

@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
 use crate::operations::ctx::{FlowCtrl, SqlBusyRegistry};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
+use crate::ai_runtime::AiRuntimeHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TunnelKey {
@@ -49,6 +50,7 @@ pub struct AppState {
     pub op_tasks: Arc<DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 
     pub sql_busy: SqlBusyRegistry,
+    pub ai_runtime: Arc<tokio::sync::Mutex<AiRuntimeHandle>>,
 }
 
 impl AppState {
@@ -65,6 +67,7 @@ impl AppState {
             flow_by_op: Arc::new(DashMap::new()),
             op_tasks: Arc::new(DashMap::new()),
             sql_busy: SqlBusyRegistry::new(),
+            ai_runtime: Arc::new(tokio::sync::Mutex::new(AiRuntimeHandle::default())),
         }
     }
 }

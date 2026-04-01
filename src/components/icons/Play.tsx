@@ -1,6 +1,6 @@
 import { SVGAttributes } from "preact";
 
-export function RunIcon(props: SVGAttributes<SVGSVGElement>) {
+export function PlayIcon(props: SVGAttributes<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"

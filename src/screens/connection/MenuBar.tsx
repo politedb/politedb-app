@@ -13,6 +13,7 @@ import {
   Backup,
   Restore,
   Lock,
+  ChatIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -41,6 +42,7 @@ interface Props {
   openSQLWindow?: () => void;
   onRefresh?: () => void;
   onSearchOpen?: () => void;
+  onOpenAiAssistant?: () => void;
 }
 
 function ToolbarDivider() {
@@ -243,6 +245,7 @@ export function MenuBar({
   onRefresh,
   openSQLWindow,
   onSearchOpen,
+  onOpenAiAssistant,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
 
@@ -504,6 +507,10 @@ export function MenuBar({
           </IconButton>
 
           <ToolbarDivider />
+
+          <IconButton title="AI Assistant" onClick={onOpenAiAssistant}>
+            <ChatIcon className="size-4 text-neutral-700" />
+          </IconButton>
 
           <div class="flex h-7 items-center rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">
             <SegButton

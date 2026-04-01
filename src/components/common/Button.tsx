@@ -66,8 +66,7 @@ export function Button({
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <Spinner className="size-3.5" />}
-      {children}
+      {loading ? <Spinner className="size-3.5" /> : children}
     </button>
   );
 }

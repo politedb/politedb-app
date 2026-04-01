@@ -79,6 +79,9 @@ export function ContextMenu(props: {
       )}
       style={{ left: x, top: y }}
       role="menu"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
     >
       <div class="py-1">
         {items.map((it, idx) => {

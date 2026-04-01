@@ -4,7 +4,7 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { DbIcon } from "src/components/icons/DbIcon";
 import { Edit, Ssh, Trash, MoreVertical } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
-import { ConfirmPopover } from "src/components/modal/ConfirmPopover";
+import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { cn } from "src/utils/cn";
 
@@ -65,24 +65,32 @@ function buildSubtitle(profile: ConnectionProfile) {
   const port =
     input && "port" in input ? (input.port as number | undefined) : undefined;
 
-  const database =
-    engine === "postgres"
-      ? (profile.input?.postgres?.database ?? "")
-      : engine === "mysql" || engine === "mariadb"
-        ? (profile.input?.mysql?.database ?? "")
-        : engine === "sqlserver"
-          ? (profile.input?.sqlserver?.database ?? "")
-        : engine === "sqlite"
-          ? (profile.input?.sqlite?.path ?? "")
-        : engine === "oracle"
-          ? (profile.input?.oracle?.database ?? "")
-        : engine === "mongo"
-          ? (profile.input?.mongo?.database ?? "")
-        : engine === "redis"
-          ? profile.input?.redis?.db != null
-            ? `db ${profile.input.redis.db}`
-            : ""
-          : "";
+  let database = "";
+  switch (engine) {
+    case "postgres":
+      database = profile.input?.postgres?.database ?? "";
+      break;
+    case "mysql":
+    case "mariadb":
+      database = profile.input?.mysql?.database ?? "";
+      break;
+    case "sqlserver":
+      database = profile.input?.sqlserver?.database ?? "";
+      break;
+    case "sqlite":
+      database = profile.input?.sqlite?.path ?? "";
+      break;
+    case "oracle":
+      database = profile.input?.oracle?.database ?? "";
+      break;
+    case "mongo":
+      database = profile.input?.mongo?.database ?? "";
+      break;
+    case "redis":
+      database =
+        profile.input?.redis?.db != null ? `db ${profile.input.redis.db}` : "";
+      break;
+  }
 
   const hostPort = host ? `${host}${port != null ? `:${port}` : ""}` : "";
   const subtitle = firstNonEmpty(
@@ -91,10 +99,6 @@ function buildSubtitle(profile: ConnectionProfile) {
   );
 
   return { engine, subtitle, hasSsh: !!profile.input?.ssh };
-}
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
 }
 
 /* -------------------------------------------------- */
@@ -129,118 +133,6 @@ const KebabButton = memo(function KebabButton(props: {
     </button>
   );
 });
-
-/* -------------------------------------------------- */
-/* Card menu */
-const MENU_WIDTH = 176; // ~w-44
-
-function CardMenu(props: {
-  open: boolean;
-  anchorEl: HTMLElement | null;
-  point: { x: number; y: number } | null;
-  onClose: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const { open, anchorEl, point, onClose, onEdit, onDelete } = props;
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function onMouseDown(e: MouseEvent) {
-      if (!ref.current?.contains(e.target as Node)) onClose();
-    }
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-
-    window.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("scroll", onClose, true);
-
-    return () => {
-      window.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("scroll", onClose, true);
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  let top = 0;
-  let left = 0;
-
-  if (point) {
-    top = point.y + 6;
-    left = point.x + 6;
-  } else if (anchorEl) {
-    const r = anchorEl.getBoundingClientRect();
-    top = r.bottom + 6;
-    left = r.right - MENU_WIDTH;
-  }
-
-  // Keep inside viewport (basic clamp)
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-
-  left = clamp(left, 8, Math.max(8, vw - MENU_WIDTH - 8));
-  top = clamp(top, 8, Math.max(8, vh - 120)); // menu height-ish
-
-  return (
-    <div
-      ref={ref}
-      style={{ top, left }}
-      class="fixed z-50 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
-      role="menu"
-    >
-      <button
-        type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 active:bg-slate-200"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onClose();
-          onEdit();
-        }}
-      >
-        <Edit className="size-4 text-slate-500" />
-        <span>Edit</span>
-      </button>
-      <ConfirmPopover
-        variant="danger"
-        title="Delete connection?"
-        description="This will remove the saved connection."
-        confirmText="Delete"
-        onConfirm={() => {
-          onClose();
-          onDelete();
-        }}
-      >
-        {({ open, triggerRef }) => (
-          <button
-            ref={triggerRef}
-            type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 transition hover:bg-red-50 hover:text-red-700 active:bg-red-100"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              open();
-            }}
-          >
-            <Trash className="size-4 text-red-500" />
-            <span class="font-medium">Delete</span>
-          </button>
-        )}
-      </ConfirmPopover>{" "}
-    </div>
-  );
-}
 
 /* -------------------------------------------------- */
 /* Connection card */
@@ -297,6 +189,12 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
   async function onDelete() {
     if (!profile) return;
+    const ok = await Promise.resolve(
+      window.confirm(
+        "Delete connection?\n\nThis will remove the saved connection."
+      )
+    );
+    if (!ok) return;
     await removeProfile(profile.id);
   }
 
@@ -304,6 +202,13 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     if (!menuOpen) return;
     return () => closeMenu();
   }, [profileId]);
+
+  const menuPosition = (() => {
+    if (menuPoint) return { x: menuPoint.x + 6, y: menuPoint.y + 6 };
+    const r = kebabRef.current?.getBoundingClientRect();
+    if (r) return { x: r.right - 176, y: r.bottom + 6 };
+    return { x: 0, y: 0 };
+  })();
 
   return (
     <div
@@ -400,18 +305,31 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         buttonRef={kebabRef}
       />
 
-      <CardMenu
+      <ContextMenu
         open={menuOpen}
-        anchorEl={kebabRef.current}
-        point={menuPoint}
+        x={menuPosition.x}
+        y={menuPosition.y}
+        items={[
+          {
+            type: "item",
+            label: "Edit",
+            icon: <Edit className="size-4" />,
+            onClick: () => {
+              closeMenu();
+              onEdit();
+            },
+          },
+          {
+            type: "item",
+            label: "Delete",
+            icon: <Trash className="size-4" />,
+            color: "red",
+            onClick: () => {
+              onDelete();
+            },
+          },
+        ]}
         onClose={closeMenu}
-        onEdit={() => {
-          closeMenu();
-          onEdit();
-        }}
-        onDelete={() => {
-          onDelete();
-        }}
       />
     </div>
   );

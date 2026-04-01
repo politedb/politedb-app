@@ -15,6 +15,11 @@ jobs:
       VITE_ANALYTICS_DEBUG: "false"
       VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
       VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+      BUNDLE_AI_ASSISTANT: ${{ vars.BUNDLE_AI_ASSISTANT || 'true' }}
+      BUNDLE_AI_MODEL: ${{ vars.BUNDLE_AI_MODEL || 'false' }}
+      AI_MODEL_REPO: ${{ vars.AI_MODEL_REPO || 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF' }}
+      AI_MODEL_PATTERN: ${{ vars.AI_MODEL_PATTERN || 'qwen2.5-coder-7b-instruct-q4_k_m*.gguf' }}
+      AI_LLAMA_REF: ${{ vars.AI_LLAMA_REF || 'master' }}
 
     strategy:
       matrix:
@@ -37,8 +42,21 @@ jobs:
         with:
           node-version: 24
 
+      - name: Setup Python
+        if: env.BUNDLE_AI_ASSISTANT == 'true' && env.BUNDLE_AI_MODEL == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm install
+
+      - name: Install AI build dependencies
+        if: env.BUNDLE_AI_ASSISTANT == 'true' && env.BUNDLE_AI_MODEL == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip huggingface_hub[cli]
 
       - name: Print build env summary
         shell: bash
@@ -47,6 +65,40 @@ jobs:
           echo "Analytics enabled: ${VITE_ANALYTICS_ENABLED:-<unset>}"
           echo "PostHog host set: $([ -n "${VITE_POSTHOG_HOST:-}" ] && echo yes || echo no)"
           echo "PostHog key set: $([ -n "${VITE_POSTHOG_KEY:-}" ] && echo yes || echo no)"
+          echo "Bundle AI assistant: ${BUNDLE_AI_ASSISTANT:-false}"
+          echo "Bundle AI model: ${BUNDLE_AI_MODEL:-false}"
+          echo "AI model repo: ${AI_MODEL_REPO:-<unset>}"
+          echo "AI model pattern: ${AI_MODEL_PATTERN:-<unset>}"
+          echo "AI llama ref: ${AI_LLAMA_REF:-<unset>}"
+
+      - name: Download bundled AI runtime
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODEL_REPO: ${{ env.AI_MODEL_REPO }}
+          MODEL_PATTERN: ${{ env.AI_MODEL_PATTERN }}
+          LLAMA_REF: ${{ env.AI_LLAMA_REF }}
+          DOWNLOAD_MODEL: ${{ env.BUNDLE_AI_MODEL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/setup_llama_runtime.sh
+          chmod +x ./scripts/download_default_ai_runtime.sh
+          ./scripts/download_default_ai_runtime.sh
+
+      - name: Verify bundled AI assets
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src-tauri/resources/ai/bin/macos/llama-server
+          ls -lh src-tauri/resources/ai/bin/macos/llama-server
+          if [ "${BUNDLE_AI_MODEL}" = "true" ]; then
+            test -f src-tauri/resources/ai/models/default.gguf
+            ls -lh src-tauri/resources/ai/models/default.gguf
+          else
+            echo "Skipping bundled model verification"
+          fi
 
       - name: Build Tauri
         env:
