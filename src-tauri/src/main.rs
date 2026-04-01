@@ -103,6 +103,7 @@ fn main() {
             commands::mongo::mongo_collection_overview,
             commands::mongo::mongo_find_documents,
             commands::mongo::mongo_list_indexes,
+            commands::mongo::mongo_collection_size_info,
             commands::mongo::mongo_insert_documents,
             commands::mongo::mongo_update_documents,
             commands::mongo::mongo_delete_documents,

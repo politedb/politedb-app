@@ -50,6 +50,7 @@ export const CMD = {
   mongoCollectionOverview: "mongo_collection_overview",
   mongoFindDocuments: "mongo_find_documents",
   mongoListIndexes: "mongo_list_indexes",
+  mongoCollectionSizeInfo: "mongo_collection_size_info",
   mongoInsertDocuments: "mongo_insert_documents",
   mongoUpdateDocuments: "mongo_update_documents",
   mongoDeleteDocuments: "mongo_delete_documents",

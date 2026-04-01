@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
-import { cellToString } from "src/utils/convert";
+import { cellToString, formatBytesSize } from "src/utils/convert";
 import { useScreenStore } from "src/stores/screen";
 import { profileConnect } from "src/lib/tauri/profile";
 import {
@@ -21,6 +21,7 @@ import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import {
   mongoCollectionOverview,
+  mongoCollectionSizeInfo,
   mongoFindDocuments,
   mongoListIndexes,
   operationCancel,
@@ -434,6 +435,25 @@ async function loadMongoOverview(params: {
     structure,
     constraints,
     rowCount: Number(overview.row_count ?? 0),
+  };
+}
+
+async function loadMongoSizeInfo(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+}): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
+  const { connId, schema, tableName } = params;
+  const stats = await mongoCollectionSizeInfo({
+    connectionId: connId,
+    database: schema,
+    collection: tableName,
+  });
+
+  return {
+    totalSize: formatBytesSize(stats.total_size_bytes ?? 0),
+    dataSize: formatBytesSize(stats.data_size_bytes ?? 0),
+    indexSize: formatBytesSize(stats.index_size_bytes ?? 0),
   };
 }
 
@@ -906,6 +926,7 @@ export function useLoadTableData() {
               let mongoStructure = prev.structure ?? [];
               let mongoRowCount =
                 typeof prev.rowCount === "number" ? prev.rowCount : 0;
+              let mongoSizeInfo = prev.sizeInfo ?? null;
 
               if (plan.needColumns || plan.needMeta || plan.needRowCount) {
                 const overview = await loadMongoOverview({
@@ -933,6 +954,24 @@ export function useLoadTableData() {
                 } catch {}
               }
 
+              if (plan.needSizeInfo || !mongoSizeInfo) {
+                mongoSizeInfo = await loadMongoSizeInfo({
+                  connId,
+                  schema,
+                  tableName,
+                });
+
+                patchMeta(setMeta, key, prev, {
+                  sizeInfo: mongoSizeInfo,
+                  connectionId: prev.connectionId ?? connId,
+                  busy: false,
+                });
+
+                try {
+                  setSizeInfoCache(key, mongoSizeInfo as any);
+                } catch {}
+              }
+
               if (plan.needRows) {
                 const rowsRes = await loadMongoRows({
                   key,
@@ -952,6 +991,7 @@ export function useLoadTableData() {
                 patchMeta(setMeta, key, prev, {
                   columns: mongoColumns,
                   rowCount: mongoRowCount,
+                  sizeInfo: mongoSizeInfo,
                   rowCountIsEstimated: false,
                   connectionId: prev.connectionId ?? connId,
                   busy: false,

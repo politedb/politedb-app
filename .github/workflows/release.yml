@@ -10,7 +10,6 @@ jobs:
     permissions:
       contents: write
     env:
-      NODE_ENV: production
       VITE_ANALYTICS_ENABLED: ${{ vars.VITE_ANALYTICS_ENABLED }}
       VITE_ANALYTICS_DEBUG: "false"
       VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
@@ -41,6 +40,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
 
       - name: Setup Python
         if: env.BUNDLE_AI_ASSISTANT == 'true' && env.BUNDLE_AI_MODEL == 'true'
@@ -102,9 +102,10 @@ jobs:
 
       - name: Build Tauri
         env:
+          NODE_ENV: production
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build -- --target ${{ matrix.target }}
+        run: npx tauri build --target ${{ matrix.target }}
 
       - name: Rename updater artifacts
         shell: bash

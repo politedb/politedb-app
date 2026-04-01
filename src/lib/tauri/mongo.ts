@@ -82,6 +82,22 @@ export async function mongoListIndexes(args: {
   });
 }
 
+export async function mongoCollectionSizeInfo(args: {
+  connectionId: string;
+  database?: string | null;
+  collection: string;
+}): Promise<{
+  total_size_bytes: number;
+  data_size_bytes: number;
+  index_size_bytes: number;
+}> {
+  return invoke(CMD.mongoCollectionSizeInfo, {
+    connectionId: args.connectionId,
+    database: args.database ?? null,
+    collection: args.collection,
+  });
+}
+
 export async function mongoInsertDocuments(args: {
   connectionId: string;
   database?: string | null;

@@ -34,6 +34,13 @@ pub struct MongoIndexInfo {
     pub index_definition: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct MongoCollectionSizeInfo {
+    pub total_size_bytes: u64,
+    pub data_size_bytes: u64,
+    pub index_size_bytes: u64,
+}
+
 fn mongo_conn<'a>(
     state: &'a AppState,
     connection_id: Uuid,
@@ -446,6 +453,43 @@ pub async fn mongo_list_indexes(
         .collect::<Vec<_>>();
 
     Ok(out)
+}
+
+#[tauri::command]
+pub async fn mongo_collection_size_info(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: Option<String>,
+    collection: String,
+) -> Result<MongoCollectionSizeInfo, String> {
+    let conn = mongo_conn(&state, connection_id)?;
+    let (client, default_database) = as_mongo_client(&conn)?;
+    let database = normalize_database_arg(database, default_database)?;
+
+    let stats = client
+        .database(&database)
+        .run_command(mongodb::bson::doc! { "collStats": &collection, "scale": 1 }, None)
+        .await
+        .map_err(|e| format!("MONGO_COLLECTION_STATS_FAILED: {e}"))?;
+
+    let read_u64 = |key: &str| -> u64 {
+        match stats.get(key) {
+            Some(Bson::Int32(v)) => (*v).max(0) as u64,
+            Some(Bson::Int64(v)) => (*v).max(0) as u64,
+            Some(Bson::Double(v)) => (*v).max(0.0) as u64,
+            _ => 0,
+        }
+    };
+
+    let storage_size = read_u64("storageSize");
+    let data_size = read_u64("size");
+    let index_size = read_u64("totalIndexSize");
+
+    Ok(MongoCollectionSizeInfo {
+        total_size_bytes: storage_size.saturating_add(index_size),
+        data_size_bytes: data_size,
+        index_size_bytes: index_size,
+    })
 }
 
 #[tauri::command]
