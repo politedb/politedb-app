@@ -99,9 +99,15 @@ fn bson_to_cell(value: &Bson) -> CellValue {
         Bson::Int64(v) => CellValue::I64(*v),
         Bson::Double(v) => CellValue::F64(*v),
         Bson::String(v) => CellValue::Str(v.clone()),
-        Bson::Binary(v) => {
-            CellValue::BytesB64(base64::engine::general_purpose::STANDARD.encode(&v.bytes))
-        }
+        Bson::Binary(v) => CellValue::Json(
+            serde_json::json!({
+                "$binary": {
+                    "subType": format!("{:02x}", u8::from(v.subtype)),
+                    "base64": base64::engine::general_purpose::STANDARD.encode(&v.bytes),
+                }
+            })
+            .to_string(),
+        ),
         Bson::ObjectId(v) => CellValue::Str(v.to_hex()),
         Bson::DateTime(v) => CellValue::Str(v.to_string()),
         other => CellValue::Json(bson::to_bson(other).unwrap_or(Bson::Null).to_string()),
