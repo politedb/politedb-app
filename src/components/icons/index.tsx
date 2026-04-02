@@ -48,3 +48,4 @@ export * from "./Analytics";
 export * from "./Settings";
 export * from "./Stop";
 export * from "./Chat";
+export * from "./Download";

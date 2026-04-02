@@ -14,6 +14,7 @@ import {
   Restore,
   Lock,
   ChatIcon,
+  Schema,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -43,6 +44,7 @@ interface Props {
   onRefresh?: () => void;
   onSearchOpen?: () => void;
   onOpenAiAssistant?: () => void;
+  onOpenDiagram?: () => void;
 }
 
 function ToolbarDivider() {
@@ -246,6 +248,7 @@ export function MenuBar({
   openSQLWindow,
   onSearchOpen,
   onOpenAiAssistant,
+  onOpenDiagram,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
 
@@ -507,6 +510,14 @@ export function MenuBar({
           </IconButton>
 
           <ToolbarDivider />
+
+          <IconButton
+            title="Generate Diagram"
+            onClick={onOpenDiagram}
+            disabled={!rt.runtimeConnectionId || rt.engine === "redis"}
+          >
+            <Schema className="size-4 text-neutral-700" />
+          </IconButton>
 
           <IconButton title="AI Assistant" onClick={onOpenAiAssistant}>
             <ChatIcon className="size-4 text-neutral-700" />

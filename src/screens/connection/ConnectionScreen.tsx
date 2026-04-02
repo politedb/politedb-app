@@ -31,6 +31,7 @@ import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog"
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
+import { DiagramGeneratorDialog } from "./DiagramGeneratorDialog";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -40,6 +41,7 @@ import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
 import type { PatchMap } from "src/utils/generateSql";
+import { pickHostDbUser } from "src/utils/connection";
 
 const EMPTY_TABLE_META = {
   columns: null,
@@ -80,6 +82,7 @@ export function ConnectionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [diagramOpen, setDiagramOpen] = useState(false);
   const [rightNavTab, setRightNavTab] = useState<"ai" | "table-size">(
     "table-size"
   );
@@ -321,6 +324,11 @@ export function ConnectionScreen() {
     return getProfileById(activeTab.profileId);
   }, [activeTab, getProfileById]);
 
+  const diagramDatabase = useMemo(() => {
+    if (!profile) return "";
+    return pickHostDbUser(profile).database || "";
+  }, [profile]);
+
   const onInsertSqlIntoActiveEditor = useCallback(
     (sql: string) => {
       const next = sql.trim();
@@ -367,6 +375,10 @@ export function ConnectionScreen() {
       );
     };
   }, [setViewMode]);
+
+  const openDiagram = useMemo(() => {
+    return () => setDiagramOpen(true);
+  }, []);
 
   /* =============================================================================
    * Keyboard shortcuts (uses stable actions)
@@ -496,6 +508,7 @@ export function ConnectionScreen() {
             onRefresh={() => void actions.refresh()}
             onSearchOpen={() => setSearchDialogOpen(true)}
             onOpenAiAssistant={openAiAssistant}
+            onOpenDiagram={openDiagram}
           />
 
           <div class="flex h-full flex-1 overflow-hidden">
@@ -650,6 +663,17 @@ export function ConnectionScreen() {
           schemaLabel={engine === "mongo" ? "Database" : "Schema"}
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}
+        />
+
+        <DiagramGeneratorDialog
+          open={diagramOpen}
+          onClose={() => setDiagramOpen(false)}
+          engine={engine}
+          database={diagramDatabase}
+          schema={activeSchema}
+          connectionId={runtimeConnectionId}
+          metaKey={metaKey}
+          metadata={metadata}
         />
       </ConnectionRuntimeProvider>
     </ConnectionActionsProvider>
