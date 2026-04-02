@@ -220,8 +220,17 @@ export type ConnectionProfile = {
   engine: DatabaseEngine;
   label: string;
   input: ConnectionCreateInput;
+  tags?: string[];
+  indicator_color?: string | null;
   created_at: number;
   updated_at: number;
+};
+
+export type ProfileImportResult = {
+  created: number;
+  updated: number;
+  total: number;
+  profiles: ConnectionProfile[];
 };
 
 export type ProfileConnectInput = {

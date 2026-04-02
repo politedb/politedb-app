@@ -82,6 +82,9 @@ fn main() {
             commands::profile::profile_save_and_connect,
             commands::profile::profile_connect,
             commands::profile::profile_connect_test,
+            commands::profile::profile_export,
+            commands::profile::profile_export_one,
+            commands::profile::profile_import,
             // secrets
             secrets::secrets_set,
             secrets::secrets_get,

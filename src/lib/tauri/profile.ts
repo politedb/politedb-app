@@ -5,6 +5,7 @@ import type {
   ConnectionCreateInput,
   ConnectionProfile,
   ConnectionTestSecrets,
+  ProfileImportResult,
   ProfileConnectInput,
   ProfileConnectResult,
   ProfileConnectTestInput,
@@ -512,6 +513,22 @@ export async function profileConnect(
 
 export async function profileRemove(profileId: string): Promise<void> {
   await invoke(CMD.profileRemove, { profileId });
+}
+
+export async function profileExport(): Promise<string> {
+  return invoke<string>(CMD.profileExport);
+}
+
+export async function profileExportOne(profileId: string): Promise<string> {
+  return invoke<string>(CMD.profileExportOne, { profileId });
+}
+
+export async function profileImport(
+  json: string
+): Promise<ProfileImportResult> {
+  return invoke<ProfileImportResult>(CMD.profileImport, {
+    payload: { json },
+  });
 }
 
 export async function profileConnectTest(

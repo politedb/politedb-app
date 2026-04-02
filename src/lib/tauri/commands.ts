@@ -19,6 +19,9 @@ export const CMD = {
   profileSaveAndConnect: "profile_save_and_connect",
   profileConnect: "profile_connect",
   profileConnectTest: "profile_connect_test",
+  profileExport: "profile_export",
+  profileExportOne: "profile_export_one",
+  profileImport: "profile_import",
 
   // Secrets
   secretsGet: "secrets_get",

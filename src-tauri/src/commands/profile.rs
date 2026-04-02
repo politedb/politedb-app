@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -54,6 +54,26 @@ pub enum ProfileSaveInput {
 pub struct ProfileSaveAndConnectResult {
     pub profile: ConnectionProfile,
     pub connection: AppConnectionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileExportFile {
+    pub version: u32,
+    pub exported_at: i64,
+    pub profiles: Vec<ConnectionProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileImportPayload {
+    pub json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileImportResult {
+    pub created: usize,
+    pub updated: usize,
+    pub total: usize,
+    pub profiles: Vec<ConnectionProfile>,
 }
 
 /* ============================================================================
@@ -703,4 +723,74 @@ pub fn profile_update(
 #[tauri::command]
 pub fn profile_remove(app: AppHandle, profile_id: Uuid) -> Result<(), String> {
     profile_store::profile_remove(&app, profile_id)
+}
+
+#[tauri::command]
+pub fn profile_export(app: AppHandle) -> Result<String, String> {
+    let profiles = profile_store::profile_list(&app)?;
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    let file = ProfileExportFile {
+        version: profile_store::profile_file_version(),
+        exported_at,
+        profiles,
+    };
+
+    serde_json::to_string_pretty(&file).map_err(|e| format!("PROFILE_EXPORT_SERIALIZE_FAILED: {e}"))
+}
+
+#[tauri::command]
+pub fn profile_export_one(app: AppHandle, profile_id: Uuid) -> Result<String, String> {
+    let profile = profile_store::profile_get(&app, profile_id)?;
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    let file = ProfileExportFile {
+        version: profile_store::profile_file_version(),
+        exported_at,
+        profiles: vec![profile],
+    };
+
+    serde_json::to_string_pretty(&file).map_err(|e| format!("PROFILE_EXPORT_SERIALIZE_FAILED: {e}"))
+}
+
+#[tauri::command]
+pub fn profile_import(
+    app: AppHandle,
+    payload: ProfileImportPayload,
+) -> Result<ProfileImportResult, String> {
+    let json = payload.json.trim();
+    if json.is_empty() {
+        return Err("PROFILE_IMPORT_EMPTY".into());
+    }
+
+    let profiles = match serde_json::from_str::<ProfileExportFile>(json) {
+        Ok(file) => file.profiles,
+        Err(wrapper_err) => match serde_json::from_str::<Vec<ConnectionProfile>>(json) {
+            Ok(list) => list,
+            Err(list_err) => match serde_json::from_str::<ConnectionProfile>(json) {
+                Ok(profile) => vec![profile],
+                Err(one_err) => {
+                    return Err(format!(
+                        "PROFILE_IMPORT_INVALID_JSON: wrapper={wrapper_err}; list={list_err}; one={one_err}"
+                    ))
+                }
+            },
+        },
+    };
+
+    let (created, updated, profiles) = profile_store::profile_upsert_many(&app, profiles)?;
+    let total = profiles.len();
+
+    Ok(ProfileImportResult {
+        created,
+        updated,
+        total,
+        profiles,
+    })
 }

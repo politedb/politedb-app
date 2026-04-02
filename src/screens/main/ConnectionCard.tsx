@@ -1,12 +1,14 @@
 import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
-import type { ConnectionProfile } from "src/lib/tauri";
+import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
-import { Edit, Ssh, Trash, MoreVertical } from "src/components/icons";
+import { Edit, Ssh, Trash, MoreVertical, Backup } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { cn } from "src/utils/cn";
+import { saveDialog, showMessage } from "src/lib/system-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 
 /* -------------------------------------------------- */
 /* utils */
@@ -198,6 +200,33 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     await removeProfile(profile.id);
   }
 
+  async function onExport() {
+    if (!profile) return;
+    const currentProfile = profile;
+
+    try {
+      const safeLabel = (currentProfile.label || "connection")
+        .trim()
+        .replace(/[\\/:*?"<>|]+/g, "-");
+      const path = await saveDialog({
+        title: "Export connection config",
+        defaultPath: `${safeLabel}.politedb-connection.json`,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+
+      const json = await profileExportOne(currentProfile.id);
+      await writeTextFile(path, json);
+
+      await showMessage(
+        "Connection config exported. Passwords stored in keychain are not included in the file.",
+        { title: "Export complete", kind: "info" }
+      );
+    } catch (err) {
+      await showMessage(String(err), { title: "Export failed", kind: "error" });
+    }
+  }
+
   useEffect(() => {
     if (!menuOpen) return;
     return () => closeMenu();
@@ -312,13 +341,22 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         items={[
           {
             type: "item",
-            label: "Edit",
+            label: "Edit Connection",
             icon: <Edit className="size-4" />,
             onClick: () => {
               closeMenu();
               onEdit();
             },
           },
+          {
+            type: "item",
+            label: "Export Connection",
+            icon: <Backup className="size-4" />,
+            onClick: () => {
+              void onExport();
+            },
+          },
+          { type: "sep" },
           {
             type: "item",
             label: "Delete",

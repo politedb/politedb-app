@@ -4,6 +4,20 @@ export function safeLower(v?: string | null) {
   return (v ?? "").toLowerCase();
 }
 
+function sortConnectionsByNewest(
+  connections: ConnectionProfile[]
+): ConnectionProfile[] {
+  return connections
+    .slice()
+    .sort((a, b) => {
+      const byCreated = (b.created_at ?? 0) - (a.created_at ?? 0);
+      if (byCreated !== 0) return byCreated;
+      const byUpdated = (b.updated_at ?? 0) - (a.updated_at ?? 0);
+      if (byUpdated !== 0) return byUpdated;
+      return safeLower(a.label).localeCompare(safeLower(b.label));
+    });
+}
+
 export function pickHostDbUser(conn: ConnectionProfile) {
   const engine = conn.engine;
 
@@ -74,29 +88,31 @@ export function filterConnections(
   searchQuery: string
 ) {
   const q = safeLower(searchQuery.trim());
-  if (!q) return connections;
+  if (!q) return sortConnectionsByNewest(connections);
 
-  return connections.filter((conn) => {
-    const label = safeLower(conn.label);
-    const engine = safeLower(conn.engine);
+  return sortConnectionsByNewest(
+    connections.filter((conn) => {
+      const label = safeLower(conn.label);
+      const engine = safeLower(conn.engine);
 
-    const { host, database, user } = pickHostDbUser(conn);
-    const hostL = safeLower(host);
-    const dbL = safeLower(database);
-    const userL = safeLower(user);
-    const userHost = `${userL}@${hostL}`;
+      const { host, database, user } = pickHostDbUser(conn);
+      const hostL = safeLower(host);
+      const dbL = safeLower(database);
+      const userL = safeLower(user);
+      const userHost = `${userL}@${hostL}`;
 
-    const tag = safeLower((conn as any).tag); // optional UI meta
+      const tag = safeLower((conn as any).tag); // optional UI meta
 
-    return (
-      label.includes(q) ||
-      engine.includes(q) ||
-      hostL.includes(q) ||
-      dbL.includes(q) ||
-      tag.includes(q) ||
-      userHost.includes(q)
-    );
-  });
+      return (
+        label.includes(q) ||
+        engine.includes(q) ||
+        hostL.includes(q) ||
+        dbL.includes(q) ||
+        tag.includes(q) ||
+        userHost.includes(q)
+      );
+    })
+  );
 }
 
 export function groupConnections(connections: ConnectionProfile[]) {

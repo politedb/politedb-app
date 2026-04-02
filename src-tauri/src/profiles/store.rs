@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,10 @@ use crate::types::ConnectionCreateInput;
 use crate::file_storage as storage;
 
 const PROFILE_VERSION: u32 = 1;
+
+pub fn profile_file_version() -> u32 {
+    PROFILE_VERSION
+}
 
 /* ============================================================================
  * File format
@@ -123,6 +128,30 @@ pub fn profile_remove(app: &AppHandle, profile_id: Uuid) -> Result<(), String> {
 
     save_profiles(app, &profiles)?;
     Ok(())
+}
+
+pub fn profile_upsert_many(
+    app: &AppHandle,
+    incoming: Vec<ConnectionProfile>,
+) -> Result<(usize, usize, Vec<ConnectionProfile>), String> {
+    let current = load_profiles(app)?;
+    let mut by_id: BTreeMap<Uuid, ConnectionProfile> =
+        current.into_iter().map(|p| (p.id, p)).collect();
+
+    let mut created = 0usize;
+    let mut updated = 0usize;
+
+    for profile in incoming {
+        if by_id.insert(profile.id, profile).is_some() {
+            updated += 1;
+        } else {
+            created += 1;
+        }
+    }
+
+    let profiles: Vec<ConnectionProfile> = by_id.into_values().collect();
+    save_profiles(app, &profiles)?;
+    Ok((created, updated, profiles))
 }
 
 pub fn profile_create_with_id(

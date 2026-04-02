@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/SelectConnEngineModal";
@@ -16,8 +17,12 @@ import { KeychainSection } from "./KeychainSection";
 
 import { filterConnections } from "src/utils/connection";
 import type { DatabaseEngine, NavId, ViewMode } from "src/types";
-import type { ConnectionProfile } from "src/lib/tauri";
+import { profileImport, type ConnectionProfile } from "src/lib/tauri";
 import { needsTelemetryConsent } from "src/lib/analytics";
+import {
+  pickOpenFile,
+  showMessage,
+} from "src/lib/system-dialog";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -98,6 +103,27 @@ export function MainScreen() {
     setActiveProfileScreen(newTab.id);
   }
 
+  async function handleImportConnections() {
+    try {
+      const path = await pickOpenFile({
+        title: "Import connection config",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path || typeof path !== "string") return;
+
+      const json = await readTextFile(path);
+      const result = await profileImport(json);
+      await loadProfiles();
+
+      await showMessage(
+        `Imported ${result.created + result.updated} connection(s).\nCreated: ${result.created}\nUpdated: ${result.updated}\n\nProfiles using keychain secrets may need passwords to be re-entered on this device.`,
+        { title: "Import complete", kind: "info" }
+      );
+    } catch (err) {
+      await showMessage(String(err), { title: "Import failed", kind: "error" });
+    }
+  }
+
   return (
     <div class="flex h-full flex-col bg-neutral-50">
       <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -120,6 +146,7 @@ export function MainScreen() {
                     setKeychainNewSignal((n) => n + 1);
                   }
                 }}
+                onImportConnections={handleImportConnections}
                 onPrivacy={() => setPrivacyOpen(true)}
                 viewMode={viewMode}
                 onViewMode={setViewMode}

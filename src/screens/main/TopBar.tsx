@@ -1,6 +1,13 @@
 import type { TargetedEvent } from "preact";
 import { Button } from "src/components/common/Button";
-import { Grid, List, Plus, Search, Settings } from "src/components/icons";
+import {
+  Grid,
+  List,
+  Plus,
+  Restore,
+  Search,
+  Settings,
+} from "src/components/icons";
 import type { NavId, ViewMode } from "src/types";
 
 export function TopBar(props: {
@@ -8,6 +15,7 @@ export function TopBar(props: {
   searchQuery: string;
   onSearchChange: (v: string) => void;
   onNew: () => void;
+  onImportConnections?: () => void;
   onPrivacy: () => void;
   viewMode: ViewMode;
   onViewMode: (v: ViewMode) => void;
@@ -17,6 +25,7 @@ export function TopBar(props: {
     searchQuery,
     onSearchChange,
     onNew,
+    onImportConnections,
     onPrivacy,
     viewMode,
     onViewMode,
@@ -29,7 +38,7 @@ export function TopBar(props: {
   const newTitle = isConnections ? "New connection" : "New keychain key";
 
   return (
-    <div class="flex shrink-0 items-center gap-2 bg-white px-3 py-2">
+    <div class="flex shrink-0 items-center gap-2 bg-white px-1 py-2">
       {/* Search */}
       <div class="relative min-w-0 flex-1">
         <input
@@ -54,6 +63,28 @@ export function TopBar(props: {
         <Plus className="size-3.5" />
         <span class="text-[12px] font-semibold">{newLabel}</span>
       </Button>
+
+      <div class="flex items-center gap-1">
+        {isConnections && (
+          <Button
+            variant="outline"
+            onClick={onImportConnections}
+            class="h-9 rounded-lg border border-slate-300 px-[8px]"
+            title="Import Connection"
+          >
+            <Restore className="size-4" />
+          </Button>
+        )}
+
+        <Button
+          variant="outline"
+          onClick={onPrivacy}
+          class="h-9 rounded-lg border border-slate-300 px-[8px]"
+          title="Privacy Settings"
+        >
+          <Settings className="size-4" />
+        </Button>
+      </div>
 
       {/* View mode */}
       <div class="ml-1 flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
@@ -87,15 +118,6 @@ export function TopBar(props: {
           <List className="size-4" />
         </button>
       </div>
-
-      <Button
-        variant="outline"
-        onClick={onPrivacy}
-        class="h-9 rounded-lg border border-slate-300 px-2"
-        title="Privacy settings"
-      >
-        <Settings className="size-4" />
-      </Button>
     </div>
   );
 }
