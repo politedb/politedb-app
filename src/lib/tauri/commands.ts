@@ -3,6 +3,7 @@ export const CMD = {
   aiRuntimeStatus: "ai_runtime_status",
   aiRuntimeStart: "ai_runtime_start",
   aiRuntimeStop: "ai_runtime_stop",
+  aiRuntimeDownloadDefaultModel: "ai_runtime_download_default_model",
 
   // Connection
   connectionCreate: "connection_create",

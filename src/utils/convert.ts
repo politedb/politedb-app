@@ -84,13 +84,14 @@ export function formatBytesSize(bytes: string | number): string {
   const KB = 1024;
   const MB = KB * 1024;
   const GB = MB * 1024;
+  const formatDecimal = (value: number) => value.toFixed(2);
 
   if (numBytes >= GB) {
-    return `${numBytes / GB} GB`;
+    return `${formatDecimal(numBytes / GB)} GB`;
   } else if (numBytes >= MB) {
-    return `${numBytes / MB} MB`;
+    return `${formatDecimal(numBytes / MB)} MB`;
   } else if (numBytes >= KB) {
-    return `${numBytes / KB} KB`;
+    return `${formatDecimal(numBytes / KB)} KB`;
   } else {
     return `${numBytes} B`;
   }

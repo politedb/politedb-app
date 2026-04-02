@@ -61,6 +61,7 @@ fn main() {
             commands::ai::ai_runtime_status,
             commands::ai::ai_runtime_start,
             commands::ai::ai_runtime_stop,
+            commands::ai::ai_runtime_download_default_model,
             // Connections
             commands::connection::connection_create,
             commands::connection::connection_list,

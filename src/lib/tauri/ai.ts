@@ -13,6 +13,8 @@ export type AiRuntimeStatus = {
   managed_by_app: boolean;
   missing: string[];
   last_error?: string | null;
+  model_downloaded_bytes?: number | null;
+  model_total_bytes?: number | null;
 };
 
 export async function aiRuntimeStatus() {
@@ -25,4 +27,8 @@ export async function aiRuntimeStart() {
 
 export async function aiRuntimeStop() {
   return invoke<AiRuntimeStatus>(CMD.aiRuntimeStop);
+}
+
+export async function aiRuntimeDownloadDefaultModel() {
+  return invoke<AiRuntimeStatus>(CMD.aiRuntimeDownloadDefaultModel);
 }

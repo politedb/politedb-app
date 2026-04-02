@@ -3,6 +3,7 @@ import type { QueryResult } from "src/lib/tauri";
 
 const AI_ENDPOINT_KEY = "politedb.ai.endpoint";
 const AI_MODEL_KEY = "politedb.ai.model";
+const AI_MODEL_SEEN_KEY = "politedb.ai.model.seen";
 
 export type LocalAiSettings = {
   endpoint: string;
@@ -103,6 +104,14 @@ export function getLocalAiSettings(): LocalAiSettings {
 export function saveLocalAiSettings(settings: LocalAiSettings) {
   safeSetLocalStorage(AI_ENDPOINT_KEY, settings.endpoint.trim());
   safeSetLocalStorage(AI_MODEL_KEY, settings.model.trim());
+}
+
+export function hasSeenLocalAiModel() {
+  return safeGetLocalStorage(AI_MODEL_SEEN_KEY) === "1";
+}
+
+export function markLocalAiModelSeen() {
+  safeSetLocalStorage(AI_MODEL_SEEN_KEY, "1");
 }
 
 export async function listLocalAiModels(endpoint: string): Promise<string[]> {

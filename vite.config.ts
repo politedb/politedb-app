@@ -15,6 +15,15 @@ export default defineConfig(async () => ({
     globals: true,
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
+    alias: {
+      "monaco-editor": resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
+    },
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.tmp/**",
+      ".tmp/**",
+    ],
   },
   resolve: {
     alias: {

@@ -8,14 +8,17 @@ import {
   answerFromResult,
   chatReply,
   getLocalAiSettings,
+  hasSeenLocalAiModel,
   isGeneralChatPrompt,
   isReadOnlySql,
   listLocalAiModels,
+  markLocalAiModelSeen,
   planSqlFromQuestion,
   queryResultToObjects,
   saveLocalAiSettings,
 } from "src/lib/ai/localAssistant";
 import {
+  aiRuntimeDownloadDefaultModel,
   aiRuntimeStart,
   aiRuntimeStatus,
   aiRuntimeStop,
@@ -24,6 +27,7 @@ import {
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { ChatMessage, DatabaseEngine, TableItem } from "src/types";
 import { cn } from "src/utils/cn";
+import { formatBytesSize } from "src/utils/convert";
 
 type Props = {
   engine: DatabaseEngine;
@@ -60,6 +64,15 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function isMissingModelOnly(status?: AiRuntimeStatus | null) {
+  if (status?.phase !== "missing") return false;
+  const missing = status.missing.map((item) => item.toLowerCase());
+  return (
+    missing.some((item) => item.includes("gguf")) &&
+    !missing.some((item) => item.includes("llama-server"))
+  );
+}
+
 function ThinkingCard(props: { status: AssistantStatus }) {
   const isLoadingModel = props.status === "loading_model";
   return (
@@ -86,6 +99,97 @@ function ThinkingCard(props: { status: AssistantStatus }) {
   );
 }
 
+function RuntimeLoadingPane(props: {
+  status: AiRuntimeStatus | null;
+  onRetry: () => void;
+}) {
+  const details = props.status?.last_error?.trim() || "Please wait...";
+  const isDownloading = /downloading local ai model/i.test(details);
+  const downloaded = Number(props.status?.model_downloaded_bytes ?? 0);
+  const total = Number(props.status?.model_total_bytes ?? 0);
+  const progressPct =
+    total > 0 ? Math.max(0, Math.min(100, (downloaded / total) * 100)) : null;
+
+  return (
+    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+      <div class="w-full max-w-sm p-4 text-center">
+        <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50">
+          <div class="size-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+        </div>
+
+        <div class="mt-4 text-base font-semibold text-neutral-900">
+          {isDownloading
+            ? "Downloading local AI model"
+            : "Preparing AI Assistant"}
+        </div>
+
+        <div class="mt-2 text-sm leading-6 text-neutral-500">
+          {isDownloading
+            ? "PoliteDB is downloading the default local model. This may take a while depending on your network."
+            : "PoliteDB is starting the local AI runtime. The chat will appear as soon as it is ready."}
+        </div>
+
+        {isDownloading ? (
+          <div class="mt-4">
+            <div class="h-2 overflow-hidden rounded-full bg-neutral-100">
+              <div
+                class="h-full rounded-full bg-blue-600 transition-[width]"
+                style={{ width: `${progressPct ?? 0}%` }}
+              />
+            </div>
+            <div class="mt-2 text-xs text-neutral-500">
+              {progressPct !== null
+                ? `${progressPct.toFixed(1)}%`
+                : "Preparing download..."}
+              {" · "}
+              {formatBytesSize(downloaded)}
+              {total > 0 ? ` / ${formatBytesSize(total)}` : ""}
+            </div>
+          </div>
+        ) : null}
+
+        <div class="mt-4 text-xs text-neutral-400">{details}</div>
+
+        <div class="mt-5 flex justify-center">
+          <Button variant="outline" class="px-3 py-1.5" onClick={props.onRetry}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissingModelPane(props: { onDownload: () => void; busy: boolean }) {
+  return (
+    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+      <div class="w-full max-w-sm p-4 text-center">
+        <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-neutral-100 text-xl">
+          AI
+        </div>
+
+        <div class="mt-4 text-base font-semibold text-neutral-900">
+          No local AI model
+        </div>
+
+        <div class="mt-2 text-sm leading-6 text-neutral-500">
+          The local model is missing. Download it again to use the AI assistant.
+        </div>
+
+        <div class="mt-5 flex justify-center">
+          <Button
+            class="px-3 py-1.5"
+            onClick={props.onDownload}
+            loading={props.busy}
+          >
+            Download model
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AiAssistantPanel(props: Props) {
   const {
     engine,
@@ -97,10 +201,16 @@ export function AiAssistantPanel(props: Props) {
     onInsertSql,
   } = props;
 
+  const initialSettingsRef = useRef<ReturnType<typeof getLocalAiSettings>>();
+  if (!initialSettingsRef.current) {
+    initialSettingsRef.current = getLocalAiSettings();
+  }
+  const initialSettings = initialSettingsRef.current;
+
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [endpoint, setEndpoint] = useState("");
-  const [model, setModel] = useState("");
+  const [endpoint, setEndpoint] = useState(initialSettings.endpoint);
+  const [model, setModel] = useState(initialSettings.model);
   const [loadingModels, setLoadingModels] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
@@ -110,8 +220,13 @@ export function AiAssistantPanel(props: Props) {
   );
   const [assistantStatus, setAssistantStatus] =
     useState<AssistantStatus>("idle");
+  const [hasSeenModelBefore, setHasSeenModelBefore] = useState(() =>
+    hasSeenLocalAiModel()
+  );
   const autoStartAttemptedRef = useRef(false);
-  const preferredModelRef = useRef("");
+  const autoDownloadAttemptedRef = useRef(false);
+  const suppressAutoStartRef = useRef(false);
+  const preferredModelRef = useRef(initialSettings.model.trim());
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -119,18 +234,33 @@ export function AiAssistantPanel(props: Props) {
   const requestSeqRef = useRef(0);
 
   useEffect(() => {
-    const settings = getLocalAiSettings();
-    setEndpoint(settings.endpoint);
-    preferredModelRef.current = settings.model.trim();
-    setModel(settings.model);
-  }, []);
-
-  useEffect(() => {
     void (async () => {
       try {
         const status = await aiRuntimeStatus();
         setRuntimeStatus(status);
         if (status.endpoint) setEndpoint(status.endpoint);
+        const missingModelOnly = isMissingModelOnly(status);
+        if (
+          missingModelOnly &&
+          !hasSeenModelBefore &&
+          !autoDownloadAttemptedRef.current
+        ) {
+          autoDownloadAttemptedRef.current = true;
+          setRuntimeBusy(true);
+          try {
+            const downloaded = await aiRuntimeDownloadDefaultModel();
+            setRuntimeStatus(downloaded);
+            if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
+            markLocalAiModelSeen();
+            setHasSeenModelBefore(true);
+            await handleStartBundledRuntime();
+            return;
+          } catch {
+            // keep missing state visible
+          } finally {
+            setRuntimeBusy(false);
+          }
+        }
         if (
           status.missing.length === 0 &&
           status.phase === "stopped" &&
@@ -146,7 +276,69 @@ export function AiAssistantPanel(props: Props) {
         // ignore in web preview
       }
     })();
-  }, []);
+  }, [hasSeenModelBefore]);
+
+  useEffect(() => {
+    if (!runtimeBusy && runtimeStatus?.phase !== "starting") return;
+
+    const id = window.setInterval(() => {
+      void aiRuntimeStatus()
+        .then((status) => {
+          setRuntimeStatus(status);
+          if (status.endpoint) setEndpoint(status.endpoint);
+        })
+        .catch(() => {});
+    }, 750);
+
+    return () => window.clearInterval(id);
+  }, [runtimeBusy, runtimeStatus?.phase]);
+
+  useEffect(() => {
+    if (runtimeBusy) return;
+    if (suppressAutoStartRef.current) return;
+    if (runtimeStatus?.phase !== "stopped") return;
+    if (runtimeStatus.missing.length > 0) return;
+    if (runtimeStatus.endpoint) return;
+
+    autoStartAttemptedRef.current = true;
+    void handleStartBundledRuntime();
+  }, [
+    runtimeBusy,
+    runtimeStatus?.phase,
+    runtimeStatus?.endpoint,
+    runtimeStatus?.missing,
+  ]);
+
+  useEffect(() => {
+    if (!runtimeStatus) return;
+    if (
+      runtimeStatus.missing.some((item) => item.toLowerCase().includes("gguf"))
+    ) {
+      return;
+    }
+    if (runtimeStatus.model_path) {
+      markLocalAiModelSeen();
+      setHasSeenModelBefore(true);
+    }
+  }, [runtimeStatus]);
+
+  useEffect(() => {
+    if (!hasSeenModelBefore) return;
+    if (!isMissingModelOnly(runtimeStatus)) return;
+    if (runtimeStatus?.phase === "missing" && !runtimeStatus?.endpoint) return;
+
+    setRuntimeStatus((prev) =>
+      prev
+        ? {
+            ...prev,
+            phase: "missing",
+            endpoint: null,
+            pid: null,
+            managed_by_app: false,
+          }
+        : prev
+    );
+  }, [hasSeenModelBefore, runtimeStatus]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -179,6 +371,21 @@ export function AiAssistantPanel(props: Props) {
   const canSubmit = useMemo(() => {
     return Boolean(prompt.trim() && endpoint.trim() && model.trim());
   }, [prompt, endpoint, model]);
+
+  const showRuntimeLoadingScreen = useMemo(() => {
+    if (runtimeBusy) return true;
+    return (
+      runtimeStatus?.phase === "starting" &&
+      !runtimeStatus?.endpoint &&
+      !submitting
+    );
+  }, [runtimeBusy, runtimeStatus, submitting]);
+
+  const showMissingModelScreen = useMemo(() => {
+    return (
+      !runtimeBusy && hasSeenModelBefore && isMissingModelOnly(runtimeStatus)
+    );
+  }, [runtimeBusy, hasSeenModelBefore, runtimeStatus]);
 
   const handleLoadModels = async (endpointOverride?: string) => {
     setLoadingModels(true);
@@ -213,6 +420,7 @@ export function AiAssistantPanel(props: Props) {
   };
 
   const handleStartBundledRuntime = async () => {
+    suppressAutoStartRef.current = false;
     setRuntimeBusy(true);
     try {
       const status = await aiRuntimeStart();
@@ -226,10 +434,81 @@ export function AiAssistantPanel(props: Props) {
   };
 
   const handleStopBundledRuntime = async () => {
+    suppressAutoStartRef.current = true;
     setRuntimeBusy(true);
     try {
       const status = await aiRuntimeStop();
       setRuntimeStatus(status);
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
+
+  const handleRetryRuntimeSetup = async () => {
+    suppressAutoStartRef.current = false;
+    setRuntimeBusy(true);
+    try {
+      const currentStatus = await aiRuntimeStatus();
+      setRuntimeStatus(currentStatus);
+      if (currentStatus.endpoint) setEndpoint(currentStatus.endpoint);
+
+      if (isMissingModelOnly(currentStatus)) {
+        const downloaded = await aiRuntimeDownloadDefaultModel();
+        setRuntimeStatus(downloaded);
+        if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
+        markLocalAiModelSeen();
+        setHasSeenModelBefore(true);
+      }
+
+      const nextStatus = await aiRuntimeStart();
+      setRuntimeStatus(nextStatus);
+      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
+      await handleLoadModels(nextStatus.endpoint ?? undefined);
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
+
+  const handleRefreshRuntimeSetup = async () => {
+    suppressAutoStartRef.current = false;
+    setRuntimeBusy(true);
+    try {
+      let currentStatus = await aiRuntimeStatus();
+      setRuntimeStatus(currentStatus);
+      if (currentStatus.endpoint) setEndpoint(currentStatus.endpoint);
+
+      if (currentStatus.phase === "ready") {
+        const stopped = await aiRuntimeStop();
+        setRuntimeStatus(stopped);
+        currentStatus = await aiRuntimeStatus();
+        setRuntimeStatus(currentStatus);
+      }
+
+      if (isMissingModelOnly(currentStatus)) {
+        if (!hasSeenModelBefore) {
+          const downloaded = await aiRuntimeDownloadDefaultModel();
+          setRuntimeStatus(downloaded);
+          if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
+          markLocalAiModelSeen();
+          setHasSeenModelBefore(true);
+        } else {
+          return;
+        }
+      }
+
+      const nextStatus = await aiRuntimeStatus();
+      setRuntimeStatus(nextStatus);
+      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
+
+      if (nextStatus.missing.length === 0 && nextStatus.phase !== "ready") {
+        const started = await aiRuntimeStart();
+        setRuntimeStatus(started);
+        if (started.endpoint) setEndpoint(started.endpoint);
+        await handleLoadModels(started.endpoint ?? undefined);
+        return;
+      }
+
+      await handleLoadModels(nextStatus.endpoint ?? undefined);
     } finally {
       setRuntimeBusy(false);
     }
@@ -413,118 +692,133 @@ export function AiAssistantPanel(props: Props) {
             </div>
           </div>
 
-          <Popover
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            positions={["bottom"]}
-            align="end"
-            padding={10}
-            contentClassName="rounded-2xl"
-            showArrow={false}
-            content={
-              <AiAssistantSettingsPopover
-                loadingModels={loadingModels}
-                runtimeBusy={runtimeBusy}
-                runtimeStatus={runtimeStatus}
-                onLoadModels={() => void handleLoadModels()}
-                onStartRuntime={handleStartBundledRuntime}
-                onStopRuntime={handleStopBundledRuntime}
-              />
-            }
+          {!showRuntimeLoadingScreen && (
+            <Popover
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              positions={["bottom"]}
+              align="end"
+              padding={10}
+              contentClassName="rounded-2xl"
+              showArrow={false}
+              content={
+                <AiAssistantSettingsPopover
+                  loadingModels={loadingModels}
+                  runtimeBusy={runtimeBusy}
+                  runtimeStatus={runtimeStatus}
+                  onLoadModels={() => void handleRefreshRuntimeSetup()}
+                  onStartRuntime={handleStartBundledRuntime}
+                  onStopRuntime={handleStopBundledRuntime}
+                />
+              }
+            >
+              <button
+                type="button"
+                title="AI settings"
+                onClick={() => setSettingsOpen((prev) => !prev)}
+                class={cn(
+                  "rounded-md border border-neutral-200 p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
+                  settingsOpen && "border-blue-200 bg-blue-50 text-blue-700"
+                )}
+                aria-haspopup="dialog"
+              >
+                <Settings className="size-4" />
+              </button>
+            </Popover>
+          )}
+        </div>
+      </div>
+
+      {showRuntimeLoadingScreen ? (
+        <RuntimeLoadingPane
+          status={runtimeStatus}
+          onRetry={() => void handleRetryRuntimeSetup()}
+        />
+      ) : showMissingModelScreen ? (
+        <MissingModelPane
+          busy={runtimeBusy}
+          onDownload={() => void handleRetryRuntimeSetup()}
+        />
+      ) : (
+        <>
+          <div
+            ref={messagesContainerRef}
+            class="min-h-0 flex-1 overflow-y-auto px-3 py-3"
           >
+            <div class="space-y-3">
+              <div class="space-y-3">
+                {messages.length === 0 ? (
+                  <div class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-500">
+                    Ask about data, get SQL suggestions, or describe the insight
+                    you want to see.
+                  </div>
+                ) : null}
+
+                {messages.map((message) => (
+                  <AiAssistantMessageCard
+                    key={message.id}
+                    message={message}
+                    onInsertSql={onInsertSql}
+                  />
+                ))}
+
+                {submitting ? <ThinkingCard status={assistantStatus} /> : null}
+
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          </div>
+          {showScrollToBottom ? (
             <button
               type="button"
-              title="AI settings"
-              onClick={() => setSettingsOpen((prev) => !prev)}
-              class={cn(
-                "rounded-md border border-neutral-200 p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
-                settingsOpen && "border-blue-200 bg-blue-50 text-blue-700"
-              )}
-              aria-haspopup="dialog"
+              onClick={scrollToBottom}
+              title="Scroll to latest message"
+              class="absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200 bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
             >
-              <Settings className="size-4" />
+              <ArrowDown className="size-4" />
             </button>
-          </Popover>
-        </div>
-      </div>
+          ) : null}
 
-      <div
-        ref={messagesContainerRef}
-        class="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-      >
-        <div class="space-y-3">
-          <div class="space-y-3">
-            {messages.length === 0 ? (
-              <div class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-500">
-                Ask about data, get SQL suggestions, or describe the insight you
-                want to see.
-              </div>
-            ) : null}
-
-            {messages.map((message) => (
-              <AiAssistantMessageCard
-                key={message.id}
-                message={message}
-                onInsertSql={onInsertSql}
+          <div class="shrink-0 border-t border-neutral-200 px-3 py-3">
+            <div class="space-y-2">
+              <textarea
+                value={prompt}
+                onInput={(e) => setPrompt(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void handleSubmit();
+                  }
+                }}
+                placeholder="Ask AI about data, or ask it to write SQL for you..."
+                disabled={submitting}
+                class="min-h-24 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
               />
-            ))}
 
-            {submitting ? <ThinkingCard status={assistantStatus} /> : null}
-
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-      </div>
-
-      {showScrollToBottom ? (
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          title="Scroll to latest message"
-          class="absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200 bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
-        >
-          <ArrowDown className="size-4" />
-        </button>
-      ) : null}
-
-      <div class="shrink-0 border-t border-neutral-200 px-3 py-3">
-        <div class="space-y-2">
-          <textarea
-            value={prompt}
-            onInput={(e) => setPrompt(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void handleSubmit();
-              }
-            }}
-            placeholder="Ask AI about data, or ask it to write SQL for you..."
-            disabled={submitting}
-            class="min-h-24 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
-          />
-
-          <div class="flex items-center justify-between gap-2">
-            <div class="text-xs text-neutral-500">
-              {runtimeConnectionId
-                ? "Assistant will try to answer with real data when possible."
-                : "No runtime connection: Assistant will return SQL or suggestions first."}
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-xs text-neutral-500">
+                  {runtimeConnectionId
+                    ? "Assistant will try to answer with real data when possible."
+                    : "No runtime connection: Assistant will return SQL or suggestions first."}
+                </div>
+                <Button
+                  class="py-1.5"
+                  onClick={submitting ? handleCancelSubmit : handleSubmit}
+                  loading={false}
+                  disabled={!canSubmit && !submitting}
+                  variant={submitting ? "primary" : "default"}
+                >
+                  {submitting
+                    ? "Cancel"
+                    : assistantStatus === "loading_model"
+                      ? "Loading model..."
+                      : "Send"}
+                </Button>
+              </div>
             </div>
-            <Button
-              class="py-1.5"
-              onClick={submitting ? handleCancelSubmit : handleSubmit}
-              loading={false}
-              disabled={!canSubmit && !submitting}
-              variant={submitting ? "primary" : "default"}
-            >
-              {submitting
-                ? "Cancel"
-                : assistantStatus === "loading_model"
-                  ? "Loading model..."
-                  : "Send"}
-            </Button>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

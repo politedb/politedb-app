@@ -1,51 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("monaco-editor", () => {
-  class Range {
-    startLineNumber: number;
-    startColumn: number;
-    endLineNumber: number;
-    endColumn: number;
-    constructor(sLn: number, sCol: number, eLn: number, eCol: number) {
-      this.startLineNumber = sLn;
-      this.startColumn = sCol;
-      this.endLineNumber = eLn;
-      this.endColumn = eCol;
-    }
-  }
-
-  class Position {
-    lineNumber: number;
-    column: number;
-    constructor(lineNumber: number, column: number) {
-      this.lineNumber = lineNumber;
-      this.column = column;
-    }
-  }
-
-  const CompletionItemKind = {
-    Keyword: 14,
-    Function: 1,
-    Field: 4,
-    Struct: 6,
-    Class: 7,
-    Module: 8,
-    Operator: 12,
-  };
-
-  const languages = {
-    CompletionItemKind,
-    CompletionItemInsertTextRule: {
-      InsertAsSnippet: 4,
-    },
-    registerCompletionItemProvider: vi.fn((langId: string, provider: any) => {
-      return { dispose: vi.fn(), __langId: langId, __provider: provider };
-    }),
-  };
-
-  return { Range, Position, languages };
-});
-
 // mock sqlConstants
 vi.mock("src/sqlConstants", () => {
   return {
