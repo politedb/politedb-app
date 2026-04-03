@@ -181,8 +181,7 @@ function computeLoadPlan(params: {
     force ||
     refreshRowCount ||
     (!isFirstLoad && (!hasRowCount || refreshStats));
-  const needSizeInfo =
-    force || (!isFirstLoad && (!hasSizeInfo || refreshStats));
+  const needSizeInfo = force || !hasSizeInfo || refreshStats;
   const needMeta = force || refreshMeta || (!isFirstLoad && metaMissing);
   const needForeignKeys = force || refreshForeignKeys || !hasForeignKeys;
 

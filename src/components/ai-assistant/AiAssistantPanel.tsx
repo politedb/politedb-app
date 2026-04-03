@@ -445,6 +445,18 @@ export function AiAssistantPanel(props: Props) {
     return !runtimeBusy && isMissingServer(runtimeStatus);
   }, [runtimeBusy, runtimeStatus]);
 
+  const showSettings = useMemo(() => {
+    return (
+      !showRuntimeLoadingScreen &&
+      !showMissingRuntimeScreen &&
+      !showMissingModelScreen
+    );
+  }, [
+    showRuntimeLoadingScreen,
+    showMissingRuntimeScreen,
+    showMissingModelScreen,
+  ]);
+
   const handleLoadModels = async (endpointOverride?: string) => {
     setLoadingModels(true);
     try {
@@ -750,7 +762,7 @@ export function AiAssistantPanel(props: Props) {
             </div>
           </div>
 
-          {!showRuntimeLoadingScreen && !showMissingRuntimeScreen && (
+          {showSettings && (
             <Popover
               open={settingsOpen}
               onOpenChange={setSettingsOpen}

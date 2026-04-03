@@ -18,7 +18,6 @@ import { KeychainSection } from "./KeychainSection";
 import { filterConnections } from "src/utils/connection";
 import type { DatabaseEngine, NavId, ViewMode } from "src/types";
 import { profileImport, type ConnectionProfile } from "src/lib/tauri";
-import { needsTelemetryConsent } from "src/lib/analytics";
 import {
   pickOpenFile,
   showMessage,
@@ -52,7 +51,7 @@ export function MainScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
-  const [privacyOpen, setPrivacyOpen] = useState(needsTelemetryConsent());
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
