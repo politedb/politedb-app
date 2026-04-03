@@ -17,6 +17,8 @@ use crate::state::AppState;
 mod ssh_tunnel;
 
 mod window_chrome;
+#[cfg(target_os = "macos")]
+use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -25,6 +27,75 @@ use engines::registry::EngineRegistry;
 
 // Needed for `app.state()` and other app/window extension methods.
 use tauri::Manager;
+
+#[cfg(target_os = "macos")]
+const MIN_SUPPORTED_MACOS_MAJOR: u32 = 13;
+#[cfg(target_os = "macos")]
+const MIN_SUPPORTED_MACOS_MINOR: u32 = 3;
+
+#[cfg(target_os = "macos")]
+fn parse_macos_version(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+#[cfg(target_os = "macos")]
+fn is_supported_macos_version(version: (u32, u32, u32)) -> bool {
+    let (major, minor, _) = version;
+    major > MIN_SUPPORTED_MACOS_MAJOR
+        || (major == MIN_SUPPORTED_MACOS_MAJOR && minor >= MIN_SUPPORTED_MACOS_MINOR)
+}
+
+#[cfg(target_os = "macos")]
+fn show_unsupported_macos_alert(current_version: &str) {
+    let message = format!(
+        "PoliteDB requires macOS {}.{} or later.\\nCurrent macOS version: {}",
+        MIN_SUPPORTED_MACOS_MAJOR, MIN_SUPPORTED_MACOS_MINOR, current_version
+    );
+
+    let _ = StdCommand::new("osascript")
+        .args([
+            "-e",
+            &format!(
+                "display alert \"Unsupported macOS Version\" message \"{}\" as critical buttons {{\"OK\"}} default button \"OK\"",
+                message.replace('\\', "\\\\").replace('"', "\\\"")
+            ),
+        ])
+        .status();
+}
+
+#[cfg(target_os = "macos")]
+fn enforce_minimum_macos_version() -> Result<(), String> {
+    let output = StdCommand::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .map_err(|e| format!("Failed to read macOS version: {e}"))?;
+
+    let version = String::from_utf8(output.stdout)
+        .map_err(|e| format!("Failed to decode macOS version: {e}"))?;
+    let parsed = parse_macos_version(&version)
+        .ok_or_else(|| format!("Failed to parse macOS version: {}", version.trim()))?;
+
+    if is_supported_macos_version(parsed) {
+        Ok(())
+    } else {
+        show_unsupported_macos_alert(version.trim());
+        Err(format!(
+            "PoliteDB requires macOS {}.{} or later. Current version: {}",
+            MIN_SUPPORTED_MACOS_MAJOR,
+            MIN_SUPPORTED_MACOS_MINOR,
+            version.trim()
+        ))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn enforce_minimum_macos_version() -> Result<(), String> {
+    Ok(())
+}
 
 fn main() {
     tracing_subscriber::fmt()
@@ -52,6 +123,7 @@ fn main() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
+            enforce_minimum_macos_version()?;
             window_chrome::apply(app);
             let state: tauri::State<AppState> = app.state();
             state.sql_busy.clear();

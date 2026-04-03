@@ -2,13 +2,14 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
+import { Plus } from "src/components/icons";
 
 function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
   const { hasSearch, onCreate } = props;
 
   return (
-    <div class="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-      <div class="text-sm font-semibold text-slate-900">
+    <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+      <div class="font-semibold text-slate-900">
         {hasSearch ? "No matching connections" : "No connections yet"}
       </div>
       <div class="mt-1 text-sm text-slate-500">
@@ -19,8 +20,9 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
 
       {!hasSearch ? (
         <div class="mt-5">
-          <Button variant="default" onClick={onCreate}>
-            + New Connection
+          <Button variant="default" class="py-2 text-sm" onClick={onCreate}>
+            <Plus class="size-3.5" />
+            New Connection
           </Button>
         </div>
       ) : null}

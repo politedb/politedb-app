@@ -143,10 +143,55 @@ export function normalizeEngineName(
     mariadb: "MariaDB",
     mongo: "MongoDB",
     sqlite: "SQLite",
+    oracle: "Oracle",
+    sqlserver: "SQL Server",
     redis: "Redis",
   };
 
   const pretty = map[v] ?? String(engine ?? "Postgres");
 
   return opts?.upper ? pretty.toUpperCase() : pretty;
+}
+
+function extractSemverLike(value: string, parts: number = 2): string {
+  const match = value.match(/\d+(?:\.\d+)+/);
+  if (!match) return "";
+  return match[0].split(".").slice(0, parts).join(".");
+}
+
+export function formatDatabaseVersion(
+  engine: unknown,
+  version: unknown
+): string {
+  const raw = String(version ?? "").trim();
+  if (!raw) return "";
+
+  const normalizedEngine = String(engine ?? "").toLowerCase();
+
+  if (normalizedEngine === "sqlserver") {
+    const year = raw.match(/\b20\d{2}\b/);
+    if (year) return year[0];
+
+    const semver = extractSemverLike(raw, 2);
+    return semver || raw;
+  }
+
+  if (
+    [
+      "postgres",
+      "postgresql",
+      "mysql",
+      "mariadb",
+      "mongo",
+      "sqlite",
+      "oracle",
+      "redis",
+    ].includes(normalizedEngine)
+  ) {
+    const semver = extractSemverLike(raw, 2);
+    return semver || raw;
+  }
+
+  const generic = extractSemverLike(raw, 2);
+  return generic || raw;
 }

@@ -69,6 +69,8 @@ The CI release workflow is defined in `.github/workflows/release.yml` and runs o
 
 - Current updater endpoint is configured in `src-tauri/tauri.conf.json`.
 - Current release workflow is set up for macOS targets.
+- Official macOS support starts at `macOS 13.3+`.
+- Builds are blocked at startup on macOS versions below `13.3`.
 
 ## Analytics (PostHog)
 
@@ -118,3 +120,49 @@ Tracked usage events:
 Consent model:
 - always tracked: `app_installed`, `app_opened`, `app_active_daily`, `app_update_available`, `app_update_install_started`
 - allow-only: connection and SQL usage events
+
+## Local AI environment variables
+
+The AI assistant can use bundled assets, app data, or explicit environment overrides.
+
+Useful local overrides:
+
+```bash
+export POLITEDB_LLM_SERVER_BIN=/absolute/path/to/llama-server
+export POLITEDB_LLM_MODEL_PATH=/absolute/path/to/model.gguf
+npm run tauri:dev
+```
+
+Resolution order:
+- `POLITEDB_LLM_SERVER_BIN`
+- bundled `llama-server`
+- `POLITEDB_LLM_MODEL_PATH`
+- downloaded app-data model at `ai/models/default.gguf`
+- local dev fallback in `src-tauri/resources/ai/models/default.gguf`
+
+## Release workflow environment variables
+
+The GitHub release workflow reads these repository variables / secrets:
+
+Repository variables:
+- `VITE_ANALYTICS_ENABLED`
+- `VITE_POSTHOG_HOST`
+- `BUNDLE_AI_ASSISTANT`
+- `BUNDLE_AI_MODEL`
+- `AI_MODEL_REPO`
+- `AI_MODEL_PATTERN`
+- `AI_LLAMA_REF`
+
+Repository secrets:
+- `VITE_POSTHOG_KEY`
+- `HF_TOKEN`
+
+Recommended defaults:
+
+```bash
+BUNDLE_AI_ASSISTANT=true
+BUNDLE_AI_MODEL=false
+AI_MODEL_REPO=Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
+AI_MODEL_PATTERN=qwen2.5-coder-7b-instruct-q4_k_m*.gguf
+AI_LLAMA_REF=master
+```

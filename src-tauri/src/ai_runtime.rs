@@ -123,6 +123,39 @@ fn resources_root_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     roots
 }
 
+fn find_named_file(root: &Path, file_name: &str, max_depth: usize) -> Option<PathBuf> {
+    fn walk(dir: &Path, file_name: &str, depth: usize, max_depth: usize) -> Option<PathBuf> {
+        if depth > max_depth {
+            return None;
+        }
+
+        let entries = fs::read_dir(dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if path.file_name().is_some_and(|name| name == file_name) {
+                    return Some(path);
+                }
+                continue;
+            }
+
+            if path.is_dir() {
+                if let Some(found) = walk(&path, file_name, depth + 1, max_depth) {
+                    return Some(found);
+                }
+            }
+        }
+
+        None
+    }
+
+    if !root.exists() {
+        return None;
+    }
+
+    walk(root, file_name, 0, max_depth)
+}
+
 fn resolve_bundled_server_bin(app: &tauri::AppHandle) -> Option<PathBuf> {
     if let Ok(from_env) = std::env::var("POLITEDB_LLM_SERVER_BIN") {
         let path = PathBuf::from(from_env);
@@ -131,20 +164,30 @@ fn resolve_bundled_server_bin(app: &tauri::AppHandle) -> Option<PathBuf> {
         }
     }
 
-    resources_root_candidates(app)
-        .into_iter()
-        .flat_map(|root| {
-            [
-                root.join("ai")
-                    .join("bin")
-                    .join(std::env::consts::OS)
-                    .join(os_bin_name()),
-                root.join("bin")
-                    .join(std::env::consts::OS)
-                    .join(os_bin_name()),
-            ]
-        })
-        .find(|path| path.exists())
+    for root in resources_root_candidates(app) {
+        let direct_candidates = [
+            root.join("ai")
+                .join("bin")
+                .join(std::env::consts::OS)
+                .join(os_bin_name()),
+            root.join("bin")
+                .join(std::env::consts::OS)
+                .join(os_bin_name()),
+            root.join(std::env::consts::OS).join(os_bin_name()),
+            root.join("bin").join(os_bin_name()),
+            root.join(os_bin_name()),
+        ];
+
+        if let Some(found) = direct_candidates.into_iter().find(|path| path.exists()) {
+            return Some(found);
+        }
+
+        if let Some(found) = find_named_file(&root, os_bin_name(), 5) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -161,12 +204,23 @@ fn resolve_bundled_model_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         }
     }
 
-    let relative = PathBuf::from("ai").join("models").join("default.gguf");
+    for root in resources_root_candidates(app) {
+        let direct_candidates = [
+            root.join("ai").join("models").join("default.gguf"),
+            root.join("models").join("default.gguf"),
+            root.join("default.gguf"),
+        ];
 
-    resources_root_candidates(app)
-        .into_iter()
-        .map(|root| root.join(&relative))
-        .find(|path| path.exists())
+        if let Some(found) = direct_candidates.into_iter().find(|path| path.exists()) {
+            return Some(found);
+        }
+
+        if let Some(found) = find_named_file(&root, "default.gguf", 5) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 fn app_data_model_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -249,7 +303,7 @@ async fn wait_until_port_ready(port: u16) -> Result<(), String> {
         }
 
         if started.elapsed() > START_TIMEOUT {
-            return Err("Timed out waiting for local AI runtime to accept connections.".into());
+            return Err("Timed out waiting for AI runtime to accept connections.".into());
         }
 
         sleep(Duration::from_millis(350)).await;
@@ -287,7 +341,7 @@ pub async fn ai_runtime_status(app: &tauri::AppHandle, state: &AppState) -> AiRu
             || runtime
                 .last_error
                 .as_deref()
-                .is_some_and(|msg| msg.contains("Downloading local AI model")));
+                .is_some_and(|msg| msg.contains("Downloading AI model")));
 
     if ensure_child_not_exited(&mut runtime).await.unwrap_or(false) && runtime.endpoint.is_some() {
         return runtime.to_status(missing);
@@ -326,14 +380,14 @@ pub async fn ai_runtime_start(
     let Some(server_bin) = server_bin else {
         let mut runtime = state.ai_runtime.lock().await;
         runtime.phase = AiRuntimePhase::Missing;
-        runtime.last_error = Some("Local AI server binary not found.".to_string());
+        runtime.last_error = Some("AI server binary not found.".to_string());
         return Ok(runtime.to_status(missing));
     };
 
     let Some(model_path) = model_path else {
         let mut runtime = state.ai_runtime.lock().await;
         runtime.phase = AiRuntimePhase::Missing;
-        runtime.last_error = Some("Local AI GGUF model not found.".to_string());
+        runtime.last_error = Some("AI GGUF model not found.".to_string());
         return Ok(runtime.to_status(missing));
     };
 
@@ -406,7 +460,7 @@ pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String
         child
             .kill()
             .await
-            .map_err(|e| format!("Failed to stop local AI runtime: {e}"))?;
+            .map_err(|e| format!("Failed to stop AI runtime: {e}"))?;
         let _ = child.wait().await;
     }
 
@@ -429,7 +483,7 @@ pub async fn ai_runtime_download_default_model(
     if server_bin.is_none() {
         let mut runtime = state.ai_runtime.lock().await;
         runtime.phase = AiRuntimePhase::Missing;
-        runtime.last_error = Some("Local AI server binary not found.".to_string());
+        runtime.last_error = Some("AI server binary not found.".to_string());
         return Ok(runtime.to_status(missing));
     }
 
@@ -440,7 +494,7 @@ pub async fn ai_runtime_download_default_model(
     {
         let mut runtime = state.ai_runtime.lock().await;
         runtime.phase = AiRuntimePhase::Starting;
-        runtime.last_error = Some("Downloading local AI model...".to_string());
+        runtime.last_error = Some("Downloading AI model...".to_string());
         runtime.model_path = Some(destination.clone());
         runtime.model_downloaded_bytes = Some(0);
         runtime.model_total_bytes = None;
@@ -456,7 +510,8 @@ pub async fn ai_runtime_download_default_model(
         return Err(format!(
             "AI_MODEL_DOWNLOAD_FAILED: {} {}",
             response.status().as_u16(),
-            response.status()
+            response
+                .status()
                 .canonical_reason()
                 .unwrap_or("Unknown download error")
         ));
@@ -468,8 +523,8 @@ pub async fn ai_runtime_download_default_model(
         runtime.model_total_bytes = total_bytes;
     }
 
-    let mut file =
-        fs::File::create(&temp_path).map_err(|e| format!("Failed to create temp model file: {e}"))?;
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|e| format!("Failed to create temp model file: {e}"))?;
     let mut response = response;
     let mut downloaded_bytes: u64 = 0;
     while let Some(chunk) = response
@@ -539,7 +594,11 @@ mod tests {
         let missing = missing_items(None, None);
 
         assert_eq!(missing.len(), 2);
-        assert!(missing.iter().any(|item| item.contains("Missing llama-server binary")));
-        assert!(missing.iter().any(|item| item.contains("Missing GGUF model")));
+        assert!(missing
+            .iter()
+            .any(|item| item.contains("Missing llama-server binary")));
+        assert!(missing
+            .iter()
+            .any(|item| item.contains("Missing GGUF model")));
     }
 }

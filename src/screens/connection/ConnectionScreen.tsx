@@ -369,12 +369,17 @@ export function ConnectionScreen() {
 
   const openAiAssistant = useMemo(() => {
     return () => {
-      setRightNavTab("ai");
-      setViewMode((prev) =>
-        prev.includes("right") ? prev : [...prev, "right"]
-      );
+      setViewMode((prev) => {
+        const isAiOpen = prev.includes("right") && rightNavTab === "ai";
+        if (isAiOpen) {
+          return prev.filter((mode) => mode !== "right");
+        }
+
+        setRightNavTab("ai");
+        return prev.includes("right") ? prev : [...prev, "right"];
+      });
     };
-  }, [setViewMode]);
+  }, [rightNavTab, setViewMode]);
 
   const openDiagram = useMemo(() => {
     return () => setDiagramOpen(true);
@@ -500,6 +505,8 @@ export function ConnectionScreen() {
                 : activeSchema
             }
             activeTable={activeTableWindow?.table.name}
+            activeRightPanelTab={rightNavTab}
+            isRightPanelOpen={viewMode.includes("right")}
             connectionVersion={meta.version}
             viewMode={viewMode}
             loadTableError={loadError}

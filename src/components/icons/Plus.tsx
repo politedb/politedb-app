@@ -1,11 +1,8 @@
-export function Plus({ className }: { className: string }) {
+import { SVGAttributes } from "preact";
+
+export function Plus(props: SVGAttributes<SVGSVGElement>) {
   return (
-    <svg
-      class={className}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
       <path
         stroke-linecap="round"
         stroke-linejoin="round"

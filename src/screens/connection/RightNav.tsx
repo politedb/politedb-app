@@ -92,7 +92,7 @@ export function RightNav({
             active={activeTab === "table-size"}
             onClick={() => onTabChange("table-size")}
           >
-            Table Size
+            Data Info
           </TabButton>
           <TabButton
             active={activeTab === "ai"}

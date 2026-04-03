@@ -21,7 +21,7 @@ import { pickHostDbUser } from "src/utils/connection";
 import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
 import { TagChips } from "src/components/common/TagChips";
-import { normalizeEngineName } from "src/utils/convert";
+import { formatDatabaseVersion, normalizeEngineName } from "src/utils/convert";
 import { DatabaseManagerDialog } from "./DatabaseManagerDialog";
 import { canManageDatabases } from "src/hooks/useDatabases";
 import { connectionCreate } from "src/lib/tauri";
@@ -34,6 +34,8 @@ import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 interface Props {
   activeSchema?: string;
   activeTable?: string;
+  activeRightPanelTab?: "ai" | "table-size";
+  isRightPanelOpen?: boolean;
   connectionVersion?: string;
   schemas?: string[];
   viewMode?: TabViewMode[];
@@ -103,15 +105,20 @@ function EnvBadge({ text }: { text: string }) {
   const isDev = t.includes("DEV") || t.includes("LOCAL");
 
   const cls = isProd
-    ? "bg-red-50 text-red-700"
+    ? "bg-red-50 text-red-700 border-red-200"
     : isStaging
-      ? "bg-amber-50 text-amber-700"
+      ? "bg-sky-50 text-sky-700 border-sky-200"
       : isDev
-        ? "bg-emerald-50 text-emerald-700"
-        : "bg-neutral-100 text-neutral-600";
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+        : "bg-neutral-100 text-neutral-600 border-neutral-200";
 
   return (
-    <span class={cn("rounded-md px-1.5 py-0.5 text-xs font-semibold", cls)}>
+    <span
+      class={cn(
+        "flex h-5 items-center rounded-md border px-1.5 text-xs font-semibold",
+        cls
+      )}
+    >
       {t}
     </span>
   );
@@ -119,9 +126,11 @@ function EnvBadge({ text }: { text: string }) {
 
 function MetaPill({
   text,
+  className,
   tone = "neutral",
 }: {
   text: string;
+  className?: string;
   tone?: "neutral" | "blue";
 }) {
   if (!text) return null;
@@ -135,7 +144,8 @@ function MetaPill({
     <span
       class={cn(
         "inline-flex h-5 items-center rounded-md border px-1.5 text-xs font-semibold",
-        cls
+        cls,
+        className
       )}
     >
       {text}
@@ -240,6 +250,8 @@ function withDatabaseInput(
 export function MenuBar({
   activeSchema,
   activeTable,
+  activeRightPanelTab,
+  isRightPanelOpen = false,
   connectionVersion: databaseVersion = "",
   viewMode = ["left"],
   loadTableError,
@@ -328,8 +340,12 @@ export function MenuBar({
     const pretty = normalizeEngineName(connectionInfo.engine || "postgres", {
       upper: true,
     });
+    const version = formatDatabaseVersion(
+      connectionInfo.engine,
+      connectionInfo.version
+    );
 
-    return [pretty, connectionInfo.version].filter(Boolean).join(" ");
+    return [pretty, version].filter(Boolean).join(" ");
   }, [connectionInfo]);
 
   const onOpenDatabase = useCallback(
@@ -520,7 +536,14 @@ export function MenuBar({
           </IconButton>
 
           <IconButton title="AI Assistant" onClick={onOpenAiAssistant}>
-            <ChatIcon className="size-4 text-neutral-700" />
+            <ChatIcon
+              className={cn(
+                "size-4 transition-colors",
+                isRightPanelOpen && activeRightPanelTab === "ai"
+                  ? "text-blue-600"
+                  : "text-neutral-700"
+              )}
+            />
           </IconButton>
 
           <div class="flex h-7 items-center rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">

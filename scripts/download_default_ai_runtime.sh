@@ -11,6 +11,8 @@ MODEL_REPO="${MODEL_REPO:-Qwen/Qwen2.5-Coder-7B-Instruct-GGUF}"
 MODEL_PATTERN="${MODEL_PATTERN:-qwen2.5-coder-7b-instruct-q4_k_m*.gguf}"
 LLAMA_REF="${LLAMA_REF:-master}"
 DOWNLOAD_MODEL="${DOWNLOAD_MODEL:-false}"
+TARGET_TRIPLE="${TARGET_TRIPLE:-}"
+MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.3}"
 
 print_help() {
   cat <<'EOF'
@@ -79,7 +81,28 @@ BUILD_DIR="$LLAMA_DIR/build"
 rm -rf "$BUILD_DIR"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  cmake -S "$LLAMA_DIR" -B "$BUILD_DIR" -DGGML_METAL=ON -DCMAKE_BUILD_TYPE=Release
+  CMAKE_ARCH_ARGS=()
+  case "$TARGET_TRIPLE" in
+    x86_64-apple-darwin)
+      CMAKE_ARCH_ARGS+=("-DCMAKE_OSX_ARCHITECTURES=x86_64")
+      ;;
+    aarch64-apple-darwin)
+      CMAKE_ARCH_ARGS+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
+      ;;
+  esac
+
+  CMAKE_ARGS=(
+    -S "$LLAMA_DIR"
+    -B "$BUILD_DIR"
+    -DGGML_METAL=ON
+    -DCMAKE_BUILD_TYPE=Release
+    "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}"
+  )
+  if (( ${#CMAKE_ARCH_ARGS[@]} > 0 )); then
+    CMAKE_ARGS+=("${CMAKE_ARCH_ARGS[@]}")
+  fi
+
+  cmake "${CMAKE_ARGS[@]}"
   cmake --build "$BUILD_DIR" --config Release -j"$(sysctl -n hw.ncpu)"
 else
   cmake -S "$LLAMA_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release

@@ -73,6 +73,13 @@ function isMissingModelOnly(status?: AiRuntimeStatus | null) {
   );
 }
 
+function isMissingServer(status?: AiRuntimeStatus | null) {
+  if (status?.phase !== "missing") return false;
+  return status.missing.some((item) =>
+    item.toLowerCase().includes("llama-server")
+  );
+}
+
 function ThinkingCard(props: { status: AssistantStatus }) {
   const isLoadingModel = props.status === "loading_model";
   return (
@@ -104,7 +111,10 @@ function RuntimeLoadingPane(props: {
   onRetry: () => void;
 }) {
   const details = props.status?.last_error?.trim() || "Please wait...";
-  const isDownloading = /downloading local ai model/i.test(details);
+  const isDownloading =
+    props.status?.model_downloaded_bytes != null ||
+    props.status?.model_total_bytes != null ||
+    /downloading( local)? ai model/i.test(details);
   const downloaded = Number(props.status?.model_downloaded_bytes ?? 0);
   const total = Number(props.status?.model_total_bytes ?? 0);
   const progressPct =
@@ -112,7 +122,7 @@ function RuntimeLoadingPane(props: {
 
   return (
     <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
-      <div class="w-full max-w-sm p-4 text-center">
+      <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50">
           <div class="size-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
         </div>
@@ -125,8 +135,8 @@ function RuntimeLoadingPane(props: {
 
         <div class="mt-2 text-sm leading-6 text-neutral-500">
           {isDownloading
-            ? "PoliteDB is downloading the default local model. This may take a while depending on your network."
-            : "PoliteDB is starting the local AI runtime. The chat will appear as soon as it is ready."}
+            ? "PoliteDB is downloading the default model. This may take a while depending on your network."
+            : "PoliteDB is starting the AI runtime. The chat will appear as soon as it is ready."}
         </div>
 
         {isDownloading ? (
@@ -163,17 +173,19 @@ function RuntimeLoadingPane(props: {
 function MissingModelPane(props: { onDownload: () => void; busy: boolean }) {
   return (
     <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
-      <div class="w-full max-w-sm p-4 text-center">
-        <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-neutral-100 text-xl">
-          AI
+      <div class="w-full max-w-sm text-center">
+        <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-600">
+          <span class="flex size-6 items-center justify-center rounded-full border-2 border-blue-600/70 font-bold select-none">
+            !
+          </span>
         </div>
 
         <div class="mt-4 text-base font-semibold text-neutral-900">
-          No local AI model
+          Missing AI model
         </div>
 
         <div class="mt-2 text-sm leading-6 text-neutral-500">
-          The local model is missing. Download it again to use the AI assistant.
+          The AI model is missing. Download it to use the AI assistant.
         </div>
 
         <div class="mt-5 flex justify-center">
@@ -183,6 +195,44 @@ function MissingModelPane(props: { onDownload: () => void; busy: boolean }) {
             loading={props.busy}
           >
             Download model
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MissingRuntimePane(props: {
+  details?: string | null;
+  onRetry: () => void;
+}) {
+  return (
+    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+      <div class="w-full max-w-sm text-center">
+        <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-red-50 text-sm font-semibold text-red-600">
+          <span class="flex size-6 items-center justify-center rounded-full border-2 border-red-600/70 font-bold select-none">
+            !
+          </span>
+        </div>
+
+        <div class="mt-4 text-base font-semibold text-neutral-900">
+          Missing AI runtime
+        </div>
+
+        <div class="mt-2 text-sm leading-6 text-neutral-500">
+          The bundled AI server binary is not available, so the assistant cannot
+          start yet.
+        </div>
+
+        {props.details ? (
+          <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-xs leading-5 text-red-700">
+            {props.details}
+          </div>
+        ) : null}
+
+        <div class="mt-5 flex justify-center">
+          <Button variant="outline" class="px-3 py-1.5" onClick={props.onRetry}>
+            Retry
           </Button>
         </div>
       </div>
@@ -218,6 +268,7 @@ export function AiAssistantPanel(props: Props) {
   const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(
     null
   );
+  const [runtimeStatusReady, setRuntimeStatusReady] = useState(false);
   const [assistantStatus, setAssistantStatus] =
     useState<AssistantStatus>("idle");
   const [hasSeenModelBefore, setHasSeenModelBefore] = useState(() =>
@@ -274,6 +325,8 @@ export function AiAssistantPanel(props: Props) {
         await handleLoadModels(status.endpoint ?? undefined);
       } catch {
         // ignore in web preview
+      } finally {
+        setRuntimeStatusReady(true);
       }
     })();
   }, [hasSeenModelBefore]);
@@ -373,19 +426,24 @@ export function AiAssistantPanel(props: Props) {
   }, [prompt, endpoint, model]);
 
   const showRuntimeLoadingScreen = useMemo(() => {
+    if (!runtimeStatusReady) return true;
     if (runtimeBusy) return true;
     return (
       runtimeStatus?.phase === "starting" &&
       !runtimeStatus?.endpoint &&
       !submitting
     );
-  }, [runtimeBusy, runtimeStatus, submitting]);
+  }, [runtimeBusy, runtimeStatus, runtimeStatusReady, submitting]);
 
   const showMissingModelScreen = useMemo(() => {
     return (
       !runtimeBusy && hasSeenModelBefore && isMissingModelOnly(runtimeStatus)
     );
   }, [runtimeBusy, hasSeenModelBefore, runtimeStatus]);
+
+  const showMissingRuntimeScreen = useMemo(() => {
+    return !runtimeBusy && isMissingServer(runtimeStatus);
+  }, [runtimeBusy, runtimeStatus]);
 
   const handleLoadModels = async (endpointOverride?: string) => {
     setLoadingModels(true);
@@ -692,7 +750,7 @@ export function AiAssistantPanel(props: Props) {
             </div>
           </div>
 
-          {!showRuntimeLoadingScreen && (
+          {!showRuntimeLoadingScreen && !showMissingRuntimeScreen && (
             <Popover
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
@@ -733,6 +791,11 @@ export function AiAssistantPanel(props: Props) {
         <RuntimeLoadingPane
           status={runtimeStatus}
           onRetry={() => void handleRetryRuntimeSetup()}
+        />
+      ) : showMissingRuntimeScreen ? (
+        <MissingRuntimePane
+          details={runtimeStatus?.last_error}
+          onRetry={() => void handleRefreshRuntimeSetup()}
         />
       ) : showMissingModelScreen ? (
         <MissingModelPane

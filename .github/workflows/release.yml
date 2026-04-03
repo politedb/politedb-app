@@ -79,6 +79,8 @@ jobs:
           MODEL_PATTERN: ${{ env.AI_MODEL_PATTERN }}
           LLAMA_REF: ${{ env.AI_LLAMA_REF }}
           DOWNLOAD_MODEL: ${{ env.BUNDLE_AI_MODEL }}
+          TARGET_TRIPLE: ${{ matrix.target }}
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
         shell: bash
         run: |
           set -euo pipefail
@@ -103,9 +105,40 @@ jobs:
       - name: Build Tauri
         env:
           NODE_ENV: production
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Verify bundled AI runtime inside app bundle
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)"
+          if [ -z "${APP_PATH}" ]; then
+            echo "Could not find built .app bundle."
+            exit 1
+          fi
+
+          echo "Checking app bundle: ${APP_PATH}"
+          RESOURCE_DIR="${APP_PATH}/Contents/Resources"
+          if [ ! -d "${RESOURCE_DIR}" ]; then
+            echo "Missing Resources directory in app bundle: ${RESOURCE_DIR}"
+            exit 1
+          fi
+
+          LLAMA_BIN="$(find "${RESOURCE_DIR}" -type f -name 'llama-server' | head -n 1)"
+          if [ -z "${LLAMA_BIN}" ]; then
+            echo "Bundled llama-server was not found inside ${RESOURCE_DIR}"
+            echo "Resource tree:"
+            find "${RESOURCE_DIR}" -maxdepth 5 -print
+            exit 1
+          fi
+
+          echo "Found bundled llama-server:"
+          ls -lh "${LLAMA_BIN}"
 
       - name: Rename updater artifacts
         shell: bash
