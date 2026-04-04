@@ -95,6 +95,9 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     -S "$LLAMA_DIR"
     -B "$BUILD_DIR"
     -DGGML_METAL=ON
+    -DGGML_NATIVE=OFF
+    -DLLAMA_OPENSSL=OFF
+    -DLLAMA_BUILD_TESTS=OFF
     -DCMAKE_BUILD_TYPE=Release
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET}"
   )
@@ -103,10 +106,10 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
 
   cmake "${CMAKE_ARGS[@]}"
-  cmake --build "$BUILD_DIR" --config Release -j"$(sysctl -n hw.ncpu)"
+  cmake --build "$BUILD_DIR" --config Release --target llama-server -j"$(sysctl -n hw.ncpu)"
 else
-  cmake -S "$LLAMA_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$BUILD_DIR" --config Release -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+  cmake -S "$LLAMA_DIR" -B "$BUILD_DIR" -DGGML_NATIVE=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release
+  cmake --build "$BUILD_DIR" --config Release --target llama-server -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 fi
 
 BIN_CANDIDATES=(
