@@ -19,6 +19,7 @@ const planSqlFromQuestionMock = vi.fn();
 const isReadOnlySqlMock = vi.fn();
 const answerFromResultMock = vi.fn();
 const queryResultToObjectsMock = vi.fn();
+const buildFastResultAnswerMock = vi.fn();
 
 const aiRuntimeStatusMock = vi.fn();
 const aiRuntimeDownloadDefaultModelMock = vi.fn();
@@ -39,6 +40,7 @@ vi.mock("src/lib/ai/localAssistant", () => ({
   isReadOnlySql: (...args: any[]) => isReadOnlySqlMock(...args),
   answerFromResult: (...args: any[]) => answerFromResultMock(...args),
   queryResultToObjects: (...args: any[]) => queryResultToObjectsMock(...args),
+  buildFastResultAnswer: (...args: any[]) => buildFastResultAnswerMock(...args),
 }));
 
 vi.mock("src/lib/tauri", () => ({
@@ -114,6 +116,7 @@ function status(overrides: Record<string, unknown> = {}) {
 function renderPanel(props: Record<string, unknown> = {}) {
   return render(
     <AiAssistantPanel
+      chatSessionKey="test-session"
       engine="postgres"
       tables={[]}
       columnsByTable={{}}
@@ -155,6 +158,10 @@ beforeEach(() => {
     highlights: [],
   });
   queryResultToObjectsMock.mockReturnValue([{ id: 1 }, { id: 2 }]);
+  buildFastResultAnswerMock.mockReturnValue({
+    answer: "I ran the query and found 2 row(s). Here is a preview of the result.",
+    confidence: "high",
+  });
   aiRuntimeStatusMock.mockResolvedValue(
     status({
       phase: "ready",

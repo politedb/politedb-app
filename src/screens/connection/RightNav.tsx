@@ -4,6 +4,7 @@ import { AiAssistantPanel } from "src/components/ai-assistant/AiAssistantPanel";
 import { cn } from "src/utils/cn";
 
 interface Props {
+  chatSessionKey: string;
   activeTab: "ai" | "table-size";
   onTabChange: (tab: "ai" | "table-size") => void;
   sizeInfo: TableSizeInfo | null;
@@ -73,6 +74,7 @@ function TableSizePane({ sizeInfo }: { sizeInfo: TableSizeInfo | null }) {
 }
 
 export function RightNav({
+  chatSessionKey,
   activeTab,
   onTabChange,
   sizeInfo,
@@ -106,6 +108,7 @@ export function RightNav({
       <div class="min-h-0 flex-1 overflow-hidden">
         {activeTab === "ai" ? (
           <AiAssistantPanel
+            chatSessionKey={chatSessionKey}
             engine={engine}
             runtimeConnectionId={runtimeConnectionId}
             activeSchema={activeSchema}

@@ -206,28 +206,61 @@ async function generateText(opts: GenerateOptions): Promise<string> {
     );
   }
 
-  throw new Error("OLLAMA_GENERATE_FAILED: timed out waiting for model to load");
+  throw new Error(
+    "OLLAMA_GENERATE_FAILED: timed out waiting for model to load"
+  );
 }
 
 function toSchemaLines(args: {
   activeSchema?: string;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
+  question?: string;
 }) {
-  const { activeSchema, tables, columnsByTable = {} } = args;
+  const { activeSchema, tables, columnsByTable = {}, question } = args;
 
-  const visibleTables = tables
-    .filter((table) => !activeSchema || table.schema === activeSchema)
-    .slice(0, 120);
+  const visibleTables = tables.filter(
+    (table) => !activeSchema || table.schema === activeSchema
+  );
 
   if (!visibleTables.length) {
     return "No table metadata is loaded yet.";
   }
 
-  return visibleTables
+  const questionTokens = Array.from(
+    new Set(
+      (question ?? "")
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/g)
+        .map((item) => item.trim())
+        .filter((item) => item.length >= 2)
+    )
+  );
+
+  const rankedTables = visibleTables
     .map((table) => {
       const key = `${table.schema}.${table.name}`;
-      const cols = (columnsByTable[key] ?? []).slice(0, 40);
+      const cols = columnsByTable[key] ?? [];
+      const haystack =
+        `${table.schema} ${table.name} ${cols.join(" ")}`.toLowerCase();
+      const score = questionTokens.reduce(
+        (acc, token) => acc + (haystack.includes(token) ? 1 : 0),
+        0
+      );
+      return { table, score };
+    })
+    .sort(
+      (a, b) => b.score - a.score || a.table.name.localeCompare(b.table.name)
+    );
+
+  const selectedTables = rankedTables.some((item) => item.score > 0)
+    ? rankedTables.slice(0, 24).map((item) => item.table)
+    : rankedTables.slice(0, 48).map((item) => item.table);
+
+  return selectedTables
+    .map((table) => {
+      const key = `${table.schema}.${table.name}`;
+      const cols = (columnsByTable[key] ?? []).slice(0, 20);
       const suffix = cols.length
         ? `(${cols.map(formatColumnForAi).join(", ")})`
         : "(columns unknown)";
@@ -241,9 +274,7 @@ function needsQuotedIdentifier(name: string) {
 }
 
 function formatColumnForAi(name: string) {
-  return needsQuotedIdentifier(name)
-    ? `${name} (quote as "${name}")`
-    : name;
+  return needsQuotedIdentifier(name) ? `${name} (quote as "${name}")` : name;
 }
 
 function quoteIdentifier(engine: DatabaseEngine, name: string) {
@@ -330,6 +361,76 @@ export function queryResultToObjects(result: QueryResult, maxRows = 50) {
   });
 }
 
+function formatScalarForAnswer(value: unknown) {
+  if (value == null) return "null";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function buildFastResultAnswer(args: {
+  result: QueryResult;
+  preview: Record<string, unknown>[];
+}) {
+  const rowCount = Number(args.result.rowCount ?? args.preview.length ?? 0);
+  const columns = (args.result.columns ?? [])
+    .map((col) => col.name)
+    .filter(Boolean);
+
+  if (rowCount === 0) {
+    return {
+      answer: "I ran the query, but it returned no rows.",
+      confidence: "high" as const,
+    };
+  }
+
+  if (args.preview.length === 1 && columns.length === 1) {
+    const onlyColumn = columns[0]!;
+    return {
+      answer: `The result is ${formatScalarForAnswer(args.preview[0]?.[onlyColumn])}.`,
+      confidence: "high" as const,
+    };
+  }
+
+  if (args.preview.length === 1 && columns.length > 1 && columns.length <= 4) {
+    const row = args.preview[0] ?? {};
+    const summary = columns
+      .slice(0, 4)
+      .map((col) => `${col}: ${formatScalarForAnswer(row[col])}`)
+      .join(", ");
+    return {
+      answer: `I found 1 row: ${summary}.`,
+      confidence: "high" as const,
+    };
+  }
+
+  if (columns.length === 1 && rowCount <= 5) {
+    const col = columns[0]!;
+    const values = args.preview
+      .slice(0, 5)
+      .map((row) => formatScalarForAnswer(row[col]))
+      .join(", ");
+    return {
+      answer: `I found ${rowCount} row(s). ${col}: ${values}.`,
+      confidence: "high" as const,
+    };
+  }
+
+  return {
+    answer: `I ran the query and found ${rowCount} row(s). Here is a preview of the result.`,
+    confidence:
+      rowCount <= args.preview.length
+        ? ("high" as const)
+        : ("medium" as const as "high" | "medium" | "low"),
+  };
+}
+
 export async function planSqlFromQuestion(args: {
   endpoint: string;
   model: string;
@@ -342,7 +443,12 @@ export async function planSqlFromQuestion(args: {
   onStatusChange?: (status: "loading_model" | "generating") => void;
   signal?: AbortSignal;
 }) {
-  const schemaSummary = toSchemaLines(args);
+  const schemaSummary = toSchemaLines({
+    activeSchema: args.activeSchema,
+    tables: args.tables,
+    columnsByTable: args.columnsByTable,
+    question: args.question,
+  });
   const prompt = [
     "You are a database copilot inside PoliteDB.",
     `Database engine: ${args.engine}`,

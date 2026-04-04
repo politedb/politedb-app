@@ -6,6 +6,7 @@ import { Popover } from "src/components/common/Popover";
 import { ArrowDown, Settings } from "src/components/icons";
 import {
   answerFromResult,
+  buildFastResultAnswer,
   chatReply,
   getLocalAiSettings,
   hasSeenLocalAiModel,
@@ -30,6 +31,7 @@ import { cn } from "src/utils/cn";
 import { formatBytesSize } from "src/utils/convert";
 
 type Props = {
+  chatSessionKey: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
   activeSchema?: string;
@@ -38,6 +40,8 @@ type Props = {
   currentSql?: string;
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
+
+const aiChatSessionMap = new Map<string, ChatMessage[]>();
 
 function formatError(error: unknown) {
   return error instanceof Error
@@ -88,7 +92,7 @@ function ThinkingCard(props: { status: AssistantStatus }) {
         PoliteDB AI
       </div>
 
-      <div class="flex items-center gap-2 text-sm text-neutral-700">
+      <div class="flex items-center gap-2 text-xs text-neutral-700">
         <span>{isLoadingModel ? "Loading model" : "Thinking"}</span>
         <div class="flex items-center gap-1">
           <span class="size-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:0ms]" />
@@ -97,7 +101,7 @@ function ThinkingCard(props: { status: AssistantStatus }) {
         </div>
       </div>
 
-      <div class="mt-2 text-xs text-neutral-500">
+      <div class="mt-1 text-xs text-neutral-500">
         {isLoadingModel
           ? "Starting the local model for the first request. This can take a little while."
           : "Generating a response..."}
@@ -242,6 +246,7 @@ function MissingRuntimePane(props: {
 
 export function AiAssistantPanel(props: Props) {
   const {
+    chatSessionKey,
     engine,
     runtimeConnectionId,
     activeSchema,
@@ -258,7 +263,9 @@ export function AiAssistantPanel(props: Props) {
   const initialSettings = initialSettingsRef.current;
 
   const [prompt, setPrompt] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => aiChatSessionMap.get(chatSessionKey) ?? []
+  );
   const [endpoint, setEndpoint] = useState(initialSettings.endpoint);
   const [model, setModel] = useState(initialSettings.model);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -283,6 +290,14 @@ export function AiAssistantPanel(props: Props) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const requestAbortRef = useRef<AbortController | null>(null);
   const requestSeqRef = useRef(0);
+
+  useEffect(() => {
+    setMessages(aiChatSessionMap.get(chatSessionKey) ?? []);
+  }, [chatSessionKey]);
+
+  useEffect(() => {
+    aiChatSessionMap.set(chatSessionKey, messages);
+  }, [chatSessionKey, messages]);
 
   useEffect(() => {
     void (async () => {
@@ -691,19 +706,37 @@ export function AiAssistantPanel(props: Props) {
         if (requestSeqRef.current !== requestId) return;
 
         const preview = queryResultToObjects(result, 20);
-        const answer = await answerFromResult({
-          endpoint,
-          model,
-          engine,
-          question,
-          sql: plan.sql,
+        const fastAnswer = buildFastResultAnswer({
           result,
-          onStatusChange: (status) =>
-            setAssistantStatus(
-              status === "loading_model" ? "loading_model" : "thinking"
-            ),
-          signal: abortController.signal,
+          preview,
         });
+
+        let answer = {
+          answer: fastAnswer.answer,
+          confidence: fastAnswer.confidence,
+        };
+
+        const shouldUseLlmSummary =
+          preview.length > 0 &&
+          preview.length <= 3 &&
+          (result.columns ?? []).length <= 6 &&
+          Number(result.rowCount ?? preview.length) <= 3;
+
+        if (shouldUseLlmSummary) {
+          answer = await answerFromResult({
+            endpoint,
+            model,
+            engine,
+            question,
+            sql: plan.sql,
+            result,
+            onStatusChange: (status) =>
+              setAssistantStatus(
+                status === "loading_model" ? "loading_model" : "thinking"
+              ),
+            signal: abortController.signal,
+          });
+        }
 
         if (requestSeqRef.current !== requestId) return;
 

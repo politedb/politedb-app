@@ -563,6 +563,7 @@ export function ConnectionScreen() {
                         second={
                           <div class="h-full overflow-hidden border-l border-neutral-200">
                             <RightNav
+                              chatSessionKey={activeProfileScreen}
                               activeTab={rightNavTab}
                               onTabChange={setRightNavTab}
                               sizeInfo={activeTableData.sizeInfo}
@@ -597,6 +598,7 @@ export function ConnectionScreen() {
                     second={
                       <div class="h-full overflow-hidden border-l border-neutral-200">
                         <RightNav
+                          chatSessionKey={activeProfileScreen}
                           activeTab={rightNavTab}
                           onTabChange={setRightNavTab}
                           sizeInfo={activeTableData.sizeInfo}
