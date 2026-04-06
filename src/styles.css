@@ -192,6 +192,11 @@ table {
   animation: export-progress 1.5s ease-in-out infinite;
 }
 
+.monaco-editor .sql-current-run-highlight {
+  background: rgba(59, 130, 246, 0.12);
+  border-radius: 4px;
+}
+
 /* container */
 .split-pane {
   position: relative;

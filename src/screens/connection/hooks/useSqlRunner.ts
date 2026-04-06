@@ -14,6 +14,8 @@ import { RunSqlReturn } from "./useSqlHistoryRunner";
 import {
   ensureSqlStreamStarted,
   clearSqlStream,
+  subscribeSqlStream,
+  getSqlStreamSnapshot,
 } from "src/screens/connection/hooks/useSqlStreamResult";
 import { isMutatingStatement } from "src/utils/detect";
 
@@ -227,13 +229,44 @@ export function useSqlRunner(args: {
               });
             } else {
               setSlot(i, {
-                status: "done",
+                status: "running",
                 mode: "stream",
                 opId: response.opId,
                 startedAt: Date.now(),
               });
 
               ensureSqlStreamStarted(response.opId);
+
+              const syncStreamStatus = () => {
+                if (currentRunId(winId) !== runId) return;
+
+                const snapshot = getSqlStreamSnapshot(response.opId);
+                if (snapshot.status === "done") {
+                  setSlot(i, {
+                    status: "done",
+                    finishedAt: Date.now(),
+                  });
+                } else if (snapshot.status === "error") {
+                  setSlot(i, {
+                    status: "error",
+                    error: formatQueryError(
+                      snapshot.error ?? "Unknown error",
+                      i
+                    ),
+                    finishedAt: Date.now(),
+                  });
+                }
+              };
+
+              const unsubStream = subscribeSqlStream(
+                response.opId,
+                syncStreamStatus
+              );
+              syncStreamStatus();
+
+              window.setTimeout(() => {
+                unsubStream();
+              }, 65_000);
             }
           } catch (err) {
             if (currentRunId(winId) !== runId) return;

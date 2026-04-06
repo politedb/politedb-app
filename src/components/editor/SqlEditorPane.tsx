@@ -34,6 +34,27 @@ interface ExtendedEditor extends monaco.editor.IStandaloneCodeEditor {
   __disposeAll?: () => void;
 }
 
+type LiveSqlEditorApi = {
+  getValue: () => string;
+  appendSql: (sql: string) => Promise<void>;
+};
+
+const liveSqlEditors = new Map<string, LiveSqlEditorApi>();
+
+export function getLiveSqlEditorContent(windowId: string): string | null {
+  return liveSqlEditors.get(windowId)?.getValue() ?? null;
+}
+
+export async function appendSqlIntoLiveEditor(
+  windowId: string,
+  sql: string
+): Promise<boolean> {
+  const api = liveSqlEditors.get(windowId);
+  if (!api) return false;
+  await api.appendSql(sql);
+  return true;
+}
+
 function normalizeEol(s: string) {
   return s.replace(/\r\n/g, "\n");
 }
@@ -60,30 +81,58 @@ function buildExportHeader(opts: { engine: string; includeUrl?: boolean }) {
   return lines.join("\n") + "\n\n";
 }
 
-function getSelectedOrCurrentSql(editor: monaco.editor.IStandaloneCodeEditor) {
+function getSelectedOrCurrentSql(
+  editor: monaco.editor.IStandaloneCodeEditor,
+  preferredPosition?: monaco.Position | null
+) {
   const model = editor.getModel();
-  if (!model) return { mode: "none" as const, sql: "" };
+  if (!model) return { mode: "none" as const, sql: "", range: null };
 
   const sel = editor.getSelection();
   if (sel && !sel.isEmpty()) {
     const sql = model.getValueInRange(sel).trim();
-    return { mode: "selection" as const, sql };
+    return { mode: "selection" as const, sql, range: sel };
   }
 
-  const pos = editor.getPosition();
-  if (!pos) return { mode: "none" as const, sql: "" };
+  const pos = preferredPosition ?? editor.getPosition();
+  if (!pos) return { mode: "none" as const, sql: "", range: null };
 
   const full = model.getValue();
-  const offset = model.getOffsetAt(pos);
+  if (!full.trim()) return { mode: "none" as const, sql: "", range: null };
 
-  const left = full.slice(0, offset);
-  const right = full.slice(offset);
+  const maxIndex = Math.max(0, full.length - 1);
+  let probe = Math.min(model.getOffsetAt(pos), maxIndex);
+
+  while (probe > 0 && /[\s;]/.test(full[probe] ?? "")) {
+    probe -= 1;
+  }
+  while (probe < maxIndex && /[\s;]/.test(full[probe] ?? "")) {
+    probe += 1;
+  }
+
+  if (/[\s;]/.test(full[probe] ?? "")) {
+    return { mode: "none" as const, sql: "", range: null };
+  }
+
+  const left = full.slice(0, probe);
+  const right = full.slice(probe);
 
   const start = left.lastIndexOf(";") + 1;
   const endRel = right.indexOf(";");
-  const end = endRel === -1 ? full.length : offset + endRel;
+  const end = endRel === -1 ? full.length : probe + endRel;
+  const startPos = model.getPositionAt(start);
+  const endPos = model.getPositionAt(end);
 
-  return { mode: "current" as const, sql: full.slice(start, end).trim() };
+  return {
+    mode: "current" as const,
+    sql: full.slice(start, end).trim(),
+    range: new monaco.Range(
+      startPos.lineNumber,
+      startPos.column,
+      endPos.lineNumber,
+      endPos.column
+    ),
+  };
 }
 
 export function SqlEditorPane(props: Props) {
@@ -100,6 +149,8 @@ export function SqlEditorPane(props: Props) {
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ExtendedEditor | null>(null);
+  const lastCursorPositionRef = useRef<monaco.Position | null>(null);
+  const runHighlightIdsRef = useRef<string[]>([]);
 
   const completionCtxRef = useRef<CompletionCtx>({
     schemas,
@@ -147,6 +198,37 @@ export function SqlEditorPane(props: Props) {
 
   const getFullSql = () => editorRef.current?.getModel()?.getValue() ?? "";
 
+  const clearRunHighlight = () => {
+    const editor = editorRef.current;
+    if (!editor || runHighlightIdsRef.current.length === 0) return;
+    runHighlightIdsRef.current = editor.deltaDecorations(
+      runHighlightIdsRef.current,
+      []
+    );
+  };
+
+  const applyRunHighlight = (range: monaco.IRange | null) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    if (!range) {
+      clearRunHighlight();
+      return;
+    }
+
+    runHighlightIdsRef.current = editor.deltaDecorations(
+      runHighlightIdsRef.current,
+      [
+        {
+          range,
+          options: {
+            className: "sql-current-run-highlight",
+          },
+        },
+      ]
+    );
+   };
+
   const flushDraft = async () => {
     const full = getFullSql();
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -181,6 +263,39 @@ export function SqlEditorPane(props: Props) {
         }
       })();
     }, 700);
+  };
+
+  const appendSqlToEditor = async (sql: string) => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    const next = sql.trim();
+    if (!editor || !model || !next) return;
+
+    const current = model.getValue().trim();
+    const merged = current ? `${current}\n\n${next}` : next;
+
+    applyingExternalCounterRef.current += 1;
+    const currentCounter = applyingExternalCounterRef.current;
+
+    try {
+      model.pushEditOperations(
+        [],
+        [{ range: model.getFullModelRange(), text: merged }],
+        () => []
+      );
+      dirtyRef.current = false;
+    } finally {
+      queueMicrotask(() => {
+        if (applyingExternalCounterRef.current === currentCounter) {
+          applyingExternalCounterRef.current = 0;
+        }
+      });
+    }
+
+    clearRunHighlight();
+    await saveSqlDraft(win.id, merged);
+    callbacksRef.current.onCommitContent?.(win.id, merged);
+    editor.focus();
   };
 
   // Apply transformation to selection (if any) or whole doc; preserve selection.
@@ -236,8 +351,9 @@ export function SqlEditorPane(props: Props) {
     const ed = editorRef.current;
     if (!ed) return;
 
-    const picked = getSelectedOrCurrentSql(ed);
+    const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
     if (!picked.sql) return;
+    applyRunHighlight(picked.range);
 
     setIsExecuting(true);
     try {
@@ -365,16 +481,23 @@ export function SqlEditorPane(props: Props) {
       });
 
       editorRef.current = editor;
+      liveSqlEditors.set(win.id, {
+        getValue: () => editor.getModel()?.getValue() ?? "",
+        appendSql: appendSqlToEditor,
+      });
 
       const completionDisposable = registerSqlCompletionSmart(
         () => completionCtxRef.current
       );
 
       const selSub = editor.onDidChangeCursorSelection(() => {
+        lastCursorPositionRef.current = editor.getPosition();
         const sel = editor.getSelection();
         const next = !!sel && !sel.isEmpty();
         setHasSelection((prev) => (prev === next ? prev : next));
       });
+
+      lastCursorPositionRef.current = editor.getPosition();
 
       editor.addAction({
         id: "run-sql",
@@ -396,6 +519,7 @@ export function SqlEditorPane(props: Props) {
       const changeSub = editor.onDidChangeModelContent(() => {
         if (applyingExternalCounterRef.current > 0) return;
         dirtyRef.current = true;
+        clearRunHighlight();
         if (!savingRef.current) scheduleBackgroundSave();
       });
 
@@ -439,8 +563,11 @@ export function SqlEditorPane(props: Props) {
         triggerSub.dispose();
         blurSub.dispose();
         completionDisposable.dispose();
+        clearRunHighlight();
+        liveSqlEditors.delete(win.id);
         editor.dispose();
         editorRef.current = null;
+        lastCursorPositionRef.current = null;
       };
 
       editor.__disposeAll = disposeAll;

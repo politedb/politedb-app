@@ -144,6 +144,28 @@ function getOrCreate(opId: string): StreamEntry {
   return entry;
 }
 
+function getSnapshot(opId: string): SqlStreamResult {
+  const entry = streams.get(opId);
+  if (!entry) {
+    return {
+      status: "idle",
+      columns: [],
+      totalRows: 0,
+      rowsVersion: 0,
+      getRowAt: () => undefined,
+    };
+  }
+
+  return {
+    status: entry.status,
+    columns: entry.columns,
+    totalRows: entry.totalRows,
+    rowsVersion: entry.version,
+    error: entry.error,
+    getRowAt: (rowIndex: number) => streams.get(opId)?.rowsByIdx.get(rowIndex),
+  };
+}
+
 /* =============================================================================
  * Start stream
  * ============================================================================= */
@@ -281,6 +303,19 @@ export function clearSqlStream(opId: string) {
   streams.delete(opId);
 }
 
+export function subscribeSqlStream(opId: string, listener: Listener) {
+  const entry = getOrCreate(opId);
+  entry.listeners.add(listener);
+
+  return () => {
+    entry.listeners.delete(listener);
+  };
+}
+
+export function getSqlStreamSnapshot(opId: string): SqlStreamResult {
+  return getSnapshot(opId);
+}
+
 /* =============================================================================
  * Hook
  * ============================================================================= */
@@ -320,11 +355,7 @@ export function useSqlStreamResult(opId?: string | null): SqlStreamResult {
   }
 
   return {
-    status: entry.status,
-    columns: entry.columns,
-    totalRows: entry.totalRows,
-    rowsVersion: entry.version,
-    error: entry.error,
+    ...getSnapshot(opId),
     getRowAt,
   };
 }

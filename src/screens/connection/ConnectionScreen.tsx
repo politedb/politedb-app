@@ -32,6 +32,10 @@ import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
 import { DiagramGeneratorDialog } from "./DiagramGeneratorDialog";
+import {
+  appendSqlIntoLiveEditor,
+  getLiveSqlEditorContent,
+} from "src/components/editor/SqlEditorPane";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -330,12 +334,15 @@ export function ConnectionScreen() {
   }, [profile]);
 
   const onInsertSqlIntoActiveEditor = useCallback(
-    (sql: string) => {
+    async (sql: string) => {
       const next = sql.trim();
       if (!next) return;
 
       let targetWindowId = activeSqlWindow?.id;
-      let current = activeSqlWindow?.content?.trim() ?? "";
+      let current =
+        (targetWindowId ? getLiveSqlEditorContent(targetWindowId) : null)?.trim() ??
+        activeSqlWindow?.content?.trim() ??
+        "";
       let title = activeSqlWindow?.title ?? "SQL Query";
 
       if (!targetWindowId) {
@@ -355,6 +362,10 @@ export function ConnectionScreen() {
       }
 
       if (!targetWindowId) return;
+
+      if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
+        return;
+      }
 
       const merged = current ? `${current}\n\n${next}` : next;
       useScreenStore

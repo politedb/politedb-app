@@ -32,6 +32,27 @@ export function useConnectionShortcuts(params: {
   }, [params.actions]);
 
   useEffect(() => {
+    const closeCurrentTarget = () => {
+      const winId = activeWindowIdRef.current;
+      const tabId = activeProfileScreenRef.current;
+
+      if (winId) {
+        const syntheticEvent = new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+        }) as unknown as MouseEvent;
+        void actionsRef.current.closeWindow(winId, syntheticEvent);
+        return true;
+      }
+
+      if (tabId && tabId !== "main") {
+        void actionsRef.current.closeTab(tabId);
+        return true;
+      }
+
+      return false;
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toLowerCase().includes("mac");
       const mod = isMac ? e.metaKey : e.ctrlKey;
@@ -51,6 +72,16 @@ export function useConnectionShortcuts(params: {
           e.preventDefault();
           e.stopPropagation();
           void actionsRef.current.beforeSaveChanges();
+          return;
+        }
+
+        if (key === "w") {
+          if (!closeCurrentTarget()) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          return;
         }
         return;
       }
@@ -84,24 +115,12 @@ export function useConnectionShortcuts(params: {
       }
 
       if (key === "w") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const winId = activeWindowIdRef.current;
-        const tabId = activeProfileScreenRef.current;
-
-        if (winId) {
-          const syntheticEvent = new MouseEvent("click", {
-            bubbles: true,
-            cancelable: true,
-          }) as unknown as MouseEvent;
-          void actionsRef.current.closeWindow(winId, syntheticEvent);
+        if (!closeCurrentTarget()) {
           return;
         }
-
-        if (tabId && tabId !== "main") {
-          void actionsRef.current.closeTab(tabId);
-        }
+        e.preventDefault();
+        e.stopPropagation();
+        return;
       }
     };
 
