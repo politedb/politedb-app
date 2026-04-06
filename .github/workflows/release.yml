@@ -23,9 +23,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - platform: macos-latest
+          - platform: macos-14
             target: "aarch64-apple-darwin"
-          - platform: macos-latest
+          - platform: macos-15-intel
             target: "x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
@@ -95,6 +95,9 @@ jobs:
           set -euo pipefail
           test -f src-tauri/resources/ai/bin/macos/llama-server
           ls -lh src-tauri/resources/ai/bin/macos/llama-server
+          find src-tauri/resources/ai/bin/macos -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
+          otool -L src-tauri/resources/ai/bin/macos/llama-server
+          otool -l src-tauri/resources/ai/bin/macos/llama-server | grep -n -E "LC_RPATH|[[:space:]]path "
           if [ "${BUNDLE_AI_MODEL}" = "true" ]; then
             test -f src-tauri/resources/ai/models/default.gguf
             ls -lh src-tauri/resources/ai/models/default.gguf
@@ -139,6 +142,24 @@ jobs:
 
           echo "Found bundled llama-server:"
           ls -lh "${LLAMA_BIN}"
+          echo "Sibling AI runtime libraries inside app bundle:"
+          find "$(dirname "${LLAMA_BIN}")" -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
+          otool -L "${LLAMA_BIN}"
+          otool -l "${LLAMA_BIN}" | grep -n -E "LC_RPATH|[[:space:]]path "
+
+          if otool -L "${LLAMA_BIN}" | grep -q '/Users/runner/work/'; then
+            echo "Build-time absolute paths leaked into llama-server dependencies."
+            exit 1
+          fi
+
+          if otool -l "${LLAMA_BIN}" | grep -q '/Users/runner/work/'; then
+            echo "Build-time absolute rpath leaked into llama-server."
+            exit 1
+          fi
+
+          while IFS= read -r dylib; do
+            test -f "$(dirname "${LLAMA_BIN}")/$(basename "${dylib}")"
+          done < <(otool -L "${LLAMA_BIN}" | awk '/@rpath\/.*\.dylib/ {print $1}')
 
       - name: Rename updater artifacts
         shell: bash

@@ -24,7 +24,6 @@ export function PrivacyDialog(props: {
   function saveConsent(next: Exclude<TelemetryConsent, "unknown">) {
     setTelemetryConsent(next);
     onConsentSaved?.(next);
-    onClose();
   }
 
   return (

@@ -3,8 +3,11 @@ Bundled local AI runtime assets live here.
 Expected layout:
 
 - `bin/macos/llama-server`
+- `bin/macos/lib*.dylib` when the macOS runtime depends on shared libraries
 - `bin/linux/llama-server`
+- `bin/linux/*.so` when the Linux runtime depends on shared libraries
 - `bin/windows/llama-server.exe`
+- `bin/windows/*.dll` when the Windows runtime depends on shared libraries
 
 Optional local-dev layout:
 
@@ -13,7 +16,7 @@ Optional local-dev layout:
 Notes:
 
 - The server binary should be built from `llama.cpp` server mode.
-- Production builds should bundle only the binary to keep the app size small.
+- Production builds must bundle the server binary and any shared libraries it depends on.
 - The model should be a GGUF file that the bundled `llama-server` can load.
 - Preferred model locations:
   - `POLITEDB_LLM_MODEL_PATH`
