@@ -10,6 +10,7 @@ import {
   setTelemetryConsent,
   type TelemetryConsent,
 } from "src/lib/analytics";
+import { useEffect, useState } from "preact/hooks";
 
 export function PrivacyDialog(props: {
   open: boolean;
@@ -18,11 +19,20 @@ export function PrivacyDialog(props: {
   onConsentSaved?: (consent: Exclude<TelemetryConsent, "unknown">) => void;
 }) {
   const { open, onClose, forceChoice = false, onConsentSaved } = props;
-  const consent = getTelemetryConsent();
+  const [consent, setConsent] = useState<TelemetryConsent>(() =>
+    getTelemetryConsent()
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setConsent(getTelemetryConsent());
+  }, [open]);
+
   const analyticsEnabled = consent === "granted";
 
   function saveConsent(next: Exclude<TelemetryConsent, "unknown">) {
     setTelemetryConsent(next);
+    setConsent(next);
     onConsentSaved?.(next);
   }
 
