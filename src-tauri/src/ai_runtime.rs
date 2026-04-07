@@ -12,7 +12,16 @@ use tokio::time::sleep;
 
 use crate::state::AppState;
 
-const DEFAULT_CONTEXT_SIZE: u32 = 16384;
+/// Default context window for bundled `llama-server`. Kept small so KV cache + weights fit RAM;
+/// SIGKILL (signal 9) during startup is often OOM.
+const DEFAULT_CONTEXT_SIZE: u32 = 1024;
+const MIN_CONTEXT_SIZE: u32 = 512;
+const MAX_CONTEXT_SIZE: u32 = 131_072;
+/// `llama-server` defaults `-b` to a large value; that pre-allocates buffers and commonly causes OOM
+/// on 8 GB machines next to a multi‑GB GGUF.
+const DEFAULT_BATCH_SIZE: u32 = 128;
+const MIN_BATCH_SIZE: u32 = 32;
+const MAX_BATCH_SIZE: u32 = 8192;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const START_TIMEOUT: Duration = Duration::from_secs(90);
 const DEFAULT_MODEL_URL: &str = "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf?download=true";
@@ -284,6 +293,38 @@ fn ensure_executable(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn resolved_context_size() -> u32 {
+    if let Ok(raw) = std::env::var("POLITEDB_LLM_CONTEXT_SIZE") {
+        if let Ok(n) = raw.trim().parse::<u32>() {
+            return n.clamp(MIN_CONTEXT_SIZE, MAX_CONTEXT_SIZE);
+        }
+    }
+    DEFAULT_CONTEXT_SIZE
+}
+
+fn resolved_batch_size() -> u32 {
+    if let Ok(raw) = std::env::var("POLITEDB_LLM_BATCH_SIZE") {
+        if let Ok(n) = raw.trim().parse::<u32>() {
+            return n.clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE);
+        }
+    }
+    DEFAULT_BATCH_SIZE
+}
+
+/// When set (e.g. `0` for CPU-only), passed as `-ngl` to `llama-server`. When unset, the binary default applies.
+fn resolved_gpu_layers() -> Option<u32> {
+    let raw = std::env::var("POLITEDB_LLM_GPU_LAYERS").ok()?;
+    raw.trim().parse::<u32>().ok()
+}
+
+fn default_model_download_url() -> String {
+    std::env::var("POLITEDB_LLM_DEFAULT_MODEL_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL_URL.to_string())
+}
+
 fn pick_free_port() -> Result<u16, String> {
     let listener =
         TcpListener::bind((DEFAULT_HOST, 0)).map_err(|e| format!("Bind free port failed: {e}"))?;
@@ -310,13 +351,26 @@ async fn wait_until_port_ready(port: u16) -> Result<(), String> {
     }
 }
 
+fn format_ai_runtime_early_exit(status: std::process::ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if status.signal() == Some(9) {
+            return format!(
+                "AI runtime exited early with status {status} (SIGKILL — often out of memory)."
+            );
+        }
+    }
+    format!("AI runtime exited early with status {status}")
+}
+
 async fn ensure_child_not_exited(handle: &mut AiRuntimeHandle) -> Result<bool, String> {
     if let Some(child) = handle.child.as_mut() {
         match child.try_wait() {
             Ok(Some(status)) => {
                 handle.child = None;
                 handle.phase = AiRuntimePhase::Error;
-                handle.last_error = Some(format!("AI runtime exited early with status {status}"));
+                handle.last_error = Some(format_ai_runtime_early_exit(status));
                 Ok(false)
             }
             Ok(None) => Ok(true),
@@ -409,6 +463,8 @@ pub async fn ai_runtime_start(
 
     let port = pick_free_port()?;
     let endpoint = format!("http://{DEFAULT_HOST}:{port}/v1");
+    let context_size = resolved_context_size();
+    let batch_size = resolved_batch_size();
 
     let mut command = Command::new(&server_bin);
     command
@@ -419,7 +475,13 @@ pub async fn ai_runtime_start(
         .arg("--port")
         .arg(port.to_string())
         .arg("-c")
-        .arg(DEFAULT_CONTEXT_SIZE.to_string())
+        .arg(context_size.to_string())
+        .arg("-b")
+        .arg(batch_size.to_string());
+    if let Some(ngl) = resolved_gpu_layers() {
+        command.arg("-ngl").arg(ngl.to_string());
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -500,8 +562,9 @@ pub async fn ai_runtime_download_default_model(
         runtime.model_total_bytes = None;
     }
 
+    let model_url = default_model_download_url();
     let response = reqwest::Client::new()
-        .get(DEFAULT_MODEL_URL)
+        .get(&model_url)
         .send()
         .await
         .map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?;
