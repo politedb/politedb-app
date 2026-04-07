@@ -30,6 +30,7 @@ import { runSqlQuery } from "src/lib/tauri/query";
 import type { ChatMessage, DatabaseEngine, TableItem } from "src/types";
 import { cn } from "src/utils/cn";
 import { formatBytesSize } from "src/utils/convert";
+import { Spinner } from "src/components/common/Spinner";
 
 type Props = {
   chatSessionKey: string;
@@ -129,7 +130,7 @@ function RuntimeLoadingPane(props: {
     <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
       <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50">
-          <div class="size-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+          <Spinner className="size-5 text-blue-500" />
         </div>
 
         <div class="mt-4 text-base font-semibold text-neutral-900">

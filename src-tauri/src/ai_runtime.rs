@@ -537,6 +537,41 @@ pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String
     Ok(runtime.to_status(Vec::new()))
 }
 
+pub async fn ai_runtime_autostart_if_available(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    let (_server_bin, _model_path, missing) = detect_missing(app);
+    if !missing.is_empty() {
+        return Ok(());
+    }
+
+    let runtime = ai_runtime_status(app, state).await;
+    if matches!(runtime.phase, AiRuntimePhase::Ready | AiRuntimePhase::Starting) {
+        return Ok(());
+    }
+
+    let _ = ai_runtime_start(app, state).await?;
+    Ok(())
+}
+
+pub fn ai_runtime_force_shutdown_blocking(state: &AppState) {
+    let mut runtime = state.ai_runtime.blocking_lock();
+
+    if let Some(child) = runtime.child.as_mut() {
+        let _ = child.start_kill();
+    }
+
+    runtime.child = None;
+    runtime.phase = AiRuntimePhase::Stopped;
+    runtime.endpoint = None;
+    runtime.port = None;
+    runtime.managed_by_app = false;
+    runtime.last_error = None;
+    runtime.model_downloaded_bytes = None;
+    runtime.model_total_bytes = None;
+}
+
 pub async fn ai_runtime_download_default_model(
     app: &tauri::AppHandle,
     state: &AppState,
