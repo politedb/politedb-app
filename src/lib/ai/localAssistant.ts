@@ -1,5 +1,6 @@
 import type { DatabaseEngine, TableItem } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
+import type { ChatMessage } from "src/types";
 
 const AI_ENDPOINT_KEY = "politedb.ai.endpoint";
 const AI_MODEL_KEY = "politedb.ai.model";
@@ -30,6 +31,11 @@ export type AiChatReply = {
   followup?: string;
 };
 
+export type DirectMetadataReply = {
+  answer: string;
+  followup?: string;
+};
+
 type GenerateOptions = {
   endpoint: string;
   model: string;
@@ -37,6 +43,9 @@ type GenerateOptions = {
   onStatusChange?: (status: "loading_model" | "generating") => void;
   signal?: AbortSignal;
 };
+
+type AiHistoryItem = Pick<ChatMessage, "role" | "text" | "sql">;
+type ReplyLanguage = "english" | "vietnamese" | "same";
 
 const MODEL_LOADING_MAX_RETRIES = 20;
 const MODEL_LOADING_RETRY_MS = 1500;
@@ -62,6 +71,40 @@ function safeSetLocalStorage(key: string, value: string) {
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function sanitizeAiText(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+
+  const normalized = text.toLowerCase();
+  if (
+    normalized === "string" ||
+    normalized === "answer" ||
+    normalized === "followup" ||
+    normalized === "clarification" ||
+    normalized === "sql" ||
+    normalized === "explanation"
+  ) {
+    return "";
+  }
+
+  return text;
+}
+
+function sanitizeAiStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => sanitizeAiText(item))
+    .filter(Boolean);
+}
+
+function normalizeIntentText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
 }
 
 function sleep(ms: number, signal?: AbortSignal) {
@@ -269,6 +312,213 @@ function toSchemaLines(args: {
     .join("\n");
 }
 
+function toConversationLines(history: AiHistoryItem[] = []) {
+  const normalized = history
+    .map((item) => ({
+      role: item.role,
+      text: String(item.text ?? "").trim(),
+      sql: String(item.sql ?? "").trim(),
+    }))
+    .filter((item) => item.text || item.sql)
+    .slice(-6);
+
+  if (!normalized.length) return "No previous conversation.";
+
+  return normalized
+    .map((item) => {
+      const parts = [`${item.role === "assistant" ? "Assistant" : "User"}: ${item.text || "(no text)"}`];
+      if (item.sql) {
+        parts.push(`SQL: ${item.sql}`);
+      }
+      return parts.join("\n");
+    })
+    .join("\n\n");
+}
+
+function detectReplyLanguage(text: string): ReplyLanguage | null {
+  const raw = String(text ?? "").trim();
+  const normalized = normalizeIntentText(text);
+  if (!raw || !normalized) return null;
+
+  if (
+    /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
+      raw
+    ) ||
+    /\b(xin chao|chao|toi|cho toi|giup toi|lay|liet ke|hien thi|dem|du lieu|bang|cot|truy van|schema|co so du lieu)\b/.test(
+      normalized
+    )
+  ) {
+    return "vietnamese";
+  }
+
+  if (
+    /\b(use|speak|answer|reply|respond)( in)? english\b/.test(normalized) ||
+    /\benglish please\b/.test(normalized) ||
+    /\btieng anh\b/.test(normalized)
+  ) {
+    return "english";
+  }
+
+  if (
+    /\b(use|speak|answer|reply|respond)( in)? vietnamese\b/.test(normalized) ||
+    /\btieng viet\b/.test(normalized)
+  ) {
+    return "vietnamese";
+  }
+
+  return null;
+}
+
+function getPreferredReplyLanguage(
+  question: string,
+  history: AiHistoryItem[] = []
+): ReplyLanguage {
+  const direct = detectReplyLanguage(question);
+  if (direct) return direct;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const detected = detectReplyLanguage(history[i]?.text ?? "");
+    if (detected) return detected;
+  }
+
+  return "same";
+}
+
+function hasDatabaseIntent(text: string) {
+  const normalized = normalizeIntentText(text);
+  if (!normalized) return false;
+
+  return [
+    /\b(sql|query|table|column|schema|database|db|row|filter|where|join|group by|order by)\b/,
+    /\b(select|count|list|show|find|get|top|latest|newest|oldest|compare|trend|sum|avg|average|max|min|duplicate|missing)\b/,
+    /\b(liet ke|dem|tim|hien thi|truy van|sap xep|loc|thong ke|so sanh|tong|trung binh|lon nhat|nho nhat|moi nhat)\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function formatListPreview(items: string[], maxItems = 12) {
+  if (!items.length) return "";
+  if (items.length <= maxItems) return items.join(", ");
+  return `${items.slice(0, maxItems).join(", ")} and ${items.length - maxItems} more`;
+}
+
+export function getDirectMetadataReply(args: {
+  engine: DatabaseEngine;
+  question: string;
+  activeSchema?: string;
+  tables: TableItem[];
+}) {
+  const text = normalizeIntentText(args.question);
+  if (!text) return null;
+  const replyLanguage = getPreferredReplyLanguage(args.question);
+
+  const visibleTables = args.tables.filter(
+    (table) => !args.activeSchema || table.schema === args.activeSchema
+  );
+  const visibleNames = visibleTables.map((table) => table.name);
+  const schemaNames = Array.from(
+    new Set(args.tables.map((table) => table.schema).filter(Boolean))
+  );
+
+  const asksAllDatabases =
+    /\b(all )?(database|databases|db)\b/.test(text) ||
+    /\b(toan bo db|tat ca db|liet ke db|hien thi db)\b/.test(text);
+  const asksSchemas =
+    /\b(schema|schemas)\b/.test(text) ||
+    /\b(so do|liet ke schema|tat ca schema)\b/.test(text);
+  const asksTables =
+    /\b(table|tables|collection|collections|key|keys)\b/.test(text) ||
+    /\b(liet ke bang|tat ca bang|toan bo bang|liet ke collection|liet ke key)\b/.test(
+      text
+    );
+  const asksListLike = [
+    /\b(list|show|display|what are|which are|give me)\b/,
+    /\b(liet ke|hien thi|cho toi|toan bo|tat ca|common)\b/,
+  ].some((pattern) => pattern.test(text));
+
+  if (!asksListLike && !asksAllDatabases && !asksSchemas && !asksTables) {
+    return null;
+  }
+
+  if (args.engine === "redis" && (asksTables || asksAllDatabases || asksSchemas)) {
+    return {
+      answer: visibleNames.length
+        ? replyLanguage === "vietnamese"
+          ? `Hiện tại mình thấy ${visibleNames.length} key trong db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+          : `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+        : replyLanguage === "vietnamese"
+          ? `Hiện tại mình chưa thấy key nào trong db ${args.activeSchema || "0"}.`
+          : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
+    } satisfies DirectMetadataReply;
+  }
+
+  if (args.engine === "mongo" && (asksTables || asksAllDatabases || asksSchemas)) {
+    return {
+      answer: visibleNames.length
+        ? replyLanguage === "vietnamese"
+          ? `Hiện tại mình thấy ${visibleNames.length} collection trong database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
+          : `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
+        : replyLanguage === "vietnamese"
+          ? `Hiện tại mình chưa thấy collection nào trong database ${args.activeSchema || "(current)"}.`
+          : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
+    } satisfies DirectMetadataReply;
+  }
+
+  if (asksAllDatabases) {
+    if (schemaNames.length > 1) {
+      return {
+        answer:
+          replyLanguage === "vietnamese"
+            ? `Trong connection hiện tại mình thấy ${schemaNames.length} schema/database: ${formatListPreview(schemaNames)}.`
+            : `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
+        followup:
+          visibleNames.length > 0
+            ? replyLanguage === "vietnamese"
+              ? `Trong phạm vi đang mở ${args.activeSchema || schemaNames[0]}, mình cũng thấy ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
+              : `For the active scope ${args.activeSchema || schemaNames[0]}, I can also list ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+            : undefined,
+      } satisfies DirectMetadataReply;
+    }
+
+    return {
+      answer:
+        replyLanguage === "vietnamese"
+          ? `Trong connection hiện tại mình chỉ có metadata cho ${args.activeSchema || schemaNames[0] || "schema/database hiện tại"}.`
+          : `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
+      followup: visibleNames.length
+        ? replyLanguage === "vietnamese"
+          ? `Hiện tại nó có ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
+          : `It currently contains ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+        : undefined,
+    } satisfies DirectMetadataReply;
+  }
+
+  if (asksSchemas) {
+    return {
+      answer: schemaNames.length
+        ? replyLanguage === "vietnamese"
+          ? `Hiện tại mình thấy ${schemaNames.length} schema: ${formatListPreview(schemaNames)}.`
+          : `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
+        : replyLanguage === "vietnamese"
+          ? "Hiện tại mình chưa có metadata schema nào."
+          : "I do not have any schema metadata loaded yet.",
+    } satisfies DirectMetadataReply;
+  }
+
+  if (asksTables) {
+    return {
+      answer: visibleNames.length
+        ? replyLanguage === "vietnamese"
+          ? `Hiện tại mình thấy ${visibleNames.length} bảng trong ${args.activeSchema || "schema hiện tại"}: ${formatListPreview(visibleNames)}.`
+          : `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
+        : replyLanguage === "vietnamese"
+          ? `Hiện tại mình chưa thấy bảng nào trong ${args.activeSchema || "schema hiện tại"}.`
+          : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
+    } satisfies DirectMetadataReply;
+  }
+
+  return null;
+}
+
 function needsQuotedIdentifier(name: string) {
   return !/^[a-z_][a-z0-9_]*$/.test(name);
 }
@@ -339,15 +589,19 @@ function normalizeQuotedIdentifiers(args: {
 export function isReadOnlySql(sql: string) {
   const normalized = sql.trim().replace(/\s+/g, " ");
   if (!normalized) return false;
-  if (normalized.includes(";")) return false;
+  const withoutTrailingSemicolons = normalized.replace(/;+$/, "").trim();
+  if (!withoutTrailingSemicolons) return false;
+  if (withoutTrailingSemicolons.includes(";")) return false;
   if (
     /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|MERGE|GRANT|REVOKE)\b/i.test(
-      normalized
+      withoutTrailingSemicolons
     )
   ) {
     return false;
   }
-  return /^(SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN|PRAGMA)\b/i.test(normalized);
+  return /^(SELECT|WITH|SHOW|DESCRIBE|DESC|EXPLAIN|PRAGMA)\b/i.test(
+    withoutTrailingSemicolons
+  );
 }
 
 export function queryResultToObjects(result: QueryResult, maxRows = 50) {
@@ -440,19 +694,33 @@ export async function planSqlFromQuestion(args: {
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
   currentSql?: string;
+  history?: AiHistoryItem[];
   onStatusChange?: (status: "loading_model" | "generating") => void;
   signal?: AbortSignal;
 }) {
+  const preferredReplyLanguage = getPreferredReplyLanguage(
+    args.question,
+    args.history
+  );
   const schemaSummary = toSchemaLines({
     activeSchema: args.activeSchema,
     tables: args.tables,
     columnsByTable: args.columnsByTable,
     question: args.question,
   });
+  const conversationSummary = toConversationLines(args.history);
   const prompt = [
     "You are a database copilot inside PoliteDB.",
     `Database engine: ${args.engine}`,
     `Active schema or database: ${args.activeSchema || "(not selected)"}`,
+    `Preferred reply language: ${preferredReplyLanguage}`,
+    "",
+    "The user may ask in natural language, including Vietnamese or English.",
+    "Infer intent from plain-language requests such as count, list, top, latest, today, yesterday, this week, compare, trend, duplicate, missing, explain, summarize, or follow-up questions.",
+    "When the latest question depends on prior chat context, use the recent conversation below.",
+    "",
+    "Recent conversation:",
+    conversationSummary,
     "",
     "Available tables and columns:",
     schemaSummary,
@@ -466,11 +734,17 @@ export async function planSqlFromQuestion(args: {
     'Return JSON only with this exact shape: {"sql":"string","explanation":"string","assumptions":["string"],"safety":"read_only|mutating|unknown","needsClarification":true|false,"clarification":"string"}',
     "Rules:",
     "- Use only listed tables and columns.",
+    "- Understand natural-language requests and map them to SQL even when the user does not mention exact table or column names.",
+    "- If the user asks for a reply language or response style, follow that preference in the explanation and clarification fields.",
+    "- Prefer sensible defaults for plain-language questions, for example recent rows, aggregates, top-N, or grouped summaries.",
+    "- If the user asks to explain or improve the current SQL, use the current SQL editor content when relevant.",
     "- If a column name contains lower camelcase letters or special characters, quotes that identifier correctly for the current engine.",
     "- Prefer a single query.",
     "- For read requests, produce a read-only query.",
     "- Add LIMIT/TOP/FETCH when the user did not ask for all rows.",
     "- If the request is ambiguous, set needsClarification=true.",
+    "- Write explanation for the end user only. Do not say things like 'The user asked...' or explain the language/translation of the request.",
+    "- Do not restate the request as meta commentary. Just explain what the SQL does, briefly and directly.",
     "- Never wrap JSON in markdown.",
   ]
     .filter(Boolean)
@@ -487,13 +761,11 @@ export async function planSqlFromQuestion(args: {
   return {
     sql: normalizeQuotedIdentifiers({
       engine: args.engine,
-      sql: String(raw?.sql ?? "").trim(),
+      sql: sanitizeAiText(raw?.sql),
       columnsByTable: args.columnsByTable,
     }).trim(),
-    explanation: String(raw?.explanation ?? "").trim(),
-    assumptions: Array.isArray(raw?.assumptions)
-      ? raw.assumptions.map((item) => String(item)).filter(Boolean)
-      : [],
+    explanation: sanitizeAiText(raw?.explanation),
+    assumptions: sanitizeAiStringArray(raw?.assumptions),
     safety:
       raw?.safety === "read_only" ||
       raw?.safety === "mutating" ||
@@ -501,7 +773,7 @@ export async function planSqlFromQuestion(args: {
         ? raw.safety
         : "unknown",
     needsClarification: Boolean(raw?.needsClarification),
-    clarification: String(raw?.clarification ?? "").trim(),
+    clarification: sanitizeAiText(raw?.clarification),
   } satisfies AiPlan;
 }
 
@@ -514,11 +786,17 @@ export async function answerFromResult(args: {
   result: QueryResult;
   onStatusChange?: (status: "loading_model" | "generating") => void;
   signal?: AbortSignal;
+  history?: AiHistoryItem[];
 }) {
+  const preferredReplyLanguage = getPreferredReplyLanguage(
+    args.question,
+    args.history
+  );
   const rows = queryResultToObjects(args.result, 50);
   const prompt = [
     "You answer database questions using only the executed result set below.",
     `Database engine: ${args.engine}`,
+    `Preferred reply language: ${preferredReplyLanguage}`,
     `User question: ${args.question.trim()}`,
     `Executed SQL: ${args.sql.trim()}`,
     `Row count returned: ${Number(args.result.rowCount ?? rows.length)}`,
@@ -543,10 +821,8 @@ export async function answerFromResult(args: {
   });
 
   return {
-    answer: String(raw?.answer ?? "").trim(),
-    highlights: Array.isArray(raw?.highlights)
-      ? raw.highlights.map((item) => String(item)).filter(Boolean)
-      : [],
+    answer: sanitizeAiText(raw?.answer),
+    highlights: sanitizeAiStringArray(raw?.highlights),
     confidence:
       raw?.confidence === "high" ||
       raw?.confidence === "medium" ||
@@ -557,14 +833,36 @@ export async function answerFromResult(args: {
 }
 
 export function isGeneralChatPrompt(question: string) {
-  const text = question.trim().toLowerCase();
+  const text = normalizeIntentText(question);
   if (!text) return false;
+
+  if (
+    [
+      /\b(use|answer|reply|respond|speak)( in)? english\b/,
+      /\b(use|answer|reply|respond|speak)( in)? vietnamese\b/,
+      /\btieng anh\b/,
+      /\btieng viet\b/,
+      /\bshort(er)? answer\b/,
+      /\bbrief(ly)?\b/,
+      /\bngan gon\b/,
+      /\bgiai thich ngan gon\b/,
+      /\bchi tra loi\b/,
+      /\bdung tao sql\b/,
+      /\bdon't use sql\b/,
+      /\bdo not use sql\b/,
+      /\bthanks?\b/,
+      /\bcam on\b/,
+      /^(ok|okay|oke|duoc|roi|continue|tiep di)\b/,
+    ].some((pattern) => pattern.test(text))
+  ) {
+    return !hasDatabaseIntent(text);
+  }
 
   return [
     /^(hi|hello|hey|yo)\b/,
-    /^(xin chao|chao|helo)\b/,
-    /\b(ban la ai|ban giup duoc gi|ban lam duoc gi)\b/,
-    /\b(who are you|what can you do|help me)\b/,
+    /^(xin chao|chao|helo|alo)\b/,
+    /\b(ban la ai|ban giup duoc gi|ban lam duoc gi|co the lam gi|huong dan toi)\b/,
+    /\b(who are you|what can you do|help me|how can you help)\b/,
   ].some((pattern) => pattern.test(text));
 }
 
@@ -575,27 +873,42 @@ export async function chatReply(args: {
   question: string;
   activeSchema?: string;
   tables: TableItem[];
+  history?: AiHistoryItem[];
   onStatusChange?: (status: "loading_model" | "generating") => void;
   signal?: AbortSignal;
 }) {
+  const preferredReplyLanguage = getPreferredReplyLanguage(
+    args.question,
+    args.history
+  );
   const visibleTables = args.tables
     .filter((table) => !args.activeSchema || table.schema === args.activeSchema)
     .slice(0, 12)
     .map((table) => `${table.schema}.${table.name}`)
     .join(", ");
+  const conversationSummary = toConversationLines(args.history);
 
   const prompt = [
     "You are PoliteDB AI Assistant.",
     "You are a friendly local database copilot inside a desktop app.",
     `Database engine: ${args.engine}`,
     `Active schema or database: ${args.activeSchema || "(not selected)"}`,
+    `Preferred reply language: ${preferredReplyLanguage}`,
     visibleTables ? `Visible tables: ${visibleTables}` : "",
+    "",
+    "The user may speak naturally in Vietnamese or English.",
+    "Use the recent conversation to understand short follow-up questions.",
+    "",
+    "Recent conversation:",
+    conversationSummary,
     "",
     `User message: ${args.question.trim()}`,
     "",
     'Return JSON only with this exact shape: {"answer":"string","followup":"string"}',
     "Rules:",
     "- For casual greetings, respond naturally and briefly.",
+    "- If the user asks to use English or Vietnamese, acknowledge it briefly and follow that language.",
+    "- Treat meta instructions about response language or style as a normal chat request, not a database query.",
     "- If the user is asking what you can do, explain you can answer database questions, suggest SQL, and analyze query results.",
     "- Do not invent data results.",
     "- Never wrap JSON in markdown.",
@@ -612,7 +925,7 @@ export async function chatReply(args: {
   });
 
   return {
-    answer: String(raw?.answer ?? "").trim(),
-    followup: String(raw?.followup ?? "").trim() || undefined,
+    answer: sanitizeAiText(raw?.answer),
+    followup: sanitizeAiText(raw?.followup) || undefined,
   } satisfies AiChatReply;
 }

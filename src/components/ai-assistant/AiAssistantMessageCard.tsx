@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Copy, CopyCheck } from "src/components/icons";
 import type { ChatMessage } from "src/types";
+import { cellToString } from "src/utils/convert";
 
 type Props = {
   message: ChatMessage;
@@ -12,8 +13,17 @@ function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function getPreviewColumns(rows: Record<string, unknown>[] = []) {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    Object.keys(row ?? {}).forEach((key) => seen.add(key));
+  }
+  return Array.from(seen);
+}
+
 export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
   const [copied, setCopied] = useState(false);
+  const previewColumns = getPreviewColumns(message.resultPreview);
 
   const handleCopySql = async () => {
     if (!message.sql) return;
@@ -80,26 +90,70 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
         </div>
       ) : null}
 
-      {message.assumptions?.length ? (
-        <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-neutral-700">
-          {message.assumptions.map((item, index) => (
-            <li key={`${message.id}-assumption-${index}`}>{item}</li>
-          ))}
-        </ul>
-      ) : null}
-
       {message.resultPreview?.length ? (
         <div class="mt-3">
+          <div class="mb-1 text-xs font-semibold text-neutral-500">Result</div>
           <div class="mb-1 text-xs text-neutral-500">
             {message.rowCount != null
               ? `${message.rowCount} row(s)`
               : "Result preview"}
             {message.confidence ? ` • confidence ${message.confidence}` : ""}
           </div>
-          <pre class="max-h-56 overflow-auto rounded-lg bg-neutral-100 p-3 text-xs text-neutral-800">
-            <code>{prettyJson(message.resultPreview)}</code>
-          </pre>
+
+          {previewColumns.length ? (
+            <div class="overflow-hidden rounded-lg border border-neutral-200">
+              <div class="max-h-56 overflow-auto">
+                <table class="min-w-full divide-y divide-neutral-200 text-xs">
+                  <thead class="bg-neutral-50">
+                    <tr>
+                      {previewColumns.map((column) => (
+                        <th
+                          key={`${message.id}-col-${column}`}
+                          class="px-3 py-2 text-left font-semibold text-neutral-600"
+                        >
+                          {column}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-neutral-100 bg-white">
+                    {message.resultPreview.map((row, index) => (
+                      <tr key={`${message.id}-row-${index}`}>
+                        {previewColumns.map((column) => (
+                          <td
+                            key={`${message.id}-row-${index}-${column}`}
+                            class="max-w-52 px-3 py-2 align-top text-neutral-800"
+                          >
+                            <div class="line-clamp-4 wrap-break-word whitespace-pre-wrap">
+                              {cellToString(row[column])}
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          <details class="mt-2">
+            <summary class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">
+              View raw JSON
+            </summary>
+            <pre class="mt-2 max-h-56 overflow-auto rounded-lg bg-neutral-100 p-3 text-xs text-neutral-800">
+              <code>{prettyJson(message.resultPreview)}</code>
+            </pre>
+          </details>
         </div>
+      ) : null}
+
+      {message.assumptions?.length ? (
+        <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-neutral-700">
+          {message.assumptions.map((item, index) => (
+            <li key={`${message.id}-assumption-${index}`}>{item}</li>
+          ))}
+        </ul>
       ) : null}
     </div>
   );

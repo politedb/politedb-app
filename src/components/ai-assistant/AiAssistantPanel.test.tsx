@@ -15,6 +15,7 @@ const markLocalAiModelSeenMock = vi.fn();
 const listLocalAiModelsMock = vi.fn();
 const isGeneralChatPromptMock = vi.fn();
 const chatReplyMock = vi.fn();
+const getDirectMetadataReplyMock = vi.fn();
 const planSqlFromQuestionMock = vi.fn();
 const isReadOnlySqlMock = vi.fn();
 const answerFromResultMock = vi.fn();
@@ -36,6 +37,7 @@ vi.mock("src/lib/ai/localAssistant", () => ({
   listLocalAiModels: (...args: any[]) => listLocalAiModelsMock(...args),
   isGeneralChatPrompt: (...args: any[]) => isGeneralChatPromptMock(...args),
   chatReply: (...args: any[]) => chatReplyMock(...args),
+  getDirectMetadataReply: (...args: any[]) => getDirectMetadataReplyMock(...args),
   planSqlFromQuestion: (...args: any[]) => planSqlFromQuestionMock(...args),
   isReadOnlySql: (...args: any[]) => isReadOnlySqlMock(...args),
   answerFromResult: (...args: any[]) => answerFromResultMock(...args),
@@ -144,6 +146,7 @@ beforeEach(() => {
     answer: "Hello! How can I help?",
     followup: "Ask me about your data.",
   });
+  getDirectMetadataReplyMock.mockReturnValue(null);
   planSqlFromQuestionMock.mockResolvedValue({
     sql: "",
     explanation: "",
@@ -231,7 +234,7 @@ describe("AiAssistantPanel", () => {
   it("sends a general chat message and renders the assistant reply", async () => {
     renderPanel();
 
-    const textarea = screen.getByPlaceholderText(
+    const textarea = await screen.findByPlaceholderText(
       "Ask AI about data, or ask it to write SQL for you..."
     );
     fireEvent.input(textarea, { target: { value: "hello" } });
@@ -251,7 +254,7 @@ describe("AiAssistantPanel", () => {
   it("runs a read-only SQL plan and renders the answer from real data", async () => {
     isGeneralChatPromptMock.mockReturnValue(false);
     planSqlFromQuestionMock.mockResolvedValue({
-      sql: "SELECT id FROM users",
+      sql: "SELECT id FROM users;",
       explanation: "Use a simple query.",
       assumptions: [],
       needsClarification: false,
@@ -260,7 +263,7 @@ describe("AiAssistantPanel", () => {
 
     renderPanel({ runtimeConnectionId: "conn_1" });
 
-    const textarea = screen.getByPlaceholderText(
+    const textarea = await screen.findByPlaceholderText(
       "Ask AI about data, or ask it to write SQL for you..."
     );
     fireEvent.input(textarea, { target: { value: "list users" } });
@@ -272,7 +275,7 @@ describe("AiAssistantPanel", () => {
     await waitFor(() =>
       expect(runSqlQueryMock).toHaveBeenCalledWith(
         "conn_1",
-        "SELECT id FROM users",
+        "SELECT id FROM users;",
         {
           maxRows: 200,
           batchSize: 200,
@@ -282,5 +285,34 @@ describe("AiAssistantPanel", () => {
     );
 
     await screen.findByText("There are 2 rows.");
+  });
+
+  it("answers metadata listing questions directly without generating SQL", async () => {
+    isGeneralChatPromptMock.mockReturnValue(false);
+    getDirectMetadataReplyMock.mockReturnValue({
+      answer: "I can currently see 2 table(s) in public: issues, users.",
+    });
+
+    renderPanel({
+      activeSchema: "public",
+      tables: [
+        { schema: "public", name: "issues" },
+        { schema: "public", name: "users" },
+      ],
+      runtimeConnectionId: "conn_1",
+    });
+
+    const textarea = await screen.findByPlaceholderText(
+      "Ask AI about data, or ask it to write SQL for you..."
+    );
+    fireEvent.input(textarea, { target: { value: "liệt kê toàn bộ bảng cho tôi" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await screen.findByText("I can currently see 2 table(s) in public: issues, users.");
+    expect(planSqlFromQuestionMock).not.toHaveBeenCalled();
+    expect(runSqlQueryMock).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import {
   answerFromResult,
   buildFastResultAnswer,
   chatReply,
+  getDirectMetadataReply,
   getLocalAiSettings,
   hasSeenLocalAiModel,
   isGeneralChatPrompt,
@@ -653,6 +654,7 @@ export function AiAssistantPanel(props: Props) {
           question,
           activeSchema,
           tables,
+          history: messages,
           onStatusChange: (status) =>
             setAssistantStatus(
               status === "loading_model" ? "loading_model" : "thinking"
@@ -668,6 +670,22 @@ export function AiAssistantPanel(props: Props) {
         return;
       }
 
+      const directReply = getDirectMetadataReply({
+        engine,
+        question,
+        activeSchema,
+        tables,
+      });
+
+      if (directReply) {
+        appendAssistantMessage({
+          text: [directReply.answer, directReply.followup]
+            .filter(Boolean)
+            .join("\n\n"),
+        });
+        return;
+      }
+
       const plan = await planSqlFromQuestion({
         endpoint,
         model,
@@ -677,6 +695,7 @@ export function AiAssistantPanel(props: Props) {
         tables,
         columnsByTable,
         currentSql,
+        history: messages,
         onStatusChange: (status) =>
           setAssistantStatus(
             status === "loading_model" ? "loading_model" : "thinking"
@@ -730,6 +749,7 @@ export function AiAssistantPanel(props: Props) {
             question,
             sql: plan.sql,
             result,
+            history: messages,
             onStatusChange: (status) =>
               setAssistantStatus(
                 status === "loading_model" ? "loading_model" : "thinking"
