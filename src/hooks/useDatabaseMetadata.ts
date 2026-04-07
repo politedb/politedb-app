@@ -6,6 +6,7 @@ import {
   mongoCollectionOverview,
   mongoListCollections,
   mongoListDatabases,
+  runRedisCommand,
 } from "src/lib/tauri";
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
@@ -179,6 +180,51 @@ export function useDatabaseMetadata() {
               tables,
               columnsByTable,
               columnsLoaded: includeColumns,
+              version: (version ?? "").trim(),
+              loading: false,
+              loaded: true,
+              error: null,
+              progress: 100,
+              stage: "done",
+            });
+
+            return cacheRef.current[metaKey]!;
+          }
+
+          if (engine === "redis") {
+            const schema = "db 0";
+            setCache(metaKey, {
+              schemas: [schema],
+              functions: [],
+              progress: 20,
+              stage: "tables",
+            });
+
+            const scanRes = await runRedisCommand(connectionId, "SCAN", [], {
+              batchSize: 500,
+              maxRows: 5000,
+              pattern: "*",
+              scanCount: 1000,
+              timeoutMs: 30_000,
+            });
+
+            const tables: TableItem[] = (scanRes.rows ?? [])
+              .map((row: any) => ({
+                schema,
+                name: cellToString(row?.[0]) ?? "",
+                kind: "table" as const,
+              }))
+              .filter((item) => Boolean(item.name));
+
+            const columnsByTable = Object.fromEntries(
+              tables.map((item) => [`${item.schema}.${item.name}`, ["value"]])
+            );
+
+            setCache(metaKey, {
+              functions: [],
+              tables,
+              columnsByTable,
+              columnsLoaded: true,
               version: (version ?? "").trim(),
               loading: false,
               loaded: true,

@@ -312,16 +312,19 @@ export type SqlQueryPayload = {
 
 export type RedisCommandPayload = {
   // Example: "KEYS", "SCAN", "GET", "HGETALL", "LRANGE", ...
-  command: string;
+  cmd: string;
 
   // All args are strings; FE should stringify numbers itself.
   args?: string[];
 
+  batch_size?: number;
+  max_rows?: number;
+
   // Optional override (fallback to connection.default_command_timeout_ms)
   command_timeout_ms?: number | null;
 
-  // Optional: if backend supports selecting db per command
-  db?: number | null;
+  pattern?: string | null;
+  scan_count?: number | null;
 };
 
 export type OperationExecuteInput =

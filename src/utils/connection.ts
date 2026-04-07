@@ -77,7 +77,11 @@ export function pickHostDbUser(conn: ConnectionProfile) {
 
   if (engine === "redis") {
     const rd = conn.input?.redis;
-    return { host: rd?.host ?? "", database: "", user: "" };
+    return {
+      host: rd?.host ?? "",
+      database: `db ${rd?.db ?? 0}`,
+      user: rd?.user ?? "",
+    };
   }
 
   return { host: "", database: "", user: "" };

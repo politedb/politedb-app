@@ -233,6 +233,7 @@ export function ActiveWindowContent() {
   if (activeTableWindow) {
     return (
       <MainTableDataPane
+        key={activeTableWindow.id}
         activeTableWindow={activeTableWindow}
         pageChange={actions.pageChange}
         onAddColumn={handleAddColumn}

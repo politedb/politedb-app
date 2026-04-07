@@ -118,8 +118,11 @@ export function MainTableDataPane(props: {
   const actions = useConnectionActionsCtx();
   const s = useConnectionStore.getState();
   const { profileId, engine, limit, offset } = rt;
+  const isRedis = engine === "redis";
   const isDataReadOnly = isProfileLocked;
-  const isStructureReadOnly = isProfileLocked || engine === "mongo";
+  const isStructureReadOnly =
+    isProfileLocked || engine === "mongo" || isRedis;
+  const canAddDataRow = !isDataReadOnly && !isRedis;
 
   const { loadTableData } = useLoadTableData();
   const {
@@ -208,14 +211,18 @@ export function MainTableDataPane(props: {
     if (startedRef.current === activeQuerySignature) return;
     startedRef.current = activeQuerySignature;
 
+    const isRedisTable = engine === "redis";
     const shouldForceReload =
+      isRedisTable ||
       loadedQuerySignatureByTable.get(activeKey) !== activeQuerySignature;
     const currentMeta =
       useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
     const shouldRefreshRowCount =
+      isRedisTable ||
       typeof currentMeta.rowCount !== "number" ||
       loadedRowCountSignatureByTable.get(activeKey) !== rowCountSignature;
     const shouldResetRowsCache =
+      isRedisTable ||
       loadedRowsDataSignatureByTable.get(activeKey) !== rowsDataSignature;
 
     useConnectionStore.getState().initRows(activeKey, 5000);
@@ -267,6 +274,7 @@ export function MainTableDataPane(props: {
   }, [
     activeTableWindow,
     activeKey,
+    engine,
     appliedFilters,
     appliedFilterCombine,
     activeQuerySignature,
@@ -897,6 +905,7 @@ export function MainTableDataPane(props: {
             )}
             <div class="min-h-0 flex-1">
               <TableData
+                key={activeKey}
                 columns={meta.columns ?? []}
                 baseRows={basePageTotal}
                 totalRows={visiblePageTotal}
@@ -905,14 +914,17 @@ export function MainTableDataPane(props: {
                 onCellChange={isDataReadOnly ? undefined : onDataChange}
                 patches={extractPatches(patches)}
                 newRowKeys={newRowKeys}
-                onAddRow={() => {
-                  if (isDataReadOnly) return;
-                  handleAddRow(
-                    meta.columns ?? [],
-                    loadedRowCount,
-                    onDataChange
-                  );
-                }}
+                onAddRow={
+                  canAddDataRow
+                    ? () => {
+                        handleAddRow(
+                          meta.columns ?? [],
+                          loadedRowCount,
+                          onDataChange
+                        );
+                      }
+                    : undefined
+                }
                 onDeleteRow={(rowIndex) => {
                   if (isDataReadOnly) return;
                   handleDeleteRow(rowIndex, offset);
@@ -940,12 +952,17 @@ export function MainTableDataPane(props: {
         onPageChange={pageChange}
         onCountExact={handleCountExact}
         onAddRow={() => {
-          if (isDataReadOnly) return;
-          handleAddRow(meta.columns ?? [], loadedRowCount, onDataChange);
+          if (!canAddDataRow) return;
+          handleAddRow(
+            meta.columns ?? [],
+            loadedRowCount,
+            onDataChange
+          );
         }}
         onAddColumn={isStructureReadOnly ? () => {} : onAddColumn}
         onAddIndex={isStructureReadOnly ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
+        canAddRow={canAddDataRow}
         readOnly={viewMode === "structure" ? isStructureReadOnly : isDataReadOnly}
       />
       {sqlDialogOpen && (

@@ -123,6 +123,12 @@ export function ConnectionScreen() {
    * ============================================================================= */
   const metadata = useDatabaseMetadata();
   const engine = activeTab?.engine;
+  const { getProfileById } = useProfileStore();
+
+  const profile = useMemo(() => {
+    if (!activeTab?.profileId) return null;
+    return getProfileById(activeTab.profileId);
+  }, [activeTab, getProfileById]);
 
   const metaKey = useMemo(() => {
     if (!activeTab?.id) return "";
@@ -192,7 +198,12 @@ export function ConnectionScreen() {
     metaKey,
     engine,
     connectionId: runtimeConnectionId,
-    defaultSchema: engine === "postgres" ? "public" : "",
+    defaultSchema:
+      engine === "postgres"
+        ? "public"
+        : engine === "redis"
+          ? `db ${profile?.input?.redis?.db ?? 0}`
+          : "",
   });
 
   const loadError = useMemo(() => {
@@ -309,6 +320,10 @@ export function ConnectionScreen() {
           setPendingTableAction("drop");
         });
       },
+      renameRedisKey: (table: TableItem, nextName: string) =>
+        actionsRef.current.renameRedisKey(table, nextName),
+      deleteRedisKey: (table: TableItem) =>
+        actionsRef.current.deleteRedisKey(table),
       openSearch: () => setSearchDialogOpen(true),
     };
   }, [isProfileLocked]);
@@ -320,13 +335,6 @@ export function ConnectionScreen() {
   const newTableSql = useMemo(() => {
     return actions.getNewTableSql().data;
   }, [actions.getNewTableSql().data]);
-
-  const { getProfileById } = useProfileStore();
-
-  const profile = useMemo(() => {
-    if (!activeTab?.profileId) return null;
-    return getProfileById(activeTab.profileId);
-  }, [activeTab, getProfileById]);
 
   const diagramDatabase = useMemo(() => {
     if (!profile) return "";
@@ -546,9 +554,17 @@ export function ConnectionScreen() {
                       schemas={schemasForEditor}
                       currSchema={activeSchema}
                       onSchemaChange={onSchemaChange}
-                      schemaLabel={engine === "mongo" ? "Database" : "Schema"}
+                      schemaLabel={
+                        engine === "mongo" || engine === "redis"
+                          ? "Database"
+                          : "Schema"
+                      }
                       tablesSectionTitle={
-                        engine === "mongo" ? "Collections" : "Tables"
+                        engine === "mongo"
+                          ? "Collections"
+                          : engine === "redis"
+                            ? "Keys"
+                            : "Tables"
                       }
                       tableSearchQuery={tableSearchQuery}
                       setTableSearchQuery={setTableSearchQuery}
@@ -680,7 +696,9 @@ export function ConnectionScreen() {
           onClose={() => setSearchDialogOpen(false)}
           tables={meta.tables ?? []}
           schemas={meta.schemas ?? []}
-          schemaLabel={engine === "mongo" ? "Database" : "Schema"}
+          schemaLabel={
+            engine === "mongo" || engine === "redis" ? "Database" : "Schema"
+          }
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}
         />

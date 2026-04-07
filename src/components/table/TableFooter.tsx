@@ -28,6 +28,7 @@ interface Props {
   onAddColumn: () => void;
   onAddIndex: () => void;
   onAddRow: () => void;
+  canAddRow?: boolean;
   onFilters: () => void;
   readOnly?: boolean;
   className?: string;
@@ -56,6 +57,7 @@ export function TableFooter({
   onAddColumn,
   onAddIndex,
   onAddRow,
+  canAddRow = true,
   onFilters,
   readOnly = false,
   showViewToggle = true,
@@ -183,7 +185,7 @@ export function TableFooter({
           </>
         )}
 
-        {showActions && viewMode === "data" && (
+        {showActions && viewMode === "data" && canAddRow && (
           <Button
             variant="shadow"
             className="px-2"

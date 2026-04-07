@@ -313,7 +313,8 @@ export function MenuBar({
 
   const connected = !!connectionInfo && !loadTableError;
   const runtimeConnectionId = activeTab?.runtimeConnectionId ?? "";
-  const canOpenSql = connectionInfo?.engine !== "mongo";
+  const canOpenSql =
+    connectionInfo?.engine !== "mongo" && connectionInfo?.engine !== "redis";
 
   const tags = useMemo(() => {
     const raw = (profile?.input?.tags ?? []).map(String);

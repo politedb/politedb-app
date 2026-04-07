@@ -3,6 +3,7 @@ import { Dispatch, useState } from "preact/hooks";
 import {
   ChevronDown,
   ChevronRight,
+  Key,
   SquareFunction,
   Search,
   Table,
@@ -11,6 +12,8 @@ import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { NewTableMenu } from "src/components/table/NewTableMenu";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
+import { DeleteRedisKeyDialog } from "src/components/modal/DeleteRedisKeyDialog";
+import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
@@ -86,6 +89,50 @@ function TableName({ name }: { name: string }) {
   );
 }
 
+function EmptyItemsState(props: {
+  isMongo: boolean;
+  isRedis: boolean;
+  hasSearch: boolean;
+}) {
+  const { isMongo, isRedis, hasSearch } = props;
+
+  const icon = isRedis ? (
+    <Key className="size-4 text-amber-500" />
+  ) : (
+    <Table className="size-4 text-blue-500" />
+  );
+
+  const title = hasSearch
+    ? isRedis
+      ? "No matching keys"
+      : isMongo
+        ? "No matching collections"
+        : "No matching tables"
+    : isRedis
+      ? "No keys yet"
+      : isMongo
+        ? "No collections found"
+        : "No tables found";
+
+  const description = hasSearch
+    ? "Try a different search keyword."
+    : isRedis
+      ? "This Redis database does not have any keys right now."
+      : isMongo
+        ? "This database does not contain any collections yet."
+        : "This schema does not contain any tables yet.";
+
+  return (
+    <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+      <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
+        {icon}
+      </div>
+      <div class="text-sm font-medium text-neutral-700">{title}</div>
+      <div class="mt-1 text-xs leading-5 text-neutral-500">{description}</div>
+    </div>
+  );
+}
+
 export function LeftNav({
   engine,
   profileId,
@@ -109,60 +156,87 @@ export function LeftNav({
   );
   const { windowHasPatchChanges } = useConnectionWindows(profileId);
   const isMongo = engine === "mongo";
-  const supportsTableMutations = !isMongo;
+  const isRedis = engine === "redis";
+  const supportsTableMutations = !isMongo && !isRedis;
 
   const [tableMenu, setTableMenu] = useState<{
     x: number;
     y: number;
     table: TableItem;
   } | null>(null);
+  const [deleteRedisKeyTarget, setDeleteRedisKeyTarget] =
+    useState<TableItem | null>(null);
+  const [renameRedisKeyTarget, setRenameRedisKeyTarget] =
+    useState<TableItem | null>(null);
 
   const tableMenuItems: MenuItem[] = tableMenu
-    ? [
-        {
-          type: "item",
-          label: "Open table",
-          onClick: () => {
-            void actions.selectTable(tableMenu.table);
+    ? isRedis
+      ? [
+          {
+            type: "item",
+            label: "Copy name",
+            onClick: () => navigator.clipboard.writeText(tableMenu.table.name),
           },
-        },
-        {
-          type: "item",
-          label: "Copy name",
-          onClick: () => navigator.clipboard.writeText(tableMenu.table.name),
-        },
-        { type: "sep" },
-        {
-          type: "item",
-          label: "Export data",
-          onClick: () => actions.exportTableData(tableMenu.table),
-        },
-        {
-          type: "item",
-          label: "Import data from CSV",
-          disabled: isProfileLocked || !supportsTableMutations,
-          onClick: () => actions.importTableData(tableMenu.table),
-        },
-        { type: "sep" },
-        {
-          type: "item",
-          label: "Clone...",
-          disabled: isProfileLocked || !supportsTableMutations,
-          onClick: () => actions.cloneTable(tableMenu.table),
-        },
-        {
-          type: "item",
-          label: "Truncate...",
-          disabled: isProfileLocked || !supportsTableMutations,
-          onClick: () => actions.truncateTable(tableMenu.table),
-        },
-        {
-          type: "item",
-          label: "Drop...",
-          disabled: isProfileLocked || !supportsTableMutations,
-          onClick: () => actions.dropTable(tableMenu.table),
-        },
-      ]
+          { type: "sep" },
+          {
+            type: "item",
+            label: "Rename key",
+            disabled: isProfileLocked,
+            onClick: () => setRenameRedisKeyTarget(tableMenu.table),
+          },
+          {
+            type: "item",
+            color: "red",
+            label: "Delete key",
+            disabled: isProfileLocked,
+            onClick: () => setDeleteRedisKeyTarget(tableMenu.table),
+          },
+        ]
+      : [
+          {
+            type: "item",
+            label: "Open table",
+            onClick: () => {
+              void actions.selectTable(tableMenu.table);
+            },
+          },
+          {
+            type: "item",
+            label: "Copy name",
+            onClick: () => navigator.clipboard.writeText(tableMenu.table.name),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "Export data",
+            onClick: () => actions.exportTableData(tableMenu.table),
+          },
+          {
+            type: "item",
+            label: "Import data from CSV",
+            disabled: isProfileLocked || !supportsTableMutations,
+            onClick: () => actions.importTableData(tableMenu.table),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "Clone...",
+            disabled: isProfileLocked || !supportsTableMutations,
+            onClick: () => actions.cloneTable(tableMenu.table),
+          },
+          {
+            type: "item",
+            label: "Truncate...",
+            disabled: isProfileLocked || !supportsTableMutations,
+            onClick: () => actions.truncateTable(tableMenu.table),
+          },
+          {
+            type: "item",
+            label: "Drop...",
+            disabled: isProfileLocked || !supportsTableMutations,
+            onClick: () => actions.dropTable(tableMenu.table),
+          },
+        ]
     : [];
 
   return (
@@ -189,7 +263,7 @@ export function LeftNav({
       {/* Middle: Sections */}
       <div class="flex-1 overflow-y-auto px-2 pb-2">
         {/* Functions (hidden for Mongo; schema = database, no SQL functions) */}
-        {!isMongo && (
+        {!isMongo && !isRedis && (
           <div class="mb-2">
             <SectionHeader
               title="Functions"
@@ -205,8 +279,13 @@ export function LeftNav({
             {expandedSections.functions && (
               <div class="mt-1">
                 {filteredFunctions.length === 0 ? (
-                  <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
-                    No functions found
+                  <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+                    <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
+                      <SquareFunction className="size-4 text-blue-500" />
+                    </div>
+                    <div class="text-sm font-medium text-neutral-700">
+                      No functions found
+                    </div>
                   </div>
                 ) : (
                   <div class="space-y-1 pl-3">
@@ -250,9 +329,11 @@ export function LeftNav({
           {expandedSections.tables && (
             <div class="mt-1">
               {filteredTables.length === 0 ? (
-                <div class="rounded-lg bg-white/60 px-3 py-2 text-xs text-neutral-500">
-                  {isMongo ? "No collections found" : "No tables found"}
-                </div>
+                <EmptyItemsState
+                  isMongo={isMongo}
+                  isRedis={isRedis}
+                  hasSearch={tableSearchQuery.trim().length > 0}
+                />
               ) : (
                 <div class="space-y-1 pl-3">
                   {filteredTables.map((table) => {
@@ -286,14 +367,25 @@ export function LeftNav({
                         )}
                         title={key}
                       >
-                        <Table
-                          className={cn(
-                            "size-4 shrink-0",
-                            isActive && !hasChanges
-                              ? "text-neutral-100"
-                              : "text-blue-500"
-                          )}
-                        />
+                        {isRedis ? (
+                          <Key
+                            className={cn(
+                              "size-4 shrink-0",
+                              isActive && !hasChanges
+                                ? "text-neutral-100"
+                                : "text-amber-500"
+                            )}
+                          />
+                        ) : (
+                          <Table
+                            className={cn(
+                              "size-4 shrink-0",
+                              isActive && !hasChanges
+                                ? "text-neutral-100"
+                                : "text-blue-500"
+                            )}
+                          />
+                        )}
                         <TableName name={table.name} />
                       </Button>
                     );
@@ -312,6 +404,26 @@ export function LeftNav({
         items={tableMenuItems}
         onClose={() => setTableMenu(null)}
       />
+
+      {deleteRedisKeyTarget && (
+        <DeleteRedisKeyDialog
+          open={true}
+          keyName={deleteRedisKeyTarget.name}
+          onClose={() => setDeleteRedisKeyTarget(null)}
+          onConfirm={() => actions.deleteRedisKey(deleteRedisKeyTarget)}
+        />
+      )}
+
+      {renameRedisKeyTarget && (
+        <RenameRedisKeyDialog
+          open={true}
+          keyName={renameRedisKeyTarget.name}
+          onClose={() => setRenameRedisKeyTarget(null)}
+          onConfirm={(nextName) =>
+            actions.renameRedisKey(renameRedisKeyTarget, nextName)
+          }
+        />
+      )}
 
       <div class="m-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 text-xs text-slate-600">
         Tips:

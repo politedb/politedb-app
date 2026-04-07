@@ -26,6 +26,8 @@ export type ConnectionActions = {
   truncateTable(table: TableItem): void;
   /** Open table tab then trigger delete table (used from table context menu) */
   dropTable(table: TableItem): void;
+  renameRedisKey(table: TableItem, nextName: string): Promise<void>;
+  deleteRedisKey(table: TableItem): Promise<void>;
 };
 
 const Ctx = createContext<ConnectionActions | null>(null);
