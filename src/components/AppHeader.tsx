@@ -310,7 +310,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                       handleTabClose(tab.id);
                     }}
                     class={cn(
-                      "rounded-full p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
+                      "rounded-full border-none p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
                       !isActive &&
                         "opacity-60 group-hover:opacity-100 hover:bg-transparent"
                     )}

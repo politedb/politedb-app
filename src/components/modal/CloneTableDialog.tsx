@@ -91,12 +91,7 @@ export function CloneTableDialog({
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
           </Button>
-          <Button
-            variant="default"
-            class="border border-blue-500"
-            onClick={handleConfirm}
-            disabled={loading}
-          >
+          <Button variant="default" onClick={handleConfirm} disabled={loading}>
             {loading ? "Cloning..." : "Clone"}
           </Button>
         </DialogFooter>

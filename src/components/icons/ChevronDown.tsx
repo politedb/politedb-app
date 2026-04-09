@@ -9,7 +9,7 @@ export function ChevronDown({ className }: { className: string }) {
       <path
         stroke-linecap="round"
         stroke-linejoin="round"
-        stroke-width="2"
+        stroke-width="3"
         d="M19 9l-7 7-7-7"
       />
     </svg>

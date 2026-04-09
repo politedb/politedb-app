@@ -3,6 +3,7 @@ import { Button } from "src/components/common/Button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -266,8 +267,11 @@ export function KeychainSection(props: {
       >
         <DialogHeader>
           <DialogTitle>Secret Editor</DialogTitle>
+          <DialogDescription>
+            Configure the key and value for your secret.
+          </DialogDescription>
         </DialogHeader>
-        <DialogContent className="gap-3">
+        <DialogContent className="gap-3 pt-1">
           <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div>
               <div class="mb-1 text-xs font-medium text-slate-700">Key</div>
@@ -315,11 +319,11 @@ export function KeychainSection(props: {
             </div>
           )}
         </DialogContent>
-        <DialogFooter className="justify-between">
+        <DialogFooter className="justify-between pt-1">
           <div class="flex items-center gap-2">
             <Button
               variant="outline"
-              className="py-2"
+              className="py-1.5"
               onClick={() => void navigator.clipboard.writeText(key)}
               disabled={!key}
             >
@@ -327,7 +331,7 @@ export function KeychainSection(props: {
             </Button>
             <Button
               variant="outline"
-              className="py-2"
+              className="py-1.5"
               onClick={() => void navigator.clipboard.writeText(resolvedValue)}
               disabled={!resolvedValue}
             >
@@ -338,7 +342,7 @@ export function KeychainSection(props: {
           <div class="flex items-center gap-2">
             <Button
               variant="default"
-              className="py-2"
+              className="py-1.5"
               onClick={() => void handleSet()}
               loading={busy}
               disabled={!canSubmit}
@@ -347,7 +351,7 @@ export function KeychainSection(props: {
             </Button>
             <Button
               variant="shadow"
-              className="py-2"
+              className="py-1.5"
               onClick={() => void handleGet()}
               loading={busy}
               disabled={!canSubmit}
@@ -356,7 +360,7 @@ export function KeychainSection(props: {
             </Button>
             <Button
               variant="destructive"
-              className="py-2"
+              className="py-1.5"
               onClick={() => void handleDelete()}
               loading={busy}
               disabled={!canSubmit}

@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { useIndexedSort, type SortState } from "src/hooks/useIndexedSort";
-import { ArrowDown, ArrowUp } from "src/components/icons";
+import { ChevronUp, ChevronDown } from "src/components/icons";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
 export interface TableColumn<T = any> {
@@ -31,7 +31,12 @@ interface TableProps<T = any> {
   estimatedRowHeight?: number;
   selectedRow?: number | null;
   selectedRows?: Set<number>;
-  onSelectRow?: (row: T, index: number, multi?: boolean, range?: boolean) => void;
+  onSelectRow?: (
+    row: T,
+    index: number,
+    multi?: boolean,
+    range?: boolean
+  ) => void;
   onDoubleClickRow?: (row: T, index: number) => void;
   enableSort?: boolean;
 }
@@ -342,9 +347,9 @@ export function Table<T = any>({
                     {enableSort &&
                       sortState.key === (col.sortKey ?? (col.key as keyof T)) &&
                       (sortState.direction === "asc" ? (
-                        <ArrowUp className="size-3" />
+                        <ChevronUp className="size-3" />
                       ) : (
-                        <ArrowDown className="size-3" />
+                        <ChevronDown className="size-3" />
                       ))}
                   </button>
                 ) : (
@@ -364,15 +369,15 @@ export function Table<T = any>({
             const sortedIndex = indexMap[displayIndex] ?? displayIndex;
             const originalIndex =
               rowIndexExtractor?.(row, sortedIndex) ?? sortedIndex;
-            
+
             let isSelected = false;
-            
+
             if (selectedRows) {
-               isSelected = selectedRows.has(originalIndex);
+              isSelected = selectedRows.has(originalIndex);
             } else if (selectedRow != null) {
-               isSelected = findDisplayIndex(selectedRow) === displayIndex;
+              isSelected = findDisplayIndex(selectedRow) === displayIndex;
             }
-            
+
             const isNewRow = (row as any).isNew;
             const dynamicClassName =
               typeof rowClassName === "function"

@@ -11,8 +11,8 @@ import {
   DialogTitle,
 } from "../common/Dialog";
 import { useCallback, useState } from "preact/hooks";
-import { Input } from "../form/Input";
 import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
+import { Input } from "../common/Input";
 
 interface Props {
   onOpenNewTable?: () => void;
@@ -107,7 +107,8 @@ function NewSchemaDialog({
         </DialogHeader>
         <div className="space-y-2">
           <Input
-            placeholder="Schema name..."
+            label="Schema name"
+            placeholder="Enter the name..."
             value={schemaName}
             onInput={(e) => setSchemaName(e.currentTarget.value)}
             className="w-full rounded-lg border border-neutral-200 p-2 text-sm"
@@ -115,12 +116,11 @@ function NewSchemaDialog({
           {error && <div className="text-xs text-red-500">{error}</div>}
         </div>
       </DialogContent>
-      <DialogFooter className="justify-center">
+      <DialogFooter className="justify-end pt-1">
         <Button variant="outline" onClick={handleClose}>
           Cancel
         </Button>
         <Button
-          className="border border-blue-500"
           variant="default"
           onClick={handleCreateSchema}
           disabled={!schemaName || busy}

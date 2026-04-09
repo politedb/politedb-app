@@ -104,15 +104,15 @@ export function filterConnections(
       const dbL = safeLower(database);
       const userL = safeLower(user);
       const userHost = `${userL}@${hostL}`;
-
-      const tag = safeLower((conn as any).tag); // optional UI meta
+      const tags = Array.isArray(conn.input?.tags) ? conn.input.tags : [];
+      const tagsL = tags.map((tag) => safeLower(tag)).join(" ");
 
       return (
         label.includes(q) ||
         engine.includes(q) ||
         hostL.includes(q) ||
         dbL.includes(q) ||
-        tag.includes(q) ||
+        tagsL.includes(q) ||
         userHost.includes(q)
       );
     })
@@ -123,18 +123,21 @@ export function groupConnections(connections: ConnectionProfile[]) {
   const grouped = new Map<string, ConnectionProfile[]>();
 
   for (const conn of connections) {
-    const tag = (conn as any).tag || "local";
-    const bucket = grouped.get(tag) ?? [];
-    bucket.push(conn);
-    grouped.set(tag, bucket);
+    const tags = Array.isArray(conn.input?.tags) ? conn.input.tags : [];
+    const normalizedTags = tags.length ? tags : ["local"];
+
+    for (const tag of normalizedTags) {
+      const safeTag = String(tag ?? "").trim() || "local";
+      const bucket = grouped.get(safeTag) ?? [];
+      bucket.push(conn);
+      grouped.set(safeTag, bucket);
+    }
   }
 
   return Array.from(grouped.entries())
     .map(([tag, conns]) => ({
       tag,
-      connections: conns
-        .slice()
-        .sort((a, b) => safeLower(a.label).localeCompare(safeLower(b.label))),
+      connections: sortConnectionsByNewest(conns),
     }))
     .sort((a, b) => safeLower(a.tag).localeCompare(safeLower(b.tag)));
 }

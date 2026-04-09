@@ -1,6 +1,10 @@
 import type { TargetedEvent } from "preact";
+import { useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
+import { Dropdown } from "src/components/common/Dropdown";
 import {
+  ChevronDown,
+  Folder,
   Grid,
   List,
   Plus,
@@ -14,7 +18,8 @@ export function TopBar(props: {
   mode: NavId;
   searchQuery: string;
   onSearchChange: (v: string) => void;
-  onNew: () => void;
+  onNewConnection: () => void;
+  onNewGroup?: () => void;
   onImportConnections?: () => void;
   onPrivacy: () => void;
   viewMode: ViewMode;
@@ -24,18 +29,20 @@ export function TopBar(props: {
     mode,
     searchQuery,
     onSearchChange,
-    onNew,
+    onNewConnection,
+    onNewGroup,
     onImportConnections,
     onPrivacy,
     viewMode,
     onViewMode,
   } = props;
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const isConnections = mode === "connections";
   const searchPlaceholder = isConnections
     ? "Search connections or paste a URL..."
     : "Search keychain keys...";
   const newLabel = isConnections ? "New Connection" : "New Key";
-  const newTitle = isConnections ? "New connection" : "New keychain key";
+  const newTitle = isConnections ? "Create" : "New keychain key";
 
   return (
     <div class="flex shrink-0 items-center gap-2 bg-white px-1 py-2">
@@ -54,28 +61,64 @@ export function TopBar(props: {
       </div>
 
       {/* Primary actions */}
-      <Button
-        variant="default"
-        onClick={onNew}
-        class="h-9 rounded-lg px-3"
-        title={newTitle}
-      >
-        <Plus className="size-3.5" />
-        <span class="text-[12px] font-semibold">{newLabel}</span>
-      </Button>
+      {isConnections ? (
+        <div class="flex items-center">
+          <Button
+            variant="default"
+            className="h-9 rounded-lg rounded-r-none px-3"
+            onClick={onNewConnection}
+            title={newTitle}
+          >
+            <Plus className="size-3" />
+            <span class="text-[12px] font-semibold">{newLabel}</span>
+          </Button>
+
+          <Dropdown
+            open={newMenuOpen}
+            onOpenChange={setNewMenuOpen}
+            positions={["bottom", "right"]}
+            align="end"
+            items={[
+              {
+                key: "new-group",
+                label: "New Group",
+                icon: <Folder className="size-4" />,
+                onSelect: onNewGroup,
+              },
+              {
+                key: "import",
+                label: "Import",
+                icon: <Restore className="size-4" />,
+                onSelect: onImportConnections,
+              },
+            ]}
+            trigger={
+              <div>
+                <Button
+                  variant="default"
+                  className="h-9 rounded-lg rounded-l-none border-l border-l-neutral-300! px-3"
+                  onClick={() => setNewMenuOpen((v) => !v)}
+                  title={newTitle}
+                >
+                  <ChevronDown className="size-3" />
+                </Button>
+              </div>
+            }
+          />
+        </div>
+      ) : (
+        <Button
+          variant="default"
+          onClick={onNewConnection}
+          class="h-9 rounded-lg px-3"
+          title={newTitle}
+        >
+          <Plus className="size-3" />
+          <span class="text-sm font-semibold">{newLabel}</span>
+        </Button>
+      )}
 
       <div class="flex items-center gap-1">
-        {isConnections && (
-          <Button
-            variant="outline"
-            onClick={onImportConnections}
-            class="h-9 rounded-lg border border-slate-300 px-[8px]"
-            title="Import Connection"
-          >
-            <Restore className="size-4" />
-          </Button>
-        )}
-
         <Button
           variant="outline"
           onClick={onPrivacy}
@@ -87,7 +130,7 @@ export function TopBar(props: {
       </div>
 
       {/* View mode */}
-      <div class="ml-1 flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+      <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
         <button
           type="button"
           onClick={() => onViewMode("grid")}

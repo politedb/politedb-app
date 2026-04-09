@@ -21,7 +21,7 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
       {!hasSearch ? (
         <div class="mt-5">
           <Button variant="default" class="py-2 text-sm" onClick={onCreate}>
-            <Plus class="size-3.5" />
+            <Plus class="size-3" />
             New Connection
           </Button>
         </div>

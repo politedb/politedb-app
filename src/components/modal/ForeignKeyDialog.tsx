@@ -4,6 +4,7 @@ import type { ForeignKeyInfo } from "src/types";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -140,8 +141,9 @@ export function ForeignKeyDialog(props: {
     >
       <DialogHeader>
         <DialogTitle>Foreign Key</DialogTitle>
+        <DialogDescription>Configure the foreign key.</DialogDescription>
       </DialogHeader>
-      <DialogContent className="gap-4">
+      <DialogContent className="gap-4 pt-0">
         <Field className="grid-cols-[120px_1fr]" label="Table">
           <p class="text-sm font-medium text-neutral-600">
             {fk?.table_name ?? tableName}
@@ -224,14 +226,14 @@ export function ForeignKeyDialog(props: {
           </Select>
         </Field>
       </DialogContent>
-      <DialogFooter className="justify-end">
+      <DialogFooter className="justify-end pt-1">
         {onDelete && fk && (
           <Button variant="outline" onClick={onDelete}>
             Delete
           </Button>
         )}
         <Button
-          className="border border-blue-500 px-6!"
+          className="px-6!"
           variant="default"
           onClick={handleSubmit(onSubmit)}
           disabled={!isDirty}

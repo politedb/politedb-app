@@ -210,7 +210,7 @@ export function DatabaseManagerDialog({
 
           <Button
             variant="default"
-            className="border border-blue-500 py-1.5"
+            className="py-1.5"
             onClick={() => {
               void handleOpenDatabase();
             }}

@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "src/components/common/Dialog";
 import { DataImportPreview } from "src/hooks/useImportTableData";
 import { Button } from "src/components/common/Button";
@@ -91,6 +92,9 @@ export function ImportTableDialog({
       <Dialog open={open} onClose={onClose} size={progress ? "sm" : "lg"}>
         <DialogHeader>
           <DialogTitle className="text-base">Import CSV data</DialogTitle>
+          <DialogDescription>
+            Import the CSV data into the selected table.
+          </DialogDescription>
         </DialogHeader>
         <DialogContent className="py-0">
           {dataPreview && (
@@ -162,7 +166,6 @@ export function ImportTableDialog({
           {dataPreview && (dataPreview.rows.length > 0 || !firstIsHeaders) && (
             <Button
               variant="default"
-              class="border border-blue-500"
               onClick={() => onImport(firstIsHeaders)}
               disabled={importing}
             >

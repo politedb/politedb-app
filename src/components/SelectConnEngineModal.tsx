@@ -279,7 +279,7 @@ export function ConnectionModal(props: {
 
           <Button
             variant="ghost"
-            className="rounded-full p-2"
+            className="rounded-full border-none p-2 hover:bg-neutral-100"
             onClick={onClose}
           >
             <X className="size-4 text-slate-600" />
@@ -335,8 +335,7 @@ export function ConnectionModal(props: {
         </div>
 
         {/* Footer (optional minimal) */}
-        <div class="flex shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 py-3">
-          <div class="text-xs text-slate-500"></div>
+        <div class="flex shrink-0 items-center justify-end border-t border-slate-200 bg-white px-6 py-3">
           <div class="flex gap-2">
             <Button variant="outline" onClick={onClose}>
               Close

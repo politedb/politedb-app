@@ -259,7 +259,6 @@ export function ExportTableDialog({
           {!progress && (
             <Button
               variant="default"
-              class="border border-blue-500"
               onClick={onExport}
               disabled={exporting || columnNames.length === 0}
             >

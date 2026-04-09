@@ -254,7 +254,7 @@ export function TableFooter({
               onClick={() => setIsPopoverOpen((open) => !open)}
               aria-expanded={isPopoverOpen}
               aria-haspopup="dialog"
-              class="rounded-full px-2 py-1 text-sm transition-colors hover:bg-neutral-200"
+              class="rounded-full px-3 py-1 text-sm transition-colors hover:bg-slate-100"
             >
               {loadedLabel}
             </button>

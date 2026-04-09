@@ -243,7 +243,7 @@ export function NewTablePane({
           <TableViewToggle viewMode="structure" />
 
           <Button variant="shadow" className="px-2" disabled>
-            <Plus className="size-3.5" />
+            <Plus className="size-3" />
             Index
           </Button>
 
@@ -255,7 +255,7 @@ export function NewTablePane({
               tableState.addColumn(null, tableState.columns.length)
             }
           >
-            <Plus className="size-3.5" />
+            <Plus className="size-3" />
             Column
           </Button>
         </div>

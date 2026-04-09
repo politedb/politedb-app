@@ -2,6 +2,7 @@ import { Button } from "src/components/common/Button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -40,22 +41,25 @@ export function DatabaseEditorDialog({
         <DialogTitle>
           {mode === "create" ? "New database" : "Rename database"}
         </DialogTitle>
+        <DialogDescription>
+          Configure the name for your database.
+        </DialogDescription>
       </DialogHeader>
-      <DialogContent className="gap-2">
+      <DialogContent className="gap-2 pt-0">
         <Input
           value={nameDraft}
-          placeholder="Database name"
+          label="Database name"
+          placeholder="Enter the name..."
           onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
           className="h-9 border border-neutral-300 text-sm"
         />
       </DialogContent>
-      <DialogFooter>
+      <DialogFooter className="pt-1">
         <Button variant="shadow" onClick={onClose} disabled={busy}>
           Cancel
         </Button>
         <Button
           variant="default"
-          className="border border-blue-500"
           onClick={onSave}
           disabled={busy || !nameDraft.trim()}
         >

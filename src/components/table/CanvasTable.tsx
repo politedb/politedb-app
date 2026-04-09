@@ -8,7 +8,7 @@ import {
 } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
-import { ArrowDown, ArrowUp } from "src/components/icons";
+import { ChevronDown, ChevronUp } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
@@ -654,21 +654,22 @@ export function CanvasTable({
           break;
         }
       }
-      
+
       if (newlyAddedVisibleIdx >= 0) {
         const el = scrollerRef.current;
         if (el) {
           const yRowTop = newlyAddedVisibleIdx * ROW_HEIGHT;
           const toSeeTop = yRowTop;
-          const toSeeBottom = yRowTop + ROW_HEIGHT + HEADER_HEIGHT - el.clientHeight;
-          
+          const toSeeBottom =
+            yRowTop + ROW_HEIGHT + HEADER_HEIGHT - el.clientHeight;
+
           if (el.scrollTop > toSeeTop - ROW_HEIGHT) {
             el.scrollTop = Math.max(0, toSeeTop - ROW_HEIGHT * 2);
           } else if (el.scrollTop < toSeeBottom + ROW_HEIGHT) {
             el.scrollTop = toSeeBottom + ROW_HEIGHT * 2;
           }
         }
-        
+
         onSelect?.(newlyAddedVisibleIdx, 0);
       }
     }
@@ -946,9 +947,9 @@ export function CanvasTable({
 
                   {isSorted &&
                     (sortDir === "asc" ? (
-                      <ArrowUp className="size-3 shrink-0" />
+                      <ChevronUp className="size-3 shrink-0" />
                     ) : (
-                      <ArrowDown className="size-3 shrink-0" />
+                      <ChevronDown className="size-3 shrink-0" />
                     ))}
 
                   {/* --- RESIZE HANDLE --- */}

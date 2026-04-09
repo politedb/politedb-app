@@ -4,15 +4,18 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/SelectConnEngineModal";
 import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
+import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 
 import { LeftNav } from "./LeftNav";
 import { TopBar } from "./TopBar";
 import { ConnectionsSection } from "./ConnectionsSection";
+import { GroupsSection } from "./GroupsSection";
 import { KeychainSection } from "./KeychainSection";
 
 import { filterConnections } from "src/utils/connection";
@@ -45,27 +48,62 @@ export function MainScreen() {
   } = useProfileStore();
 
   const profiles = useProfileStore((s) => s.profiles);
+  const ensureGroupsLoaded = useConnectionGroupsStore((s) => s.ensureLoaded);
+  const groups = useConnectionGroupsStore((s) => s.groups);
+  const assignments = useConnectionGroupsStore((s) => s.assignments);
+  const createGroup = useConnectionGroupsStore((s) => s.createGroup);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
   }, [loadProfiles]);
+
+  useEffect(() => {
+    ensureGroupsLoaded();
+  }, [ensureGroupsLoaded]);
 
   const selectedProfile = useMemo(() => {
     if (!selectedProfileId) return undefined;
     return profiles.find((p) => p.id === selectedProfileId);
   }, [profiles, selectedProfileId]);
 
-  const filteredProfiles = useMemo(
-    () => filterConnections(profiles, searchQuery),
-    [profiles, searchQuery]
+  const groupedProfiles = useMemo(
+    () =>
+      groups
+        .map((group) => ({
+          group,
+          count: profiles.filter((profile) => assignments[profile.id] === group.id)
+            .length,
+        })),
+    [groups, profiles, assignments]
   );
+
+  const filteredProfiles = useMemo(
+    () => {
+      const searched = filterConnections(profiles, searchQuery);
+      if (!selectedGroupId) return searched;
+      return searched.filter((profile) =>
+        assignments[profile.id] === selectedGroupId
+      );
+    },
+    [profiles, searchQuery, selectedGroupId, assignments]
+  );
+
+  useEffect(() => {
+    if (!selectedGroupId) return;
+    const stillExists = groupedProfiles.some(
+      ({ group }) => group.id === selectedGroupId
+    );
+    if (!stillExists) setSelectedGroupId(undefined);
+  }, [groupedProfiles, selectedGroupId]);
 
   async function handleProfileSaved(v?: ConnectionProfile) {
     if (!v) return;
@@ -123,6 +161,10 @@ export function MainScreen() {
     }
   }
 
+  async function handleCreateGroup(name: string) {
+    createGroup(name);
+  }
+
   return (
     <div class="flex h-full flex-col bg-neutral-50">
       <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -137,14 +179,15 @@ export function MainScreen() {
                 mode={activeNav}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                onNew={() => {
+                onNewConnection={() => {
                   if (activeNav === "connections") {
                     openNew();
-                  } else {
-                    setKeychainEditorOpen(true);
-                    setKeychainNewSignal((n) => n + 1);
+                    return;
                   }
+                  setKeychainEditorOpen(true);
+                  setKeychainNewSignal((n) => n + 1);
                 }}
+                onNewGroup={() => setNewGroupOpen(true)}
                 onImportConnections={handleImportConnections}
                 onPrivacy={() => setPrivacyOpen(true)}
                 viewMode={viewMode}
@@ -159,6 +202,11 @@ export function MainScreen() {
               <div class="px-4 py-4">
                 {/* Centered canvas */}
                 <div class="mx-auto w-full max-w-400">
+                  <GroupsSection
+                    groups={groupedProfiles}
+                    selectedGroupId={selectedGroupId}
+                    onPickGroup={setSelectedGroupId}
+                  />
                   <ConnectionsSection
                     profiles={filteredProfiles}
                     selectedId={selectedProfileId}
@@ -217,6 +265,11 @@ export function MainScreen() {
         </OverlayModal>
 
         <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
+        <NewConnectionGroupDialog
+          open={newGroupOpen}
+          onClose={() => setNewGroupOpen(false)}
+          onCreate={handleCreateGroup}
+        />
       </div>
     </div>
   );

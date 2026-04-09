@@ -2,13 +2,22 @@ import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
 import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
-import { Edit, Ssh, Trash, MoreVertical, Backup } from "src/components/icons";
+import {
+  Edit,
+  Ssh,
+  Trash,
+  MoreVertical,
+  Backup,
+  Folder,
+} from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
+import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { cn } from "src/utils/cn";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
 
 /* -------------------------------------------------- */
 /* utils */
@@ -152,9 +161,16 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     s.profiles.find((p) => p.id === profileId)
   );
   const removeProfile = useProfileStore((s) => s.removeProfile);
+  const ensureGroupsLoaded = useConnectionGroupsStore((s) => s.ensureLoaded);
+  const groups = useConnectionGroupsStore((s) => s.groups);
+  const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
+  const currentGroup = useConnectionGroupsStore((s) =>
+    s.getGroupForProfile(profileId)
+  );
 
   const kebabRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [assignGroupOpen, setAssignGroupOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -228,6 +244,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   }
 
   useEffect(() => {
+    ensureGroupsLoaded();
+  }, [ensureGroupsLoaded]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     return () => closeMenu();
   }, [profileId]);
@@ -299,6 +319,12 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
                 />
               </div>
             ) : null}
+
+            {currentGroup ? (
+              <span class="inline-flex max-w-40 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                {currentGroup.name}
+              </span>
+            ) : null}
           </div>
 
           {/* Subtitle row */}
@@ -359,6 +385,16 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           { type: "sep" },
           {
             type: "item",
+            label: "Move to Group",
+            icon: <Folder className="size-4" />,
+            onClick: () => {
+              closeMenu();
+              setAssignGroupOpen(true);
+            },
+          },
+          { type: "sep" },
+          {
+            type: "item",
             label: "Delete",
             icon: <Trash className="size-4" />,
             color: "red",
@@ -368,6 +404,18 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           },
         ]}
         onClose={closeMenu}
+      />
+
+      <AssignConnectionGroupDialog
+        open={assignGroupOpen}
+        onClose={() => setAssignGroupOpen(false)}
+        connectionLabel={label}
+        groups={groups}
+        selectedGroupId={currentGroup?.id}
+        onSave={async (groupId) => {
+          assignGroup(profile.id, groupId);
+          setAssignGroupOpen(false);
+        }}
       />
     </div>
   );
