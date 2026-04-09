@@ -8,6 +8,7 @@ export type ConnectionSortMode =
   | "label-desc"
   | "created-desc"
   | "created-asc";
+export type KeychainSortMode = "label-asc" | "label-desc";
 export type TabViewMode = "left" | "right" | "bottom";
 export type WindowType = "table" | "sql" | "explain" | "erd";
 

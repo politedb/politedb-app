@@ -16,7 +16,7 @@ import {
   secretsSet,
 } from "src/lib/tauri";
 import { KeychainCard } from "./KeychainCard";
-import type { ViewMode } from "src/types";
+import type { KeychainSortMode, ViewMode } from "src/types";
 import { cn } from "src/utils/cn";
 
 function isTauriRuntime() {
@@ -49,11 +49,19 @@ function EmptyState(props: { hasSearch: boolean }) {
 export function KeychainSection(props: {
   searchQuery: string;
   viewMode: ViewMode;
+  sortMode: KeychainSortMode;
   newSignal: number;
   editorOpen: boolean;
   onEditorOpenChange: (open: boolean) => void;
 }) {
-  const { searchQuery, viewMode, newSignal, editorOpen, onEditorOpenChange } =
+  const {
+    searchQuery,
+    viewMode,
+    sortMode,
+    newSignal,
+    editorOpen,
+    onEditorOpenChange,
+  } =
     props;
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
@@ -212,9 +220,13 @@ export function KeychainSection(props: {
   const canSubmit = tauriReady && !busy;
   const filteredKeys = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return keys;
-    return keys.filter((k) => k.toLowerCase().includes(q));
-  }, [keys, searchQuery]);
+    const matched = !q ? keys : keys.filter((k) => k.toLowerCase().includes(q));
+    return [...matched].sort((a, b) =>
+      sortMode === "label-desc"
+        ? b.localeCompare(a)
+        : a.localeCompare(b)
+    );
+  }, [keys, searchQuery, sortMode]);
 
   return (
     <div class="h-full w-full bg-neutral-100">

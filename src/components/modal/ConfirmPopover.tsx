@@ -3,6 +3,7 @@ import type { JSX } from "preact";
 import { createPortal } from "preact/compat";
 
 type ConfirmVariant = "default" | "danger";
+type ConfirmAlign = "start" | "center" | "end";
 
 type Point = { top: number; left: number; placement: "top" | "bottom" };
 
@@ -27,6 +28,7 @@ export function ConfirmPopover(props: {
   closeOnCancel?: boolean;
   closeOnOutside?: boolean;
   closeOnEsc?: boolean;
+  align?: ConfirmAlign;
 
   onConfirm: () => void | Promise<void>;
   onCancel?: () => void;
@@ -44,6 +46,7 @@ export function ConfirmPopover(props: {
     closeOnCancel = true,
     closeOnOutside = true,
     closeOnEsc = true,
+    align = "end",
     onConfirm,
     onCancel,
   } = props;
@@ -80,10 +83,14 @@ export function ConfirmPopover(props: {
     const W = 240; // popover width
     const GAP = 8;
 
-    let left = Math.min(
-      Math.max(8, r.right - W), // right align to trigger
-      window.innerWidth - W - 8
-    );
+    let left =
+      align === "start"
+        ? r.left
+        : align === "center"
+          ? r.left + r.width / 2 - W / 2
+          : r.right - W;
+
+    left = Math.min(Math.max(8, left), window.innerWidth - W - 8);
 
     let top = r.bottom + GAP;
     let placement: Point["placement"] = "bottom";

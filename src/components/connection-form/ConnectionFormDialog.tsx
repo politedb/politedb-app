@@ -203,7 +203,7 @@ export function ConnectionFormDialog({
 
       addTab(newTab);
       setActiveProfileScreen(newTab.id);
-      onSaved?.();
+      onSaved?.(res.profile);
       onClose?.();
       trackEvent("connection_connect_success", {
         engine: connectionInput.engine,

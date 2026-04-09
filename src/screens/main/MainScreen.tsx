@@ -22,14 +22,12 @@ import { filterConnections } from "src/utils/connection";
 import type {
   ConnectionSortMode,
   DatabaseEngine,
+  KeychainSortMode,
   NavId,
   ViewMode,
 } from "src/types";
 import { profileImport, type ConnectionProfile } from "src/lib/tauri";
-import {
-  pickOpenFile,
-  showMessage,
-} from "src/lib/system-dialog";
+import { pickOpenFile, showMessage } from "src/lib/system-dialog";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -57,12 +55,16 @@ export function MainScreen() {
   const groups = useConnectionGroupsStore((s) => s.groups);
   const assignments = useConnectionGroupsStore((s) => s.assignments);
   const createGroup = useConnectionGroupsStore((s) => s.createGroup);
+  const deleteGroup = useConnectionGroupsStore((s) => s.deleteGroup);
+  const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [connectionSortMode, setConnectionSortMode] =
     useState<ConnectionSortMode>("created-desc");
+  const [keychainSortMode, setKeychainSortMode] =
+    useState<KeychainSortMode>("label-asc");
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
@@ -84,29 +86,26 @@ export function MainScreen() {
 
   const groupedProfiles = useMemo(
     () =>
-      groups
-        .map((group) => ({
-          group,
-          count: profiles.filter((profile) => assignments[profile.id] === group.id)
-            .length,
-        })),
+      groups.map((group) => ({
+        group,
+        count: profiles.filter(
+          (profile) => assignments[profile.id] === group.id
+        ).length,
+      })),
     [groups, profiles, assignments]
   );
 
-  const filteredProfiles = useMemo(
-    () => {
-      const searched = filterConnections(
-        profiles,
-        searchQuery,
-        connectionSortMode
-      );
-      if (!selectedGroupId) return searched;
-      return searched.filter((profile) =>
-        assignments[profile.id] === selectedGroupId
-      );
-    },
-    [profiles, searchQuery, selectedGroupId, assignments, connectionSortMode]
-  );
+  const filteredProfiles = useMemo(() => {
+    const searched = filterConnections(
+      profiles,
+      searchQuery,
+      connectionSortMode
+    );
+    if (!selectedGroupId) return searched;
+    return searched.filter(
+      (profile) => assignments[profile.id] === selectedGroupId
+    );
+  }, [profiles, searchQuery, selectedGroupId, assignments, connectionSortMode]);
 
   useEffect(() => {
     if (!selectedGroupId) return;
@@ -116,18 +115,27 @@ export function MainScreen() {
     if (!stillExists) setSelectedGroupId(undefined);
   }, [groupedProfiles, selectedGroupId]);
 
+  function assignSelectedGroupToProfile(profileId: string) {
+    if (showNewConnection && selectedGroupId) {
+      assignGroup(profileId, selectedGroupId);
+    }
+  }
+
   async function handleProfileSaved(v?: ConnectionProfile) {
     if (!v) return;
 
     await saveProfile(v);
 
+    assignSelectedGroupToProfile(v.id);
     closeNew();
     closeEdit();
     setShowDatabaseForm(undefined);
     selectProfile(undefined);
   }
 
-  async function handleNewProfile() {
+  async function handleNewProfile(v?: ConnectionProfile) {
+    if (v) assignSelectedGroupToProfile(v.id);
+
     await loadProfiles();
     closeNew();
     closeEdit();
@@ -176,6 +184,22 @@ export function MainScreen() {
     createGroup(name);
   }
 
+  function handleTopBarCreate() {
+    if (activeNav === "connections") {
+      openNew();
+      return;
+    }
+    setKeychainEditorOpen(true);
+    setKeychainNewSignal((n) => n + 1);
+  }
+
+  function handleDeleteGroup(groupId: string) {
+    if (selectedGroupId === groupId) {
+      setSelectedGroupId(undefined);
+    }
+    deleteGroup(groupId);
+  }
+
   return (
     <div class="flex h-full flex-col bg-neutral-50">
       <div class="flex min-h-0 flex-1 overflow-hidden">
@@ -190,14 +214,7 @@ export function MainScreen() {
                 mode={activeNav}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                onNewConnection={() => {
-                  if (activeNav === "connections") {
-                    openNew();
-                    return;
-                  }
-                  setKeychainEditorOpen(true);
-                  setKeychainNewSignal((n) => n + 1);
-                }}
+                onNewConnection={handleTopBarCreate}
                 onNewGroup={() => setNewGroupOpen(true)}
                 onImportConnections={handleImportConnections}
                 onPrivacy={() => setPrivacyOpen(true)}
@@ -205,6 +222,8 @@ export function MainScreen() {
                 onViewMode={setViewMode}
                 connectionSortMode={connectionSortMode}
                 onConnectionSortModeChange={setConnectionSortMode}
+                keychainSortMode={keychainSortMode}
+                onKeychainSortModeChange={setKeychainSortMode}
               />
             </div>
           </div>
@@ -219,6 +238,7 @@ export function MainScreen() {
                     groups={groupedProfiles}
                     selectedGroupId={selectedGroupId}
                     onPickGroup={setSelectedGroupId}
+                    onDeleteGroup={handleDeleteGroup}
                   />
                   <ConnectionsSection
                     profiles={filteredProfiles}
@@ -243,6 +263,7 @@ export function MainScreen() {
               <KeychainSection
                 searchQuery={searchQuery}
                 viewMode={viewMode}
+                sortMode={keychainSortMode}
                 newSignal={keychainNewSignal}
                 editorOpen={keychainEditorOpen}
                 onEditorOpenChange={setKeychainEditorOpen}
@@ -277,7 +298,10 @@ export function MainScreen() {
           />
         </OverlayModal>
 
-        <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
+        <PrivacyDialog
+          open={privacyOpen}
+          onClose={() => setPrivacyOpen(false)}
+        />
         <NewConnectionGroupDialog
           open={newGroupOpen}
           onClose={() => setNewGroupOpen(false)}

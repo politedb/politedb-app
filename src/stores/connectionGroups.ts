@@ -16,6 +16,7 @@ type ConnectionGroupsState = ConnectionGroupsSnapshot & {
   loaded: boolean;
   ensureLoaded: () => void;
   createGroup: (name: string) => ConnectionGroup;
+  deleteGroup: (groupId: string) => void;
   assignGroup: (profileId: string, groupId?: string) => void;
   getGroupForProfile: (profileId: string) => ConnectionGroup | undefined;
 };
@@ -110,6 +111,26 @@ export const useConnectionGroupsStore = create<ConnectionGroupsState>(
       safeWrite(snapshot);
       set(snapshot);
       return nextGroup;
+    },
+
+    deleteGroup: (groupId) => {
+      get().ensureLoaded();
+
+      const nextGroups = get().groups.filter((group) => group.id !== groupId);
+      const nextAssignments = { ...get().assignments };
+
+      for (const [profileId, assignedGroupId] of Object.entries(nextAssignments)) {
+        if (assignedGroupId === groupId) {
+          delete nextAssignments[profileId];
+        }
+      }
+
+      const snapshot = {
+        groups: nextGroups,
+        assignments: nextAssignments,
+      };
+      safeWrite(snapshot);
+      set(snapshot);
     },
 
     assignGroup: (profileId, groupId) => {

@@ -1,23 +1,35 @@
 import type { TargetedEvent } from "preact";
-import { useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
+
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import {
   ChevronDownIcon,
-  DateAscIcon,
-  DateDescIcon,
-  FolderIcon,
   GridIcon,
   ListIcon,
   PlusIcon,
-  RestoreIcon,
   SearchIcon,
   SettingsIcon,
   SortIcon,
 } from "src/components/icons";
-import type { ConnectionSortMode, NavId, ViewMode } from "src/types";
+import type {
+  ConnectionSortMode,
+  KeychainSortMode,
+  NavId,
+  ViewMode,
+} from "src/types";
 
-export function TopBar(props: {
+import {
+  buildConnectionSortItems,
+  buildKeychainSortItems,
+  buildNewConnectionMenuItems,
+  getTopBarCreateLabel,
+  getTopBarCreateTitle,
+  getTopBarSearchPlaceholder,
+} from "./topBar.config";
+import { cn } from "src/utils/cn";
+
+type TopBarProps = {
   mode: NavId;
   searchQuery: string;
   onSearchChange: (v: string) => void;
@@ -29,7 +41,199 @@ export function TopBar(props: {
   onViewMode: (v: ViewMode) => void;
   connectionSortMode?: ConnectionSortMode;
   onConnectionSortModeChange?: (v: ConnectionSortMode) => void;
+  keychainSortMode?: KeychainSortMode;
+  onKeychainSortModeChange?: (v: KeychainSortMode) => void;
+};
+
+function SearchField(props: {
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
 }) {
+  const { value, placeholder, onChange } = props;
+
+  return (
+    <div class="relative min-w-0 flex-1">
+      <input
+        type="text"
+        placeholder={placeholder}
+        value={value}
+        onInput={(e: TargetedEvent<HTMLInputElement>) =>
+          onChange(e.currentTarget.value)
+        }
+        class={cn(
+          "h-9 w-full rounded-lg border border-slate-300 bg-white py-2 pr-3 pl-9 text-sm text-slate-900 transition-colors",
+          "outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        )}
+      />
+      <SearchIcon className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    </div>
+  );
+}
+
+function CreateConnectionButtonGroup(props: {
+  label: string;
+  title: string;
+  onCreate: () => void;
+  dropdownItems: ReturnType<typeof buildNewConnectionMenuItems>;
+}) {
+  const { label, title, onCreate, dropdownItems } = props;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div class="flex items-center">
+      <Button
+        variant="default"
+        className="h-9 rounded-lg rounded-r-none px-3"
+        onClick={onCreate}
+        title={title}
+      >
+        <PlusIcon className="size-3" />
+        <span class="text-[12px] font-semibold">{label}</span>
+      </Button>
+
+      <Dropdown
+        open={open}
+        onOpenChange={setOpen}
+        positions={["bottom", "right"]}
+        align="end"
+        items={dropdownItems}
+        trigger={
+          <div>
+            <Button
+              variant="default"
+              className="h-9 rounded-lg rounded-l-none border-l border-l-neutral-300! px-3"
+              onClick={() => setOpen((v) => !v)}
+              title={title}
+            >
+              <ChevronDownIcon className="size-3" />
+            </Button>
+          </div>
+        }
+      />
+    </div>
+  );
+}
+
+function CreateKeychainButton(props: {
+  label: string;
+  title: string;
+  onCreate: () => void;
+}) {
+  const { label, title, onCreate } = props;
+
+  return (
+    <Button
+      variant="default"
+      onClick={onCreate}
+      class="h-9 rounded-lg px-3"
+      title={title}
+    >
+      <PlusIcon className="size-3" />
+      <span class="text-sm font-semibold">{label}</span>
+    </Button>
+  );
+}
+
+function SortMenu(props: {
+  title: string;
+  items:
+    | ReturnType<typeof buildConnectionSortItems>
+    | ReturnType<typeof buildKeychainSortItems>;
+}) {
+  const { title, items } = props;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Dropdown
+      open={open}
+      onOpenChange={setOpen}
+      positions={["bottom"]}
+      align="end"
+      widthClassName="w-52"
+      items={items}
+      trigger={
+        <div>
+          <Button
+            variant="outline"
+            onClick={() => setOpen((v) => !v)}
+            class="h-9 rounded-lg border border-slate-300 px-[8px]"
+            title={title}
+          >
+            <SortIcon className="size-4" />
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
+function UtilityActions(props: {
+  sortTitle: string;
+  sortItems:
+    | ReturnType<typeof buildConnectionSortItems>
+    | ReturnType<typeof buildKeychainSortItems>;
+  onPrivacy: () => void;
+}) {
+  const { sortTitle, sortItems, onPrivacy } = props;
+
+  return (
+    <div class="flex items-center gap-1">
+      <SortMenu title={sortTitle} items={sortItems} />
+      <Button
+        variant="outline"
+        onClick={onPrivacy}
+        class="h-9 rounded-lg border border-slate-300 px-[8px]"
+        title="Privacy Settings"
+      >
+        <SettingsIcon className="size-4" />
+      </Button>
+    </div>
+  );
+}
+
+function ViewModeToggle(props: {
+  mode: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  const { mode, onChange } = props;
+
+  return (
+    <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+      <button
+        type="button"
+        onClick={() => onChange("grid")}
+        class={`flex h-9 w-9 items-center justify-center ${
+          mode === "grid"
+            ? "bg-blue-50 text-blue-600"
+            : "text-slate-600 hover:bg-slate-50"
+        }`}
+        title="Grid view"
+        aria-label="Grid view"
+      >
+        <GridIcon className="size-4" />
+      </button>
+
+      <div class="h-5 w-px bg-slate-200" />
+
+      <button
+        type="button"
+        onClick={() => onChange("list")}
+        class={`flex h-9 w-9 items-center justify-center ${
+          mode === "list"
+            ? "bg-blue-50 text-blue-600"
+            : "text-slate-600 hover:bg-slate-50"
+        }`}
+        title="List view"
+        aria-label="List view"
+      >
+        <ListIcon className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+export function TopBar(props: TopBarProps) {
   const {
     mode,
     searchQuery,
@@ -42,206 +246,74 @@ export function TopBar(props: {
     onViewMode,
     connectionSortMode = "created-desc",
     onConnectionSortModeChange,
+    keychainSortMode = "label-asc",
+    onKeychainSortModeChange,
   } = props;
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   const isConnections = mode === "connections";
-  const searchPlaceholder = isConnections
-    ? "Search connections or paste a URL..."
-    : "Search keychain keys...";
-  const newLabel = isConnections ? "New Connection" : "New Key";
-  const newTitle = isConnections ? "Create" : "New keychain key";
+  const searchPlaceholder = getTopBarSearchPlaceholder(isConnections);
+  const createLabel = getTopBarCreateLabel(isConnections);
+  const createTitle = getTopBarCreateTitle(isConnections);
+
+  const newConnectionMenuItems = useMemo(
+    () =>
+      buildNewConnectionMenuItems({
+        onNewGroup,
+        onImportConnections,
+      }),
+    [onImportConnections, onNewGroup]
+  );
+
+  const sortItems = useMemo(
+    () =>
+      isConnections
+        ? buildConnectionSortItems({
+            mode: connectionSortMode,
+            onChange: onConnectionSortModeChange,
+          })
+        : buildKeychainSortItems({
+            mode: keychainSortMode,
+            onChange: onKeychainSortModeChange,
+          }),
+    [
+      connectionSortMode,
+      isConnections,
+      keychainSortMode,
+      onConnectionSortModeChange,
+      onKeychainSortModeChange,
+    ]
+  );
 
   return (
     <div class="flex shrink-0 items-center gap-2 bg-white px-1 py-2">
-      {/* Search */}
-      <div class="relative min-w-0 flex-1">
-        <input
-          type="text"
-          placeholder={searchPlaceholder}
-          value={searchQuery}
-          onInput={(e: TargetedEvent<HTMLInputElement>) =>
-            onSearchChange(e.currentTarget.value)
-          }
-          class="h-9 w-full rounded-lg border border-slate-300 bg-white py-2 pr-3 pl-9 text-[13px] text-slate-900 transition-colors outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-        />
-        <SearchIcon className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
-      </div>
+      <SearchField
+        value={searchQuery}
+        placeholder={searchPlaceholder}
+        onChange={onSearchChange}
+      />
 
-      {/* Primary actions */}
       {isConnections ? (
-        <div class="flex items-center">
-          <Button
-            variant="default"
-            className="h-9 rounded-lg rounded-r-none px-3"
-            onClick={onNewConnection}
-            title={newTitle}
-          >
-            <PlusIcon className="size-3" />
-            <span class="text-[12px] font-semibold">{newLabel}</span>
-          </Button>
-
-          <Dropdown
-            open={newMenuOpen}
-            onOpenChange={setNewMenuOpen}
-            positions={["bottom", "right"]}
-            align="end"
-            items={[
-              {
-                key: "new-group",
-                label: "New Group",
-                icon: <FolderIcon className="size-4" />,
-                onSelect: onNewGroup,
-              },
-              {
-                key: "import",
-                label: "Import",
-                icon: <RestoreIcon className="size-4" />,
-                onSelect: onImportConnections,
-              },
-            ]}
-            trigger={
-              <div>
-                <Button
-                  variant="default"
-                  className="h-9 rounded-lg rounded-l-none border-l border-l-neutral-300! px-3"
-                  onClick={() => setNewMenuOpen((v) => !v)}
-                  title={newTitle}
-                >
-                  <ChevronDownIcon className="size-3" />
-                </Button>
-              </div>
-            }
-          />
-        </div>
+        <CreateConnectionButtonGroup
+          label={createLabel}
+          title={createTitle}
+          onCreate={onNewConnection}
+          dropdownItems={newConnectionMenuItems}
+        />
       ) : (
-        <Button
-          variant="default"
-          onClick={onNewConnection}
-          class="h-9 rounded-lg px-3"
-          title={newTitle}
-        >
-          <PlusIcon className="size-3" />
-          <span class="text-sm font-semibold">{newLabel}</span>
-        </Button>
+        <CreateKeychainButton
+          label={createLabel}
+          title={createTitle}
+          onCreate={onNewConnection}
+        />
       )}
 
-      <div class="flex items-center gap-1">
-        {isConnections ? (
-          <Dropdown
-            open={sortMenuOpen}
-            onOpenChange={setSortMenuOpen}
-            positions={["bottom"]}
-            align="end"
-            widthClassName="w-52"
-            items={[
-              {
-                key: "label-asc",
-                label: "A-z",
-                icon: (
-                  <span class="flex size-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600">
-                    Az
-                  </span>
-                ),
-                rightSlot:
-                  connectionSortMode === "label-asc" ? (
-                    <span class="text-blue-600">✓</span>
-                  ) : undefined,
-                onSelect: () => onConnectionSortModeChange?.("label-asc"),
-              },
-              {
-                key: "label-desc",
-                label: "Z-a",
-                icon: (
-                  <span class="flex size-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600">
-                    Za
-                  </span>
-                ),
-                rightSlot:
-                  connectionSortMode === "label-desc" ? (
-                    <span class="text-blue-600">✓</span>
-                  ) : undefined,
-                onSelect: () => onConnectionSortModeChange?.("label-desc"),
-              },
-              {
-                key: "created-desc",
-                label: "Newest to oldest",
-                separatorBefore: true,
-                icon: <DateDescIcon className="size-5" />,
-                rightSlot:
-                  connectionSortMode === "created-desc" ? (
-                    <span class="text-blue-600">✓</span>
-                  ) : undefined,
-                onSelect: () => onConnectionSortModeChange?.("created-desc"),
-              },
-              {
-                key: "created-asc",
-                label: "Oldest to newest",
-                icon: <DateAscIcon className="size-5" />,
-                rightSlot:
-                  connectionSortMode === "created-asc" ? (
-                    <span class="text-blue-600">✓</span>
-                  ) : undefined,
-                onSelect: () => onConnectionSortModeChange?.("created-asc"),
-              },
-            ]}
-            trigger={
-              <div>
-                <Button
-                  variant="outline"
-                  onClick={() => setSortMenuOpen((v) => !v)}
-                  class="h-9 rounded-lg border border-slate-300 px-[8px]"
-                  title="Sort connections"
-                >
-                  <SortIcon className="size-4" />
-                </Button>
-              </div>
-            }
-          />
-        ) : null}
-        <Button
-          variant="outline"
-          onClick={onPrivacy}
-          class="h-9 rounded-lg border border-slate-300 px-[8px]"
-          title="Privacy Settings"
-        >
-          <SettingsIcon className="size-4" />
-        </Button>
-      </div>
+      <UtilityActions
+        sortTitle={isConnections ? "Sort connections" : "Sort keychain keys"}
+        sortItems={sortItems}
+        onPrivacy={onPrivacy}
+      />
 
-      {/* View mode */}
-      <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
-        <button
-          type="button"
-          onClick={() => onViewMode("grid")}
-          class={`flex h-9 w-9 items-center justify-center ${
-            viewMode === "grid"
-              ? "bg-blue-50 text-blue-600"
-              : "text-slate-600 hover:bg-slate-50"
-          }`}
-          title="Grid view"
-          aria-label="Grid view"
-        >
-          <GridIcon className="size-4" />
-        </button>
-
-        <div class="h-5 w-px bg-slate-200" />
-
-        <button
-          type="button"
-          onClick={() => onViewMode("list")}
-          class={`flex h-9 w-9 items-center justify-center ${
-            viewMode === "list"
-              ? "bg-blue-50 text-blue-600"
-              : "text-slate-600 hover:bg-slate-50"
-          }`}
-          title="List view"
-          aria-label="List view"
-        >
-          <ListIcon className="size-4" />
-        </button>
-      </div>
+      <ViewModeToggle mode={viewMode} onChange={onViewMode} />
     </div>
   );
 }

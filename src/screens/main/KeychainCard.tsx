@@ -33,6 +33,16 @@ export function KeychainCard(props: {
 
   const { label, tag } = useMemo(() => parseKeyName(keyName), [keyName]);
 
+  async function onDeleteSecret() {
+    const ok = await Promise.resolve(
+      window.confirm(
+        `Delete keychain secret?\n\nThis will remove the saved keychain.`
+      )
+    );
+    if (!ok) return;
+    onDelete();
+  }
+
   const menuItems = useMemo<MenuItem[]>(
     () => [
       {
@@ -55,7 +65,7 @@ export function KeychainCard(props: {
         type: "item",
         label: "Delete",
         disabled,
-        onClick: onDelete,
+        onClick: onDeleteSecret,
         color: "red",
         icon: <TrashIcon className="size-4" />,
       },

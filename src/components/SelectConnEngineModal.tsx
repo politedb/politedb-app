@@ -7,6 +7,7 @@ import { DbIcon } from "./icons/DbIcon";
 import { SearchIcon, XIcon } from "./icons";
 
 import type { DatabaseEngine, DatabaseType } from "../types";
+import type { ConnectionProfile } from "src/lib/tauri";
 import { SUPPORTED_DATABASES } from "../constant.ts";
 
 function normalizeQuery(q: string) {
@@ -124,7 +125,7 @@ function EngineRow(props: {
 }
 
 export function ConnectionModal(props: {
-  onSaved: () => void;
+  onSaved: (v?: ConnectionProfile) => void;
   onClose: () => void;
   showDatabaseForm: DatabaseEngine | undefined;
   setShowDatabaseForm: (show: DatabaseEngine | undefined) => void;
