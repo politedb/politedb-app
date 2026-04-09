@@ -1,10 +1,12 @@
-export function Analytics({ className }: { className: string }) {
+import { SVGProps } from "preact/compat";
+
+export function AnalyticsIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      class={className}
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      {...props}
     >
       <path
         d="M16.125 13.125L20.25 9M10.875 10.125L13.875 13.125M3.75 15L8.625 10.125"

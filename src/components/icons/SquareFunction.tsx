@@ -1,12 +1,14 @@
-export function SquareFunction({ className }: { className: string }) {
+import { SVGProps } from "preact/compat";
+
+export function SquareFunctionIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
-      className={className}
       width="24"
       height="24"
       viewBox="0 0 24 24"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
+      {...props}
     >
       <path
         d="M8 15.889C8.15 16.42 8.455 17 9.25 17C10.625 17 10.969 15.889 12 12C13.031 8.111 13.375 7 14.75 7C15.545 7 15.85 7.58 16 8.111M10.333 10.611H14.75"

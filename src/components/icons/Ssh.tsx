@@ -1,5 +1,6 @@
-export function Ssh(props: { className?: string }) {
-  const { className = "" } = props;
+import { SVGProps } from "preact/compat";
+
+export function SshIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -8,8 +9,8 @@ export function Ssh(props: { className?: string }) {
       stroke-width="2"
       stroke-linecap="round"
       stroke-linejoin="round"
-      class={className}
       aria-hidden="true"
+      {...props}
     >
       {/* > */}
       <path d="M4 6l6 6-6 6" />

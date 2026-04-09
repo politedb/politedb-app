@@ -1,11 +1,8 @@
-export function Key({ className }: { className: string }) {
+import { SVGProps } from "preact/compat";
+
+export function KeyIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      class={className}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
       <path
         stroke-linecap="round"
         stroke-linejoin="round"
