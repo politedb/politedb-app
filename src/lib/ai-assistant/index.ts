@@ -1,59 +1,31 @@
 import type { DatabaseEngine, TableItem } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
-import type { ChatMessage } from "src/types";
-
-const AI_ENDPOINT_KEY = "politedb.ai.endpoint";
-const AI_MODEL_KEY = "politedb.ai.model";
-const AI_MODEL_SEEN_KEY = "politedb.ai.model.seen";
-
-export type LocalAiSettings = {
-  endpoint: string;
-  model: string;
-};
-
-export type AiPlan = {
-  sql: string;
-  explanation: string;
-  assumptions: string[];
-  safety: "read_only" | "mutating" | "unknown";
-  needsClarification: boolean;
-  clarification: string;
-};
-
-export type AiAnswer = {
-  answer: string;
-  highlights: string[];
-  confidence: "high" | "medium" | "low";
-};
-
-export type AiChatReply = {
-  answer: string;
-  followup?: string;
-};
-
-export type DirectMetadataReply = {
-  answer: string;
-  followup?: string;
-};
-
-type GenerateOptions = {
-  endpoint: string;
-  model: string;
-  prompt: string;
-  onStatusChange?: (status: "loading_model" | "generating") => void;
-  signal?: AbortSignal;
-};
-
-type AiHistoryItem = Pick<ChatMessage, "role" | "text" | "sql">;
-type ReplyLanguage = "english" | "vietnamese" | "same";
-
-const MODEL_LOADING_MAX_RETRIES = 20;
-const MODEL_LOADING_RETRY_MS = 1500;
-
-const DEFAULT_AI_SETTINGS: LocalAiSettings = {
-  endpoint: "http://127.0.0.1:11434",
-  model: "qwen2.5-coder:7b",
-};
+import {
+  AI_ENDPOINT_KEY,
+  AI_MODEL_KEY,
+  AI_MODEL_SEEN_KEY,
+  DEFAULT_AI_SETTINGS,
+  MODEL_LOADING_MAX_RETRIES,
+  MODEL_LOADING_RETRY_MS,
+} from "src/utils/assistant";
+import {
+  buildChatReplyPrompt,
+  buildIntentClassifierPrompt,
+  buildResultAnswerPrompt,
+  buildSqlPlanPrompt,
+} from "@root/src/lib/ai-assistant/prompts";
+import type {
+  AiAnswer,
+  AiChatReply,
+  AiHistoryItem,
+  AiIntentDecision,
+  AiPlan,
+  AmbiguousPromptReply,
+  DirectMetadataReply,
+  GenerateOptions,
+  LocalAiSettings,
+  ReplyLanguage,
+} from "@root/src/lib/ai-assistant/types";
 
 function safeGetLocalStorage(key: string) {
   try {
@@ -94,9 +66,7 @@ function sanitizeAiText(value: unknown) {
 
 function sanitizeAiStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => sanitizeAiText(item))
-    .filter(Boolean);
+  return value.map((item) => sanitizeAiText(item)).filter(Boolean);
 }
 
 function normalizeIntentText(value: string) {
@@ -204,6 +174,7 @@ async function generateJson<T>(opts: GenerateOptions): Promise<T> {
 
 async function generateText(opts: GenerateOptions): Promise<string> {
   const endpoint = trimTrailingSlash(opts.endpoint.trim());
+  const maxTokens = Math.max(32, Math.min(opts.maxTokens ?? 256, 1024));
   for (let attempt = 0; attempt <= MODEL_LOADING_MAX_RETRIES; attempt++) {
     throwIfAborted(opts.signal);
     opts.onStatusChange?.("generating");
@@ -223,6 +194,7 @@ async function generateText(opts: GenerateOptions): Promise<string> {
           },
         ],
         temperature: 0.1,
+        max_tokens: maxTokens,
         stream: false,
       }),
     });
@@ -312,7 +284,7 @@ function toSchemaLines(args: {
     .join("\n");
 }
 
-function toConversationLines(history: AiHistoryItem[] = []) {
+function toConversationLines(history: AiHistoryItem[] = [], limit = 6) {
   const normalized = history
     .map((item) => ({
       role: item.role,
@@ -320,13 +292,15 @@ function toConversationLines(history: AiHistoryItem[] = []) {
       sql: String(item.sql ?? "").trim(),
     }))
     .filter((item) => item.text || item.sql)
-    .slice(-6);
+    .slice(-limit);
 
   if (!normalized.length) return "No previous conversation.";
 
   return normalized
     .map((item) => {
-      const parts = [`${item.role === "assistant" ? "Assistant" : "User"}: ${item.text || "(no text)"}`];
+      const parts = [
+        `${item.role === "assistant" ? "Assistant" : "User"}: ${item.text || "(no text)"}`,
+      ];
       if (item.sql) {
         parts.push(`SQL: ${item.sql}`);
       }
@@ -335,7 +309,7 @@ function toConversationLines(history: AiHistoryItem[] = []) {
     .join("\n\n");
 }
 
-function detectReplyLanguage(text: string): ReplyLanguage | null {
+function detectReplyLanguage(text: string): "english" | "vietnamese" | null {
   const raw = String(text ?? "").trim();
   const normalized = normalizeIntentText(text);
   if (!raw || !normalized) return null;
@@ -370,18 +344,20 @@ function detectReplyLanguage(text: string): ReplyLanguage | null {
 }
 
 function getPreferredReplyLanguage(
-  question: string,
-  history: AiHistoryItem[] = []
+  _question: string,
+  _history: AiHistoryItem[] = []
 ): ReplyLanguage {
-  const direct = detectReplyLanguage(question);
-  if (direct) return direct;
+  return "english";
+}
 
-  for (let i = history.length - 1; i >= 0; i--) {
-    const detected = detectReplyLanguage(history[i]?.text ?? "");
-    if (detected) return detected;
+function detectQuestionLanguage(
+  text: string
+): "english" | "vietnamese" | "unknown" {
+  const detected = detectReplyLanguage(text);
+  if (detected === "english" || detected === "vietnamese") {
+    return detected;
   }
-
-  return "same";
+  return "unknown";
 }
 
 function hasDatabaseIntent(text: string) {
@@ -393,6 +369,109 @@ function hasDatabaseIntent(text: string) {
     /\b(select|count|list|show|find|get|top|latest|newest|oldest|compare|trend|sum|avg|average|max|min|duplicate|missing)\b/,
     /\b(liet ke|dem|tim|hien thi|truy van|sap xep|loc|thong ke|so sanh|tong|trung binh|lon nhat|nho nhat|moi nhat)\b/,
   ].some((pattern) => pattern.test(normalized));
+}
+
+function countMeaningfulTokens(text: string) {
+  return normalizeIntentText(text)
+    .split(/[^a-z0-9_]+/g)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2).length;
+}
+
+export function getAmbiguousPromptReply(args: {
+  question: string;
+  history?: AiHistoryItem[];
+}): AmbiguousPromptReply | null {
+  const raw = String(args.question ?? "").trim();
+  const text = normalizeIntentText(raw);
+  if (!text) return null;
+
+  const meaningfulTokenCount = countMeaningfulTokens(raw);
+  const compact = text.replace(/\s+/g, " ").trim();
+
+  const obviouslyVague =
+    meaningfulTokenCount === 0 ||
+    compact.length <= 3 ||
+    /^(a+|b+|c+|d+|e+|h+m+|h+e+l+o*|ok+|oke+|test+|aaa+|bbb+|ccc+)$/.test(
+      compact
+    ) ||
+    /^(gi gi|gi do|cai gi|nao|sao|huh|uh|umm+|hmm+|idk|whatever)$/.test(
+      compact
+    );
+
+  const tooShortWithoutIntent =
+    meaningfulTokenCount <= 1 &&
+    !hasDatabaseIntent(raw) &&
+    !isGeneralChatPrompt(raw);
+
+  if (!obviouslyVague && !tooShortWithoutIntent) {
+    return null;
+  }
+
+  return {
+    answer: "I am not sure what you want to do with the data yet.",
+    followup:
+      "Please be more specific, for example: show the latest 10 rows, count records, filter by a condition, or explain a specific SQL query.",
+  };
+}
+
+export async function classifyAssistantIntent(args: {
+  endpoint: string;
+  model: string;
+  engine: DatabaseEngine;
+  question: string;
+  activeSchema?: string;
+  tables: TableItem[];
+  history?: AiHistoryItem[];
+  onStatusChange?: (status: "loading_model" | "generating") => void;
+  signal?: AbortSignal;
+}) {
+  const conversationSummary = toConversationLines(args.history);
+  const visibleTables = args.tables
+    .filter((table) => !args.activeSchema || table.schema === args.activeSchema)
+    .slice(0, 16)
+    .map((table) => `${table.schema}.${table.name}`)
+    .join(", ");
+
+  const prompt = buildIntentClassifierPrompt({
+    engine: args.engine,
+    activeSchema: args.activeSchema,
+    visibleTables,
+    conversationSummary,
+    question: args.question,
+  });
+
+  const raw = await generateJson<Partial<AiIntentDecision>>({
+    endpoint: args.endpoint,
+    model: args.model,
+    prompt,
+    maxTokens: 96,
+    onStatusChange: args.onStatusChange,
+    signal: args.signal,
+  });
+
+  const kind =
+    raw?.kind === "chat" ||
+    raw?.kind === "metadata" ||
+    raw?.kind === "sql" ||
+    raw?.kind === "clarify"
+      ? raw.kind
+      : "clarify";
+
+  const questionLanguage =
+    raw?.questionLanguage === "english" ||
+    raw?.questionLanguage === "vietnamese" ||
+    raw?.questionLanguage === "unknown"
+      ? raw.questionLanguage
+      : detectQuestionLanguage(args.question);
+  const replyLanguage = "english";
+
+  return {
+    kind,
+    questionLanguage,
+    replyLanguage,
+    clarification: sanitizeAiText(raw?.clarification) || undefined,
+  } satisfies AiIntentDecision;
 }
 
 function formatListPreview(items: string[], maxItems = 12) {
@@ -409,8 +488,6 @@ export function getDirectMetadataReply(args: {
 }) {
   const text = normalizeIntentText(args.question);
   if (!text) return null;
-  const replyLanguage = getPreferredReplyLanguage(args.question);
-
   const visibleTables = args.tables.filter(
     (table) => !args.activeSchema || table.schema === args.activeSchema
   );
@@ -439,55 +516,43 @@ export function getDirectMetadataReply(args: {
     return null;
   }
 
-  if (args.engine === "redis" && (asksTables || asksAllDatabases || asksSchemas)) {
+  if (
+    args.engine === "redis" &&
+    (asksTables || asksAllDatabases || asksSchemas)
+  ) {
     return {
       answer: visibleNames.length
-        ? replyLanguage === "vietnamese"
-          ? `Hiện tại mình thấy ${visibleNames.length} key trong db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
-          : `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
-        : replyLanguage === "vietnamese"
-          ? `Hiện tại mình chưa thấy key nào trong db ${args.activeSchema || "0"}.`
-          : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
+        ? `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+        : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
-  if (args.engine === "mongo" && (asksTables || asksAllDatabases || asksSchemas)) {
+  if (
+    args.engine === "mongo" &&
+    (asksTables || asksAllDatabases || asksSchemas)
+  ) {
     return {
       answer: visibleNames.length
-        ? replyLanguage === "vietnamese"
-          ? `Hiện tại mình thấy ${visibleNames.length} collection trong database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
-          : `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
-        : replyLanguage === "vietnamese"
-          ? `Hiện tại mình chưa thấy collection nào trong database ${args.activeSchema || "(current)"}.`
-          : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
+        ? `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
+        : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
   if (asksAllDatabases) {
     if (schemaNames.length > 1) {
       return {
-        answer:
-          replyLanguage === "vietnamese"
-            ? `Trong connection hiện tại mình thấy ${schemaNames.length} schema/database: ${formatListPreview(schemaNames)}.`
-            : `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
+        answer: `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
         followup:
           visibleNames.length > 0
-            ? replyLanguage === "vietnamese"
-              ? `Trong phạm vi đang mở ${args.activeSchema || schemaNames[0]}, mình cũng thấy ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
-              : `For the active scope ${args.activeSchema || schemaNames[0]}, I can also list ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+            ? `For the active scope ${args.activeSchema || schemaNames[0]}, I can also list ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
             : undefined,
       } satisfies DirectMetadataReply;
     }
 
     return {
-      answer:
-        replyLanguage === "vietnamese"
-          ? `Trong connection hiện tại mình chỉ có metadata cho ${args.activeSchema || schemaNames[0] || "schema/database hiện tại"}.`
-          : `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
+      answer: `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
       followup: visibleNames.length
-        ? replyLanguage === "vietnamese"
-          ? `Hiện tại nó có ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
-          : `It currently contains ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+        ? `It currently contains ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
         : undefined,
     } satisfies DirectMetadataReply;
   }
@@ -495,24 +560,16 @@ export function getDirectMetadataReply(args: {
   if (asksSchemas) {
     return {
       answer: schemaNames.length
-        ? replyLanguage === "vietnamese"
-          ? `Hiện tại mình thấy ${schemaNames.length} schema: ${formatListPreview(schemaNames)}.`
-          : `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
-        : replyLanguage === "vietnamese"
-          ? "Hiện tại mình chưa có metadata schema nào."
-          : "I do not have any schema metadata loaded yet.",
+        ? `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
+        : "I do not have any schema metadata loaded yet.",
     } satisfies DirectMetadataReply;
   }
 
   if (asksTables) {
     return {
       answer: visibleNames.length
-        ? replyLanguage === "vietnamese"
-          ? `Hiện tại mình thấy ${visibleNames.length} bảng trong ${args.activeSchema || "schema hiện tại"}: ${formatListPreview(visibleNames)}.`
-          : `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
-        : replyLanguage === "vietnamese"
-          ? `Hiện tại mình chưa thấy bảng nào trong ${args.activeSchema || "schema hiện tại"}.`
-          : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
+        ? `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
+        : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
@@ -709,51 +766,21 @@ export async function planSqlFromQuestion(args: {
     question: args.question,
   });
   const conversationSummary = toConversationLines(args.history);
-  const prompt = [
-    "You are a database copilot inside PoliteDB.",
-    `Database engine: ${args.engine}`,
-    `Active schema or database: ${args.activeSchema || "(not selected)"}`,
-    `Preferred reply language: ${preferredReplyLanguage}`,
-    "",
-    "The user may ask in natural language, including Vietnamese or English.",
-    "Infer intent from plain-language requests such as count, list, top, latest, today, yesterday, this week, compare, trend, duplicate, missing, explain, summarize, or follow-up questions.",
-    "When the latest question depends on prior chat context, use the recent conversation below.",
-    "",
-    "Recent conversation:",
+  const prompt = buildSqlPlanPrompt({
+    engine: args.engine,
+    activeSchema: args.activeSchema,
+    preferredReplyLanguage,
     conversationSummary,
-    "",
-    "Available tables and columns:",
     schemaSummary,
-    "",
-    args.currentSql?.trim()
-      ? `Current SQL in editor:\n${args.currentSql.trim()}\n`
-      : "",
-    "Task:",
-    args.question.trim(),
-    "",
-    'Return JSON only with this exact shape: {"sql":"string","explanation":"string","assumptions":["string"],"safety":"read_only|mutating|unknown","needsClarification":true|false,"clarification":"string"}',
-    "Rules:",
-    "- Use only listed tables and columns.",
-    "- Understand natural-language requests and map them to SQL even when the user does not mention exact table or column names.",
-    "- If the user asks for a reply language or response style, follow that preference in the explanation and clarification fields.",
-    "- Prefer sensible defaults for plain-language questions, for example recent rows, aggregates, top-N, or grouped summaries.",
-    "- If the user asks to explain or improve the current SQL, use the current SQL editor content when relevant.",
-    "- If a column name contains lower camelcase letters or special characters, quotes that identifier correctly for the current engine.",
-    "- Prefer a single query.",
-    "- For read requests, produce a read-only query.",
-    "- Add LIMIT/TOP/FETCH when the user did not ask for all rows.",
-    "- If the request is ambiguous, set needsClarification=true.",
-    "- Write explanation for the end user only. Do not say things like 'The user asked...' or explain the language/translation of the request.",
-    "- Do not restate the request as meta commentary. Just explain what the SQL does, briefly and directly.",
-    "- Never wrap JSON in markdown.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    currentSql: args.currentSql,
+    question: args.question,
+  });
 
   const raw = await generateJson<Partial<AiPlan>>({
     endpoint: args.endpoint,
     model: args.model,
     prompt,
+    maxTokens: 320,
     onStatusChange: args.onStatusChange,
     signal: args.signal,
   });
@@ -793,29 +820,21 @@ export async function answerFromResult(args: {
     args.history
   );
   const rows = queryResultToObjects(args.result, 50);
-  const prompt = [
-    "You answer database questions using only the executed result set below.",
-    `Database engine: ${args.engine}`,
-    `Preferred reply language: ${preferredReplyLanguage}`,
-    `User question: ${args.question.trim()}`,
-    `Executed SQL: ${args.sql.trim()}`,
-    `Row count returned: ${Number(args.result.rowCount ?? rows.length)}`,
-    `Columns: ${(args.result.columns ?? []).map((col) => col.name).join(", ")}`,
-    "",
-    "Rows JSON:",
-    JSON.stringify(rows, null, 2),
-    "",
-    'Return JSON only with this exact shape: {"answer":"string","highlights":["string"],"confidence":"high|medium|low"}',
-    "Rules:",
-    "- Be precise and concise.",
-    "- If the result is insufficient, say that clearly.",
-    "- Do not invent values not present in the rows.",
-  ].join("\n");
+  const prompt = buildResultAnswerPrompt({
+    engine: args.engine,
+    preferredReplyLanguage,
+    question: args.question,
+    sql: args.sql,
+    rowCount: Number(args.result.rowCount ?? rows.length),
+    columns: (args.result.columns ?? []).map((col) => col.name).join(", "),
+    rowsJson: JSON.stringify(rows, null, 2),
+  });
 
   const raw = await generateJson<Partial<AiAnswer>>({
     endpoint: args.endpoint,
     model: args.model,
     prompt,
+    maxTokens: 160,
     onStatusChange: args.onStatusChange,
     signal: args.signal,
   });
@@ -866,6 +885,58 @@ export function isGeneralChatPrompt(question: string) {
   ].some((pattern) => pattern.test(text));
 }
 
+export function getFastChatReply(question: string): AiChatReply | null {
+  const text = normalizeIntentText(question);
+  if (!text) return null;
+
+  if (/^(hi|hello|hey|yo|xin chao|chao|helo|alo)\b/.test(text)) {
+    return {
+      answer: "Hello! How can I assist you today?",
+      followup:
+        "You can ask me about your data, request SQL, or ask me to explain a query.",
+    };
+  }
+
+  if (/\b(thanks?|cam on)\b/.test(text)) {
+    return {
+      answer: "You're welcome.",
+      followup: "Let me know if you'd like help with data or SQL.",
+    };
+  }
+
+  if (/^(ok|okay|oke|duoc|roi|continue|tiep di)\b/.test(text)) {
+    return {
+      answer: "Sure.",
+      followup: "Tell me what you want to do next with the database.",
+    };
+  }
+
+  if (
+    /\b(use|answer|reply|respond|speak)( in)? english\b/.test(text) ||
+    /\btieng anh\b/.test(text) ||
+    /\b(use|answer|reply|respond|speak)( in)? vietnamese\b/.test(text) ||
+    /\btieng viet\b/.test(text)
+  ) {
+    return {
+      answer: "Understood. I will continue in English.",
+    };
+  }
+
+  if (
+    /\b(who are you|what can you do|help me|how can you help)\b/.test(text) ||
+    /\b(ban la ai|ban giup duoc gi|ban lam duoc gi|co the lam gi|huong dan toi)\b/.test(
+      text
+    )
+  ) {
+    return {
+      answer:
+        "I am PoliteDB AI Assistant. I can answer database questions, suggest SQL, explain queries, and summarize query results.",
+    };
+  }
+
+  return null;
+}
+
 export async function chatReply(args: {
   endpoint: string;
   model: string;
@@ -888,38 +959,19 @@ export async function chatReply(args: {
     .join(", ");
   const conversationSummary = toConversationLines(args.history);
 
-  const prompt = [
-    "You are PoliteDB AI Assistant.",
-    "You are a friendly local database copilot inside a desktop app.",
-    `Database engine: ${args.engine}`,
-    `Active schema or database: ${args.activeSchema || "(not selected)"}`,
-    `Preferred reply language: ${preferredReplyLanguage}`,
-    visibleTables ? `Visible tables: ${visibleTables}` : "",
-    "",
-    "The user may speak naturally in Vietnamese or English.",
-    "Use the recent conversation to understand short follow-up questions.",
-    "",
-    "Recent conversation:",
+  const prompt = buildChatReplyPrompt({
+    engine: args.engine,
+    activeSchema: args.activeSchema,
+    preferredReplyLanguage,
+    visibleTables,
     conversationSummary,
-    "",
-    `User message: ${args.question.trim()}`,
-    "",
-    'Return JSON only with this exact shape: {"answer":"string","followup":"string"}',
-    "Rules:",
-    "- For casual greetings, respond naturally and briefly.",
-    "- If the user asks to use English or Vietnamese, acknowledge it briefly and follow that language.",
-    "- Treat meta instructions about response language or style as a normal chat request, not a database query.",
-    "- If the user is asking what you can do, explain you can answer database questions, suggest SQL, and analyze query results.",
-    "- Do not invent data results.",
-    "- Never wrap JSON in markdown.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
+    question: args.question,
+  });
   const raw = await generateJson<Partial<AiChatReply>>({
     endpoint: args.endpoint,
     model: args.model,
     prompt,
+    maxTokens: 64,
     onStatusChange: args.onStatusChange,
     signal: args.signal,
   });

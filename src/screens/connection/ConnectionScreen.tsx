@@ -58,6 +58,12 @@ const EMPTY_TABLE_META = {
   connectionId: null,
 };
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export function ConnectionScreen() {
   /* =============================================================================
    * Screen store (tab-level)
@@ -371,17 +377,29 @@ export function ConnectionScreen() {
 
       if (!targetWindowId) return;
 
-      if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
-        return;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
+          return;
+        }
+        await sleep(50);
       }
 
       const merged = current ? `${current}\n\n${next}` : next;
-      useScreenStore
-        .getState()
-        .updateSqlWindowContent(activeProfileScreen, targetWindowId, {
+      useScreenStore.getState().updateSqlWindowContent(
+        activeProfileScreen,
+        targetWindowId,
+        {
           content: merged,
           title,
-        });
+        }
+      );
+
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
+          return;
+        }
+        await sleep(50);
+      }
     },
     [activeProfileScreen, activeSqlWindow, openSqlEditor]
   );

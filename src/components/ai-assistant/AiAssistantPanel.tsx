@@ -8,6 +8,8 @@ import {
   answerFromResult,
   buildFastResultAnswer,
   chatReply,
+  getFastChatReply,
+  getAmbiguousPromptReply,
   getDirectMetadataReply,
   getLocalAiSettings,
   hasSeenLocalAiModel,
@@ -18,7 +20,7 @@ import {
   planSqlFromQuestion,
   queryResultToObjects,
   saveLocalAiSettings,
-} from "src/lib/ai/localAssistant";
+} from "@root/src/lib/ai-assistant";
 import {
   aiRuntimeDownloadDefaultModel,
   aiRuntimeStart,
@@ -31,6 +33,7 @@ import type { ChatMessage, DatabaseEngine, TableItem } from "src/types";
 import { cn } from "src/utils/cn";
 import { formatBytesSize } from "src/utils/convert";
 import { Spinner } from "src/components/common/Spinner";
+import { sleep } from "src/utils/common";
 
 type Props = {
   chatSessionKey: string;
@@ -602,13 +605,16 @@ export function AiAssistantPanel(props: Props) {
   };
 
   const appendAssistantMessage = (
-    message: Omit<ChatMessage, "id" | "role">
+    message: Omit<ChatMessage, "id" | "role">,
+    startedAt = Date.now()
   ) => {
     setMessages((prev) => [
       ...prev,
       {
         id: makeId(),
         role: "assistant",
+        createdAt: Date.now(),
+        durationMs: Math.max(0, Date.now() - startedAt),
         ...message,
       },
     ]);
@@ -632,6 +638,8 @@ export function AiAssistantPanel(props: Props) {
     requestAbortRef.current = abortController;
 
     const question = prompt.trim();
+    const requestStartedAt = Date.now();
+
     setPrompt("");
     setSubmitting(true);
     setAssistantStatus("thinking");
@@ -643,11 +651,40 @@ export function AiAssistantPanel(props: Props) {
         id: makeId(),
         role: "user",
         text: question,
+        createdAt: Date.now(),
       },
     ]);
 
     try {
+      const fastChatReply = getFastChatReply(question);
+      if (fastChatReply) {
+        await sleep(500);
+        appendAssistantMessage(
+          {
+            text: [fastChatReply.answer, fastChatReply.followup]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+          requestStartedAt
+        );
+        return;
+      }
+
+      let intentKind: "chat" | "metadata" | "sql" | "clarify";
+
       if (isGeneralChatPrompt(question)) {
+        intentKind = "chat";
+      } else if (
+        getDirectMetadataReply({ engine, question, activeSchema, tables })
+      ) {
+        intentKind = "metadata";
+      } else if (getAmbiguousPromptReply({ question, history: messages })) {
+        intentKind = "clarify";
+      } else {
+        intentKind = "sql";
+      }
+
+      if (intentKind === "chat") {
         const reply = await chatReply({
           endpoint,
           model,
@@ -665,25 +702,63 @@ export function AiAssistantPanel(props: Props) {
 
         if (requestSeqRef.current !== requestId) return;
 
-        appendAssistantMessage({
-          text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
-        });
+        appendAssistantMessage(
+          {
+            text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
+          },
+          requestStartedAt
+        );
         return;
       }
 
-      const directReply = getDirectMetadataReply({
-        engine,
-        question,
-        activeSchema,
-        tables,
-      });
+      if (intentKind === "clarify") {
+        await sleep(500);
+        const ambiguousReply = getAmbiguousPromptReply({
+          question,
+          history: messages,
+        }) ?? {
+          answer:
+            "I need a clearer request before I decide whether to answer normally or generate a query.",
+        };
 
-      if (directReply) {
-        appendAssistantMessage({
-          text: [directReply.answer, directReply.followup]
-            .filter(Boolean)
-            .join("\n\n"),
+        appendAssistantMessage(
+          {
+            text: [ambiguousReply.answer, ambiguousReply.followup]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+          requestStartedAt
+        );
+        return;
+      }
+
+      if (intentKind === "metadata") {
+        await sleep(500);
+        const directReply = getDirectMetadataReply({
+          engine,
+          question,
+          activeSchema,
+          tables,
         });
+
+        if (!directReply) {
+          appendAssistantMessage(
+            {
+              text: "I do not have enough metadata loaded yet to answer that directly.",
+            },
+            requestStartedAt
+          );
+          return;
+        }
+
+        appendAssistantMessage(
+          {
+            text: [directReply.answer, directReply.followup]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+          requestStartedAt
+        );
         return;
       }
 
@@ -707,12 +782,16 @@ export function AiAssistantPanel(props: Props) {
       if (requestSeqRef.current !== requestId) return;
 
       if (plan.needsClarification && !plan.sql) {
-        appendAssistantMessage({
-          text:
-            plan.explanation || "I need more information to answer accurately.",
-          clarification: plan.clarification,
-          assumptions: plan.assumptions,
-        });
+        appendAssistantMessage(
+          {
+            text:
+              plan.explanation ||
+              "I need more information to answer accurately.",
+            clarification: plan.clarification,
+            assumptions: plan.assumptions,
+          },
+          requestStartedAt
+        );
         return;
       }
 
@@ -761,39 +840,50 @@ export function AiAssistantPanel(props: Props) {
 
         if (requestSeqRef.current !== requestId) return;
 
-        appendAssistantMessage({
+        appendAssistantMessage(
+          {
+            text:
+              answer.answer ||
+              plan.explanation ||
+              "I have run the query and got the result.",
+            sql: plan.sql,
+            assumptions: plan.assumptions,
+            clarification: plan.needsClarification
+              ? plan.clarification
+              : undefined,
+            resultPreview: preview,
+            rowCount: Number(result.rowCount ?? preview.length),
+            confidence: answer.confidence,
+          },
+          requestStartedAt
+        );
+        return;
+      }
+
+      appendAssistantMessage(
+        {
           text:
-            answer.answer ||
             plan.explanation ||
-            "I have run the query and got the result.",
-          sql: plan.sql,
+            "I haven't run the query yet, but here is the SQL that matches your request.",
+          sql: plan.sql || undefined,
           assumptions: plan.assumptions,
           clarification: plan.needsClarification
             ? plan.clarification
             : undefined,
-          resultPreview: preview,
-          rowCount: Number(result.rowCount ?? preview.length),
-          confidence: answer.confidence,
-        });
-        return;
-      }
-
-      appendAssistantMessage({
-        text:
-          plan.explanation ||
-          "I haven't run the query yet, but here is the SQL that matches your request.",
-        sql: plan.sql || undefined,
-        assumptions: plan.assumptions,
-        clarification: plan.needsClarification ? plan.clarification : undefined,
-      });
+        },
+        requestStartedAt
+      );
     } catch (err) {
       if (isAbortError(err) || requestSeqRef.current !== requestId) {
         return;
       }
       const msg = formatError(err);
-      appendAssistantMessage({
-        text: `Cannot process this request: ${msg}`,
-      });
+      appendAssistantMessage(
+        {
+          text: `Cannot process this request: ${msg}`,
+        },
+        requestStartedAt
+      );
     } finally {
       if (requestSeqRef.current === requestId) {
         requestAbortRef.current = null;

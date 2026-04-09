@@ -9,6 +9,34 @@ type Props = {
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
 
+function formatMessageTime(value?: number) {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
+function formatDuration(value?: number) {
+  if (!value || value < 1000) return "";
+  const totalSeconds = Math.round(value / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `Worked for ${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `Worked for ${minutes}m ${seconds}s`;
+  }
+  return `Worked for ${seconds}s`;
+}
+
 function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -24,6 +52,10 @@ function getPreviewColumns(rows: Record<string, unknown>[] = []) {
 export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
   const [copied, setCopied] = useState(false);
   const previewColumns = getPreviewColumns(message.resultPreview);
+  const messageTime = formatMessageTime(message.createdAt);
+  const durationText = message.role === "assistant"
+    ? formatDuration(message.durationMs)
+    : "";
 
   const handleCopySql = async () => {
     if (!message.sql) return;
@@ -40,9 +72,19 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
           : "border-neutral-200 bg-white"
       }`}
     >
-      <div class="mb-1 text-xs font-bold tracking-wide text-neutral-500 uppercase">
-        {message.role === "user" ? "You" : "PoliteDB AI"}
+      <div class="mb-1 flex items-center justify-between gap-2 text-xs font-bold tracking-wide text-neutral-500 uppercase">
+        <span>{message.role === "user" ? "You" : "PoliteDB AI"}</span>
+        {messageTime ? (
+          <span class="text-[10px] font-medium tracking-normal normal-case text-neutral-400">
+            {messageTime}
+          </span>
+        ) : null}
       </div>
+      {durationText ? (
+        <div class="mb-2 text-[11px] font-medium text-neutral-400">
+          {durationText}
+        </div>
+      ) : null}
 
       <div class="text-sm wrap-break-word whitespace-pre-wrap text-neutral-800">
         {message.text}
