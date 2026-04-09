@@ -15,7 +15,7 @@ import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { getDbConfig } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
-import { ArrowRight } from "src/components/icons";
+import { ArrowRightIcon } from "src/components/icons";
 import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 
 const COLUMNS_NAME: (keyof TableStructure)[] = [
@@ -306,7 +306,7 @@ export function TableStructure({
                   )}
                   disabled={readOnly}
                 >
-                  <ArrowRight className="size-3" />
+                  <ArrowRightIcon className="size-3" />
                 </button>
               )}
             </div>

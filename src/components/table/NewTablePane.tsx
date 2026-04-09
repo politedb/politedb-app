@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "preact/hooks";
 import { Input, InputOption } from "src/components/common/Input";
 import { Button } from "src/components/common/Button";
 import { Table } from "src/components/common/Table";
-import { Plus } from "src/components/icons";
+import { PlusIcon } from "src/components/icons";
 import type { TableItem, DatabaseEngine, TableColumn } from "src/types";
 import type { TableColumn as CommonColumn } from "src/components/common/Table";
 import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
@@ -243,7 +243,7 @@ export function NewTablePane({
           <TableViewToggle viewMode="structure" />
 
           <Button variant="shadow" className="px-2" disabled>
-            <Plus className="size-3" />
+            <PlusIcon className="size-3" />
             Index
           </Button>
 
@@ -255,7 +255,7 @@ export function NewTablePane({
               tableState.addColumn(null, tableState.columns.length)
             }
           >
-            <Plus className="size-3" />
+            <PlusIcon className="size-3" />
             Column
           </Button>
         </div>

@@ -1,5 +1,5 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { X, Database } from "./icons";
+import { XIcon, DatabaseIcon } from "./icons";
 import { ReactNode } from "preact/compat";
 import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
@@ -34,7 +34,11 @@ type NavButton = {
 };
 
 const NAV_BUTTONS: NavButton[] = [
-  { id: "main", label: "Databases", icon: <Database className="size-3.5" /> },
+  {
+    id: "main",
+    label: "Databases",
+    icon: <DatabaseIcon className="size-3.5" />,
+  },
 ];
 
 export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
@@ -315,7 +319,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                         "opacity-60 group-hover:opacity-100 hover:bg-transparent"
                     )}
                   >
-                    <X className="size-3.5" />
+                    <XIcon className="size-3.5" />
                   </Button>
                 </div>
               );

@@ -7,7 +7,7 @@ import {
   DialogTitle,
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
-import { Database, Search } from "src/components/icons";
+import { DatabaseIcon, SearchIcon } from "src/components/icons";
 import type { DatabaseEngine } from "src/types";
 import { cn } from "src/utils/cn";
 import { useCallback, useEffect, useState } from "preact/hooks";
@@ -146,7 +146,7 @@ export function DatabaseManagerDialog({
           placeholder="Search for database..."
           onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
           className="h-10 rounded-lg border border-neutral-300 text-sm"
-          left={<Search className="size-5 text-neutral-500" />}
+          left={<SearchIcon className="size-5 text-neutral-500" />}
         />
 
         {!canManageDatabases(engine) && (
@@ -177,7 +177,7 @@ export function DatabaseManagerDialog({
                   }}
                   onDblClick={handleOpenDatabase}
                 >
-                  <Database
+                  <DatabaseIcon
                     className={cn(
                       "size-5 text-blue-500",
                       selectedDb === dbName && "text-blue-200"

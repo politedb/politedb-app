@@ -12,9 +12,9 @@ import {
   SaveAndConnectInput,
 } from "src/lib/tauri";
 
-import { X } from "../icons";
+import { XIcon } from "src/components/icons";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
-import { Button } from "../common/Button";
+import { Button } from "src/components/common/Button";
 
 import { ConnectionBasicsSection } from "./ConnectionBasicsSection";
 import { IdentitySection } from "./IdentitySection";
@@ -237,7 +237,7 @@ export function ConnectionFormDialog({
           variant="ghost"
           className="absolute top-3 right-3 rounded-full border-none p-2 hover:bg-neutral-100"
         >
-          <X className="size-4 text-slate-600" />
+          <XIcon className="size-4 text-slate-600" />
         </Button>
       </div>
 

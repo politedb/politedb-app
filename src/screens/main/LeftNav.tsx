@@ -1,4 +1,4 @@
-import { Database, Key } from "src/components/icons";
+import { DatabaseIcon, KeyIcon } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
 import { Button } from "src/components/common/Button";
@@ -7,9 +7,9 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "connections",
     label: "Connections",
-    icon: <Database className="size-4" />,
+    icon: <DatabaseIcon className="size-4" />,
   },
-  { id: "keychain", label: "Keychain", icon: <Key className="size-4" /> },
+  { id: "keychain", label: "Keychain", icon: <KeyIcon className="size-4" /> },
 ];
 
 export function LeftNav(props: {

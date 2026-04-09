@@ -4,7 +4,7 @@ import { ConnectionFormDialog } from "./connection-form/ConnectionFormDialog.tsx
 import { OverlayModal } from "./modal/OverlayModal";
 import { Button } from "./common/Button";
 import { DbIcon } from "./icons/DbIcon";
-import { Search, X } from "./icons";
+import { SearchIcon, XIcon } from "./icons";
 
 import type { DatabaseEngine, DatabaseType } from "../types";
 import { SUPPORTED_DATABASES } from "../constant.ts";
@@ -282,7 +282,7 @@ export function ConnectionModal(props: {
             className="rounded-full border-none p-2 hover:bg-neutral-100"
             onClick={onClose}
           >
-            <X className="size-4 text-slate-600" />
+            <XIcon className="size-4 text-slate-600" />
           </Button>
         </div>
 
@@ -297,7 +297,7 @@ export function ConnectionModal(props: {
               onInput={(e) => setQuery(e.currentTarget.value)}
               class="h-10 w-full rounded-xl border border-slate-300 bg-white pr-3 pl-10 text-sm font-medium text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60"
             />
-            <Search className="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-slate-400" />
+            <SearchIcon className="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-slate-400" />
           </div>
 
           {!anyAvailable ? (

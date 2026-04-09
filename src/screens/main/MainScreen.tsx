@@ -19,7 +19,12 @@ import { GroupsSection } from "./GroupsSection";
 import { KeychainSection } from "./KeychainSection";
 
 import { filterConnections } from "src/utils/connection";
-import type { DatabaseEngine, NavId, ViewMode } from "src/types";
+import type {
+  ConnectionSortMode,
+  DatabaseEngine,
+  NavId,
+  ViewMode,
+} from "src/types";
 import { profileImport, type ConnectionProfile } from "src/lib/tauri";
 import {
   pickOpenFile,
@@ -56,6 +61,8 @@ export function MainScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [connectionSortMode, setConnectionSortMode] =
+    useState<ConnectionSortMode>("created-desc");
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
@@ -88,13 +95,17 @@ export function MainScreen() {
 
   const filteredProfiles = useMemo(
     () => {
-      const searched = filterConnections(profiles, searchQuery);
+      const searched = filterConnections(
+        profiles,
+        searchQuery,
+        connectionSortMode
+      );
       if (!selectedGroupId) return searched;
       return searched.filter((profile) =>
         assignments[profile.id] === selectedGroupId
       );
     },
-    [profiles, searchQuery, selectedGroupId, assignments]
+    [profiles, searchQuery, selectedGroupId, assignments, connectionSortMode]
   );
 
   useEffect(() => {
@@ -192,6 +203,8 @@ export function MainScreen() {
                 onPrivacy={() => setPrivacyOpen(true)}
                 viewMode={viewMode}
                 onViewMode={setViewMode}
+                connectionSortMode={connectionSortMode}
+                onConnectionSortModeChange={setConnectionSortMode}
               />
             </div>
           </div>

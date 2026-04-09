@@ -18,7 +18,7 @@ import { TagSelect } from "src/components/common/TagSelect";
 import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
-import { Search } from "../icons/Search";
+import { SearchIcon } from "src/components/icons";
 
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
@@ -158,7 +158,7 @@ export function TableStructurePane(props: {
                 ? "Search constraints..."
                 : "Search columns..."
             }
-            left={<Search className="size-3.5 text-neutral-400" />}
+            left={<SearchIcon className="size-3.5 text-neutral-400" />}
             className="flex-1 border border-neutral-200 bg-white text-xs"
             disabled={activeTableMeta.busy}
           />

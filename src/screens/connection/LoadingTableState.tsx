@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { Box } from "src/components/common/Box";
-import { Database } from "src/components/icons";
+import { DatabaseIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
 export function LoadingTableState() {
@@ -49,7 +49,7 @@ export function LoadingTableState() {
         <div class="w-120 max-w-[90vw] rounded-xl border border-neutral-200 bg-white px-6 py-6 shadow-sm">
           {/* Row 1: icon + headline */}
           <div class="flex items-center gap-1">
-            <Database className="size-4 text-neutral-900" />
+            <DatabaseIcon className="size-4 text-neutral-900" />
             <div class={cn("text-md font-semibold text-neutral-900")}>
               {title}
             </div>

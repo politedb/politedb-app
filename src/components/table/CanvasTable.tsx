@@ -8,7 +8,7 @@ import {
 } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
-import { ChevronDown, ChevronUp } from "src/components/icons";
+import { ChevronDownIcon, ChevronUpIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
@@ -947,9 +947,9 @@ export function CanvasTable({
 
                   {isSorted &&
                     (sortDir === "asc" ? (
-                      <ChevronUp className="size-3 shrink-0" />
+                      <ChevronUpIcon className="size-3 shrink-0" />
                     ) : (
-                      <ChevronDown className="size-3 shrink-0" />
+                      <ChevronDownIcon className="size-3 shrink-0" />
                     ))}
 
                   {/* --- RESIZE HANDLE --- */}

@@ -2,19 +2,19 @@ import { useCallback, useMemo, useState } from "preact/hooks";
 import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import {
-  Unlock,
-  Database,
-  RefreshCw,
-  Search,
-  TabBottom,
-  TabRight,
-  TabLeft,
-  ChevronRight,
-  Backup,
-  Restore,
-  Lock,
+  UnlockIcon,
+  DatabaseIcon,
+  RefreshCwIcon,
+  SearchIcon,
+  TabBottomIcon,
+  TabRightIcon,
+  TabLeftIcon,
+  ChevronRightIcon,
+  BackupIcon,
+  RestoreIcon,
+  LockIcon,
   ChatIcon,
-  Schema,
+  SchemaIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { pickHostDbUser } from "src/utils/connection";
@@ -394,9 +394,9 @@ export function MenuBar({
               }}
             >
               {activeTab?.isLocked ? (
-                <Lock className="size-4 text-neutral-600" />
+                <LockIcon className="size-4 text-neutral-600" />
               ) : (
-                <Unlock className="size-4 text-neutral-600" />
+                <UnlockIcon className="size-4 text-neutral-600" />
               )}
             </IconButton>
 
@@ -410,7 +410,7 @@ export function MenuBar({
               }
               onClick={() => setDbDialogOpen(true)}
             >
-              <Database className="size-4 text-neutral-600" />
+              <DatabaseIcon className="size-4 text-neutral-600" />
             </IconButton>
 
             <ToolbarDivider />
@@ -468,7 +468,7 @@ export function MenuBar({
                   <span class="text-xs font-semibold text-neutral-800">
                     {dbLabel.db}
                   </span>
-                  <ChevronRight className="size-2" />
+                  <ChevronRightIcon className="size-2" />
                   <span class="text-xs font-medium text-neutral-600">
                     {dbLabel.target}
                   </span>
@@ -500,7 +500,7 @@ export function MenuBar({
               !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
             }
           >
-            <Backup className="size-4 text-neutral-700" />
+            <BackupIcon className="size-4 text-neutral-700" />
           </IconButton>
 
           <IconButton
@@ -513,17 +513,17 @@ export function MenuBar({
               dbRestoreRunning
             }
           >
-            <Restore className="size-4 text-neutral-700" />
+            <RestoreIcon className="size-4 text-neutral-700" />
           </IconButton>
 
           <ToolbarDivider />
 
           <IconButton title="Refresh" onClick={onRefresh}>
-            <RefreshCw className="size-4.5 text-neutral-700" />
+            <RefreshCwIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <IconButton title="Search" onClick={onSearchOpen}>
-            <Search className="size-4 text-neutral-700" />
+            <SearchIcon className="size-4 text-neutral-700" />
           </IconButton>
 
           <ToolbarDivider />
@@ -533,7 +533,7 @@ export function MenuBar({
             onClick={onOpenDiagram}
             disabled={!rt.runtimeConnectionId || rt.engine === "redis"}
           >
-            <Schema className="size-4 text-neutral-700" />
+            <SchemaIcon className="size-4 text-neutral-700" />
           </IconButton>
 
           <IconButton title="AI Assistant" onClick={onOpenAiAssistant}>
@@ -552,7 +552,7 @@ export function MenuBar({
               title="Tab Left"
               onClick={() => onViewModeChange?.("left")}
             >
-              <TabLeft
+              <TabLeftIcon
                 className={cn(
                   "size-4 transition-colors",
                   viewMode.includes("left")
@@ -568,7 +568,7 @@ export function MenuBar({
               title="Tab Bottom"
               onClick={() => onViewModeChange?.("bottom")}
             >
-              <TabBottom
+              <TabBottomIcon
                 className={cn(
                   "size-4 transition-colors",
                   viewMode.includes("bottom")
@@ -584,7 +584,7 @@ export function MenuBar({
               title="Tab Right"
               onClick={() => onViewModeChange?.("right")}
             >
-              <TabRight
+              <TabRightIcon
                 className={cn(
                   "size-4 transition-colors",
                   viewMode.includes("right")

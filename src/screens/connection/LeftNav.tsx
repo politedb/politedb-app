@@ -1,12 +1,12 @@
 import { SetStateAction } from "preact/compat";
 import { Dispatch, useState } from "preact/hooks";
 import {
-  ChevronDown,
-  ChevronRight,
-  Key,
-  SquareFunction,
-  Search,
-  Table,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  KeyIcon,
+  SquareFunctionIcon,
+  SearchIcon,
+  TableIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
@@ -64,9 +64,9 @@ function SectionHeader(props: {
     >
       <div class="flex w-full items-center justify-start gap-1">
         {expanded ? (
-          <ChevronDown className="size-3.5 shrink-0 text-neutral-500" />
+          <ChevronDownIcon className="size-3.5 shrink-0 text-neutral-500" />
         ) : (
-          <ChevronRight className="size-3.5 shrink-0 text-neutral-500" />
+          <ChevronRightIcon className="size-3.5 shrink-0 text-neutral-500" />
         )}
 
         <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
@@ -97,9 +97,9 @@ function EmptyItemsState(props: {
   const { isMongo, isRedis, hasSearch } = props;
 
   const icon = isRedis ? (
-    <Key className="size-4 text-amber-500" />
+    <KeyIcon className="size-4 text-amber-500" />
   ) : (
-    <Table className="size-4 text-blue-500" />
+    <TableIcon className="size-4 text-blue-500" />
   );
 
   const title = hasSearch
@@ -252,7 +252,7 @@ export function LeftNav({
           <Input
             type="text"
             placeholder="Search tables…"
-            left={<Search className="size-3.5 text-neutral-500" />}
+            left={<SearchIcon className="size-3.5 text-neutral-500" />}
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
             className={cn("rounded-lg border border-neutral-200 bg-white!")}
@@ -281,7 +281,7 @@ export function LeftNav({
                 {filteredFunctions.length === 0 ? (
                   <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
                     <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
-                      <SquareFunction className="size-4 text-blue-500" />
+                      <SquareFunctionIcon className="size-4 text-blue-500" />
                     </div>
                     <div class="text-sm font-medium text-neutral-700">
                       No functions found
@@ -301,7 +301,7 @@ export function LeftNav({
                           )}
                           title={key}
                         >
-                          <SquareFunction className="size-4 shrink-0 text-blue-500" />
+                          <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
                           <TableName name={fn.name} />
                         </div>
                       );
@@ -368,7 +368,7 @@ export function LeftNav({
                         title={key}
                       >
                         {isRedis ? (
-                          <Key
+                          <KeyIcon
                             className={cn(
                               "size-4 shrink-0",
                               isActive && !hasChanges
@@ -377,7 +377,7 @@ export function LeftNav({
                             )}
                           />
                         ) : (
-                          <Table
+                          <TableIcon
                             className={cn(
                               "size-4 shrink-0",
                               isActive && !hasChanges

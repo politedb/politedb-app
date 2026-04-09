@@ -3,16 +3,19 @@ import { useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import {
-  ChevronDown,
-  Folder,
-  Grid,
-  List,
-  Plus,
-  Restore,
-  Search,
-  Settings,
+  ChevronDownIcon,
+  DateAscIcon,
+  DateDescIcon,
+  FolderIcon,
+  GridIcon,
+  ListIcon,
+  PlusIcon,
+  RestoreIcon,
+  SearchIcon,
+  SettingsIcon,
+  SortIcon,
 } from "src/components/icons";
-import type { NavId, ViewMode } from "src/types";
+import type { ConnectionSortMode, NavId, ViewMode } from "src/types";
 
 export function TopBar(props: {
   mode: NavId;
@@ -24,6 +27,8 @@ export function TopBar(props: {
   onPrivacy: () => void;
   viewMode: ViewMode;
   onViewMode: (v: ViewMode) => void;
+  connectionSortMode?: ConnectionSortMode;
+  onConnectionSortModeChange?: (v: ConnectionSortMode) => void;
 }) {
   const {
     mode,
@@ -35,8 +40,12 @@ export function TopBar(props: {
     onPrivacy,
     viewMode,
     onViewMode,
+    connectionSortMode = "created-desc",
+    onConnectionSortModeChange,
   } = props;
   const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+
   const isConnections = mode === "connections";
   const searchPlaceholder = isConnections
     ? "Search connections or paste a URL..."
@@ -57,7 +66,7 @@ export function TopBar(props: {
           }
           class="h-9 w-full rounded-lg border border-slate-300 bg-white py-2 pr-3 pl-9 text-[13px] text-slate-900 transition-colors outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
         />
-        <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <SearchIcon className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
       </div>
 
       {/* Primary actions */}
@@ -69,7 +78,7 @@ export function TopBar(props: {
             onClick={onNewConnection}
             title={newTitle}
           >
-            <Plus className="size-3" />
+            <PlusIcon className="size-3" />
             <span class="text-[12px] font-semibold">{newLabel}</span>
           </Button>
 
@@ -82,13 +91,13 @@ export function TopBar(props: {
               {
                 key: "new-group",
                 label: "New Group",
-                icon: <Folder className="size-4" />,
+                icon: <FolderIcon className="size-4" />,
                 onSelect: onNewGroup,
               },
               {
                 key: "import",
                 label: "Import",
-                icon: <Restore className="size-4" />,
+                icon: <RestoreIcon className="size-4" />,
                 onSelect: onImportConnections,
               },
             ]}
@@ -100,7 +109,7 @@ export function TopBar(props: {
                   onClick={() => setNewMenuOpen((v) => !v)}
                   title={newTitle}
                 >
-                  <ChevronDown className="size-3" />
+                  <ChevronDownIcon className="size-3" />
                 </Button>
               </div>
             }
@@ -113,19 +122,91 @@ export function TopBar(props: {
           class="h-9 rounded-lg px-3"
           title={newTitle}
         >
-          <Plus className="size-3" />
+          <PlusIcon className="size-3" />
           <span class="text-sm font-semibold">{newLabel}</span>
         </Button>
       )}
 
       <div class="flex items-center gap-1">
+        {isConnections ? (
+          <Dropdown
+            open={sortMenuOpen}
+            onOpenChange={setSortMenuOpen}
+            positions={["bottom"]}
+            align="end"
+            widthClassName="w-52"
+            items={[
+              {
+                key: "label-asc",
+                label: "A-z",
+                icon: (
+                  <span class="flex size-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600">
+                    Az
+                  </span>
+                ),
+                rightSlot:
+                  connectionSortMode === "label-asc" ? (
+                    <span class="text-blue-600">✓</span>
+                  ) : undefined,
+                onSelect: () => onConnectionSortModeChange?.("label-asc"),
+              },
+              {
+                key: "label-desc",
+                label: "Z-a",
+                icon: (
+                  <span class="flex size-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600">
+                    Za
+                  </span>
+                ),
+                rightSlot:
+                  connectionSortMode === "label-desc" ? (
+                    <span class="text-blue-600">✓</span>
+                  ) : undefined,
+                onSelect: () => onConnectionSortModeChange?.("label-desc"),
+              },
+              {
+                key: "created-desc",
+                label: "Newest to oldest",
+                separatorBefore: true,
+                icon: <DateDescIcon className="size-5" />,
+                rightSlot:
+                  connectionSortMode === "created-desc" ? (
+                    <span class="text-blue-600">✓</span>
+                  ) : undefined,
+                onSelect: () => onConnectionSortModeChange?.("created-desc"),
+              },
+              {
+                key: "created-asc",
+                label: "Oldest to newest",
+                icon: <DateAscIcon className="size-5" />,
+                rightSlot:
+                  connectionSortMode === "created-asc" ? (
+                    <span class="text-blue-600">✓</span>
+                  ) : undefined,
+                onSelect: () => onConnectionSortModeChange?.("created-asc"),
+              },
+            ]}
+            trigger={
+              <div>
+                <Button
+                  variant="outline"
+                  onClick={() => setSortMenuOpen((v) => !v)}
+                  class="h-9 rounded-lg border border-slate-300 px-[8px]"
+                  title="Sort connections"
+                >
+                  <SortIcon className="size-4" />
+                </Button>
+              </div>
+            }
+          />
+        ) : null}
         <Button
           variant="outline"
           onClick={onPrivacy}
           class="h-9 rounded-lg border border-slate-300 px-[8px]"
           title="Privacy Settings"
         >
-          <Settings className="size-4" />
+          <SettingsIcon className="size-4" />
         </Button>
       </div>
 
@@ -142,7 +223,7 @@ export function TopBar(props: {
           title="Grid view"
           aria-label="Grid view"
         >
-          <Grid className="size-4" />
+          <GridIcon className="size-4" />
         </button>
 
         <div class="h-5 w-px bg-slate-200" />
@@ -158,7 +239,7 @@ export function TopBar(props: {
           title="List view"
           aria-label="List view"
         >
-          <List className="size-4" />
+          <ListIcon className="size-4" />
         </button>
       </div>
     </div>

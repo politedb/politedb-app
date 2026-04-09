@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
-import { Plus, ChevronDown, Minus } from "src/components/icons";
+import { PlusIcon, ChevronDownIcon, MinusIcon } from "src/components/icons";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { TableFilterCondition } from "src/hooks/queries";
 import { tableDataQuery } from "src/hooks/queries";
@@ -240,7 +240,7 @@ export function TableFilterBar({
                 onClick={() => removeRow(index)}
                 aria-label="Remove filter"
               >
-                <Minus className="size-2.5" />
+                <MinusIcon className="size-2.5" />
               </Button>
               <Button
                 variant="shadow"
@@ -251,7 +251,7 @@ export function TableFilterBar({
                 onClick={addRow}
                 aria-label="Add filter"
               >
-                <Plus className="size-2.5" />
+                <PlusIcon className="size-2.5" />
               </Button>
             </div>
           );
@@ -301,7 +301,7 @@ export function TableFilterBar({
                   class="border-l border-neutral-200 px-1"
                   onClick={() => setApplyAllOpen(!applyAllOpen)}
                 >
-                  <ChevronDown className="size-3.5" />
+                  <ChevronDownIcon className="size-3.5" />
                 </div>
               </Button>
               {applyAllOpen && (

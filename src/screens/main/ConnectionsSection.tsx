@@ -2,7 +2,7 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
-import { Plus } from "src/components/icons";
+import { PlusIcon } from "src/components/icons";
 
 function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
   const { hasSearch, onCreate } = props;
@@ -21,7 +21,7 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
       {!hasSearch ? (
         <div class="mt-5">
           <Button variant="default" class="py-2 text-sm" onClick={onCreate}>
-            <Plus class="size-3" />
+            <PlusIcon class="size-3" />
             New Connection
           </Button>
         </div>

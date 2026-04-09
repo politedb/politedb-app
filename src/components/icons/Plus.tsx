@@ -1,6 +1,6 @@
 import { SVGAttributes } from "preact";
 
-export function Plus(props: SVGAttributes<SVGSVGElement>) {
+export function PlusIcon(props: SVGAttributes<SVGSVGElement>) {
   return (
     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
       <path

@@ -1,4 +1,4 @@
-import { Folder, X } from "../icons";
+import { FolderIcon, XIcon } from "../icons";
 import { cn } from "src/utils/cn";
 
 function basename(path: string) {
@@ -74,7 +74,7 @@ export function FilePathPicker(props: {
         </span>
 
         {!hasValue ? (
-          <Folder className="size-4 shrink-0 text-slate-500" />
+          <FolderIcon className="size-4 shrink-0 text-slate-500" />
         ) : null}
       </div>
 
@@ -99,7 +99,7 @@ export function FilePathPicker(props: {
           title="Clear"
           aria-label="Clear file path"
         >
-          <X className="size-3" />
+          <XIcon className="size-3" />
         </button>
       ) : null}
     </div>

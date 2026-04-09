@@ -1,6 +1,11 @@
 import { useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { Table, X, ChevronLeft, ChevronRight } from "src/components/icons";
+import {
+  TableIcon,
+  XIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -98,7 +103,7 @@ export function NavigationTabs({
             onClick={() => scrollBy(-1)}
             title="Scroll left"
           >
-            <ChevronLeft className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
+            <ChevronLeftIcon className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
           </Button>
         </div>
 
@@ -133,7 +138,7 @@ export function NavigationTabs({
                 )}
               >
                 {w.type === "table" && (
-                  <Table className="size-4 text-neutral-500" />
+                  <TableIcon className="size-4 text-neutral-500" />
                 )}
 
                 {w.type === "sql" && (
@@ -160,7 +165,7 @@ export function NavigationTabs({
                   class="ml-1 rounded-full border-none p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-100"
                   title="Close"
                 >
-                  <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
+                  <XIcon className="size-3.5 text-neutral-500 hover:text-neutral-700" />
                 </Button>
               </div>
             );
@@ -175,7 +180,7 @@ export function NavigationTabs({
             onClick={() => scrollBy(1)}
             title="Scroll right"
           >
-            <ChevronRight className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
+            <ChevronRightIcon className="size-4 text-neutral-500 transition-colors group-hover:text-neutral-900" />
           </Button>
         </div>
       </div>

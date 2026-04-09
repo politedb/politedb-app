@@ -1,5 +1,5 @@
 import { Button } from "src/components/common/Button";
-import { PlayIcon, RefreshCw, StopIcon } from "src/components/icons";
+import { PlayIcon, RefreshCwIcon, StopIcon } from "src/components/icons";
 import type { AiRuntimeStatus } from "src/lib/tauri";
 import { cn } from "src/utils/cn";
 
@@ -109,7 +109,7 @@ export function AiAssistantSettingsPopover({
           onClick={onLoadModels}
           loading={loadingModels}
         >
-          <RefreshCw className="size-3.5" />
+          <RefreshCwIcon className="size-3.5" />
           Refresh
         </Button>
       </div>

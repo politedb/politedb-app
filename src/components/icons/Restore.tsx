@@ -1,6 +1,6 @@
 import { SVGProps } from "preact/compat";
 
-export function Restore(props: SVGProps<SVGSVGElement>) {
+export function RestoreIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       width="24"

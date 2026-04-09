@@ -3,7 +3,7 @@ import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantM
 import { AiAssistantSettingsPopover } from "src/components/ai-assistant/AiAssistantSettingsPopover";
 import { Button } from "src/components/common/Button";
 import { Popover } from "src/components/common/Popover";
-import { ChevronDown, Settings } from "src/components/icons";
+import { ChevronDownIcon, SettingsIcon } from "src/components/icons";
 import {
   answerFromResult,
   buildFastResultAnswer,
@@ -846,7 +846,7 @@ export function AiAssistantPanel(props: Props) {
                 )}
                 aria-haspopup="dialog"
               >
-                <Settings className="size-4" />
+                <SettingsIcon className="size-4" />
               </button>
             </Popover>
           )}
@@ -904,7 +904,7 @@ export function AiAssistantPanel(props: Props) {
               title="Scroll to latest message"
               class="absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200 bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
             >
-              <ChevronDown className="size-4" />
+              <ChevronDownIcon className="size-4" />
             </button>
           ) : null}
 

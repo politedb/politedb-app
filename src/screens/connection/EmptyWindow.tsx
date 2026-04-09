@@ -1,4 +1,4 @@
-import { Database } from "src/components/icons";
+import { DatabaseIcon } from "src/components/icons";
 
 export function EmptyWindow(props: {
   onNewSql: () => void;
@@ -14,7 +14,7 @@ export function EmptyWindow(props: {
 
       <div class="relative w-full max-w-lg px-6 text-center">
         <div class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-white ring-1 ring-neutral-200">
-          <Database className="size-5 text-neutral-600" />
+          <DatabaseIcon className="size-5 text-neutral-600" />
         </div>
 
         <div class="text-lg font-semibold text-neutral-900">
@@ -40,7 +40,8 @@ export function EmptyWindow(props: {
           ) : null}
 
           <div class="text-xs text-neutral-400">
-            or choose a {canOpenSql ? "table" : "collection"} from the left panel
+            or choose a {canOpenSql ? "table" : "collection"} from the left
+            panel
           </div>
         </div>
       </div>

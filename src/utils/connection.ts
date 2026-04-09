@@ -1,19 +1,37 @@
 import type { ConnectionProfile } from "src/lib/tauri";
+import type { ConnectionSortMode } from "src/types";
 
 export function safeLower(v?: string | null) {
   return (v ?? "").toLowerCase();
 }
 
-function sortConnectionsByNewest(
-  connections: ConnectionProfile[]
+export function sortConnections(
+  connections: ConnectionProfile[],
+  mode: ConnectionSortMode = "created-desc"
 ): ConnectionProfile[] {
   return connections
     .slice()
     .sort((a, b) => {
-      const byCreated = (b.created_at ?? 0) - (a.created_at ?? 0);
-      if (byCreated !== 0) return byCreated;
-      const byUpdated = (b.updated_at ?? 0) - (a.updated_at ?? 0);
-      if (byUpdated !== 0) return byUpdated;
+      if (mode === "label-asc") {
+        const byLabel = safeLower(a.label).localeCompare(safeLower(b.label));
+        if (byLabel !== 0) return byLabel;
+      }
+      if (mode === "label-desc") {
+        const byLabel = safeLower(b.label).localeCompare(safeLower(a.label));
+        if (byLabel !== 0) return byLabel;
+      }
+      if (mode === "created-asc") {
+        const byCreated = (a.created_at ?? 0) - (b.created_at ?? 0);
+        if (byCreated !== 0) return byCreated;
+        const byUpdated = (a.updated_at ?? 0) - (b.updated_at ?? 0);
+        if (byUpdated !== 0) return byUpdated;
+      }
+      if (mode === "created-desc") {
+        const byCreated = (b.created_at ?? 0) - (a.created_at ?? 0);
+        if (byCreated !== 0) return byCreated;
+        const byUpdated = (b.updated_at ?? 0) - (a.updated_at ?? 0);
+        if (byUpdated !== 0) return byUpdated;
+      }
       return safeLower(a.label).localeCompare(safeLower(b.label));
     });
 }
@@ -89,12 +107,13 @@ export function pickHostDbUser(conn: ConnectionProfile) {
 
 export function filterConnections(
   connections: ConnectionProfile[],
-  searchQuery: string
+  searchQuery: string,
+  sortMode: ConnectionSortMode = "created-desc"
 ) {
   const q = safeLower(searchQuery.trim());
-  if (!q) return sortConnectionsByNewest(connections);
+  if (!q) return sortConnections(connections, sortMode);
 
-  return sortConnectionsByNewest(
+  return sortConnections(
     connections.filter((conn) => {
       const label = safeLower(conn.label);
       const engine = safeLower(conn.engine);
@@ -115,7 +134,8 @@ export function filterConnections(
         tagsL.includes(q) ||
         userHost.includes(q)
       );
-    })
+    }),
+    sortMode
   );
 }
 
@@ -137,7 +157,7 @@ export function groupConnections(connections: ConnectionProfile[]) {
   return Array.from(grouped.entries())
     .map(([tag, conns]) => ({
       tag,
-      connections: sortConnectionsByNewest(conns),
+      connections: sortConnections(conns, "created-desc"),
     }))
     .sort((a, b) => safeLower(a.tag).localeCompare(safeLower(b.tag)));
 }

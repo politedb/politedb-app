@@ -3,12 +3,12 @@ import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
 import {
-  Edit,
-  Ssh,
-  Trash,
-  MoreVertical,
-  Backup,
-  Folder,
+  EditIcon,
+  SshIcon,
+  TrashIcon,
+  MoreVerticalIcon,
+  BackupIcon,
+  FolderIcon,
 } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
@@ -140,7 +140,7 @@ const KebabButton = memo(function KebabButton(props: {
           : "opacity-0 group-hover:opacity-100 focus:opacity-100",
       ].join(" ")}
     >
-      <MoreVertical className="size-5" />
+      <MoreVerticalIcon className="size-5" />
     </button>
   );
 });
@@ -344,7 +344,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
                   class="inline-flex items-center gap-1 font-mono text-xs font-semibold tracking-wide text-indigo-500"
                   title="Connected via SSH tunnel"
                 >
-                  <Ssh className="h-3.5 w-3.5 text-slate-400" />
+                  <SshIcon className="h-3.5 w-3.5 text-slate-400" />
                   SSH
                 </span>
               </>
@@ -368,7 +368,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           {
             type: "item",
             label: "Edit Connection",
-            icon: <Edit className="size-4" />,
+            icon: <EditIcon className="size-4" />,
             onClick: () => {
               closeMenu();
               onEdit();
@@ -377,7 +377,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           {
             type: "item",
             label: "Export Connection",
-            icon: <Backup className="size-4" />,
+            icon: <BackupIcon className="size-4" />,
             onClick: () => {
               void onExport();
             },
@@ -386,7 +386,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           {
             type: "item",
             label: "Move to Group",
-            icon: <Folder className="size-4" />,
+            icon: <FolderIcon className="size-4" />,
             onClick: () => {
               closeMenu();
               setAssignGroupOpen(true);
@@ -396,7 +396,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           {
             type: "item",
             label: "Delete",
-            icon: <Trash className="size-4" />,
+            icon: <TrashIcon className="size-4" />,
             color: "red",
             onClick: () => {
               onDelete();

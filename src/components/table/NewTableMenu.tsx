@@ -1,5 +1,5 @@
 import { MenuDropdown, MenuDropdownItem } from "../common/MenuDropdown";
-import { Table, Schema } from "../icons";
+import { TableIcon, SchemaIcon } from "../icons";
 import { cn } from "src/utils/cn";
 import { Button } from "../common/Button";
 import {
@@ -33,12 +33,12 @@ export function NewTableMenu({
     {
       label: "New Table",
       onClick: () => onOpenNewTable?.(),
-      icon: <Table className="size-4 text-neutral-600" />,
+      icon: <TableIcon className="size-4 text-neutral-600" />,
     },
     {
       label: "New Schema",
       onClick: () => setOpenSchema(true),
-      icon: <Schema className="size-4 text-neutral-600" />,
+      icon: <SchemaIcon className="size-4 text-neutral-600" />,
       hidden: !enableNewSchema,
     },
   ];

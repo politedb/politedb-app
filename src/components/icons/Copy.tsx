@@ -1,6 +1,6 @@
 import type { SVGAttributes } from "preact";
 
-export function Copy(props: SVGAttributes<SVGSVGElement>) {
+export function CopyIcon(props: SVGAttributes<SVGSVGElement>) {
   return (
     <svg
       viewBox="0 0 24 24"

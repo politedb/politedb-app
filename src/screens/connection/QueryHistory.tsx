@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from "preact/hooks";
-import { Clock, Trash, Copy } from "src/components/icons";
+import { ClockIcon, TrashIcon, CopyIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Box } from "src/components/common/Box";
 import { cn } from "src/utils/cn";
@@ -104,7 +104,7 @@ export function QueryHistory({ activeProfileId }: Props) {
     <div class="flex h-full flex-col bg-white">
       <div class="flex items-center justify-between border-b border-neutral-200 bg-white px-3 py-2">
         <div class="flex items-center gap-2">
-          <Clock className="size-4 text-neutral-500" />
+          <ClockIcon className="size-4 text-neutral-500" />
           <h3 class="text-sm font-semibold text-neutral-800">SQL History</h3>
           {queries.length > 0 ? (
             <span class="text-[11px] text-neutral-500">({queries.length})</span>
@@ -121,7 +121,7 @@ export function QueryHistory({ activeProfileId }: Props) {
             )}
             title="Clear history"
           >
-            <Trash className="size-4" />
+            <TrashIcon className="size-4" />
             Clear
           </Button>
         )}
@@ -130,7 +130,7 @@ export function QueryHistory({ activeProfileId }: Props) {
       <div class="flex-1 overflow-y-auto">
         {queries.length === 0 ? (
           <Box className="text-center">
-            <Clock className="mx-auto mb-2 size-8 text-neutral-300" />
+            <ClockIcon className="mx-auto mb-2 size-8 text-neutral-300" />
             <p class="text-sm text-neutral-500">No query history</p>
           </Box>
         ) : (
@@ -170,7 +170,7 @@ export function QueryHistory({ activeProfileId }: Props) {
                       }}
                       title="Copy"
                     >
-                      <Copy className="size-4" />
+                      <CopyIcon className="size-4" />
                     </Button>
                   </div>
                 </div>

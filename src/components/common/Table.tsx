@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { useIndexedSort, type SortState } from "src/hooks/useIndexedSort";
-import { ChevronUp, ChevronDown } from "src/components/icons";
+import { ChevronUpIcon, ChevronDownIcon } from "src/components/icons";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
 export interface TableColumn<T = any> {
@@ -347,9 +347,9 @@ export function Table<T = any>({
                     {enableSort &&
                       sortState.key === (col.sortKey ?? (col.key as keyof T)) &&
                       (sortState.direction === "asc" ? (
-                        <ChevronUp className="size-3" />
+                        <ChevronUpIcon className="size-3" />
                       ) : (
-                        <ChevronDown className="size-3" />
+                        <ChevronDownIcon className="size-3" />
                       ))}
                   </button>
                 ) : (

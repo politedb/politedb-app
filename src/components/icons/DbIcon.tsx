@@ -1,4 +1,4 @@
-import { Database } from "./Database";
+import { DatabaseIcon } from "./Database";
 import { cn } from "src/utils/cn";
 
 import postgres from "src/assets/db/postgres.svg";
@@ -108,7 +108,7 @@ export function DbIcon(props: {
   if (!src) {
     return (
       <span class={boxClass} style={{ width: `${dim}px`, height: `${dim}px` }}>
-        <Database className="h-full w-full" />
+        <DatabaseIcon className="h-full w-full" />
       </span>
     );
   }

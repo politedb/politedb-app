@@ -1,6 +1,6 @@
 import { SVGProps } from "preact/compat";
 
-export function Database(props: SVGProps<SVGSVGElement>) {
+export function DatabaseIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" {...props}>
       <path

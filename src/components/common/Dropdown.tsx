@@ -9,6 +9,8 @@ export type DropdownItemConfig = {
   label: string;
   icon?: JSX.Element;
   disabled?: boolean;
+  rightSlot?: JSX.Element;
+  separatorBefore?: boolean;
   onSelect?: () => void;
 };
 
@@ -65,28 +67,35 @@ export function Dropdown(props: {
           )}
         >
           {items.map((item, idx) => (
-            <button
-              key={item.key ?? `${item.label}-${idx}`}
-              type="button"
-              disabled={item.disabled}
-              class={cn(
-                "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
-                item.disabled
-                  ? "cursor-not-allowed opacity-50"
-                  : "hover:bg-slate-50",
-                itemClassName
-              )}
-              onClick={() => {
-                if (item.disabled) return;
-                setOpen(false);
-                item.onSelect?.();
-              }}
-            >
-              {item.icon ? (
-                <span class="shrink-0 text-slate-500">{item.icon}</span>
+            <div key={item.key ?? `${item.label}-${idx}`}>
+              {item.separatorBefore ? (
+                <div class="my-1 h-px bg-slate-200" />
               ) : null}
-              <span>{item.label}</span>
-            </button>
+              <button
+                type="button"
+                disabled={item.disabled}
+                class={cn(
+                  "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
+                  item.disabled
+                    ? "cursor-not-allowed opacity-50"
+                    : "hover:bg-slate-50",
+                  itemClassName
+                )}
+                onClick={() => {
+                  if (item.disabled) return;
+                  setOpen(false);
+                  item.onSelect?.();
+                }}
+              >
+                {item.icon ? (
+                  <span class="shrink-0 text-slate-500">{item.icon}</span>
+                ) : null}
+                <span class="min-w-0 flex-1">{item.label}</span>
+                {item.rightSlot ? (
+                  <span class="shrink-0 text-slate-500">{item.rightSlot}</span>
+                ) : null}
+              </button>
+            </div>
           ))}
         </div>
       }

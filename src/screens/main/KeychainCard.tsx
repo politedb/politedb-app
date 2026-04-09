@@ -1,6 +1,12 @@
 import { useMemo, useRef, useState } from "preact/hooks";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import { Copy, Edit, Key, MoreVertical, Trash } from "src/components/icons";
+import {
+  CopyIcon,
+  EditIcon,
+  KeyIcon,
+  MoreVerticalIcon,
+  TrashIcon,
+} from "src/components/icons";
 import { cn } from "src/utils/cn";
 
 function parseKeyName(keyName: string) {
@@ -33,7 +39,7 @@ export function KeychainCard(props: {
         type: "item",
         label: "Edit",
         color: "slate",
-        icon: <Edit className="size-4" />,
+        icon: <EditIcon className="size-4" />,
         disabled,
         onClick: onOpen,
       },
@@ -41,7 +47,7 @@ export function KeychainCard(props: {
         type: "item",
         label: "Copy name",
         color: "slate",
-        icon: <Copy className="size-4" />,
+        icon: <CopyIcon className="size-4" />,
         onClick: onCopy,
       },
       { type: "sep" },
@@ -51,7 +57,7 @@ export function KeychainCard(props: {
         disabled,
         onClick: onDelete,
         color: "red",
-        icon: <Trash className="size-4" />,
+        icon: <TrashIcon className="size-4" />,
       },
     ],
     [disabled, onCopy, onDelete, onOpen]
@@ -86,7 +92,7 @@ export function KeychainCard(props: {
       >
         <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
           <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 ring-1 ring-blue-200">
-            <Key className="size-6 text-slate-700" />
+            <KeyIcon className="size-6 text-slate-700" />
           </div>
 
           <div class="min-w-0 flex-1">
@@ -120,7 +126,7 @@ export function KeychainCard(props: {
               }
             }}
           >
-            <MoreVertical className="size-5" />
+            <MoreVerticalIcon className="size-5" />
           </button>
         </div>
       </div>

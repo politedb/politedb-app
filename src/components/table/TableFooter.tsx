@@ -1,6 +1,10 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { ChevronLeft, ChevronRight, Plus } from "src/components/icons";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  PlusIcon,
+} from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 import { Select } from "src/components/common/Select";
 import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
@@ -168,7 +172,7 @@ export function TableFooter({
                 onClick={onAddColumn}
                 disabled={readOnly}
               >
-                <Plus className="size-3.5" />
+                <PlusIcon className="size-3.5" />
                 Column
               </Button>
             ) : structPaneTab === "constraints" ? (
@@ -178,7 +182,7 @@ export function TableFooter({
                 onClick={onAddIndex}
                 disabled={readOnly}
               >
-                <Plus className="size-3.5" />
+                <PlusIcon className="size-3.5" />
                 Index
               </Button>
             ) : null}
@@ -192,7 +196,7 @@ export function TableFooter({
             onClick={onAddRow}
             disabled={readOnly}
           >
-            <Plus className="size-3.5" />
+            <PlusIcon className="size-3.5" />
             Row
           </Button>
         )}
@@ -282,7 +286,7 @@ export function TableFooter({
               disabled={offset === 0}
               className="px-3 py-1"
             >
-              <ChevronLeft className="size-3" />
+              <ChevronLeftIcon className="size-3" />
             </Button>
             <Button
               variant="outline"
@@ -290,7 +294,7 @@ export function TableFooter({
               disabled={offset + limit >= pagination.totalRows}
               className="px-3 py-1"
             >
-              <ChevronRight className="size-3" />
+              <ChevronRightIcon className="size-3" />
             </Button>
             <Select
               value={limit}

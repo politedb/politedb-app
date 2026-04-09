@@ -3,6 +3,11 @@ import { ColumnMeta } from "./lib/tauri";
 
 export type NavId = "connections" | "keychain";
 export type ViewMode = "grid" | "list";
+export type ConnectionSortMode =
+  | "label-asc"
+  | "label-desc"
+  | "created-desc"
+  | "created-asc";
 export type TabViewMode = "left" | "right" | "bottom";
 export type WindowType = "table" | "sql" | "explain" | "erd";
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { ChevronSort, X } from "src/components/icons";
+import { ChevronSortIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { MenuItem, MenuPopover } from "./MenuPopover";
 
@@ -75,14 +75,14 @@ export function TagSelect(props: Props) {
                   }}
                 >
                   {key}
-                  <X className="size-3 hover:text-blue-900" />
+                  <XIcon className="size-3 hover:text-blue-900" />
                 </span>
               ))}
             </>
           ) : (
             <span class="text-neutral-400">Select columns...</span>
           )}
-          <ChevronSort
+          <ChevronSortIcon
             className={cn(
               "ml-auto size-4 text-neutral-400",
               isOpen && "rotate-180",

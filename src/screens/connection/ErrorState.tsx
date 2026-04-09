@@ -1,5 +1,5 @@
 import { Box } from "src/components/common/Box";
-import { Database } from "src/components/icons";
+import { DatabaseIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
 type ErrorStateProps = {
@@ -23,7 +23,7 @@ export function ErrorState({
             {/* Header */}
             <div class="flex items-center justify-between gap-4 border-b border-neutral-200 px-4 py-3">
               <div class="flex min-w-0 items-center gap-2">
-                <Database className="size-4 text-red-600" />
+                <DatabaseIcon className="size-4 text-red-600" />
                 <div class="min-w-0 truncate text-[15px] font-semibold text-red-600">
                   {title}
                 </div>

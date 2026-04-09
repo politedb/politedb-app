@@ -1,6 +1,6 @@
 import { useMemo, useState } from "preact/hooks";
 import { normalizeTag } from "src/utils/convert";
-import { X } from "../icons";
+import { XIcon } from "../icons";
 import { Button } from "./Button";
 
 export function TagInput(props: {
@@ -66,7 +66,7 @@ export function TagInput(props: {
               onClick={() => removeTag(t)}
               aria-label={`Remove tag ${t}`}
             >
-              <X className="size-3" />
+              <XIcon className="size-3" />
             </button>
           </span>
         ))}

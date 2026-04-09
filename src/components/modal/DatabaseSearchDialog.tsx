@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Dialog, DialogContent } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
-import { Search, Table, Schema } from "src/components/icons";
+import { SearchIcon, TableIcon, SchemaIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
@@ -125,7 +125,7 @@ export function DatabaseSearchDialog({
             onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
             onKeyDown={handleKeyDown}
             placeholder={`Search ${schemaLabel.toLowerCase()}s, tables, and views...`}
-            left={<Search className="size-4 text-neutral-500" />}
+            left={<SearchIcon className="size-4 text-neutral-500" />}
             className="rounded-lg border border-neutral-300 text-sm"
             autoFocus={true}
           />
@@ -165,7 +165,7 @@ export function DatabaseSearchDialog({
                       {res.type === "schema" ? (
                         <>
                           <div class="flex items-center gap-2">
-                            <Schema className="mr-2 size-4 shrink-0 text-amber-500" />
+                            <SchemaIcon className="mr-2 size-4 shrink-0 text-amber-500" />
                             <span class="font-medium text-neutral-700">
                               {res.data}
                             </span>
@@ -175,7 +175,7 @@ export function DatabaseSearchDialog({
                       ) : (
                         <>
                           <div class="flex items-center gap-2">
-                            <Table className="mr-2 size-4 shrink-0 text-blue-500" />
+                            <TableIcon className="mr-2 size-4 shrink-0 text-blue-500" />
                             <span class="font-medium text-neutral-700">
                               {res.data.name}
                             </span>

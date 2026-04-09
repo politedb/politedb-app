@@ -1,6 +1,6 @@
 import { useEffect } from "preact/hooks";
 import type { ComponentChildren } from "preact";
-import { X } from "../icons";
+import { XIcon } from "../icons";
 import { cn } from "src/utils/cn";
 
 export type DialogSize = "xs" | "sm" | "md" | "lg" | "xl" | "full";
@@ -97,7 +97,7 @@ export function Dialog({
             )}
             aria-label="Close dialog"
           >
-            <X className="size-4" />
+            <XIcon className="size-4" />
           </button>
         )}
         {children}

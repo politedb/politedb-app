@@ -2,7 +2,7 @@ import { HTMLAttributes, TargetedEvent, TargetedFocusEvent } from "preact";
 import { useState, useRef, useEffect, useCallback } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { MenuPopover, MenuItem } from "./MenuPopover";
-import { ChevronSort } from "src/components/icons";
+import { ChevronSortIcon } from "src/components/icons";
 
 export type InputOption = string | { label: string; value: string };
 
@@ -137,7 +137,7 @@ export function Input(
               props.disabled && "cursor-not-allowed opacity-50"
             )}
           >
-            <ChevronSort className="size-4" />
+            <ChevronSortIcon className="size-4" />
           </button>
         )}
         {!showSelect && props.right && (

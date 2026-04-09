@@ -3,11 +3,11 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { Button } from "src/components/common/Button";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import {
-  ChevronDown,
-  ChevronRight,
+  ChevronDownIcon,
+  ChevronRightIcon,
   DownloadIcon,
-  RefreshCw,
-  X,
+  RefreshCwIcon,
+  XIcon,
 } from "src/components/icons";
 import { tableColumnsQuery, tableForeignKeysQuery } from "src/hooks/queries";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
@@ -608,7 +608,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
             class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Close diagram dialog"
           >
-            <X className="size-4" />
+            <XIcon className="size-4" />
           </button>
         </div>
 
@@ -644,9 +644,9 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
                   >
                     <span>Mermaid Source</span>
                     {showSource ? (
-                      <ChevronDown className="size-4" />
+                      <ChevronDownIcon className="size-4" />
                     ) : (
-                      <ChevronRight className="size-4" />
+                      <ChevronRightIcon className="size-4" />
                     )}
                   </button>
 
@@ -683,7 +683,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
               disabled={disabled || loading}
               class="h-9 rounded-lg px-3"
             >
-              <RefreshCw className="size-4" />
+              <RefreshCwIcon className="size-4" />
               Refresh
             </Button>
             <Button
