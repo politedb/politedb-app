@@ -364,18 +364,26 @@ async function loadSizeInfo(params: {
   connId: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
-  const { connId, schema, tableName, addLogQuery } = params;
-  const q = tableSizeInfoQuery(schema, tableName);
+  const { connId, schema, tableName, engine, addLogQuery } = params;
+  const q = tableSizeInfoQuery(schema, tableName, engine);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
 
   const r0 = (res.rows as unknown[][])?.[0] ?? [];
+  const useByteFormatter = engine !== "postgres";
   return {
-    totalSize: cellToString(r0?.[0]) ?? "0",
-    dataSize: cellToString(r0?.[1]) ?? "0",
-    indexSize: cellToString(r0?.[2]) ?? "0",
+    totalSize: useByteFormatter
+      ? formatBytesSize(Number(cellToString(r0?.[0]) ?? 0))
+      : (cellToString(r0?.[0]) ?? "0"),
+    dataSize: useByteFormatter
+      ? formatBytesSize(Number(cellToString(r0?.[1]) ?? 0))
+      : (cellToString(r0?.[1]) ?? "0"),
+    indexSize: useByteFormatter
+      ? formatBytesSize(Number(cellToString(r0?.[2]) ?? 0))
+      : (cellToString(r0?.[2]) ?? "0"),
   };
 }
 
@@ -576,7 +584,11 @@ async function loadRedisRows(params: {
       result = await runRedisCommand(
         connId,
         "LRANGE",
-        [tableName, String(offset), String(Math.max(offset, offset + limit - 1))],
+        [
+          tableName,
+          String(offset),
+          String(Math.max(offset, offset + limit - 1)),
+        ],
         { timeoutMs: 20_000 }
       );
       columns = [{ name: "value", db_type: "redis:list-item" }];
@@ -591,7 +603,11 @@ async function loadRedisRows(params: {
       result = await runRedisCommand(
         connId,
         "ZRANGE",
-        [tableName, String(offset), String(Math.max(offset, offset + limit - 1))],
+        [
+          tableName,
+          String(offset),
+          String(Math.max(offset, offset + limit - 1)),
+        ],
         { timeoutMs: 20_000 }
       );
       columns = [{ name: "value", db_type: "redis:zset-member" }];
@@ -643,7 +659,7 @@ async function loadMeta(params: {
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<{ structure: any[]; constraints: any[] }> {
-    const { connId, schema, tableName, engine, addLogQuery } = params;
+  const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (engine === "sqlite") {
     const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
@@ -1025,7 +1041,6 @@ export function useLoadTableData() {
 
           const limit = pagination?.limit ?? DEFAULT_LIMIT;
           const offset = pagination?.offset ?? DEFAULT_OFFSET;
-          const isPostgres = activeTab.engine === "postgres";
           const supportsMeta =
             activeTab.engine === "postgres" ||
             activeTab.engine === "mysql" ||
@@ -1326,13 +1341,14 @@ export function useLoadTableData() {
             );
           }
 
-          if (plan.needSizeInfo && isPostgres) {
+          if (plan.needSizeInfo) {
             metaTasks.push(
               (async () => {
                 const sizeInfo = await loadSizeInfo({
                   connId,
                   schema,
                   tableName,
+                  engine: activeTab.engine,
                   addLogQuery,
                 });
                 if (latestLoadSignatureByKey.get(key) !== loadSignature) return;

@@ -44,13 +44,94 @@ export const dbSchemasQuery = () => {
   return regexEscape(queryStr);
 };
 
-export const tableSizeInfoQuery = (schema: string, tableName: string) => {
-  if (schema === "main") {
+export const tableSizeInfoQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  if (engine === "sqlite") {
+    const queryStr = `
+      WITH table_pages AS (
+        SELECT COALESCE(SUM(pgsize), 0) AS size_bytes
+        FROM dbstat
+        WHERE name = ${qLiteral(tableName)}
+      ),
+      index_pages AS (
+        SELECT COALESCE(SUM(d.pgsize), 0) AS size_bytes
+        FROM dbstat d
+        WHERE d.name IN (
+          SELECT name
+          FROM pragma_index_list(${qLiteral(tableName)})
+          WHERE name IS NOT NULL
+        )
+      )
+      SELECT
+        COALESCE((SELECT size_bytes FROM table_pages), 0) + COALESCE((SELECT size_bytes FROM index_pages), 0) AS total_size,
+        COALESCE((SELECT size_bytes FROM table_pages), 0) AS data_size,
+        COALESCE((SELECT size_bytes FROM index_pages), 0) AS index_size;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (isMySqlLike(engine)) {
     const queryStr = `
       SELECT
-        'N/A' AS total_size,
-        'N/A' AS data_size,
-        'N/A' AS index_size;
+        COALESCE(data_length, 0) + COALESCE(index_length, 0) AS total_size,
+        COALESCE(data_length, 0) AS data_size,
+        COALESCE(index_length, 0) AS index_size
+      FROM information_schema.tables
+      WHERE table_schema = ${qLiteral(schema)}
+        AND table_name = ${qLiteral(tableName)}
+      LIMIT 1;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "sqlserver") {
+    const queryStr = `
+      SELECT
+        COALESCE(SUM(ps.reserved_page_count), 0) * 8192 AS total_size,
+        COALESCE(SUM(ps.in_row_data_page_count + ps.lob_used_page_count + ps.row_overflow_used_page_count), 0) * 8192 AS data_size,
+        COALESCE(SUM(ps.used_page_count - (ps.in_row_data_page_count + ps.lob_used_page_count + ps.row_overflow_used_page_count)), 0) * 8192 AS index_size
+      FROM sys.dm_db_partition_stats ps
+      INNER JOIN sys.objects o ON o.object_id = ps.object_id
+      INNER JOIN sys.schemas s ON s.schema_id = o.schema_id
+      WHERE s.name = ${qLiteral(schema)}
+        AND o.name = ${qLiteral(tableName)}
+        AND o.type = 'U';
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "oracle") {
+    const table = tableName.toUpperCase();
+    const queryStr = `
+      WITH table_segments AS (
+        SELECT COALESCE(SUM(bytes), 0) AS data_size
+        FROM user_segments
+        WHERE segment_name = ${qLiteral(table)}
+          AND segment_type IN (
+            'TABLE',
+            'TABLE PARTITION',
+            'TABLE SUBPARTITION',
+            'LOBSEGMENT',
+            'LOB PARTITION',
+            'LOB SUBPARTITION'
+          )
+      ),
+      index_segments AS (
+        SELECT COALESCE(SUM(s.bytes), 0) AS index_size
+        FROM user_indexes i
+        LEFT JOIN user_segments s
+          ON s.segment_name = i.index_name
+         AND s.segment_type LIKE 'INDEX%'
+        WHERE i.table_name = ${qLiteral(table)}
+      )
+      SELECT
+        COALESCE((SELECT data_size FROM table_segments), 0) + COALESCE((SELECT index_size FROM index_segments), 0) AS total_size,
+        COALESCE((SELECT data_size FROM table_segments), 0) AS data_size,
+        COALESCE((SELECT index_size FROM index_segments), 0) AS index_size
+      FROM dual;
     `;
     return regexEscape(queryStr);
   }

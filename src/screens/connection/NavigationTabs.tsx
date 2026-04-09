@@ -157,7 +157,7 @@ export function NavigationTabs({
                     e.stopPropagation();
                     closeNow(w.id);
                   }}
-                  class="ml-1 rounded-full p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-100"
+                  class="ml-1 rounded-full border-none p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-100"
                   title="Close"
                 >
                   <X className="size-3.5 text-neutral-500 hover:text-neutral-700" />
