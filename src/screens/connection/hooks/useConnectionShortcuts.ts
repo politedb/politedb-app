@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "preact/hooks";
+import {
+  matchesShortcut,
+  useKeyboardShortcutsStore,
+} from "src/stores/keyboardShortcuts";
 
 type ShortcutActions = {
   openSql: () => void;
@@ -15,6 +19,7 @@ export function useConnectionShortcuts(params: {
   activeProfileScreen: string;
   actions: ShortcutActions;
 }) {
+  const shortcuts = useKeyboardShortcutsStore((s) => s.shortcuts);
   const activeWindowIdRef = useRef(params.activeWindowId);
   const activeProfileScreenRef = useRef(params.activeProfileScreen);
   const actionsRef = useRef(params.actions);
@@ -54,28 +59,21 @@ export function useConnectionShortcuts(params: {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toLowerCase().includes("mac");
-      const mod = isMac ? e.metaKey : e.ctrlKey;
-      if (!mod) return;
-
       const target = e.target as HTMLElement;
       const inEditable =
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
         target.isContentEditable;
 
-      const key = e.key.toLowerCase();
-
-      // Allow Cmd/Ctrl+S even inside inputs
       if (inEditable) {
-        if (key === "s") {
+        if (matchesShortcut(e, shortcuts.saveChanges)) {
           e.preventDefault();
           e.stopPropagation();
           void actionsRef.current.beforeSaveChanges();
           return;
         }
 
-        if (key === "w") {
+        if (matchesShortcut(e, shortcuts.closeCurrent)) {
           if (!closeCurrentTarget()) {
             return;
           }
@@ -86,35 +84,38 @@ export function useConnectionShortcuts(params: {
         return;
       }
 
-      if (key === "p" || key === "k") {
+      if (
+        matchesShortcut(e, shortcuts.openSearch) ||
+        matchesShortcut(e, "Mod+P")
+      ) {
         e.preventDefault();
         e.stopPropagation();
         actionsRef.current.openSearch?.();
         return;
       }
 
-      if (key === "t") {
+      if (matchesShortcut(e, shortcuts.openSql)) {
         e.preventDefault();
         e.stopPropagation();
         actionsRef.current.openSql();
         return;
       }
 
-      if (key === "s") {
+      if (matchesShortcut(e, shortcuts.saveChanges)) {
         e.preventDefault();
         e.stopPropagation();
         void actionsRef.current.beforeSaveChanges();
         return;
       }
 
-      if (key === "r") {
+      if (matchesShortcut(e, shortcuts.refresh)) {
         e.preventDefault();
         e.stopPropagation();
         void actionsRef.current.refresh();
         return;
       }
 
-      if (key === "w") {
+      if (matchesShortcut(e, shortcuts.closeCurrent)) {
         if (!closeCurrentTarget()) {
           return;
         }
@@ -126,5 +127,5 @@ export function useConnectionShortcuts(params: {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [shortcuts]);
 }

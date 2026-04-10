@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/SelectConnEngineModal";
 import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import { KeyboardShortcutsDialog } from "src/components/modal/KeyboardShortcutsDialog";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
@@ -73,6 +74,7 @@ export function MainScreen() {
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [licenseOpen, setLicenseOpen] = useState(false);
+  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
 
   useEffect(() => {
@@ -216,6 +218,7 @@ export function MainScreen() {
           onChange={setActiveNav}
           onOpenLicense={() => setLicenseOpen(true)}
           onOpenPrivacy={() => setPrivacyOpen(true)}
+          onOpenKeyboardShortcuts={() => setKeyboardShortcutsOpen(true)}
         />
 
         {/* Main column */}
@@ -317,6 +320,10 @@ export function MainScreen() {
         <LicenseDialog
           open={licenseOpen}
           onClose={() => setLicenseOpen(false)}
+        />
+        <KeyboardShortcutsDialog
+          open={keyboardShortcutsOpen}
+          onClose={() => setKeyboardShortcutsOpen(false)}
         />
         <NewConnectionGroupDialog
           open={newGroupOpen}

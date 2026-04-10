@@ -20,8 +20,15 @@ export function LeftNav(props: {
   onChange: (id: NavId) => void;
   onOpenLicense: () => void;
   onOpenPrivacy: () => void;
+  onOpenKeyboardShortcuts: () => void;
 }) {
-  const { active, onChange, onOpenLicense, onOpenPrivacy } = props;
+  const {
+    active,
+    onChange,
+    onOpenLicense,
+    onOpenPrivacy,
+    onOpenKeyboardShortcuts,
+  } = props;
 
   const { appVersion, updateAvailable, installUpdate, isInstallingUpdate } =
     useAppUpdater();
@@ -158,7 +165,7 @@ export function LeftNav(props: {
             {
               separatorBefore: true,
               label: "Keyboard shortcuts",
-              onSelect: onOpenPrivacy,
+              onSelect: onOpenKeyboardShortcuts,
             },
             {
               label: "Theme",

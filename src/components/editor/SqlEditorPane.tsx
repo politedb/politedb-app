@@ -11,6 +11,10 @@ import { ensureSqlTheme } from "./registerSqlTheme";
 import { formatSql, minifySql } from "src/utils/sqlFormatter";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
+import {
+  matchesShortcut,
+  useKeyboardShortcutsStore,
+} from "src/stores/keyboardShortcuts";
 
 type Props = {
   win: SqlEditorWindow;
@@ -136,6 +140,7 @@ function getSelectedOrCurrentSql(
 }
 
 export function SqlEditorPane(props: Props) {
+  const saveShortcut = useKeyboardShortcutsStore((s) => s.shortcuts.saveChanges);
   const {
     win,
     onCommitContent,
@@ -396,14 +401,10 @@ export function SqlEditorPane(props: Props) {
     }
   };
 
-  // Cmd/Ctrl+S: force flush draft (auto-save is still on)
+  // Custom save shortcut: force flush draft (auto-save is still on)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const isMac = navigator.platform.toLowerCase().includes("mac");
-      const mod = isMac ? e.metaKey : e.ctrlKey;
-      if (!mod) return;
-
-      if (e.key.toLowerCase() === "s") {
+      if (matchesShortcut(e, saveShortcut)) {
         e.preventDefault();
         void flushDraft();
       }
@@ -411,7 +412,7 @@ export function SqlEditorPane(props: Props) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [win.id]);
+  }, [saveShortcut, win.id]);
 
   // Reduce unhandled cancellation noise
   useEffect(() => {

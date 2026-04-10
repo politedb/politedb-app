@@ -10,6 +10,10 @@ import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
+import {
+  formatShortcutLabel,
+  useKeyboardShortcutsStore,
+} from "src/stores/keyboardShortcuts";
 
 interface Props {
   openWindows: OpenWindow[];
@@ -33,6 +37,9 @@ export function NavigationTabs({
   activeWindowId,
 }: Props) {
   const actions = useConnectionActionsCtx();
+  const closeShortcut = useKeyboardShortcutsStore(
+    (s) => s.shortcuts.closeCurrent
+  );
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   const [ctx, setCtx] = useState<{
@@ -68,7 +75,7 @@ export function NavigationTabs({
         {
           type: "item",
           label: "Close",
-          shortcut: "⌘W",
+          shortcut: formatShortcutLabel(closeShortcut),
           onClick: () => closeNow(ctx.tabId),
         },
         {

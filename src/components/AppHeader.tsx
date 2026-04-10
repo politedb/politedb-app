@@ -11,6 +11,10 @@ import { useConnectionStore } from "../stores/connection";
 import { DbIcon } from "./icons/DbIcon";
 import { ContextMenu, type MenuItem } from "./common/ContextMenu";
 import { cn } from "../utils/cn";
+import {
+  formatShortcutLabel,
+  useKeyboardShortcutsStore,
+} from "src/stores/keyboardShortcuts";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -42,6 +46,9 @@ const NAV_BUTTONS: NavButton[] = [
 ];
 
 export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
+  const closeShortcut = useKeyboardShortcutsStore(
+    (s) => s.shortcuts.closeCurrent
+  );
   const {
     profileTabs,
     removeTab,
@@ -183,7 +190,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
         {
           type: "item",
           label: "Close",
-          shortcut: "⌘W",
+          shortcut: formatShortcutLabel(closeShortcut),
           onClick: () => void handleTabClose(ctx.tabId),
         },
         {
