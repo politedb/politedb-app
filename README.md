@@ -121,6 +121,51 @@ Consent model:
 - always tracked: `app_installed`, `app_opened`, `app_active_daily`, `app_update_available`, `app_update_install_started`
 - allow-only: connection and SQL usage events
 
+## License activation
+
+The desktop app includes an app-side license flow for per-device activation.
+
+Configure:
+
+```bash
+VITE_LICENSE_API_BASE=https://your-license-api.example.com
+VITE_LICENSE_PRODUCT=politedb
+```
+
+The app expects these endpoints:
+
+- `POST /v1/licenses/activate`
+- `POST /v1/licenses/validate`
+- `POST /v1/licenses/deactivate`
+
+Request body shape:
+
+```json
+{
+  "product": "politedb",
+  "licenseKey": "LIC-XXXX-XXXX",
+  "activationToken": "optional",
+  "device": {
+    "device_id": "stable-device-id",
+    "device_name": "MacBook Pro",
+    "platform": "macos",
+    "arch": "aarch64"
+  }
+}
+```
+
+The response can return fields such as:
+
+- `status`
+- `activationToken`
+- `licenseId`
+- `planName`
+- `customerEmail`
+- `expiresAt`
+- `seatsAllowed`
+- `devicesUsed`
+- `message`
+
 ## Local AI environment variables
 
 The AI assistant can use bundled assets, app data, or explicit environment overrides.

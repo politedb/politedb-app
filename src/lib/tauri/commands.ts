@@ -4,6 +4,14 @@ export const CMD = {
   aiRuntimeStart: "ai_runtime_start",
   aiRuntimeStop: "ai_runtime_stop",
   aiRuntimeDownloadDefaultModel: "ai_runtime_download_default_model",
+  licenseDeviceInfo: "license_device_info",
+  licenseStateLoad: "license_state_load",
+  licenseStateSave: "license_state_save",
+  licenseStateClear: "license_state_clear",
+  licenseActivate: "license_activate",
+  licenseRefresh: "license_refresh",
+  licenseDeactivate: "license_deactivate",
+  licenseOpenExternalUrl: "license_open_external_url",
 
   // Connection
   connectionCreate: "connection_create",

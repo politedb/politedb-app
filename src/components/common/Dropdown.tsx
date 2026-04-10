@@ -11,6 +11,7 @@ export type DropdownItemConfig = {
   disabled?: boolean;
   rightSlot?: JSX.Element;
   separatorBefore?: boolean;
+  className?: string;
   onSelect?: () => void;
 };
 
@@ -24,6 +25,7 @@ export function Dropdown(props: {
   padding?: number;
   widthClassName?: string;
   contentClassName?: string;
+  containerClassName?: string;
   itemClassName?: string;
 }) {
   const {
@@ -36,6 +38,7 @@ export function Dropdown(props: {
     padding = 10,
     widthClassName = "w-56",
     contentClassName,
+    containerClassName,
     itemClassName,
   } = props;
 
@@ -58,7 +61,11 @@ export function Dropdown(props: {
       padding={padding}
       showArrow={false}
       contentClassName={cn("rounded-2xl", contentClassName)}
-      containerClassName="-translate-y-1!"
+      containerClassName={cn(
+        positions.includes("top") && "translate-y-1!",
+        positions.includes("bottom") && "-translate-y-1!",
+        containerClassName
+      )}
       content={
         <div
           class={cn(
@@ -76,6 +83,7 @@ export function Dropdown(props: {
                 disabled={item.disabled}
                 class={cn(
                   "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
+                  item.className,
                   item.disabled
                     ? "cursor-not-allowed opacity-50"
                     : "hover:bg-slate-50",

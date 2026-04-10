@@ -6,4 +6,5 @@ export * from "./operation";
 export * from "./mongo";
 export * from "./redis";
 export * from "./ai";
+export * from "./license";
 export * from "./sql";

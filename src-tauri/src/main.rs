@@ -1,10 +1,11 @@
 #[cfg(target_os = "macos")]
 extern crate objc2;
 
-mod commands;
 mod ai_runtime;
+mod commands;
 mod engines;
 mod file_storage;
+mod license;
 mod operations;
 mod profiles;
 mod security;
@@ -139,6 +140,14 @@ fn main() {
             commands::ai::ai_runtime_start,
             commands::ai::ai_runtime_stop,
             commands::ai::ai_runtime_download_default_model,
+            commands::license::license_device_info,
+            commands::license::license_state_load,
+            commands::license::license_state_save,
+            commands::license::license_state_clear,
+            commands::license::license_activate,
+            commands::license::license_refresh,
+            commands::license::license_deactivate,
+            commands::license::license_open_external_url,
             // Connections
             commands::connection::connection_create,
             commands::connection::connection_list,
@@ -193,7 +202,10 @@ fn main() {
         .expect("error while building app");
 
     app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
             let state: tauri::State<'_, AppState> = app_handle.state();
             ai_runtime::ai_runtime_force_shutdown_blocking(&state);
         }

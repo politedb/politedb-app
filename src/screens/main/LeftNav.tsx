@@ -1,7 +1,10 @@
-import { DatabaseIcon, KeyIcon } from "src/components/icons";
+import { DatabaseIcon, KeyIcon, SettingsIcon } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
 import { Button } from "src/components/common/Button";
+import { Dropdown } from "../../components/common/Dropdown";
+import { useState } from "preact/hooks";
+import { TagChips } from "../../components/common/TagChips";
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -15,11 +18,16 @@ const NAV_ITEMS: NavItem[] = [
 export function LeftNav(props: {
   active: NavId;
   onChange: (id: NavId) => void;
+  onOpenLicense: () => void;
+  onOpenPrivacy: () => void;
 }) {
-  const { active, onChange } = props;
+  const { active, onChange, onOpenLicense, onOpenPrivacy } = props;
+
   const { appVersion, updateAvailable, installUpdate, isInstallingUpdate } =
     useAppUpdater();
-  const envSuffix = import.meta.env.DEV ? " (Dev)" : "";
+  const [openSettings, setOpenSettings] = useState(false);
+
+  const envSuffix = import.meta.env.DEV ? "-dev" : "";
 
   return (
     <aside
@@ -106,10 +114,58 @@ export function LeftNav(props: {
             {isInstallingUpdate ? "Installing update..." : "Update"}
           </Button>
         )}
-        <div class="mx-auto flex w-fit items-center gap-2 text-sm text-slate-600">
-          Version {appVersion}
-          {envSuffix}
-        </div>
+
+        <Dropdown
+          open={openSettings}
+          onOpenChange={setOpenSettings}
+          positions={["top", "left"]}
+          align="start"
+          trigger={
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                variant="ghost"
+                className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm"
+                title="Settings"
+                onClick={() => setOpenSettings((v) => !v)}
+              >
+                <div className="flex items-center gap-3">
+                  <SettingsIcon className="size-4.5" />
+                  Settings
+                </div>
+                <TagChips tags="Free" size="md" />
+              </Button>
+            </div>
+          }
+          itemClassName="py-1"
+          items={[
+            {
+              label: `About PoliteDB (v${appVersion}${envSuffix})`,
+              disabled: true,
+            },
+            {
+              label: `Free plan`,
+              disabled: true,
+            },
+            {
+              separatorBefore: true,
+              label: "Privacy & Analytics",
+              onSelect: onOpenPrivacy,
+            },
+            {
+              label: "License key",
+              onSelect: onOpenLicense,
+            },
+            {
+              separatorBefore: true,
+              label: "Keyboard shortcuts",
+              onSelect: onOpenPrivacy,
+            },
+            {
+              label: "Theme",
+              onSelect: onOpenPrivacy,
+            },
+          ]}
+        />
       </div>
     </aside>
   );

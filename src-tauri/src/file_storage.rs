@@ -8,6 +8,8 @@ use tauri::Manager;
 // Root folders / files under app_data_dir
 const PERSISTENT_DIR: &str = "persistent";
 const PERSISTENT_UI_FILE: &str = "ui.json";
+const LICENSE_DIR: &str = "license";
+const LICENSE_FILE: &str = "state.json";
 
 const PROFILES_DIR: &str = "profiles";
 const PROFILES_FILE: &str = "profiles.json";
@@ -81,6 +83,10 @@ pub fn path_persistent_ui(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 pub fn path_profiles(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_root(app)?.join(PROFILES_DIR).join(PROFILES_FILE))
+}
+
+pub fn path_license_state(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join(LICENSE_DIR).join(LICENSE_FILE))
 }
 
 pub fn dir_sql_drafts(app: &tauri::AppHandle) -> Result<PathBuf, String> {

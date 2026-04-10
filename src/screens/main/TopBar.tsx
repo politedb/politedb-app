@@ -9,7 +9,6 @@ import {
   ListIcon,
   PlusIcon,
   SearchIcon,
-  SettingsIcon,
   SortIcon,
 } from "src/components/icons";
 import type {
@@ -36,7 +35,6 @@ type TopBarProps = {
   onNewConnection: () => void;
   onNewGroup?: () => void;
   onImportConnections?: () => void;
-  onPrivacy: () => void;
   viewMode: ViewMode;
   onViewMode: (v: ViewMode) => void;
   connectionSortMode?: ConnectionSortMode;
@@ -173,21 +171,12 @@ function UtilityActions(props: {
   sortItems:
     | ReturnType<typeof buildConnectionSortItems>
     | ReturnType<typeof buildKeychainSortItems>;
-  onPrivacy: () => void;
 }) {
-  const { sortTitle, sortItems, onPrivacy } = props;
+  const { sortTitle, sortItems } = props;
 
   return (
     <div class="flex items-center gap-1">
       <SortMenu title={sortTitle} items={sortItems} />
-      <Button
-        variant="outline"
-        onClick={onPrivacy}
-        class="h-9 rounded-lg border border-slate-300 px-[8px]"
-        title="Privacy Settings"
-      >
-        <SettingsIcon className="size-4" />
-      </Button>
     </div>
   );
 }
@@ -241,7 +230,6 @@ export function TopBar(props: TopBarProps) {
     onNewConnection,
     onNewGroup,
     onImportConnections,
-    onPrivacy,
     viewMode,
     onViewMode,
     connectionSortMode = "created-desc",
@@ -310,7 +298,6 @@ export function TopBar(props: TopBarProps) {
       <UtilityActions
         sortTitle={isConnections ? "Sort connections" : "Sort keychain keys"}
         sortItems={sortItems}
-        onPrivacy={onPrivacy}
       />
 
       <ViewModeToggle mode={viewMode} onChange={onViewMode} />

@@ -4,6 +4,7 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/SelectConnEngineModal";
 import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
@@ -11,6 +12,7 @@ import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
+import { useLicenseStore } from "src/stores/license";
 
 import { LeftNav } from "./LeftNav";
 import { TopBar } from "./TopBar";
@@ -57,6 +59,7 @@ export function MainScreen() {
   const createGroup = useConnectionGroupsStore((s) => s.createGroup);
   const deleteGroup = useConnectionGroupsStore((s) => s.deleteGroup);
   const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
+  const loadLicense = useLicenseStore((s) => s.load);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeNav, setActiveNav] = useState<NavId>("connections");
@@ -69,6 +72,7 @@ export function MainScreen() {
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [licenseOpen, setLicenseOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
 
   useEffect(() => {
@@ -78,6 +82,10 @@ export function MainScreen() {
   useEffect(() => {
     ensureGroupsLoaded();
   }, [ensureGroupsLoaded]);
+
+  useEffect(() => {
+    void loadLicense();
+  }, [loadLicense]);
 
   const selectedProfile = useMemo(() => {
     if (!selectedProfileId) return undefined;
@@ -203,7 +211,12 @@ export function MainScreen() {
   return (
     <div class="flex h-full flex-col bg-neutral-50">
       <div class="flex min-h-0 flex-1 overflow-hidden">
-        <LeftNav active={activeNav} onChange={setActiveNav} />
+        <LeftNav
+          active={activeNav}
+          onChange={setActiveNav}
+          onOpenLicense={() => setLicenseOpen(true)}
+          onOpenPrivacy={() => setPrivacyOpen(true)}
+        />
 
         {/* Main column */}
         <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -217,7 +230,6 @@ export function MainScreen() {
                 onNewConnection={handleTopBarCreate}
                 onNewGroup={() => setNewGroupOpen(true)}
                 onImportConnections={handleImportConnections}
-                onPrivacy={() => setPrivacyOpen(true)}
                 viewMode={viewMode}
                 onViewMode={setViewMode}
                 connectionSortMode={connectionSortMode}
@@ -301,6 +313,10 @@ export function MainScreen() {
         <PrivacyDialog
           open={privacyOpen}
           onClose={() => setPrivacyOpen(false)}
+        />
+        <LicenseDialog
+          open={licenseOpen}
+          onClose={() => setLicenseOpen(false)}
         />
         <NewConnectionGroupDialog
           open={newGroupOpen}

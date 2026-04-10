@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod connection;
 pub mod export;
+pub mod license;
 pub mod mongo;
 pub mod operation;
 pub mod persistent;
