@@ -1,9 +1,10 @@
 import { DatabaseIcon, KeyIcon, SettingsIcon } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
+import { useLicenseStore } from "src/stores/license";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "../../components/common/Dropdown";
-import { useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import { TagChips } from "../../components/common/TagChips";
 
 const NAV_ITEMS: NavItem[] = [
@@ -32,9 +33,42 @@ export function LeftNav(props: {
 
   const { appVersion, updateAvailable, installUpdate, isInstallingUpdate } =
     useAppUpdater();
+  const licenseState = useLicenseStore((s) => s.state);
   const [openSettings, setOpenSettings] = useState(false);
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
+  const isLicenseActive =
+    String(licenseState?.status ?? "").toLowerCase() === "active";
+  const licensePlanLabel = useMemo(() => {
+    if (isLicenseActive) {
+      return `${licenseState?.plan_name?.trim() || "Licensed"} plan`;
+    }
+
+    const trialExpiresAt =
+      typeof licenseState?.trial_expires_at === "number"
+        ? licenseState.trial_expires_at
+        : null;
+
+    if (!trialExpiresAt) {
+      return "Free trial";
+    }
+
+    const remainingMs = trialExpiresAt - Date.now();
+    if (remainingMs <= 0) {
+      return "Free trial expired";
+    }
+
+    const dayMs = 24 * 60 * 60 * 1000;
+    const daysLeft = Math.ceil(remainingMs / dayMs);
+
+    return daysLeft <= 1
+      ? "Free trial (1 days left)"
+      : `Free trial (${daysLeft} days left)`;
+  }, [
+    isLicenseActive,
+    licenseState?.plan_name,
+    licenseState?.trial_expires_at,
+  ]);
 
   return (
     <aside
@@ -139,7 +173,20 @@ export function LeftNav(props: {
                   <SettingsIcon className="size-4.5" />
                   Settings
                 </div>
-                <TagChips tags="Free" size="md" />
+                {!isLicenseActive && (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenLicense();
+                    }}
+                  >
+                    <TagChips
+                      className="[&>span]:capitalize"
+                      tags="Upgrade"
+                      size="md"
+                    />
+                  </div>
+                )}
               </Button>
             </div>
           }
@@ -150,7 +197,7 @@ export function LeftNav(props: {
               disabled: true,
             },
             {
-              label: `Free plan`,
+              label: licensePlanLabel,
               disabled: true,
             },
             {
@@ -166,10 +213,6 @@ export function LeftNav(props: {
               separatorBefore: true,
               label: "Keyboard shortcuts",
               onSelect: onOpenKeyboardShortcuts,
-            },
-            {
-              label: "Theme",
-              onSelect: onOpenPrivacy,
             },
           ]}
         />

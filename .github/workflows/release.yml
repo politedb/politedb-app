@@ -14,6 +14,8 @@ jobs:
       VITE_ANALYTICS_DEBUG: "false"
       VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
       VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+      VITE_LICENSE_API_BASE: ${{ vars.VITE_LICENSE_API_BASE }}
+      VITE_LICENSE_PRODUCT: ${{ vars.VITE_LICENSE_PRODUCT || 'politedb' }}
       BUNDLE_AI_ASSISTANT: ${{ vars.BUNDLE_AI_ASSISTANT || 'true' }}
       BUNDLE_AI_MODEL: ${{ vars.BUNDLE_AI_MODEL || 'false' }}
       AI_MODEL_REPO: ${{ vars.AI_MODEL_REPO || 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF' }}
@@ -65,6 +67,8 @@ jobs:
           echo "Analytics enabled: ${VITE_ANALYTICS_ENABLED:-<unset>}"
           echo "PostHog host set: $([ -n "${VITE_POSTHOG_HOST:-}" ] && echo yes || echo no)"
           echo "PostHog key set: $([ -n "${VITE_POSTHOG_KEY:-}" ] && echo yes || echo no)"
+          echo "License API base set: $([ -n "${VITE_LICENSE_API_BASE:-}" ] && echo yes || echo no)"
+          echo "License product: ${VITE_LICENSE_PRODUCT:-<unset>}"
           echo "Bundle AI assistant: ${BUNDLE_AI_ASSISTANT:-false}"
           echo "Bundle AI model: ${BUNDLE_AI_MODEL:-false}"
           echo "AI model repo: ${AI_MODEL_REPO:-<unset>}"

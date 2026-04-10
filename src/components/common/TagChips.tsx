@@ -24,6 +24,14 @@ function tagTone(tag: string) {
     return "border-rose-200 bg-rose-100 text-rose-700";
   }
 
+  if (
+    normalized === "upgrade" ||
+    normalized === "trial" ||
+    normalized === "starter"
+  ) {
+    return "border-amber-200 bg-amber-100 text-amber-800";
+  }
+
   return "border-neutral-200 bg-white text-neutral-700";
 }
 

@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::process::Command as StdCommand;
 
 use crate::file_storage as storage;
 
-const LICENSE_STATE_VERSION: u32 = 1;
+const LICENSE_STATE_VERSION: u32 = 3;
+const TRIAL_DURATION_DAYS: i64 = 14;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseDeviceInfo {
@@ -33,6 +35,8 @@ pub struct LicenseState {
     pub last_validated_at: Option<i64>,
     pub seats_allowed: Option<u32>,
     pub devices_used: Option<u32>,
+    pub trial_started_at: Option<i64>,
+    pub trial_expires_at: Option<i64>,
     pub message: Option<String>,
 }
 
@@ -73,8 +77,32 @@ struct LicenseApiResponse {
     error: Option<String>,
 }
 
+fn parse_license_api_response(text: &str) -> Result<LicenseApiResponse, String> {
+    serde_json::from_str::<LicenseApiResponse>(text).or_else(|direct_err| {
+        let value: Value = serde_json::from_str(text).map_err(|json_err| {
+            format!("{direct_err}; raw body: {text}; json parse error: {json_err}")
+        })?;
+
+        for key in ["data", "license", "result"] {
+            if let Some(inner) = value.get(key) {
+                if let Ok(parsed) = serde_json::from_value::<LicenseApiResponse>(inner.clone()) {
+                    return Ok(parsed);
+                }
+            }
+        }
+
+        serde_json::from_value::<LicenseApiResponse>(value.clone()).map_err(|nested_err| {
+            format!("{direct_err}; raw body: {text}; nested parse error: {nested_err}")
+        })
+    })
+}
+
 impl LicenseState {
     pub fn inactive(device: &LicenseDeviceInfo) -> Self {
+        let trial_started_at = chrono::Utc::now().timestamp_millis();
+        let trial_expires_at =
+            (chrono::Utc::now() + chrono::Duration::days(TRIAL_DURATION_DAYS)).timestamp_millis();
+
         Self {
             version: LICENSE_STATE_VERSION,
             status: "inactive".to_string(),
@@ -93,6 +121,8 @@ impl LicenseState {
             last_validated_at: None,
             seats_allowed: None,
             devices_used: None,
+            trial_started_at: Some(trial_started_at),
+            trial_expires_at: Some(trial_expires_at),
             message: None,
         }
     }
@@ -105,6 +135,44 @@ impl LicenseState {
         self.arch = device.arch.clone();
         self
     }
+}
+
+fn parse_expiry_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .ok()
+}
+
+fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
+    let status = state.status.trim().to_lowercase();
+    let now = chrono::Utc::now().timestamp_millis();
+
+    if status != "active" {
+        if state
+            .trial_expires_at
+            .is_some_and(|trial_expires_at| trial_expires_at <= now)
+            && state.message.as_deref().unwrap_or("").trim().is_empty()
+        {
+            state.message = Some("Your 14-day free trial has expired.".to_string());
+        }
+        return state;
+    }
+
+    let Some(expires_at) = state.expires_at.clone() else {
+        return state;
+    };
+    let Some(expiry) = parse_expiry_timestamp(&expires_at) else {
+        return state;
+    };
+
+    if expiry.timestamp_millis() <= now {
+        state.status = "expired".to_string();
+        if state.message.as_deref().unwrap_or("").trim().is_empty() {
+            state.message = Some("This license has expired.".to_string());
+        }
+    }
+
+    state
 }
 
 fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
@@ -124,16 +192,14 @@ fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
 #[cfg(target_os = "macos")]
 fn machine_identity_source() -> Option<String> {
     let output = command_output("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])?;
-    output
-        .lines()
-        .find_map(|line| {
-            if !line.contains("IOPlatformUUID") {
-                return None;
-            }
-            line.split('=')
-                .nth(1)
-                .map(|value| value.trim().trim_matches('"').to_string())
-        })
+    output.lines().find_map(|line| {
+        if !line.contains("IOPlatformUUID") {
+            return None;
+        }
+        line.split('=')
+            .nth(1)
+            .map(|value| value.trim().trim_matches('"').to_string())
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -166,7 +232,9 @@ fn machine_identity_source() -> Option<String> {
         if !line.contains("MachineGuid") {
             return None;
         }
-        line.split_whitespace().last().map(|value| value.to_string())
+        line.split_whitespace()
+            .last()
+            .map(|value| value.to_string())
     })
 }
 
@@ -227,9 +295,14 @@ pub fn license_state_load(app: &tauri::AppHandle) -> Result<LicenseState, String
     let device = license_device_info();
     let path = storage::path_license_state(app)?;
     let value = storage::json_read_if_exists::<LicenseState>(&path)?;
-    Ok(value
-        .unwrap_or_else(|| LicenseState::inactive(&device))
-        .with_device(&device))
+    let existing = value.filter(|state| state.version == LICENSE_STATE_VERSION);
+    let next = apply_local_expiry(
+        existing
+            .unwrap_or_else(|| LicenseState::inactive(&device))
+            .with_device(&device),
+    );
+    storage::json_write_atomic(&path, &next)?;
+    Ok(next)
 }
 
 pub fn license_state_save(
@@ -237,16 +310,25 @@ pub fn license_state_save(
     state: LicenseState,
 ) -> Result<LicenseState, String> {
     let device = license_device_info();
-    let next = state.with_device(&device);
+    let next = apply_local_expiry(state.with_device(&device));
     let path = storage::path_license_state(app)?;
     storage::json_write_atomic(&path, &next)?;
     Ok(next)
 }
 
 pub fn license_state_clear(app: &tauri::AppHandle) -> Result<LicenseState, String> {
+    let device = license_device_info();
     let path = storage::path_license_state(app)?;
-    storage::remove_if_exists(&path)?;
-    Ok(LicenseState::inactive(&license_device_info()))
+    let previous = storage::json_read_if_exists::<LicenseState>(&path)?;
+    let mut next = LicenseState::inactive(&device);
+
+    if let Some(previous) = previous {
+        next.trial_started_at = previous.trial_started_at.or(next.trial_started_at);
+        next.trial_expires_at = previous.trial_expires_at.or(next.trial_expires_at);
+    }
+
+    storage::json_write_atomic(&path, &next)?;
+    Ok(apply_local_expiry(next))
 }
 
 fn pick_string(values: &[Option<String>]) -> Option<String> {
@@ -264,12 +346,29 @@ fn pick_i64(values: &[Option<i64>]) -> Option<i64> {
     values.iter().find_map(|value| *value)
 }
 
+fn default_trial_started_at(previous: Option<&LicenseState>) -> i64 {
+    previous
+        .and_then(|state| state.trial_started_at)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+}
+
+fn default_trial_expires_at(previous: Option<&LicenseState>, trial_started_at: i64) -> i64 {
+    previous
+        .and_then(|state| state.trial_expires_at)
+        .unwrap_or_else(|| {
+            trial_started_at + chrono::Duration::seconds(TRIAL_DURATION_DAYS).num_milliseconds()
+        })
+}
+
 fn normalize_api_state(
     payload: LicenseApiResponse,
     device: &LicenseDeviceInfo,
     previous: Option<&LicenseState>,
     license_key: Option<String>,
 ) -> LicenseState {
+    let trial_started_at = default_trial_started_at(previous);
+    let trial_expires_at = default_trial_expires_at(previous, trial_started_at);
+
     LicenseState {
         version: LICENSE_STATE_VERSION,
         status: pick_string(&[
@@ -324,6 +423,8 @@ fn normalize_api_state(
             payload.devices_used,
             previous.and_then(|state| state.devices_used),
         ]),
+        trial_started_at: Some(trial_started_at),
+        trial_expires_at: Some(trial_expires_at),
         message: pick_string(&[
             payload.message,
             payload.error,
@@ -334,7 +435,7 @@ fn normalize_api_state(
 
 async fn post_license_api(
     api_base: &str,
-    path: &str,
+    action: &str,
     body: &LicenseApiRequest,
 ) -> Result<LicenseApiResponse, String> {
     let base = api_base.trim().trim_end_matches('/');
@@ -343,27 +444,90 @@ async fn post_license_api(
     }
 
     let client = reqwest::Client::new();
-    let res = client
-        .post(format!("{base}{path}"))
-        .json(body)
-        .send()
-        .await
-        .map_err(|e| format!("License request failed: {e}"))?;
+    let candidates = license_endpoint_candidates(base, action);
+    let mut last_error = String::new();
 
-    let status = res.status();
-    let payload = res
-        .json::<LicenseApiResponse>()
-        .await
-        .map_err(|e| format!("License response parse failed: {e}"))?;
+    for url in candidates {
+        let res = client
+            .post(&url)
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| format!("License request failed: {e}"))?;
 
-    if !status.is_success() {
-        return Err(
-            pick_string(&[payload.message.clone(), payload.error.clone()])
-                .unwrap_or_else(|| format!("License API returned {status}")),
-        );
+        let status = res.status();
+        let body_text = res
+            .text()
+            .await
+            .map_err(|e| format!("License response read failed: {e}"))?;
+
+        match parse_license_api_response(&body_text) {
+            Ok(payload) => {
+                if !status.is_success() {
+                    let message = pick_string(&[payload.message.clone(), payload.error.clone()])
+                        .unwrap_or_else(|| format!("License API returned {status}"));
+                    if status == reqwest::StatusCode::NOT_FOUND {
+                        last_error = format!("{message} ({url})");
+                        continue;
+                    }
+                    return Err(message);
+                }
+                return Ok(payload);
+            }
+            Err(parse_error) => {
+                last_error = format!("{parse_error} ({url})");
+                if status == reqwest::StatusCode::NOT_FOUND
+                    || body_text.contains("Cannot POST")
+                    || body_text.contains("<!DOCTYPE html")
+                {
+                    continue;
+                }
+                return Err(format!("License response parse failed: {parse_error}"));
+            }
+        }
     }
 
-    Ok(payload)
+    Err(format!(
+        "License API endpoint not found. Checked common routes for base '{base}'. Last error: {last_error}"
+    ))
+}
+
+fn license_endpoint_candidates(base: &str, action: &str) -> Vec<String> {
+    let action = action.trim().trim_start_matches('/');
+    let mut candidates = Vec::new();
+
+    let push = |list: &mut Vec<String>, url: String| {
+        if !list.iter().any(|existing| existing == &url) {
+            list.push(url);
+        }
+    };
+
+    if base.ends_with("/api/v1") {
+        push(&mut candidates, format!("{base}/licenses/{action}"));
+        push(&mut candidates, format!("{base}/{action}"));
+        return candidates;
+    }
+
+    if base.ends_with("/v1") {
+        let root = base.trim_end_matches("/v1");
+        push(&mut candidates, format!("{base}/licenses/{action}"));
+        push(&mut candidates, format!("{base}/{action}"));
+        push(&mut candidates, format!("{root}/api/v1/licenses/{action}"));
+        push(&mut candidates, format!("{root}/api/v1/{action}"));
+        return candidates;
+    }
+
+    if base.ends_with("/api") {
+        push(&mut candidates, format!("{base}/v1/licenses/{action}"));
+        push(&mut candidates, format!("{base}/v1/{action}"));
+        return candidates;
+    }
+
+    push(&mut candidates, format!("{base}/v1/licenses/{action}"));
+    push(&mut candidates, format!("{base}/api/v1/licenses/{action}"));
+    push(&mut candidates, format!("{base}/v1/{action}"));
+    push(&mut candidates, format!("{base}/api/v1/{action}"));
+    candidates
 }
 
 pub async fn license_activate(
@@ -375,7 +539,7 @@ pub async fn license_activate(
     let device = license_device_info();
     let payload = post_license_api(
         &api_base,
-        "/v1/licenses/activate",
+        "activate",
         &LicenseApiRequest {
             product,
             license_key: Some(license_key.clone()),
@@ -398,7 +562,7 @@ pub async fn license_refresh(
     let device = license_device_info();
     let payload = post_license_api(
         &api_base,
-        "/v1/licenses/validate",
+        "validate",
         &LicenseApiRequest {
             product,
             license_key: current.license_key.clone(),
@@ -408,7 +572,12 @@ pub async fn license_refresh(
     )
     .await?;
 
-    let next = normalize_api_state(payload, &device, Some(&current), current.license_key.clone());
+    let next = normalize_api_state(
+        payload,
+        &device,
+        Some(&current),
+        current.license_key.clone(),
+    );
     license_state_save(app, next)
 }
 
@@ -422,7 +591,7 @@ pub async fn license_deactivate(
 
     let _ = post_license_api(
         &api_base,
-        "/v1/licenses/deactivate",
+        "deactivate",
         &LicenseApiRequest {
             product,
             license_key: current.license_key.clone(),

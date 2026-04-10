@@ -9,7 +9,9 @@ import {
 } from "src/lib/tauri";
 
 const LICENSE_API_BASE = (import.meta.env.VITE_LICENSE_API_BASE ?? "").trim();
-const LICENSE_PRODUCT = (import.meta.env.VITE_LICENSE_PRODUCT ?? "politedb").trim();
+const LICENSE_PRODUCT = (
+  import.meta.env.VITE_LICENSE_PRODUCT ?? "politedb"
+).trim();
 
 type LicenseStoreState = {
   state: LicenseState | null;
@@ -30,6 +32,18 @@ function toErrorMessage(error: unknown) {
   return String(error ?? "Unknown error");
 }
 
+function hasActivationData(state?: LicenseState | null) {
+  return Boolean(state?.license_key || state?.activation_token);
+}
+
+async function refreshLicenseSilently() {
+  if (!LICENSE_API_BASE) return null;
+  return licenseRefresh({
+    apiBase: LICENSE_API_BASE,
+    product: LICENSE_PRODUCT,
+  });
+}
+
 export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
   state: null,
   busy: false,
@@ -42,6 +56,17 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
     try {
       const state = await licenseStateLoad();
       set({ state, busy: false, loaded: true });
+
+      if (hasActivationData(state) && LICENSE_API_BASE) {
+        void refreshLicenseSilently()
+          .then((next) => {
+            if (!next) return;
+            set({ state: next, loaded: true });
+          })
+          .catch(() => {
+            // Keep the local state if silent validation fails.
+          });
+      }
     } catch (error) {
       set({ busy: false, error: toErrorMessage(error), loaded: true });
     }

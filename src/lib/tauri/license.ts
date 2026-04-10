@@ -1,7 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { CMD } from "./commands";
 
-export type LicenseStatusKind = "inactive" | "active" | "invalid" | "error";
+export type LicenseStatusKind =
+  | "inactive"
+  | "active"
+  | "expired"
+  | "invalid"
+  | "error";
 
 export type LicenseDeviceInfo = {
   device_id: string;
@@ -28,6 +33,8 @@ export type LicenseState = {
   last_validated_at?: number | null;
   seats_allowed?: number | null;
   devices_used?: number | null;
+  trial_started_at?: number | null;
+  trial_expires_at?: number | null;
   message?: string | null;
 };
 
@@ -53,9 +60,9 @@ export async function licenseActivate(args: {
   licenseKey: string;
 }) {
   return invoke<LicenseState>(CMD.licenseActivate, {
-    api_base: args.apiBase,
+    apiBase: args.apiBase,
     product: args.product,
-    license_key: args.licenseKey,
+    licenseKey: args.licenseKey,
   });
 }
 
@@ -64,7 +71,7 @@ export async function licenseRefresh(args: {
   product: string;
 }) {
   return invoke<LicenseState>(CMD.licenseRefresh, {
-    api_base: args.apiBase,
+    apiBase: args.apiBase,
     product: args.product,
   });
 }
@@ -74,7 +81,7 @@ export async function licenseDeactivate(args: {
   product: string;
 }) {
   return invoke<LicenseState>(CMD.licenseDeactivate, {
-    api_base: args.apiBase,
+    apiBase: args.apiBase,
     product: args.product,
   });
 }
