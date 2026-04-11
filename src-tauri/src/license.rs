@@ -5,7 +5,7 @@ use std::process::Command as StdCommand;
 
 use crate::file_storage as storage;
 
-const LICENSE_STATE_VERSION: u32 = 3;
+const LICENSE_STATE_VERSION: u32 = 1;
 const TRIAL_DURATION_DAYS: i64 = 14;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +173,22 @@ fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
     }
 
     state
+}
+
+pub fn blocks_app_update(state: &LicenseState) -> bool {
+    let status = state.status.trim().to_lowercase();
+    if status == "active" {
+        return false;
+    }
+
+    if status == "expired" {
+        return true;
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    state
+        .trial_expires_at
+        .is_some_and(|trial_expires_at| trial_expires_at <= now)
 }
 
 fn command_output(cmd: &str, args: &[&str]) -> Option<String> {

@@ -1,5 +1,6 @@
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
+import { CMD } from "src/lib/tauri/commands";
 
 export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -17,6 +18,6 @@ export async function checkForRuntimeUpdate(): Promise<RuntimeUpdate | null> {
 }
 
 export async function installRuntimeUpdate(update: RuntimeUpdate) {
-  await update.downloadAndInstall();
-  await relaunch();
+  void update;
+  await invoke<void>(CMD.updaterInstallIfAllowed);
 }

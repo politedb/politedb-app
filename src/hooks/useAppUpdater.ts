@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import packageJson from "@root/package.json";
 import { getVersion } from "@tauri-apps/api/app";
 import { trackEssentialEvent } from "src/lib/analytics";
+import { useLicenseStore } from "src/stores/license";
 import {
   checkForRuntimeUpdate,
   installRuntimeUpdate,
@@ -15,6 +16,7 @@ export function useAppUpdater() {
   const [pendingUpdate, setPendingUpdate] = useState<RuntimeUpdate | null>(
     null
   );
+  const licenseState = useLicenseStore((s) => s.state);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -47,8 +49,26 @@ export function useAppUpdater() {
     })();
   }, [appVersion]);
 
+  const canInstallUpdate = useMemo(() => {
+    const normalizedStatus = String(licenseState?.status ?? "").toLowerCase();
+    if (normalizedStatus === "active") {
+      return true;
+    }
+
+    if (normalizedStatus === "expired") {
+      return false;
+    }
+
+    const trialExpiresAt = Number(licenseState?.trial_expires_at ?? 0);
+    if (Number.isFinite(trialExpiresAt) && trialExpiresAt > 0) {
+      return trialExpiresAt > Date.now();
+    }
+
+    return true;
+  }, [licenseState?.status, licenseState?.trial_expires_at]);
+
   const installUpdate = useCallback(async () => {
-    if (!pendingUpdate || isUpdating) return;
+    if (!pendingUpdate || isUpdating || !canInstallUpdate) return;
     setIsUpdating(true);
     try {
       trackEssentialEvent("app_update_install_started", {
@@ -59,13 +79,14 @@ export function useAppUpdater() {
     } finally {
       setIsUpdating(false);
     }
-  }, [pendingUpdate, isUpdating, appVersion]);
+  }, [pendingUpdate, isUpdating, canInstallUpdate, appVersion]);
 
   return {
     appVersion,
-    updateAvailable: !!pendingUpdate,
+    updateAvailable: !!pendingUpdate && canInstallUpdate,
     updateVersion: pendingUpdate?.version ?? null,
     installUpdate,
     isInstallingUpdate: isUpdating,
+    canInstallUpdate,
   };
 }

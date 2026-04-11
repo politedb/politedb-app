@@ -37,17 +37,22 @@ export function LeftNav(props: {
   const [openSettings, setOpenSettings] = useState(false);
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
-  const isLicenseActive =
-    String(licenseState?.status ?? "").toLowerCase() === "active";
+  const normalizedLicenseStatus = String(licenseState?.status ?? "").toLowerCase();
+  const isLicenseActive = normalizedLicenseStatus === "active";
+  const isLicenseExpired = normalizedLicenseStatus === "expired";
+  const trialExpiresAt =
+    typeof licenseState?.trial_expires_at === "number"
+      ? licenseState.trial_expires_at
+      : null;
+  const isTrialExpired =
+    trialExpiresAt != null && Number.isFinite(trialExpiresAt)
+      ? trialExpiresAt <= Date.now()
+      : false;
+  const canInstallUpdate = !isLicenseExpired && !isTrialExpired;
   const licensePlanLabel = useMemo(() => {
     if (isLicenseActive) {
       return `${licenseState?.plan_name?.trim() || "Licensed"} plan`;
     }
-
-    const trialExpiresAt =
-      typeof licenseState?.trial_expires_at === "number"
-        ? licenseState.trial_expires_at
-        : null;
 
     if (!trialExpiresAt) {
       return "Free trial";
@@ -64,11 +69,7 @@ export function LeftNav(props: {
     return daysLeft <= 1
       ? "Free trial (1 days left)"
       : `Free trial (${daysLeft} days left)`;
-  }, [
-    isLicenseActive,
-    licenseState?.plan_name,
-    licenseState?.trial_expires_at,
-  ]);
+  }, [isLicenseActive, licenseState?.plan_name, trialExpiresAt]);
 
   return (
     <aside
@@ -146,7 +147,7 @@ export function LeftNav(props: {
         <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600">
           <div>Tip: Right-click a connection for actions.</div>
         </div>
-        {updateAvailable && (
+        {updateAvailable && canInstallUpdate && (
           <Button
             onClick={() => void installUpdate()}
             disabled={isInstallingUpdate}

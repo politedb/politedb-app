@@ -28,7 +28,7 @@ export function TrialExpiredOverlay(props: {
   }
 
   return (
-    <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/55 backdrop-blur-sm">
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 backdrop-blur-sm">
       <div class="mx-4 w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-8 shadow-2xl">
         <div class="mx-auto max-w-xl text-center">
           <div class="mb-4 inline-flex rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-sm font-medium text-amber-700">

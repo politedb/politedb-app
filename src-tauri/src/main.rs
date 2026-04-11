@@ -197,6 +197,7 @@ fn main() {
             commands::mongo::mongo_insert_documents,
             commands::mongo::mongo_update_documents,
             commands::mongo::mongo_delete_documents,
+            commands::updater::updater_install_if_allowed,
         ])
         .build(tauri::generate_context!())
         .expect("error while building app");

@@ -12,6 +12,7 @@ export const CMD = {
   licenseRefresh: "license_refresh",
   licenseDeactivate: "license_deactivate",
   licenseOpenExternalUrl: "license_open_external_url",
+  updaterInstallIfAllowed: "updater_install_if_allowed",
 
   // Connection
   connectionCreate: "connection_create",
