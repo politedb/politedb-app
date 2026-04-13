@@ -874,9 +874,6 @@ export function useConnectionActions(
     async (tabId: string, skipCheck = false) => {
       if (closingRef.current) return;
 
-      const tab = profileTabs.find((t) => t.id === tabId);
-      if (tab?.isLocked) return; // Prevent closing locked tab
-
       closingRef.current = true;
 
       try {

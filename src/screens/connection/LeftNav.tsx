@@ -77,12 +77,15 @@ function SectionHeader(props: {
   );
 }
 
-function TableName({ name }: { name: string }) {
+function TableName({ className, name }: { className?: string; name: string }) {
   const { ref, value } = useMiddleEllipsisByWidth({ text: name });
   return (
     <span
       ref={ref}
-      class="min-w-0 flex-1 overflow-hidden text-ellipsis select-none"
+      class={cn(
+        "min-w-0 flex-1 overflow-hidden text-ellipsis select-none",
+        className
+      )}
     >
       {value}
     </span>
@@ -384,7 +387,12 @@ export function LeftNav({
                             )}
                           />
                         )}
-                        <TableName name={table.name} />
+                        <TableName
+                          className={cn(
+                            hasChanges && "bg-amber-200 text-neutral-600"
+                          )}
+                          name={table.name}
+                        />
                       </Button>
                     );
                   })}

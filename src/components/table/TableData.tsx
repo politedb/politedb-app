@@ -392,6 +392,12 @@ export function TableData({
         onChangeSort={setSortState}
         foreignKeyMap={foreignKeyMap}
         onCellActivate={handleCellActivate}
+        onClearSelection={() => {
+          setSelected(null);
+          setSelectedRows(new Set());
+          setEditing(null);
+          setLastSelectedRow(null);
+        }}
       />
     </div>
   );

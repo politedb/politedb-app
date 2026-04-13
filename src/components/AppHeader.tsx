@@ -119,7 +119,6 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const handleTabClose = useCallback(
     async (tabId: string) => {
       const currentTab = profileTabs.find((tab) => tab.id === tabId);
-      if (currentTab?.isLocked) return;
 
       const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
 

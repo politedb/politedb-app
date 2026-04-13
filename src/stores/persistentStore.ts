@@ -1,7 +1,11 @@
 import { create } from "zustand";
 
 import { useProfileStore } from "src/stores/profile";
-import { ProfileTab, useScreenStore } from "src/stores/screen";
+import {
+  ProfileTab,
+  QuerySafetyMode,
+  useScreenStore,
+} from "src/stores/screen";
 
 import type { OpenWindow, SqlEditorWindow } from "src/types";
 import { debounce } from "../utils/common";
@@ -36,7 +40,7 @@ import {
 
 type PersistedProfileTab = Pick<
   ProfileTab,
-  "id" | "label" | "engine" | "profileId"
+  "id" | "label" | "engine" | "profileId" | "isLocked" | "querySafetyMode"
 >;
 
 type PersistedWindow =
@@ -49,6 +53,9 @@ export type PersistentSnapshotV1 = {
 
   activeProfileScreen: string;
   profileTabs: PersistedProfileTab[];
+
+  /** Per-profile query safety; kept when all tabs for that profile are closed. */
+  querySafetyByProfileId?: Record<string, QuerySafetyMode>;
 
   openWindows: Record<string, PersistedWindow[]>;
   activeWindowId: Record<string, string | null>;
@@ -96,8 +103,22 @@ function clampSnapshotV1(
   return { ...snap, profileTabs, openWindows, activeWindowId };
 }
 
+function normalizeSafetyMode(v: unknown): QuerySafetyMode {
+  if (v === "lock" || v === "safe" || v === "default") return v;
+  return "default";
+}
+
 function buildSnapshotFromScreen(): PersistentSnapshotV1 {
   const s = useScreenStore.getState();
+
+  const querySafetyByProfileId: Record<string, QuerySafetyMode> = {
+    ...s.querySafetyByProfileId,
+  };
+  for (const t of s.profileTabs) {
+    const mode =
+      t.querySafetyMode ?? (t.isLocked ? "lock" : ("default" as const));
+    querySafetyByProfileId[t.profileId] = normalizeSafetyMode(mode);
+  }
 
   return {
     version: 1,
@@ -109,7 +130,11 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
       label: t.label,
       engine: t.engine,
       profileId: t.profileId,
+      isLocked: t.isLocked,
+      querySafetyMode: t.querySafetyMode,
     })),
+
+    querySafetyByProfileId,
 
     openWindows: s.openWindows,
     activeWindowId: s.activeWindowId,
@@ -245,9 +270,33 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       const profiles = useProfileStore.getState().profiles;
       const profileIdSet = new Set(profiles.map((p) => p.id));
 
-      const profileTabs = snap.profileTabs.filter((t) =>
-        profileIdSet.has(t.profileId)
-      );
+      const profileTabs = snap.profileTabs
+        .filter((t) => profileIdSet.has(t.profileId))
+        .map((t) => {
+          const mode = normalizeSafetyMode(
+            t.querySafetyMode ?? (t.isLocked ? "lock" : "default")
+          );
+          return {
+            ...t,
+            querySafetyMode: mode,
+            isLocked: mode === "lock",
+          };
+        });
+
+      const querySafetyByProfileId: Record<string, QuerySafetyMode> = {};
+      const rawMap = snap.querySafetyByProfileId;
+      if (rawMap && typeof rawMap === "object") {
+        for (const [pid, v] of Object.entries(rawMap)) {
+          if (profileIdSet.has(pid)) {
+            querySafetyByProfileId[pid] = normalizeSafetyMode(v);
+          }
+        }
+      }
+      for (const t of profileTabs) {
+        querySafetyByProfileId[t.profileId] = normalizeSafetyMode(
+          t.querySafetyMode ?? (t.isLocked ? "lock" : "default")
+        );
+      }
 
       const openWindows: Record<string, PersistedWindow[]> = {};
       const activeWindowId: Record<string, string | null> = {};
@@ -271,6 +320,7 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       useScreenStore.setState({
         activeProfileScreen: nextActive,
         profileTabs: profileTabs,
+        querySafetyByProfileId,
         openWindows: openWindows,
         activeWindowId,
       });

@@ -61,6 +61,7 @@ type Props = {
   onDeleteRow?: (rowIdx: number) => void;
   onDeleteRows?: (rowIndices: number[]) => void;
   onAddRow?: () => void;
+  onClearSelection?: () => void;
 };
 
 // ============================================================================
@@ -202,6 +203,7 @@ export function CanvasTable({
   onDeleteRow,
   onDeleteRows,
   onAddRow,
+  onClearSelection,
   isCellDirty,
   isNewRow,
   onChangeSort,
@@ -757,17 +759,29 @@ export function CanvasTable({
       const x0 = e.clientX - rect.left;
       const y0 = e.clientY - rect.top;
 
-      if (y0 < HEADER_HEIGHT) return;
+      if (y0 < HEADER_HEIGHT) {
+        if (editing) commitAndExit();
+        onClearSelection?.();
+        return;
+      }
 
       const { left, top } = scrollRef.current;
       const x = x0 + left;
       const y = y0 - HEADER_HEIGHT + top;
 
       const rowIdx = Math.floor(y / ROW_HEIGHT);
-      if (rowIdx < 0 || rowIdx >= totalRows) return;
+      if (rowIdx < 0 || rowIdx >= totalRows) {
+        if (editing) commitAndExit();
+        onClearSelection?.();
+        return;
+      }
 
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
-      if (colIdx < 0) return;
+      if (colIdx < 0) {
+        if (editing) commitAndExit();
+        onClearSelection?.();
+        return;
+      }
 
       // If this is an FK column and click is on the arrow area (right ~16px),
       // trigger navigation instead of normal select.
@@ -792,7 +806,16 @@ export function CanvasTable({
 
       onSelect?.(rowIdx, colIdx, e.metaKey || e.ctrlKey, e.shiftKey);
     },
-    [columns, editing, totalRows, colLefts, colWidths, onSelect, commitAndExit]
+    [
+      columns,
+      editing,
+      totalRows,
+      colLefts,
+      colWidths,
+      onSelect,
+      commitAndExit,
+      onClearSelection,
+    ]
   );
 
   const handleDblClick = useCallback(

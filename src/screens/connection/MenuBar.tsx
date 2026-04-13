@@ -7,6 +7,7 @@ import {
 } from "preact/hooks";
 import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
+import { usePersistentStore } from "src/stores/persistentStore";
 import {
   UnlockIcon,
   DatabaseIcon,
@@ -273,6 +274,7 @@ export function MenuBar({
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
   const safeModeRef = useRef<HTMLDivElement | null>(null);
+  const savePersistentNow = usePersistentStore((s) => s.saveNow);
 
   const getProfileById = useProfileStore((s) => s.getProfileById);
 
@@ -313,15 +315,16 @@ export function MenuBar({
   }, [safeModeOpen]);
 
   const setQuerySafetyMode = useCallback(
-    (mode: "default" | "lock" | "safe") => {
+    async (mode: "default" | "lock" | "safe") => {
       if (!activeTab) return;
       updateTab(activeTab.id, {
         querySafetyMode: mode,
         isLocked: mode === "lock",
       });
+      await savePersistentNow();
       setSafeModeOpen(false);
     },
-    [activeTab, updateTab]
+    [activeTab, updateTab, savePersistentNow]
   );
 
   const profile = useMemo(() => {
@@ -389,7 +392,7 @@ export function MenuBar({
       label: "Default mode",
       description: "Warn before sending queries",
       value: "default",
-      color: "neutral",
+      color: "gray",
     },
     {
       label: "Lock mode",
@@ -473,7 +476,7 @@ export function MenuBar({
                         querySafetyMode === mode.value && "bg-neutral-100"
                       )}
                       onClick={() =>
-                        setQuerySafetyMode(
+                        void setQuerySafetyMode(
                           mode.value as "default" | "lock" | "safe"
                         )
                       }

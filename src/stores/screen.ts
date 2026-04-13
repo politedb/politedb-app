@@ -1,6 +1,18 @@
 import { create } from "zustand";
 import { DatabaseEngine, OpenWindow, SqlEditorWindow } from "../types";
 
+export type QuerySafetyMode = "default" | "lock" | "safe";
+
+function tabSafetyMode(
+  t: Pick<ProfileTab, "querySafetyMode" | "isLocked">
+): QuerySafetyMode {
+  if (t.querySafetyMode === "lock" || t.querySafetyMode === "safe") {
+    return t.querySafetyMode;
+  }
+  if (t.querySafetyMode === "default") return "default";
+  return t.isLocked ? "lock" : "default";
+}
+
 function schedulePersistentSave() {
   queueMicrotask(async () => {
     const mod = await import("src/stores/persistentStore");
@@ -20,8 +32,9 @@ export type ProfileTab = {
 
   profileId: string; // Persistent identity (backend uuid or legacy mapped id)
   runtimeConnectionId?: string; // Runtime connection handle (created on connect)
-  isLocked?: boolean; // Disables tab closing
-  querySafetyMode?: "default" | "lock" | "safe";
+  /** True when query safety is Lock (mutations blocked); does not block closing the tab. */
+  isLocked?: boolean;
+  querySafetyMode?: QuerySafetyMode;
 };
 
 /**
@@ -33,6 +46,9 @@ type ScreenState = {
   activeProfileScreen: string; // current active tabId, or "main"
 
   profileTabs: ProfileTab[];
+
+  /** Last chosen query safety per saved profile (survives closing the tab). */
+  querySafetyByProfileId: Record<string, QuerySafetyMode>;
 
   openWindows: Record<string, OpenWindow[]>;
   activeWindowId: Record<string, string | null>;
@@ -64,6 +80,8 @@ type ScreenState = {
 export const useScreenStore = create<ScreenState>((set) => ({
   activeProfileScreen: "main",
   profileTabs: [],
+
+  querySafetyByProfileId: {},
 
   openWindows: {},
   activeWindowId: {},
@@ -182,32 +200,66 @@ export const useScreenStore = create<ScreenState>((set) => ({
   addTab: (tab) =>
     set((s) => {
       schedulePersistentSave();
+      const explicitSafety =
+        tab.querySafetyMode !== undefined || tab.isLocked !== undefined;
+      const mode: QuerySafetyMode = explicitSafety
+        ? tabSafetyMode(tab)
+        : (s.querySafetyByProfileId[tab.profileId] ?? "default");
+      const merged: ProfileTab = {
+        ...tab,
+        querySafetyMode: mode,
+        isLocked: mode === "lock",
+      };
       return {
-        profileTabs: [...s.profileTabs, tab],
-        activeProfileScreen: tab.id,
+        profileTabs: [...s.profileTabs, merged],
+        querySafetyByProfileId: {
+          ...s.querySafetyByProfileId,
+          [tab.profileId]: mode,
+        },
+        activeProfileScreen: merged.id,
         openWindows: {
           ...s.openWindows,
-          [tab.id]: s.openWindows[tab.id] ?? [],
+          [merged.id]: s.openWindows[merged.id] ?? [],
         },
         activeWindowId: {
           ...s.activeWindowId,
-          [tab.id]: s.activeWindowId[tab.id] ?? null,
+          [merged.id]: s.activeWindowId[merged.id] ?? null,
         },
       };
     }),
 
   updateTab: (id, patch) =>
     set((s) => {
+      const tab = s.profileTabs.find((t) => t.id === id);
+      if (!tab) return s;
+
+      const updated: ProfileTab = { ...tab, ...patch };
+
       // Only persist if patch changes persisted fields (ignore runtimeConnectionId)
       const { runtimeConnectionId: _rt, ...persistedPatch } = patch as any;
       const shouldPersist = Object.keys(persistedPatch).length > 0;
 
       if (shouldPersist) schedulePersistentSave();
 
+      let querySafetyByProfileId = s.querySafetyByProfileId;
+      let profileTabs = s.profileTabs.map((t) => (t.id === id ? updated : t));
+
+      if ("querySafetyMode" in patch || "isLocked" in patch) {
+        const mode = tabSafetyMode(updated);
+        querySafetyByProfileId = {
+          ...s.querySafetyByProfileId,
+          [updated.profileId]: mode,
+        };
+        profileTabs = profileTabs.map((t) =>
+          t.profileId === updated.profileId
+            ? { ...t, querySafetyMode: mode, isLocked: mode === "lock" }
+            : t
+        );
+      }
+
       return {
-        profileTabs: s.profileTabs.map((t) =>
-          t.id === id ? { ...t, ...patch } : t
-        ),
+        profileTabs,
+        querySafetyByProfileId,
       };
     }),
 
@@ -234,6 +286,10 @@ export const useScreenStore = create<ScreenState>((set) => ({
   resetTabs: (profileTabs) =>
     set((s) => {
       schedulePersistentSave();
-      return { ...s, profileTabs };
+      let querySafetyByProfileId = { ...s.querySafetyByProfileId };
+      for (const t of profileTabs) {
+        querySafetyByProfileId[t.profileId] = tabSafetyMode(t);
+      }
+      return { ...s, profileTabs, querySafetyByProfileId };
     }),
 }));

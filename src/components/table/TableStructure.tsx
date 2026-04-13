@@ -238,7 +238,7 @@ export function TableStructure({
               <Input
                 className={cn(
                   "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
-                  isDirtyCell && "bg-amber-100",
+                  isDirtyCell && "bg-amber-200",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
                   isRowSelected && !isEmptyRow && "bg-blue-200!",
                   isFkColumn && !isEmptyRow && "pr-6"
