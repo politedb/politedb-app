@@ -279,7 +279,9 @@ export function ConnectionScreen() {
   useEffect(() => {
     actionsRef.current = actionsRaw;
   }, [actionsRaw]);
-  const isProfileLocked = !!activeTab?.isLocked;
+  const sqlSafetyMode =
+    activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
+  const isProfileLocked = sqlSafetyMode === "lock";
 
   const actions = useMemo(() => {
     return {
@@ -467,6 +469,7 @@ export function ConnectionScreen() {
       activeSchema,
       runtimeConnectionId,
       isProfileLocked,
+      sqlSafetyMode,
       limit,
       offset,
       loadError,
@@ -484,6 +487,7 @@ export function ConnectionScreen() {
       activeSchema,
       runtimeConnectionId,
       isProfileLocked,
+      sqlSafetyMode,
       limit,
       offset,
       loadError,

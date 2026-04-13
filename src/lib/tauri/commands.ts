@@ -13,6 +13,7 @@ export const CMD = {
   licenseDeactivate: "license_deactivate",
   licenseOpenExternalUrl: "license_open_external_url",
   updaterInstallIfAllowed: "updater_install_if_allowed",
+  securityTouchIdAuthenticate: "security_touch_id_authenticate",
 
   // Connection
   connectionCreate: "connection_create",

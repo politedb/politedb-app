@@ -16,6 +16,7 @@ export function SqlWindowPane(props: {
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
   isProfileLocked?: boolean;
+  sqlSafetyMode?: "default" | "lock" | "safe";
   onRunSql: (args: {
     windowId: string;
     connectionId: string;
@@ -29,6 +30,7 @@ export function SqlWindowPane(props: {
     metadata,
     runtimeConnectionId,
     isProfileLocked = false,
+    sqlSafetyMode = "default",
     onRunSql,
   } = props;
 
@@ -47,6 +49,7 @@ export function SqlWindowPane(props: {
       activeSqlWindowId: win.id,
       runtimeConnectionId,
       isProfileLocked,
+      sqlSafetyMode,
       onRunSql,
     });
 

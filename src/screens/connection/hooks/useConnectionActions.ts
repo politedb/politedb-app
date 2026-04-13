@@ -17,6 +17,7 @@ import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
+import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
   type DataAction,
   type DataKey,
@@ -240,6 +241,7 @@ export function useConnectionActions(
 
   const {
     activeProfileScreen,
+    activeTab,
     profileTabs,
     openWindows,
     activeTableWindow,
@@ -832,6 +834,20 @@ export function useConnectionActions(
     if (isActiveTabLocked) return;
     if (!activeTableWindow || !runtimeConnectionId) return;
 
+    const safetyMode =
+      activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
+
+    if (safetyMode === "safe") {
+      try {
+        await securityTouchIdAuthenticate(
+          "Authenticate with Touch ID before saving changes."
+        );
+      } catch (e) {
+        setError(normalizeSqlError(e));
+        return;
+      }
+    }
+
     const tabDirty = tabHasChanges(activeProfileScreen);
 
     const jobs: Array<Promise<void>> = [];
@@ -845,9 +861,11 @@ export function useConnectionActions(
     isActiveTabLocked,
     activeTableWindow,
     runtimeConnectionId,
+    activeTab,
     tabHasChanges,
     activeProfileScreen,
     applyPatchesForActiveWindow,
+    setError,
     pendingCloseTabId,
     saveNewTable,
   ]);

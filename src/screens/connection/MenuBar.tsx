@@ -1,4 +1,10 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import {
@@ -265,6 +271,8 @@ export function MenuBar({
   const rt = useConnectionRuntimeCtx();
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
+  const [safeModeOpen, setSafeModeOpen] = useState(false);
+  const safeModeRef = useRef<HTMLDivElement | null>(null);
 
   const getProfileById = useProfileStore((s) => s.getProfileById);
 
@@ -288,6 +296,33 @@ export function MenuBar({
   const activeTab = useMemo(() => {
     return profileTabs.find((tab) => tab.id === activeProfileScreen);
   }, [profileTabs, activeProfileScreen]);
+  const querySafetyMode =
+    activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
+
+  useEffect(() => {
+    if (!safeModeOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!safeModeRef.current || !target) return;
+      if (!safeModeRef.current.contains(target)) {
+        setSafeModeOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    return () => window.removeEventListener("mousedown", onPointerDown);
+  }, [safeModeOpen]);
+
+  const setQuerySafetyMode = useCallback(
+    (mode: "default" | "lock" | "safe") => {
+      if (!activeTab) return;
+      updateTab(activeTab.id, {
+        querySafetyMode: mode,
+        isLocked: mode === "lock",
+      });
+      setSafeModeOpen(false);
+    },
+    [activeTab, updateTab]
+  );
 
   const profile = useMemo(() => {
     if (!activeTab?.profileId) return null;
@@ -349,6 +384,27 @@ export function MenuBar({
     return [pretty, version].filter(Boolean).join(" ");
   }, [connectionInfo]);
 
+  const queryModes = [
+    {
+      label: "Default mode",
+      description: "Warn before sending queries",
+      value: "default",
+      color: "neutral",
+    },
+    {
+      label: "Lock mode",
+      description: "Block all editing queries",
+      value: "lock",
+      color: "red",
+    },
+    {
+      label: "Safe mode",
+      description: "Require Touch ID before sending queries",
+      value: "safe",
+      color: "green",
+    },
+  ];
+
   const onOpenDatabase = useCallback(
     async (nextDb: string) => {
       if (!activeTab?.profileId || !profile) {
@@ -384,21 +440,59 @@ export function MenuBar({
       <div class="flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
         <div class="flex items-center">
           <div class="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
-            <IconButton
-              className="size-6"
-              title={activeTab?.isLocked ? "Unlock" : "Lock"}
-              onClick={(e: any) => {
-                e.stopPropagation();
-                if (!activeTab) return;
-                updateTab(activeTab.id, { isLocked: !activeTab.isLocked });
-              }}
-            >
-              {activeTab?.isLocked ? (
-                <LockIcon className="size-4 text-neutral-600" />
-              ) : (
-                <UnlockIcon className="size-4 text-neutral-600" />
-              )}
-            </IconButton>
+            <div class="relative" ref={safeModeRef}>
+              <IconButton
+                className="size-6"
+                title="Safety mode"
+                onClick={(e: any) => {
+                  e.stopPropagation();
+                  setSafeModeOpen((prev) => !prev);
+                }}
+              >
+                {querySafetyMode === "default" ? (
+                  <UnlockIcon className={cn("size-4", "text-neutral-600")} />
+                ) : (
+                  <LockIcon
+                    className={cn(
+                      "size-4",
+                      querySafetyMode === "safe"
+                        ? "text-green-600"
+                        : "text-red-600"
+                    )}
+                  />
+                )}
+              </IconButton>
+
+              {safeModeOpen ? (
+                <div class="absolute top-8 -left-1 z-40 w-md rounded-lg border border-neutral-200 bg-white p-1 shadow-lg">
+                  {queryModes.map((mode) => (
+                    <button
+                      type="button"
+                      class={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-neutral-100",
+                        querySafetyMode === mode.value && "bg-neutral-100"
+                      )}
+                      onClick={() =>
+                        setQuerySafetyMode(
+                          mode.value as "default" | "lock" | "safe"
+                        )
+                      }
+                    >
+                      <div
+                        class={`size-1 rounded-full bg-${mode.color}-500 p-1`}
+                      />
+                      <div class="flex items-center gap-2 text-sm">
+                        <span class="font-semibold text-neutral-800">
+                          {mode.label}
+                        </span>
+                        <span>-</span>
+                        <span class="text-neutral-500">{mode.description}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
             <IconButton
               className="size-6"

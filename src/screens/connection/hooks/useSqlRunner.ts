@@ -18,6 +18,7 @@ import {
   getSqlStreamSnapshot,
 } from "src/screens/connection/hooks/useSqlStreamResult";
 import { isMutatingStatement } from "src/utils/detect";
+import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);
@@ -50,6 +51,7 @@ export function useSqlRunner(args: {
   activeSqlWindowId?: string;
   runtimeConnectionId?: string;
   isProfileLocked?: boolean;
+  sqlSafetyMode?: "default" | "lock" | "safe";
   onRunSql: RunSqlFn;
   stopOnError?: boolean;
 }) {
@@ -57,6 +59,7 @@ export function useSqlRunner(args: {
     activeSqlWindowId,
     runtimeConnectionId,
     isProfileLocked = false,
+    sqlSafetyMode = "default",
     onRunSql,
     stopOnError = false,
   } = args;
@@ -138,8 +141,40 @@ export function useSqlRunner(args: {
         }
 
         const list = v.statements;
+        const effectiveMode =
+          sqlSafetyMode === "lock" || isProfileLocked ? "lock" : sqlSafetyMode;
 
-        if (isProfileLocked) {
+        if (effectiveMode === "default") {
+          const confirmed = window.confirm(
+            "Do you want to send this query?"
+          );
+          if (!confirmed) return;
+        }
+
+        if (effectiveMode === "safe") {
+          try {
+            await securityTouchIdAuthenticate(
+              "Authenticate with Touch ID before sending queries."
+            );
+          } catch (err) {
+            const slots: SqlResultSlot[] = [
+              {
+                index: 0,
+                sql: list[0] ?? payload.sql,
+                status: "error",
+                error: `Touch ID authentication failed: ${unwrapErrorMessage(err)}`,
+                finishedAt: Date.now(),
+              },
+            ];
+            setSqlSlots(slots);
+            setActiveResultIndex(0);
+            stateByWindowId.set(winId, { slots, activeIndex: 0 });
+            bumpRunId(winId);
+            return;
+          }
+        }
+
+        if (effectiveMode === "lock") {
           const blockedIndex = list.findIndex((stmt) => isMutatingStatement(stmt));
           if (blockedIndex >= 0) {
             const slots: SqlResultSlot[] = [
@@ -308,6 +343,7 @@ export function useSqlRunner(args: {
       bumpRunId,
       currentRunId,
       isProfileLocked,
+      sqlSafetyMode,
       onRunSql,
       runtimeConnectionId,
       stopOnError,

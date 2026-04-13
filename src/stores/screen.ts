@@ -21,6 +21,7 @@ export type ProfileTab = {
   profileId: string; // Persistent identity (backend uuid or legacy mapped id)
   runtimeConnectionId?: string; // Runtime connection handle (created on connect)
   isLocked?: boolean; // Disables tab closing
+  querySafetyMode?: "default" | "lock" | "safe";
 };
 
 /**

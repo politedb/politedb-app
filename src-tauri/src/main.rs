@@ -148,6 +148,7 @@ fn main() {
             commands::license::license_refresh,
             commands::license::license_deactivate,
             commands::license::license_open_external_url,
+            commands::security::security_touch_id_authenticate,
             // Connections
             commands::connection::connection_create,
             commands::connection::connection_list,
