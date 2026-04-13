@@ -53,6 +53,44 @@ copy_runtime_libs() {
   return "$copied"
 }
 
+sanitize_macos_rpaths() {
+  local target="$1"
+  local rpath=""
+
+  if ! command -v otool >/dev/null 2>&1 || ! command -v install_name_tool >/dev/null 2>&1; then
+    return 0
+  fi
+
+  while IFS= read -r rpath; do
+    [[ -n "$rpath" ]] || continue
+    case "$rpath" in
+      @executable_path|@loader_path|@rpath)
+        ;;
+      @executable_path/*|@loader_path/*|@rpath/*)
+        ;;
+      *)
+        install_name_tool -delete_rpath "$rpath" "$target" 2>/dev/null || true
+        ;;
+    esac
+  done < <(
+    otool -l "$target" | awk '
+      $1 == "cmd" && $2 == "LC_RPATH" { in_rpath = 1; next }
+      in_rpath && $1 == "path" { print $2; in_rpath = 0 }
+    '
+  )
+}
+
+ensure_macos_runtime_rpaths() {
+  local target="$1"
+
+  if ! command -v install_name_tool >/dev/null 2>&1; then
+    return 0
+  fi
+
+  install_name_tool -add_rpath "@executable_path" "$target" 2>/dev/null || true
+  install_name_tool -add_rpath "@loader_path" "$target" 2>/dev/null || true
+}
+
 ensure_macos_runtime_aliases() {
   local dep
   local dep_name
@@ -83,11 +121,10 @@ else
 fi
 
 if [[ "$PLATFORM_DIR" == "macos" ]]; then
-  if command -v install_name_tool >/dev/null 2>&1; then
-    OLD_RPATH="/Users/runner/work/politedb-universal/politedb-universal/.tmp/ai-runtime/llama.cpp/build/bin"
-    install_name_tool -delete_rpath "$OLD_RPATH" "$DEST_BIN_DIR/$BIN_NAME" 2>/dev/null || true
-    install_name_tool -add_rpath "@executable_path" "$DEST_BIN_DIR/$BIN_NAME" 2>/dev/null || true
-  fi
+  while IFS= read -r mach_o; do
+    sanitize_macos_rpaths "$mach_o"
+    ensure_macos_runtime_rpaths "$mach_o"
+  done < <(find "$DEST_BIN_DIR" -maxdepth 1 -type f \( -name 'llama-server' -o -name '*.dylib' \) | sort)
   ensure_macos_runtime_aliases
 fi
 
