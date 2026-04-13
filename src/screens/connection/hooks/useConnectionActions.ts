@@ -218,6 +218,16 @@ function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
   return false;
 }
 
+function getOpenTableWindows(
+  openWindows: Record<string, OpenWindow[]>,
+  profileId: string
+): TableWindow[] {
+  const windows = openWindows[profileId] ?? [];
+  return windows.filter(
+    (window): window is TableWindow => window.type === "table"
+  );
+}
+
 /* =============================================================================
  * Hook
  * ============================================================================= */
@@ -350,28 +360,30 @@ export function useConnectionActions(
 
     await refreshSchemaAndTables();
 
-    if (!activeTableWindow) return;
+    const tableWindows = getOpenTableWindows(openWindows, activeProfileScreen);
+    if (tableWindows.length === 0) return;
 
-    await loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      { limit, offset },
-      {
-        force: true,
-        refreshRows: true,
-        refreshMeta: false,
-        refreshStats: false,
-      }
+    await Promise.all(
+      tableWindows.map((window) =>
+        loadTableData(
+          window.table.schema,
+          window.table.name,
+          { limit, offset },
+          { force: true, forceRefresh: true }
+        )
+      )
     );
   }, [
     tabHasChanges,
     activeProfileScreen,
     setWarningRefresh,
     refreshSchemaAndTables,
-    activeTableWindow,
+    openWindows,
     loadTableData,
     limit,
     offset,
+    refreshRuntimeConnection,
+    runtimeConnectionId,
   ]);
 
   const getNewTableSql = useCallback(() => {
@@ -672,11 +684,10 @@ export function useConnectionActions(
 
           if (cols.length === 1 && cols[0]?.name === "value") {
             if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
-            await runRedisCommand(
-              runtimeConnectionId,
-              "SET",
-              [activeTableWindow.table.name, String(raw.value ?? "")]
-            );
+            await runRedisCommand(runtimeConnectionId, "SET", [
+              activeTableWindow.table.name,
+              String(raw.value ?? ""),
+            ]);
             continue;
           }
 
@@ -687,18 +698,16 @@ export function useConnectionActions(
           ) {
             if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
             if (Object.prototype.hasOwnProperty.call(raw, "field")) {
-              throw new Error("Redis hash fields cannot be renamed from table view.");
+              throw new Error(
+                "Redis hash fields cannot be renamed from table view."
+              );
             }
             const fieldValue = String(sourceRow[0] ?? "");
-            await runRedisCommand(
-              runtimeConnectionId,
-              "HSET",
-              [
-                activeTableWindow.table.name,
-                fieldValue,
-                String(raw.value ?? ""),
-              ]
-            );
+            await runRedisCommand(runtimeConnectionId, "HSET", [
+              activeTableWindow.table.name,
+              fieldValue,
+              String(raw.value ?? ""),
+            ]);
             continue;
           }
 
@@ -971,7 +980,8 @@ export function useConnectionActions(
 
   const renameRedisKey = useCallback(
     async (table: TableItem, nextName: string) => {
-      if (isActiveTabLocked || engine !== "redis" || !runtimeConnectionId) return;
+      if (isActiveTabLocked || engine !== "redis" || !runtimeConnectionId)
+        return;
       if (!nextName || nextName === table.name) return;
 
       try {
@@ -991,7 +1001,17 @@ export function useConnectionActions(
         screenStore.replaceWindows(activeProfileScreen, nextWindows);
 
         await refreshSchemaAndTables();
-        await loadTableData(table.schema, nextName, { limit, offset }, { force: true, refreshRows: true, refreshMeta: true, refreshStats: true });
+        await loadTableData(
+          table.schema,
+          nextName,
+          { limit, offset },
+          {
+            force: true,
+            refreshRows: true,
+            refreshMeta: true,
+            refreshStats: true,
+          }
+        );
       } catch (e) {
         setError(normalizeSqlError(e));
       }
@@ -1011,11 +1031,13 @@ export function useConnectionActions(
 
   const deleteRedisKey = useCallback(
     async (table: TableItem) => {
-      if (isActiveTabLocked || engine !== "redis" || !runtimeConnectionId) return;
+      if (isActiveTabLocked || engine !== "redis" || !runtimeConnectionId)
+        return;
 
       try {
         await runRedisCommand(runtimeConnectionId, "DEL", [table.name]);
-        const windows = useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+        const windows =
+          useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
         const targetWindow = windows.find(
           (w) => w.type === "table" && w.table.name === table.name
         );

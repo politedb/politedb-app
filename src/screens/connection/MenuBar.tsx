@@ -59,7 +59,7 @@ function IconButton(props: any) {
     <Button
       variant="ghost"
       className={cn(
-        "h-7 w-7 rounded-md p-0",
+        "h-7 w-7 rounded-md border-none p-0",
         "hover:bg-neutral-100 active:bg-neutral-200",
         "disabled:opacity-50",
         className
@@ -417,7 +417,7 @@ export function MenuBar({
 
             <Button
               variant="ghost"
-              className="h-6 rounded-md px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
+              className="h-6 rounded-md border-none px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
               disabled={!canOpenSql}
               onClick={openSQLWindow}
             >

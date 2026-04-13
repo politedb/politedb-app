@@ -327,7 +327,8 @@ export type ConnectionState = {
     opId: string,
     cap?: number,
     streamOffset?: number,
-    resetCache?: boolean // <--- UPDATED: Add resetCache flag
+    resetCache?: boolean, // <--- UPDATED: Add resetCache flag
+    forceRefresh?: boolean
   ) => void;
 
   endRowsStream: (key: string, opId: string) => void;
@@ -925,7 +926,14 @@ export const useConnectionStore = create<ConnectionState>()(
           };
         }),
 
-      beginRowsStream: (key, opId, cap, streamOffset = 0, resetCache = false) =>
+      beginRowsStream: (
+        key,
+        opId,
+        cap,
+        streamOffset = 0,
+        resetCache = false,
+        forceRefresh = false
+      ) =>
         set((s) => {
           // --- UPDATED: Handle cache reset ---
           let currentCache = s.tableRowCacheByKey;
@@ -950,15 +958,18 @@ export const useConnectionStore = create<ConnectionState>()(
 
           const sameCap = prev.cap === nextCap;
           const sameStream = prev.streamOffset === nextStreamOffset;
+          const hardRefresh = forceRefresh;
 
           // If resetCache is true, we must assume prev.rows contains stale data (e.g. from previous sort order),
           // so we force a fresh start (no overlap reuse). We still keep prev.rows visible so the UI
           // doesn't flicker to empty during refresh — new chunks will overwrite in place.
           const forceFresh = resetCache;
 
-          if (!forceFresh && sameCap && sameStream) {
+          if (hardRefresh) {
+            nextRows = new Array(nextCap).fill(undefined);
+          } else if (!forceFresh && sameCap && sameStream) {
             nextRows = prev.rows;
-          } else if (forceFresh && sameCap && sameStream) {
+          } else if (forceFresh && !forceRefresh && sameCap && sameStream) {
             // Silent refresh: keep previous rows visible until new stream chunks overwrite them
             nextRows = Array.from(prev.rows);
           } else {
@@ -971,7 +982,7 @@ export const useConnectionStore = create<ConnectionState>()(
             const newEnd = newBase + nextCap;
             const overlapStart = Math.max(prevBase, newBase);
             const overlapEnd = Math.min(prevEnd, newEnd);
-            if (overlapEnd > overlapStart) {
+            if (!hardRefresh && overlapEnd > overlapStart) {
               const len = overlapEnd - overlapStart;
               const srcOff = overlapStart - prevBase;
               const dstOff = overlapStart - newBase;
@@ -981,7 +992,7 @@ export const useConnectionStore = create<ConnectionState>()(
             }
 
             // Hydrate from cache for instant render (if cache exists)
-            if (cacheEntry) {
+            if (!forceRefresh && cacheEntry) {
               const newBase = nextStreamOffset;
               for (let i = 0; i < nextCap; i++) {
                 if (nextRows[i] !== undefined) continue;
@@ -1003,8 +1014,9 @@ export const useConnectionStore = create<ConnectionState>()(
             rows: nextRows,
 
             // When forceFresh we keep prev.rows visible, so keep loadedMax so UI state stays consistent
-            loadedMax:
-              forceFresh && sameCap && sameStream
+            loadedMax: hardRefresh
+              ? nextStreamOffset - 1
+              : forceFresh && sameCap && sameStream
                 ? prev.loadedMax
                 : forceFresh
                   ? nextStreamOffset - 1

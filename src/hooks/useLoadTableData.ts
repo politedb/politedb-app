@@ -67,6 +67,7 @@ const EMPTY_META = {
 
 export type LoadFlags = {
   force?: boolean; // Force refresh everything (bypasses dedup check)
+  forceRefresh?: boolean; // Force full rows refresh without cache reuse
   forceRows?: boolean; // Force rows reload without refreshing meta/stats
   refreshRowCount?: boolean; // Refresh COUNT(*) without reloading other stats
   exactRowCount?: boolean; // Force exact COUNT(*) instead of estimate
@@ -128,6 +129,7 @@ function computeLoadPlan(params: {
   const { key, prev, engine, flags, pagination } = params;
 
   const force = !!flags.force;
+  const forceRefresh = !!flags.forceRefresh;
   const forceRows = !!flags.forceRows;
   const refreshRowCount = !!flags.refreshRowCount;
   const refreshRows = flags.refreshRows ?? true;
@@ -172,6 +174,7 @@ function computeLoadPlan(params: {
   const paginationChanged = !rowsMatchOffset;
   const needRows =
     force ||
+    forceRefresh ||
     forceRows ||
     isFirstLoad ||
     refreshRows ||
@@ -194,7 +197,8 @@ function computeLoadPlan(params: {
   const capMismatch = rowsInfo ? rowsInfo.cap !== desiredCap : true;
   const needRowsWithLimit =
     needRows ||
-    (capMismatch && (refreshRows || force || forceRows || paginationChanged));
+    (capMismatch &&
+      (refreshRows || force || forceRefresh || forceRows || paginationChanged));
 
   return {
     key,
@@ -257,6 +261,7 @@ function buildLoadSignature(params: {
     limit: pagination?.limit ?? DEFAULT_LIMIT,
     offset: pagination?.offset ?? DEFAULT_OFFSET,
     force: !!flags.force,
+    forceRefresh: !!flags.forceRefresh,
     forceRows: !!flags.forceRows,
     refreshRowCount: !!flags.refreshRowCount,
     refreshRows: flags.refreshRows ?? true,
@@ -473,8 +478,18 @@ async function loadMongoRows(params: {
   limit: number;
   offset: number;
   resetCache?: boolean;
+  forceRefresh?: boolean;
 }): Promise<{ columns: ColumnRow[]; rowCount: number }> {
-  const { key, connId, schema, tableName, limit, offset, resetCache } = params;
+  const {
+    key,
+    connId,
+    schema,
+    tableName,
+    limit,
+    offset,
+    resetCache,
+    forceRefresh,
+  } = params;
   const result = await mongoFindDocuments({
     connectionId: connId,
     database: schema,
@@ -488,7 +503,7 @@ async function loadMongoRows(params: {
   const cap = Math.max(1000, limit * 4);
 
   store.initRows(key, DEFAULT_ROWS_CAP);
-  store.beginRowsStream(key, opId, cap, offset, !!resetCache);
+  store.beginRowsStream(key, opId, cap, offset, !!resetCache, !!forceRefresh);
   store.applyRowsChunk(key, opId, {
     rows: result.rows ?? [],
     row_offset: 0,
@@ -853,6 +868,7 @@ async function startRowsStream(params: {
   offset: number;
   addLogQuery: (sql: string) => void;
   resetCache?: boolean;
+  forceRefresh?: boolean;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
 }): Promise<void> {
@@ -866,6 +882,7 @@ async function startRowsStream(params: {
     offset,
     addLogQuery,
     resetCache,
+    forceRefresh,
     filters,
     filterCombine = "AND",
   } = params;
@@ -918,7 +935,7 @@ async function startRowsStream(params: {
   const cap = Math.max(1000, limit * 4);
 
   // Begin stream in store (resets cache if requested)
-  store.beginRowsStream(key, rowsOpId, cap, offset, resetCache);
+  store.beginRowsStream(key, rowsOpId, cap, offset, resetCache, forceRefresh);
 
   let unsub: (() => void) | null = null;
 
@@ -1042,12 +1059,7 @@ export function useLoadTableData() {
           const limit = pagination?.limit ?? DEFAULT_LIMIT;
           const offset = pagination?.offset ?? DEFAULT_OFFSET;
           const supportsMeta =
-            activeTab.engine === "postgres" ||
-            activeTab.engine === "mysql" ||
-            activeTab.engine === "mariadb" ||
-            activeTab.engine === "sqlserver" ||
-            activeTab.engine === "sqlite" ||
-            activeTab.engine === "oracle";
+            activeTab.engine !== "redis" && activeTab.engine !== "mongo";
 
           // Set busy/error state
           if (plan.needAnyMetaWork)
@@ -1135,6 +1147,7 @@ export function useLoadTableData() {
                   limit,
                   offset,
                   resetCache: !!flags.force || !!flags.forceRows,
+                  forceRefresh: !!flags.forceRefresh,
                 });
 
                 if (rowsRes.columns.length > 0) {
@@ -1302,6 +1315,7 @@ export function useLoadTableData() {
                   offset,
                   addLogQuery,
                   resetCache: shouldReset,
+                  forceRefresh: !!flags.forceRefresh,
                   filters: flags.filters,
                   filterCombine: flags.filterCombine ?? "AND",
                 });

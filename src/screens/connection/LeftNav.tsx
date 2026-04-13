@@ -361,9 +361,11 @@ export function LeftNav({
                           "text-left text-sm",
                           "overflow-hidden text-ellipsis select-none",
                           "transition-none",
-                          !isActive && "hover:bg-neutral-200/60",
+                          !isActive &&
+                            "hover:border-neutral-200/60! hover:bg-neutral-200/60 active:bg-neutral-200/60",
                           hasChanges &&
-                            "bg-amber-200 text-neutral-600 hover:bg-amber-200/80"
+                            !isActive &&
+                            "border-amber-200 bg-amber-200 text-neutral-600 hover:border-amber-200! hover:bg-amber-200/60 active:bg-amber-200/80"
                         )}
                         title={key}
                       >
@@ -371,18 +373,14 @@ export function LeftNav({
                           <KeyIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive && !hasChanges
-                                ? "text-neutral-100"
-                                : "text-amber-500"
+                              isActive ? "text-neutral-100" : "text-amber-500"
                             )}
                           />
                         ) : (
                           <TableIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive && !hasChanges
-                                ? "text-neutral-100"
-                                : "text-blue-500"
+                              isActive ? "text-neutral-100" : "text-blue-500"
                             )}
                           />
                         )}
