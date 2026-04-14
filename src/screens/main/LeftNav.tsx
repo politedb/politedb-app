@@ -37,7 +37,9 @@ export function LeftNav(props: {
   const [openSettings, setOpenSettings] = useState(false);
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
-  const normalizedLicenseStatus = String(licenseState?.status ?? "").toLowerCase();
+  const normalizedLicenseStatus = String(
+    licenseState?.status ?? ""
+  ).toLowerCase();
   const isLicenseActive = normalizedLicenseStatus === "active";
   const isLicenseExpired = normalizedLicenseStatus === "expired";
   const trialExpiresAt =
@@ -200,6 +202,7 @@ export function LeftNav(props: {
             {
               label: licensePlanLabel,
               disabled: true,
+              className: "font-semibold",
             },
             {
               separatorBefore: true,

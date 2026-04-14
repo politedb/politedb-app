@@ -4,21 +4,10 @@ import type { LicenseState } from "src/lib/tauri/license";
 
 const PRICING_URL = "https://politedb.com/pricing";
 
-function formatDate(value?: number | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-  }).format(date);
-}
-
 export function TrialExpiredOverlay(props: {
   state: LicenseState | null;
   onOpenLicense: () => void;
 }) {
-  const expiryLabel = formatDate(props.state?.trial_expires_at ?? null);
-
   async function handleBuyLicense() {
     try {
       await licenseOpenExternalUrl(PRICING_URL);
@@ -38,10 +27,8 @@ export function TrialExpiredOverlay(props: {
             Your 14-day trial has ended
           </h1>
           <p class="mt-3 text-base leading-7 text-slate-600">
-            {expiryLabel
-              ? `Your free trial expired on ${expiryLabel}.`
-              : "Your free trial has expired."}{" "}
-            Enter a license key to continue using PoliteDB on this device.
+            Your free trial has expired. Enter a license key to continue using
+            PoliteDB on this device.
           </p>
 
           <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">

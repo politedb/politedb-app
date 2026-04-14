@@ -7,6 +7,8 @@ import { useLicenseStore } from "src/stores/license";
 import { TrialExpiredOverlay } from "src/screens/main/TrialExpiredOverlay";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 
+const LICENSE_VALIDATION_GRACE_MS = 60 * 60 * 1000;
+
 export function MainLayout() {
   const { activeProfileScreen, setActiveProfileScreen, profileTabs } =
     useScreenStore();
@@ -39,11 +41,27 @@ export function MainLayout() {
 
   const isLicenseActive =
     String(licenseState?.status ?? "").toLowerCase() === "active";
+  const hasActivationData = Boolean(
+    licenseState?.license_key || licenseState?.activation_token
+  );
+  const isValidationStale = useMemo(() => {
+    if (!isLicenseActive || !hasActivationData) return false;
+    const lastValidatedAt = Number(licenseState?.last_validated_at ?? 0);
+    if (!Number.isFinite(lastValidatedAt) || lastValidatedAt <= 0) return true;
+    return now - lastValidatedAt > LICENSE_VALIDATION_GRACE_MS;
+  }, [
+    hasActivationData,
+    isLicenseActive,
+    licenseState?.last_validated_at,
+    now,
+  ]);
   const isTrialExpired = useMemo(() => {
     const expiresAt = Number(licenseState?.trial_expires_at ?? 0);
     return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
   }, [licenseState?.trial_expires_at, now]);
-  const isAppLocked = licenseLoaded && !isLicenseActive && isTrialExpired;
+  const isAppLocked =
+    licenseLoaded &&
+    (isValidationStale || (!isLicenseActive && isTrialExpired));
 
   return (
     <div class="app-header flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50">

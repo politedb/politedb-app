@@ -66,6 +66,16 @@ const activeBorderStyles: Record<ButtonVariant, string> = {
   secondary: "border-gray-500 hover:border-gray-600 active:border-gray-700",
 };
 
+const spinnerStyles: Record<ButtonVariant, string> = {
+  default: "text-white",
+  shadow: "text-neutral-700",
+  primary: "text-neutral-700",
+  outline: "text-neutral-700",
+  ghost: "text-neutral-700",
+  destructive: "text-white",
+  secondary: "text-white",
+};
+
 export function Button({
   children,
   disabled,
@@ -91,7 +101,11 @@ export function Button({
       disabled={disabled || loading}
       {...props}
     >
-      {loading ? <Spinner className="size-3.5" /> : children}
+      {loading ? (
+        <Spinner className={cn("size-3.5", spinnerStyles[variant])} />
+      ) : (
+        children
+      )}
     </button>
   );
 }

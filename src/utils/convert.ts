@@ -195,3 +195,25 @@ export function formatDatabaseVersion(
   const generic = extractSemverLike(raw, 2);
   return generic || raw;
 }
+
+export function formatDateTime(
+  value?: number | string | null,
+  includeTime?: boolean
+) {
+  if (!value) return "";
+  const date =
+    typeof value === "number" ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "short",
+    timeStyle: includeTime ? "medium" : undefined,
+  }).format(date);
+}
+
+export function formatDaysUntil(value?: number | string | null) {
+  if (!value) return 0;
+  const date =
+    typeof value === "number" ? new Date(value) : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return 0;
+  return Math.ceil((date.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+}
