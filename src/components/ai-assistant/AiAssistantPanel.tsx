@@ -369,6 +369,7 @@ export function AiAssistantPanel(props: Props) {
   useEffect(() => {
     if (runtimeBusy) return;
     if (suppressAutoStartRef.current) return;
+    if (autoStartAttemptedRef.current) return;
     if (runtimeStatus?.phase !== "stopped") return;
     if (runtimeStatus.missing.length > 0) return;
     if (runtimeStatus.endpoint) return;
@@ -518,6 +519,15 @@ export function AiAssistantPanel(props: Props) {
       if (status.endpoint) setEndpoint(status.endpoint);
       // if (status.model_name) setModel(status.model_name);
       await handleLoadModels(status.endpoint ?? undefined);
+    } catch {
+      // Keep a stable error/missing state instead of repeatedly auto-retrying
+      // and causing loading/missing panes to flicker.
+      suppressAutoStartRef.current = true;
+      const nextStatus = await aiRuntimeStatus().catch(() => null);
+      if (nextStatus) {
+        setRuntimeStatus(nextStatus);
+        if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
+      }
     } finally {
       setRuntimeBusy(false);
     }

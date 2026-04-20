@@ -64,19 +64,23 @@ export function SSHSection(props: SectionProps) {
   const sshKeyPath = useController({
     control,
     name: "sshKeyPath",
-    rules:
-      enabled && isKeyAuth
-        ? { required: "SSH private key file is required." }
-        : undefined,
+    rules: {
+      validate: (value) => {
+        if (!enabled || !isKeyAuth) return true;
+        return value?.trim() ? true : "SSH private key file is required.";
+      },
+    },
   });
 
   const sshPassword = useController({
     control,
     name: "sshPassword",
-    rules:
-      enabled && isPasswordAuth
-        ? { required: "SSH password is required." }
-        : undefined,
+    rules: {
+      validate: (value) => {
+        if (!enabled || !isPasswordAuth) return true;
+        return value?.trim() ? true : "SSH password is required.";
+      },
+    },
   });
 
   function dirty() {
@@ -187,6 +191,7 @@ export function SSHSection(props: SectionProps) {
             <div class="space-y-2">
               <div class="grid grid-cols-[2fr_3fr] gap-2">
                 <Select
+                  class="h-10"
                   value={sshAuthType.field.value}
                   error={!!authErr}
                   onChange={(e) => {
