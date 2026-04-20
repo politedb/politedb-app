@@ -171,7 +171,7 @@ async fn resolve_mongo_password(
 
 async fn smoke_mongo(client: &Client) -> Result<(), String> {
     client
-        .list_database_names(None, None)
+        .list_database_names()
         .await
         .map(|_| ())
         .map_err(|e| format!("MONGO_CONNECT_FAILED: {e}"))

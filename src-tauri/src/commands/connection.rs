@@ -485,7 +485,7 @@ pub async fn connection_version(
         crate::engines::EngineConnection::Mongo(mongo) => {
             let db = mongo.client.database("admin");
             let res = db
-                .run_command(mongodb::bson::doc! { "buildInfo": 1 }, None)
+                .run_command(mongodb::bson::doc! { "buildInfo": 1 })
                 .await
                 .map_err(|e| format!("MONGO_VERSION_QUERY_FAILED: {e}"))?;
             let version = res

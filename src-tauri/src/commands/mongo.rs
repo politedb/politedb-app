@@ -285,7 +285,8 @@ async fn sample_documents(
 ) -> Result<Vec<Document>, String> {
     let coll = client.database(database).collection::<Document>(collection);
     let options = FindOptions::builder().limit(limit).skip(skip).build();
-    coll.find(None, options)
+    coll.find(mongodb::bson::doc! {})
+        .with_options(options)
         .await
         .map_err(|e| format!("MONGO_QUERY_FAILED: {e}"))?
         .try_collect::<Vec<Document>>()
@@ -302,7 +303,7 @@ pub async fn mongo_list_databases(
     let (client, default_database) = as_mongo_client(&conn)?;
 
     let mut names: Vec<String> = client
-        .list_database_names(None, None)
+        .list_database_names()
         .await
         .map_err(|e| format!("MONGO_LIST_DATABASES_FAILED: {e}"))?;
 
@@ -333,7 +334,7 @@ pub async fn mongo_list_collections(
 
     client
         .database(&database)
-        .list_collection_names(None)
+        .list_collection_names()
         .await
         .map_err(|e| format!("MONGO_LIST_COLLECTIONS_FAILED: {e}"))
 }
@@ -356,7 +357,7 @@ pub async fn mongo_collection_overview(
     let row_count = client
         .database(&database)
         .collection::<Document>(&collection)
-        .estimated_document_count(None)
+        .estimated_document_count()
         .await
         .map_err(|e| format!("MONGO_COUNT_FAILED: {e}"))?;
 
@@ -384,7 +385,7 @@ pub async fn mongo_find_documents(
     let row_count = client
         .database(&database)
         .collection::<Document>(&collection)
-        .estimated_document_count(None)
+        .estimated_document_count()
         .await
         .map_err(|e| format!("MONGO_COUNT_FAILED: {e}"))?;
 
@@ -410,7 +411,7 @@ pub async fn mongo_list_indexes(
         .database(&database)
         .collection::<Document>(&collection);
     let indexes = coll
-        .list_indexes(None)
+        .list_indexes()
         .await
         .map_err(|e| format!("MONGO_LIST_INDEXES_FAILED: {e}"))?
         .try_collect::<Vec<_>>()
@@ -468,7 +469,7 @@ pub async fn mongo_collection_size_info(
 
     let stats = client
         .database(&database)
-        .run_command(mongodb::bson::doc! { "collStats": &collection, "scale": 1 }, None)
+        .run_command(mongodb::bson::doc! { "collStats": &collection, "scale": 1 })
         .await
         .map_err(|e| format!("MONGO_COLLECTION_STATS_FAILED: {e}"))?;
 
@@ -516,7 +517,7 @@ pub async fn mongo_insert_documents(
     let result = client
         .database(&database)
         .collection::<Document>(&collection)
-        .insert_many(docs, None)
+        .insert_many(docs)
         .await
         .map_err(|e| format!("MONGO_INSERT_FAILED: {e}"))?;
 
@@ -569,7 +570,6 @@ pub async fn mongo_update_documents(
             .update_one(
                 mongodb::bson::doc! { "_id": id },
                 mongodb::bson::doc! { "$set": set_doc },
-                None,
             )
             .await
             .map_err(|e| format!("MONGO_UPDATE_FAILED_AT_INDEX_{idx}: {e}"))?;
@@ -604,7 +604,7 @@ pub async fn mongo_delete_documents(
     let result = client
         .database(&database)
         .collection::<Document>(&collection)
-        .delete_many(mongodb::bson::doc! { "_id": { "$in": bson_ids } }, None)
+        .delete_many(mongodb::bson::doc! { "_id": { "$in": bson_ids } })
         .await
         .map_err(|e| format!("MONGO_DELETE_FAILED: {e}"))?;
 
