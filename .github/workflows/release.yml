@@ -24,6 +24,7 @@ jobs:
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
 
     strategy:
       matrix:
@@ -82,10 +83,10 @@ jobs:
           echo "Apple team id set: $([ -n "${APPLE_TEAM_ID:-}" ] && echo yes || echo no)"
 
       - name: Prepare Apple API key env
-        if: secrets.APPLE_API_KEY != ''
+        if: env.APPLE_API_KEY != ''
         shell: bash
         env:
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ env.APPLE_API_KEY }}
         run: |
           set -euo pipefail
 
