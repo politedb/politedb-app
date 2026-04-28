@@ -16,6 +16,7 @@ import {
   tableStructuresQuery,
   tableStructuresMySqlQuery,
   type TableFilterCondition,
+  type TableSort,
 } from "./queries";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
@@ -77,6 +78,7 @@ export type LoadFlags = {
   refreshStats?: boolean; // RowCount + sizeInfo (default false)
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
+  sortBy?: TableSort | null;
 };
 
 type ColumnRow = { name: string | null; db_type: string | null };
@@ -269,6 +271,7 @@ function buildLoadSignature(params: {
     refreshForeignKeys: flags.refreshForeignKeys ?? false,
     refreshStats: flags.refreshStats ?? false,
     filterCombine: flags.filterCombine ?? "AND",
+    sortBy: flags.sortBy ?? null,
     filters,
   });
 }
@@ -871,6 +874,7 @@ async function startRowsStream(params: {
   forceRefresh?: boolean;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
+  sortBy?: TableSort | null;
 }): Promise<void> {
   const {
     key,
@@ -885,6 +889,7 @@ async function startRowsStream(params: {
     forceRefresh,
     filters,
     filterCombine = "AND",
+    sortBy,
   } = params;
 
   const q = tableDataQuery(
@@ -893,6 +898,7 @@ async function startRowsStream(params: {
     { limit, offset },
     filters,
     filterCombine,
+    sortBy,
     engine
   );
   addLogQuery(q);
@@ -1318,6 +1324,7 @@ export function useLoadTableData() {
                   forceRefresh: !!flags.forceRefresh,
                   filters: flags.filters,
                   filterCombine: flags.filterCombine ?? "AND",
+                  sortBy: flags.sortBy ?? null,
                 });
               } catch (e) {
                 const curMeta =

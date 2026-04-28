@@ -217,6 +217,11 @@ export type TableFilterCondition = {
   enabled: boolean;
 };
 
+export type TableSort = {
+  colName: string;
+  direction: "asc" | "desc";
+};
+
 const VALUE_OPS = ["=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "ILIKE"];
 const IN_OPS = ["IN", "NOT IN"];
 const NULL_OPS = ["IS NULL", "IS NOT NULL"];
@@ -268,6 +273,7 @@ export const tableDataQuery = (
   pagination?: { limit: number; offset: number },
   filters?: TableFilterCondition[],
   combineWith: "AND" | "OR" = "AND",
+  sortBy?: TableSort | null,
   engine?: DatabaseEngine
 ) => {
   const limit = pagination?.limit ?? 300;
@@ -276,12 +282,15 @@ export const tableDataQuery = (
   const where = filters?.length
     ? buildWhereClause(filters, combineWith, engine)
     : "";
+  const orderBy = sortBy
+    ? ` ORDER BY ${qIdent(sortBy.colName, engine)} ${sortBy.direction.toUpperCase()}`
+    : "";
   const queryStr =
     engine === "oracle"
-      ? `SELECT * FROM ${tableIdent}${where} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
+      ? `SELECT * FROM ${tableIdent}${where}${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
       : engine === "sqlserver"
-        ? `SELECT * FROM ${tableIdent}${where} ORDER BY (SELECT NULL) OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
-      : `SELECT * FROM ${tableIdent}${where} LIMIT ${limit} OFFSET ${offset};`;
+        ? `SELECT * FROM ${tableIdent}${where}${orderBy || " ORDER BY (SELECT NULL)"} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
+      : `SELECT * FROM ${tableIdent}${where}${orderBy} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
 

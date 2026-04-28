@@ -3,7 +3,7 @@ import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { PlusIcon, ChevronDownIcon, MinusIcon } from "src/components/icons";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import type { TableFilterCondition } from "src/hooks/queries";
+import type { TableFilterCondition, TableSort } from "src/hooks/queries";
 import { tableDataQuery } from "src/hooks/queries";
 import { cn } from "src/utils/cn";
 import { Input } from "src/components/common/Input";
@@ -38,6 +38,7 @@ interface TableFilterBarProps {
   appliedFilters: TableFilterCondition[];
   limit: number;
   offset: number;
+  sortState?: TableSort | null;
   onFiltersChange: (filters: TableFilterCondition[]) => void;
   onFilterCombineChange: (combine: "AND" | "OR") => void;
   onApply: (
@@ -65,6 +66,7 @@ export function TableFilterBar({
   appliedFilters,
   limit,
   offset,
+  sortState = null,
   onFiltersChange,
   onFilterCombineChange,
   onApply,
@@ -146,9 +148,10 @@ export function TableFilterBar({
       tableName,
       { limit, offset },
       filters,
-      filterCombine
+      filterCombine,
+      sortState
     );
-  }, [schema, tableName, limit, offset, filters, filterCombine]);
+  }, [schema, tableName, limit, offset, filters, filterCombine, sortState]);
 
   useEffect(() => {
     if (filters.length > 0) return;

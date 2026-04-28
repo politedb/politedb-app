@@ -33,6 +33,7 @@ import {
   copyTableDataQuery,
   truncateTableQuery,
   dropTableQuery,
+  type TableSort,
 } from "src/hooks/queries";
 import { TableForeignKey } from "src/types";
 
@@ -145,6 +146,7 @@ export function MainTableDataPane(props: {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
   const [dropDialogOpen, setDropDialogOpen] = useState(false);
+  const [sortState, setSortState] = useState<TableSort | null>(null);
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -173,6 +175,10 @@ export function MainTableDataPane(props: {
     handleClearFilters,
   } = useTableFilter(startedRef, activeKey);
 
+  useEffect(() => {
+    setSortState(null);
+  }, [activeKey]);
+
   const filterSignature = useMemo(
     () =>
       JSON.stringify(
@@ -189,8 +195,8 @@ export function MainTableDataPane(props: {
 
   const activeQuerySignature = useMemo(
     () =>
-      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}`,
-    [activeKey, limit, offset, appliedFilterCombine, filterSignature]
+      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}`,
+    [activeKey, limit, offset, appliedFilterCombine, filterSignature, sortState]
   );
 
   const rowCountSignature = useMemo(
@@ -199,8 +205,9 @@ export function MainTableDataPane(props: {
   );
 
   const rowsDataSignature = useMemo(
-    () => `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}`,
-    [activeKey, offset, appliedFilterCombine, filterSignature]
+    () =>
+      `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}`,
+    [activeKey, offset, appliedFilterCombine, filterSignature, sortState]
   );
 
   /* ===========================================================================
@@ -261,6 +268,7 @@ export function MainTableDataPane(props: {
         refreshStats: false,
         filters: appliedFilters.length ? appliedFilters : undefined,
         filterCombine: appliedFilterCombine,
+        sortBy: sortState,
       }
     ).catch(() => {
       // Error state is already written into the store by loadTableData.
@@ -280,6 +288,7 @@ export function MainTableDataPane(props: {
     activeQuerySignature,
     rowCountSignature,
     rowsDataSignature,
+    sortState,
   ]);
 
   useEffect(() => {
@@ -890,6 +899,7 @@ export function MainTableDataPane(props: {
                 appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
+                sortState={sortState}
                 setFilterVisible={setFilterBarVisible}
                 onFiltersChange={setFilters}
                 onFilterCombineChange={setFilterCombine}
@@ -933,6 +943,13 @@ export function MainTableDataPane(props: {
                 rowsVersion={rowsInfo?.version ?? 0}
                 foreignKeyMap={foreignKeyMap}
                 onNavigateFk={handleNavigateFk}
+                sortState={sortState}
+                onChangeSort={(nextSort) => {
+                  setSortState(nextSort);
+                  if (offset !== 0) {
+                    pageChange(limit, 0);
+                  }
+                }}
               />
             </div>
           </div>
