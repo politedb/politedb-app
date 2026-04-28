@@ -33,7 +33,7 @@
     "sql-formatter": "^15.7.0",
     "tailwind-merge": "^3.4.0",
     "url": "^0.11.4",
-    "uuid": "^13.0.0",
+    "uuid": "^14.0.0",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
