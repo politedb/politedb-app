@@ -21,3 +21,8 @@ pub async fn ai_runtime_stop(state: tauri::State<'_, AppState>) -> Result<ai_run
 pub async fn ai_runtime_download_default_model(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<ai_runtime::AiRuntimeStatus, String> {
     ai_runtime::ai_runtime_download_default_model(&app, &state).await
 }
+
+#[tauri::command]
+pub async fn ai_runtime_cancel_model_download(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<ai_runtime::AiRuntimeStatus, String> {
+    Ok(ai_runtime::ai_runtime_cancel_model_download(&app, &state).await)
+}

@@ -4,6 +4,7 @@ export const CMD = {
   aiRuntimeStart: "ai_runtime_start",
   aiRuntimeStop: "ai_runtime_stop",
   aiRuntimeDownloadDefaultModel: "ai_runtime_download_default_model",
+  aiRuntimeCancelModelDownload: "ai_runtime_cancel_model_download",
   licenseDeviceInfo: "license_device_info",
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",

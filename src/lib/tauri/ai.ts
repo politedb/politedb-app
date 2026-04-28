@@ -32,3 +32,7 @@ export async function aiRuntimeStop() {
 export async function aiRuntimeDownloadDefaultModel() {
   return invoke<AiRuntimeStatus>(CMD.aiRuntimeDownloadDefaultModel);
 }
+
+export async function aiRuntimeCancelModelDownload() {
+  return invoke<AiRuntimeStatus>(CMD.aiRuntimeCancelModelDownload);
+}

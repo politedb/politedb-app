@@ -21,15 +21,18 @@ const isReadOnlySqlMock = vi.fn();
 const answerFromResultMock = vi.fn();
 const queryResultToObjectsMock = vi.fn();
 const buildFastResultAnswerMock = vi.fn();
+const getFastChatReplyMock = vi.fn();
+const getAmbiguousPromptReplyMock = vi.fn();
 
 const aiRuntimeStatusMock = vi.fn();
 const aiRuntimeDownloadDefaultModelMock = vi.fn();
+const aiRuntimeCancelModelDownloadMock = vi.fn();
 const aiRuntimeStartMock = vi.fn();
 const aiRuntimeStopMock = vi.fn();
 
 const runSqlQueryMock = vi.fn();
 
-vi.mock("src/lib/ai/localAssistant", () => ({
+vi.mock("@root/src/lib/ai-assistant", () => ({
   getLocalAiSettings: (...args: any[]) => getLocalAiSettingsMock(...args),
   saveLocalAiSettings: (...args: any[]) => saveLocalAiSettingsMock(...args),
   hasSeenLocalAiModel: (...args: any[]) => hasSeenLocalAiModelMock(...args),
@@ -43,10 +46,15 @@ vi.mock("src/lib/ai/localAssistant", () => ({
   answerFromResult: (...args: any[]) => answerFromResultMock(...args),
   queryResultToObjects: (...args: any[]) => queryResultToObjectsMock(...args),
   buildFastResultAnswer: (...args: any[]) => buildFastResultAnswerMock(...args),
+  getFastChatReply: (...args: any[]) => getFastChatReplyMock(...args),
+  getAmbiguousPromptReply: (...args: any[]) =>
+    getAmbiguousPromptReplyMock(...args),
 }));
 
 vi.mock("src/lib/tauri", () => ({
   aiRuntimeStatus: (...args: any[]) => aiRuntimeStatusMock(...args),
+  aiRuntimeCancelModelDownload: (...args: any[]) =>
+    aiRuntimeCancelModelDownloadMock(...args),
   aiRuntimeDownloadDefaultModel: (...args: any[]) =>
     aiRuntimeDownloadDefaultModelMock(...args),
   aiRuntimeStart: (...args: any[]) => aiRuntimeStartMock(...args),
@@ -85,18 +93,10 @@ vi.mock("src/components/common/Button", () => ({
 
 vi.mock("src/components/icons", () => ({
   ArrowDown: () => <span>arrow-down</span>,
+  ChevronDownIcon: () => <span>chevron-down</span>,
   Settings: () => <span>settings</span>,
+  SettingsIcon: () => <span>settings</span>,
 }));
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 function status(overrides: Record<string, unknown> = {}) {
   return {
@@ -115,10 +115,37 @@ function status(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function missingModelStatus(overrides: Record<string, unknown> = {}) {
+  return status({
+    phase: "missing",
+    missing: [
+      "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf",
+    ],
+    ...overrides,
+  });
+}
+
+function mockMissingModelStatus() {
+  aiRuntimeStatusMock.mockImplementation(() =>
+    Promise.resolve(missingModelStatus())
+  );
+}
+
+function pendingPromise<T>() {
+  return new Promise<T>(() => {});
+}
+
+let renderSeq = 0;
+
 function renderPanel(props: Record<string, unknown> = {}) {
+  const chatSessionKey =
+    typeof props.chatSessionKey === "string"
+      ? props.chatSessionKey
+      : `test-session-${++renderSeq}`;
+
   return render(
     <AiAssistantPanel
-      chatSessionKey="test-session"
+      chatSessionKey={chatSessionKey}
       engine="postgres"
       tables={[]}
       columnsByTable={{}}
@@ -165,6 +192,8 @@ beforeEach(() => {
     answer: "I ran the query and found 2 row(s). Here is a preview of the result.",
     confidence: "high",
   });
+  getFastChatReplyMock.mockReturnValue(null);
+  getAmbiguousPromptReplyMock.mockReturnValue(null);
   aiRuntimeStatusMock.mockResolvedValue(
     status({
       phase: "ready",
@@ -177,6 +206,15 @@ beforeEach(() => {
       phase: "stopped",
       model_name: "default",
       model_path: "/tmp/default.gguf",
+    })
+  );
+  aiRuntimeCancelModelDownloadMock.mockResolvedValue(
+    status({
+      phase: "missing",
+      missing: [
+        "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf",
+      ],
+      last_error: "AI model download canceled.",
     })
   );
   aiRuntimeStartMock.mockResolvedValue(
@@ -200,26 +238,16 @@ beforeEach(() => {
 });
 
 describe("AiAssistantPanel", () => {
-  it("auto-downloads and starts runtime on first launch when only the model is missing", async () => {
-    const downloading = deferred<any>();
-    aiRuntimeStatusMock.mockImplementation(() =>
-      Promise.resolve(
-        status({
-          phase: "missing",
-          missing: [
-            "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf",
-          ],
-        })
-      )
-    );
-    aiRuntimeDownloadDefaultModelMock.mockReturnValueOnce(downloading.promise);
+  it("shows missing model state on first launch and downloads only after user action", async () => {
+    mockMissingModelStatus();
 
     renderPanel();
 
-    await screen.findByText("Preparing AI Assistant");
-    expect(aiRuntimeDownloadDefaultModelMock).toHaveBeenCalledTimes(1);
+    await screen.findByText("Missing AI model");
+    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
+    expect(aiRuntimeStartMock).not.toHaveBeenCalled();
 
-    downloading.resolve(
+    aiRuntimeDownloadDefaultModelMock.mockResolvedValueOnce(
       status({
         phase: "stopped",
         model_name: "default",
@@ -227,8 +255,76 @@ describe("AiAssistantPanel", () => {
       })
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
+
+    await waitFor(() =>
+      expect(aiRuntimeDownloadDefaultModelMock).toHaveBeenCalledTimes(1)
+    );
     await waitFor(() => expect(aiRuntimeStartMock).toHaveBeenCalledTimes(1));
     expect(markLocalAiModelSeenMock).toHaveBeenCalled();
+  });
+
+  it("does not download the missing model when retrying runtime setup", async () => {
+    mockMissingModelStatus();
+
+    renderPanel();
+
+    await screen.findByText("Missing AI model");
+    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
+    expect(aiRuntimeStartMock).not.toHaveBeenCalled();
+  });
+
+  it("shows cancel while the model download is running", async () => {
+    mockMissingModelStatus();
+    aiRuntimeDownloadDefaultModelMock.mockReturnValueOnce(pendingPromise());
+
+    renderPanel();
+
+    await screen.findByText("Missing AI model");
+    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
+
+    await screen.findByText("Downloading local AI model");
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry" })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(aiRuntimeCancelModelDownloadMock).toHaveBeenCalledTimes(1)
+    );
+  });
+
+  it("shows retry only after model download fails", async () => {
+    mockMissingModelStatus();
+    aiRuntimeDownloadDefaultModelMock.mockRejectedValueOnce(
+      new Error("AI_MODEL_DOWNLOAD_FAILED: network error")
+    );
+
+    renderPanel();
+
+    await screen.findByText("Missing AI model");
+    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
+
+    await screen.findByRole("button", { name: "Retry" });
+    expect(
+      screen.queryByRole("button", { name: "Cancel" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("starts runtime automatically when runtime assets are available", async () => {
+    aiRuntimeStatusMock.mockResolvedValueOnce(
+      status({
+        phase: "stopped",
+        model_name: "default",
+        model_path: "/tmp/default.gguf",
+      })
+    );
+
+    renderPanel();
+
+    await waitFor(() => expect(aiRuntimeStartMock).toHaveBeenCalledTimes(1));
+    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
   });
 
   it("sends a general chat message and renders the assistant reply", async () => {

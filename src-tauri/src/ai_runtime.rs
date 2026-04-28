@@ -64,6 +64,7 @@ pub struct AiRuntimeHandle {
     pub managed_by_app: bool,
     pub model_downloaded_bytes: Option<u64>,
     pub model_total_bytes: Option<u64>,
+    pub cancel_model_download: bool,
 }
 
 impl Default for AiRuntimeHandle {
@@ -80,6 +81,7 @@ impl Default for AiRuntimeHandle {
             managed_by_app: false,
             model_downloaded_bytes: None,
             model_total_bytes: None,
+            cancel_model_download: false,
         }
     }
 }
@@ -595,6 +597,7 @@ pub async fn ai_runtime_download_default_model(
         runtime.model_path = Some(destination.clone());
         runtime.model_downloaded_bytes = Some(0);
         runtime.model_total_bytes = None;
+        runtime.cancel_model_download = false;
     }
 
     let model_url = default_model_download_url();
@@ -630,6 +633,23 @@ pub async fn ai_runtime_download_default_model(
         .await
         .map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?
     {
+        {
+            let runtime = state.ai_runtime.lock().await;
+            if runtime.cancel_model_download {
+                drop(runtime);
+                let _ = fs::remove_file(&temp_path);
+                let mut runtime = state.ai_runtime.lock().await;
+                runtime.phase = AiRuntimePhase::Missing;
+                runtime.last_error = Some("AI model download canceled.".to_string());
+                runtime.model_path = None;
+                runtime.model_name = None;
+                runtime.model_downloaded_bytes = None;
+                runtime.model_total_bytes = None;
+                runtime.cancel_model_download = false;
+                return Ok(runtime.to_status(missing_items(server_bin.as_deref(), None)));
+            }
+        }
+
         downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
         file.write_all(&chunk)
             .map_err(|e| format!("Failed to write downloaded model chunk: {e}"))?;
@@ -652,8 +672,26 @@ pub async fn ai_runtime_download_default_model(
     runtime.model_name = Some(model_name_from_path(&destination));
     runtime.model_downloaded_bytes = None;
     runtime.model_total_bytes = None;
+    runtime.cancel_model_download = false;
 
     Ok(runtime.to_status(Vec::new()))
+}
+
+pub async fn ai_runtime_cancel_model_download(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> AiRuntimeStatus {
+    let (server_bin, _model_path, _missing) = detect_missing(app);
+    let mut runtime = state.ai_runtime.lock().await;
+
+    if matches!(runtime.phase, AiRuntimePhase::Starting)
+        && (runtime.model_downloaded_bytes.is_some() || runtime.model_total_bytes.is_some())
+    {
+        runtime.cancel_model_download = true;
+        runtime.last_error = Some("Canceling AI model download...".to_string());
+    }
+
+    runtime.to_status(missing_items(server_bin.as_deref(), None))
 }
 
 trait Pipe: Sized {

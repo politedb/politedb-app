@@ -22,6 +22,7 @@ import {
   saveLocalAiSettings,
 } from "@root/src/lib/ai-assistant";
 import {
+  aiRuntimeCancelModelDownload,
   aiRuntimeDownloadDefaultModel,
   aiRuntimeStart,
   aiRuntimeStatus,
@@ -89,6 +90,15 @@ function isMissingServer(status?: AiRuntimeStatus | null) {
   );
 }
 
+function isModelDownloading(status?: AiRuntimeStatus | null) {
+  const details = status?.last_error?.trim() ?? "";
+  return (
+    status?.model_downloaded_bytes != null ||
+    status?.model_total_bytes != null ||
+    /downloading( local)? ai model/i.test(details)
+  );
+}
+
 function ThinkingCard(props: { status: AssistantStatus }) {
   const isLoadingModel = props.status === "loading_model";
   return (
@@ -118,12 +128,12 @@ function ThinkingCard(props: { status: AssistantStatus }) {
 function RuntimeLoadingPane(props: {
   status: AiRuntimeStatus | null;
   onRetry: () => void;
+  onCancelDownload: () => void;
+  showRetry?: boolean;
+  forceDownloading?: boolean;
 }) {
   const details = props.status?.last_error?.trim() || "Please wait...";
-  const isDownloading =
-    props.status?.model_downloaded_bytes != null ||
-    props.status?.model_total_bytes != null ||
-    /downloading( local)? ai model/i.test(details);
+  const isDownloading = props.forceDownloading || isModelDownloading(props.status);
   const downloaded = Number(props.status?.model_downloaded_bytes ?? 0);
   const total = Number(props.status?.model_total_bytes ?? 0);
   const progressPct =
@@ -169,11 +179,27 @@ function RuntimeLoadingPane(props: {
 
         <div class="mt-4 text-xs text-neutral-400">{details}</div>
 
-        <div class="mt-5 flex justify-center">
-          <Button variant="outline" class="px-3 py-1.5" onClick={props.onRetry}>
-            Retry
-          </Button>
-        </div>
+        {isDownloading ? (
+          <div class="mt-5 flex justify-center">
+            <Button
+              variant="outline"
+              class="px-3 py-1.5"
+              onClick={props.onCancelDownload}
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : props.showRetry ? (
+          <div class="mt-5 flex justify-center">
+            <Button
+              variant="outline"
+              class="px-3 py-1.5"
+              onClick={props.onRetry}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -281,13 +307,14 @@ export function AiAssistantPanel(props: Props) {
     null
   );
   const [runtimeStatusReady, setRuntimeStatusReady] = useState(false);
+  const [modelDownloadFailed, setModelDownloadFailed] = useState(false);
+  const [modelDownloadInProgress, setModelDownloadInProgress] = useState(false);
   const [assistantStatus, setAssistantStatus] =
     useState<AssistantStatus>("idle");
   const [hasSeenModelBefore, setHasSeenModelBefore] = useState(() =>
     hasSeenLocalAiModel()
   );
   const autoStartAttemptedRef = useRef(false);
-  const autoDownloadAttemptedRef = useRef(false);
   const suppressAutoStartRef = useRef(false);
   const preferredModelRef = useRef(initialSettings.model.trim());
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
@@ -309,29 +336,8 @@ export function AiAssistantPanel(props: Props) {
       try {
         const status = await aiRuntimeStatus();
         setRuntimeStatus(status);
+        setModelDownloadFailed(false);
         if (status.endpoint) setEndpoint(status.endpoint);
-        const missingModelOnly = isMissingModelOnly(status);
-        if (
-          missingModelOnly &&
-          !hasSeenModelBefore &&
-          !autoDownloadAttemptedRef.current
-        ) {
-          autoDownloadAttemptedRef.current = true;
-          setRuntimeBusy(true);
-          try {
-            const downloaded = await aiRuntimeDownloadDefaultModel();
-            setRuntimeStatus(downloaded);
-            if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
-            markLocalAiModelSeen();
-            setHasSeenModelBefore(true);
-            await handleStartBundledRuntime();
-            return;
-          } catch {
-            // keep missing state visible
-          } finally {
-            setRuntimeBusy(false);
-          }
-        }
         if (
           status.missing.length === 0 &&
           status.phase === "stopped" &&
@@ -349,7 +355,7 @@ export function AiAssistantPanel(props: Props) {
         setRuntimeStatusReady(true);
       }
     })();
-  }, [hasSeenModelBefore]);
+  }, []);
 
   useEffect(() => {
     if (!runtimeBusy && runtimeStatus?.phase !== "starting") return;
@@ -449,18 +455,25 @@ export function AiAssistantPanel(props: Props) {
   const showRuntimeLoadingScreen = useMemo(() => {
     if (!runtimeStatusReady) return true;
     if (runtimeBusy) return true;
+    if (modelDownloadInProgress) return true;
+    if (modelDownloadFailed) return true;
     return (
       runtimeStatus?.phase === "starting" &&
       !runtimeStatus?.endpoint &&
       !submitting
     );
-  }, [runtimeBusy, runtimeStatus, runtimeStatusReady, submitting]);
+  }, [
+    modelDownloadFailed,
+    modelDownloadInProgress,
+    runtimeBusy,
+    runtimeStatus,
+    runtimeStatusReady,
+    submitting,
+  ]);
 
   const showMissingModelScreen = useMemo(() => {
-    return (
-      !runtimeBusy && hasSeenModelBefore && isMissingModelOnly(runtimeStatus)
-    );
-  }, [runtimeBusy, hasSeenModelBefore, runtimeStatus]);
+    return !runtimeBusy && isMissingModelOnly(runtimeStatus);
+  }, [runtimeBusy, runtimeStatus]);
 
   const showMissingRuntimeScreen = useMemo(() => {
     return !runtimeBusy && isMissingServer(runtimeStatus);
@@ -553,17 +566,69 @@ export function AiAssistantPanel(props: Props) {
       if (currentStatus.endpoint) setEndpoint(currentStatus.endpoint);
 
       if (isMissingModelOnly(currentStatus)) {
-        const downloaded = await aiRuntimeDownloadDefaultModel();
-        setRuntimeStatus(downloaded);
-        if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
-        markLocalAiModelSeen();
-        setHasSeenModelBefore(true);
+        return;
       }
 
       const nextStatus = await aiRuntimeStart();
       setRuntimeStatus(nextStatus);
       if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
       await handleLoadModels(nextStatus.endpoint ?? undefined);
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
+
+  const handleDownloadModel = async () => {
+    suppressAutoStartRef.current = false;
+    setModelDownloadFailed(false);
+    setModelDownloadInProgress(true);
+    setRuntimeBusy(true);
+    try {
+      const downloaded = await aiRuntimeDownloadDefaultModel();
+      setRuntimeStatus(downloaded);
+      if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
+      if (isMissingModelOnly(downloaded)) {
+        return;
+      }
+
+      markLocalAiModelSeen();
+      setHasSeenModelBefore(true);
+
+      const nextStatus = await aiRuntimeStart();
+      setRuntimeStatus(nextStatus);
+      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
+      await handleLoadModels(nextStatus.endpoint ?? undefined);
+    } catch (error) {
+      const message = formatError(error);
+      setModelDownloadFailed(true);
+      setRuntimeStatus((prev) => ({
+        ...(prev ?? {
+          endpoint: null,
+          model_name: null,
+          server_bin: null,
+          model_path: null,
+          pid: null,
+          managed_by_app: true,
+          missing: [],
+        }),
+        phase: "error",
+        last_error: message,
+        model_downloaded_bytes: null,
+        model_total_bytes: null,
+      }));
+    } finally {
+      setModelDownloadInProgress(false);
+      setRuntimeBusy(false);
+    }
+  };
+
+  const handleCancelModelDownload = async () => {
+    setModelDownloadFailed(false);
+    setModelDownloadInProgress(false);
+    try {
+      const status = await aiRuntimeCancelModelDownload();
+      setRuntimeStatus(status);
+      if (status.endpoint) setEndpoint(status.endpoint);
     } finally {
       setRuntimeBusy(false);
     }
@@ -585,15 +650,7 @@ export function AiAssistantPanel(props: Props) {
       }
 
       if (isMissingModelOnly(currentStatus)) {
-        if (!hasSeenModelBefore) {
-          const downloaded = await aiRuntimeDownloadDefaultModel();
-          setRuntimeStatus(downloaded);
-          if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
-          markLocalAiModelSeen();
-          setHasSeenModelBefore(true);
-        } else {
-          return;
-        }
+        return;
       }
 
       const nextStatus = await aiRuntimeStatus();
@@ -957,6 +1014,9 @@ export function AiAssistantPanel(props: Props) {
         <RuntimeLoadingPane
           status={runtimeStatus}
           onRetry={() => void handleRetryRuntimeSetup()}
+          onCancelDownload={() => void handleCancelModelDownload()}
+          showRetry={modelDownloadFailed}
+          forceDownloading={modelDownloadInProgress}
         />
       ) : showMissingRuntimeScreen ? (
         <MissingRuntimePane
@@ -966,7 +1026,7 @@ export function AiAssistantPanel(props: Props) {
       ) : showMissingModelScreen ? (
         <MissingModelPane
           busy={runtimeBusy}
-          onDownload={() => void handleRetryRuntimeSetup()}
+          onDownload={() => void handleDownloadModel()}
         />
       ) : (
         <>
