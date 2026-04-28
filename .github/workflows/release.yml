@@ -21,6 +21,9 @@ jobs:
       AI_MODEL_REPO: ${{ vars.AI_MODEL_REPO || 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF' }}
       AI_MODEL_PATTERN: ${{ vars.AI_MODEL_PATTERN || 'qwen2.5-coder-7b-instruct-q4_k_m*.gguf' }}
       AI_LLAMA_REF: ${{ vars.AI_LLAMA_REF || 'master' }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     strategy:
       matrix:
@@ -74,6 +77,39 @@ jobs:
           echo "AI model repo: ${AI_MODEL_REPO:-<unset>}"
           echo "AI model pattern: ${AI_MODEL_PATTERN:-<unset>}"
           echo "AI llama ref: ${AI_LLAMA_REF:-<unset>}"
+          echo "Apple API key id set: $([ -n "${APPLE_API_KEY_ID:-}" ] && echo yes || echo no)"
+          echo "Apple API issuer set: $([ -n "${APPLE_API_ISSUER:-}" ] && echo yes || echo no)"
+          echo "Apple team id set: $([ -n "${APPLE_TEAM_ID:-}" ] && echo yes || echo no)"
+
+      - name: Prepare Apple API key env
+        if: secrets.APPLE_API_KEY != ''
+        shell: bash
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_API_KEY_ID:-}" ]; then
+            echo "Missing APPLE_API_KEY_ID"
+            exit 1
+          fi
+
+          if [ -z "${APPLE_API_ISSUER:-}" ]; then
+            echo "Missing APPLE_API_ISSUER"
+            exit 1
+          fi
+
+          KEY_DIR="$RUNNER_TEMP/apple-api-key"
+          KEY_PATH="$KEY_DIR/AuthKey_${APPLE_API_KEY_ID}.p8"
+          mkdir -p "$KEY_DIR"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=${APPLE_API_KEY_ID}" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=${APPLE_API_ISSUER}" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}" >> "$GITHUB_ENV"
 
       - name: Download bundled AI runtime
         if: env.BUNDLE_AI_ASSISTANT == 'true'
@@ -115,6 +151,11 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "13.3"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY_ID: ${{ env.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ env.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: npx tauri build --target ${{ matrix.target }}
 
       - name: Verify bundled AI runtime inside app bundle

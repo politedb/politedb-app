@@ -41,6 +41,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "./entitlements.mac.plist",
       "dmg": {
         "windowSize": {
           "width": 660,
