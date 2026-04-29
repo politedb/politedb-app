@@ -33,6 +33,10 @@ function getErrorMessage(err: unknown): string {
   return "Unknown error";
 }
 
+function isHiddenSystemKey(key: string): boolean {
+  return key.startsWith("license_state_key_v");
+}
+
 function EmptyState(props: { hasSearch: boolean }) {
   const { hasSearch } = props;
 
@@ -164,8 +168,9 @@ export function KeychainSection(props: {
     setMessage(null);
     try {
       const imported = await secretsList();
-      setKeys(imported);
-      setMessage(`Imported ${imported.length} key(s).`);
+      const visible = imported.filter((k) => !isHiddenSystemKey(k));
+      setKeys(visible);
+      setMessage(`Imported ${visible.length} key(s).`);
     } catch (e) {
       setError(getErrorMessage(e));
     } finally {
@@ -220,7 +225,10 @@ export function KeychainSection(props: {
   const canSubmit = tauriReady && !busy;
   const filteredKeys = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const matched = !q ? keys : keys.filter((k) => k.toLowerCase().includes(q));
+    const visible = keys.filter((k) => !isHiddenSystemKey(k));
+    const matched = !q
+      ? visible
+      : visible.filter((k) => k.toLowerCase().includes(q));
     return [...matched].sort((a, b) =>
       sortMode === "label-desc"
         ? b.localeCompare(a)

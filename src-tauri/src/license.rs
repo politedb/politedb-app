@@ -1,3 +1,8 @@
+use aes_gcm::aead::rand_core::RngCore;
+use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -7,6 +12,9 @@ use crate::file_storage as storage;
 
 const LICENSE_STATE_VERSION: u32 = 1;
 const TRIAL_DURATION_DAYS: i64 = 14;
+const LICENSE_CRYPTO_KEY_VERSION: u32 = 1;
+const LICENSE_STATE_NONCE_SIZE: usize = 12;
+const LICENSE_STATE_KEY_SIZE: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseDeviceInfo {
@@ -38,6 +46,13 @@ pub struct LicenseState {
     pub trial_started_at: Option<i64>,
     pub trial_expires_at: Option<i64>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EncryptedLicenseState {
+    version: u32,
+    nonce_b64: String,
+    ciphertext_b64: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +110,139 @@ fn parse_license_api_response(text: &str) -> Result<LicenseApiResponse, String> 
             format!("{direct_err}; raw body: {text}; nested parse error: {nested_err}")
         })
     })
+}
+
+fn fallback_device_key(device_id: &str) -> [u8; LICENSE_STATE_KEY_SIZE] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"politedb-license-state-fallback:");
+    hasher.update(device_id.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = [0u8; LICENSE_STATE_KEY_SIZE];
+    out.copy_from_slice(&digest[..LICENSE_STATE_KEY_SIZE]);
+    out
+}
+
+fn key_from_keyring_or_fallback(
+    app: &tauri::AppHandle,
+    device_id: &str,
+) -> [u8; LICENSE_STATE_KEY_SIZE] {
+    let key_name = format!("license_state_key_v{LICENSE_CRYPTO_KEY_VERSION}_{device_id}");
+
+    if let Ok(raw) = crate::security::secrets::keychain_get(app, &key_name) {
+        let decoded = BASE64_STANDARD.decode(raw.as_bytes()).ok();
+        if let Some(bytes) = decoded {
+            if bytes.len() == LICENSE_STATE_KEY_SIZE {
+                let mut key = [0u8; LICENSE_STATE_KEY_SIZE];
+                key.copy_from_slice(&bytes);
+                return key;
+            }
+        }
+    }
+
+    let mut fresh = [0u8; LICENSE_STATE_KEY_SIZE];
+    OsRng.fill_bytes(&mut fresh);
+    let encoded = BASE64_STANDARD.encode(fresh);
+    if crate::security::secrets::keychain_set(app, &key_name, &encoded).is_ok() {
+        return fresh;
+    }
+
+    fallback_device_key(device_id)
+}
+
+fn encrypt_license_state(
+    state: &LicenseState,
+    key: &[u8; LICENSE_STATE_KEY_SIZE],
+) -> Result<EncryptedLicenseState, String> {
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| format!("Failed to initialize state cipher: {e}"))?;
+    let plaintext =
+        serde_json::to_vec(state).map_err(|e| format!("Failed to serialize state: {e}"))?;
+    let mut nonce = [0u8; LICENSE_STATE_NONCE_SIZE];
+    OsRng.fill_bytes(&mut nonce);
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
+        .map_err(|e| format!("Failed to encrypt state: {e}"))?;
+
+    Ok(EncryptedLicenseState {
+        version: LICENSE_CRYPTO_KEY_VERSION,
+        nonce_b64: BASE64_STANDARD.encode(nonce),
+        ciphertext_b64: BASE64_STANDARD.encode(ciphertext),
+    })
+}
+
+fn decrypt_license_state(
+    encrypted: &EncryptedLicenseState,
+    key: &[u8; LICENSE_STATE_KEY_SIZE],
+) -> Result<LicenseState, String> {
+    if encrypted.version != LICENSE_CRYPTO_KEY_VERSION {
+        return Err(format!(
+            "Unsupported encrypted state version: {}",
+            encrypted.version
+        ));
+    }
+
+    let nonce = BASE64_STANDARD
+        .decode(encrypted.nonce_b64.as_bytes())
+        .map_err(|e| format!("Failed to decode state nonce: {e}"))?;
+    if nonce.len() != LICENSE_STATE_NONCE_SIZE {
+        return Err("Invalid state nonce length".to_string());
+    }
+
+    let ciphertext = BASE64_STANDARD
+        .decode(encrypted.ciphertext_b64.as_bytes())
+        .map_err(|e| format!("Failed to decode state ciphertext: {e}"))?;
+
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| format!("Failed to initialize state cipher: {e}"))?;
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|e| format!("Failed to decrypt state: {e}"))?;
+
+    serde_json::from_slice::<LicenseState>(&plaintext)
+        .map_err(|e| format!("Failed to parse decrypted state JSON: {e}"))
+}
+
+fn read_license_state_raw(path: &std::path::Path) -> Result<Option<Vec<u8>>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("Failed to read license state: {e}"))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(bytes))
+}
+
+fn license_state_load_from_disk(
+    app: &tauri::AppHandle,
+    path: &std::path::Path,
+    device: &LicenseDeviceInfo,
+) -> Result<Option<LicenseState>, String> {
+    let Some(raw) = read_license_state_raw(path)? else {
+        return Ok(None);
+    };
+
+    if let Ok(encrypted) = serde_json::from_slice::<EncryptedLicenseState>(&raw) {
+        let key = key_from_keyring_or_fallback(app, &device.device_id);
+        let state = decrypt_license_state(&encrypted, &key)?;
+        return Ok(Some(state));
+    }
+
+    // Backward compatibility: allow loading old plaintext once, then caller will rewrite encrypted.
+    let plaintext = serde_json::from_slice::<LicenseState>(&raw)
+        .map_err(|e| format!("Failed to parse legacy license state: {e}"))?;
+    Ok(Some(plaintext))
+}
+
+fn license_state_save_to_disk(
+    app: &tauri::AppHandle,
+    path: &std::path::Path,
+    state: &LicenseState,
+    device: &LicenseDeviceInfo,
+) -> Result<(), String> {
+    let key = key_from_keyring_or_fallback(app, &device.device_id);
+    let encrypted = encrypt_license_state(state, &key)?;
+    storage::json_write_atomic(path, &encrypted)
 }
 
 impl LicenseState {
@@ -310,14 +458,14 @@ pub fn license_device_info() -> LicenseDeviceInfo {
 pub fn license_state_load(app: &tauri::AppHandle) -> Result<LicenseState, String> {
     let device = license_device_info();
     let path = storage::path_license_state(app)?;
-    let value = storage::json_read_if_exists::<LicenseState>(&path)?;
+    let value = license_state_load_from_disk(app, &path, &device)?;
     let existing = value.filter(|state| state.version == LICENSE_STATE_VERSION);
     let next = apply_local_expiry(
         existing
             .unwrap_or_else(|| LicenseState::inactive(&device))
             .with_device(&device),
     );
-    storage::json_write_atomic(&path, &next)?;
+    license_state_save_to_disk(app, &path, &next, &device)?;
     Ok(next)
 }
 
@@ -328,14 +476,14 @@ pub fn license_state_save(
     let device = license_device_info();
     let next = apply_local_expiry(state.with_device(&device));
     let path = storage::path_license_state(app)?;
-    storage::json_write_atomic(&path, &next)?;
+    license_state_save_to_disk(app, &path, &next, &device)?;
     Ok(next)
 }
 
 pub fn license_state_clear(app: &tauri::AppHandle) -> Result<LicenseState, String> {
     let device = license_device_info();
     let path = storage::path_license_state(app)?;
-    let previous = storage::json_read_if_exists::<LicenseState>(&path)?;
+    let previous = license_state_load_from_disk(app, &path, &device)?;
     let mut next = LicenseState::inactive(&device);
 
     if let Some(previous) = previous {
@@ -343,7 +491,7 @@ pub fn license_state_clear(app: &tauri::AppHandle) -> Result<LicenseState, Strin
         next.trial_expires_at = previous.trial_expires_at.or(next.trial_expires_at);
     }
 
-    storage::json_write_atomic(&path, &next)?;
+    license_state_save_to_disk(app, &path, &next, &device)?;
     Ok(apply_local_expiry(next))
 }
 
