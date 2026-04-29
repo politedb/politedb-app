@@ -59,6 +59,19 @@ npm run tauri build
 
 The CI release workflow is defined in `.github/workflows/release.yml` and runs on tags matching `v*`.
 
+Build Linux artifacts with Docker Compose:
+
+```bash
+docker compose -f docker-compose.linux-build.yml build
+docker compose -f docker-compose.linux-build.yml run --rm tauri-linux-builder
+```
+
+Output files are copied to your host machine at:
+
+- `artifacts/linux/`
+
+This approach is useful when your host OS is not Linux but you need Linux bundles (`.deb`, `.AppImage`, etc.).
+
 ## Releasing
 
 1. Ensure app versions are updated where needed (for example `package.json` and `src-tauri/tauri.conf.json`).

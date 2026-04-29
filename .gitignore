@@ -35,3 +35,4 @@ dataset-sample
 src-tauri/resources/ai/bin/
 src-tauri/resources/ai/models/
 !src-tauri/resources/ai/README.md
+artifacts/

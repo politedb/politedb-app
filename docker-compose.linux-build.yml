@@ -1,0 +1,34 @@
+services:
+  tauri-linux-builder:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/linux-build.Dockerfile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - cargo-registry:/root/.cargo/registry
+      - cargo-git:/root/.cargo/git
+      - target-cache:/workspace/src-tauri/target
+      - node-modules:/workspace/node_modules
+    environment:
+      - CI=true
+    command: >
+      bash -lc "set -e;
+      npm ci --include=dev;
+      set +e;
+      npm run tauri build;
+      BUILD_EXIT=$?;
+      set -e;
+      rm -rf /workspace/artifacts/linux;
+      mkdir -p /workspace/artifacts/linux;
+      if [ -d /workspace/src-tauri/target/release/bundle ]; then
+        cp -R /workspace/src-tauri/target/release/bundle/. /workspace/artifacts/linux/;
+      fi;
+      exit $$BUILD_EXIT"
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  target-cache:
+  node-modules:
