@@ -41,8 +41,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "signingIdentity": "Developer ID Application: Son Pham (JCV2248FMN)",
+      "entitlements": "entitlements.mac.plist",
       "hardenedRuntime": true,
-      "entitlements": "./entitlements.mac.plist",
       "dmg": {
         "windowSize": {
           "width": 660,

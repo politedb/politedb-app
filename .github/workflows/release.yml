@@ -24,7 +24,10 @@ jobs:
       APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
 
     strategy:
       matrix:
@@ -81,12 +84,13 @@ jobs:
           echo "Apple API key id set: $([ -n "${APPLE_API_KEY_ID:-}" ] && echo yes || echo no)"
           echo "Apple API issuer set: $([ -n "${APPLE_API_ISSUER:-}" ] && echo yes || echo no)"
           echo "Apple team id set: $([ -n "${APPLE_TEAM_ID:-}" ] && echo yes || echo no)"
+          echo "Apple API key content set: $([ -n "${APPLE_API_KEY_CONTENT:-}" ] && echo yes || echo no)"
 
       - name: Prepare Apple API key env
-        if: env.APPLE_API_KEY != ''
+        if: env.APPLE_API_KEY_CONTENT != ''
         shell: bash
         env:
-          APPLE_API_KEY_CONTENT: ${{ env.APPLE_API_KEY }}
+          APPLE_API_KEY_CONTENT: ${{ env.APPLE_API_KEY_CONTENT }}
         run: |
           set -euo pipefail
 
@@ -103,14 +107,73 @@ jobs:
           KEY_DIR="$RUNNER_TEMP/apple-api-key"
           KEY_PATH="$KEY_DIR/AuthKey_${APPLE_API_KEY_ID}.p8"
           mkdir -p "$KEY_DIR"
-          printf '%s' "$APPLE_API_KEY_CONTENT" > "$KEY_PATH"
+          printf '%s' "$APPLE_API_KEY_CONTENT" | perl -pe 's/\\n/\n/g' | tr -d '\r' > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
 
-          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_PATH"; then
+            echo "APPLE_API_KEY must contain the .p8 private key content, not the key id or a local file path."
+            exit 1
+          fi
+
+          # Tauri expects APPLE_API_KEY to be the App Store Connect key id.
+          echo "APPLE_API_KEY=${APPLE_API_KEY_ID}" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY_ID=${APPLE_API_KEY_ID}" >> "$GITHUB_ENV"
           echo "APPLE_API_ISSUER=${APPLE_API_ISSUER}" >> "$GITHUB_ENV"
           echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}" >> "$GITHUB_ENV"
+
+          echo "Prepared Apple API key file: ${KEY_PATH}"
+
+      - name: Validate macOS signing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY_ID APPLE_API_ISSUER APPLE_TEAM_ID APPLE_API_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret/env: ${name}"
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            echo "macOS signing/notarization secrets are incomplete. Refusing to publish unsigned artifact."
+            exit 1
+          fi
+
+      - name: Validate Apple notarization credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun notarytool history \
+            --key "$APPLE_API_KEY_PATH" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            >/dev/null
+
+      - name: Import Apple signing certificate
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_CONTENT: ${{ env.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_VALUE: ${{ env.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/apple-certificate.p12"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+
+          echo "$APPLE_CERTIFICATE_CONTENT" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD_VALUE" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "APPLE_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       - name: Download bundled AI runtime
         if: env.BUNDLE_AI_ASSISTANT == 'true'
@@ -136,7 +199,7 @@ jobs:
           set -euo pipefail
           test -f src-tauri/resources/ai/bin/macos/llama-server
           ls -lh src-tauri/resources/ai/bin/macos/llama-server
-          find src-tauri/resources/ai/bin/macos -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
+          find src-tauri/resources/ai/bin/macos -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
           otool -L src-tauri/resources/ai/bin/macos/llama-server
           otool -l src-tauri/resources/ai/bin/macos/llama-server | grep -n -E "LC_RPATH|[[:space:]]path "
           if [ "${BUNDLE_AI_MODEL}" = "true" ]; then
@@ -146,18 +209,91 @@ jobs:
             echo "Skipping bundled model verification"
           fi
 
+      - name: Sign bundled AI runtime
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/sign-macos-libs.sh
+          ./scripts/sign-macos-libs.sh
+
       - name: Build Tauri
         env:
           NODE_ENV: production
           MACOSX_DEPLOYMENT_TARGET: "13.3"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_API_KEY: ${{ env.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
-          APPLE_API_KEY_ID: ${{ env.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ env.APPLE_API_ISSUER }}
-          APPLE_TEAM_ID: ${{ env.APPLE_TEAM_ID }}
         run: npx tauri build --target ${{ matrix.target }}
+
+      # Tauri notarizes/staples the .app; the .dmg is produced afterward and often has no stapled ticket.
+      - name: Notarize and staple DMG (if needed)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DMG_PATH="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.dmg' -print | head -n 1)"
+          if [ -z "${DMG_PATH}" ] || [ ! -f "${DMG_PATH}" ]; then
+            echo "Could not find DMG under src-tauri/target for ${{ matrix.target }}"
+            exit 1
+          fi
+
+          echo "DMG path: ${DMG_PATH}"
+
+          if xcrun stapler validate "${DMG_PATH}" >/dev/null 2>&1; then
+            echo "DMG already has a stapled notarization ticket; skipping submit."
+            exit 0
+          fi
+
+          echo "Submitting DMG for notarization, then stapling..."
+          xcrun notarytool submit "${DMG_PATH}" \
+            --key "${APPLE_API_KEY_PATH}" \
+            --key-id "${APPLE_API_KEY_ID}" \
+            --issuer "${APPLE_API_ISSUER}" \
+            ${APPLE_TEAM_ID:+--team-id "${APPLE_TEAM_ID}"} \
+            --wait
+
+          xcrun stapler staple "${DMG_PATH}"
+
+      - name: Verify code signing and notarization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Available bundle artifacts:"
+          find "src-tauri/target" -path '*/release/bundle/*' -print || true
+
+          APP_PATH="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type d -name '*.app' -print | head -n 1)"
+          DMG_PATH="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.dmg' -print | head -n 1)"
+
+          if [ -z "${APP_PATH}" ] || [ ! -e "${APP_PATH}" ]; then
+            UPDATE_ARCHIVE="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.tar.gz' -print | head -n 1)"
+            if [ -n "${UPDATE_ARCHIVE}" ] && [ -f "${UPDATE_ARCHIVE}" ]; then
+              EXTRACT_DIR="$RUNNER_TEMP/app-bundle-${{ matrix.target }}"
+              mkdir -p "${EXTRACT_DIR}"
+              tar -xzf "${UPDATE_ARCHIVE}" -C "${EXTRACT_DIR}"
+              APP_PATH="$(find "${EXTRACT_DIR}" -type d -name '*.app' -print | head -n 1)"
+            fi
+          fi
+
+          if [ -z "${APP_PATH}" ] || [ ! -e "${APP_PATH}" ]; then
+            echo "Could not find app bundle for verification in bundle output or updater archive."
+            exit 1
+          fi
+
+          if [ -z "${DMG_PATH}" ] || [ ! -e "${DMG_PATH}" ]; then
+            echo "Could not find dmg for verification."
+            exit 1
+          fi
+
+          echo "Verifying app signature: ${APP_PATH}"
+          codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+          xcrun stapler validate "${APP_PATH}"
+
+          echo "Verifying dmg notarization ticket: ${DMG_PATH}"
+          xcrun stapler validate "${DMG_PATH}"
+          spctl -a -vv -t open --context context:primary-signature "${DMG_PATH}"
 
       - name: Verify bundled AI runtime inside app bundle
         if: env.BUNDLE_AI_ASSISTANT == 'true'
@@ -165,9 +301,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)"
+          APP_PATH="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type d -name '*.app' -print | head -n 1)"
           if [ -z "${APP_PATH}" ]; then
-            echo "Could not find built .app bundle."
+            UPDATE_ARCHIVE="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.tar.gz' -print | head -n 1)"
+            if [ -n "${UPDATE_ARCHIVE}" ] && [ -f "${UPDATE_ARCHIVE}" ]; then
+              EXTRACT_DIR="$RUNNER_TEMP/ai-app-bundle-${{ matrix.target }}"
+              mkdir -p "${EXTRACT_DIR}"
+              tar -xzf "${UPDATE_ARCHIVE}" -C "${EXTRACT_DIR}"
+              APP_PATH="$(find "${EXTRACT_DIR}" -type d -name '*.app' -print | head -n 1)"
+            fi
+          fi
+
+          if [ -z "${APP_PATH}" ]; then
+            echo "Could not find built .app bundle in bundle output or updater archive."
+            echo "Available bundle artifacts:"
+            find "src-tauri/target" -path '*/release/bundle/*' -print || true
             exit 1
           fi
 
@@ -182,14 +330,14 @@ jobs:
           if [ -z "${LLAMA_BIN}" ]; then
             echo "Bundled llama-server was not found inside ${RESOURCE_DIR}"
             echo "Resource tree:"
-            find "${RESOURCE_DIR}" -maxdepth 5 -print
+            find "${RESOURCE_DIR}" -print
             exit 1
           fi
 
           echo "Found bundled llama-server:"
           ls -lh "${LLAMA_BIN}"
           echo "Sibling AI runtime libraries inside app bundle:"
-          find "$(dirname "${LLAMA_BIN}")" -maxdepth 1 -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
+          find "$(dirname "${LLAMA_BIN}")" -type f \( -name '*.dylib' -o -name '*.so' -o -name '*.dll' \) -print
           otool -L "${LLAMA_BIN}"
           otool -l "${LLAMA_BIN}" | grep -n -E "LC_RPATH|[[:space:]]path "
 
@@ -220,7 +368,7 @@ jobs:
               ;;
           esac
 
-          UPDATE_FILE="$(ls src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz | head -n 1)"
+          UPDATE_FILE="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.tar.gz' -print | head -n 1)"
           SIG_FILE="${UPDATE_FILE}.sig"
           if [ ! -f "${SIG_FILE}" ]; then
             echo "Missing updater signature: ${SIG_FILE}"
@@ -247,7 +395,7 @@ jobs:
               ;;
           esac
 
-          UPDATE_FILE="$(ls src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz | head -n 1)"
+          UPDATE_FILE="$(find "src-tauri/target" -path "*/${{ matrix.target }}/*" -type f -name '*.tar.gz' -print | head -n 1)"
           SIG_FILE="${UPDATE_FILE}.sig"
           if [ ! -f "${SIG_FILE}" ]; then
             echo "Missing updater signature: ${SIG_FILE}"
