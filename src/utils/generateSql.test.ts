@@ -3,7 +3,8 @@ import { generateUpdateSqlFromPatches } from "./generateSql";
 
 function mysqlJsonDisplayLiteral(value: unknown) {
   const json = typeof value === "string" ? value : JSON.stringify(value);
-  return `'${json
+  const mysqlSafeJson = json.replace(/'/g, "\\u0027");
+  return `'${mysqlSafeJson
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
     .replace(/'/g, "\\'")}'`;
@@ -237,5 +238,37 @@ describe("generateUpdateSqlFromPatches", () => {
     );
     expect(sql[0]).toContain(']}}');
     expect(sql[0]).toContain("WHERE `id` = 1;");
+  });
+
+  it("replaces apostrophes in MySQL JSON payload with unicode escape", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: {
+                regex: "password\\s*[:=]\\s*[\"'][^\"'\\n]{8,}[\"']",
+              },
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain("\\u0027");
+    expect(sql[0]).not.toContain("[\\\"\\']");
   });
 });

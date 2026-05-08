@@ -78,6 +78,11 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
 
     // ---- In single quotes '
     if (inSingle) {
+      if (ch === "\\") {
+        // MySQL-style backslash escapes inside string literal (e.g. \', \", \\)
+        i += 2;
+        continue;
+      }
       if (ch === "'") {
         // SQL standard escape: '' inside strings
         if (next === "'") {
@@ -92,6 +97,11 @@ export function splitSqlStatements(sql: string): SplitStmt[] {
 
     // ---- In double quotes "
     if (inDouble) {
+      if (ch === "\\") {
+        // Support backslash escapes in engines that allow it.
+        i += 2;
+        continue;
+      }
       if (ch === '"') {
         // SQL standard escape: "" inside identifiers/strings
         if (next === '"') {

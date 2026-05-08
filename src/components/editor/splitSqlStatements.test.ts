@@ -117,4 +117,17 @@ describe("splitSqlStatements", () => {
       "select `m;``n` as k",
     ]);
   });
+
+  it("does not split on semicolon inside MySQL escaped JSON string", () => {
+    const sql = [
+      "UPDATE `t`",
+      "SET `json_value` = '{\\\"decorators\\\":{\\\"load\\\":[\\\"SELECT hostname AS hostname FROM system_info;\\\"]}}';",
+      "select * from `t`;",
+    ].join("\n");
+
+    const out = splitSqlStatements(sql).map((s) => s.text);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain("system_info;");
+    expect(out[1]).toBe("select * from `t`");
+  });
 });

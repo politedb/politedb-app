@@ -84,7 +84,8 @@ function stringifyJsonValue(value: any): string {
 }
 
 function mysqlJsonLiteral(jsonText: string): string {
-  return `'${jsonText
+  const mysqlSafeJson = jsonText.replace(/'/g, "\\u0027");
+  return `'${mysqlSafeJson
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"')
     .replace(/'/g, "\\'")}'`;

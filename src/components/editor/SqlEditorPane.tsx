@@ -15,6 +15,7 @@ import {
   matchesShortcut,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
+import { splitSqlStatements } from "./splitSqlStatements";
 
 type Props = {
   win: SqlEditorWindow;
@@ -98,44 +99,50 @@ function getSelectedOrCurrentSql(
     return { mode: "selection" as const, sql, range: sel };
   }
 
-  const pos = preferredPosition ?? editor.getPosition();
-  if (!pos) return { mode: "none" as const, sql: "", range: null };
-
   const full = model.getValue();
   if (!full.trim()) return { mode: "none" as const, sql: "", range: null };
 
-  const maxIndex = Math.max(0, full.length - 1);
-  let probe = Math.min(model.getOffsetAt(pos), maxIndex);
+  const pos = preferredPosition ?? editor.getPosition();
+  if (pos) {
+    const maxIndex = Math.max(0, full.length - 1);
+    let probe = Math.min(model.getOffsetAt(pos), maxIndex);
 
-  while (probe > 0 && /[\s;]/.test(full[probe] ?? "")) {
-    probe -= 1;
+    // If cursor is right after a statement terminator (`;`) or on trailing
+    // whitespace/newline after it, prefer the previous statement.
+    if (probe > 0 && (full[probe] === ";" || /\s/.test(full[probe] ?? ""))) {
+      let j = probe;
+      while (j > 0 && /\s/.test(full[j] ?? "")) j -= 1;
+      if (full[j] === ";") j -= 1;
+      while (j > 0 && /\s/.test(full[j] ?? "")) j -= 1;
+      probe = Math.max(0, j);
+    }
+
+    const statements = splitSqlStatements(full);
+    const current =
+      statements.find((stmt) => probe >= stmt.start && probe <= stmt.end) ??
+      statements.find((stmt) => probe >= stmt.start && probe < stmt.end) ??
+      null;
+
+    if (current?.text?.trim()) {
+      const startPos = model.getPositionAt(current.start);
+      const endPos = model.getPositionAt(current.end);
+      return {
+        mode: "current" as const,
+        sql: current.text.trim(),
+        range: new monaco.Range(
+          startPos.lineNumber,
+          startPos.column,
+          endPos.lineNumber,
+          endPos.column
+        ),
+      };
+    }
   }
-  while (probe < maxIndex && /[\s;]/.test(full[probe] ?? "")) {
-    probe += 1;
-  }
-
-  if (/[\s;]/.test(full[probe] ?? "")) {
-    return { mode: "none" as const, sql: "", range: null };
-  }
-
-  const left = full.slice(0, probe);
-  const right = full.slice(probe);
-
-  const start = left.lastIndexOf(";") + 1;
-  const endRel = right.indexOf(";");
-  const end = endRel === -1 ? full.length : probe + endRel;
-  const startPos = model.getPositionAt(start);
-  const endPos = model.getPositionAt(end);
 
   return {
-    mode: "current" as const,
-    sql: full.slice(start, end).trim(),
-    range: new monaco.Range(
-      startPos.lineNumber,
-      startPos.column,
-      endPos.lineNumber,
-      endPos.column
-    ),
+    mode: "all" as const,
+    sql: full.trim(),
+    range: model.getFullModelRange(),
   };
 }
 
