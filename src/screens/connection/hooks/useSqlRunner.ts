@@ -144,13 +144,6 @@ export function useSqlRunner(args: {
         const effectiveMode =
           sqlSafetyMode === "lock" || isProfileLocked ? "lock" : sqlSafetyMode;
 
-        if (effectiveMode === "default") {
-          const confirmed = window.confirm(
-            "Do you want to send this query?"
-          );
-          if (!confirmed) return;
-        }
-
         if (effectiveMode === "safe") {
           try {
             await securityTouchIdAuthenticate(
