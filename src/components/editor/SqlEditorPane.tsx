@@ -147,7 +147,9 @@ function getSelectedOrCurrentSql(
 }
 
 export function SqlEditorPane(props: Props) {
-  const saveShortcut = useKeyboardShortcutsStore((s) => s.shortcuts.saveChanges);
+  const saveShortcut = useKeyboardShortcutsStore(
+    (s) => s.shortcuts.saveChanges
+  );
   const {
     win,
     onCommitContent,
@@ -239,7 +241,7 @@ export function SqlEditorPane(props: Props) {
         },
       ]
     );
-   };
+  };
 
   const flushDraft = async () => {
     const full = getFullSql();

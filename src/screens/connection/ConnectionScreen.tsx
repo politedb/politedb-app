@@ -183,6 +183,11 @@ export function ConnectionScreen() {
     return s.tableDataMap[k]?.connectionId || undefined;
   });
 
+  const newTableDrafts = useConnectionStore((s) => {
+    if (!activeProfileScreen) return {};
+    return s.newTableData[activeProfileScreen] ?? {};
+  });
+
   /* =============================================================================
    * Schema/tables panel (depends on runtimeConnectionId + metaKey)
    * ============================================================================= */
@@ -211,6 +216,71 @@ export function ConnectionScreen() {
           ? `db ${profile?.input?.redis?.db ?? 0}`
           : "",
   });
+
+  const sidebarTables = useMemo(() => {
+    const base = [...filteredTables];
+    const draftTables = activeWindows
+      .filter(
+        (
+          w
+        ): w is Extract<(typeof activeWindows)[number], { type: "table" }> =>
+          w.type === "table" && !!w.table?.new
+      )
+      .map((w) => w.table)
+      .filter((t) => !activeSchema || t.schema === activeSchema)
+      .filter((t) => {
+        const q = tableSearchQuery.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
+        );
+      });
+
+    const persistedDraftTables = Object.entries(newTableDrafts)
+      .map(([windowId, data]) => {
+        const rawName = data?.tableName?.trim() ?? "";
+        if (!rawName) return null;
+
+        // Window id format is usually "table:<schema>.<name>"
+        const key = windowId.startsWith("table:")
+          ? windowId.slice(6)
+          : windowId;
+        const dotIdx = key.indexOf(".");
+        const schemaFromWindow =
+          dotIdx > 0 ? key.slice(0, dotIdx).trim() : activeSchema;
+
+        return {
+          schema: schemaFromWindow || activeSchema,
+          name: rawName,
+          new: true,
+        } as TableItem;
+      })
+      .filter((t): t is TableItem => !!t)
+      .filter((t) => !activeSchema || t.schema === activeSchema)
+      .filter((t) => {
+        const q = tableSearchQuery.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
+        );
+      });
+
+    for (const draft of [...draftTables, ...persistedDraftTables]) {
+      if (
+        !base.some((t) => t.schema === draft.schema && t.name === draft.name)
+      ) {
+        base.push(draft);
+      }
+    }
+
+    return base;
+  }, [
+    filteredTables,
+    activeWindows,
+    newTableDrafts,
+    activeSchema,
+    tableSearchQuery,
+  ]);
 
   const loadError = useMemo(() => {
     return (
@@ -356,7 +426,10 @@ export function ConnectionScreen() {
 
       let targetWindowId = activeSqlWindow?.id;
       let current =
-        (targetWindowId ? getLiveSqlEditorContent(targetWindowId) : null)?.trim() ??
+        (targetWindowId
+          ? getLiveSqlEditorContent(targetWindowId)
+          : null
+        )?.trim() ??
         activeSqlWindow?.content?.trim() ??
         "";
       let title = activeSqlWindow?.title ?? "SQL Query";
@@ -387,14 +460,12 @@ export function ConnectionScreen() {
       }
 
       const merged = current ? `${current}\n\n${next}` : next;
-      useScreenStore.getState().updateSqlWindowContent(
-        activeProfileScreen,
-        targetWindowId,
-        {
+      useScreenStore
+        .getState()
+        .updateSqlWindowContent(activeProfileScreen, targetWindowId, {
           content: merged,
           title,
-        }
-      );
+        });
 
       for (let attempt = 0; attempt < 6; attempt += 1) {
         if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
@@ -592,7 +663,7 @@ export function ConnectionScreen() {
                       setTableSearchQuery={setTableSearchQuery}
                       expandedSections={expandedSections}
                       setExpandedSections={setExpandedSections}
-                      filteredTables={filteredTables}
+                      filteredTables={sidebarTables}
                       filteredFunctions={filteredFunctions}
                       activeWindowId={activeWindowId}
                     />

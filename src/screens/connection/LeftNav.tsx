@@ -345,6 +345,7 @@ export function LeftNav({
                     const hasChanges = windowHasPatchChanges(
                       dataPatchMap[profileId]?.[`table:${key}`]
                     );
+                    const isNewTable = !!table.new;
 
                     return (
                       <Button
@@ -366,6 +367,9 @@ export function LeftNav({
                           "transition-none",
                           !isActive &&
                             "hover:border-neutral-200/60! hover:bg-neutral-200/60 active:bg-neutral-200/60",
+                          isNewTable &&
+                            !isActive &&
+                            "bg-green-200 text-emerald-900 hover:border-green-200! hover:bg-green-200/80 active:border-green-200! active:bg-green-200/90",
                           hasChanges &&
                             !isActive &&
                             "border-amber-200 bg-amber-200 text-neutral-600 hover:border-amber-200! hover:bg-amber-200/60 active:bg-amber-200/80"
@@ -389,6 +393,7 @@ export function LeftNav({
                         )}
                         <TableName
                           className={cn(
+                            isNewTable && "bg-green-200 text-emerald-900",
                             hasChanges && "bg-amber-200 text-neutral-600"
                           )}
                           name={table.name}
