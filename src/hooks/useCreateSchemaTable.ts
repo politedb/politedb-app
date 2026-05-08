@@ -95,7 +95,13 @@ export function useCreateSchemaTable() {
         }
 
         const { schema, tableName, columns, primaryKey } = payload;
-        const query = createTableQuery(schema, tableName, columns, primaryKey);
+        const query = createTableQuery(
+          schema,
+          tableName,
+          columns,
+          primaryKey,
+          activeTab.engine
+        );
         addQueryHistory(activeTab.id, query);
 
         await runSqlQuery(connId, query);

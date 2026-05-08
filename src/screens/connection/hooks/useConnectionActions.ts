@@ -410,7 +410,8 @@ export function useConnectionActions(
       activeTableWindow.table.schema,
       tableName.trim(),
       validColumns,
-      primaryKey
+      primaryKey,
+      engine
     );
 
     return { data: [sql], error: null };

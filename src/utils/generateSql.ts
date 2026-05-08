@@ -28,31 +28,89 @@ function qIdent(ident: string, engine?: DatabaseEngine) {
   return `"${String(ident).replace(/"/g, `""`)}"`;
 }
 
-function qLiteral(v: any): string {
+function qLiteral(v: any, engine?: DatabaseEngine): string {
   if (v === null || v === undefined) {
     return "NULL";
   }
-  const str = String(v);
+  let str = String(v);
+  if (engine === "mysql" || engine === "mariadb") {
+    // Keep SQL readable while staying safe for MySQL string parser.
+    str = str.replace(/\\/g, "\\\\");
+  }
   // Escape single quotes
   return `'${str.replace(/'/g, "''")}'`;
 }
 
 /** PostgreSQL (and common) type names that expect numeric literals (unquoted) in SQL */
 const NUMERIC_TYPE_PATTERN =
-  /^(int2|int4|int8|smallint|integer|bigint|serial|bigserial|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?$/i;
+  /^(bit|tinyint|smallint|mediumint|int|integer|bigint|int2|int4|int8|serial|bigserial|float|double|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?(\s+unsigned)?$/i;
 
 function isNumericColumnType(dbType: string | undefined): boolean {
   if (!dbType || typeof dbType !== "string") return false;
   return NUMERIC_TYPE_PATTERN.test(dbType.trim());
 }
 
+function isJsonColumnType(dbType: string | undefined): boolean {
+  if (!dbType || typeof dbType !== "string") return false;
+  return /\bjsonb?\b/i.test(dbType.trim());
+}
+
+function stringifyJsonValue(value: any): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return "";
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        const nested = parsed.trim();
+        if (nested === "") return "";
+        try {
+          return JSON.stringify(JSON.parse(nested));
+        } catch {
+          return parsed;
+        }
+      }
+      return JSON.stringify(parsed);
+    } catch {
+      return value;
+    }
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function mysqlJsonLiteral(jsonText: string): string {
+  return `'${jsonText
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/'/g, "\\'")}'`;
+}
+
 /**
  * Format a value for use in SQL SET or WHERE. For numeric column types, outputs
  * unquoted numeric literal so PostgreSQL accepts it (e.g. SET price = 0 not SET price = '0').
  */
-function formatValue(value: any, dbType: string | undefined): string {
+function formatValue(
+  value: any,
+  dbType: string | undefined,
+  engine?: DatabaseEngine
+): string {
   if (value === null || value === undefined) {
     return "NULL";
+  }
+  if (isJsonColumnType(dbType)) {
+    const jsonText = stringifyJsonValue(value);
+    if (jsonText.trim() === "" || jsonText.trim().toLowerCase() === "null") {
+      return "NULL";
+    }
+    if (engine === "mysql" || engine === "mariadb") {
+      return mysqlJsonLiteral(jsonText);
+    }
+    return qLiteral(jsonText, engine);
   }
   if (typeof value === "boolean") {
     return value ? "TRUE" : "FALSE";
@@ -66,7 +124,7 @@ function formatValue(value: any, dbType: string | undefined): string {
     const n = Number(s);
     if (Number.isFinite(n)) return String(n);
   }
-  return qLiteral(value);
+  return qLiteral(value, engine);
 }
 
 /**
@@ -146,7 +204,7 @@ export function generateUpdateSqlFromPatches(
       if (!col) continue;
 
       setClauses.push(
-        `${qIdent(colName, engine)} = ${formatValue(newValue, col.db_type)}`
+        `${qIdent(colName, engine)} = ${formatValue(newValue, col.db_type, engine)}`
       );
     }
 
@@ -162,6 +220,13 @@ export function generateUpdateSqlFromPatches(
 
       // Skip if using primary key and this column is not a primary key
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
+        continue;
+      }
+      if (
+        !usePrimaryKey &&
+        (engine === "mysql" || engine === "mariadb") &&
+        isJsonColumnType(col.db_type)
+      ) {
         continue;
       }
 
@@ -188,7 +253,7 @@ export function generateUpdateSqlFromPatches(
           }
         }
         whereClauses.push(
-          `${colName} = ${formatValue(valueToCompare, col.db_type)}`
+          `${colName} = ${formatValue(valueToCompare, col.db_type, engine)}`
         );
       }
     }
@@ -232,7 +297,7 @@ export function generateInsertSqlFromPatches(
       if (colName === "__rowKey") continue; // Skip internal row key
       const col = columns?.find((c) => c.name === colName);
       colNames.push(qIdent(colName, engine));
-      values.push(formatValue(value, col?.db_type));
+      values.push(formatValue(value, col?.db_type, engine));
     }
 
     if (colNames.length === 0) {
@@ -702,6 +767,13 @@ export function generateDeleteSqlFromPatches(
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
         continue;
       }
+      if (
+        !usePrimaryKey &&
+        (engine === "mysql" || engine === "mariadb") &&
+        isJsonColumnType(col.db_type)
+      ) {
+        continue;
+      }
 
       const cellValue = originalRow[i];
       const originalValue = cellToString(cellValue);
@@ -726,7 +798,7 @@ export function generateDeleteSqlFromPatches(
           }
         }
         whereClauses.push(
-          `${colName} = ${formatValue(valueToCompare, col.db_type)}`
+          `${colName} = ${formatValue(valueToCompare, col.db_type, engine)}`
         );
       }
     }

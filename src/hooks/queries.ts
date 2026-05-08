@@ -846,11 +846,12 @@ export const createTableQuery = (
   schema: string,
   tableName: string,
   columns: TableColumn[],
-  primaryKey: string | string[]
+  primaryKey: string | string[],
+  engine?: DatabaseEngine
 ) => {
   const columnDefinitions = columns
     .map((col) => {
-      let def = `${qIdent(col.column_name)} ${col.data_type}`;
+      let def = `${qIdent(col.column_name, engine)} ${col.data_type}`;
 
       // Add NOT NULL constraint if specified
       if (col.is_nullable === "NOT NULL") {
@@ -884,11 +885,11 @@ export const createTableQuery = (
       : [];
   const primaryKeyConstraint =
     primaryKeyColumns.length > 0
-      ? `,\n      PRIMARY KEY (${primaryKeyColumns.map((key) => qIdent(key)).join(", ")})`
+      ? `,\n      PRIMARY KEY (${primaryKeyColumns.map((key) => qIdent(key, engine)).join(", ")})`
       : "";
 
   const queryStr = `
-    CREATE TABLE ${qIdent(schema)}.${qIdent(tableName)} (
+    CREATE TABLE ${qIdent(schema, engine)}.${qIdent(tableName, engine)} (
       ${columnDefinitions}${primaryKeyConstraint}
     );
   `;

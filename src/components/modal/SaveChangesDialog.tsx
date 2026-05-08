@@ -1,4 +1,4 @@
-import { useMemo } from "preact/hooks";
+import { useCallback, useMemo, useState } from "preact/hooks";
 import { Button } from "../common/Button";
 import {
   Dialog,
@@ -17,6 +17,7 @@ import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/QueryHistory";
 import type { DatabaseEngine } from "src/types";
+import { CopyCheck, CopyIcon } from "src/components/icons";
 
 type ChangeSummary = {
   inserts: number;
@@ -161,6 +162,7 @@ export function SaveChangesDialog({
   offset = 0,
 }: Props) {
   const isMongo = engine === "mongo";
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const summary = useMemo(
     () => analyzePatches(patchMap, engine, { activeScreen, getRowAt, offset }),
@@ -179,6 +181,14 @@ export function SaveChangesDialog({
     summary.structureChanges > 0 ||
     summary.constraintChanges > 0 ||
     newTableSql?.length > 0;
+
+  const onCopyStatement = useCallback(async (sql: string, index: number) => {
+    setCopiedIndex(index);
+    await navigator.clipboard.writeText(sql);
+    setTimeout(() => {
+      setCopiedIndex((current) => (current === index ? null : current));
+    }, 1000);
+  }, []);
 
   if (!hasChanges) {
     return null;
@@ -262,12 +272,34 @@ export function SaveChangesDialog({
                 {allSqlStatements.map((sql, index) => {
                   const sqlType = getSqlType(sql);
                   const borderColor = SQL_BORDER_COLORS[sqlType];
+                  const copied = copiedIndex === index;
                   return (
                     <div
                       key={index}
-                      class={`rounded border p-3 ${borderColor}`}
+                      class={`group relative rounded border p-3 ${borderColor}`}
                     >
-                      <div class="line-clamp-3 font-mono text-xs wrap-break-word">
+                      <div class="absolute top-2 right-2 z-10">
+                        <Button
+                          variant="ghost"
+                          class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
+                            copied
+                              ? "opacity-100"
+                              : "opacity-0 group-hover:opacity-100"
+                          } transition-opacity`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void onCopyStatement(sql, index);
+                          }}
+                          title={copied ? "Copied!" : "Copy statement"}
+                        >
+                          {copied ? (
+                            <CopyCheck className="size-3.5 text-green-700" />
+                          ) : (
+                            <CopyIcon className="size-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                      <div class="pr-8 line-clamp-3 font-mono text-xs wrap-break-word">
                         {highlightSql(sql)}
                       </div>
                     </div>
