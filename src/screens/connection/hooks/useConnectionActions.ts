@@ -21,6 +21,7 @@ import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
   type DataAction,
   type DataKey,
+  type NewTableDataState,
   useConnectionStore,
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
@@ -174,6 +175,12 @@ type NewTableLike = {
   columns: Array<{ column_name: string }>;
 };
 
+type NewTableDraftEntry = {
+  window: TableWindow;
+  data: NewTableDataState;
+  sql: string;
+};
+
 function isValidNewTable(v: unknown): v is NewTableLike {
   if (!v || typeof v !== "object") return false;
   const obj = v as Record<string, unknown>;
@@ -190,6 +197,45 @@ function isValidNewTable(v: unknown): v is NewTableLike {
   });
 
   return obj.tableName.trim().length > 0 && hasAnyCol;
+}
+
+function getNewTableDraftEntries(args: {
+  tabId: string;
+  openWindows: Record<string, OpenWindow[]>;
+  engine: DatabaseEngine | undefined;
+}): { data: NewTableDraftEntry[]; error: string | null } {
+  const s = useConnectionStore.getState();
+  const drafts = s.newTableData[args.tabId] ?? {};
+  const windows = args.openWindows[args.tabId] ?? [];
+  const windowsById = new Map(windows.map((w) => [w.id, w]));
+
+  const result: NewTableDraftEntry[] = [];
+
+  for (const [windowId, draft] of Object.entries(drafts)) {
+    const window = windowsById.get(windowId);
+    if (!window || window.type !== "table" || !window.table.new) continue;
+
+    if (!isValidNewTable(draft)) {
+      return { data: [], error: "Invalid new table data" };
+    }
+
+    const validColumns = draft.columns.filter((col) => col.column_name?.trim());
+    const tableName = draft.tableName.trim();
+
+    result.push({
+      window,
+      data: { ...draft, tableName, columns: validColumns },
+      sql: createTableQuery(
+        window.table.schema,
+        tableName,
+        validColumns,
+        draft.primaryKey,
+        args.engine
+      ),
+    });
+  }
+
+  return { data: result, error: null };
 }
 
 function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
@@ -217,6 +263,12 @@ function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
   }
 
   return false;
+}
+
+function getTabPatchMap(tabId: string): PatchMap | null {
+  const s = useConnectionStore.getState();
+  const tabPatchMap = (s.dataPatchMap[tabId] ?? {}) as unknown as PatchMap;
+  return patchMapHasAnyChanges(tabPatchMap) ? tabPatchMap : null;
 }
 
 function getOpenTableWindows(
@@ -265,7 +317,6 @@ export function useConnectionActions(
     closeWindow: closeWindowFn,
     removeTab,
     setActiveProfileScreen,
-    newTableSaveRef,
     refreshRuntimeConnection,
   } = args;
 
@@ -297,6 +348,16 @@ export function useConnectionActions(
     s.clearDataPatchMap(tabId, tableWindowId);
     s.clearNewTableData(tabId, tableWindowId);
   }, []);
+
+  const clearTablePatchChanges = useCallback(
+    (tabId: string, tableWindowId?: string) => {
+      const s = useConnectionStore.getState();
+      s.clearTableConstraints(tabId, tableWindowId);
+      s.clearTableStructure(tabId, tableWindowId);
+      s.clearDataPatchMap(tabId, tableWindowId);
+    },
+    []
+  );
 
   const tabHasChanges = useCallback((tabId: string): boolean => {
     const s = useConnectionStore.getState();
@@ -389,291 +450,83 @@ export function useConnectionActions(
   ]);
 
   const getNewTableSql = useCallback(() => {
-    if (!activeTableWindow) return { data: [], error: null };
+    const drafts = getNewTableDraftEntries({
+      tabId: activeProfileScreen,
+      openWindows,
+      engine,
+    });
 
-    const s = useConnectionStore.getState();
+    if (drafts.error) return { data: [], error: drafts.error };
 
-    // Check for new table data
-    const newTableData =
-      s.newTableData[activeProfileScreen]?.[activeTableWindow.id];
-
-    if (!newTableData) return { data: [], error: null };
-
-    const { tableName, columns, primaryKey } = newTableData;
-    const validColumns = columns.filter((col) => col.column_name?.trim());
-
-    if (!tableName?.trim() || validColumns.length === 0) {
-      return { data: [], error: "Invalid new table data" };
-    }
-
-    const sql = createTableQuery(
-      activeTableWindow.table.schema,
-      tableName.trim(),
-      validColumns,
-      primaryKey,
-      engine
-    );
-
-    return { data: [sql], error: null };
-  }, [activeProfileScreen, activeTableWindow]);
+    return { data: drafts.data.map((draft) => draft.sql), error: null };
+  }, [activeProfileScreen, openWindows, engine]);
 
   const getPatchMap = useCallback((): PatchMap | null => {
-    if (!activeTableWindow) return null;
+    return getTabPatchMap(activeProfileScreen);
+  }, [activeProfileScreen]);
 
-    const s = useConnectionStore.getState();
-    const tabPatchMap = (s.dataPatchMap[activeProfileScreen] ??
-      {}) as unknown as PatchMap;
+  const applyMongoPatchEntry = useCallback(
+    async (entry: PatchMapEntry) => {
+      const tableWindow = entry.tableWindow;
+      if (!runtimeConnectionId || !tableWindow) return;
 
-    const entry = (tabPatchMap as unknown as Record<string, unknown>)[
-      activeTableWindow.id
-    ] as PatchMapEntry | undefined;
+      const patches = entry.patches;
+      const createData = patches?.create?.data ?? {};
+      const updateData = patches?.update?.data ?? {};
+      const deleteData = patches?.delete?.data ?? {};
 
-    if (!entry) return null;
+      const hasUnsupportedPatches =
+        Object.keys(patches?.create?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.update?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
+        Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
+        Object.keys(patches?.delete?.constraints ?? {}).length > 0;
 
-    return { [activeTableWindow.id]: entry } as unknown as PatchMap;
-  }, [activeProfileScreen, activeTableWindow]);
+      if (hasUnsupportedPatches) {
+        throw new Error(
+          "Mongo does not support structure/constraint patches in table view."
+        );
+      }
 
-  const syncTableMeta = useCallback(
-    (targetTableName?: string) => {
-      if (!activeTableWindow) return;
-
-      const s = useConnectionStore.getState();
-      const tableNameToUse = targetTableName ?? activeTableWindow.table.name;
-
+      const store = useConnectionStore.getState();
       const key = tableKey(
         activeProfileScreen,
-        activeTableWindow.table.schema,
-        tableNameToUse
+        tableWindow.table.schema,
+        tableWindow.table.name
       );
-      const fresh = s.tableDataMap[key];
-      if (fresh) {
-        if (Array.isArray(fresh.structure)) {
-          s.setTableStructure(
-            activeProfileScreen,
-            activeTableWindow.id,
-            fresh.structure
-          );
-        }
-        if (Array.isArray(fresh.constraints)) {
-          s.setTableConstraints(
-            activeProfileScreen,
-            activeTableWindow.id,
-            fresh.constraints
-          );
-        }
+      const cols = store.tableDataMap[key]?.columns ?? [];
+      const idColIdx = cols.findIndex((c) => c.name === "_id");
+      if (idColIdx < 0) {
+        throw new Error("MONGO_ID_COLUMN_NOT_FOUND");
       }
-    },
-    [activeProfileScreen, activeTableWindow]
-  );
+      const cache = store.tableRowCacheByKey[key];
 
-  const applyPatchesForActiveWindow = useCallback(async () => {
-    if (isActiveTabLocked) return;
-    if (!activeTableWindow || !runtimeConnectionId) return;
+      const documents = Object.values(createData).map((patch) => {
+        const raw = (patch ?? {}) as Record<string, unknown>;
+        const doc: Record<string, unknown> = {};
 
-    try {
-      const onlyActive = getPatchMap();
-
-      if (!onlyActive) return;
-
-      const entry = onlyActive[activeTableWindow.id];
-
-      if (engine === "mongo") {
-        const patches = entry?.patches;
-        const createData = patches?.create?.data ?? {};
-        const updateData = patches?.update?.data ?? {};
-        const deleteData = patches?.delete?.data ?? {};
-
-        const hasUnsupportedPatches =
-          Object.keys(patches?.create?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.update?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
-          Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
-          Object.keys(patches?.delete?.constraints ?? {}).length > 0;
-
-        if (hasUnsupportedPatches) {
-          throw new Error(
-            "Mongo does not support structure/constraint patches in table view."
-          );
-        }
-
-        const store = useConnectionStore.getState();
-        const key = tableKey(
-          activeProfileScreen,
-          activeTableWindow.table.schema,
-          activeTableWindow.table.name
-        );
-        const cols = store.tableDataMap[key]?.columns ?? [];
-        const idColIdx = cols.findIndex((c) => c.name === "_id");
-        if (idColIdx < 0) {
-          throw new Error("MONGO_ID_COLUMN_NOT_FOUND");
-        }
-        const cache = store.tableRowCacheByKey[key];
-
-        const documents = Object.values(createData).map((patch) => {
-          const raw = (patch ?? {}) as Record<string, unknown>;
-          const doc: Record<string, unknown> = {};
-
-          for (const [k, v] of Object.entries(raw)) {
-            if (k === "__rowKey") continue;
-            if (k === "_id" && (v === null || String(v ?? "").trim() === "")) {
-              continue;
-            }
-            doc[k] = v;
+        for (const [k, v] of Object.entries(raw)) {
+          if (k === "__rowKey") continue;
+          if (k === "_id" && (v === null || String(v ?? "").trim() === "")) {
+            continue;
           }
-
-          return doc;
-        });
-
-        const updates = Object.entries(updateData)
-          .map(([rowKey, patch]) => {
-            const rowIndex = Number(rowKey);
-            if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
-
-            const raw = (patch ?? {}) as Record<string, unknown>;
-            if ("_id" in raw) {
-              throw new Error("Mongo _id is immutable and cannot be updated.");
-            }
-
-            const candidateIndices = [rowIndex, rowIndex + offset];
-            const resolvedIndex =
-              candidateIndices.find(
-                (idx) =>
-                  Boolean(cache?.map.get(idx)) ||
-                  Boolean(store.getRowAt(key, idx))
-              ) ?? rowIndex;
-
-            const originalRow = cache?.map.get(resolvedIndex);
-            const fallbackRow = store.getRowAt(key, resolvedIndex);
-            const sourceRow = Array.isArray(originalRow)
-              ? originalRow
-              : fallbackRow;
-            if (!sourceRow || !Array.isArray(sourceRow)) return null;
-
-            const idValue = mongoCellToValue(sourceRow[idColIdx]);
-            if (idValue == null || String(idValue).trim() === "") {
-              return null;
-            }
-
-            const set: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(raw)) {
-              if (k === "__rowKey" || k === "_id") continue;
-              set[k] = v;
-            }
-
-            if (Object.keys(set).length === 0) return null;
-            return { id: idValue, set };
-          })
-          .filter(Boolean) as Array<{
-          id: unknown;
-          set: Record<string, unknown>;
-        }>;
-
-        const deleteIds = Object.keys(deleteData)
-          .map((rowKey) => {
-            const rowIndex = Number(rowKey);
-            if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
-
-            const candidateIndices = [rowIndex, rowIndex + offset];
-            const resolvedIndex =
-              candidateIndices.find(
-                (idx) =>
-                  Boolean(cache?.map.get(idx)) ||
-                  Boolean(store.getRowAt(key, idx))
-              ) ?? rowIndex;
-
-            const originalRow = cache?.map.get(resolvedIndex);
-            const fallbackRow = store.getRowAt(key, resolvedIndex);
-            const sourceRow = Array.isArray(originalRow)
-              ? originalRow
-              : fallbackRow;
-            if (!sourceRow || !Array.isArray(sourceRow)) return null;
-
-            const idValue = mongoCellToValue(sourceRow[idColIdx]);
-            if (idValue == null || String(idValue).trim() === "") {
-              return null;
-            }
-            return idValue;
-          })
-          .filter((v) => v !== null) as unknown[];
-
-        if (documents.length > 0) {
-          await mongoInsertDocuments({
-            connectionId: runtimeConnectionId,
-            database: activeTableWindow.table.schema,
-            collection: activeTableWindow.table.name,
-            documents,
-          });
-        }
-        if (updates.length > 0) {
-          await mongoUpdateDocuments({
-            connectionId: runtimeConnectionId,
-            database: activeTableWindow.table.schema,
-            collection: activeTableWindow.table.name,
-            updates,
-          });
-        }
-        if (deleteIds.length > 0) {
-          await mongoDeleteDocuments({
-            connectionId: runtimeConnectionId,
-            database: activeTableWindow.table.schema,
-            collection: activeTableWindow.table.name,
-            ids: deleteIds,
-          });
+          doc[k] = v;
         }
 
-        clearChanges(activeProfileScreen, activeTableWindow.id);
-        await loadTableData(
-          activeTableWindow.table.schema,
-          activeTableWindow.table.name,
-          { limit, offset },
-          {
-            force: true,
-            refreshRows: true,
-            refreshMeta: true,
-            refreshStats: true,
-          }
-        );
-        return;
-      }
+        return doc;
+      });
 
-      if (engine === "redis") {
-        const patches = entry?.patches;
-        const createData = patches?.create?.data ?? {};
-        const updateData = patches?.update?.data ?? {};
-        const deleteData = patches?.delete?.data ?? {};
-
-        const hasUnsupportedPatches =
-          Object.keys(createData).length > 0 ||
-          Object.keys(deleteData).length > 0 ||
-          Object.keys(patches?.create?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.update?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
-          Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
-          Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
-          Object.keys(patches?.delete?.constraints ?? {}).length > 0;
-
-        if (hasUnsupportedPatches) {
-          throw new Error(
-            "Redis table view currently supports updating existing values only."
-          );
-        }
-
-        const store = useConnectionStore.getState();
-        const key = tableKey(
-          activeProfileScreen,
-          activeTableWindow.table.schema,
-          activeTableWindow.table.name
-        );
-        const cols = store.tableDataMap[key]?.columns ?? [];
-        const cache = store.tableRowCacheByKey[key];
-        const rowsByIndex = Object.entries(updateData);
-
-        for (const [rowKey, patch] of rowsByIndex) {
+      const updates = Object.entries(updateData)
+        .map(([rowKey, patch]) => {
           const rowIndex = Number(rowKey);
-          if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
+          if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
 
           const raw = (patch ?? {}) as Record<string, unknown>;
+          if ("_id" in raw) {
+            throw new Error("Mongo _id is immutable and cannot be updated.");
+          }
+
           const candidateIndices = [rowIndex, rowIndex + offset];
           const resolvedIndex =
             candidateIndices.find(
@@ -681,62 +534,220 @@ export function useConnectionActions(
                 Boolean(cache?.map.get(idx)) ||
                 Boolean(store.getRowAt(key, idx))
             ) ?? rowIndex;
-          const sourceRow =
-            cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
-          if (!sourceRow || !Array.isArray(sourceRow)) continue;
 
-          if (cols.length === 1 && cols[0]?.name === "value") {
-            if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
-            await runRedisCommand(runtimeConnectionId, "SET", [
-              activeTableWindow.table.name,
-              String(raw.value ?? ""),
-            ]);
-            continue;
+          const originalRow = cache?.map.get(resolvedIndex);
+          const fallbackRow = store.getRowAt(key, resolvedIndex);
+          const sourceRow = Array.isArray(originalRow)
+            ? originalRow
+            : fallbackRow;
+          if (!sourceRow || !Array.isArray(sourceRow)) return null;
+
+          const idValue = mongoCellToValue(sourceRow[idColIdx]);
+          if (idValue == null || String(idValue).trim() === "") {
+            return null;
           }
 
-          if (
-            cols.length >= 2 &&
-            cols[0]?.name === "field" &&
-            cols[1]?.name === "value"
-          ) {
-            if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
-            if (Object.prototype.hasOwnProperty.call(raw, "field")) {
-              throw new Error(
-                "Redis hash fields cannot be renamed from table view."
-              );
-            }
-            const fieldValue = String(sourceRow[0] ?? "");
-            await runRedisCommand(runtimeConnectionId, "HSET", [
-              activeTableWindow.table.name,
-              fieldValue,
-              String(raw.value ?? ""),
-            ]);
-            continue;
+          const set: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(raw)) {
+            if (k === "__rowKey" || k === "_id") continue;
+            set[k] = v;
           }
 
-          throw new Error("Redis edit is not supported for this key type yet.");
+          if (Object.keys(set).length === 0) return null;
+          return { id: idValue, set };
+        })
+        .filter(Boolean) as Array<{
+        id: unknown;
+        set: Record<string, unknown>;
+      }>;
+
+      const deleteIds = Object.keys(deleteData)
+        .map((rowKey) => {
+          const rowIndex = Number(rowKey);
+          if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
+
+          const candidateIndices = [rowIndex, rowIndex + offset];
+          const resolvedIndex =
+            candidateIndices.find(
+              (idx) =>
+                Boolean(cache?.map.get(idx)) ||
+                Boolean(store.getRowAt(key, idx))
+            ) ?? rowIndex;
+
+          const originalRow = cache?.map.get(resolvedIndex);
+          const fallbackRow = store.getRowAt(key, resolvedIndex);
+          const sourceRow = Array.isArray(originalRow)
+            ? originalRow
+            : fallbackRow;
+          if (!sourceRow || !Array.isArray(sourceRow)) return null;
+
+          const idValue = mongoCellToValue(sourceRow[idColIdx]);
+          if (idValue == null || String(idValue).trim() === "") {
+            return null;
+          }
+          return idValue;
+        })
+        .filter((v) => v !== null) as unknown[];
+
+      if (documents.length > 0) {
+        await mongoInsertDocuments({
+          connectionId: runtimeConnectionId,
+          database: tableWindow.table.schema,
+          collection: tableWindow.table.name,
+          documents,
+        });
+      }
+      if (updates.length > 0) {
+        await mongoUpdateDocuments({
+          connectionId: runtimeConnectionId,
+          database: tableWindow.table.schema,
+          collection: tableWindow.table.name,
+          updates,
+        });
+      }
+      if (deleteIds.length > 0) {
+        await mongoDeleteDocuments({
+          connectionId: runtimeConnectionId,
+          database: tableWindow.table.schema,
+          collection: tableWindow.table.name,
+          ids: deleteIds,
+        });
+      }
+    },
+    [activeProfileScreen, mongoCellToValue, offset, runtimeConnectionId]
+  );
+
+  const applyRedisPatchEntry = useCallback(
+    async (entry: PatchMapEntry) => {
+      const tableWindow = entry.tableWindow;
+      if (!runtimeConnectionId || !tableWindow) return;
+
+      const patches = entry.patches;
+      const createData = patches?.create?.data ?? {};
+      const updateData = patches?.update?.data ?? {};
+      const deleteData = patches?.delete?.data ?? {};
+
+      const hasUnsupportedPatches =
+        Object.keys(createData).length > 0 ||
+        Object.keys(deleteData).length > 0 ||
+        Object.keys(patches?.create?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.update?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
+        Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
+        Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
+        Object.keys(patches?.delete?.constraints ?? {}).length > 0;
+
+      if (hasUnsupportedPatches) {
+        throw new Error(
+          "Redis table view currently supports updating existing values only."
+        );
+      }
+
+      const store = useConnectionStore.getState();
+      const key = tableKey(
+        activeProfileScreen,
+        tableWindow.table.schema,
+        tableWindow.table.name
+      );
+      const cols = store.tableDataMap[key]?.columns ?? [];
+      const cache = store.tableRowCacheByKey[key];
+
+      for (const [rowKey, patch] of Object.entries(updateData)) {
+        const rowIndex = Number(rowKey);
+        if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
+
+        const raw = (patch ?? {}) as Record<string, unknown>;
+        const candidateIndices = [rowIndex, rowIndex + offset];
+        const resolvedIndex =
+          candidateIndices.find(
+            (idx) =>
+              Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
+          ) ?? rowIndex;
+        const sourceRow =
+          cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
+        if (!sourceRow || !Array.isArray(sourceRow)) continue;
+
+        if (cols.length === 1 && cols[0]?.name === "value") {
+          if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
+          await runRedisCommand(runtimeConnectionId, "SET", [
+            tableWindow.table.name,
+            String(raw.value ?? ""),
+          ]);
+          continue;
         }
 
-        clearChanges(activeProfileScreen, activeTableWindow.id);
-        await loadTableData(
-          activeTableWindow.table.schema,
-          activeTableWindow.table.name,
-          { limit, offset },
-          {
-            force: true,
-            refreshRows: true,
-            refreshMeta: true,
-            refreshStats: true,
+        if (
+          cols.length >= 2 &&
+          cols[0]?.name === "field" &&
+          cols[1]?.name === "value"
+        ) {
+          if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
+          if (Object.prototype.hasOwnProperty.call(raw, "field")) {
+            throw new Error(
+              "Redis hash fields cannot be renamed from table view."
+            );
           }
+          const fieldValue = String(sourceRow[0] ?? "");
+          await runRedisCommand(runtimeConnectionId, "HSET", [
+            tableWindow.table.name,
+            fieldValue,
+            String(raw.value ?? ""),
+          ]);
+          continue;
+        }
+
+        throw new Error("Redis edit is not supported for this key type yet.");
+      }
+    },
+    [activeProfileScreen, offset, runtimeConnectionId]
+  );
+
+  const applyPatchesForCurrentTab = useCallback(async () => {
+    if (isActiveTabLocked) return;
+    if (!runtimeConnectionId) return;
+
+    const patchMap = getTabPatchMap(activeProfileScreen);
+    if (!patchMap) return;
+
+    try {
+      const changedEntries = Object.values(
+        patchMap as unknown as Record<string, PatchMapEntry>
+      );
+
+      if (engine === "mongo" || engine === "redis") {
+        for (const entry of changedEntries) {
+          if (engine === "mongo") {
+            await applyMongoPatchEntry(entry);
+          } else {
+            await applyRedisPatchEntry(entry);
+          }
+        }
+
+        clearTablePatchChanges(activeProfileScreen);
+        await Promise.all(
+          changedEntries.map((entry) =>
+            loadTableData(
+              entry.tableWindow.table.schema,
+              entry.tableWindow.table.name,
+              { limit, offset },
+              {
+                force: true,
+                refreshRows: true,
+                refreshMeta: true,
+                refreshStats: true,
+              }
+            )
+          )
         );
         return;
       }
 
       const store = useConnectionStore.getState();
-      const sql = generateSqlFromPatches(onlyActive, engine ?? "postgres", {
+      const sql = generateSqlFromPatches(patchMap, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
         getRowAt: store.getRowAt,
       });
+
       if (!sql.length) {
         setError("An error occurred while applying patches.");
         return;
@@ -749,62 +760,69 @@ export function useConnectionActions(
         });
       }
 
-      clearChanges(activeProfileScreen, activeTableWindow.id);
+      clearTablePatchChanges(activeProfileScreen);
 
-      const { refreshRows, refreshMeta, refreshStats } =
-        inferRefreshFlagsFromEntry(entry);
+      let shouldRefreshSchema = false;
+      await Promise.all(
+        changedEntries.map(async (entry) => {
+          const tableWindow = entry.tableWindow;
+          if (!tableWindow) return;
 
-      let targetTableName = activeTableWindow.table.name;
-      const metadataPatch = entry?.patches?.update?.structure?.["-1"];
+          const metadataPatch = entry.patches?.update?.structure?.["-1"] as
+            | { tableName?: unknown }
+            | undefined;
+          const targetTableName =
+            metadataPatch &&
+            typeof metadataPatch.tableName === "string" &&
+            metadataPatch.tableName !== tableWindow.table.name
+              ? metadataPatch.tableName
+              : tableWindow.table.name;
 
-      if (
-        metadataPatch &&
-        typeof metadataPatch.tableName === "string" &&
-        metadataPatch.tableName !== activeTableWindow.table.name
-      ) {
-        targetTableName = metadataPatch.tableName;
-
-        const screenStore = useScreenStore.getState();
-        const windows = screenStore.openWindows[activeProfileScreen] ?? [];
-        const nextWindows = windows.map((w) => {
-          if (w.id === activeTableWindow.id && w.type === "table") {
-            return {
-              ...w,
-              table: { ...w.table, name: targetTableName },
-            };
+          if (targetTableName !== tableWindow.table.name) {
+            shouldRefreshSchema = true;
+            const screenStore = useScreenStore.getState();
+            const windows = screenStore.openWindows[activeProfileScreen] ?? [];
+            screenStore.replaceWindows(
+              activeProfileScreen,
+              windows.map((w) =>
+                w.id === tableWindow.id && w.type === "table"
+                  ? { ...w, table: { ...w.table, name: targetTableName } }
+                  : w
+              )
+            );
           }
-          return w;
-        });
-        screenStore.replaceWindows(activeProfileScreen, nextWindows);
-        await refreshSchemaAndTables();
-      }
 
-      await loadTableData(
-        activeTableWindow.table.schema,
-        targetTableName,
-        { limit, offset },
-        { force: true, refreshRows, refreshMeta, refreshStats }
+          const { refreshRows, refreshMeta, refreshStats } =
+            inferRefreshFlagsFromEntry(entry);
+          await loadTableData(
+            tableWindow.table.schema,
+            targetTableName,
+            { limit, offset },
+            { force: true, refreshRows, refreshMeta, refreshStats }
+          );
+        })
       );
 
-      // Sync edited structure/constraints from freshly loaded meta so UI shows new types
-      syncTableMeta(targetTableName);
+      if (shouldRefreshSchema) {
+        await refreshSchemaAndTables();
+      }
     } catch (e) {
       setError(normalizeSqlError(e));
     }
   }, [
     isActiveTabLocked,
-    activeTableWindow,
     runtimeConnectionId,
     activeProfileScreen,
     engine,
     runSqlWithHistory,
-    clearChanges,
+    clearTablePatchChanges,
     loadTableData,
     limit,
     offset,
     setError,
-    syncTableMeta,
-    mongoCellToValue,
+    refreshSchemaAndTables,
+    applyMongoPatchEntry,
+    applyRedisPatchEntry,
   ]);
 
   const beforeSaveChanges = useCallback(() => {
@@ -825,16 +843,67 @@ export function useConnectionActions(
     setShowSaveDialog(true);
   }, [isActiveTabLocked, getNewTableSql, getPatchMap, setError]);
 
-  const saveNewTable = useCallback(async () => {
-    if (newTableSaveRef.current) {
-      await newTableSaveRef.current();
+  const saveNewTables = useCallback(async () => {
+    const drafts = getNewTableDraftEntries({
+      tabId: activeProfileScreen,
+      openWindows,
+      engine,
+    });
+
+    if (drafts.error) {
+      setError(drafts.error);
+      return;
     }
-  }, [newTableSaveRef]);
+
+    if (!drafts.data.length) return;
+
+    const connectionId =
+      runtimeConnectionId ?? (await refreshRuntimeConnection());
+    if (!connectionId) {
+      setError("No active connection.");
+      return;
+    }
+
+    const activeNewTableDraft = drafts.data.find(
+      (draft) => draft.window.id === activeTableWindow?.id
+    );
+    const s = useConnectionStore.getState();
+
+    for (const draft of drafts.data) {
+      await runSqlWithHistory({
+        connectionId,
+        sql: draft.sql,
+      });
+
+      s.clearNewTableData(activeProfileScreen, draft.window.id);
+      useScreenStore
+        .getState()
+        .removeWindow(activeProfileScreen, draft.window.id);
+    }
+
+    await refreshSchemaAndTables();
+
+    if (activeNewTableDraft) {
+      await openTable({
+        schema: activeNewTableDraft.window.table.schema,
+        name: activeNewTableDraft.data.tableName,
+      });
+    }
+  }, [
+    activeProfileScreen,
+    openWindows,
+    engine,
+    runtimeConnectionId,
+    refreshRuntimeConnection,
+    activeTableWindow,
+    runSqlWithHistory,
+    setError,
+    refreshSchemaAndTables,
+    openTable,
+  ]);
 
   const saveChanges = useCallback(async () => {
     if (isActiveTabLocked) return;
-    if (!activeTableWindow || !runtimeConnectionId) return;
-
     const safetyMode =
       activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
 
@@ -852,23 +921,21 @@ export function useConnectionActions(
     const tabDirty = tabHasChanges(activeProfileScreen);
 
     const jobs: Array<Promise<void>> = [];
-    if (tabDirty) jobs.push(applyPatchesForActiveWindow());
+    if (tabDirty) jobs.push(applyPatchesForCurrentTab());
 
     // keep old behavior: only save new table when not in "pending close tab" flow
-    if (pendingCloseTabId === null) jobs.push(saveNewTable());
+    if (pendingCloseTabId === null) jobs.push(saveNewTables());
 
     if (jobs.length) await Promise.all(jobs);
   }, [
     isActiveTabLocked,
-    activeTableWindow,
-    runtimeConnectionId,
     activeTab,
     tabHasChanges,
     activeProfileScreen,
-    applyPatchesForActiveWindow,
+    applyPatchesForCurrentTab,
     setError,
     pendingCloseTabId,
-    saveNewTable,
+    saveNewTables,
   ]);
 
   const closeTab = useCallback(
