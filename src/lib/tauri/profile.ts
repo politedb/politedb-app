@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import type {
   ConnectionCreateInput,
   ConnectionProfile,
+  SecretRef,
   ConnectionTestSecrets,
   ProfileImportResult,
   ProfileConnectInput,
@@ -502,6 +503,90 @@ export function profileSaveAndConnect(
 
 export async function profileList(): Promise<ConnectionProfile[]> {
   return invoke<ConnectionProfile[]>(CMD.profileList);
+}
+
+async function resolveSecretRefPlain(ref?: SecretRef | null): Promise<string> {
+  if (!ref) return "";
+  if (ref.kind === "inline") return ref.value ?? "";
+  try {
+    const key = (ref.value ?? "").trim();
+    if (!key) return "";
+    return await secretsGet(key);
+  } catch {
+    return "";
+  }
+}
+
+function dbPasswordRef(input: ConnectionCreateInput): SecretRef | undefined {
+  switch (input.engine) {
+    case "postgres":
+      return input.postgres?.password;
+    case "mysql":
+    case "mariadb":
+      return input.mysql?.password;
+    case "sqlserver":
+      return input.sqlserver?.password;
+    case "oracle":
+      return input.oracle?.password;
+    case "mongo":
+      return input.mongo?.password;
+    case "redis":
+      return input.redis?.password;
+    default:
+      return undefined;
+  }
+}
+
+/** Match form behavior: whether DB secret is persisted in OS keychain for this saved input. */
+function inferStoreKeychainFromCreateInput(
+  input: ConnectionCreateInput
+): boolean {
+  const e = input.engine;
+  if (e === "postgres") return input.postgres?.password?.kind !== "inline";
+  if (e === "mysql" || e === "mariadb")
+    return input.mysql?.password?.kind !== "inline";
+  if (e === "sqlserver")
+    return input.sqlserver?.password?.kind !== "inline";
+  if (e === "oracle") return input.oracle?.password?.kind !== "inline";
+  if (e === "mongo") return input.mongo?.password?.kind !== "inline";
+  if (e === "sqlite") return false;
+  return true;
+}
+
+async function fetchProfileSecretsForDuplicate(
+  profile: ConnectionProfile
+): Promise<{ dbPassword: string; sshPassword: string }> {
+  const input = profile.input;
+  const dbPassword = await resolveSecretRefPlain(dbPasswordRef(input));
+
+  let sshPassword = "";
+  const ssh = input.ssh;
+  if (ssh?.auth?.kind === "password") {
+    sshPassword = await resolveSecretRefPlain(ssh.auth.password);
+  }
+
+  return { dbPassword, sshPassword };
+}
+
+/** Persist a new profile cloned from `profile` (label gets ` (copy)`). No UI. */
+export async function duplicateProfile(
+  profile: ConnectionProfile
+): Promise<ConnectionProfile> {
+  const input = structuredClone(profile.input) as ConnectionCreateInput;
+  const baseLabel = (profile.label || input.label || "Connection").trim();
+  input.label = baseLabel ? `${baseLabel} (copy)` : "Connection (copy)";
+
+  const storeKeychain = inferStoreKeychainFromCreateInput(input);
+  const { dbPassword, sshPassword } =
+    await fetchProfileSecretsForDuplicate(profile);
+
+  return profileSave({
+    mode: "create",
+    storeKeychain,
+    password: dbPassword,
+    ssh_password: sshPassword,
+    ...input,
+  });
 }
 
 export async function profileConnect(

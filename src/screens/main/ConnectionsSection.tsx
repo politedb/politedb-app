@@ -38,6 +38,7 @@ export function ConnectionsSection(props: {
   onCreate: () => void;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
+  onDuplicate?: (id: string) => void | Promise<void>;
 }) {
   const {
     profiles,
@@ -47,6 +48,7 @@ export function ConnectionsSection(props: {
     onCreate,
     onOpen,
     onEdit,
+    onDuplicate,
   } = props;
 
   const hasSearch = !!searchQuery.trim();
@@ -71,6 +73,7 @@ export function ConnectionsSection(props: {
                 selected={selectedId === p.id}
                 onOpen={() => onOpen(p.id)}
                 onEdit={() => onEdit(p.id)}
+                onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
               />
             </div>
           ))}
@@ -84,6 +87,7 @@ export function ConnectionsSection(props: {
               selected={selectedId === p.id}
               onOpen={() => onOpen(p.id)}
               onEdit={() => onEdit(p.id)}
+              onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
             />
           ))}
         </div>

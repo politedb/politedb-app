@@ -9,6 +9,7 @@ import {
   MoreVerticalIcon,
   BackupIcon,
   FolderIcon,
+  CopyIcon,
 } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
@@ -154,8 +155,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   selected: boolean;
   onOpen: () => void;
   onEdit: () => void;
+  onDuplicate?: () => void | Promise<void>;
 }) {
-  const { profileId, selected, onOpen, onEdit } = props;
+  const { profileId, selected, onOpen, onEdit, onDuplicate } = props;
 
   const profile = useProfileStore((s) =>
     s.profiles.find((p) => p.id === profileId)
@@ -374,6 +376,19 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               onEdit();
             },
           },
+          ...(onDuplicate
+            ? [
+                {
+                  type: "item" as const,
+                  label: "Duplicate Connection",
+                  icon: <CopyIcon className="size-4" />,
+                  onClick: () => {
+                    closeMenu();
+                    void onDuplicate();
+                  },
+                },
+              ]
+            : []),
           {
             type: "item",
             label: "Export Connection",

@@ -203,15 +203,16 @@ export function ConnectionModal(props: {
 
   // ===== Form Mode =====
   if (showDatabaseForm) {
-    const selected = findDb(selectedEngine);
+    const formEngine = showDatabaseForm;
+    const selected = findDb(formEngine);
 
     return (
       <OverlayModal open onClose={onClose}>
-        {selected?.engine && availableEngines.includes(selected?.engine) ? (
+        {selected?.engine && availableEngines.includes(formEngine) ? (
           <ConnectionFormDialog
             onSaved={onSaved}
             onClose={onClose}
-            engine={selected?.engine}
+            engine={formEngine}
           />
         ) : (
           <div class="mx-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">

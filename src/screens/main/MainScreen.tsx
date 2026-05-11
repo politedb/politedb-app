@@ -29,8 +29,9 @@ import type {
   NavId,
   ViewMode,
 } from "src/types";
-import { profileImport, type ConnectionProfile } from "src/lib/tauri";
+import { duplicateProfile, profileImport, type ConnectionProfile } from "src/lib/tauri";
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
+import { trackEvent } from "src/lib/analytics";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -194,6 +195,32 @@ export function MainScreen() {
     createGroup(name);
   }
 
+  async function handleDuplicate(profileId: string) {
+    const found = profiles.find((p) => p.id === profileId);
+    if (!found) return;
+
+    try {
+      const created = await duplicateProfile(found);
+      const groupId = assignments[found.id];
+      if (groupId) assignGroup(created.id, groupId);
+      await loadProfiles();
+
+      trackEvent("connection_duplicate_success", {
+        engine: created.engine,
+      });
+    } catch (err) {
+      const msg = String(err);
+      await showMessage(msg, {
+        title: "Could not duplicate connection",
+        kind: "error",
+      });
+      trackEvent("connection_duplicate_error", {
+        engine: found.engine,
+        error: msg.slice(0, 240),
+      });
+    }
+  }
+
   function handleTopBarCreate() {
     if (activeNav === "connections") {
       openNew();
@@ -271,6 +298,7 @@ export function MainScreen() {
                       selectProfile(id);
                       openEdit(id);
                     }}
+                    onDuplicate={handleDuplicate}
                   />
                 </div>
               </div>
