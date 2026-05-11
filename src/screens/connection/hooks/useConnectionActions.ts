@@ -1011,12 +1011,15 @@ export function useConnectionActions(
 
   const closeNewWindows = useCallback(
     async (tabId: string) => {
+      const draftWindowIds = new Set(
+        Object.keys(useConnectionStore.getState().newTableData[tabId] ?? {})
+      );
       const windows = openWindows[tabId] ?? [];
       if (!windows.length) return;
 
       await Promise.all(
         windows.map(async (w) => {
-          if (w.type === "table" && w.table.new) {
+          if (w.type === "table" && (w.table.new || draftWindowIds.has(w.id))) {
             await closeWindow(w.id, new MouseEvent("click"));
           }
         })
@@ -1030,8 +1033,8 @@ export function useConnectionActions(
       clearChanges(pendingCloseTabId);
       await closeTab(pendingCloseTabId, true);
     } else {
-      clearChanges(activeProfileScreen);
       await closeNewWindows(activeProfileScreen);
+      clearChanges(activeProfileScreen);
     }
 
     setWarningRefresh(false);

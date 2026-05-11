@@ -136,6 +136,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app::app_quit,
             commands::ai::ai_runtime_status,
             commands::ai::ai_runtime_start,
             commands::ai::ai_runtime_stop,

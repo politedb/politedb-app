@@ -5,10 +5,13 @@ import {
   useRef,
   useCallback,
 } from "preact/hooks";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
+import { usePersistentStore } from "src/stores/persistentStore";
 
 import { MenuBar } from "./MenuBar";
 import { LeftNav } from "./LeftNav";
@@ -62,6 +65,97 @@ const EMPTY_NEW_TABLE_DRAFTS = Object.freeze({}) as Record<
   { tableName?: string }
 >;
 
+function patchMapHasAnyChanges(patchMap: unknown): boolean {
+  if (!patchMap || typeof patchMap !== "object") return false;
+
+  for (const entry of Object.values(patchMap as Record<string, unknown>)) {
+    const patches = (entry as { patches?: unknown } | undefined)?.patches;
+    if (!patches || typeof patches !== "object") continue;
+
+    for (const actionPatches of Object.values(
+      patches as Record<string, unknown>
+    )) {
+      if (!actionPatches || typeof actionPatches !== "object") continue;
+
+      for (const rows of Object.values(
+        actionPatches as Record<string, unknown>
+      )) {
+        if (rows && typeof rows === "object" && Object.keys(rows).length > 0) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasValidNewTableDraft(draft: unknown): boolean {
+  if (!draft || typeof draft !== "object") return false;
+  const data = draft as {
+    tableName?: unknown;
+    columns?: Array<{ column_name?: unknown }>;
+  };
+
+  return (
+    typeof data.tableName === "string" &&
+    data.tableName.trim().length > 0 &&
+    Array.isArray(data.columns) &&
+    data.columns.some(
+      (column) =>
+        typeof column?.column_name === "string" &&
+        column.column_name.trim().length > 0
+    )
+  );
+}
+
+function hasAnyUnsavedConnectionChanges(): boolean {
+  const s = useConnectionStore.getState();
+
+  for (const patchMap of Object.values(s.dataPatchMap)) {
+    if (patchMapHasAnyChanges(patchMap)) return true;
+  }
+
+  for (const tabDrafts of Object.values(s.newTableData)) {
+    for (const draft of Object.values(tabDrafts)) {
+      if (hasValidNewTableDraft(draft)) return true;
+    }
+  }
+
+  return false;
+}
+
+function discardAllConnectionChanges() {
+  const s = useConnectionStore.getState();
+  const screen = useScreenStore.getState();
+  const tabIds = new Set<string>([
+    ...Object.keys(s.dataPatchMap),
+    ...Object.keys(s.newTableData),
+    ...Object.keys(s.tableStructure),
+    ...Object.keys(s.tableConstraints),
+    ...Object.keys(screen.openWindows),
+  ]);
+
+  for (const tabId of tabIds) {
+    const newTableWindowIds = new Set(Object.keys(s.newTableData[tabId] ?? {}));
+
+    s.clearTableConstraints(tabId);
+    s.clearTableStructure(tabId);
+    s.clearDataPatchMap(tabId);
+    s.clearNewTableData(tabId);
+
+    const windows = screen.openWindows[tabId] ?? [];
+    const withoutNewTableWindows = windows.filter(
+      (window) =>
+        window.type !== "table" ||
+        (!window.table.new && !newTableWindowIds.has(window.id))
+    );
+    if (withoutNewTableWindows.length !== windows.length) {
+      screen.replaceWindows(tabId, withoutNewTableWindows);
+    }
+  }
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
@@ -87,6 +181,7 @@ export function ConnectionScreen() {
   const [offset, setOffset] = useState(0);
 
   const [warningRefresh, setWarningRefresh] = useState(false);
+  const [pendingAppQuit, setPendingAppQuit] = useState(false);
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
     null
   );
@@ -100,6 +195,61 @@ export function ConnectionScreen() {
   const [rightNavTab, setRightNavTab] = useState<"ai" | "table-size">(
     "table-size"
   );
+  const forceQuitRef = useRef(false);
+
+  const quitApp = useCallback(async () => {
+    forceQuitRef.current = true;
+
+    try {
+      await invoke("app_quit");
+    } catch {
+      await getCurrentWindow().destroy();
+    }
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (forceQuitRef.current) return;
+
+        event.preventDefault();
+
+        if (!hasAnyUnsavedConnectionChanges()) {
+          void quitApp();
+          return;
+        }
+
+        setPendingCloseTabId(null);
+        setPendingAppQuit(true);
+        setWarningRefresh(true);
+      })
+      .then((off) => {
+        if (disposed) {
+          off();
+          return;
+        }
+        unlisten = off;
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [quitApp]);
+
+  const discardAndQuitApp = useCallback(async () => {
+    discardAllConnectionChanges();
+    await usePersistentStore.getState().saveNow();
+
+    setWarningRefresh(false);
+    setPendingCloseTabId(null);
+    setPendingAppQuit(false);
+
+    await quitApp();
+  }, [quitApp]);
 
   const { viewMode, toggleViewMode, setViewMode } = useViewMode([
     "left",
@@ -747,8 +897,16 @@ export function ConnectionScreen() {
             onClose={() => {
               setWarningRefresh(false);
               setPendingCloseTabId(null);
+              setPendingAppQuit(false);
             }}
-            onDiscard={() => void actions.discardChanges()}
+            onDiscard={() => {
+              if (pendingAppQuit) {
+                void discardAndQuitApp();
+                return;
+              }
+
+              void actions.discardChanges();
+            }}
           />
 
           {error && (
