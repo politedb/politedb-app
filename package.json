@@ -11,7 +11,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "RUST_LOG=trace tauri dev",
+    "tauri:dev": "RUST_LOG=info tauri dev",
+    "tauri:dev:trace": "RUST_LOG=trace tauri dev",
     "format": "prettier --write ."
   },
   "dependencies": {

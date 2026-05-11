@@ -3,6 +3,7 @@ import { Button } from "src/components/common/Button";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
 import { PlusIcon } from "src/components/icons";
+import type { ConnectionGroup } from "src/stores/connectionGroups";
 
 function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
   const { hasSearch, onCreate } = props;
@@ -35,9 +36,12 @@ export function ConnectionsSection(props: {
   selectedId?: string;
   viewMode: ViewMode;
   searchQuery: string;
+  groups: ConnectionGroup[];
+  groupIdsByProfile: Record<string, string[]>;
   onCreate: () => void;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
+  onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
   onDuplicate?: (id: string) => void | Promise<void>;
 }) {
   const {
@@ -45,9 +49,12 @@ export function ConnectionsSection(props: {
     selectedId,
     viewMode,
     searchQuery,
+    groups,
+    groupIdsByProfile,
     onCreate,
     onOpen,
     onEdit,
+    onAssignGroups,
     onDuplicate,
   } = props;
 
@@ -71,6 +78,9 @@ export function ConnectionsSection(props: {
               <ConnectionCard
                 profileId={p.id}
                 selected={selectedId === p.id}
+                groups={groups}
+                selectedGroupIds={groupIdsByProfile[p.id] ?? []}
+                onAssignGroups={onAssignGroups}
                 onOpen={() => onOpen(p.id)}
                 onEdit={() => onEdit(p.id)}
                 onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
@@ -85,6 +95,9 @@ export function ConnectionsSection(props: {
               key={p.id}
               profileId={p.id}
               selected={selectedId === p.id}
+              groups={groups}
+              selectedGroupIds={groupIdsByProfile[p.id] ?? []}
+              onAssignGroups={onAssignGroups}
               onOpen={() => onOpen(p.id)}
               onEdit={() => onEdit(p.id)}
               onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}

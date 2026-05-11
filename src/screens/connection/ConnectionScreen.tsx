@@ -57,6 +57,10 @@ const EMPTY_TABLE_META = {
   error: null,
   connectionId: null,
 };
+const EMPTY_NEW_TABLE_DRAFTS = Object.freeze({}) as Record<
+  string,
+  { tableName?: string }
+>;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => {
@@ -184,8 +188,8 @@ export function ConnectionScreen() {
   });
 
   const newTableDrafts = useConnectionStore((s) => {
-    if (!activeProfileScreen) return {};
-    return s.newTableData[activeProfileScreen] ?? {};
+    if (!activeProfileScreen) return EMPTY_NEW_TABLE_DRAFTS;
+    return s.newTableData[activeProfileScreen] ?? EMPTY_NEW_TABLE_DRAFTS;
   });
 
   /* =============================================================================
@@ -221,9 +225,7 @@ export function ConnectionScreen() {
     const base = [...filteredTables];
     const draftTables = activeWindows
       .filter(
-        (
-          w
-        ): w is Extract<(typeof activeWindows)[number], { type: "table" }> =>
+        (w): w is Extract<(typeof activeWindows)[number], { type: "table" }> =>
           w.type === "table" && !!w.table?.new
       )
       .map((w) => w.table)

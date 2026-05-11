@@ -19,7 +19,7 @@
         "minWidth": 1000,
         "minHeight": 500,
         "decorations": true,
-        "transparent": true,
+        "transparent": false,
         "titleBarStyle": "Overlay",
         "devtools": true
       }

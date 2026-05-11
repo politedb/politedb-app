@@ -9,7 +9,7 @@ type ConnectionGroup = {
 
 type ConnectionGroupsSnapshot = {
   groups: ConnectionGroup[];
-  assignments: Record<string, string | undefined>;
+  assignments: Record<string, string | string[] | undefined>;
 };
 
 type ConnectionGroupsState = ConnectionGroupsSnapshot & {
@@ -18,6 +18,7 @@ type ConnectionGroupsState = ConnectionGroupsSnapshot & {
   createGroup: (name: string) => ConnectionGroup;
   deleteGroup: (groupId: string) => void;
   assignGroup: (profileId: string, groupId?: string) => void;
+  assignGroups: (profileId: string, groupIds: string[]) => void;
   getGroupForProfile: (profileId: string) => ConnectionGroup | undefined;
 };
 
@@ -32,13 +33,26 @@ function safeRead(): ConnectionGroupsSnapshot {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return { groups: [], assignments: {} };
     const parsed = JSON.parse(raw) as Partial<ConnectionGroupsSnapshot>;
-    return {
-      groups: Array.isArray(parsed.groups) ? parsed.groups : [],
-      assignments:
-        parsed.assignments && typeof parsed.assignments === "object"
-          ? parsed.assignments
-          : {},
-    };
+    const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+    const assignments: ConnectionGroupsSnapshot["assignments"] = {};
+    const rawAssignments =
+      parsed.assignments && typeof parsed.assignments === "object"
+        ? parsed.assignments
+        : {};
+
+    for (const [profileId, value] of Object.entries(rawAssignments)) {
+      if (Array.isArray(value)) {
+        const groupIds = value.filter(
+          (groupId): groupId is string => typeof groupId === "string" && !!groupId
+        );
+        if (groupIds.length) assignments[profileId] = Array.from(new Set(groupIds));
+      } else if (typeof value === "string" && value) {
+        // Backward compatible migration from v1 single-group assignments.
+        assignments[profileId] = [value];
+      }
+    }
+
+    return { groups, assignments };
   } catch {
     return { groups: [], assignments: {} };
   }
@@ -63,7 +77,19 @@ function sortGroups(groups: ConnectionGroup[]) {
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-export { type ConnectionGroup };
+function normalizeGroupIds(value: string | string[] | undefined): string[] {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value.filter((groupId): groupId is string => typeof groupId === "string" && !!groupId)
+      )
+    );
+  }
+  if (typeof value === "string" && value) return [value];
+  return [];
+}
+
+export { type ConnectionGroup, normalizeGroupIds };
 
 export const useConnectionGroupsStore = create<ConnectionGroupsState>(
   (set, get) => ({
@@ -119,8 +145,13 @@ export const useConnectionGroupsStore = create<ConnectionGroupsState>(
       const nextGroups = get().groups.filter((group) => group.id !== groupId);
       const nextAssignments = { ...get().assignments };
 
-      for (const [profileId, assignedGroupId] of Object.entries(nextAssignments)) {
-        if (assignedGroupId === groupId) {
+      for (const [profileId, assignedGroupIds] of Object.entries(nextAssignments)) {
+        const nextGroupIds = normalizeGroupIds(assignedGroupIds).filter(
+          (id) => id !== groupId
+        );
+        if (nextGroupIds.length) {
+          nextAssignments[profileId] = nextGroupIds;
+        } else {
           delete nextAssignments[profileId];
         }
       }
@@ -134,10 +165,18 @@ export const useConnectionGroupsStore = create<ConnectionGroupsState>(
     },
 
     assignGroup: (profileId, groupId) => {
+      get().assignGroups(profileId, groupId ? [groupId] : []);
+    },
+
+    assignGroups: (profileId, groupIds) => {
       get().ensureLoaded();
+      const existingGroupIds = new Set(get().groups.map((group) => group.id));
+      const cleanGroupIds = Array.from(
+        new Set(groupIds.filter((groupId) => existingGroupIds.has(groupId)))
+      );
       const nextAssignments = { ...get().assignments };
-      if (groupId) {
-        nextAssignments[profileId] = groupId;
+      if (cleanGroupIds.length) {
+        nextAssignments[profileId] = cleanGroupIds;
       } else {
         delete nextAssignments[profileId];
       }
@@ -151,7 +190,7 @@ export const useConnectionGroupsStore = create<ConnectionGroupsState>(
 
     getGroupForProfile: (profileId) => {
       const { groups, assignments } = get();
-      const groupId = assignments[profileId];
+      const groupId = normalizeGroupIds(assignments[profileId])[0];
       return groups.find((group) => group.id === groupId);
     },
   })

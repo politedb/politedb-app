@@ -13,6 +13,7 @@ import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
+import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
 import { LeftNav } from "./LeftNav";
@@ -61,6 +62,7 @@ export function MainScreen() {
   const createGroup = useConnectionGroupsStore((s) => s.createGroup);
   const deleteGroup = useConnectionGroupsStore((s) => s.deleteGroup);
   const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
+  const assignGroups = useConnectionGroupsStore((s) => s.assignGroups);
   const loadLicense = useLicenseStore((s) => s.load);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -95,15 +97,23 @@ export function MainScreen() {
     return profiles.find((p) => p.id === selectedProfileId);
   }, [profiles, selectedProfileId]);
 
+  const groupIdsByProfile = useMemo(() => {
+    const next: Record<string, string[]> = {};
+    for (const profile of profiles) {
+      next[profile.id] = normalizeGroupIds(assignments[profile.id]);
+    }
+    return next;
+  }, [profiles, assignments]);
+
   const groupedProfiles = useMemo(
     () =>
       groups.map((group) => ({
         group,
         count: profiles.filter(
-          (profile) => assignments[profile.id] === group.id
+          (profile) => (groupIdsByProfile[profile.id] ?? []).includes(group.id)
         ).length,
       })),
-    [groups, profiles, assignments]
+    [groups, profiles, groupIdsByProfile]
   );
 
   const filteredProfiles = useMemo(() => {
@@ -114,9 +124,9 @@ export function MainScreen() {
     );
     if (!selectedGroupId) return searched;
     return searched.filter(
-      (profile) => assignments[profile.id] === selectedGroupId
+      (profile) => (groupIdsByProfile[profile.id] ?? []).includes(selectedGroupId)
     );
-  }, [profiles, searchQuery, selectedGroupId, assignments, connectionSortMode]);
+  }, [profiles, searchQuery, selectedGroupId, groupIdsByProfile, connectionSortMode]);
 
   useEffect(() => {
     if (!selectedGroupId) return;
@@ -201,8 +211,8 @@ export function MainScreen() {
 
     try {
       const created = await duplicateProfile(found);
-      const groupId = assignments[found.id];
-      if (groupId) assignGroup(created.id, groupId);
+      const groupIds = normalizeGroupIds(assignments[found.id]);
+      if (groupIds.length) assignGroups(created.id, groupIds);
       await loadProfiles();
 
       trackEvent("connection_duplicate_success", {
@@ -287,7 +297,10 @@ export function MainScreen() {
                     selectedId={selectedProfileId}
                     viewMode={viewMode}
                     searchQuery={searchQuery}
+                    groups={groups}
+                    groupIdsByProfile={groupIdsByProfile}
                     onCreate={openNew}
+                    onAssignGroups={assignGroups}
                     onOpen={(id) => {
                       // optional: keep selection in sync when opening
                       // selectProfile(id);

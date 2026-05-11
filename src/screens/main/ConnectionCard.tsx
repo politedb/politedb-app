@@ -1,4 +1,10 @@
-import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
+import {
+  memo,
+  RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "preact/compat";
 import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
@@ -14,7 +20,7 @@ import {
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
-import { useConnectionGroupsStore } from "src/stores/connectionGroups";
+import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { cn } from "src/utils/cn";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
@@ -153,22 +159,30 @@ const DEFAULT_INDICATOR_COLOR = "#94A3B8"; // slate-300
 export const ConnectionCard = memo(function ConnectionCard(props: {
   profileId: string;
   selected: boolean;
+  groups: ConnectionGroup[];
+  selectedGroupIds: string[];
+  onAssignGroups: (profileId: string, groupIds: string[]) => void | Promise<void>;
   onOpen: () => void;
   onEdit: () => void;
   onDuplicate?: () => void | Promise<void>;
 }) {
-  const { profileId, selected, onOpen, onEdit, onDuplicate } = props;
+  const {
+    profileId,
+    selected,
+    groups,
+    selectedGroupIds,
+    onAssignGroups,
+    onOpen,
+    onEdit,
+    onDuplicate,
+  } = props;
 
   const profile = useProfileStore((s) =>
     s.profiles.find((p) => p.id === profileId)
   );
   const removeProfile = useProfileStore((s) => s.removeProfile);
-  const ensureGroupsLoaded = useConnectionGroupsStore((s) => s.ensureLoaded);
-  const groups = useConnectionGroupsStore((s) => s.groups);
-  const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
-  const currentGroup = useConnectionGroupsStore((s) =>
-    s.getGroupForProfile(profileId)
-  );
+  const selectedGroupIdSet = new Set(selectedGroupIds);
+  const currentGroups = groups.filter((group) => selectedGroupIdSet.has(group.id));
 
   const kebabRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -246,10 +260,6 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   }
 
   useEffect(() => {
-    ensureGroupsLoaded();
-  }, [ensureGroupsLoaded]);
-
-  useEffect(() => {
     if (!menuOpen) return;
     return () => closeMenu();
   }, [profileId]);
@@ -322,9 +332,18 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               </div>
             ) : null}
 
-            {currentGroup ? (
-              <span class="inline-flex max-w-40 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                {currentGroup.name}
+            {currentGroups.slice(0, 2).map((group) => (
+              <span
+                key={group.id}
+                class="inline-flex max-w-32 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700"
+                title={group.name}
+              >
+                {group.name}
+              </span>
+            ))}
+            {currentGroups.length > 2 ? (
+              <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                +{currentGroups.length - 2}
               </span>
             ) : null}
           </div>
@@ -421,17 +440,19 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         onClose={closeMenu}
       />
 
-      <AssignConnectionGroupDialog
-        open={assignGroupOpen}
-        onClose={() => setAssignGroupOpen(false)}
-        connectionLabel={label}
-        groups={groups}
-        selectedGroupId={currentGroup?.id}
-        onSave={async (groupId) => {
-          assignGroup(profile.id, groupId);
-          setAssignGroupOpen(false);
-        }}
-      />
+      {assignGroupOpen ? (
+        <AssignConnectionGroupDialog
+          open={assignGroupOpen}
+          onClose={() => setAssignGroupOpen(false)}
+          connectionLabel={label}
+          groups={groups}
+          selectedGroupIds={currentGroups.map((group) => group.id)}
+          onSave={async (groupIds) => {
+            await onAssignGroups(profile.id, groupIds);
+            setAssignGroupOpen(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 });
