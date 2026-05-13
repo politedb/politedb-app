@@ -9,10 +9,18 @@ export function OverlayModal(props: {
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={props.onClose}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       <div
         class="flex max-h-[85vh] w-full items-center justify-center overflow-hidden px-4"
         onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
         {props.children}
       </div>

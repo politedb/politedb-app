@@ -41,7 +41,10 @@ export function AssignConnectionGroupDialog(props: {
   const filteredGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return groups.filter((group) => {
-      if (normalizedQuery && !group.name.toLowerCase().includes(normalizedQuery)) {
+      if (
+        normalizedQuery &&
+        !group.name.toLowerCase().includes(normalizedQuery)
+      ) {
         return false;
       }
       return true;
@@ -62,7 +65,12 @@ export function AssignConnectionGroupDialog(props: {
   }
 
   return (
-    <Dialog open={open} onClose={onClose} size="sm" className="overflow-visible">
+    <Dialog
+      open={open}
+      onClose={onClose}
+      size="sm"
+      className="overflow-visible"
+    >
       <DialogHeader>
         <DialogTitle>Move Connection To Groups</DialogTitle>
       </DialogHeader>
@@ -76,7 +84,9 @@ export function AssignConnectionGroupDialog(props: {
           <div
             class={cn(
               "flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl border bg-white px-3 py-2",
-              focused ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"
+              focused
+                ? "border-blue-500 ring-2 ring-blue-100"
+                : "border-slate-200"
             )}
           >
             {selectedGroups.map((group) => (
@@ -107,14 +117,16 @@ export function AssignConnectionGroupDialog(props: {
                     setValues((current) => current.slice(0, -1));
                   }
                 }}
-                placeholder={selectedGroups.length ? "Add group..." : "Search groups..."}
+                placeholder={
+                  selectedGroups.length ? "Add group..." : "Search groups..."
+                }
                 class="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
               />
             </div>
           </div>
 
           {focused ? (
-            <div class="absolute z-20 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+            <div class="absolute z-20 mt-2 max-h-64 w-full space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
               {groups.length ? (
                 filteredGroups.length ? (
                   filteredGroups.map((group) => {
@@ -132,7 +144,9 @@ export function AssignConnectionGroupDialog(props: {
                         onMouseDown={(e) => e.preventDefault()}
                         onClick={() => toggleGroup(group.id)}
                       >
-                        <span class="min-w-0 flex-1 truncate">{group.name}</span>
+                        <span class="min-w-0 flex-1 truncate">
+                          {group.name}
+                        </span>
                         {selected ? (
                           <span class="text-sm font-bold text-blue-600">✓</span>
                         ) : null}
@@ -162,17 +176,16 @@ export function AssignConnectionGroupDialog(props: {
             Clear groups
           </button>
         ) : (
-          <p class="text-xs text-slate-500">Leave empty to keep this connection ungrouped.</p>
+          <p class="text-xs text-slate-500">
+            Leave empty to keep this connection ungrouped.
+          </p>
         )}
       </DialogContent>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>
-        <Button
-          variant="default"
-          onClick={() => void onSave(values)}
-        >
+        <Button variant="default" onClick={() => void onSave(values)}>
           Save
         </Button>
       </DialogFooter>

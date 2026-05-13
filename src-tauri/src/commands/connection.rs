@@ -448,10 +448,11 @@ pub async fn connection_version(
             }
         }
         crate::engines::EngineConnection::Sqlite(sqlite) => {
-            let path = sqlite.db_path.clone();
+            let shared = sqlite.conn.clone();
             let version = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                let conn = rusqlite::Connection::open(&path)
-                    .map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
+                let conn = shared
+                    .lock()
+                    .map_err(|_| "SQLITE_CONN_MUTEX_POISONED".to_string())?;
                 let version: String = conn
                     .query_row("SELECT sqlite_version()", [], |row| row.get(0))
                     .map_err(|e| format!("SQLITE_VERSION_QUERY_FAILED: {e}"))?;

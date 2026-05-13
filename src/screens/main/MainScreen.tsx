@@ -30,9 +30,17 @@ import type {
   NavId,
   ViewMode,
 } from "src/types";
-import { duplicateProfile, profileImport, type ConnectionProfile } from "src/lib/tauri";
+import {
+  duplicateProfile,
+  profileImport,
+  profileSaveAndConnect,
+  type ConnectionProfile,
+  type SaveAndConnectAction,
+  type SaveAndConnectInput,
+} from "src/lib/tauri";
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
 import { trackEvent } from "src/lib/analytics";
+import { seedSqliteTemplateDemo } from "src/lib/sqliteTemplateSeed";
 
 export function MainScreen() {
   const { addTab, setActiveProfileScreen } = useScreenStore();
@@ -79,6 +87,7 @@ export function MainScreen() {
   const [licenseOpen, setLicenseOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [templateSaving, setTemplateSaving] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
@@ -109,8 +118,8 @@ export function MainScreen() {
     () =>
       groups.map((group) => ({
         group,
-        count: profiles.filter(
-          (profile) => (groupIdsByProfile[profile.id] ?? []).includes(group.id)
+        count: profiles.filter((profile) =>
+          (groupIdsByProfile[profile.id] ?? []).includes(group.id)
         ).length,
       })),
     [groups, profiles, groupIdsByProfile]
@@ -123,10 +132,16 @@ export function MainScreen() {
       connectionSortMode
     );
     if (!selectedGroupId) return searched;
-    return searched.filter(
-      (profile) => (groupIdsByProfile[profile.id] ?? []).includes(selectedGroupId)
+    return searched.filter((profile) =>
+      (groupIdsByProfile[profile.id] ?? []).includes(selectedGroupId)
     );
-  }, [profiles, searchQuery, selectedGroupId, groupIdsByProfile, connectionSortMode]);
+  }, [
+    profiles,
+    searchQuery,
+    selectedGroupId,
+    groupIdsByProfile,
+    connectionSortMode,
+  ]);
 
   useEffect(() => {
     if (!selectedGroupId) return;
@@ -203,6 +218,59 @@ export function MainScreen() {
 
   async function handleCreateGroup(name: string) {
     createGroup(name);
+  }
+
+  async function handleUseSqliteTemplate() {
+    setTemplateSaving(true);
+    try {
+      const saved = await profileSaveAndConnect({
+        mode: "create",
+        engine: "sqlite",
+        label: "Hello World",
+        tags: ["local"],
+        indicator_color: "",
+        storeKeychain: false,
+        sqlite: {
+          path: ":memory:",
+          statement_timeout_ms: 60_000,
+        },
+      } as SaveAndConnectInput & SaveAndConnectAction);
+
+      try {
+        await seedSqliteTemplateDemo(saved.connection.id);
+      } catch (seedErr) {
+        console.warn("[sqlite template] demo seed failed:", seedErr);
+      }
+
+      if (selectedGroupId) {
+        assignGroup(saved.profile.id, selectedGroupId);
+      }
+
+      await loadProfiles();
+
+      const newTab: ProfileTab = {
+        id: `tab-${uuid()}`,
+        label: saved.profile.label || "Hello World",
+        profileId: saved.profile.id,
+        engine: saved.profile.engine,
+        runtimeConnectionId: saved.connection.id,
+      };
+      addTab(newTab);
+      setActiveProfileScreen(newTab.id);
+
+      trackEvent("connection_sqlite_template_created", { engine: "sqlite" });
+    } catch (err) {
+      const msg = String(err);
+      await showMessage(msg, {
+        title: "Could not create template",
+        kind: "error",
+      });
+      trackEvent("connection_sqlite_template_error", {
+        error: msg.slice(0, 240),
+      });
+    } finally {
+      setTemplateSaving(false);
+    }
   }
 
   async function handleDuplicate(profileId: string) {
@@ -300,6 +368,8 @@ export function MainScreen() {
                     groups={groups}
                     groupIdsByProfile={groupIdsByProfile}
                     onCreate={openNew}
+                    onUseSqliteTemplate={handleUseSqliteTemplate}
+                    templateSaving={templateSaving}
                     onAssignGroups={assignGroups}
                     onOpen={(id) => {
                       // optional: keep selection in sync when opening

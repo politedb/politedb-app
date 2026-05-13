@@ -241,7 +241,7 @@ impl EngineConnection {
                 Ok(())
             }
             EngineConnection::Sqlite(sqlite) => {
-                let db_path = sqlite.db_path.clone();
+                let shared = sqlite.conn.clone();
                 let default_timeout = sqlite.default_statement_timeout_ms;
 
                 let handle = tokio::spawn(async move {
@@ -260,7 +260,7 @@ impl EngineConnection {
 
                     crate::engines::sqlite::operation::run_sqlite_sql_query(
                         ctx,
-                        db_path,
+                        shared,
                         input,
                         default_timeout,
                     )

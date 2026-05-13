@@ -1,10 +1,4 @@
-import {
-  memo,
-  RefObject,
-  useEffect,
-  useRef,
-  useState,
-} from "preact/compat";
+import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
 import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
@@ -161,7 +155,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   selected: boolean;
   groups: ConnectionGroup[];
   selectedGroupIds: string[];
-  onAssignGroups: (profileId: string, groupIds: string[]) => void | Promise<void>;
+  onAssignGroups: (
+    profileId: string,
+    groupIds: string[]
+  ) => void | Promise<void>;
   onOpen: () => void;
   onEdit: () => void;
   onDuplicate?: () => void | Promise<void>;
@@ -182,7 +179,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   );
   const removeProfile = useProfileStore((s) => s.removeProfile);
   const selectedGroupIdSet = new Set(selectedGroupIds);
-  const currentGroups = groups.filter((group) => selectedGroupIdSet.has(group.id));
+  const currentGroups = groups.filter((group) =>
+    selectedGroupIdSet.has(group.id)
+  );
 
   const kebabRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -332,7 +331,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               </div>
             ) : null}
 
-            {currentGroups.slice(0, 2).map((group) => (
+            {currentGroups.slice(0, 1).map((group) => (
               <span
                 key={group.id}
                 class="inline-flex max-w-32 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700"
@@ -341,9 +340,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
                 {group.name}
               </span>
             ))}
-            {currentGroups.length > 2 ? (
+            {currentGroups.length > 1 ? (
               <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                +{currentGroups.length - 2}
+                +{currentGroups.length - 1}
               </span>
             ) : null}
           </div>

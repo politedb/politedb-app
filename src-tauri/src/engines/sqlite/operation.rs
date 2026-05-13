@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rusqlite::types::ValueRef;
+use rusqlite::Connection;
 use tauri::Emitter;
 use tokio::sync::Notify;
 
@@ -29,7 +30,7 @@ fn sqlite_value_to_cell(v: ValueRef<'_>) -> CellValue {
 
 pub async fn run_sqlite_sql_query(
     ctx: OperationCtx,
-    db_path: String,
+    shared: Arc<Mutex<Connection>>,
     sql_input: SqlQueryInput,
     _default_statement_timeout_ms: Option<u64>,
 ) {
@@ -66,8 +67,9 @@ pub async fn run_sqlite_sql_query(
             return Err("SQLITE_SQL_EMPTY".into());
         }
 
-        let conn =
-            rusqlite::Connection::open(&db_path).map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
+        let conn = shared
+            .lock()
+            .map_err(|_| "SQLITE_CONN_MUTEX_POISONED".to_string())?;
 
         if validate_only {
             let stmt = conn

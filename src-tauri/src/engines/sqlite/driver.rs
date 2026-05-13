@@ -78,14 +78,14 @@ pub async fn connect_sqlite(
         return Err("SQLITE_PATH_REQUIRED".into());
     }
 
-    tokio::task::spawn_blocking({
+    let conn = tokio::task::spawn_blocking({
         let db_path = db_path.clone();
-        move || -> Result<(), String> {
+        move || -> Result<rusqlite::Connection, String> {
             let conn = rusqlite::Connection::open(&db_path)
                 .map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
             conn.execute_batch("SELECT 1;")
                 .map_err(|e| format!("SQLITE_SMOKE_TEST_FAILED: {e}"))?;
-            Ok(())
+            Ok(conn)
         }
     })
     .await
@@ -95,6 +95,7 @@ pub async fn connect_sqlite(
         id: conn_id,
         label,
         db_path,
+        conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
         default_statement_timeout_ms: input.statement_timeout_ms,
     })
 }

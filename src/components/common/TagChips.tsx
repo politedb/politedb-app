@@ -60,7 +60,7 @@ export function TagChips(props: {
         <span
           key={t}
           title={t}
-          class={cn("max-w-30 truncate", baseCls, chipCls, tagTone(t))}
+          class={cn("max-w-30 min-w-0 truncate", baseCls, chipCls, tagTone(t))}
         >
           {t}
         </span>

@@ -76,6 +76,10 @@ export function Dialog({
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-500/50"
       onClick={handleBackdropClick}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       <div
         class={cn(
@@ -86,6 +90,10 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
         {showCloseButton && onClose && (
           <button

@@ -2,11 +2,16 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
-import { PlusIcon } from "src/components/icons";
 import type { ConnectionGroup } from "src/stores/connectionGroups";
 
-function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
-  const { hasSearch, onCreate } = props;
+function EmptyState(props: {
+  hasSearch: boolean;
+  profilesEmpty: boolean;
+  onCreate: () => void;
+  onUseTemplate?: () => void | Promise<void>;
+  templateSaving?: boolean;
+}) {
+  const { hasSearch, profilesEmpty, onUseTemplate, templateSaving } = props;
 
   return (
     <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
@@ -20,11 +25,19 @@ function EmptyState(props: { hasSearch: boolean; onCreate: () => void }) {
       </div>
 
       {!hasSearch ? (
-        <div class="mt-5">
-          <Button variant="default" class="py-2 text-sm" onClick={onCreate}>
-            <PlusIcon class="size-3" />
-            New Connection
-          </Button>
+        <div class="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center">
+          {profilesEmpty && onUseTemplate ? (
+            <Button
+              type="button"
+              variant="default"
+              class="border py-2 text-sm"
+              loading={templateSaving}
+              disabled={templateSaving}
+              onClick={() => void onUseTemplate()}
+            >
+              Start with a SQLite template
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -38,7 +51,9 @@ export function ConnectionsSection(props: {
   searchQuery: string;
   groups: ConnectionGroup[];
   groupIdsByProfile: Record<string, string[]>;
+  templateSaving?: boolean;
   onCreate: () => void;
+  onUseSqliteTemplate?: () => void | Promise<void>;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
   onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
@@ -51,7 +66,9 @@ export function ConnectionsSection(props: {
     searchQuery,
     groups,
     groupIdsByProfile,
+    templateSaving,
     onCreate,
+    onUseSqliteTemplate,
     onOpen,
     onEdit,
     onAssignGroups,
@@ -70,7 +87,13 @@ export function ConnectionsSection(props: {
       </div>
 
       {profiles.length === 0 ? (
-        <EmptyState hasSearch={hasSearch} onCreate={onCreate} />
+        <EmptyState
+          hasSearch={hasSearch}
+          profilesEmpty={profiles.length === 0}
+          onCreate={onCreate}
+          onUseTemplate={onUseSqliteTemplate}
+          templateSaving={templateSaving}
+        />
       ) : viewMode === "grid" ? (
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {profiles.map((p) => (
