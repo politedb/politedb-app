@@ -34,7 +34,7 @@ import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog"
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
-import { DiagramGeneratorDialog } from "./DiagramGeneratorDialog";
+import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
 import {
   appendSqlIntoLiveEditor,
   getLiveSqlEditorContent,

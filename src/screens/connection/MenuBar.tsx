@@ -29,7 +29,7 @@ import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
 import { TagChips } from "src/components/common/TagChips";
 import { formatDatabaseVersion, normalizeEngineName } from "src/utils/convert";
-import { DatabaseManagerDialog } from "./DatabaseManagerDialog";
+import { DatabaseManagerDialog } from "src/components/modal/DatabaseManagerDialog";
 import { canManageDatabases } from "src/hooks/useDatabases";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";

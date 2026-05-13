@@ -262,3 +262,45 @@ table {
 .split-pane__divider.is-dragging::before {
   background: #2563eb;
 }
+
+@keyframes diagram-rel-flow-kf {
+  to {
+    stroke-dashoffset: -80;
+  }
+}
+
+.diagram-rel-flow {
+  stroke-dasharray: 2 38;
+  stroke-opacity: 0.95;
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.45));
+  animation: diagram-rel-flow-kf 4.8s linear infinite;
+}
+
+.diagram-rel-flow-particle {
+  stroke-dasharray: 0 40;
+  stroke-linecap: round;
+  stroke-width: 4.8;
+  stroke-opacity: 0.95;
+  filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.45));
+  animation: diagram-rel-flow-kf 4.8s linear infinite;
+}
+
+.diagram-rel-flow,
+.diagram-rel-flow-particle {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .diagram-rel-flow,
+  .diagram-rel-flow-particle {
+    animation: none;
+    filter: none;
+  }
+
+  .diagram-rel-flow-particle {
+    stroke-dasharray: none;
+    stroke-width: 0;
+  }
+}
