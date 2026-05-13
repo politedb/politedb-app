@@ -946,7 +946,7 @@ export function CanvasTable({
                     onChangeSort && "select-none active:bg-neutral-100"
                   )}
                   style={{ width: w, height: HEADER_HEIGHT }}
-                  onPointerDown={(e) => {
+                  onMouseUp={(e) => {
                     if (!onChangeSort) return;
                     if (e.button !== 0) return;
                     if (

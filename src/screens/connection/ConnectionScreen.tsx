@@ -49,6 +49,7 @@ import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
 import type { PatchMap } from "src/utils/generateSql";
 import { pickHostDbUser } from "src/utils/connection";
+import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 
 const EMPTY_TABLE_META = {
   columns: null,
@@ -316,6 +317,33 @@ export function ConnectionScreen() {
     activeTableWindow?.table?.name,
     getTableData,
   ]);
+
+  const activeTableLoadKey = useMemo(() => {
+    if (!activeTableWindow || activeProfileScreen === "main") return null;
+    return tableKey(
+      activeProfileScreen,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+  }, [
+    activeProfileScreen,
+    activeTableWindow,
+    activeTableWindow?.table?.schema,
+    activeTableWindow?.table?.name,
+  ]);
+
+  const rowsStreamState = useConnectionStore((s) => {
+    if (!activeTableLoadKey) return null;
+    return s.tableRowsByKey[activeTableLoadKey] ?? null;
+  });
+
+  const tableRowsLoadPercent = useMemo(() => {
+    if (!rowsStreamState?.running) return null;
+    return tableRowsStreamLoadPercent(
+      rowsStreamState,
+      activeTableData.rowCount as number | null | undefined
+    );
+  }, [rowsStreamState, activeTableData.rowCount]);
 
   /* =============================================================================
    * runtimeConnectionId (derived from tab runtime conn OR table conn)
@@ -774,6 +802,7 @@ export function ConnectionScreen() {
             connectionVersion={meta.version}
             viewMode={viewMode}
             loadTableError={loadError}
+            tableRowsLoadPercent={tableRowsLoadPercent}
             onViewModeChange={toggleViewMode}
             openSQLWindow={actions.openSql}
             onRefresh={() => void actions.refresh()}

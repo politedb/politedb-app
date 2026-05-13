@@ -36,6 +36,7 @@ import {
   type TableSort,
 } from "src/hooks/queries";
 import { TableForeignKey } from "src/types";
+import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 
 /* =============================================================================
  * Patch helpers
@@ -121,8 +122,7 @@ export function MainTableDataPane(props: {
   const { profileId, engine, limit, offset } = rt;
   const isRedis = engine === "redis";
   const isDataReadOnly = isProfileLocked;
-  const isStructureReadOnly =
-    isProfileLocked || engine === "mongo" || isRedis;
+  const isStructureReadOnly = isProfileLocked || engine === "mongo" || isRedis;
   const canAddDataRow = !isDataReadOnly && !isRedis;
 
   const { loadTableData } = useLoadTableData();
@@ -147,6 +147,7 @@ export function MainTableDataPane(props: {
   const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
   const [dropDialogOpen, setDropDialogOpen] = useState(false);
   const [sortState, setSortState] = useState<TableSort | null>(null);
+  const [progressNow, setProgressNow] = useState(() => Date.now());
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -423,6 +424,22 @@ export function MainTableDataPane(props: {
       (!hasRenderedTableBefore &&
         (!currentPageLoaded || !queryMatchesRenderedData)));
 
+  useEffect(() => {
+    if (!shouldShowLoading || !rowsInfo?.running) return;
+
+    const id = window.setInterval(() => setProgressNow(Date.now()), 250);
+    return () => window.clearInterval(id);
+  }, [shouldShowLoading, rowsInfo?.running]);
+
+  const rowsLoadProgress = useMemo(() => {
+    if (!rowsInfo?.running) return null;
+    return tableRowsStreamLoadPercent(
+      rowsInfo,
+      meta.rowCount as number | null | undefined,
+      progressNow
+    );
+  }, [rowsInfo, meta.rowCount, progressNow]);
+
   // Foreign key metadata powers cross-table navigation, but it can be loaded
   // after the first page of rows is already visible.
   useEffect(() => {
@@ -527,7 +544,8 @@ export function MainTableDataPane(props: {
    * =========================================================================== */
 
   if (hasError) return <ErrorState message={errorText} />;
-  if (shouldShowLoading) return <LoadingTableState />;
+  if (shouldShowLoading)
+    return <LoadingTableState progress={rowsLoadProgress} />;
 
   /* ===========================================================================
    * Paging
@@ -970,17 +988,15 @@ export function MainTableDataPane(props: {
         onCountExact={handleCountExact}
         onAddRow={() => {
           if (!canAddDataRow) return;
-          handleAddRow(
-            meta.columns ?? [],
-            loadedRowCount,
-            onDataChange
-          );
+          handleAddRow(meta.columns ?? [], loadedRowCount, onDataChange);
         }}
         onAddColumn={isStructureReadOnly ? () => {} : onAddColumn}
         onAddIndex={isStructureReadOnly ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
         canAddRow={canAddDataRow}
-        readOnly={viewMode === "structure" ? isStructureReadOnly : isDataReadOnly}
+        readOnly={
+          viewMode === "structure" ? isStructureReadOnly : isDataReadOnly
+        }
       />
       {sqlDialogOpen && (
         <SqlPreviewModal

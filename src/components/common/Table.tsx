@@ -335,7 +335,7 @@ export function Table<T = any>({
                 {col.sortable ? (
                   <button
                     class="flex w-full items-center justify-between gap-1 select-none"
-                    onPointerDown={(e) => {
+                    onMouseUp={(e) => {
                       if (e.button !== 0) return;
                       if (!enableSort) return;
                       const sortKey = resolveSortKey(col);

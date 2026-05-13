@@ -3,7 +3,7 @@ import { Box } from "src/components/common/Box";
 import { DatabaseIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
-export function LoadingTableState() {
+export function LoadingTableState(props: { progress?: number | null }) {
   const [startedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
 
@@ -14,6 +14,10 @@ export function LoadingTableState() {
 
   const elapsedMs = now - startedAt;
   const elapsedSec = Math.floor(elapsedMs / 1000);
+  const progress =
+    typeof props.progress === "number"
+      ? Math.max(0, Math.min(99, Math.round(props.progress)))
+      : null;
 
   const { title, subtitle } = useMemo(() => {
     if (elapsedMs < 1200) {
@@ -67,8 +71,17 @@ export function LoadingTableState() {
           </div>
 
           {/* Row 3: loading bar (align with text block, not icon) */}
-          <div class="mt-4 h-1.5 w-120 max-w-full overflow-hidden rounded-full bg-neutral-200/70">
-            <div class="h-full w-1/3 animate-[indeterminate_1.1s_ease-in-out_infinite] rounded-full bg-blue-600/75" />
+          <div class="mt-4 flex items-center gap-3">
+            <div class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-neutral-200/70">
+              {progress === null ? (
+                <div class="h-full w-1/3 animate-[indeterminate_1.1s_ease-in-out_infinite] rounded-full bg-blue-600/75" />
+              ) : (
+                <div
+                  class="h-full rounded-full bg-blue-600/85 transition-[width] duration-200 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              )}
+            </div>
           </div>
 
           <style>

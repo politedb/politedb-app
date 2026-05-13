@@ -47,6 +47,8 @@ interface Props {
   schemas?: string[];
   viewMode?: TabViewMode[];
   loadTableError?: string | null;
+  /** 0–99 while row chunks stream for the active table; omit or null when idle */
+  tableRowsLoadPercent?: number | null;
   onSchemaChange?: (schema: string) => void;
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
@@ -262,6 +264,7 @@ export function MenuBar({
   connectionVersion: databaseVersion = "",
   viewMode = ["left"],
   loadTableError,
+  tableRowsLoadPercent = null,
   onViewModeChange,
   onRefresh,
   openSQLWindow,
@@ -527,7 +530,7 @@ export function MenuBar({
           <div class="w-full max-w-220 min-w-0">
             <div
               class={cn(
-                "flex h-7 w-full items-center gap-2 rounded-lg border bg-white px-2",
+                "relative flex h-7 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white px-2",
                 loadTableError
                   ? "border-red-300"
                   : "border-neutral-200 hover:border-neutral-300",
@@ -583,6 +586,25 @@ export function MenuBar({
                   ) : null}
                 </div>
               )}
+
+              {typeof tableRowsLoadPercent === "number" ? (
+                <div
+                  class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[3px] bg-neutral-100"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={tableRowsLoadPercent}
+                  aria-label="Loading table rows"
+                >
+                  <div
+                    class="h-full rounded-sm bg-blue-500 transition-[width] duration-200 ease-out"
+                    style={{ width: `${tableRowsLoadPercent}%` }}
+                  />
+                  <div class="absolute right-2 bottom-1.5 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 shadow-sm">
+                    {Math.round(tableRowsLoadPercent)}%
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
