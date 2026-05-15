@@ -689,12 +689,12 @@ export function CanvasTable({
         sortState && sortState.colName === colName ? sortState.direction : null;
 
       let next: { colName: string; direction: "asc" | "desc" } | null;
-      if (currentDir === "asc") {
-        next = { colName, direction: "desc" };
-      } else if (currentDir === "desc") {
+      if (currentDir === "desc") {
+        next = { colName, direction: "asc" };
+      } else if (currentDir === "asc") {
         next = null; // clear sort
       } else {
-        next = { colName, direction: "asc" };
+        next = { colName, direction: "desc" };
       }
 
       onChangeSort(next);

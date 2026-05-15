@@ -32,7 +32,7 @@ export function useIndexedSort<TRow, TKey extends keyof TRow>(
 ): UseIndexedSortResult<TRow, TKey> {
   const [sortState, setSortState] = useState<SortState<TKey>>({
     key: options?.initialKey ?? null,
-    direction: options?.initialDirection ?? "asc",
+    direction: options?.initialDirection ?? "desc",
   });
 
   const { sortedRows, indexMap } = useMemo<IndexedSortResult<TRow>>(() => {
@@ -70,26 +70,28 @@ export function useIndexedSort<TRow, TKey extends keyof TRow>(
     };
   }, [rows, sortState]);
 
-  const toggleSort = useCallback(
-    (key: TKey) => {
-      setSortState((previous) => {
-        if (previous.key === key) {
-          const nextDirection: SortDirection =
-            previous.direction === "asc" ? "desc" : "asc";
-          return { key, direction: nextDirection };
+  const toggleSort = useCallback((key: TKey) => {
+    setSortState((previous) => {
+      if (previous.key === key) {
+        if (previous.direction === "desc") {
+          return { key, direction: "asc" };
         }
-        return { key, direction: "asc" };
+
+        return { key: null, direction: "desc" };
+      }
+      return { key, direction: "desc" };
+    });
+  }, []);
+
+  const setSort = useCallback(
+    (key: TKey | null, direction: SortDirection = "desc") => {
+      setSortState({
+        key,
+        direction,
       });
     },
     []
   );
-
-  const setSort = useCallback((key: TKey | null, direction: SortDirection = "asc") => {
-    setSortState({
-      key,
-      direction,
-    });
-  }, []);
 
   const findDisplayIndex = useCallback(
     (originalIndex: number | null | undefined): number | null => {
