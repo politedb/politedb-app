@@ -600,9 +600,6 @@ export function MenuBar({
                     class="h-full rounded-sm bg-blue-500 transition-[width] duration-200 ease-out"
                     style={{ width: `${tableRowsLoadPercent}%` }}
                   />
-                  <div class="absolute right-2 bottom-1.5 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 shadow-sm">
-                    {Math.round(tableRowsLoadPercent)}%
-                  </div>
                 </div>
               ) : null}
             </div>

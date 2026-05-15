@@ -214,4 +214,5 @@ export const DEFAULT_FILTER_STATE: TableFilterState = {
   filterCombine: "AND",
   appliedFilters: [],
   appliedFilterCombine: "AND",
+  filterApplySeq: 0,
 };

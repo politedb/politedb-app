@@ -128,6 +128,13 @@ export function TableFilterBar({
     [filters, onApply, onFilterCombineChange, tableKey]
   );
 
+  const handleApplyRow = useCallback(
+    (row: TableFilterCondition) => {
+      onApply([row], filterCombine, tableKey);
+    },
+    [filterCombine, onApply, tableKey]
+  );
+
   const checkFilterApplied = useCallback(
     (filter: TableFilterCondition) => {
       const filterApplied = appliedFilters.find((f) => f.id === filter.id);
@@ -222,6 +229,12 @@ export function TableFilterBar({
                       value: (e.target as HTMLInputElement).value,
                     })
                   }
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    handleApplyRow(row);
+                    (e.currentTarget as HTMLInputElement).blur();
+                  }}
                   className={cn(
                     "min-w-[140px] flex-1 px-3 py-[2.5px] text-sm outline-none",
                     "border border-neutral-300 bg-white focus:border-blue-400",
@@ -233,7 +246,7 @@ export function TableFilterBar({
               <Button
                 variant="shadow"
                 className="px-3 py-[4.5px] text-xs"
-                onClick={() => onApply([row], filterCombine, tableKey)}
+                onClick={() => handleApplyRow(row)}
               >
                 Apply
               </Button>

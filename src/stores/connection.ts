@@ -155,6 +155,7 @@ export type TableFilterState = {
   filterCombine: "AND" | "OR";
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
+  filterApplySeq?: number;
 };
 
 /* =============================================================================

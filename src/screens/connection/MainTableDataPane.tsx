@@ -169,6 +169,7 @@ export function MainTableDataPane(props: {
     filterCombine,
     appliedFilters,
     appliedFilterCombine,
+    filterApplySeq,
     setFilters,
     setFilterCombine,
     setFilterBarVisible,
@@ -196,19 +197,35 @@ export function MainTableDataPane(props: {
 
   const activeQuerySignature = useMemo(
     () =>
-      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}`,
-    [activeKey, limit, offset, appliedFilterCombine, filterSignature, sortState]
+      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
+    [
+      activeKey,
+      limit,
+      offset,
+      appliedFilterCombine,
+      filterSignature,
+      sortState,
+      filterApplySeq,
+    ]
   );
 
   const rowCountSignature = useMemo(
-    () => `${activeKey}:${appliedFilterCombine}:${filterSignature}`,
-    [activeKey, appliedFilterCombine, filterSignature]
+    () =>
+      `${activeKey}:${appliedFilterCombine}:${filterSignature}:${filterApplySeq}`,
+    [activeKey, appliedFilterCombine, filterSignature, filterApplySeq]
   );
 
   const rowsDataSignature = useMemo(
     () =>
-      `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}`,
-    [activeKey, offset, appliedFilterCombine, filterSignature, sortState]
+      `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
+    [
+      activeKey,
+      offset,
+      appliedFilterCombine,
+      filterSignature,
+      sortState,
+      filterApplySeq,
+    ]
   );
 
   /* ===========================================================================
@@ -290,6 +307,7 @@ export function MainTableDataPane(props: {
     rowCountSignature,
     rowsDataSignature,
     sortState,
+    filterApplySeq,
   ]);
 
   useEffect(() => {

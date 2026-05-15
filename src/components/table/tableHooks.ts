@@ -326,6 +326,7 @@ export function useTableFilter(
         ...current,
         appliedFilters: newFilters,
         appliedFilterCombine: combine,
+        filterApplySeq: (current.filterApplySeq ?? 0) + 1,
       });
       startedRef.current = null; // allow effect to run with new filters
     },
@@ -373,6 +374,7 @@ export function useTableFilter(
     filterCombine: current.filterCombine ?? "AND",
     appliedFilters: current.appliedFilters ?? [],
     appliedFilterCombine: current.appliedFilterCombine ?? "AND",
+    filterApplySeq: current.filterApplySeq ?? 0,
 
     setFilters,
     setFilterCombine,
