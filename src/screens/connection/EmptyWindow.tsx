@@ -1,4 +1,37 @@
 import { DatabaseIcon } from "src/components/icons";
+import { cn } from "src/utils/cn";
+
+export function ConnectionFailedPlaceholder(props: { message: string }) {
+  const { message } = props;
+
+  return (
+    <div class="relative flex h-full w-full items-center justify-center px-6">
+      <div class="relative w-full max-w-lg text-center">
+        <div class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-200">
+          <DatabaseIcon className="size-5 text-red-600" />
+        </div>
+
+        <div class="text-lg font-semibold text-red-700">Connection failed</div>
+
+        <pre
+          class={cn(
+            "mt-4 max-h-52 overflow-auto text-left",
+            "whitespace-pre-wrap wrap-break-word",
+            "rounded-xl border border-red-200 bg-red-50/90 p-4",
+            "font-mono text-[12px] leading-relaxed text-red-900"
+          )}
+        >
+          {message.trim()}
+        </pre>
+
+        <p class="mt-4 text-sm leading-relaxed text-neutral-600">
+          See the status bar above for the same message, or fix your connection
+          settings and open this profile again.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function EmptyWindow(props: {
   onNewSql: () => void;

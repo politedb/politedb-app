@@ -110,7 +110,7 @@ export function ConnectionFooter(props: {
 
     return (
       <>
-        <span class="h-2 w-2 rounded-full bg-rose-500" />
+        <span class="size-2 shrink-0 rounded-full bg-rose-500" />
         <span class="font-medium text-rose-700">Error</span>
       </>
     );

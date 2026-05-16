@@ -10,6 +10,8 @@ interface DialogProps {
   onClose?: () => void;
   children: ComponentChildren;
   className?: string;
+  /** Backdrop layer behind the panel (default: semi-opaque dim). */
+  backdropClassName?: string;
   size?: DialogSize;
   showCloseButton?: boolean;
   closeOnOutsideClick?: boolean;
@@ -45,6 +47,7 @@ export function Dialog({
   onClose,
   children,
   className,
+  backdropClassName,
   size = "md",
   showCloseButton = true,
   closeOnOutsideClick = true,
@@ -74,7 +77,10 @@ export function Dialog({
 
   return (
     <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-neutral-500/50"
+      class={cn(
+        "fixed inset-0 z-50 flex items-center justify-center",
+        backdropClassName ?? "bg-neutral-500/50"
+      )}
       onClick={handleBackdropClick}
       onContextMenu={(e) => {
         e.preventDefault();

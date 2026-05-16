@@ -7,6 +7,7 @@ import {
   DialogTitle,
   type DialogSize,
 } from "../common/Dialog";
+import { cn } from "src/utils/cn";
 
 interface Props {
   open: boolean;
@@ -15,19 +16,41 @@ interface Props {
   size?: DialogSize;
   onClose: () => void;
   onRetry?: () => void;
+  /** Query / runtime errors: scrollable details, no DDL revert note. */
+  variant?: "default" | "execution";
+  /** When false, hides the DDL revert note. Ignored when variant is execution. */
+  showRevertNote?: boolean;
+  hint?: string;
+  backdropClassName?: string;
 }
 
 export function ErrorDialog({
   open,
   error,
-  title = "Error",
-  size = "xs",
+  title: titleProp,
+  size: sizeProp,
   onClose,
   onRetry,
+  variant = "default",
+  showRevertNote = true,
+  hint: hintProp,
+  backdropClassName,
 }: Props) {
+  const isExecution = variant === "execution";
+  const title = titleProp ?? (isExecution ? "Execution" : "Error");
+  const size = sizeProp ?? (isExecution ? "md" : "xs");
+  const hint =
+    hintProp ??
+    (isExecution
+      ? "Check connection, permissions, or try a smaller LIMIT."
+      : undefined);
+  const showRevert = !isExecution && showRevertNote;
+  const detail = error.replace(/^\s*ERROR:\s*/i, "").trim() || error;
+
   return (
     <Dialog
       className="gap-2"
+      backdropClassName={backdropClassName}
       showCloseButton={false}
       open={open}
       onClose={onClose}
@@ -35,24 +58,59 @@ export function ErrorDialog({
     >
       <DialogContent>
         <DialogHeader className="p-0">
-          <DialogTitle className="text-base">{title}</DialogTitle>
+          <div class="flex items-center justify-between gap-3">
+            <DialogTitle
+              className={cn("text-base", isExecution && "text-red-600")}
+            >
+              {title}
+            </DialogTitle>
+            {isExecution ? (
+              <span class="shrink-0 rounded-md bg-red-50 px-2 py-0.5 text-sm font-semibold text-red-700">
+                ERROR
+              </span>
+            ) : null}
+          </div>
         </DialogHeader>
 
-        <div className="space-y-2 text-sm text-neutral-800">
-          <p class="max-h-48 overflow-hidden text-ellipsis text-red-600">
-            ERROR: {error.replace("ERROR: ", "")}
-          </p>
-          <p>All changes were reverted (DDL statements can't be reverted).</p>
+        <div class="space-y-2 text-sm text-neutral-800">
+          {isExecution ? (
+            <>
+              <div class="text-sm font-semibold text-neutral-500">Details</div>
+              <pre
+                class={cn(
+                  "max-h-64 overflow-auto wrap-break-word whitespace-pre-wrap",
+                  "rounded-lg border border-neutral-200 bg-neutral-50 p-3",
+                  "font-mono text-sm leading-5 text-neutral-900"
+                )}
+              >
+                {detail}
+              </pre>
+            </>
+          ) : (
+            <p class="max-h-48 overflow-hidden text-ellipsis text-red-600">
+              ERROR: {detail}
+            </p>
+          )}
+          {showRevert ? (
+            <p>All changes were reverted (DDL statements can't be reverted).</p>
+          ) : null}
+          {hint ? (
+            <p class="text-xs leading-5 text-neutral-500">{hint}</p>
+          ) : null}
         </div>
       </DialogContent>
-      <DialogFooter className="flex-col justify-center">
+      <DialogFooter className="flex-col justify-center pt-0">
         {onRetry && (
-          <Button className="w-full py-1.5" variant="default" onClick={onRetry}>
+          <Button
+            className={cn("w-full py-1.5")}
+            variant="default"
+            onClick={onRetry}
+          >
             Try Again
           </Button>
         )}
         <Button
-          className="w-full py-1.5"
+          className={cn("w-full py-1.5")}
           variant={onRetry ? "shadow" : "default"}
           onClick={onClose}
         >

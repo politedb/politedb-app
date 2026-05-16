@@ -180,7 +180,6 @@ export function ConnectionScreen() {
    * ============================================================================= */
   const [limit, setLimit] = useState(300);
   const [offset, setOffset] = useState(0);
-
   const [warningRefresh, setWarningRefresh] = useState(false);
   const [pendingAppQuit, setPendingAppQuit] = useState(false);
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
@@ -196,6 +195,8 @@ export function ConnectionScreen() {
   const [rightNavTab, setRightNavTab] = useState<"ai" | "table-size">(
     "table-size"
   );
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+
   const forceQuitRef = useRef(false);
 
   const quitApp = useCallback(async () => {
@@ -276,8 +277,13 @@ export function ConnectionScreen() {
     connecting: connectingRuntime,
     error: errorRuntime,
     reload: reloadRuntime,
-    setError: setErrorRuntime,
   } = useEnsureRuntimeConnection(activeTab);
+
+  useEffect(() => {
+    if (errorRuntime) {
+      setErrorDialogOpen(true);
+    }
+  }, [errorRuntime]);
 
   /* =============================================================================
    * Engine/metaKey (depends on activeTab)
@@ -964,11 +970,11 @@ export function ConnectionScreen() {
           )}
         </div>
 
-        {errorRuntime && (
+        {errorDialogOpen && (
           <ErrorDialog
-            open={!!errorRuntime}
-            error={errorRuntime}
-            onClose={() => setErrorRuntime(null)}
+            open
+            error={errorRuntime ?? ""}
+            onClose={() => setErrorDialogOpen(false)}
             onRetry={() => void reloadRuntime()}
           />
         )}

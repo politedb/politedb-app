@@ -11,7 +11,6 @@ import { TableFilterBar } from "src/components/table/TableFilterBar";
 import { TableFooter } from "src/components/table/TableFooter";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
-import { ErrorState } from "./ErrorState";
 
 import { DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
@@ -37,6 +36,7 @@ import {
 } from "src/hooks/queries";
 import { TableForeignKey } from "src/types";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
+import { ErrorDialog } from "src/components/modal/ErrorDialog";
 
 /* =============================================================================
  * Patch helpers
@@ -148,6 +148,7 @@ export function MainTableDataPane(props: {
   const [dropDialogOpen, setDropDialogOpen] = useState(false);
   const [sortState, setSortState] = useState<TableSort | null>(null);
   const [progressNow, setProgressNow] = useState(() => Date.now());
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -310,6 +311,31 @@ export function MainTableDataPane(props: {
     filterApplySeq,
   ]);
 
+  const dismissTableError = useCallback(() => {
+    const store = useConnectionStore.getState();
+    const tm = store.tableDataMap[activeKey];
+    if (tm?.error) {
+      store.addTableDataMap(activeKey, { ...tm, error: null });
+    }
+    const rows = store.tableRowsByKey[activeKey];
+    if (rows?.error) {
+      useConnectionStore.setState({
+        tableRowsByKey: {
+          ...store.tableRowsByKey,
+          [activeKey]: { ...rows, error: null },
+        },
+      });
+    }
+    startedRef.current = null;
+  }, [activeKey]);
+
+  const retryTableLoad = useCallback(() => {
+    dismissTableError();
+    loadedQuerySignatureByTable.delete(activeKey);
+    startedRef.current = null;
+    void handleLoadRows();
+  }, [activeKey, dismissTableError, handleLoadRows]);
+
   useEffect(() => {
     if (!activeKey) return;
 
@@ -361,6 +387,12 @@ export function MainTableDataPane(props: {
 
   const hasError = !!(meta.error || rowsInfo?.error);
   const errorText = String(meta.error || rowsInfo?.error || "");
+
+  useEffect(() => {
+    if (hasError) {
+      setErrorDialogOpen(true);
+    }
+  }, [hasError]);
 
   // Lazy-load structure/constraints when switching to Structure view.
   useEffect(() => {
@@ -561,7 +593,6 @@ export function MainTableDataPane(props: {
    * Render guards
    * =========================================================================== */
 
-  if (hasError) return <ErrorState message={errorText} />;
   if (shouldShowLoading)
     return <LoadingTableState progress={rowsLoadProgress} />;
 
@@ -610,6 +641,8 @@ export function MainTableDataPane(props: {
 
   const getRowAt = (i: number) =>
     useConnectionStore.getState().getRowAt(activeKey, offset + i);
+
+  const getEmptyRowAt = useCallback(() => undefined, []);
 
   const foreignKeyMap = useMemo(() => {
     const out: Record<string, TableForeignKey> = {};
@@ -895,33 +928,45 @@ export function MainTableDataPane(props: {
     <div class="flex h-full min-h-0 flex-col">
       <div class="min-h-0 flex-1 overflow-hidden">
         {viewMode === "structure" ? (
-          <TableStructurePane
-            engine={engine}
-            profileId={profileId}
-            readOnly={isStructureReadOnly}
-            activeTableWindow={activeTableWindow as any}
-            activeTableMeta={meta}
-            structPaneTab={structPaneTab}
-            setStructPaneTab={setStructPaneTab}
-            tableStructure={
-              s.tableStructure[profileId]?.[activeTableWindow.id] ?? EMPTY_ARRAY
-            }
-            tableConstraints={
-              s.tableConstraints[profileId]?.[activeTableWindow.id] ??
-              EMPTY_ARRAY
-            }
-            tableList={rt.metadata.get({ metaKey: rt.metaKey }).tables}
-            onDataChange={onDataChange}
-            onAddNewColumn={onAddColumn}
-            onDeleteColumn={onDeleteColumn}
-            deletedStructureRows={extractDeleted(patches, DATA_KEYS.structure)}
-            onAddIndex={onAddIndex}
-            onDeleteIndex={onDeleteIndex}
-            deletedConstraintRows={extractDeleted(
-              patches,
-              DATA_KEYS.constraints
-            )}
-          />
+          hasError ? (
+            <div class="flex h-full min-h-0 flex-col overflow-hidden">
+              <div class="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-neutral-400">
+                Unable to load structure while the data query has an error.
+              </div>
+            </div>
+          ) : (
+            <TableStructurePane
+              engine={engine}
+              profileId={profileId}
+              readOnly={isStructureReadOnly}
+              activeTableWindow={activeTableWindow as any}
+              activeTableMeta={meta}
+              structPaneTab={structPaneTab}
+              setStructPaneTab={setStructPaneTab}
+              tableStructure={
+                s.tableStructure[profileId]?.[activeTableWindow.id] ??
+                EMPTY_ARRAY
+              }
+              tableConstraints={
+                s.tableConstraints[profileId]?.[activeTableWindow.id] ??
+                EMPTY_ARRAY
+              }
+              tableList={rt.metadata.get({ metaKey: rt.metaKey }).tables}
+              onDataChange={onDataChange}
+              onAddNewColumn={onAddColumn}
+              onDeleteColumn={onDeleteColumn}
+              deletedStructureRows={extractDeleted(
+                patches,
+                DATA_KEYS.structure
+              )}
+              onAddIndex={onAddIndex}
+              onDeleteIndex={onDeleteIndex}
+              deletedConstraintRows={extractDeleted(
+                patches,
+                DATA_KEYS.constraints
+              )}
+            />
+          )
         ) : (
           <div class="flex h-full min-h-0 flex-col">
             {filterBarVisible && (
@@ -943,6 +988,7 @@ export function MainTableDataPane(props: {
                 onClear={handleClearFilters}
                 onExport={onExportOpen}
                 onImport={onImportOpen}
+                queryError={hasError}
                 onShowSql={(sql) => {
                   setSqlPreview(sql);
                   setSqlDialogOpen(true);
@@ -953,15 +999,17 @@ export function MainTableDataPane(props: {
               <TableData
                 key={activeKey}
                 columns={meta.columns ?? []}
-                baseRows={basePageTotal}
-                totalRows={visiblePageTotal}
-                getRowAt={getRowAt}
+                baseRows={hasError ? 0 : basePageTotal}
+                totalRows={hasError ? 0 : visiblePageTotal}
+                getRowAt={hasError ? getEmptyRowAt : getRowAt}
                 readOnly={isDataReadOnly}
-                onCellChange={isDataReadOnly ? undefined : onDataChange}
-                patches={extractPatches(patches)}
-                newRowKeys={newRowKeys}
+                onCellChange={
+                  hasError || isDataReadOnly ? undefined : onDataChange
+                }
+                patches={hasError ? null : extractPatches(patches)}
+                newRowKeys={hasError ? [] : newRowKeys}
                 onAddRow={
-                  canAddDataRow
+                  !hasError && canAddDataRow
                     ? () => {
                         handleAddRow(
                           meta.columns ?? [],
@@ -972,11 +1020,13 @@ export function MainTableDataPane(props: {
                     : undefined
                 }
                 onDeleteRow={(rowIndex) => {
-                  if (isDataReadOnly) return;
+                  if (hasError || isDataReadOnly) return;
                   handleDeleteRow(rowIndex, offset);
                 }}
-                deletedRows={extractDeleted(patches, DATA_KEYS.data)}
-                rowsVersion={rowsInfo?.version ?? 0}
+                deletedRows={
+                  hasError ? EMPTY_SET : extractDeleted(patches, DATA_KEYS.data)
+                }
+                rowsVersion={hasError ? 0 : (rowsInfo?.version ?? 0)}
                 foreignKeyMap={foreignKeyMap}
                 onNavigateFk={handleNavigateFk}
                 sortState={sortState}
@@ -999,8 +1049,8 @@ export function MainTableDataPane(props: {
         filterBarVisible={filterBarVisible}
         limit={limit}
         offset={offset}
-        loadedMax={loadedMax}
-        totalRows={footerTotalRows}
+        loadedMax={hasError ? -1 : loadedMax}
+        totalRows={hasError ? 0 : footerTotalRows}
         rowCountIsEstimated={!!meta.rowCountIsEstimated}
         onPageChange={pageChange}
         onCountExact={handleCountExact}
@@ -1016,6 +1066,7 @@ export function MainTableDataPane(props: {
           viewMode === "structure" ? isStructureReadOnly : isDataReadOnly
         }
       />
+
       {sqlDialogOpen && (
         <SqlPreviewModal
           open={sqlDialogOpen}
@@ -1077,6 +1128,17 @@ export function MainTableDataPane(props: {
           onClose={onDropClose}
           tableName={activeTableWindow.table.name}
           onConfirm={handleDrop}
+        />
+      )}
+
+      {errorDialogOpen && (
+        <ErrorDialog
+          open
+          variant="execution"
+          backdropClassName="bg-transparent"
+          error={errorText}
+          onClose={() => setErrorDialogOpen(false)}
+          onRetry={retryTableLoad}
         />
       )}
     </div>

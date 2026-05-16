@@ -353,9 +353,14 @@ export function MenuBar({
   }, [profile, activeSchema, activeTable, databaseVersion]);
 
   const connected = !!connectionInfo && !loadTableError;
-  const runtimeConnectionId = activeTab?.runtimeConnectionId ?? "";
+  const runtimeConnectionId = rt.runtimeConnectionId ?? "";
+  const connectionBlocked = !rt.runtimeConnectionId;
   const canOpenSql =
     connectionInfo?.engine !== "mongo" && connectionInfo?.engine !== "redis";
+
+  useEffect(() => {
+    if (connectionBlocked) setSafeModeOpen(false);
+  }, [connectionBlocked]);
 
   const tags = useMemo(() => {
     const raw = (profile?.input?.tags ?? []).map(String);
@@ -445,11 +450,16 @@ export function MenuBar({
     <>
       <div class="flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
         <div class="flex items-center">
-          <div class="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+          <div
+            class={cn(
+              "flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+            )}
+          >
             <div class="relative" ref={safeModeRef}>
               <IconButton
                 className="size-6"
                 title="Safety mode"
+                disabled={connectionBlocked}
                 onClick={(e: any) => {
                   e.stopPropagation();
                   setSafeModeOpen((prev) => !prev);
@@ -504,6 +514,7 @@ export function MenuBar({
               className="size-6"
               title="Database"
               disabled={
+                connectionBlocked ||
                 activeTab?.isLocked ||
                 !runtimeConnectionId ||
                 !canManageDatabases(connectionInfo?.engine)
@@ -518,7 +529,7 @@ export function MenuBar({
             <Button
               variant="ghost"
               className="h-6 rounded-md border-none px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
-              disabled={!canOpenSql}
+              disabled={!canOpenSql || connectionBlocked}
               onClick={openSQLWindow}
             >
               SQL

@@ -11,7 +11,7 @@ import { tableKey } from "src/hooks/useLoadTableData";
 import { SqlWindowPane } from "./SqlWindowPane";
 import { MainTableDataPane } from "./MainTableDataPane";
 import { NewTableRoute } from "./NewTableRoute";
-import { EmptyWindow } from "./EmptyWindow";
+import { EmptyWindow, ConnectionFailedPlaceholder } from "./EmptyWindow";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -179,11 +179,19 @@ export function ActiveWindowContent() {
     [isProfileLocked, activeTableWindow, onDataChange]
   );
 
+  const showConnectionFailureMain =
+    !rt.runtimeConnectionId && Boolean(rt.loadError?.trim());
+
   // -------------------------------------------------------------------------
   // Routing
   // -------------------------------------------------------------------------
 
   if (!hasAnyWindow) {
+    if (showConnectionFailureMain) {
+      return (
+        <ConnectionFailedPlaceholder message={rt.loadError!} />
+      );
+    }
     return (
       <EmptyWindow
         onNewSql={actions.openSql}
@@ -246,5 +254,14 @@ export function ActiveWindowContent() {
     );
   }
 
-  return <EmptyWindow onNewSql={actions.openSql} />;
+  if (showConnectionFailureMain) {
+    return <ConnectionFailedPlaceholder message={rt.loadError!} />;
+  }
+
+  return (
+    <EmptyWindow
+      onNewSql={actions.openSql}
+      canOpenSql={rt.engine !== "mongo"}
+    />
+  );
 }

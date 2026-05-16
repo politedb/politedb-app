@@ -54,6 +54,8 @@ interface TableFilterBarProps {
   onExport?: () => void;
   onImport?: () => void;
   onShowSql?: (sql: string) => void;
+  /** Last table load failed — highlight value inputs */
+  queryError?: boolean;
 }
 
 export function TableFilterBar({
@@ -73,6 +75,7 @@ export function TableFilterBar({
   onClear,
   onExport,
   onShowSql,
+  queryError = false,
 }: TableFilterBarProps) {
   const [applyAllOpen, setApplyAllOpen] = useState(false);
 
@@ -238,7 +241,9 @@ export function TableFilterBar({
                   className={cn(
                     "min-w-[140px] flex-1 px-3 py-[2.5px] text-sm outline-none",
                     "border border-neutral-300 bg-white focus:border-blue-400",
-                    isAppliedFilter && "bg-green-100!"
+                    queryError &&
+                      "border-red-300 bg-red-100! focus:border-red-400",
+                    !queryError && isAppliedFilter && "bg-green-100!"
                   )}
                 />
               </div>

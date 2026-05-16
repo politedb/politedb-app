@@ -19,6 +19,7 @@ import type { DatabaseEngine, TableItem } from "src/types";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
@@ -153,6 +154,8 @@ export function LeftNav({
   activeWindowId,
 }: Props) {
   const actions = useConnectionActionsCtx();
+  const rt = useConnectionRuntimeCtx();
+  const connectionChromeBlocked = !rt.runtimeConnectionId;
   const { dataPatchMap } = useConnectionStore();
   const isProfileLocked = useScreenStore(
     (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
@@ -448,7 +451,11 @@ export function LeftNav({
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-2">
           <NewTableMenu
-            disabled={isProfileLocked || !supportsTableMutations}
+            disabled={
+              isProfileLocked ||
+              !supportsTableMutations ||
+              connectionChromeBlocked
+            }
             enableNewSchema={engine === "postgres"}
             onOpenNewTable={() => {
               const t: TableItem = {
@@ -464,6 +471,7 @@ export function LeftNav({
           <Select
             aria-label={schemaLabel}
             title={schemaLabel}
+            disabled={connectionChromeBlocked}
             className={cn(
               "h-6 w-full rounded-lg border-neutral-300 bg-white",
               "text-xs! font-medium! text-neutral-800",
