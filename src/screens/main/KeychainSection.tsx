@@ -18,6 +18,7 @@ import {
 import { KeychainCard } from "./KeychainCard";
 import type { KeychainSortMode, ViewMode } from "src/types";
 import { cn } from "src/utils/cn";
+import { LockIcon } from "src/components/icons";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -61,8 +62,7 @@ export function KeychainSection(props: {
     newSignal,
     editorOpen,
     onEditorOpenChange,
-  } =
-    props;
+  } = props;
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
   const [resolvedValue, setResolvedValue] = useState("");
@@ -222,9 +222,7 @@ export function KeychainSection(props: {
     const q = searchQuery.trim().toLowerCase();
     const matched = !q ? keys : keys.filter((k) => k.toLowerCase().includes(q));
     return [...matched].sort((a, b) =>
-      sortMode === "label-desc"
-        ? b.localeCompare(a)
-        : a.localeCompare(b)
+      sortMode === "label-desc" ? b.localeCompare(a) : a.localeCompare(b)
     );
   }, [keys, searchQuery, sortMode]);
 
@@ -237,10 +235,17 @@ export function KeychainSection(props: {
           </div>
         )}
 
-        <div class="mb-3 flex items-center justify-between">
+        <div class="mb-3 flex items-center justify-between gap-8">
           <h2 class="text-sm font-semibold tracking-wide text-slate-800">
             Keychain ({filteredKeys.length})
           </h2>
+
+          <div class="flex items-center gap-1">
+            <LockIcon className="size-4 text-green-500" />
+            <span class="text-sm font-medium text-slate-500">
+              Stored securely in macOS keychain
+            </span>
+          </div>
         </div>
 
         {filteredKeys.length === 0 && (
