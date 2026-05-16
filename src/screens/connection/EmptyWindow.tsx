@@ -1,8 +1,12 @@
 import { DatabaseIcon } from "src/components/icons";
+import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 
-export function ConnectionFailedPlaceholder(props: { message: string }) {
-  const { message } = props;
+export function ConnectionFailedPlaceholder(props: {
+  message: string;
+  onEditConnection?: () => void;
+}) {
+  const { message, onEditConnection } = props;
 
   return (
     <div class="relative flex h-full w-full items-center justify-center px-6">
@@ -16,7 +20,7 @@ export function ConnectionFailedPlaceholder(props: { message: string }) {
         <pre
           class={cn(
             "mt-4 max-h-52 overflow-auto text-left",
-            "whitespace-pre-wrap wrap-break-word",
+            "wrap-break-word whitespace-pre-wrap",
             "rounded-xl border border-red-200 bg-red-50/90 p-4",
             "font-mono text-[12px] leading-relaxed text-red-900"
           )}
@@ -25,9 +29,21 @@ export function ConnectionFailedPlaceholder(props: { message: string }) {
         </pre>
 
         <p class="mt-4 text-sm leading-relaxed text-neutral-600">
-          See the status bar above for the same message, or fix your connection
-          settings and open this profile again.
+          See the status bar above for the same message, or edit your connection
+          settings and try again.
         </p>
+
+        {onEditConnection ? (
+          <div class="mt-6 flex justify-center">
+            <Button
+              variant="default"
+              className="px-5 py-2 text-sm"
+              onClick={onEditConnection}
+            >
+              Edit connection
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

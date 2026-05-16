@@ -35,6 +35,9 @@ import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
+import { OverlayModal } from "src/components/modal/OverlayModal";
+import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import type { ConnectionProfile } from "src/lib/tauri";
 import {
   appendSqlIntoLiveEditor,
   getLiveSqlEditorContent,
@@ -276,13 +279,12 @@ export function ConnectionScreen() {
   const {
     connecting: connectingRuntime,
     error: errorRuntime,
+    setError: setRuntimeConnectionError,
     reload: reloadRuntime,
   } = useEnsureRuntimeConnection(activeTab);
 
   useEffect(() => {
-    if (errorRuntime) {
-      setErrorDialogOpen(true);
-    }
+    setErrorDialogOpen(!!errorRuntime);
   }, [errorRuntime]);
 
   /* =============================================================================
@@ -290,12 +292,48 @@ export function ConnectionScreen() {
    * ============================================================================= */
   const metadata = useDatabaseMetadata();
   const engine = activeTab?.engine;
-  const { getProfileById } = useProfileStore();
+  const { getProfileById, showEditProfile, selectedProfileId, closeEdit, saveProfile, loadProfiles } =
+    useProfileStore();
 
   const profile = useMemo(() => {
     if (!activeTab?.profileId) return null;
     return getProfileById(activeTab.profileId);
   }, [activeTab, getProfileById]);
+
+  const editProfile = useMemo(() => {
+    if (!selectedProfileId) return undefined;
+    return getProfileById(selectedProfileId);
+  }, [selectedProfileId, getProfileById]);
+
+  const handleConnectionProfileSaved = useCallback(
+    async (saved?: ConnectionProfile) => {
+      if (!saved || !activeTab) return;
+
+      await saveProfile(saved);
+      await loadProfiles();
+      closeEdit();
+      setErrorDialogOpen(false);
+
+      const currentTab =
+        useScreenStore.getState().profileTabs.find((t) => t.id === activeTab.id) ??
+        activeTab;
+
+      // Connect path sets runtimeConnectionId on the tab; Save-only clears it to retry.
+      const runtimeConnectionId = currentTab.runtimeConnectionId;
+
+      useScreenStore.getState().updateTab(activeTab.id, {
+        label: saved.label || activeTab.label,
+        engine: saved.engine,
+        profileId: saved.id,
+        runtimeConnectionId: runtimeConnectionId ?? undefined,
+      });
+
+      if (runtimeConnectionId) {
+        setRuntimeConnectionError(null);
+      }
+    },
+    [activeTab, saveProfile, loadProfiles, closeEdit, setRuntimeConnectionError]
+  );
 
   const metaKey = useMemo(() => {
     if (!activeTab?.id) return "";
@@ -405,6 +443,19 @@ export function ConnectionScreen() {
           : "",
   });
 
+  const prevRuntimeConnectionIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const prev = prevRuntimeConnectionIdRef.current;
+    prevRuntimeConnectionIdRef.current = runtimeConnectionId;
+
+    if (!runtimeConnectionId || runtimeConnectionId === prev) return;
+
+    setRuntimeConnectionError(null);
+    setErrorDialogOpen(false);
+    void refreshSchemaAndTables();
+  }, [runtimeConnectionId, refreshSchemaAndTables, setRuntimeConnectionError]);
+
   const sidebarTables = useMemo(() => {
     const base = [...filteredTables];
     const draftTables = activeWindows
@@ -469,12 +520,23 @@ export function ConnectionScreen() {
   ]);
 
   const loadError = useMemo(() => {
-    return (
-      errorRuntime ||
-      meta.error ||
-      (activeTableWindow ? activeTableData.error : null)
-    );
-  }, [errorRuntime, meta.error, activeTableWindow, activeTableData.error]);
+    const tableErr = activeTableWindow ? activeTableData.error : null;
+
+    if (!runtimeConnectionId) {
+      return errorRuntime || meta.error || tableErr;
+    }
+
+    // Connected: ignore stale runtime error; only show metadata error if load never succeeded.
+    const metadataErr = meta.error && !meta.loaded ? meta.error : null;
+    return metadataErr || tableErr;
+  }, [
+    runtimeConnectionId,
+    errorRuntime,
+    meta.error,
+    meta.loaded,
+    activeTableWindow,
+    activeTableData.error,
+  ]);
 
   /* =============================================================================
    * New table save ref (runtime)
@@ -1001,6 +1063,27 @@ export function ConnectionScreen() {
           metaKey={metaKey}
           metadata={metadata}
         />
+
+        <OverlayModal
+          open={
+            !!(
+              showEditProfile &&
+              editProfile &&
+              activeTab?.profileId === editProfile.id
+            )
+          }
+          onClose={closeEdit}
+        >
+          {editProfile ? (
+            <ConnectionFormDialog
+              onSaved={handleConnectionProfileSaved}
+              onClose={closeEdit}
+              initialData={editProfile}
+              engine={editProfile.engine}
+              reuseTabId={activeTab?.id}
+            />
+          ) : null}
+        </OverlayModal>
       </ConnectionRuntimeProvider>
     </ConnectionActionsProvider>
   );

@@ -15,6 +15,7 @@ import { EmptyWindow, ConnectionFailedPlaceholder } from "./EmptyWindow";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { useProfileStore } from "src/stores/profile";
 
 const EMPTY_ARRAY: [] = [];
 
@@ -44,8 +45,14 @@ export function ActiveWindowContent() {
   const rt = useConnectionRuntimeCtx();
 
   const { profileId, isProfileLocked } = rt;
-  const { hasAnyWindow, activeId, activeSqlWindow, activeTableWindow } =
+  const { hasAnyWindow, activeId, activeTab, activeSqlWindow, activeTableWindow } =
     useConnectionWindows(profileId);
+
+  const openEditConnection = useCallback(() => {
+    const profileId = activeTab?.profileId;
+    if (!profileId) return;
+    useProfileStore.getState().openEdit(profileId);
+  }, [activeTab?.profileId]);
 
   const activeKey = useMemo(() => {
     if (!activeTableWindow) return "";
@@ -189,7 +196,12 @@ export function ActiveWindowContent() {
   if (!hasAnyWindow) {
     if (showConnectionFailureMain) {
       return (
-        <ConnectionFailedPlaceholder message={rt.loadError!} />
+        <ConnectionFailedPlaceholder
+          message={rt.loadError!}
+          onEditConnection={
+            activeTab?.profileId ? openEditConnection : undefined
+          }
+        />
       );
     }
     return (
@@ -255,7 +267,14 @@ export function ActiveWindowContent() {
   }
 
   if (showConnectionFailureMain) {
-    return <ConnectionFailedPlaceholder message={rt.loadError!} />;
+    return (
+      <ConnectionFailedPlaceholder
+        message={rt.loadError!}
+        onEditConnection={
+          activeTab?.profileId ? openEditConnection : undefined
+        }
+      />
+    );
   }
 
   return (

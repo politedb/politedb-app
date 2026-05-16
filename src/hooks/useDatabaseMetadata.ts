@@ -362,15 +362,18 @@ export function useDatabaseMetadata() {
 
       const meta = cacheRef.current[metaKey] ?? emptyMeta(engine);
 
-      // Lazy load only if we have connectionId to execute queries
-      if (
-        lazy &&
-        connectionId &&
-        (!meta.loaded || (includeColumns && !meta.columnsLoaded)) &&
-        !meta.loading &&
-        !meta.error
-      ) {
-        void load({ metaKey, engine, connectionId, includeColumns });
+      // Lazy load when connected; retry after a prior metadata error.
+      const needsLoad =
+        !meta.loaded || (includeColumns && !meta.columnsLoaded) || !!meta.error;
+
+      if (lazy && connectionId && needsLoad && !meta.loading) {
+        void load({
+          metaKey,
+          engine,
+          connectionId,
+          includeColumns,
+          force: !!meta.error,
+        });
       }
 
       return meta;

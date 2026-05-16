@@ -36,13 +36,16 @@ export function ConnectionFormDialog({
   onSaved,
   initialData,
   engine,
+  /** When set, Connect updates this tab instead of opening a new one. */
+  reuseTabId,
 }: {
   onSaved?: (v?: ConnectionProfile) => void;
   onClose?: () => void;
   initialData?: ConnectionProfile;
   engine: DatabaseEngine;
+  reuseTabId?: string;
 }) {
-  const { addTab, setActiveProfileScreen } = useScreenStore();
+  const { addTab, updateTab, setActiveProfileScreen } = useScreenStore();
 
   const profileId = initialData?.id ?? undefined;
 
@@ -192,8 +195,7 @@ export function ConnectionFormDialog({
 
       setSuccess(`Connected ✅ ${res.profile.label}`);
 
-      const newTab: ProfileTab = {
-        id: `tab-${uuid()}`,
+      const tabPatch: Partial<ProfileTab> = {
         label:
           res.profile.label || connectionInput.label || "Unnamed Connection",
         engine: connectionInput.engine,
@@ -201,8 +203,19 @@ export function ConnectionFormDialog({
         profileId: res.profile.id,
       };
 
-      addTab(newTab);
-      setActiveProfileScreen(newTab.id);
+      if (reuseTabId) {
+        updateTab(reuseTabId, tabPatch);
+        setActiveProfileScreen(reuseTabId);
+      } else {
+        const newTab: ProfileTab = {
+          id: `tab-${uuid()}`,
+          ...tabPatch,
+        } as ProfileTab;
+
+        addTab(newTab);
+        setActiveProfileScreen(newTab.id);
+      }
+
       onSaved?.(res.profile);
       onClose?.();
       trackEvent("connection_connect_success", {

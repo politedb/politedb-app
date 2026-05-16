@@ -12,8 +12,11 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
   useEffect(() => {
     if (!activeTab?.profileId) return;
 
-    // already connected
-    if (activeTab.runtimeConnectionId) return;
+    // already connected — clear any stale error from a previous failed attempt
+    if (activeTab.runtimeConnectionId) {
+      setError(null);
+      return;
+    }
 
     let canceled = false;
     setConnecting(true);
