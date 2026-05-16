@@ -242,7 +242,7 @@ table {
 .split-pane--vertical .split-pane__divider::before {
   width: 100%;
   height: 1px;
-  /* 👈 mảnh */
+  /* thin scrollbar thumb */
   top: 50%;
   transform: translateY(-50%);
 }

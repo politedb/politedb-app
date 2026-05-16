@@ -74,17 +74,21 @@ export function hexToRgba(hex: string, alpha: number) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export function formatBytesSize(bytes: string | number): string {
+export function formatBytesSize(
+  bytes: string | number,
+  options?: { fractionDigits?: number }
+): string {
   const numBytes = typeof bytes === "string" ? parseFloat(bytes) : bytes;
+  const fractionDigits = Math.max(0, options?.fractionDigits ?? 0);
 
   if (!Number.isFinite(numBytes) || numBytes < 0) {
-    return "0 B";
+    return fractionDigits > 0 ? `0.${"0".repeat(fractionDigits)} B` : "0 B";
   }
 
   const KB = 1024;
   const MB = KB * 1024;
   const GB = MB * 1024;
-  const formatDecimal = (value: number) => value.toFixed(0);
+  const formatDecimal = (value: number) => value.toFixed(fractionDigits);
 
   if (numBytes >= GB) {
     return `${formatDecimal(numBytes / GB)} GB`;
@@ -93,7 +97,9 @@ export function formatBytesSize(bytes: string | number): string {
   } else if (numBytes >= KB) {
     return `${formatDecimal(numBytes / KB)} KB`;
   } else {
-    return `${numBytes} Bytes`;
+    return fractionDigits > 0
+      ? `${numBytes.toFixed(fractionDigits)} B`
+      : `${numBytes} Bytes`;
   }
 }
 

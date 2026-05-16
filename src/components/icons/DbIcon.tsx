@@ -10,7 +10,7 @@ import sqlite from "src/assets/db/sqlite.svg";
 import oracle from "src/assets/db/oracle.svg";
 import sqlserver from "src/assets/db/sqlserver.svg";
 
-// Nếu mày đã có type ở chỗ khác thì import, còn không thì để local như này:
+// Import DatabaseEngine from shared types if available; otherwise keep this local alias.
 export type DatabaseEngine =
   | "postgres"
   | "mysql"

@@ -22,7 +22,7 @@
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
 
-  // ===== Rust dùng rustfmt =====
+  // ===== Rust: use rustfmt =====
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },

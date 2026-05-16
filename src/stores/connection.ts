@@ -387,7 +387,7 @@ export const useConnectionStore = create<ConnectionState>()(
       };
 
       if (immediate) {
-        // Nếu đã có RAF pending thì hủy luôn để flush ngay
+        // Cancel any pending RAF so we flush immediately
         const raf = rafByKey.get(key);
         if (raf) {
           cancelAnimationFrame(raf);
@@ -1184,7 +1184,7 @@ export const useConnectionStore = create<ConnectionState>()(
             prevMeta.lastChunkAt = lastChunkAt;
           }
 
-          const wasEmpty = prev.loadedMax < prev.streamOffset; // chưa có row nào
+          const wasEmpty = prev.loadedMax < prev.streamOffset; // no rows loaded yet
           const nowHasAny = loadedMax >= prev.streamOffset;
 
           if (

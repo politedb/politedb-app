@@ -32,24 +32,32 @@ const aiRuntimeStopMock = vi.fn();
 
 const runSqlQueryMock = vi.fn();
 
-vi.mock("@root/src/lib/ai-assistant", () => ({
-  getLocalAiSettings: (...args: any[]) => getLocalAiSettingsMock(...args),
-  saveLocalAiSettings: (...args: any[]) => saveLocalAiSettingsMock(...args),
-  hasSeenLocalAiModel: (...args: any[]) => hasSeenLocalAiModelMock(...args),
-  markLocalAiModelSeen: (...args: any[]) => markLocalAiModelSeenMock(...args),
-  listLocalAiModels: (...args: any[]) => listLocalAiModelsMock(...args),
-  isGeneralChatPrompt: (...args: any[]) => isGeneralChatPromptMock(...args),
-  chatReply: (...args: any[]) => chatReplyMock(...args),
-  getDirectMetadataReply: (...args: any[]) => getDirectMetadataReplyMock(...args),
-  planSqlFromQuestion: (...args: any[]) => planSqlFromQuestionMock(...args),
-  isReadOnlySql: (...args: any[]) => isReadOnlySqlMock(...args),
-  answerFromResult: (...args: any[]) => answerFromResultMock(...args),
-  queryResultToObjects: (...args: any[]) => queryResultToObjectsMock(...args),
-  buildFastResultAnswer: (...args: any[]) => buildFastResultAnswerMock(...args),
-  getFastChatReply: (...args: any[]) => getFastChatReplyMock(...args),
-  getAmbiguousPromptReply: (...args: any[]) =>
-    getAmbiguousPromptReplyMock(...args),
-}));
+vi.mock("@root/src/lib/ai-assistant", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@root/src/lib/ai-assistant")>();
+
+  return {
+    ...actual,
+    getLocalAiSettings: (...args: any[]) => getLocalAiSettingsMock(...args),
+    saveLocalAiSettings: (...args: any[]) => saveLocalAiSettingsMock(...args),
+    hasSeenLocalAiModel: (...args: any[]) => hasSeenLocalAiModelMock(...args),
+    markLocalAiModelSeen: (...args: any[]) => markLocalAiModelSeenMock(...args),
+    listLocalAiModels: (...args: any[]) => listLocalAiModelsMock(...args),
+    isGeneralChatPrompt: (...args: any[]) => isGeneralChatPromptMock(...args),
+    chatReply: (...args: any[]) => chatReplyMock(...args),
+    getDirectMetadataReply: (...args: any[]) =>
+      getDirectMetadataReplyMock(...args),
+    planSqlFromQuestion: (...args: any[]) => planSqlFromQuestionMock(...args),
+    isReadOnlySql: (...args: any[]) => isReadOnlySqlMock(...args),
+    answerFromResult: (...args: any[]) => answerFromResultMock(...args),
+    queryResultToObjects: (...args: any[]) => queryResultToObjectsMock(...args),
+    buildFastResultAnswer: (...args: any[]) =>
+      buildFastResultAnswerMock(...args),
+    getFastChatReply: (...args: any[]) => getFastChatReplyMock(...args),
+    getAmbiguousPromptReply: (...args: any[]) =>
+      getAmbiguousPromptReplyMock(...args),
+  };
+});
 
 vi.mock("src/lib/tauri", () => ({
   aiRuntimeStatus: (...args: any[]) => aiRuntimeStatusMock(...args),
@@ -247,10 +255,20 @@ describe("AiAssistantPanel", () => {
     expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
     expect(aiRuntimeStartMock).not.toHaveBeenCalled();
 
-    aiRuntimeDownloadDefaultModelMock.mockResolvedValueOnce(
+    const downloadedStatus = status({
+      phase: "stopped",
+      model_name: "default",
+      model_path: "/tmp/default.gguf",
+      missing: [],
+    });
+
+    aiRuntimeDownloadDefaultModelMock.mockResolvedValueOnce(downloadedStatus);
+    aiRuntimeStatusMock.mockResolvedValue(downloadedStatus);
+    aiRuntimeStartMock.mockResolvedValue(
       status({
-        phase: "stopped",
-        model_name: "default",
+        phase: "ready",
+        endpoint: "http://127.0.0.1:8080/v1",
+        model_name: "qwen2.5-coder:7b",
         model_path: "/tmp/default.gguf",
       })
     );
@@ -401,7 +419,7 @@ describe("AiAssistantPanel", () => {
     const textarea = await screen.findByPlaceholderText(
       "Ask AI about data, or ask it to write SQL for you..."
     );
-    fireEvent.input(textarea, { target: { value: "liệt kê toàn bộ bảng cho tôi" } });
+    fireEvent.input(textarea, { target: { value: "list all tables for me" } });
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
     );

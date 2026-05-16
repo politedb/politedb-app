@@ -77,7 +77,7 @@ pub struct ProfileImportResult {
 }
 
 /* ============================================================================
- * Validation (engine-aware, cho phép NO password)
+ * Validation (engine-aware, allows NO password)
  * ============================================================================
  */
 
@@ -95,7 +95,7 @@ fn validate_pg_input(pg: &PgConnectInput) -> Result<(), String> {
         return Err("PG_PORT_INVALID".into());
     }
 
-    // allow no password => không check empty
+    // allow no password => do not require a non-empty password
     Ok(())
 }
 
@@ -255,7 +255,7 @@ fn maybe_persist_secret_ref(
         return Ok(());
     }
 
-    // persist_secrets=true nhưng user để password rỗng => bỏ qua, giữ Inline "" để connect "no password"
+    // persist_secrets=true but empty password => skip; keep Inline "" for no-password connect
     if sr.kind == SecretRefKind::Inline {
         let pw = sr.value.trim();
         if pw.is_empty() {

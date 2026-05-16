@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantMessageCard";
 import { AiAssistantSettingsPopover } from "src/components/ai-assistant/AiAssistantSettingsPopover";
 import { Button } from "src/components/common/Button";
@@ -9,8 +9,10 @@ import {
   buildFastResultAnswer,
   chatReply,
   getFastChatReply,
+  getFastSqlReply,
   getAmbiguousPromptReply,
   getDirectMetadataReply,
+  wantsSqlGeneration,
   getLocalAiSettings,
   hasSeenLocalAiModel,
   isGeneralChatPrompt,
@@ -99,6 +101,28 @@ function isModelDownloading(status?: AiRuntimeStatus | null) {
   );
 }
 
+function isRuntimeReady(status?: AiRuntimeStatus | null) {
+  return status?.phase === "ready" && Boolean(status.endpoint?.trim());
+}
+
+async function pollRuntimeUntilReady(
+  onStatus: (status: AiRuntimeStatus) => void,
+  options?: { maxWaitMs?: number; intervalMs?: number }
+): Promise<AiRuntimeStatus | null> {
+  const maxWaitMs = options?.maxWaitMs ?? 120_000;
+  const intervalMs = options?.intervalMs ?? 750;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    const status = await aiRuntimeStatus();
+    onStatus(status);
+    if (isRuntimeReady(status)) return status;
+    await sleep(intervalMs);
+  }
+
+  return null;
+}
+
 function ThinkingCard(props: { status: AssistantStatus }) {
   const isLoadingModel = props.status === "loading_model";
   return (
@@ -171,8 +195,10 @@ function RuntimeLoadingPane(props: {
                 ? `${progressPct.toFixed(1)}%`
                 : "Preparing download..."}
               {" · "}
-              {formatBytesSize(downloaded)}
-              {total > 0 ? ` / ${formatBytesSize(total)}` : ""}
+              {formatBytesSize(downloaded, { fractionDigits: 2 })}
+              {total > 0
+                ? ` / ${formatBytesSize(total, { fractionDigits: 2 })}`
+                : ""}
             </div>
           </div>
         ) : null}
@@ -308,6 +334,7 @@ export function AiAssistantPanel(props: Props) {
   );
   const [runtimeStatusReady, setRuntimeStatusReady] = useState(false);
   const [modelDownloadFailed, setModelDownloadFailed] = useState(false);
+  const [runtimeStartFailed, setRuntimeStartFailed] = useState(false);
   const [modelDownloadInProgress, setModelDownloadInProgress] = useState(false);
   const [assistantStatus, setAssistantStatus] =
     useState<AssistantStatus>("idle");
@@ -358,19 +385,28 @@ export function AiAssistantPanel(props: Props) {
   }, []);
 
   useEffect(() => {
-    if (!runtimeBusy && runtimeStatus?.phase !== "starting") return;
+    const shouldPoll =
+      runtimeBusy ||
+      modelDownloadInProgress ||
+      runtimeStatus?.phase === "starting";
+
+    if (!shouldPoll) return;
 
     const id = window.setInterval(() => {
       void aiRuntimeStatus()
         .then((status) => {
           setRuntimeStatus(status);
           if (status.endpoint) setEndpoint(status.endpoint);
+          if (isRuntimeReady(status)) {
+            setRuntimeStartFailed(false);
+            setModelDownloadFailed(false);
+          }
         })
         .catch(() => {});
     }, 750);
 
     return () => window.clearInterval(id);
-  }, [runtimeBusy, runtimeStatus?.phase]);
+  }, [runtimeBusy, modelDownloadInProgress, runtimeStatus?.phase]);
 
   useEffect(() => {
     if (runtimeBusy) return;
@@ -456,7 +492,7 @@ export function AiAssistantPanel(props: Props) {
     if (!runtimeStatusReady) return true;
     if (runtimeBusy) return true;
     if (modelDownloadInProgress) return true;
-    if (modelDownloadFailed) return true;
+    if (modelDownloadFailed || runtimeStartFailed) return true;
     return (
       runtimeStatus?.phase === "starting" &&
       !runtimeStatus?.endpoint &&
@@ -464,6 +500,7 @@ export function AiAssistantPanel(props: Props) {
     );
   }, [
     modelDownloadFailed,
+    runtimeStartFailed,
     modelDownloadInProgress,
     runtimeBusy,
     runtimeStatus,
@@ -557,22 +594,79 @@ export function AiAssistantPanel(props: Props) {
     }
   };
 
+  const applyRuntimeStatus = useCallback((status: AiRuntimeStatus) => {
+    setRuntimeStatus(status);
+    if (status.endpoint) setEndpoint(status.endpoint);
+  }, []);
+
+  const ensureBundledRuntimeReady = useCallback(async () => {
+    const apply = applyRuntimeStatus;
+
+    let currentStatus = await aiRuntimeStatus();
+    apply(currentStatus);
+
+    if (isRuntimeReady(currentStatus)) {
+      await handleLoadModels(currentStatus.endpoint!);
+      return;
+    }
+
+    if (isMissingModelOnly(currentStatus)) {
+      return;
+    }
+
+    if (currentStatus.phase === "ready") {
+      const stopped = await aiRuntimeStop();
+      apply(stopped);
+      currentStatus = stopped;
+    }
+
+    if (
+      currentStatus.missing.length === 0 &&
+      !isRuntimeReady(currentStatus) &&
+      currentStatus.phase !== "starting"
+    ) {
+      try {
+        const started = await aiRuntimeStart();
+        apply(started);
+        if (isRuntimeReady(started)) {
+          await handleLoadModels(started.endpoint!);
+          return;
+        }
+      } catch {
+        // Server may still be loading the GGUF — poll until ready.
+      }
+    }
+
+    const ready = await pollRuntimeUntilReady(apply, { maxWaitMs: 120_000 });
+    if (ready?.endpoint) {
+      await handleLoadModels(ready.endpoint);
+      return;
+    }
+
+    const finalStatus = await aiRuntimeStatus();
+    apply(finalStatus);
+    if (isRuntimeReady(finalStatus) && finalStatus.endpoint) {
+      await handleLoadModels(finalStatus.endpoint);
+      return;
+    }
+
+    if (isMissingModelOnly(finalStatus)) {
+      return;
+    }
+
+    throw new Error(
+      finalStatus.last_error?.trim() ||
+        "AI runtime failed to start. Try Refresh or wait for the model to finish loading."
+    );
+  }, [applyRuntimeStatus, handleLoadModels]);
+
   const handleRetryRuntimeSetup = async () => {
     suppressAutoStartRef.current = false;
+    setRuntimeStartFailed(false);
+    setModelDownloadFailed(false);
     setRuntimeBusy(true);
     try {
-      const currentStatus = await aiRuntimeStatus();
-      setRuntimeStatus(currentStatus);
-      if (currentStatus.endpoint) setEndpoint(currentStatus.endpoint);
-
-      if (isMissingModelOnly(currentStatus)) {
-        return;
-      }
-
-      const nextStatus = await aiRuntimeStart();
-      setRuntimeStatus(nextStatus);
-      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
-      await handleLoadModels(nextStatus.endpoint ?? undefined);
+      await ensureBundledRuntimeReady();
     } finally {
       setRuntimeBusy(false);
     }
@@ -581,25 +675,64 @@ export function AiAssistantPanel(props: Props) {
   const handleDownloadModel = async () => {
     suppressAutoStartRef.current = false;
     setModelDownloadFailed(false);
+    setRuntimeStartFailed(false);
     setModelDownloadInProgress(true);
     setRuntimeBusy(true);
     try {
       const downloaded = await aiRuntimeDownloadDefaultModel();
-      setRuntimeStatus(downloaded);
-      if (downloaded.endpoint) setEndpoint(downloaded.endpoint);
+      applyRuntimeStatus(downloaded);
+
       if (isMissingModelOnly(downloaded)) {
-        return;
+        await sleep(300);
+        const refreshed = await aiRuntimeStatus();
+        applyRuntimeStatus(refreshed);
+        if (isMissingModelOnly(refreshed)) {
+          setModelDownloadFailed(true);
+          return;
+        }
       }
 
       markLocalAiModelSeen();
       setHasSeenModelBefore(true);
+      setModelDownloadInProgress(false);
 
-      const nextStatus = await aiRuntimeStart();
-      setRuntimeStatus(nextStatus);
-      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
-      await handleLoadModels(nextStatus.endpoint ?? undefined);
+      // Let the filesystem settle, then start runtime (with retries/polling).
+      await sleep(300);
+      await ensureBundledRuntimeReady();
     } catch (error) {
       const message = formatError(error);
+      const latest = await aiRuntimeStatus().catch(() => null);
+      if (latest) applyRuntimeStatus(latest);
+
+      if (latest && isRuntimeReady(latest) && latest.endpoint) {
+        await handleLoadModels(latest.endpoint);
+        return;
+      }
+
+      const modelOnDisk =
+        Boolean(latest?.model_path?.trim()) && !isMissingModelOnly(latest);
+
+      if (modelOnDisk) {
+        setRuntimeStartFailed(true);
+        setRuntimeStatus((prev) => ({
+          ...(latest ?? prev ?? {
+            endpoint: null,
+            model_name: null,
+            server_bin: null,
+            model_path: null,
+            pid: null,
+            managed_by_app: true,
+            missing: [],
+            phase: "error",
+          }),
+          phase: "error",
+          last_error: message,
+          model_downloaded_bytes: null,
+          model_total_bytes: null,
+        }));
+        return;
+      }
+
       setModelDownloadFailed(true);
       setRuntimeStatus((prev) => ({
         ...(prev ?? {
@@ -636,36 +769,11 @@ export function AiAssistantPanel(props: Props) {
 
   const handleRefreshRuntimeSetup = async () => {
     suppressAutoStartRef.current = false;
+    setRuntimeStartFailed(false);
+    setModelDownloadFailed(false);
     setRuntimeBusy(true);
     try {
-      let currentStatus = await aiRuntimeStatus();
-      setRuntimeStatus(currentStatus);
-      if (currentStatus.endpoint) setEndpoint(currentStatus.endpoint);
-
-      if (currentStatus.phase === "ready") {
-        const stopped = await aiRuntimeStop();
-        setRuntimeStatus(stopped);
-        currentStatus = await aiRuntimeStatus();
-        setRuntimeStatus(currentStatus);
-      }
-
-      if (isMissingModelOnly(currentStatus)) {
-        return;
-      }
-
-      const nextStatus = await aiRuntimeStatus();
-      setRuntimeStatus(nextStatus);
-      if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
-
-      if (nextStatus.missing.length === 0 && nextStatus.phase !== "ready") {
-        const started = await aiRuntimeStart();
-        setRuntimeStatus(started);
-        if (started.endpoint) setEndpoint(started.endpoint);
-        await handleLoadModels(started.endpoint ?? undefined);
-        return;
-      }
-
-      await handleLoadModels(nextStatus.endpoint ?? undefined);
+      await ensureBundledRuntimeReady();
     } finally {
       setRuntimeBusy(false);
     }
@@ -741,6 +849,8 @@ export function AiAssistantPanel(props: Props) {
 
       if (isGeneralChatPrompt(question)) {
         intentKind = "chat";
+      } else if (wantsSqlGeneration(question)) {
+        intentKind = "sql";
       } else if (
         getDirectMetadataReply({ engine, question, activeSchema, tables })
       ) {
@@ -823,6 +933,24 @@ export function AiAssistantPanel(props: Props) {
             text: [directReply.answer, directReply.followup]
               .filter(Boolean)
               .join("\n\n"),
+          },
+          requestStartedAt
+        );
+        return;
+      }
+
+      const fastSql = getFastSqlReply({
+        engine,
+        question,
+        activeSchema,
+        tables,
+      });
+      if (fastSql) {
+        await sleep(300);
+        appendAssistantMessage(
+          {
+            text: fastSql.explanation,
+            sql: fastSql.sql,
           },
           requestStartedAt
         );
@@ -1013,9 +1141,13 @@ export function AiAssistantPanel(props: Props) {
       {showRuntimeLoadingScreen ? (
         <RuntimeLoadingPane
           status={runtimeStatus}
-          onRetry={() => void handleRetryRuntimeSetup()}
+          onRetry={() =>
+            void (runtimeStartFailed
+              ? handleRefreshRuntimeSetup()
+              : handleRetryRuntimeSetup())
+          }
           onCancelDownload={() => void handleCancelModelDownload()}
-          showRetry={modelDownloadFailed}
+          showRetry={modelDownloadFailed || runtimeStartFailed}
           forceDownloading={modelDownloadInProgress}
         />
       ) : showMissingRuntimeScreen ? (

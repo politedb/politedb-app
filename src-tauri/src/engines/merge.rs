@@ -59,7 +59,7 @@ fn merge_ssh_auth_for_test(
                 // 2️⃣ override from FE
                 *base_pw = ov_pw;
             }
-            // 3️⃣ else: giữ base_pw
+            // 3️⃣ else: keep base_pw
         }
 
         // ===== Auth type changed (Password <-> PrivateKey) =====

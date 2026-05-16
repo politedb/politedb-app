@@ -498,8 +498,8 @@ fn spawn_session_thread(
             let mut remove_ids: Vec<u64> = Vec::new();
 
             for (id, p) in pipes.iter_mut() {
-                // FIX: Xử lý Handshake riêng
-                // Dùng if let để kiểm tra state mà không giữ borrow lâu
+                // FIX: Handle handshake separately.
+                // Use matches! so we do not hold a long-lived borrow on state.
                 let is_handshaking = matches!(p.state, PipeState::Handshaking);
 
                 if is_handshaking {
@@ -518,8 +518,8 @@ fn spawn_session_thread(
                     }
                 }
 
-                // FIX: Xử lý Pump riêng (Sau khi handshake có thể đã thành Active ngay lập tức)
-                // Lúc này ta truyền `p` vào hàm, hàm sẽ tự tách `p.state` ra.
+                // FIX: Handle pump separately (handshake may transition to Active immediately).
+                // pump_active_channel takes `p` and splits `p.state` internally.
                 if let PipeState::Active(_) = p.state {
                     if pump_active_channel(&sess, p) {
                         any_activity = true;

@@ -366,9 +366,22 @@ function hasDatabaseIntent(text: string) {
 
   return [
     /\b(sql|query|table|column|schema|database|db|row|filter|where|join|group by|order by)\b/,
-    /\b(select|count|list|show|find|get|top|latest|newest|oldest|compare|trend|sum|avg|average|max|min|duplicate|missing)\b/,
-    /\b(liet ke|dem|tim|hien thi|truy van|sap xep|loc|thong ke|so sanh|tong|trung binh|lon nhat|nho nhat|moi nhat)\b/,
+    /\b(select|insert|update|delete|truncate|drop|alter|create|count|list|show|find|get|top|latest|newest|oldest|compare|trend|sum|avg|average|max|min|duplicate|missing)\b/,
+    /\b(liet ke|dem|tim|hien thi|truy van|sap xep|loc|thong ke|so sanh|tong|trung binh|lon nhat|nho nhat|moi nhat|cau lenh|lenh sql)\b/,
   ].some((pattern) => pattern.test(normalized));
+}
+
+/** True when the user wants generated SQL, not a schema/table listing. */
+export function wantsSqlGeneration(question: string) {
+  const text = normalizeIntentText(question);
+  if (!text) return false;
+
+  return [
+    /\b(truncate|select|insert|update|delete|drop|alter|create|grant|revoke|merge|replace)\b/,
+    /\b(cau lenh|lenh sql|viet sql|tao sql|generate sql|write sql|sql command|sql query)\b/,
+    /\b(cho|give|show|write|create|generate)\s+(me\s+)?(the\s+)?(a\s+)?(sql|cau lenh|query)\b/,
+    /\b(explain|run|execute|fix|improve|optimize)(\s+(this|the))?\s+sql\b/,
+  ].some((pattern) => pattern.test(text));
 }
 
 function countMeaningfulTokens(text: string) {
@@ -480,6 +493,64 @@ function formatListPreview(items: string[], maxItems = 12) {
   return `${items.slice(0, maxItems).join(", ")} and ${items.length - maxItems} more`;
 }
 
+function findTableInContext(
+  tables: TableItem[],
+  tableName: string,
+  activeSchema?: string
+) {
+  const normalizedName = tableName.toLowerCase();
+  const matches = tables.filter(
+    (table) => table.name.toLowerCase() === normalizedName
+  );
+  if (!matches.length) return null;
+  if (activeSchema) {
+    return matches.find((table) => table.schema === activeSchema) ?? matches[0];
+  }
+  return matches[0] ?? null;
+}
+
+export function getFastSqlReply(args: {
+  engine: DatabaseEngine;
+  question: string;
+  activeSchema?: string;
+  tables: TableItem[];
+}): { sql: string; explanation: string } | null {
+  if (!wantsSqlGeneration(args.question)) return null;
+
+  const text = normalizeIntentText(args.question);
+
+  const truncateMatch = text.match(
+    /\btruncate\s+(?:table\s+)?(?:(?:([a-z0-9_]+)\.)?([a-z0-9_]+)|table\s+([a-z0-9_]+))\b/
+  );
+  if (truncateMatch) {
+    const schemaFromQuestion = truncateMatch[1];
+    const tableName = truncateMatch[2] || truncateMatch[3];
+    if (!tableName) return null;
+
+    const table = schemaFromQuestion
+      ? args.tables.find(
+          (item) =>
+            item.name.toLowerCase() === tableName &&
+            item.schema.toLowerCase() === schemaFromQuestion
+        )
+      : findTableInContext(args.tables, tableName, args.activeSchema);
+
+    const schema =
+      table?.schema ?? schemaFromQuestion ?? args.activeSchema ?? "public";
+    const name = table?.name ?? tableName;
+    const qualified = `${quoteIdentifier(args.engine, schema)}.${quoteIdentifier(args.engine, name)}`;
+
+    return {
+      sql: `TRUNCATE TABLE ${qualified};`,
+      explanation: table
+        ? `Removes all rows from ${schema}.${name}. Review carefully before running this statement.`
+        : `Suggested TRUNCATE for ${schema}.${name}. Verify the table exists before running.`,
+    };
+  }
+
+  return null;
+}
+
 export function getDirectMetadataReply(args: {
   engine: DatabaseEngine;
   question: string;
@@ -488,6 +559,7 @@ export function getDirectMetadataReply(args: {
 }) {
   const text = normalizeIntentText(args.question);
   if (!text) return null;
+  if (wantsSqlGeneration(args.question)) return null;
   const visibleTables = args.tables.filter(
     (table) => !args.activeSchema || table.schema === args.activeSchema
   );
