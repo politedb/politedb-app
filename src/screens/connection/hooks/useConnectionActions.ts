@@ -16,6 +16,7 @@ import { runRedisCommand } from "src/lib/tauri/redis";
 import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
+import { runSqlTransaction } from "src/utils/sqlTransaction";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
@@ -753,12 +754,16 @@ export function useConnectionActions(
         return;
       }
 
-      for (const stmt of sql) {
-        await runSqlWithHistory({
-          connectionId: runtimeConnectionId,
-          sql: stmt,
-        });
-      }
+      await runSqlTransaction({
+        engine: engine ?? "postgres",
+        statements: sql,
+        run: async (stmt) => {
+          await runSqlWithHistory({
+            connectionId: runtimeConnectionId,
+            sql: stmt,
+          });
+        },
+      });
 
       clearTablePatchChanges(activeProfileScreen);
 
