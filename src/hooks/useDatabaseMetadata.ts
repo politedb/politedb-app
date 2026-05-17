@@ -362,17 +362,17 @@ export function useDatabaseMetadata() {
 
       const meta = cacheRef.current[metaKey] ?? emptyMeta(engine);
 
-      // Lazy load when connected; retry after a prior metadata error.
+      // Lazy load when connected. Do not auto-retry on error — that retriggers on
+      // every render and can pin the UI in a perpetual "connecting" state.
       const needsLoad =
-        !meta.loaded || (includeColumns && !meta.columnsLoaded) || !!meta.error;
+        !meta.loaded || (includeColumns && !meta.columnsLoaded);
 
-      if (lazy && connectionId && needsLoad && !meta.loading) {
+      if (lazy && connectionId && needsLoad && !meta.loading && !meta.error) {
         void load({
           metaKey,
           engine,
           connectionId,
           includeColumns,
-          force: !!meta.error,
         });
       }
 

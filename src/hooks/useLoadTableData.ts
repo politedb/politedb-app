@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
 import { cellToString, formatBytesSize } from "src/utils/convert";
 import { useScreenStore } from "src/stores/screen";
-import { profileConnect } from "src/lib/tauri/profile";
+import { connectProfileOnce } from "src/lib/runtimeConnection";
 import {
   tableColumnsQuery,
   tableDataQuery,
@@ -1014,8 +1014,8 @@ export function useLoadTableData() {
       if (!activeTab) throw new Error("NO_ACTIVE_TAB");
       const meta = tableDataMap[key];
       if (meta?.connectionId) return meta.connectionId;
-      const res = await profileConnect(activeTab.profileId);
-      return res.connection.id;
+      if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
+      return await connectProfileOnce(activeTab.profileId);
     },
     [activeTab, tableDataMap]
   );

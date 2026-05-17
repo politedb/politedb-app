@@ -7,13 +7,27 @@ import {
 } from "preact/hooks";
 
 import { TableData } from "src/components/table/TableData";
+import { commitTableCellEdit } from "src/components/table/commitTableCellEdit";
+import { buildSelectedRowDetail } from "src/components/table/selectedRowDetail";
+import {
+  buildNewRowsFromPatches,
+  useNewRows,
+} from "src/components/table/tableHooks";
+import { createTablePatchHelpers } from "src/screens/connection/hooks/useTablePatches";
+import { EMPTY_OBJECT } from "src/components/table/tableUtils";
+import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
 import { TableFilterBar } from "src/components/table/TableFilterBar";
 import { TableFooter } from "src/components/table/TableFooter";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
 import { LoadingTableState } from "./LoadingTableState";
 
 import { DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
-import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
+import {
+  DataAction,
+  DataKey,
+  type SelectedRowDetail,
+  useConnectionStore,
+} from "src/stores/connection";
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
@@ -178,9 +192,27 @@ export function MainTableDataPane(props: {
     handleClearFilters,
   } = useTableFilter(startedRef, activeKey);
 
+  const setSelectedRowDetail = useConnectionStore(
+    (s) => s.setSelectedRowDetail
+  );
+  const clearSelectedRowDetail = useConnectionStore(
+    (s) => s.clearSelectedRowDetail
+  );
+  const registerRowFieldEditHandler = useConnectionStore(
+    (s) => s.registerRowFieldEditHandler
+  );
+
   useEffect(() => {
     setSortState(null);
-  }, [activeKey]);
+    clearSelectedRowDetail(activeKey);
+  }, [activeKey, clearSelectedRowDetail]);
+
+  const handleSelectedRowDetailChange = useCallback(
+    (detail: SelectedRowDetail | null) => {
+      setSelectedRowDetail(activeKey, detail);
+    },
+    [activeKey, setSelectedRowDetail]
+  );
 
   const filterSignature = useMemo(
     () =>
@@ -385,6 +417,12 @@ export function MainTableDataPane(props: {
     [patches]
   );
 
+  const dataPatches = useMemo(() => extractPatches(patches), [patches]);
+  const deletedDataRows = useMemo(
+    () => extractDeleted(patches, DATA_KEYS.data),
+    [patches]
+  );
+
   const hasError = !!(meta.error || rowsInfo?.error);
   const errorText = String(meta.error || rowsInfo?.error || "");
 
@@ -529,6 +567,10 @@ export function MainTableDataPane(props: {
    * Mutations
    * =========================================================================== */
 
+  const refreshSelectedRowDetailRef = useRef<
+    ((pageRowIdx: number) => void) | null
+  >(null);
+
   const onDataChange = useCallback(
     (
       action: DataAction,
@@ -552,13 +594,19 @@ export function MainTableDataPane(props: {
         data,
       });
 
-      // Convert row key to number
-      const rowIdx = Number(rowKey);
+      // Page-local row index in patches; global index in row store.
+      const pageRowIdx = Number(rowKey);
+      const globalRowIdx =
+        rowIndex === -1
+          ? -1
+          : offset + (Number.isNaN(pageRowIdx) ? rowIndex : pageRowIdx);
+
+      if (globalRowIdx < 0) return;
 
       // Update existing row
       const existingRow = useConnectionStore
         .getState()
-        .getRowAt(activeKey, rowIdx);
+        .getRowAt(activeKey, globalRowIdx);
       if (!existingRow) return;
 
       // Create updated row by copying existing data and updating the changed column
@@ -576,9 +624,30 @@ export function MainTableDataPane(props: {
       }
 
       // Update the row in the store
-      useConnectionStore.getState().updateRow(activeKey, rowIdx, updatedRow);
+      useConnectionStore
+        .getState()
+        .updateRow(activeKey, globalRowIdx, updatedRow);
+
+      if (dataKey === DATA_KEYS.data) {
+        const parsedKey = Number(rowKey);
+        const pageRowIdx =
+          rowIndex === -1
+            ? basePageTotal
+            : Number.isNaN(parsedKey)
+              ? rowIndex
+              : parsedKey;
+        refreshSelectedRowDetailRef.current?.(pageRowIdx);
+      }
     },
-    [isDataReadOnly, profileId, meta, activeTableWindow, activeKey]
+    [
+      isDataReadOnly,
+      profileId,
+      meta,
+      activeTableWindow,
+      activeKey,
+      offset,
+      basePageTotal,
+    ]
   );
 
   const { handleAddRow, handleDeleteRow } = useTableDataOperations({
@@ -588,6 +657,162 @@ export function MainTableDataPane(props: {
     isLocked: isDataReadOnly,
     onDataChange,
   });
+
+  const tableColumns = meta.columns ?? [];
+  const columnsKey = useMemo(
+    () => tableColumns.map((col) => col.name).join("\0"),
+    [tableColumns]
+  );
+
+  const patchHelpers = useTablePatches({
+    patches: hasError ? null : dataPatches,
+    newRowKeys: hasError ? [] : newRowKeys,
+    deletedRows: hasError ? EMPTY_SET : deletedDataRows,
+    editedDataLength: hasError ? 0 : basePageTotal,
+  });
+
+  const newRowsForDetail = useNewRows(
+    hasError ? null : dataPatches,
+    hasError ? [] : newRowKeys,
+    tableColumns,
+    columnsKey
+  );
+
+  const rowFieldEditCtxRef = useRef({
+    activeKey,
+    tableColumns,
+    patchHelpers,
+    newRowsForDetail,
+    hasError,
+    basePageTotal,
+    offset,
+    rowsVersion: 0,
+  });
+  rowFieldEditCtxRef.current = {
+    activeKey,
+    tableColumns,
+    patchHelpers,
+    newRowsForDetail,
+    hasError,
+    basePageTotal,
+    offset,
+    rowsVersion: rowsInfo?.version ?? 0,
+  };
+
+  const onDataChangeRef = useRef(onDataChange);
+  onDataChangeRef.current = onDataChange;
+
+  const getRowArrayForDetail = useCallback(
+    (idx: number): unknown[] | undefined => {
+      const ctx = rowFieldEditCtxRef.current;
+      if (ctx.hasError || idx < 0) return undefined;
+
+      const totalLen = ctx.basePageTotal;
+      if (idx < totalLen) {
+        return useConnectionStore
+          .getState()
+          .getRowAt(ctx.activeKey, ctx.offset + idx);
+      }
+
+      const j = idx - totalLen;
+      if (j >= 0 && j < ctx.newRowsForDetail.length) {
+        const obj = ctx.newRowsForDetail[j]?.row ?? EMPTY_OBJECT;
+        const out = new Array(ctx.tableColumns.length);
+        for (let c = 0; c < ctx.tableColumns.length; c++) {
+          const name = ctx.tableColumns[c]!.name;
+          const cell = (obj as Record<string, { v?: unknown } | unknown>)?.[
+            name
+          ];
+          out[c] =
+            cell && typeof cell === "object" && cell !== null && "v" in cell
+              ? (cell as { v?: unknown }).v
+              : (cell ?? null);
+        }
+        return out;
+      }
+
+      return undefined;
+    },
+    []
+  );
+
+  refreshSelectedRowDetailRef.current = (pageRowIdx: number) => {
+    const selected = useConnectionStore.getState().selectedRowByKey[activeKey];
+    if (!selected || selected.rowIndex !== pageRowIdx) return;
+
+    const windowPatches =
+      useConnectionStore.getState().dataPatchMap[profileId]?.[
+        activeTableWindow.id
+      ]?.patches ?? null;
+    const freshDataPatches = extractPatches(windowPatches);
+    const freshNewRowKeys = Object.keys(
+      (windowPatches?.create?.data ?? {}) as Record<string, unknown>
+    );
+    const freshDeleted = extractDeleted(windowPatches, DATA_KEYS.data);
+    const freshPatchHelpers = createTablePatchHelpers({
+      patches: freshDataPatches,
+      newRowKeys: freshNewRowKeys,
+      deletedRows: freshDeleted,
+      editedDataLength: basePageTotal,
+    });
+    const freshNewRows = buildNewRowsFromPatches(
+      freshDataPatches,
+      freshNewRowKeys,
+      tableColumns
+    );
+
+    setSelectedRowDetail(
+      activeKey,
+      buildSelectedRowDetail(
+        pageRowIdx,
+        tableColumns,
+        getRowArrayForDetail,
+        freshPatchHelpers,
+        freshNewRows
+      )
+    );
+  };
+
+  useEffect(() => {
+    if (isDataReadOnly || hasError || viewMode !== "data") {
+      registerRowFieldEditHandler(activeKey, undefined);
+      return;
+    }
+
+    const handler = (
+      rowIndex: number,
+      columnName: string,
+      newValue: string
+    ) => {
+      const ctx = rowFieldEditCtxRef.current;
+      const changed = commitTableCellEdit({
+        rowIdx: rowIndex,
+        columnName,
+        newValue,
+        columns: ctx.tableColumns,
+        getRowArray: getRowArrayForDetail,
+        patchHelpers: ctx.patchHelpers,
+        newRows: ctx.newRowsForDetail,
+        dataKey: DATA_KEYS.data,
+        onCellChange: onDataChangeRef.current,
+      });
+
+      if (!changed) return;
+
+      refreshSelectedRowDetailRef.current?.(rowIndex);
+    };
+
+    registerRowFieldEditHandler(activeKey, handler);
+    return () => registerRowFieldEditHandler(activeKey, undefined);
+  }, [
+    activeKey,
+    isDataReadOnly,
+    hasError,
+    viewMode,
+    getRowArrayForDetail,
+    registerRowFieldEditHandler,
+    setSelectedRowDetail,
+  ]);
 
   /* ===========================================================================
    * Render guards
@@ -1036,6 +1261,7 @@ export function MainTableDataPane(props: {
                     pageChange(limit, 0);
                   }
                 }}
+                onSelectedRowDetailChange={handleSelectedRowDetailChange}
               />
             </div>
           </div>

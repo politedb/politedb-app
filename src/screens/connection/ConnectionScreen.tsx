@@ -381,6 +381,11 @@ export function ConnectionScreen() {
     return s.tableRowsByKey[activeTableLoadKey] ?? null;
   });
 
+  const selectedRowDetail = useConnectionStore((s) => {
+    if (!activeTableLoadKey) return null;
+    return s.selectedRowByKey[activeTableLoadKey] ?? null;
+  });
+
   const tableRowsLoadPercent = useMemo(() => {
     if (!rowsStreamState?.running) return null;
     return tableRowsStreamLoadPercent(
@@ -936,6 +941,9 @@ export function ConnectionScreen() {
                               activeTab={rightNavTab}
                               onTabChange={setRightNavTab}
                               sizeInfo={activeTableData.sizeInfo}
+                              selectedRowDetail={selectedRowDetail}
+                              tableLoadKey={activeTableLoadKey}
+                              dataReadOnly={isProfileLocked}
                               engine={engine || "postgres"}
                               runtimeConnectionId={runtimeConnectionId}
                               activeSchema={activeSchema}
@@ -971,6 +979,9 @@ export function ConnectionScreen() {
                           activeTab={rightNavTab}
                           onTabChange={setRightNavTab}
                           sizeInfo={activeTableData.sizeInfo}
+                          selectedRowDetail={selectedRowDetail}
+                          tableLoadKey={activeTableLoadKey}
+                          dataReadOnly={isProfileLocked}
                           engine={engine || "postgres"}
                           runtimeConnectionId={runtimeConnectionId}
                           activeSchema={activeSchema}

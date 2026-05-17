@@ -1,4 +1,3 @@
-use serde::Deserialize;
 use serde_json::Value;
 
 use crate::profiles::import_common::{
@@ -11,12 +10,6 @@ use crate::types::{
     ConnectionCreateInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
     PgConnectInput, RedisConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
-
-#[derive(Debug, Deserialize)]
-struct DBeaverExportFile {
-    #[serde(default)]
-    connections: serde_json::Map<String, Value>,
-}
 
 #[derive(Debug, Default)]
 pub struct DBeaverImportReport {

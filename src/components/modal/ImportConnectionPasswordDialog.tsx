@@ -52,8 +52,8 @@ export function ImportConnectionPasswordDialog(props: {
         <Input
           type="password"
           value={password}
-          placeholder="File password"
-          className="h-10"
+          placeholder="Enter the password..."
+          className="h-9 border border-slate-300 text-sm"
           onValueChange={setPassword}
           disabled={busy}
         />

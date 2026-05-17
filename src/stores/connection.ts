@@ -158,6 +158,26 @@ export type TableFilterState = {
   filterApplySeq?: number;
 };
 
+/** Column values for the currently selected data row (Data Info panel). */
+export type SelectedRowField = {
+  name: string;
+  value: string;
+  dataType?: string;
+  isNull?: boolean;
+  readonly?: boolean;
+};
+
+export type SelectedRowDetail = {
+  rowIndex: number;
+  fields: SelectedRowField[];
+};
+
+export type RowFieldEditHandler = (
+  rowIndex: number,
+  columnName: string,
+  newValue: string
+) => void;
+
 /* =============================================================================
  * Rows windowing (max gain)
  * ============================================================================= */
@@ -245,6 +265,8 @@ export type ConnectionState = {
     string,
     { map: Map<number, unknown[]>; order: number[] }
   >;
+  selectedRowByKey: Record<string, SelectedRowDetail | null>;
+  rowFieldEditHandlerByKey: Record<string, RowFieldEditHandler | undefined>;
 
   addQueryHistory: (windowId: string, sql: string) => void;
   clearQueryHistory: (windowId: string) => void;
@@ -294,6 +316,13 @@ export type ConnectionState = {
 
   setTableFilter: (key: string, filter: TableFilterState) => void;
   clearTableFilter: (key: string, visible?: boolean) => void;
+
+  setSelectedRowDetail: (key: string, detail: SelectedRowDetail | null) => void;
+  clearSelectedRowDetail: (key: string) => void;
+  registerRowFieldEditHandler: (
+    key: string,
+    handler: RowFieldEditHandler | undefined
+  ) => void;
 
   clearTableStructure: (tabId: string, tableWindowId?: string) => void;
   clearTableConstraints: (tabId: string, tableWindowId?: string) => void;
@@ -423,6 +452,8 @@ export const useConnectionStore = create<ConnectionState>()(
 
       tableRowsByKey: {},
       tableRowCacheByKey: {},
+      selectedRowByKey: {},
+      rowFieldEditHandlerByKey: {},
 
       /* =========================================================================
        * Existing actions (keep as your current implementation)
@@ -650,12 +681,25 @@ export const useConnectionStore = create<ConnectionState>()(
             let original: Record<string, any> | undefined;
 
             if (dataKey === DATA_KEYS.data) {
-              const rowIndex = parseInt(rowKey, 10);
-              if (!isNaN(rowIndex) && rowIndex >= 0) {
+              const localRowIndex = parseInt(rowKey, 10);
+              if (!isNaN(localRowIndex) && localRowIndex >= 0) {
+                const rowsState = s.tableRowsByKey[tableKey];
+                const globalRowIndex =
+                  (rowsState?.streamOffset ?? 0) + localRowIndex;
                 const cache = s.tableRowCacheByKey[tableKey];
-                const originalRow = cacheGet(cache, rowIndex) as
+                let originalRow = cacheGet(cache, globalRowIndex) as
                   | unknown[]
                   | undefined;
+                if (
+                  !originalRow &&
+                  rowsState &&
+                  globalRowIndex >= rowsState.base &&
+                  globalRowIndex < rowsState.base + rowsState.cap
+                ) {
+                  originalRow = rowsState.rows[
+                    globalRowIndex - rowsState.base
+                  ] as unknown[] | undefined;
+                }
                 const columns = tableData.columns ?? [];
                 if (
                   originalRow &&
@@ -1339,6 +1383,49 @@ export const useConnectionStore = create<ConnectionState>()(
             },
           },
         })),
+
+      setSelectedRowDetail: (key, detail) =>
+        set((s) => {
+          const prev = s.selectedRowByKey[key] ?? null;
+          if (prev === detail) return s;
+          if (
+            prev &&
+            detail &&
+            prev.rowIndex === detail.rowIndex &&
+            prev.fields.length === detail.fields.length &&
+            prev.fields.every(
+              (f, i) =>
+                f.name === detail.fields[i]?.name &&
+                f.value === detail.fields[i]?.value &&
+                f.dataType === detail.fields[i]?.dataType &&
+                f.isNull === detail.fields[i]?.isNull &&
+                f.readonly === detail.fields[i]?.readonly
+            )
+          ) {
+            return s;
+          }
+          return {
+            selectedRowByKey: { ...s.selectedRowByKey, [key]: detail },
+          };
+        }),
+
+      clearSelectedRowDetail: (key) =>
+        set((s) => {
+          if (!(key in s.selectedRowByKey)) return s;
+          const next = { ...s.selectedRowByKey };
+          delete next[key];
+          return { selectedRowByKey: next };
+        }),
+
+      registerRowFieldEditHandler: (key, handler) =>
+        set((s) => {
+          const prev = s.rowFieldEditHandlerByKey[key];
+          if (prev === handler) return s;
+          const next = { ...s.rowFieldEditHandlerByKey };
+          if (handler) next[key] = handler;
+          else delete next[key];
+          return { rowFieldEditHandlerByKey: next };
+        }),
     };
   })
 );

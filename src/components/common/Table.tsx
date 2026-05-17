@@ -2,7 +2,7 @@ import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { cn } from "src/utils/cn";
 import { useFillViewportTable } from "src/hooks/useFillViewportTable";
-import { useIndexedSort, type SortState } from "src/hooks/useIndexedSort";
+import { useIndexedSort } from "src/hooks/useIndexedSort";
 import { ChevronUpIcon, ChevronDownIcon } from "src/components/icons";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 
@@ -82,12 +82,6 @@ export function Table<T = any>({
     fillViewport,
   });
 
-  const initialSortableColumn = useMemo<keyof T | undefined>(
-    () =>
-      columns.find((column) => column.sortable)?.sortKey as keyof T | undefined,
-    [columns]
-  );
-
   const {
     sortState,
     sortedRows,
@@ -95,17 +89,20 @@ export function Table<T = any>({
     toggleSort,
     setSort,
     findDisplayIndex,
-  } = useIndexedSort<T, keyof T>(data, {
-    initialKey: initialSortableColumn,
-  } as {
-    initialKey?: keyof T;
-    initialDirection?: SortState<keyof T>["direction"];
-  });
+  } = useIndexedSort<T, keyof T>(data);
 
   const displayRows = sortedRows;
   const resolveSortKey = useCallback(
     (col: TableColumn<T>) =>
       (col.sortKey as keyof T | undefined) ?? (col.key as keyof T),
+    []
+  );
+
+  const isCenterColumn = useCallback(
+    (col: TableColumn<T>) =>
+      col.key === "_rowNumber" ||
+      col.className?.includes("text-center") ||
+      col.headerClassName?.includes("text-center"),
     []
   );
 
@@ -317,7 +314,8 @@ export function Table<T = any>({
                 key={col.key}
                 class={cn(
                   "relative border-r border-neutral-200 active:bg-neutral-100",
-                  "p-2 text-left text-xs font-semibold text-neutral-700",
+                  "p-2 text-xs font-semibold text-neutral-700",
+                  isCenterColumn(col) ? "text-center" : "text-left",
                   stickyHeader &&
                     "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",
                   col.headerClassName
@@ -334,7 +332,10 @@ export function Table<T = any>({
               >
                 {col.sortable ? (
                   <button
-                    class="flex w-full items-center justify-between gap-1 select-none"
+                    class={cn(
+                      "flex w-full items-center gap-1 select-none",
+                      isCenterColumn(col) ? "justify-center" : "justify-between"
+                    )}
                     onMouseUp={(e) => {
                       if (e.button !== 0) return;
                       if (!enableSort) return;

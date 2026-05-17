@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { trackEvent } from "src/lib/analytics";
-import { profileConnect } from "src/lib/tauri/profile";
+import { connectProfileOnce } from "src/lib/runtimeConnection";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 
 export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
@@ -15,6 +15,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     // already connected — clear any stale error from a previous failed attempt
     if (activeTab.runtimeConnectionId) {
       setError(null);
+      setConnecting(false);
       return;
     }
 
@@ -23,11 +24,19 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
 
     void (async () => {
       const startedAt = Date.now();
+      const tabId = activeTab.id;
+      const profileId = activeTab.profileId;
       try {
-        const res = await profileConnect(activeTab.profileId);
+        const connectionId = await connectProfileOnce(profileId);
         setError(null);
         if (canceled) return;
-        updateTab(activeTab.id, { runtimeConnectionId: res.connection.id });
+
+        const latestTab = useScreenStore
+          .getState()
+          .profileTabs.find((t) => t.id === tabId);
+        if (latestTab?.runtimeConnectionId) return;
+
+        updateTab(tabId, { runtimeConnectionId: connectionId });
         trackEvent("runtime_connection_opened", {
           engine: activeTab.engine,
           source: "auto_restore",
@@ -54,6 +63,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     activeTab?.id,
     activeTab?.profileId,
     activeTab?.runtimeConnectionId,
+    activeTab?.engine,
     updateTab,
   ]);
 
@@ -63,15 +73,15 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     setConnecting(true);
     const startedAt = Date.now();
     try {
-      const res = await profileConnect(activeTab.profileId);
+      const connectionId = await connectProfileOnce(activeTab.profileId);
       setError(null);
-      updateTab(activeTab.id, { runtimeConnectionId: res.connection.id });
+      updateTab(activeTab.id, { runtimeConnectionId: connectionId });
       trackEvent("runtime_connection_opened", {
         engine: activeTab.engine,
         source: "manual_reload",
         duration_ms: Date.now() - startedAt,
       });
-      return res.connection.id;
+      return connectionId;
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
       setError(msg);

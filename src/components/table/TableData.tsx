@@ -1,7 +1,13 @@
 import { useCallback, useState } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
-import type { DataAction, DataKey } from "src/stores/connection";
+import type {
+  DataAction,
+  DataKey,
+  SelectedRowDetail,
+} from "src/stores/connection";
+import { commitTableCellEdit } from "./commitTableCellEdit";
+import { buildSelectedRowDetail } from "./selectedRowDetail";
 import type { TableSort } from "src/hooks/queries";
 
 import { EMPTY_ARRAY, EMPTY_SET, EMPTY_OBJECT } from "./tableUtils";
@@ -46,6 +52,7 @@ interface Props {
   readOnly?: boolean;
   sortState?: TableSort | null;
   onChangeSort?: (sort: TableSort | null) => void;
+  onSelectedRowDetailChange?: (detail: SelectedRowDetail | null) => void;
 }
 
 // ============================================================================
@@ -71,6 +78,7 @@ export function TableData({
   readOnly = false,
   sortState = null,
   onChangeSort,
+  onSelectedRowDetailChange,
 }: Props) {
   const baseLen = Math.max(0, baseRows || 0);
   const totalLen = Math.max(0, totalRows || 0);
@@ -158,16 +166,36 @@ export function TableData({
     rowIdx: number;
     colIdx: number;
   } | null>(null);
-  
+
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [lastSelectedRow, setLastSelectedRow] = useState<number | null>(null);
-  
+
   const [editing, setEditing] = useState<{
     rowIdx: number;
     colIdx: number;
   } | null>(null);
 
   const totalDataLength = totalLen + newRows.length;
+
+  const publishSelectedRowDetail = useCallback(
+    (rowIdx: number | null) => {
+      if (!onSelectedRowDetailChange) return;
+      if (rowIdx == null || rowIdx < 0) {
+        onSelectedRowDetailChange(null);
+        return;
+      }
+      onSelectedRowDetailChange(
+        buildSelectedRowDetail(
+          rowIdx,
+          columns,
+          getRowArray,
+          patchHelpers,
+          newRows
+        )
+      );
+    },
+    [onSelectedRowDetailChange, columns, getRowArray, patchHelpers, newRows]
+  );
 
   // --------------------------------------------------------------------------
   // Commit edit (IMPORTANT glue)
@@ -177,46 +205,21 @@ export function TableData({
     (cell: { rowIdx: number; colIdx: number }, newValue: string) => {
       const { colIdx } = cell;
       const rowIdx = cell.rowIdx;
-      if (rowIdx < 0) return;
-
       const col = columns[colIdx];
       if (!col) return;
 
-      const colName = col.name;
-
-      const rowArr = getRowArray(rowIdx);
-      const originalValue = (rowArr as any)?.[colIdx] ?? null;
-
-      const patchedValue = patchHelpers.getPatchedValue(
+      commitTableCellEdit({
         rowIdx,
-        colName,
-        originalValue,
-        newRows
-      );
-
-      const prev = (cellToString(patchedValue) ?? "").trim();
-      const next = (newValue ?? "").trim();
-
-      const isNewRow = patchHelpers.isNewRow(rowIdx);
-
-      if (!isNewRow && prev === next) return;
-
-      // Update local cache (optional hook)
-      // updateData(rowIdx, colName, newValue);
-
-      const changeData: Record<string, any> = { [colName]: newValue };
-
-      if (isNewRow) {
-        const rowKey = patchHelpers.getRowKey(rowIdx, newRows);
-        changeData.__rowKey = rowKey;
-      }
-
-      onCellChange?.(
-        isNewRow ? "create" : "update",
-        DATA_KEY,
-        isNewRow ? -1 : rowIdx,
-        changeData
-      );
+        columnName: col.name,
+        newValue,
+        columns,
+        getRowArray,
+        patchHelpers,
+        newRows,
+        dataKey: DATA_KEY,
+        onCellChange,
+      });
+      // Data Info refresh runs from MainTableDataPane.onDataChange (fresh patches).
     },
     [columns, patchHelpers, newRows, onCellChange, getRowArray]
   );
@@ -270,18 +273,17 @@ export function TableData({
         onSelect={(rowIdx, colIdx, multi, range) => {
           setSelected({ rowIdx, colIdx });
           setEditing(null);
-          
+
           if (range && lastSelectedRow !== null) {
-            // Shift click
             const min = Math.min(lastSelectedRow, rowIdx);
             const max = Math.max(lastSelectedRow, rowIdx);
             const newSelection = new Set(selectedRows);
             for (let i = min; i <= max; i++) {
-               newSelection.add(i);
+              newSelection.add(i);
             }
             setSelectedRows(newSelection);
+            publishSelectedRowDetail(rowIdx);
           } else if (multi) {
-            // Ctrl/Cmd click
             const newSelection = new Set(selectedRows);
             if (newSelection.has(rowIdx)) {
               newSelection.delete(rowIdx);
@@ -290,10 +292,20 @@ export function TableData({
             }
             setSelectedRows(newSelection);
             setLastSelectedRow(rowIdx);
+            const primary =
+              newSelection.size === 1
+                ? [...newSelection][0]
+                : newSelection.has(rowIdx)
+                  ? rowIdx
+                  : null;
+            publishSelectedRowDetail(
+              primary ??
+                (newSelection.size > 0 ? Math.min(...newSelection) : null)
+            );
           } else {
-            // Normal click
             setSelectedRows(new Set([rowIdx]));
             setLastSelectedRow(rowIdx);
+            publishSelectedRowDetail(rowIdx);
           }
         }}
         onStartEdit={(cell) => {
@@ -302,6 +314,7 @@ export function TableData({
           setSelected(cell);
           setSelectedRows(new Set([cell.rowIdx]));
           setLastSelectedRow(cell.rowIdx);
+          publishSelectedRowDetail(cell.rowIdx);
         }}
         onAddRow={readOnly ? undefined : onAddRow}
         onDeleteRow={(visibleRowIdx) => {
@@ -313,18 +326,20 @@ export function TableData({
           setSelected(null);
           setSelectedRows(new Set());
           setEditing(null);
+          publishSelectedRowDetail(null);
         }}
         onDeleteRows={(visibleRowIndices) => {
           if (readOnly) return;
-          visibleRowIndices.forEach(visibleIdx => {
-             const realIdx = visibleIdx;
-             if (realIdx >= 0) {
-               onDeleteRow?.(realIdx);
-             }
+          visibleRowIndices.forEach((visibleIdx) => {
+            const realIdx = visibleIdx;
+            if (realIdx >= 0) {
+              onDeleteRow?.(realIdx);
+            }
           });
           setSelected(null);
           setSelectedRows(new Set());
           setEditing(null);
+          publishSelectedRowDetail(null);
         }}
         onCommitEdit={handleCommitEdit}
         onExitEdit={() => setEditing(null)}
@@ -351,6 +366,7 @@ export function TableData({
           setSelectedRows(new Set());
           setEditing(null);
           setLastSelectedRow(null);
+          publishSelectedRowDetail(null);
         }}
       />
     </div>

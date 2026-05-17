@@ -1,4 +1,4 @@
-import { useCallback } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 
 export interface UseTablePatchesProps {
   patches?: Record<string, Record<string, any>> | null;
@@ -7,77 +7,61 @@ export interface UseTablePatchesProps {
   editedDataLength: number;
 }
 
-export function useTablePatches({
+export function createTablePatchHelpers({
   patches,
-  deletedRows = new Set(),
+  deletedRows = new Set<number>(),
   editedDataLength,
 }: UseTablePatchesProps) {
-  // Get row key for a given row index (handles both numeric indices and new row string keys)
-  const getRowKey = useCallback(
-    (rowIndex: number, newRows: any[]): string => {
-      // Check if this is a new row (index >= editedDataLength)
-      if (rowIndex >= editedDataLength) {
-        const newRowIndex = rowIndex - editedDataLength;
-        const newRow = newRows[newRowIndex];
-        return newRow?.rowKey || String(rowIndex);
-      }
-      return String(rowIndex);
-    },
-    [editedDataLength]
-  );
+  const getRowKey = (
+    rowIndex: number,
+    newRows: { rowKey: string }[]
+  ): string => {
+    if (rowIndex >= editedDataLength) {
+      const newRowIndex = rowIndex - editedDataLength;
+      const newRow = newRows[newRowIndex];
+      return newRow?.rowKey || String(rowIndex);
+    }
+    return String(rowIndex);
+  };
 
-  // Check if a row is a new row (for create action)
-  const isNewRow = useCallback(
-    (rowIndex: number): boolean => {
-      return rowIndex >= editedDataLength;
-    },
-    [editedDataLength]
-  );
+  const isNewRow = (rowIndex: number): boolean => rowIndex >= editedDataLength;
 
-  // Check if a row is deleted
-  const isRowDeleted = useCallback(
-    (rowIndex: number): boolean => {
-      // For new rows, check if they're in deletedRows
-      if (rowIndex >= editedDataLength) {
-        return false; // New rows can't be deleted this way
-      }
-      return deletedRows.has(rowIndex);
-    },
-    [deletedRows, editedDataLength]
-  );
+  const isRowDeleted = (rowIndex: number): boolean => {
+    if (rowIndex >= editedDataLength) return false;
+    return deletedRows.has(rowIndex);
+  };
 
-  // For update cell rendering, prefer patched value over original
-  const getPatchedValue = useCallback(
-    (rowIndex: number, colName: string, fallback: any, newRows: any[]) => {
-      const rowKey = getRowKey(rowIndex, newRows);
-      const rowPatch = patches?.[rowKey];
-      if (!rowPatch) return fallback;
-      if (Object.prototype.hasOwnProperty.call(rowPatch, colName))
-        return rowPatch[colName];
-      return fallback;
-    },
-    [patches, getRowKey]
-  );
+  const getPatchedValue = (
+    rowIndex: number,
+    colName: string,
+    fallback: unknown,
+    newRows: { rowKey: string }[]
+  ) => {
+    const rowKey = getRowKey(rowIndex, newRows);
+    const rowPatch = patches?.[rowKey];
+    if (!rowPatch) return fallback;
+    if (Object.prototype.hasOwnProperty.call(rowPatch, colName))
+      return rowPatch[colName];
+    return fallback;
+  };
 
-  const isCellPatched = useCallback(
-    (rowIndex: number, colName: string, newRows: any[]) => {
-      const rowKey = getRowKey(rowIndex, newRows);
-      const rowPatch = patches?.[rowKey];
-      return (
-        !!rowPatch && Object.prototype.hasOwnProperty.call(rowPatch, colName)
-      );
-    },
-    [patches, getRowKey]
-  );
+  const isCellPatched = (
+    rowIndex: number,
+    colName: string,
+    newRows: { rowKey: string }[]
+  ) => {
+    const rowKey = getRowKey(rowIndex, newRows);
+    const rowPatch = patches?.[rowKey];
+    return (
+      !!rowPatch && Object.prototype.hasOwnProperty.call(rowPatch, colName)
+    );
+  };
 
-  const isRowPatched = useCallback(
-    (rowIndex: number, newRows: any[]) => {
-      const rowKey = getRowKey(rowIndex, newRows);
-      const rowPatch = patches?.[rowKey];
-      return !!rowPatch && Object.keys(rowPatch).length > 0;
-    },
-    [patches, getRowKey]
-  );
+  const isRowPatched = (rowIndex: number, newRows: { rowKey: string }[]) => {
+    const rowKey = getRowKey(rowIndex, newRows);
+    const rowPatch = patches?.[rowKey];
+    return !!rowPatch && Object.keys(rowPatch).length > 0;
+  };
 
   return {
     getRowKey,
@@ -87,4 +71,12 @@ export function useTablePatches({
     isCellPatched,
     isRowPatched,
   };
+}
+
+export function useTablePatches(props: UseTablePatchesProps) {
+  const { patches, deletedRows = new Set(), editedDataLength } = props;
+  return useMemo(
+    () => createTablePatchHelpers({ patches, deletedRows, editedDataLength }),
+    [patches, deletedRows, editedDataLength]
+  );
 }

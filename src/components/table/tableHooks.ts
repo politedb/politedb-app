@@ -9,7 +9,6 @@ import {
 import type { ColumnMeta } from "src/lib/tauri/types";
 import {
   type NewRowData,
-  EMPTY_ARRAY,
   MIN_COL_WIDTH,
   MAX_COL_WIDTH,
   DEFAULT_COL_WIDTH,
@@ -247,32 +246,40 @@ export function useContainerWidth() {
 // useNewRows
 // ============================================================================
 
+export function buildNewRowsFromPatches(
+  patches: Record<string, Record<string, unknown>> | null | undefined,
+  newRowKeys: string[],
+  columns: ColumnMeta[]
+): NewRowData[] {
+  if (!patches || newRowKeys.length === 0) return [];
+
+  const result: NewRowData[] = [];
+  for (let i = 0; i < newRowKeys.length; i++) {
+    const rowKey = newRowKeys[i];
+    const patchData = patches[rowKey];
+    if (!patchData) continue;
+
+    const row: Record<string, { v: unknown; t: string }> = {};
+    for (let j = 0; j < columns.length; j++) {
+      const col = columns[j];
+      const value = patchData[col.name] ?? null;
+      row[col.name] = { v: value, t: inferCellType(value) };
+    }
+    result.push({ row, rowKey, isNew: true });
+  }
+  return result;
+}
+
 export function useNewRows(
   patches: Record<string, Record<string, any>> | null | undefined,
   newRowKeys: string[],
   columns: ColumnMeta[],
   columnsKey: string
 ): NewRowData[] {
-  return useMemo(() => {
-    if (!patches || newRowKeys.length === 0)
-      return EMPTY_ARRAY as unknown as NewRowData[];
-
-    const result: NewRowData[] = [];
-    for (let i = 0; i < newRowKeys.length; i++) {
-      const rowKey = newRowKeys[i];
-      const patchData = patches[rowKey];
-      if (!patchData) continue;
-
-      const row: Record<string, { v: any; t: string }> = {};
-      for (let j = 0; j < columns.length; j++) {
-        const col = columns[j];
-        const value = patchData[col.name] ?? null;
-        row[col.name] = { v: value, t: inferCellType(value) };
-      }
-      result.push({ row, rowKey, isNew: true });
-    }
-    return result;
-  }, [patches, newRowKeys, columnsKey]);
+  return useMemo(
+    () => buildNewRowsFromPatches(patches, newRowKeys, columns),
+    [patches, newRowKeys, columnsKey]
+  );
 }
 
 // ============================================================================

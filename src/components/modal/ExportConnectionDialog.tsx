@@ -76,16 +76,16 @@ export function ExportConnectionDialog(props: {
             <Input
               type="password"
               value={password}
-              placeholder="File password"
-              className="h-10"
+              placeholder="Enter the password..."
+              className="h-9 border border-slate-300 text-sm"
               onValueChange={setPassword}
               disabled={busy}
             />
             <Input
               type="password"
               value={confirmPassword}
-              placeholder="Confirm file password"
-              className="h-10"
+              placeholder="Confirm password..."
+              className="h-9 border border-slate-300 text-sm"
               onValueChange={setConfirmPassword}
               disabled={busy}
             />

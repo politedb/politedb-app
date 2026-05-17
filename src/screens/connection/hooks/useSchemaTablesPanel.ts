@@ -129,10 +129,12 @@ export function useSchemaTablesPanel(args: {
     [meta.columnsByTable]
   );
 
-  // Connecting/loading state
+  // Initial metadata hydration only — not a runtime DB connect spinner.
   const isConnecting = useMemo(() => {
-    return meta.loading && (meta.tables?.length ?? 0) === 0;
-  }, [meta.loading, meta.tables]);
+    if (!connectionId) return false;
+    if (meta.error && !meta.loading) return false;
+    return meta.loading && !meta.loaded;
+  }, [connectionId, meta.loading, meta.loaded, meta.error]);
 
   return {
     meta,

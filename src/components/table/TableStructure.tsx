@@ -189,7 +189,7 @@ export function TableStructure({
         headerClassName: "min-w-12! text-center",
         render: (_value: any, row: any, index: number) =>
           typeof row._sourceIndex === "number" ? (
-            <span class="text-sm text-neutral-500">
+            <span class="block w-full text-center text-sm text-neutral-500">
               {row._rowNumber ?? index + 1}
             </span>
           ) : (
