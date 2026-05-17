@@ -3,11 +3,10 @@ import { generateUpdateSqlFromPatches } from "./generateSql";
 
 function mysqlJsonDisplayLiteral(value: unknown) {
   const json = typeof value === "string" ? value : JSON.stringify(value);
-  const mysqlSafeJson = json.replace(/'/g, "\\u0027");
-  return `'${mysqlSafeJson
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/'/g, "\\'")}'`;
+  const hex = Array.from(new TextEncoder().encode(json))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `CONVERT(UNHEX('${hex}') USING utf8mb4)`;
 }
 
 describe("generateUpdateSqlFromPatches", () => {
@@ -182,7 +181,8 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(sql[0]).toContain(
       `\`json_value\` = ${mysqlJsonDisplayLiteral(jsonValue)}`
     );
-    expect(sql[0]).toContain("password");
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain("password\\\\");
     expect(sql[0]).not.toContain("CAST(0x");
     expect(sql[0]).toContain("WHERE `id` = 1;");
   });
@@ -236,11 +236,12 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(sql[0]).toContain(
       `\`json_value\` = ${mysqlJsonDisplayLiteral(jsonValue)}`
     );
-    expect(sql[0]).toContain(']}}');
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain('"]}}');
     expect(sql[0]).toContain("WHERE `id` = 1;");
   });
 
-  it("replaces apostrophes in MySQL JSON payload with unicode escape", () => {
+  it("serializes MySQL JSON payloads with apostrophes through a hex utf8 literal", () => {
     const sql = generateUpdateSqlFromPatches(
       {
         update: {
@@ -268,7 +269,8 @@ describe("generateUpdateSqlFromPatches", () => {
     );
 
     expect(sql).toHaveLength(1);
-    expect(sql[0]).toContain("\\u0027");
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
     expect(sql[0]).not.toContain("[\\\"\\']");
+    expect(sql[0]).not.toContain("\\u0027");
   });
 });

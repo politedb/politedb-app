@@ -18,6 +18,7 @@ import {
 } from "src/hooks/useExportTableData";
 import { ErrorDialog } from "./ErrorDialog";
 import { Checkbox } from "src/components/common/Checkbox";
+import type { DatabaseEngine } from "src/types";
 
 interface Props {
   open: boolean;
@@ -29,6 +30,7 @@ interface Props {
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
   totalRows: number;
+  engine?: DatabaseEngine;
 }
 
 export function ExportTableDialog({
@@ -41,6 +43,7 @@ export function ExportTableDialog({
   appliedFilters,
   appliedFilterCombine,
   totalRows,
+  engine,
 }: Props) {
   const {
     format,
@@ -118,6 +121,7 @@ export function ExportTableDialog({
       connectionId,
       schema,
       tableName,
+      engine,
       appliedFilters,
       appliedFilterCombine,
       columns,
@@ -132,6 +136,7 @@ export function ExportTableDialog({
     appliedFilters,
     appliedFilterCombine,
     columns,
+    engine,
     handleExport,
   ]);
 

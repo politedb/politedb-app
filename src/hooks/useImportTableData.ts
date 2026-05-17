@@ -4,6 +4,8 @@ import { readTextFile } from "@tauri-apps/plugin-fs";
 import { parseCsv } from "src/utils/csv";
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { ColumnMeta } from "src/lib/tauri/types";
+import type { DatabaseEngine } from "src/types";
+import { formatSqlValue, quoteIdentifier, quoteTableName } from "src/utils/sqlDialect";
 
 export type DataImportPreview = {
   headers: string[];
@@ -17,6 +19,7 @@ export type ImportConfig = {
   columns: ColumnMeta[];
   limit: number;
   offset: number;
+  engine?: DatabaseEngine;
   firstIsHeaders?: boolean;
   onSuccess: () => Promise<void>;
 };
@@ -66,6 +69,7 @@ export function useImportTableData() {
         schema,
         tableName,
         columns,
+        engine,
         firstIsHeaders = true,
         onSuccess,
       } = config;
@@ -108,11 +112,10 @@ export function useImportTableData() {
       setError(null);
       setImportProgress({ imported: 0, total: dataRows.length });
 
-      const quotedTable = `"${schema.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
+      const quotedTable = quoteTableName(schema, tableName, engine);
       const quotedCols = colOrder
-        .map((c) => `"${c.replace(/"/g, '""')}"`)
+        .map((c) => quoteIdentifier(c, engine))
         .join(", ");
-      const escape = (v: string) => `'${String(v).replace(/'/g, "''")}'`;
 
       try {
         for (let i = 0; i < dataRows.length; i += BATCH) {
@@ -122,7 +125,8 @@ export function useImportTableData() {
               const vals = colOrder.map((col) => {
                 const idx = headerToIndex.get(col)!;
                 const raw = row[idx] ?? "";
-                return escape(raw);
+                const column = columns.find((item) => item.name === col);
+                return formatSqlValue(raw, column?.db_type, engine);
               });
               return `(${vals.join(", ")})`;
             })

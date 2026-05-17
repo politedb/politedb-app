@@ -1,19 +1,16 @@
 import type { DatabaseEngine, TableColumn } from "src/types";
+import { quoteIdentifier, quoteTableName, sqlStringLiteral } from "src/utils/sqlDialect";
 
 export function isMySqlLike(engine?: DatabaseEngine) {
   return engine === "mysql" || engine === "mariadb";
 }
 
 export function qIdent(ident: string, engine?: DatabaseEngine) {
-  const raw = String(ident);
-  if (isMySqlLike(engine)) {
-    return `\`${raw.replace(/`/g, "``")}\``;
-  }
-  return `"${raw.replace(/"/g, `""`)}"`;
+  return quoteIdentifier(ident, engine);
 }
 
-export function qLiteral(v: string) {
-  return `'${String(v).replace(/'/g, `''`)}'`;
+export function qLiteral(v: string, engine?: DatabaseEngine) {
+  return sqlStringLiteral(v, engine);
 }
 
 export function regexEscape(s: string) {
@@ -371,7 +368,7 @@ export const tableDataQuery = (
 ) => {
   const limit = pagination?.limit ?? 300;
   const offset = pagination?.offset ?? 0;
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
   const where = filters?.length
     ? buildWhereClause(filters, combineWith, engine)
     : "";
@@ -396,7 +393,7 @@ export const tableExportQuery = (
   combineWith: "AND" | "OR" = "AND",
   engine?: DatabaseEngine
 ) => {
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
   const colList =
     columns && columns.length > 0
       ? columns.map((c) => qIdent(c, engine)).join(", ")
@@ -415,7 +412,7 @@ export const tableRowCountQuery = (
   combineWith: "AND" | "OR" = "AND",
   engine?: DatabaseEngine
 ) => {
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
   const where = filters?.length
     ? buildWhereClause(filters, combineWith, engine)
     : "";

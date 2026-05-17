@@ -1100,6 +1100,7 @@ export function MainTableDataPane(props: {
         columns: meta.columns ?? [],
         limit,
         offset,
+        engine,
         firstIsHeaders,
         onSuccess: async () => reloadTableData(schema, name),
       });
@@ -1110,6 +1111,7 @@ export function MainTableDataPane(props: {
       activeTableWindow.table.name,
       meta.connectionId,
       meta.columns,
+      engine,
       limit,
       offset,
       reloadTableData,
@@ -1312,6 +1314,7 @@ export function MainTableDataPane(props: {
           totalRows={totalRows}
           appliedFilters={appliedFilters}
           appliedFilterCombine={appliedFilterCombine}
+          engine={engine}
         />
       )}
 

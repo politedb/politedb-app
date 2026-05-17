@@ -9,6 +9,14 @@ import type {
 import { cellToString } from "./convert";
 import { TableDataState } from "src/stores/connection";
 import { getDbConfig } from "./dbConfig";
+import {
+  formatSqlValue,
+  isBlobColumnType,
+  isJsonColumnType,
+  quoteIdentifier,
+  quoteTableName,
+  sqlStringLiteral,
+} from "./sqlDialect";
 
 // patchMap[action][dataKey][rowKey] = data
 export type PatchData = Record<string, Record<string, Record<string, any>>>;
@@ -21,111 +29,17 @@ export type PatchMap = {
   };
 };
 
-function qIdent(ident: string, engine?: DatabaseEngine) {
-  if (engine === "mysql" || engine === "mariadb") {
-    return `\`${String(ident).replace(/`/g, "``")}\``;
-  }
-  return `"${String(ident).replace(/"/g, `""`)}"`;
-}
+const qIdent = quoteIdentifier;
+const qLiteral = sqlStringLiteral;
+const formatValue = formatSqlValue;
 
-function qLiteral(v: any, engine?: DatabaseEngine): string {
-  if (v === null || v === undefined) {
-    return "NULL";
-  }
-  let str = String(v);
-  if (engine === "mysql" || engine === "mariadb") {
-    // Keep SQL readable while staying safe for MySQL string parser.
-    str = str.replace(/\\/g, "\\\\");
-  }
-  // Escape single quotes
-  return `'${str.replace(/'/g, "''")}'`;
-}
-
-/** PostgreSQL (and common) type names that expect numeric literals (unquoted) in SQL */
-const NUMERIC_TYPE_PATTERN =
-  /^(bit|tinyint|smallint|mediumint|int|integer|bigint|int2|int4|int8|serial|bigserial|float|double|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?(\s+unsigned)?$/i;
-
-function isNumericColumnType(dbType: string | undefined): boolean {
-  if (!dbType || typeof dbType !== "string") return false;
-  return NUMERIC_TYPE_PATTERN.test(dbType.trim());
-}
-
-function isJsonColumnType(dbType: string | undefined): boolean {
-  if (!dbType || typeof dbType !== "string") return false;
-  return /\bjsonb?\b/i.test(dbType.trim());
-}
-
-function stringifyJsonValue(value: any): string {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed === "") return "";
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (typeof parsed === "string") {
-        const nested = parsed.trim();
-        if (nested === "") return "";
-        try {
-          return JSON.stringify(JSON.parse(nested));
-        } catch {
-          return parsed;
-        }
-      }
-      return JSON.stringify(parsed);
-    } catch {
-      return value;
-    }
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function mysqlJsonLiteral(jsonText: string): string {
-  const mysqlSafeJson = jsonText.replace(/'/g, "\\u0027");
-  return `'${mysqlSafeJson
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/'/g, "\\'")}'`;
-}
-
-/**
- * Format a value for use in SQL SET or WHERE. For numeric column types, outputs
- * unquoted numeric literal so PostgreSQL accepts it (e.g. SET price = 0 not SET price = '0').
- */
-function formatValue(
-  value: any,
+function isUnsafeFallbackWhereColumn(
   dbType: string | undefined,
   engine?: DatabaseEngine
-): string {
-  if (value === null || value === undefined) {
-    return "NULL";
-  }
-  if (isJsonColumnType(dbType)) {
-    const jsonText = stringifyJsonValue(value);
-    if (jsonText.trim() === "" || jsonText.trim().toLowerCase() === "null") {
-      return "NULL";
-    }
-    if (engine === "mysql" || engine === "mariadb") {
-      return mysqlJsonLiteral(jsonText);
-    }
-    return qLiteral(jsonText, engine);
-  }
-  if (typeof value === "boolean") {
-    return value ? "TRUE" : "FALSE";
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-  if (isNumericColumnType(dbType)) {
-    const s = String(value).trim();
-    if (s === "" || s.toLowerCase() === "null") return "NULL";
-    const n = Number(s);
-    if (Number.isFinite(n)) return String(n);
-  }
-  return qLiteral(value, engine);
+) {
+  if (!dbType) return false;
+  if (isBlobColumnType(dbType)) return true;
+  return (engine === "mysql" || engine === "mariadb") && isJsonColumnType(dbType);
 }
 
 /**
@@ -171,7 +85,7 @@ export function generateUpdateSqlFromPatches(
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Get update patches for data
   const updatePatches = patchMap["update"]?.["data"];
@@ -225,8 +139,7 @@ export function generateUpdateSqlFromPatches(
       }
       if (
         !usePrimaryKey &&
-        (engine === "mysql" || engine === "mariadb") &&
-        isJsonColumnType(col.db_type)
+        isUnsafeFallbackWhereColumn(col.db_type, engine)
       ) {
         continue;
       }
@@ -281,7 +194,7 @@ export function generateInsertSqlFromPatches(
   columns?: Array<{ name: string; db_type?: string }>
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Get create patches for data only (not structure or constraints)
   const createPatches = patchMap["create"]?.["data"];
@@ -325,7 +238,7 @@ export function generateStructureSqlFromPatches(
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Handle CREATE (new columns)
   const createPatches = patchMap["create"]?.["structure"];
@@ -634,7 +547,7 @@ export function generateConstraintSqlFromPatches(
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Handle CREATE (new indexes/constraints)
   const createPatches = patchMap["create"]?.["constraints"];
@@ -647,7 +560,7 @@ export function generateConstraintSqlFromPatches(
 
       const uniqueClause = isUnique ? "UNIQUE " : "";
       const algorithmClause = ` USING ${algorithm || "BTREE"}`;
-      const columnClause = columnName ? ` (${qIdent(columnName)})` : "";
+      const columnClause = columnName ? ` (${qIdent(columnName, engine)})` : "";
       const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName, engine)} ON ${tableIdent}${algorithmClause}${columnClause};`;
       sqlStatements.push(sql);
     }
@@ -731,7 +644,7 @@ export function generateDeleteSqlFromPatches(
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
+  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Get delete patches for data
   const deletePatches = patchMap["delete"]?.["data"];
@@ -770,8 +683,7 @@ export function generateDeleteSqlFromPatches(
       }
       if (
         !usePrimaryKey &&
-        (engine === "mysql" || engine === "mariadb") &&
-        isJsonColumnType(col.db_type)
+        isUnsafeFallbackWhereColumn(col.db_type, engine)
       ) {
         continue;
       }

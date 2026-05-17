@@ -29,6 +29,7 @@ export type ExportConfig = {
   connectionId: string | null;
   schema: string;
   tableName: string;
+  engine?: import("src/types").DatabaseEngine;
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
 };
@@ -92,6 +93,7 @@ export function useExportTableData() {
         connectionId: connId,
         schema,
         tableName,
+        engine,
         appliedFilters,
         appliedFilterCombine,
         columns,
@@ -115,7 +117,8 @@ export function useExportTableData() {
         tableName,
         columnNames,
         appliedFilters.length ? appliedFilters : undefined,
-        appliedFilterCombine
+        appliedFilterCombine,
+        engine
       );
       const opId = await startSqlQueryStream(connId, q, {
         batchSize: 50,
@@ -147,7 +150,7 @@ export function useExportTableData() {
             );
             content = (isFirstChunk ? "[" : "") + chunkPart;
           } else {
-            content = formatSqlChunk(schema, tableName, cols, rows);
+            content = formatSqlChunk(schema, tableName, cols, rows, engine);
           }
 
           try {
