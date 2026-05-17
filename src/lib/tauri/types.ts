@@ -233,6 +233,15 @@ export type ProfileImportResult = {
   profiles: ConnectionProfile[];
 };
 
+export type ExternalImportSource = "dbeaver" | "tableplus";
+
+export type ExternalImportResult = ProfileImportResult & {
+  source: ExternalImportSource;
+  skipped: number;
+  skipped_reasons: string[];
+  passwords_included: boolean;
+};
+
 export type ProfileConnectInput = {
   profile_id: string;
 };

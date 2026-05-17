@@ -4,10 +4,7 @@ import {
   FolderIcon,
   RestoreIcon,
 } from "src/components/icons";
-import type {
-  ConnectionSortMode,
-  KeychainSortMode,
-} from "src/types";
+import type { ConnectionSortMode, KeychainSortMode } from "src/types";
 import type { DropdownItemConfig } from "src/components/common/Dropdown";
 
 function alphaSortBadge(label: "Az" | "Za") {
@@ -28,16 +25,16 @@ export function buildNewConnectionMenuItems(actions: {
 }): DropdownItemConfig[] {
   return [
     {
+      key: "import",
+      label: "Import Connection",
+      icon: <RestoreIcon className="size-4" />,
+      onSelect: actions.onImportConnections,
+    },
+    {
       key: "new-group",
       label: "New Group",
       icon: <FolderIcon className="size-4" />,
       onSelect: actions.onNewGroup,
-    },
-    {
-      key: "import",
-      label: "Import",
-      icon: <RestoreIcon className="size-4" />,
-      onSelect: actions.onImportConnections,
     },
   ];
 }
@@ -105,22 +102,16 @@ export function buildKeychainSortItems(args: {
   ];
 }
 
-export function getTopBarSearchPlaceholder(
-  isConnections: boolean
-) {
+export function getTopBarSearchPlaceholder(isConnections: boolean) {
   return isConnections
     ? "Search connections or paste a URL..."
     : "Search keychain keys...";
 }
 
-export function getTopBarCreateLabel(
-  isConnections: boolean
-) {
+export function getTopBarCreateLabel(isConnections: boolean) {
   return isConnections ? "New Connection" : "New Key";
 }
 
-export function getTopBarCreateTitle(
-  isConnections: boolean
-) {
+export function getTopBarCreateTitle(isConnections: boolean) {
   return isConnections ? "Create" : "New keychain key";
 }

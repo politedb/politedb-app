@@ -14,10 +14,22 @@ export function ImportConnectionPasswordDialog(props: {
   open: boolean;
   busy?: boolean;
   error?: string | null;
+  title?: string;
+  description?: string;
+  submitLabel?: string;
   onClose: () => void;
   onSubmit: (password: string) => void;
 }) {
-  const { open, busy, error, onClose, onSubmit } = props;
+  const {
+    open,
+    busy,
+    error,
+    title = "Encrypted export file",
+    description = "Enter the file password that was shared with you separately from the export file.",
+    submitLabel = "Import",
+    onClose,
+    onSubmit,
+  } = props;
   const [password, setPassword] = useState("");
 
   useEffect(() => {
@@ -32,11 +44,8 @@ export function ImportConnectionPasswordDialog(props: {
   return (
     <Dialog open={open} onClose={onClose} size="sm" closeOnOutsideClick={!busy}>
       <DialogHeader>
-        <DialogTitle>Encrypted export file</DialogTitle>
-        <DialogDescription>
-          Enter the file password that was shared with you separately from the
-          export file.
-        </DialogDescription>
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
 
       <DialogContent className="pt-1">
@@ -69,7 +78,7 @@ export function ImportConnectionPasswordDialog(props: {
           loading={busy}
           disabled={!password.trim()}
         >
-          Import
+          {submitLabel}
         </Button>
       </DialogFooter>
     </Dialog>

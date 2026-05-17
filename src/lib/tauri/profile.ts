@@ -7,6 +7,7 @@ import type {
   SecretRef,
   ConnectionTestSecrets,
   ProfileImportResult,
+  ExternalImportResult,
   ProfileConnectInput,
   ProfileConnectResult,
   ProfileConnectTestInput,
@@ -545,8 +546,7 @@ function inferStoreKeychainFromCreateInput(
   if (e === "postgres") return input.postgres?.password?.kind !== "inline";
   if (e === "mysql" || e === "mariadb")
     return input.mysql?.password?.kind !== "inline";
-  if (e === "sqlserver")
-    return input.sqlserver?.password?.kind !== "inline";
+  if (e === "sqlserver") return input.sqlserver?.password?.kind !== "inline";
   if (e === "oracle") return input.oracle?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
   if (e === "sqlite") return false;
@@ -642,6 +642,15 @@ export async function profileImport(
 ): Promise<ProfileImportResult> {
   return invoke<ProfileImportResult>(CMD.profileImport, {
     payload: { json },
+  });
+}
+
+export async function profileImportExternal(
+  path: string,
+  password?: string
+): Promise<ExternalImportResult> {
+  return invoke<ExternalImportResult>(CMD.profileImportExternal, {
+    payload: { path, password: password ?? null },
   });
 }
 

@@ -6,11 +6,13 @@ version = 3
 name = "PoliteDB"
 version = "0.11.0"
 dependencies = [
+ "aes",
  "aes-gcm",
  "anyhow",
  "argon2",
  "async-trait",
  "base64 0.22.1",
+ "cbc",
  "chrono",
  "cocoa",
  "core-foundation 0.10.1",
@@ -21,6 +23,7 @@ dependencies = [
  "dirs",
  "flate2",
  "futures-util",
+ "hmac",
  "keyring",
  "mongodb",
  "mysql_async",
@@ -28,6 +31,8 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "oracle",
+ "pbkdf2 0.12.2",
+ "plist",
  "postgres-native-tls",
  "postgres-types",
  "rand 0.8.5",
@@ -39,6 +44,7 @@ dependencies = [
  "security-framework-sys",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "ssh2",
  "tauri",
@@ -3261,7 +3267,7 @@ dependencies = [
  "md-5",
  "mongodb-internal-macros",
  "once_cell",
- "pbkdf2",
+ "pbkdf2 0.11.0",
  "percent-encoding",
  "rand 0.8.5",
  "rustc_version_runtime",
@@ -4048,6 +4054,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83a0692ec44e4cf1ef28ca317f14f8f07da2d95ec3fa01f86e4467b725e60917"
 dependencies = [
  "digest",
+]
+
+[[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest",
+ "hmac",
 ]
 
 [[package]]

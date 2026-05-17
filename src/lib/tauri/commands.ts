@@ -36,6 +36,7 @@ export const CMD = {
   profileDecryptExport: "profile_decrypt_export",
   profileIsEncryptedExport: "profile_is_encrypted_export",
   profileImport: "profile_import",
+  profileImportExternal: "profile_import_external",
 
   // Secrets
   secretsGet: "secrets_get",

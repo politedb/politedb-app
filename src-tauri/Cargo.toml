@@ -60,6 +60,12 @@ base64 = "0.22.1"
 argon2 = "0.5"
 aes-gcm = "0.10"
 rand = "0.8"
+plist = "1.7"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+hmac = "0.12"
+sha1 = "0.10"
 mysql_async = { version = "0.36.1", default-features = false, features = [
     "derive",
     "rustls-tls",

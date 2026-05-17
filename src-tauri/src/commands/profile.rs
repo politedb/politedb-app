@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::commands::connection;
 use crate::profiles::export_crypto;
+use crate::profiles::import_external::{self, ExternalImportResult};
 use crate::profiles::sharing;
 use crate::profiles::store as profile_store;
 use crate::profiles::types::{
@@ -865,4 +866,22 @@ pub fn profile_import(
         total,
         profiles,
     })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProfileImportExternalPayload {
+    pub path: String,
+    pub password: Option<String>,
+}
+
+#[tauri::command]
+pub fn profile_import_external(
+    app: AppHandle,
+    payload: ProfileImportExternalPayload,
+) -> Result<ExternalImportResult, String> {
+    import_external::import_external_file(
+        &app,
+        &payload.path,
+        payload.password.as_deref(),
+    )
 }

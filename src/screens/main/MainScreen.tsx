@@ -8,6 +8,10 @@ import { KeyboardShortcutsDialog } from "src/components/modal/KeyboardShortcutsD
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { ImportConnectionPasswordDialog } from "src/components/modal/ImportConnectionPasswordDialog";
+import {
+  ImportConnectionSourceDialog,
+  type ImportConnectionSource,
+} from "src/components/modal/ImportConnectionSourceDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 
@@ -32,6 +36,11 @@ import {
   isSharingExport,
   parseProfileExportMeta,
 } from "src/utils/profileSharing";
+import {
+  formatExternalImportError,
+  formatExternalImportSuccessMessage,
+  isTablePlusEncryptedPath,
+} from "src/utils/profileImport";
 import type {
   ConnectionSortMode,
   DatabaseEngine,
@@ -43,6 +52,7 @@ import {
   duplicateProfile,
   profileDecryptExport,
   profileImport,
+  profileImportExternal,
   profileSaveAndConnect,
   type ConnectionProfile,
   type SaveAndConnectAction,
@@ -98,9 +108,12 @@ export function MainScreen() {
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
-  const [importEncryptedJson, setImportEncryptedJson] = useState<string | null>(
-    null
-  );
+  const [importSourceDialogOpen, setImportSourceDialogOpen] = useState(false);
+  const [importPasswordDialog, setImportPasswordDialog] = useState<
+    | { kind: "tableplus"; path: string }
+    | { kind: "politedb"; json: string }
+    | null
+  >(null);
   const [importPasswordError, setImportPasswordError] = useState<string | null>(
     null
   );
@@ -212,7 +225,16 @@ export function MainScreen() {
     setActiveProfileScreen(newTab.id);
   }
 
-  async function finishConnectionImport(json: string) {
+  async function finishExternalImport(path: string, password?: string) {
+    const result = await profileImportExternal(path, password);
+    await loadProfiles();
+    await showMessage(formatExternalImportSuccessMessage(result), {
+      title: "Import complete",
+      kind: "info",
+    });
+  }
+
+  async function finishPoliteDbImport(json: string) {
     const result = await profileImport(json);
     await loadProfiles();
 
@@ -224,43 +246,90 @@ export function MainScreen() {
     await showMessage(body, { title: "Import complete", kind: "info" });
   }
 
-  async function handleImportConnections() {
+  function handleImportConnections() {
+    setImportSourceDialogOpen(true);
+  }
+
+  async function handleImportSourceSelected(source: ImportConnectionSource) {
+    setImportSourceDialogOpen(false);
+
     try {
-      const path = await pickOpenFile({
-        title: "Import connection config",
-        filters: [
-          {
-            name: "PoliteDB Connection",
-            extensions: [CONNECTION_EXPORT_EXTENSION],
-          },
-        ],
-      });
+      const path = await pickOpenFile(
+        source === "dbeaver"
+          ? {
+              title: "Select DBeaver data-sources.json",
+              filters: [{ name: "DBeaver", extensions: ["json"] }],
+            }
+          : source === "tableplus"
+            ? {
+                title: "Select TablePlus export",
+                filters: [
+                  {
+                    name: "TablePlus",
+                    extensions: ["tableplusconnection", "plist"],
+                  },
+                ],
+              }
+            : {
+                title: "Select PoliteDB export",
+                filters: [
+                  {
+                    name: "PoliteDB Connection",
+                    extensions: [CONNECTION_EXPORT_EXTENSION],
+                  },
+                ],
+              }
+      );
       if (!path || typeof path !== "string") return;
 
-      const json = await readTextFile(path);
-      if (isEncryptedExportFile(json)) {
-        setImportPasswordError(null);
-        setImportEncryptedJson(json);
+      if (source === "politedb") {
+        const json = await readTextFile(path);
+        if (isEncryptedExportFile(json)) {
+          setImportPasswordError(null);
+          setImportPasswordDialog({ kind: "politedb", json });
+          return;
+        }
+        await finishPoliteDbImport(json);
         return;
       }
 
-      await finishConnectionImport(json);
+      if (source === "tableplus" && isTablePlusEncryptedPath(path)) {
+        setImportPasswordError(null);
+        setImportPasswordDialog({ kind: "tableplus", path });
+        return;
+      }
+
+      await finishExternalImport(path);
     } catch (err) {
-      await showMessage(String(err), { title: "Import failed", kind: "error" });
+      await showMessage(
+        source === "politedb" ? String(err) : formatExternalImportError(err),
+        { title: "Import failed", kind: "error" }
+      );
     }
   }
 
-  async function handleImportEncrypted(password: string) {
-    if (!importEncryptedJson) return;
+  async function handleImportPasswordSubmit(password: string) {
+    if (!importPasswordDialog) return;
 
+    const dialog = importPasswordDialog;
     setImportBusy(true);
     setImportPasswordError(null);
     try {
-      const json = await profileDecryptExport(importEncryptedJson, password);
-      setImportEncryptedJson(null);
-      await finishConnectionImport(json);
+      if (dialog.kind === "politedb") {
+        const json = await profileDecryptExport(dialog.json, password);
+        setImportPasswordDialog(null);
+        await finishPoliteDbImport(json);
+      } else {
+        const path = dialog.path;
+        setImportPasswordDialog(null);
+        await finishExternalImport(path, password);
+      }
     } catch (err) {
-      setImportPasswordError(formatExportPasswordError(err));
+      setImportPasswordError(
+        dialog.kind === "politedb"
+          ? formatExportPasswordError(err)
+          : formatExternalImportError(err)
+      );
     } finally {
       setImportBusy(false);
     }
@@ -492,16 +561,32 @@ export function MainScreen() {
           onCreate={handleCreateGroup}
         />
 
+        <ImportConnectionSourceDialog
+          open={importSourceDialogOpen}
+          onClose={() => setImportSourceDialogOpen(false)}
+          onSelect={(source) => void handleImportSourceSelected(source)}
+        />
+
         <ImportConnectionPasswordDialog
-          open={importEncryptedJson !== null}
+          open={importPasswordDialog !== null}
           busy={importBusy}
           error={importPasswordError}
+          title={
+            importPasswordDialog?.kind === "tableplus"
+              ? "TablePlus export file"
+              : undefined
+          }
+          description={
+            importPasswordDialog?.kind === "tableplus"
+              ? "Enter the password you set when exporting connections from TablePlus."
+              : undefined
+          }
           onClose={() => {
             if (importBusy) return;
-            setImportEncryptedJson(null);
+            setImportPasswordDialog(null);
             setImportPasswordError(null);
           }}
-          onSubmit={(password) => void handleImportEncrypted(password)}
+          onSubmit={(password) => void handleImportPasswordSubmit(password)}
         />
       </div>
     </div>

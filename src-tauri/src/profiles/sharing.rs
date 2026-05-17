@@ -75,7 +75,7 @@ fn prepare_ssh_for_sharing_export(
             if options.include_ssh_password {
                 *password = resolve_plain_secret_string(app, password)?;
             } else {
-                *password = String::new();
+                password.clear();
             }
         }
         SshAuth::PrivateKey {
@@ -177,45 +177,51 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
 }
 
 fn inline_secret_from_ref(app: &AppHandle, secret: &SecretRef) -> Result<SecretRef, String> {
-    let value = resolve_plain_secret_string(app, &secret.value)?;
-    match secret.kind {
-        SecretRefKind::Inline if value.is_empty() => {
-            Ok(SecretRef {
-                kind: SecretRefKind::Inline,
-                value: String::new(),
-            })
-        }
-        SecretRefKind::Inline => Ok(SecretRef {
-            kind: SecretRefKind::Inline,
-            value,
-        }),
-        SecretRefKind::Keychain => {
-            if value.is_empty() {
-                return Err("EXPORT_DB_PASSWORD_UNAVAILABLE".into());
-            }
-            Ok(SecretRef {
-                kind: SecretRefKind::Inline,
-                value,
-            })
-        }
-    }
+    let value = match secret.kind {
+        SecretRefKind::Keychain => resolve_keychain_secret(app, &secret.value)?,
+        SecretRefKind::Inline => resolve_plain_secret_string(app, &secret.value)?,
+    };
+
+    Ok(SecretRef {
+        kind: SecretRefKind::Inline,
+        value,
+    })
 }
 
-/// Resolve inline text or a keychain account name stored in a string field.
+/// Resolve a stored password string (inline secret or keychain account name).
 fn resolve_plain_secret_string(app: &AppHandle, raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(String::new());
     }
 
-    if trimmed.starts_with("profile:") {
-        return secrets::keychain_get(app, trimmed).map_err(|_| {
-            "EXPORT_PASSWORD_UNAVAILABLE: saved secret is missing from this device's keychain"
-                .into()
-        });
+    if is_keychain_reference(trimmed) {
+        return resolve_keychain_secret(app, trimmed);
     }
 
     Ok(trimmed.to_string())
+}
+
+fn is_keychain_reference(value: &str) -> bool {
+    value.starts_with("profile:") || value.starts_with("politedb/profile/")
+}
+
+fn resolve_keychain_secret(app: &AppHandle, key: &str) -> Result<String, String> {
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("EXPORT_PASSWORD_UNAVAILABLE".into());
+    }
+
+    let value = secrets::keychain_get(app, key).map_err(|_| {
+        "EXPORT_PASSWORD_UNAVAILABLE: saved secret is missing from this device's keychain"
+            .to_string()
+    })?;
+
+    if value.trim().is_empty() {
+        return Err("EXPORT_PASSWORD_UNAVAILABLE".into());
+    }
+
+    Ok(value)
 }
 
 /// Keep portable `~/.ssh/...` hints; replace absolute paths with a generic hint or empty.
@@ -277,6 +283,13 @@ mod tests {
         });
         assert!(both.iter().any(|s| s.contains("Database password is included")));
         assert!(both.iter().any(|s| s.contains("SSH password is included")));
+    }
+
+    #[test]
+    fn treats_politedb_keychain_keys_as_references() {
+        assert!(is_keychain_reference(
+            "politedb/profile/abc/postgres/db_password"
+        ));
     }
 
     #[test]
