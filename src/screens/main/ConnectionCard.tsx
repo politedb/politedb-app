@@ -1,5 +1,8 @@
 import { memo, RefObject, useEffect, useRef, useState } from "preact/compat";
-import { profileExportOne, type ConnectionProfile } from "src/lib/tauri";
+import {
+  profileExportOneEncrypted,
+  type ConnectionProfile,
+} from "src/lib/tauri";
 
 import { DbIcon } from "src/components/icons/DbIcon";
 import {
@@ -19,6 +22,15 @@ import { cn } from "src/utils/cn";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
+import {
+  ExportConnectionDialog,
+  type ExportConnectionOptions,
+} from "src/components/modal/ExportConnectionDialog";
+import {
+  formatExportPasswordError,
+  CONNECTION_EXPORT_EXTENSION,
+  formatSharingExportSuccessMessage,
+} from "src/utils/profileSharing";
 
 /* -------------------------------------------------- */
 /* utils */
@@ -186,6 +198,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   const kebabRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [assignGroupOpen, setAssignGroupOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(
     null
   );
@@ -231,30 +245,60 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     await removeProfile(profile.id);
   }
 
-  async function onExport() {
+  function openExportDialog() {
+    closeMenu();
+    setExportDialogOpen(true);
+  }
+
+  async function runSharingExport(options: ExportConnectionOptions) {
     if (!profile) return;
     const currentProfile = profile;
 
+    setExportBusy(true);
     try {
       const safeLabel = (currentProfile.label || "connection")
         .trim()
         .replace(/[\\/:*?"<>|]+/g, "-");
       const path = await saveDialog({
-        title: "Export connection config",
-        defaultPath: `${safeLabel}.politedb-connection.json`,
-        filters: [{ name: "JSON", extensions: ["json"] }],
+        title: "Export connection for sharing",
+        defaultPath: `${safeLabel}.${CONNECTION_EXPORT_EXTENSION}`,
+        filters: [
+          {
+            name: "PoliteDB Connection",
+            extensions: [CONNECTION_EXPORT_EXTENSION],
+          },
+        ],
       });
       if (!path) return;
 
-      const json = await profileExportOne(currentProfile.id);
+      const json = await profileExportOneEncrypted(
+        currentProfile.id,
+        options.filePassword,
+        {
+          includeDbPassword: options.includeDbPassword,
+          includeSshPassword: options.includeSshPassword,
+        }
+      );
       await writeTextFile(path, json);
 
+      setExportDialogOpen(false);
       await showMessage(
-        "Connection config exported. Passwords stored in keychain are not included in the file.",
-        { title: "Export complete", kind: "info" }
+        formatSharingExportSuccessMessage({
+          includeDbPassword: options.includeDbPassword,
+          includeSshPassword: options.includeSshPassword,
+        }),
+        {
+          title: "Export completed",
+          kind: "info",
+        }
       );
     } catch (err) {
-      await showMessage(String(err), { title: "Export failed", kind: "error" });
+      await showMessage(formatExportPasswordError(err), {
+        title: "Export failed",
+        kind: "error",
+      });
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -409,10 +453,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
             : []),
           {
             type: "item",
-            label: "Export Connection",
+            label: "Export this connection",
             icon: <BackupIcon className="size-4" />,
             onClick: () => {
-              void onExport();
+              openExportDialog();
             },
           },
           { type: "sep" },
@@ -437,6 +481,16 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           },
         ]}
         onClose={closeMenu}
+      />
+
+      <ExportConnectionDialog
+        open={exportDialogOpen}
+        connectionLabel={label}
+        busy={exportBusy}
+        onClose={() => {
+          if (!exportBusy) setExportDialogOpen(false);
+        }}
+        onConfirm={(exportOptions) => void runSharingExport(exportOptions)}
       />
 
       {assignGroupOpen ? (

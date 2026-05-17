@@ -819,7 +819,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
       await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
 
       await showMessage("PNG exported.", {
-        title: "Export complete",
+        title: "Export completed",
         kind: "info",
       });
     } catch (err) {

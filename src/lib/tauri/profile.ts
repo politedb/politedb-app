@@ -608,6 +608,35 @@ export async function profileExportOne(profileId: string): Promise<string> {
   return invoke<string>(CMD.profileExportOne, { profileId });
 }
 
+export type SharingExportSecretOptions = {
+  includeDbPassword?: boolean;
+  includeSshPassword?: boolean;
+};
+
+export async function profileExportOneEncrypted(
+  profileId: string,
+  password: string,
+  options?: SharingExportSecretOptions
+): Promise<string> {
+  return invoke<string>(CMD.profileExportOneEncrypted, {
+    profileId,
+    password,
+    includeDbPassword: !!options?.includeDbPassword,
+    includeSshPassword: !!options?.includeSshPassword,
+  });
+}
+
+export async function profileDecryptExport(
+  encryptedJson: string,
+  password: string
+): Promise<string> {
+  return invoke<string>(CMD.profileDecryptExport, { encryptedJson, password });
+}
+
+export async function profileIsEncryptedExport(json: string): Promise<boolean> {
+  return invoke<boolean>(CMD.profileIsEncryptedExport, { json });
+}
+
 export async function profileImport(
   json: string
 ): Promise<ProfileImportResult> {

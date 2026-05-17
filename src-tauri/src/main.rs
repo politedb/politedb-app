@@ -173,6 +173,9 @@ fn main() {
             commands::profile::profile_connect_test,
             commands::profile::profile_export,
             commands::profile::profile_export_one,
+            commands::profile::profile_export_one_encrypted,
+            commands::profile::profile_decrypt_export,
+            commands::profile::profile_is_encrypted_export,
             commands::profile::profile_import,
             // secrets
             secrets::secrets_set,

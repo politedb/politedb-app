@@ -120,7 +120,12 @@ export function Input(
           onFocus={handleFocus}
           onBlur={handleBlur}
           class={cn(
-            "w-full rounded-md p-2 text-xs focus:bg-white focus:outline-2 focus:outline-blue-500",
+            "w-full rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-900",
+            "placeholder:text-slate-400",
+            "focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20",
+            "disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500",
+            props.error &&
+              "border-rose-400 focus:border-rose-500 focus:ring-rose-500/20",
             props.left && "pl-7",
             (showSelect || props.right) && "pr-8",
             className

@@ -7,6 +7,7 @@ import { ConnectionFormDialog } from "src/components/connection-form/ConnectionF
 import { KeyboardShortcutsDialog } from "src/components/modal/KeyboardShortcutsDialog";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
+import { ImportConnectionPasswordDialog } from "src/components/modal/ImportConnectionPasswordDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 
@@ -23,6 +24,14 @@ import { GroupsSection } from "./GroupsSection";
 import { KeychainSection } from "./KeychainSection";
 
 import { filterConnections } from "src/utils/connection";
+import {
+  formatExportPasswordError,
+  formatSharingImportSuccessMessage,
+  isEncryptedExportFile,
+  CONNECTION_EXPORT_EXTENSION,
+  isSharingExport,
+  parseProfileExportMeta,
+} from "src/utils/profileSharing";
 import type {
   ConnectionSortMode,
   DatabaseEngine,
@@ -32,6 +41,7 @@ import type {
 } from "src/types";
 import {
   duplicateProfile,
+  profileDecryptExport,
   profileImport,
   profileSaveAndConnect,
   type ConnectionProfile,
@@ -88,6 +98,13 @@ export function MainScreen() {
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
+  const [importEncryptedJson, setImportEncryptedJson] = useState<string | null>(
+    null
+  );
+  const [importPasswordError, setImportPasswordError] = useState<string | null>(
+    null
+  );
+  const [importBusy, setImportBusy] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
@@ -195,24 +212,57 @@ export function MainScreen() {
     setActiveProfileScreen(newTab.id);
   }
 
+  async function finishConnectionImport(json: string) {
+    const result = await profileImport(json);
+    await loadProfiles();
+
+    const meta = parseProfileExportMeta(json);
+    const body = isSharingExport(meta)
+      ? formatSharingImportSuccessMessage(result, meta)
+      : `Imported ${result.created + result.updated} connection(s).\nCreated: ${result.created}\nUpdated: ${result.updated}\n\nProfiles using keychain secrets may need passwords to be re-entered on this device.`;
+
+    await showMessage(body, { title: "Import complete", kind: "info" });
+  }
+
   async function handleImportConnections() {
     try {
       const path = await pickOpenFile({
         title: "Import connection config",
-        filters: [{ name: "JSON", extensions: ["json"] }],
+        filters: [
+          {
+            name: "PoliteDB Connection",
+            extensions: [CONNECTION_EXPORT_EXTENSION],
+          },
+        ],
       });
       if (!path || typeof path !== "string") return;
 
       const json = await readTextFile(path);
-      const result = await profileImport(json);
-      await loadProfiles();
+      if (isEncryptedExportFile(json)) {
+        setImportPasswordError(null);
+        setImportEncryptedJson(json);
+        return;
+      }
 
-      await showMessage(
-        `Imported ${result.created + result.updated} connection(s).\nCreated: ${result.created}\nUpdated: ${result.updated}\n\nProfiles using keychain secrets may need passwords to be re-entered on this device.`,
-        { title: "Import complete", kind: "info" }
-      );
+      await finishConnectionImport(json);
     } catch (err) {
       await showMessage(String(err), { title: "Import failed", kind: "error" });
+    }
+  }
+
+  async function handleImportEncrypted(password: string) {
+    if (!importEncryptedJson) return;
+
+    setImportBusy(true);
+    setImportPasswordError(null);
+    try {
+      const json = await profileDecryptExport(importEncryptedJson, password);
+      setImportEncryptedJson(null);
+      await finishConnectionImport(json);
+    } catch (err) {
+      setImportPasswordError(formatExportPasswordError(err));
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -440,6 +490,18 @@ export function MainScreen() {
           open={newGroupOpen}
           onClose={() => setNewGroupOpen(false)}
           onCreate={handleCreateGroup}
+        />
+
+        <ImportConnectionPasswordDialog
+          open={importEncryptedJson !== null}
+          busy={importBusy}
+          error={importPasswordError}
+          onClose={() => {
+            if (importBusy) return;
+            setImportEncryptedJson(null);
+            setImportPasswordError(null);
+          }}
+          onSubmit={(password) => void handleImportEncrypted(password)}
         />
       </div>
     </div>

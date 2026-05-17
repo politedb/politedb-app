@@ -32,6 +32,9 @@ export const CMD = {
   profileConnectTest: "profile_connect_test",
   profileExport: "profile_export",
   profileExportOne: "profile_export_one",
+  profileExportOneEncrypted: "profile_export_one_encrypted",
+  profileDecryptExport: "profile_decrypt_export",
+  profileIsEncryptedExport: "profile_is_encrypted_export",
   profileImport: "profile_import",
 
   // Secrets
