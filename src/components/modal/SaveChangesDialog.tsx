@@ -18,6 +18,7 @@ import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheck, CopyIcon } from "src/components/icons";
+import { buildPatchDiffs } from "src/utils/patchDiff";
 
 type ChangeSummary = {
   inserts: number;
@@ -174,6 +175,11 @@ export function SaveChangesDialog({
     return [...(newTableSql || []), ...patchSql];
   }, [summary.sqlStatements, newTableSql]);
 
+  const rowDiffs = useMemo(
+    () => buildPatchDiffs(patchMap, { activeScreen, getRowAt }),
+    [patchMap, activeScreen, getRowAt]
+  );
+
   const hasChanges =
     summary.inserts > 0 ||
     summary.updates > 0 ||
@@ -251,6 +257,56 @@ export function SaveChangesDialog({
           </div>
         </div>
 
+        {rowDiffs.length > 0 && (
+          <div class="rounded-lg border border-neutral-200">
+            <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+              <h3 class="text-sm font-semibold text-neutral-900">
+                Row & Column Diff ({rowDiffs.length})
+              </h3>
+            </div>
+            <div class="max-h-56 space-y-3 overflow-y-auto p-4">
+              {rowDiffs.map((diff, index) => (
+                <div
+                  key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
+                  class="rounded-md border border-neutral-200 bg-white p-3"
+                >
+                  <div class="mb-2 flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                      <p class="truncate font-mono text-xs text-neutral-600">
+                        {diff.table}
+                      </p>
+                      <p class="truncate text-xs text-neutral-500">
+                        {diff.identity}
+                      </p>
+                    </div>
+                    <span class="rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold uppercase text-neutral-700">
+                      {diff.action}
+                    </span>
+                  </div>
+                  <div class="space-y-1">
+                    {diff.cells.map((cell) => (
+                      <div
+                        key={cell.column}
+                        class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
+                      >
+                        <span class="truncate font-medium text-neutral-700">
+                          {cell.column}
+                        </span>
+                        <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
+                          {cell.oldValue || "NULL"}
+                        </span>
+                        <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
+                          {cell.newValue || "NULL"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* SQL Statements Section */}
         <div class="rounded-lg border border-neutral-200">
           <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
@@ -262,11 +318,11 @@ export function SaveChangesDialog({
           </div>
           <div class="max-h-64 overflow-y-auto p-4">
             {allSqlStatements.length === 0 ? (
-              <p class="text-sm text-neutral-500">
+              <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 {isMongo
-                  ? "No Mongo operations to execute."
-                  : "No SQL statements to execute."}
-              </p>
+                  ? "There are pending changes, but no Mongo operations were generated."
+                  : "There are pending changes, but no SQL statements were generated. Review the diff before saving."}
+              </div>
             ) : (
               <div class="space-y-3">
                 {allSqlStatements.map((sql, index) => {
