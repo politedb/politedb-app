@@ -19,7 +19,7 @@ type PatchHelpers = {
 export function commitTableCellEdit(params: {
   rowIdx: number;
   columnName: string;
-  newValue: string;
+  newValue: unknown;
   columns: ColumnMeta[];
   getRowArray: (idx: number) => unknown[] | undefined;
   patchHelpers: PatchHelpers;
@@ -63,7 +63,7 @@ export function commitTableCellEdit(params: {
   );
 
   const prev = (cellToString(patchedValue) ?? "").trim();
-  const next = (newValue ?? "").trim();
+  const next = (cellToString(newValue) ?? "").trim();
   const isNewRow = patchHelpers.isNewRow(rowIdx);
 
   if (!isNewRow && prev === next) return false;

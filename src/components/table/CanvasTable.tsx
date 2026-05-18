@@ -12,12 +12,17 @@ import { ChevronDownIcon, ChevronUpIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
+import {
+  isBlobColumnType,
+  isJsonColumnType,
+} from "src/utils/sqlDialect";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
 
 type EditingCell = { rowIdx: number; colIdx: number };
 type HeaderMenuState = { x: number; y: number; colName: string };
+type CellEditorKind = "text" | "json" | "date" | "datetime" | "bool" | "blob";
 
 type Props = {
   columns: ColumnMeta[];
@@ -48,7 +53,7 @@ type Props = {
     range?: boolean
   ) => void;
   onStartEdit?: (cell: EditingCell) => void;
-  onCommitEdit?: (cell: EditingCell, value: string) => void;
+  onCommitEdit?: (cell: EditingCell, value: unknown) => void;
   onExitEdit?: () => void;
 
   onCellActivate?: (cell: EditingCell) => boolean | void;
@@ -179,6 +184,18 @@ function hitTestCol(
   return -1;
 }
 
+function getCellEditorKind(column?: ColumnMeta): CellEditorKind {
+  const type = column?.db_type?.toLowerCase() ?? "";
+  if (isBlobColumnType(type)) return "blob";
+  if (isJsonColumnType(type)) return "json";
+  if (/\b(bool|boolean|bit)\b/.test(type)) return "bool";
+  if (/\b(timestamp|datetime|timestamptz|timestamp with time zone)\b/.test(type)) {
+    return "datetime";
+  }
+  if (/\b(date)\b/.test(type)) return "date";
+  return "text";
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -243,8 +260,11 @@ export function CanvasTable({
   const [isResizing, setIsResizing] = useState(false);
 
   // --- Editor State ---
-  const editorRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+    null
+  );
   const [editorValue, setEditorValue] = useState("");
+  const [editorError, setEditorError] = useState<string | null>(null);
   const [editorRect, setEditorRect] = useState<{
     x: number;
     y: number;
@@ -252,6 +272,9 @@ export function CanvasTable({
     h: number;
   } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<HeaderMenuState | null>(null);
+  const editorKind = editing
+    ? getCellEditorKind(columns[editing.colIdx])
+    : "text";
 
   // --- Viewport ---
   const [viewport, setViewport] = useState({ w: 1, h: 1 });
@@ -631,17 +654,45 @@ export function CanvasTable({
     };
   }, [isResizing]);
 
-  const commitAndExit = useCallback(() => {
-    if (!editing) return;
-    onCommitEdit?.(editing, editorValue);
-    onExitEdit?.();
-    setEditorRect(null);
-  }, [editing, editorValue, onCommitEdit, onExitEdit]);
-
   const cancelExit = useCallback(() => {
     onExitEdit?.();
     setEditorRect(null);
+    setEditorError(null);
   }, [onExitEdit]);
+
+  const commitAndExit = useCallback(() => {
+    if (!editing) return;
+    if (editorKind === "blob") {
+      cancelExit();
+      return;
+    }
+
+    let nextValue: unknown = editorValue;
+    if (editorKind === "json" && editorValue.trim() !== "") {
+      try {
+        nextValue = JSON.stringify(JSON.parse(editorValue));
+      } catch {
+        setEditorError("Invalid JSON");
+        return;
+      }
+    } else if (editorKind === "bool") {
+      nextValue =
+        editorValue === "__NULL__" ? null : editorValue === "true";
+    }
+
+    onCommitEdit?.(editing, nextValue);
+    onExitEdit?.();
+    setEditorRect(null);
+    setEditorError(null);
+  }, [editing, editorKind, editorValue, onCommitEdit, onExitEdit, cancelExit]);
+
+  const commitNullAndExit = useCallback(() => {
+    if (!editing || editorKind === "blob") return;
+    onCommitEdit?.(editing, null);
+    onExitEdit?.();
+    setEditorRect(null);
+    setEditorError(null);
+  }, [editing, editorKind, onCommitEdit, onExitEdit]);
 
   // --------------------------------------------------------------------------
   // Auto-scroll on new row
@@ -848,7 +899,20 @@ export function CanvasTable({
 
       const row = getRowAt(rowIdx);
       const s = cellToString(row?.[colIdx] ?? null);
-      setEditorValue(s ?? "");
+      const kind = getCellEditorKind(columns[colIdx]);
+      setEditorError(null);
+      if (kind === "bool") {
+        const normalized = String(s ?? "").toLowerCase();
+        setEditorValue(
+          normalized === "true" || normalized === "1"
+            ? "true"
+            : normalized === "false" || normalized === "0"
+              ? "false"
+              : "__NULL__"
+        );
+      } else {
+        setEditorValue(s ?? "");
+      }
 
       const r2 = getRect(rowIdx, colIdx, left, top);
       if (r2) setEditorRect(r2);
@@ -1017,26 +1081,85 @@ export function CanvasTable({
 
       {/* Editor Overlay */}
       {editorRect && editing && !isResizing && (
-        <input
-          ref={editorRef}
-          class="absolute z-60 bg-white px-2 text-sm shadow-sm"
-          placeholder="NULL"
+        <div
+          class="absolute z-60"
           style={{
             left: editorRect.x + 2,
             top: editorRect.y + HEADER_HEIGHT + 4,
-            width: editorRect.w - 4,
-            height: editorRect.h - 3,
+            width: Math.max(editorRect.w - 4, editorKind === "json" ? 260 : 120),
           }}
-          value={editorValue}
-          onInput={(e) =>
-            setEditorValue((e.currentTarget as HTMLInputElement).value)
-          }
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitAndExit();
-            if (e.key === "Escape") cancelExit();
-          }}
-          onBlur={commitAndExit}
-        />
+        >
+          {editorKind === "json" ? (
+            <textarea
+              ref={editorRef as any}
+              class={cn(
+                "min-h-24 w-full resize bg-white px-2 py-1 font-mono text-xs shadow-sm outline-none",
+                editorError && "border border-red-400"
+              )}
+              value={editorValue}
+              onInput={(e) =>
+                setEditorValue((e.currentTarget as HTMLTextAreaElement).value)
+              }
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  commitAndExit();
+                }
+                if (e.key === "Escape") cancelExit();
+              }}
+              onBlur={commitAndExit}
+            />
+          ) : editorKind === "bool" ? (
+            <select
+              ref={editorRef as any}
+              class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none"
+              value={editorValue}
+              onInput={(e) =>
+                setEditorValue((e.currentTarget as HTMLSelectElement).value)
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitAndExit();
+                if (e.key === "Escape") cancelExit();
+              }}
+              onBlur={commitAndExit}
+            >
+              <option value="true">true</option>
+              <option value="false">false</option>
+              <option value="__NULL__">NULL</option>
+            </select>
+          ) : (
+            <input
+              ref={editorRef as any}
+              class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500"
+              type={editorKind === "date" ? "date" : editorKind === "datetime" ? "datetime-local" : "text"}
+              placeholder={editorKind === "blob" ? "Binary value is read-only" : "NULL"}
+              disabled={editorKind === "blob"}
+              value={editorKind === "blob" ? "Binary value is read-only" : editorValue}
+              onInput={(e) =>
+                setEditorValue((e.currentTarget as HTMLInputElement).value)
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitAndExit();
+                if (e.key === "Escape") cancelExit();
+              }}
+              onBlur={editorKind === "blob" ? cancelExit : commitAndExit}
+            />
+          )}
+          {editorError && (
+            <p class="mt-1 rounded bg-red-50 px-2 py-1 text-xs text-red-700 shadow">
+              {editorError}
+            </p>
+          )}
+          {editorKind !== "blob" && (
+            <button
+              type="button"
+              class="mt-1 rounded border border-neutral-200 bg-white px-2 py-0.5 text-xs text-neutral-600 shadow-sm hover:bg-neutral-50"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={commitNullAndExit}
+            >
+              Set NULL
+            </button>
+          )}
+        </div>
       )}
 
       <ContextMenu

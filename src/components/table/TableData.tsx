@@ -202,7 +202,7 @@ export function TableData({
   // --------------------------------------------------------------------------
 
   const handleCommitEdit = useCallback(
-    (cell: { rowIdx: number; colIdx: number }, newValue: string) => {
+    (cell: { rowIdx: number; colIdx: number }, newValue: unknown) => {
       const { colIdx } = cell;
       const rowIdx = cell.rowIdx;
       const col = columns[colIdx];
