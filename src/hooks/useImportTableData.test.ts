@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildImportInsertPlan,
   buildDefaultImportMapping,
   validateImportPreview,
 } from "./useImportTableData";
@@ -53,5 +54,60 @@ describe("CSV import helpers", () => {
     );
 
     expect(issues).toHaveLength(0);
+  });
+
+  it("validates beyond preview rows when full validation is enabled", () => {
+    const rows = Array.from({ length: 101 }, (_, index) => [
+      index === 100 ? "bad" : String(index),
+    ]);
+
+    expect(
+      validateImportPreview(
+        { headers: ["id"], rows },
+        [{ name: "id", db_type: "int" }],
+        {
+          firstIsHeaders: true,
+          nullMode: "empty-string",
+          columnMapping: { id: 0 },
+        }
+      )
+    ).toHaveLength(0);
+
+    expect(
+      validateImportPreview(
+        { headers: ["id"], rows },
+        [{ name: "id", db_type: "int" }],
+        {
+          firstIsHeaders: true,
+          nullMode: "empty-string",
+          fullValidation: true,
+          columnMapping: { id: 0 },
+        }
+      )
+    ).toMatchObject([{ row: 101, column: "id", value: "bad" }]);
+  });
+
+  it("builds one insert statement per CSV row for transactional rollback reporting", () => {
+    const plan = buildImportInsertPlan({
+      schema: "public",
+      tableName: "users",
+      columns: [
+        { name: "id", db_type: "int" },
+        { name: "name", db_type: "text" },
+      ],
+      rows: [
+        ["1", "Ada"],
+        ["2", ""],
+      ],
+      columnMapping: { id: 0, name: 1 },
+      nullMode: "empty-as-null",
+      engine: "postgres",
+    });
+
+    expect(plan.rowNumbers).toEqual([1, 2]);
+    expect(plan.statements).toEqual([
+      `INSERT INTO "public"."users" ("id", "name") VALUES (1, 'Ada')`,
+      `INSERT INTO "public"."users" ("id", "name") VALUES (2, NULL)`,
+    ]);
   });
 });

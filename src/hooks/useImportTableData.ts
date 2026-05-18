@@ -2,10 +2,14 @@ import { useCallback, useState } from "preact/hooks";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { parseCsv } from "src/utils/csv";
-import { runSqlQuery } from "src/lib/tauri/query";
+import { operationExecuteTransaction } from "src/lib/tauri";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { DatabaseEngine } from "src/types";
-import { formatSqlValue, quoteIdentifier, quoteTableName } from "src/utils/sqlDialect";
+import {
+  formatSqlValue,
+  quoteIdentifier,
+  quoteTableName,
+} from "src/utils/sqlDialect";
 
 export type DataImportPreview = {
   headers: string[];
@@ -26,6 +30,7 @@ export type ImportOptions = {
   firstIsHeaders: boolean;
   columnMapping: ImportColumnMapping;
   nullMode: ImportNullMode;
+  fullValidation?: boolean;
 };
 
 export type ImportConfig = {
@@ -39,10 +44,14 @@ export type ImportConfig = {
   firstIsHeaders?: boolean;
   columnMapping?: ImportColumnMapping;
   nullMode?: ImportNullMode;
+  fullValidation?: boolean;
   onSuccess: () => Promise<void>;
 };
 
-const BATCH = 50;
+export type ImportStatementPlan = {
+  statements: string[];
+  rowNumbers: number[];
+};
 
 function typeIssue(value: string, dbType?: string): string | null {
   if (value === "") return null;
@@ -95,8 +104,9 @@ export function validateImportPreview(
   const dataRows = options.firstIsHeaders
     ? preview.rows
     : [preview.headers, ...preview.rows];
+  const maxRows = options.fullValidation ? dataRows.length : 100;
   const issues: ImportIssue[] = [];
-  for (let rowIndex = 0; rowIndex < Math.min(dataRows.length, 100); rowIndex++) {
+  for (let rowIndex = 0; rowIndex < Math.min(dataRows.length, maxRows); rowIndex++) {
     const row = dataRows[rowIndex] ?? [];
     for (const column of columns) {
       const csvIndex = options.columnMapping[column.name];
@@ -115,6 +125,70 @@ export function validateImportPreview(
     }
   }
   return issues;
+}
+
+export function buildImportInsertPlan(args: {
+  schema: string;
+  tableName: string;
+  columns: ColumnMeta[];
+  rows: string[][];
+  columnMapping: ImportColumnMapping;
+  nullMode: ImportNullMode;
+  engine?: DatabaseEngine;
+}): ImportStatementPlan {
+  const {
+    schema,
+    tableName,
+    columns,
+    rows,
+    columnMapping,
+    nullMode,
+    engine,
+  } = args;
+  const colOrder = columns
+    .map((column) => column.name)
+    .filter((name) => columnMapping[name] != null && columnMapping[name]! >= 0);
+
+  const quotedTable = quoteTableName(schema, tableName, engine);
+  const quotedCols = colOrder
+    .map((c) => quoteIdentifier(c, engine))
+    .join(", ");
+  const statements: string[] = [];
+  const rowNumbers: number[] = [];
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex] ?? [];
+    const vals = colOrder.map((col) => {
+      const idx = columnMapping[col]!;
+      const raw = row[idx] ?? "";
+      const column = columns.find((item) => item.name === col);
+      const value = raw === "" && nullMode === "empty-as-null" ? null : raw;
+      return formatSqlValue(value, column?.db_type, engine);
+    });
+    statements.push(
+      `INSERT INTO ${quotedTable} (${quotedCols}) VALUES (${vals.join(", ")})`
+    );
+    rowNumbers.push(rowIndex + 1);
+  }
+
+  return { statements, rowNumbers };
+}
+
+function importIssueMessage(issue: ImportIssue): string {
+  const preview =
+    issue.value.length > 32 ? `${issue.value.slice(0, 32)}...` : issue.value;
+  return `row ${issue.row}, column ${issue.column}, value ${JSON.stringify(preview)}: ${issue.message}`;
+}
+
+function importExecutionErrorMessage(error: unknown, rowNumbers: number[]) {
+  const raw = error instanceof Error ? error.message : String(error);
+  const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*(.*)/);
+  if (!match) return raw || "Import failed.";
+
+  const statementIndex = Number(match[1]);
+  const reason = match[2]?.trim() || "Database rejected the row.";
+  const rowNumber = rowNumbers[statementIndex - 1] ?? statementIndex;
+  return `Import failed at row ${rowNumber}, column unknown, value unavailable: ${reason}`;
 }
 
 export function useImportTableData() {
@@ -164,6 +238,7 @@ export function useImportTableData() {
         firstIsHeaders = true,
         columnMapping,
         nullMode = "empty-string",
+        fullValidation = false,
         onSuccess,
       } = config;
 
@@ -202,12 +277,13 @@ export function useImportTableData() {
         firstIsHeaders,
         columnMapping: mapping,
         nullMode,
+        fullValidation,
       });
       if (issues.length > 0) {
         setError(
           `CSV validation failed: ${issues
             .slice(0, 5)
-            .map((issue) => `row ${issue.row} ${issue.column}: ${issue.message}`)
+            .map(importIssueMessage)
             .join("; ")}`
         );
         return;
@@ -217,38 +293,27 @@ export function useImportTableData() {
       setError(null);
       setImportProgress({ imported: 0, total: dataRows.length });
 
-      const quotedTable = quoteTableName(schema, tableName, engine);
-      const quotedCols = colOrder
-        .map((c) => quoteIdentifier(c, engine))
-        .join(", ");
+      const importPlan = buildImportInsertPlan({
+        schema,
+        tableName,
+        columns,
+        rows: dataRows,
+        columnMapping: mapping,
+        nullMode,
+        engine,
+      });
 
       try {
-        for (let i = 0; i < dataRows.length; i += BATCH) {
-          const batch = dataRows.slice(i, i + BATCH);
-          const values = batch
-            .map((row) => {
-              const vals = colOrder.map((col) => {
-                const idx = mapping[col]!;
-                const raw = row[idx] ?? "";
-                const column = columns.find((item) => item.name === col);
-                const value = raw === "" && nullMode === "empty-as-null" ? null : raw;
-                return formatSqlValue(value, column?.db_type, engine);
-              });
-              return `(${vals.join(", ")})`;
-            })
-            .join(", ");
-          const sql = `INSERT INTO ${quotedTable} (${quotedCols}) VALUES ${values}`;
-          await runSqlQuery(connectionId, sql, { timeoutMs: 30_000 });
-          setImportProgress({
-            imported: Math.min(i + batch.length, dataRows.length),
-            total: dataRows.length,
-          });
-        }
+        await operationExecuteTransaction({
+          connectionId,
+          statements: importPlan.statements,
+        });
+        setImportProgress({ imported: dataRows.length, total: dataRows.length });
 
         setDataPreview(null);
         await onSuccess();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Import failed.");
+        setError(importExecutionErrorMessage(err, importPlan.rowNumbers));
       } finally {
         setImporting(false);
       }
