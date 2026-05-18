@@ -1014,7 +1014,7 @@ export function MainTableDataPane(props: {
       if (!meta.connectionId) throw new Error("Not connected.");
 
       const { schema, name } = activeTableWindow.table;
-      const sql = truncateTableQuery(schema, name, opts);
+      const sql = truncateTableQuery(schema, name, opts, engine);
       await rt.runSqlWithHistory({
         windowId: activeTableWindow.id,
         connectionId: meta.connectionId,
@@ -1028,6 +1028,7 @@ export function MainTableDataPane(props: {
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       activeTableWindow.id,
+      engine,
       rt.runSqlWithHistory,
       reloadTableData,
     ]
@@ -1038,7 +1039,7 @@ export function MainTableDataPane(props: {
     if (!meta.connectionId) throw new Error("Not connected.");
 
     const { schema, name } = activeTableWindow.table;
-    const sql = dropTableQuery(schema, name);
+    const sql = dropTableQuery(schema, name, engine);
     await rt.runSqlWithHistory({
       windowId: activeTableWindow.id,
       connectionId: meta.connectionId,
@@ -1052,6 +1053,7 @@ export function MainTableDataPane(props: {
     activeTableWindow.table.schema,
     activeTableWindow.table.name,
     activeTableWindow.id,
+    engine,
     rt.runSqlWithHistory,
     rt.refreshSchemaAndTables,
     actions.closeWindow,
@@ -1062,14 +1064,19 @@ export function MainTableDataPane(props: {
       if (isProfileLocked) return;
       if (!meta.connectionId) throw new Error("Not connected.");
       const { schema, name } = activeTableWindow.table;
-      const createSql = cloneTableQuery(schema, name, newTableName);
+      const createSql = cloneTableQuery(schema, name, newTableName, engine);
       await rt.runSqlWithHistory({
         windowId: activeTableWindow.id,
         connectionId: meta.connectionId,
         sql: createSql,
       });
       if (copyData) {
-        const insertSql = copyTableDataQuery(schema, name, newTableName);
+        const insertSql = copyTableDataQuery(
+          schema,
+          name,
+          newTableName,
+          engine
+        );
         await rt.runSqlWithHistory({
           windowId: activeTableWindow.id,
           connectionId: meta.connectionId,
@@ -1084,6 +1091,7 @@ export function MainTableDataPane(props: {
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       activeTableWindow.id,
+      engine,
       rt.runSqlWithHistory,
       rt.refreshSchemaAndTables,
     ]

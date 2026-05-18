@@ -1,5 +1,14 @@
 import type { DatabaseEngine, TableColumn } from "src/types";
-import { quoteIdentifier, quoteTableName, sqlStringLiteral } from "src/utils/sqlDialect";
+import {
+  cloneTableSql,
+  copyTableDataSql,
+  createTableSql,
+  dropTableSql,
+  quoteIdentifier,
+  quoteTableName,
+  sqlStringLiteral,
+  truncateTableSql,
+} from "src/utils/sqlDialect";
 
 export function isMySqlLike(engine?: DatabaseEngine) {
   return engine === "mysql" || engine === "mariadb";
@@ -939,33 +948,31 @@ export const createTableQuery = (
   primaryKey: string | string[],
   engine?: DatabaseEngine
 ) => {
-  const columnDefinitions = columns
-    .map((col) => {
-      let def = `${qIdent(col.column_name, engine)} ${col.data_type}`;
+  const columnDefinitions = columns.map((col) => {
+    let def = `${qIdent(col.column_name, engine)} ${col.data_type}`;
 
-      // Add NOT NULL constraint if specified
-      if (col.is_nullable === "NOT NULL") {
-        def += " NOT NULL";
+    // Add NOT NULL constraint if specified
+    if (col.is_nullable === "NOT NULL") {
+      def += " NOT NULL";
+    }
+
+    // Add default value if specified
+    if (col.column_default && col.column_default.trim() !== "") {
+      const defaultVal = col.column_default.trim();
+      // If it's a function call or special value, use as-is, otherwise quote it
+      if (
+        defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) || // Function calls like NOW()
+        defaultVal.match(/^[0-9]+$/) || // Numbers
+        defaultVal.toUpperCase() === "NULL"
+      ) {
+        def += ` DEFAULT ${defaultVal}`;
+      } else {
+        def += ` DEFAULT ${qLiteral(defaultVal, engine)}`;
       }
+    }
 
-      // Add default value if specified
-      if (col.column_default && col.column_default.trim() !== "") {
-        const defaultVal = col.column_default.trim();
-        // If it's a function call or special value, use as-is, otherwise quote it
-        if (
-          defaultVal.match(/^[A-Z_][A-Z0-9_]*\(\)$/) || // Function calls like NOW()
-          defaultVal.match(/^[0-9]+$/) || // Numbers
-          defaultVal.toUpperCase() === "NULL"
-        ) {
-          def += ` DEFAULT ${defaultVal}`;
-        } else {
-          def += ` DEFAULT ${qLiteral(defaultVal)}`;
-        }
-      }
-
-      return def;
-    })
-    .join(",\n      ");
+    return def;
+  });
 
   // Add PRIMARY KEY constraint (support single or multiple columns)
   const primaryKeyColumns = Array.isArray(primaryKey)
@@ -973,16 +980,13 @@ export const createTableQuery = (
     : primaryKey
       ? [primaryKey]
       : [];
-  const primaryKeyConstraint =
-    primaryKeyColumns.length > 0
-      ? `,\n      PRIMARY KEY (${primaryKeyColumns.map((key) => qIdent(key, engine)).join(", ")})`
-      : "";
-
-  const queryStr = `
-    CREATE TABLE ${qIdent(schema, engine)}.${qIdent(tableName, engine)} (
-      ${columnDefinitions}${primaryKeyConstraint}
-    );
-  `;
+  const queryStr = createTableSql(
+    schema,
+    tableName,
+    columnDefinitions,
+    primaryKeyColumns,
+    engine
+  );
   return regexEscape(queryStr);
 };
 
@@ -994,37 +998,39 @@ export const createSchemaQuery = (schema: string) => {
 export const copyTableDataQuery = (
   schema: string,
   tableName: string,
-  newTableName: string
+  newTableName: string,
+  engine?: DatabaseEngine
 ) => {
-  const queryStr = `INSERT INTO ${qIdent(schema)}.${qIdent(newTableName)} SELECT * FROM ${qIdent(schema)}.${qIdent(tableName)};`;
+  const queryStr = copyTableDataSql(schema, tableName, newTableName, engine);
   return regexEscape(queryStr);
 };
 
 export const cloneTableQuery = (
   schema: string,
   tableName: string,
-  newTableName: string
+  newTableName: string,
+  engine?: DatabaseEngine
 ) => {
-  const queryStr = `CREATE TABLE ${qIdent(schema)}.${qIdent(newTableName)} (LIKE ${qIdent(schema)}.${qIdent(tableName)} INCLUDING ALL);`;
+  const queryStr = cloneTableSql(schema, tableName, newTableName, engine);
   return regexEscape(queryStr);
 };
 
-export const dropTableQuery = (schema: string, tableName: string) => {
-  const queryStr = `DROP TABLE ${qIdent(schema)}.${qIdent(tableName)};`;
+export const dropTableQuery = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) => {
+  const queryStr = dropTableSql(schema, tableName, engine);
   return regexEscape(queryStr);
 };
 
 export const truncateTableQuery = (
   schema: string,
   tableName: string,
-  opts?: { restartIdentity?: boolean; cascade?: boolean }
+  opts?: { restartIdentity?: boolean; cascade?: boolean },
+  engine?: DatabaseEngine
 ) => {
-  const parts = ["TRUNCATE TABLE", `${qIdent(schema)}.${qIdent(tableName)}`];
-  if (opts?.restartIdentity) {
-    parts.push("RESTART IDENTITY");
-  }
-  parts.push(opts?.cascade !== false ? "CASCADE" : "RESTRICT");
-  const queryStr = `${parts.join(" ")};`;
+  const queryStr = truncateTableSql(schema, tableName, opts, engine);
   return regexEscape(queryStr);
 };
 

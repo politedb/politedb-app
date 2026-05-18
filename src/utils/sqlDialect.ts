@@ -49,6 +49,184 @@ export function quoteTableName(
   return `${quoteIdentifier(schema, engine)}.${quoteIdentifier(tableName, engine)}`;
 }
 
+export function unsupportedSql(feature: string, engine?: DatabaseEngine): never {
+  throw new Error(
+    `${feature} is not supported for ${engine ?? "this database"} yet.`
+  );
+}
+
+export function createTableSql(
+  schema: string,
+  tableName: string,
+  columnDefinitions: string[],
+  primaryKeyColumns: string[] = [],
+  engine?: DatabaseEngine
+) {
+  const primaryKeyConstraint = primaryKeyColumns.length
+    ? `,\n      PRIMARY KEY (${primaryKeyColumns
+        .map((key) => quoteIdentifier(key, engine))
+        .join(", ")})`
+    : "";
+
+  return `
+    CREATE TABLE ${quoteTableName(schema, tableName, engine)} (
+      ${columnDefinitions.join(",\n      ")}${primaryKeyConstraint}
+    );
+  `;
+}
+
+export function copyTableDataSql(
+  schema: string,
+  tableName: string,
+  newTableName: string,
+  engine?: DatabaseEngine
+) {
+  return `INSERT INTO ${quoteTableName(schema, newTableName, engine)} SELECT * FROM ${quoteTableName(schema, tableName, engine)};`;
+}
+
+export function cloneTableSql(
+  schema: string,
+  tableName: string,
+  newTableName: string,
+  engine?: DatabaseEngine
+) {
+  const source = quoteTableName(schema, tableName, engine);
+  const target = quoteTableName(schema, newTableName, engine);
+
+  if (isMysqlFamilyEngine(engine)) {
+    return `CREATE TABLE ${target} LIKE ${source};`;
+  }
+
+  if (engine === "sqlite") {
+    return `CREATE TABLE ${target} AS SELECT * FROM ${source} WHERE 0;`;
+  }
+
+  if (engine === "postgres" || !engine) {
+    return `CREATE TABLE ${target} (LIKE ${source} INCLUDING ALL);`;
+  }
+
+  unsupportedSql("Clone table", engine);
+}
+
+export function dropTableSql(
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine
+) {
+  return `DROP TABLE ${quoteTableName(schema, tableName, engine)};`;
+}
+
+export function truncateTableSql(
+  schema: string,
+  tableName: string,
+  opts?: { restartIdentity?: boolean; cascade?: boolean },
+  engine?: DatabaseEngine
+) {
+  const table = quoteTableName(schema, tableName, engine);
+
+  if (engine === "sqlite") {
+    return `DELETE FROM ${table};`;
+  }
+
+  if (isMysqlFamilyEngine(engine)) {
+    return `TRUNCATE TABLE ${table};`;
+  }
+
+  if (engine === "sqlserver") {
+    return `TRUNCATE TABLE ${table};`;
+  }
+
+  const parts = ["TRUNCATE TABLE", table];
+  if (opts?.restartIdentity) {
+    parts.push("RESTART IDENTITY");
+  }
+  parts.push(opts?.cascade !== false ? "CASCADE" : "RESTRICT");
+  return `${parts.join(" ")};`;
+}
+
+export function renameColumnSql(
+  schema: string,
+  tableName: string,
+  oldName: string,
+  newName: string,
+  engine?: DatabaseEngine
+) {
+  if (engine === "sqlserver") {
+    return `EXEC sp_rename ${sqlStringLiteral(`${schema}.${tableName}.${oldName}`, engine)}, ${sqlStringLiteral(newName, engine)}, 'COLUMN';`;
+  }
+
+  if (engine === "oracle") {
+    return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} RENAME COLUMN ${quoteIdentifier(oldName, engine)} TO ${quoteIdentifier(newName, engine)};`;
+  }
+
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} RENAME COLUMN ${quoteIdentifier(oldName, engine)} TO ${quoteIdentifier(newName, engine)};`;
+}
+
+export function addColumnSql(
+  schema: string,
+  tableName: string,
+  columnDefinition: string,
+  engine?: DatabaseEngine
+) {
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ADD COLUMN ${columnDefinition};`;
+}
+
+export function dropColumnSql(
+  schema: string,
+  tableName: string,
+  columnName: string,
+  engine?: DatabaseEngine
+) {
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} DROP COLUMN ${quoteIdentifier(columnName, engine)};`;
+}
+
+export function dropIndexSql(
+  schema: string,
+  tableName: string,
+  indexName: string,
+  engine?: DatabaseEngine
+) {
+  if (isMysqlFamilyEngine(engine)) {
+    return `DROP INDEX ${quoteIdentifier(indexName, engine)} ON ${quoteTableName(schema, tableName, engine)};`;
+  }
+
+  if (engine === "sqlserver") {
+    return `DROP INDEX ${quoteIdentifier(indexName, engine)} ON ${quoteTableName(schema, tableName, engine)};`;
+  }
+
+  if (engine === "sqlite") {
+    return `DROP INDEX IF EXISTS ${quoteIdentifier(indexName, engine)};`;
+  }
+
+  return `DROP INDEX IF EXISTS ${quoteTableName(schema, indexName, engine)};`;
+}
+
+export function createIndexSql(args: {
+  schema: string;
+  tableName: string;
+  indexName: string;
+  columnName: string;
+  unique?: boolean;
+  algorithm?: string;
+  engine?: DatabaseEngine;
+}) {
+  const unique = args.unique ? "UNIQUE " : "";
+  const table = quoteTableName(args.schema, args.tableName, args.engine);
+  const index = quoteIdentifier(args.indexName, args.engine);
+  const column = quoteIdentifier(args.columnName, args.engine);
+
+  if (isMysqlFamilyEngine(args.engine)) {
+    const using = args.algorithm ? ` USING ${args.algorithm}` : "";
+    return `CREATE ${unique}INDEX ${index} ON ${table} (${column})${using};`;
+  }
+
+  const using =
+    args.engine === "postgres" && args.algorithm
+      ? ` USING ${args.algorithm}`
+      : "";
+  return `CREATE ${unique}INDEX ${index} ON ${table}${using} (${column});`;
+}
+
 function toHexUtf8(value: string) {
   return Array.from(new TextEncoder().encode(value))
     .map((byte) => byte.toString(16).padStart(2, "0"))

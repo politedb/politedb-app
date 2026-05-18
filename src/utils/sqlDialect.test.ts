@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  cloneTableSql,
   formatSqlValue,
   quoteIdentifier,
   quoteTableName,
+  truncateTableSql,
 } from "./sqlDialect";
 import { formatSqlChunk } from "./exportFormats";
 
@@ -43,5 +45,17 @@ describe("sqlDialect", () => {
     expect(sql).toContain("INSERT INTO `fleet`.`app_config_json`");
     expect(sql).toContain("`json_value`");
     expect(sql).toContain("CONVERT(UNHEX(");
+  });
+
+  it("builds table action SQL by engine", () => {
+    expect(cloneTableSql("public", "users", "users_copy", "postgres")).toBe(
+      'CREATE TABLE "public"."users_copy" (LIKE "public"."users" INCLUDING ALL);'
+    );
+    expect(cloneTableSql("app", "users", "users_copy", "mysql")).toBe(
+      "CREATE TABLE `app`.`users_copy` LIKE `app`.`users`;"
+    );
+    expect(truncateTableSql("main", "users", undefined, "sqlite")).toBe(
+      'DELETE FROM "users";'
+    );
   });
 });
