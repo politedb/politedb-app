@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -63,4 +64,36 @@ pub struct OperationExecuteInput {
 pub struct SqlTransactionExecuteInput {
     pub connection_id: Uuid,
     pub statements: Vec<String>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImportNullMode {
+    EmptyString,
+    EmptyAsNull,
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct SqlImportColumnInput {
+    pub name: String,
+    pub db_type: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct SqlImportCsvInput {
+    pub connection_id: Uuid,
+    pub engine: crate::types::EngineKind,
+    pub schema: String,
+    pub table_name: String,
+    pub columns: Vec<SqlImportColumnInput>,
+    pub column_mapping: HashMap<String, Option<usize>>,
+    pub null_mode: ImportNullMode,
+    pub first_is_headers: bool,
+    pub full_validation: bool,
+    pub csv_text: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct SqlImportCsvResult {
+    pub imported: usize,
 }

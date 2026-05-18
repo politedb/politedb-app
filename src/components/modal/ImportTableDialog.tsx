@@ -34,6 +34,7 @@ interface Props {
     firstIsHeaders: boolean;
     columnMapping: ImportColumnMapping;
     nullMode: ImportNullMode;
+    fullValidation: boolean;
   }) => void;
 }
 
@@ -69,6 +70,7 @@ export function ImportTableDialog({
 }: Props) {
   const [firstIsHeaders, setFirstIsHeaders] = useState(true);
   const [nullMode, setNullMode] = useState<ImportNullMode>("empty-string");
+  const [fullValidation, setFullValidation] = useState(false);
   const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
 
   const onClose = useCallback(() => {
@@ -107,8 +109,9 @@ export function ImportTableDialog({
       firstIsHeaders,
       columnMapping,
       nullMode,
+      fullValidation,
     });
-  }, [dataPreview, columns, firstIsHeaders, columnMapping, nullMode]);
+  }, [dataPreview, columns, firstIsHeaders, columnMapping, nullMode, fullValidation]);
 
   const mappedColumnCount = useMemo(
     () =>
@@ -144,7 +147,9 @@ export function ImportTableDialog({
                 </p>
                 <div class="flex items-center gap-6">
                   <p class="text-xs text-neutral-600">
-                    First 100 rows of the CSV file
+                    {fullValidation
+                      ? "Validating all rows"
+                      : "First 100 rows of the CSV file"}
                   </p>
                   <Checkbox
                     checked={firstIsHeaders}
@@ -163,6 +168,13 @@ export function ImportTableDialog({
                       )
                     }
                     label="Empty values as NULL"
+                  />
+                  <Checkbox
+                    checked={fullValidation}
+                    onChange={(e) =>
+                      setFullValidation((e.target as HTMLInputElement).checked)
+                    }
+                    label="Validate all rows before import"
                   />
                 </div>
               </div>
@@ -282,7 +294,12 @@ export function ImportTableDialog({
             <Button
               variant="default"
               onClick={() =>
-                onImport({ firstIsHeaders, columnMapping, nullMode })
+                onImport({
+                  firstIsHeaders,
+                  columnMapping,
+                  nullMode,
+                  fullValidation,
+                })
               }
               disabled={
                 importing ||

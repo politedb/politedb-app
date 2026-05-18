@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildImportInsertPlan,
   buildDefaultImportMapping,
   validateImportPreview,
 } from "./useImportTableData";
@@ -87,27 +86,4 @@ describe("CSV import helpers", () => {
     ).toMatchObject([{ row: 101, column: "id", value: "bad" }]);
   });
 
-  it("builds one insert statement per CSV row for transactional rollback reporting", () => {
-    const plan = buildImportInsertPlan({
-      schema: "public",
-      tableName: "users",
-      columns: [
-        { name: "id", db_type: "int" },
-        { name: "name", db_type: "text" },
-      ],
-      rows: [
-        ["1", "Ada"],
-        ["2", ""],
-      ],
-      columnMapping: { id: 0, name: 1 },
-      nullMode: "empty-as-null",
-      engine: "postgres",
-    });
-
-    expect(plan.rowNumbers).toEqual([1, 2]);
-    expect(plan.statements).toEqual([
-      `INSERT INTO "public"."users" ("id", "name") VALUES (1, 'Ada')`,
-      `INSERT INTO "public"."users" ("id", "name") VALUES (2, NULL)`,
-    ]);
-  });
 });

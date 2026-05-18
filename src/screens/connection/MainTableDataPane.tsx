@@ -1102,6 +1102,7 @@ export function MainTableDataPane(props: {
       firstIsHeaders: boolean;
       columnMapping: import("src/hooks/useImportTableData").ImportColumnMapping;
       nullMode: import("src/hooks/useImportTableData").ImportNullMode;
+      fullValidation: boolean;
     }) => {
       if (isProfileLocked) return;
       const { schema, name } = activeTableWindow.table;
@@ -1116,6 +1117,7 @@ export function MainTableDataPane(props: {
         firstIsHeaders: options.firstIsHeaders,
         columnMapping: options.columnMapping,
         nullMode: options.nullMode,
+        fullValidation: options.fullValidation,
         onSuccess: async () => reloadTableData(schema, name),
       });
     },

@@ -2,14 +2,9 @@ import { useCallback, useState } from "preact/hooks";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { parseCsv } from "src/utils/csv";
-import { operationExecuteTransaction } from "src/lib/tauri";
+import { operationImportCsvTransaction } from "src/lib/tauri";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { DatabaseEngine } from "src/types";
-import {
-  formatSqlValue,
-  quoteIdentifier,
-  quoteTableName,
-} from "src/utils/sqlDialect";
 
 export type DataImportPreview = {
   headers: string[];
@@ -46,11 +41,6 @@ export type ImportConfig = {
   nullMode?: ImportNullMode;
   fullValidation?: boolean;
   onSuccess: () => Promise<void>;
-};
-
-export type ImportStatementPlan = {
-  statements: string[];
-  rowNumbers: number[];
 };
 
 function typeIssue(value: string, dbType?: string): string | null {
@@ -135,65 +125,25 @@ export function validateImportPreview(
   return issues;
 }
 
-export function buildImportInsertPlan(args: {
-  schema: string;
-  tableName: string;
-  columns: ColumnMeta[];
-  rows: string[][];
-  columnMapping: ImportColumnMapping;
-  nullMode: ImportNullMode;
-  engine?: DatabaseEngine;
-}): ImportStatementPlan {
-  const { schema, tableName, columns, rows, columnMapping, nullMode, engine } =
-    args;
-  const colOrder = columns
-    .map((column) => column.name)
-    .filter((name) => columnMapping[name] != null && columnMapping[name]! >= 0);
-
-  const quotedTable = quoteTableName(schema, tableName, engine);
-  const quotedCols = colOrder.map((c) => quoteIdentifier(c, engine)).join(", ");
-  const statements: string[] = [];
-  const rowNumbers: number[] = [];
-
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-    const row = rows[rowIndex] ?? [];
-    const vals = colOrder.map((col) => {
-      const idx = columnMapping[col]!;
-      const raw = row[idx] ?? "";
-      const column = columns.find((item) => item.name === col);
-      const value = raw === "" && nullMode === "empty-as-null" ? null : raw;
-      return formatSqlValue(value, column?.db_type, engine);
-    });
-    statements.push(
-      `INSERT INTO ${quotedTable} (${quotedCols}) VALUES (${vals.join(", ")})`
-    );
-    rowNumbers.push(rowIndex + 1);
-  }
-
-  return { statements, rowNumbers };
-}
-
 function importIssueMessage(issue: ImportIssue): string {
   const preview =
     issue.value.length > 32 ? `${issue.value.slice(0, 32)}...` : issue.value;
   return `row ${issue.row}, column ${issue.column}, value ${JSON.stringify(preview)}: ${issue.message}`;
 }
 
-function importExecutionErrorMessage(error: unknown, rowNumbers: number[]) {
+function importExecutionErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
   const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*(.*)/);
   if (!match) return raw || "Import failed.";
-
-  const statementIndex = Number(match[1]);
   const reason = match[2]?.trim() || "Database rejected the row.";
-  const rowNumber = rowNumbers[statementIndex - 1] ?? statementIndex;
-  return `Import failed at row ${rowNumber}, column unknown, value unavailable: ${reason}`;
+  return `Import failed at row ${match[1]}, column unknown, value unavailable: ${reason}`;
 }
 
 export function useImportTableData() {
   const [dataPreview, setDataPreview] = useState<DataImportPreview | null>(
     null
   );
+  const [csvText, setCsvText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{
@@ -217,10 +167,12 @@ export function useImportTableData() {
     try {
       const text = await readTextFile(path);
       const { headers, rows } = parseCsv(text);
+      setCsvText(text);
       setDataPreview({ headers, rows });
       return true;
     } catch {
       setDataPreview(null);
+      setCsvText(null);
       setError("Failed to read or parse CSV file.");
       return false;
     }
@@ -241,7 +193,7 @@ export function useImportTableData() {
         onSuccess,
       } = config;
 
-      if (!dataPreview) return;
+      if (!dataPreview || csvText == null) return;
 
       const mapping =
         columnMapping ??
@@ -292,39 +244,39 @@ export function useImportTableData() {
       setError(null);
       setImportProgress({ imported: 0, total: dataRows.length });
 
-      const importPlan = buildImportInsertPlan({
-        schema,
-        tableName,
-        columns,
-        rows: dataRows,
-        columnMapping: mapping,
-        nullMode,
-        engine,
-      });
-
       try {
-        await operationExecuteTransaction({
+        const result = await operationImportCsvTransaction({
           connectionId,
-          statements: importPlan.statements,
+          engine,
+          schema,
+          tableName,
+          columns,
+          columnMapping: mapping,
+          nullMode,
+          firstIsHeaders,
+          fullValidation,
+          csvText,
         });
         setImportProgress({
-          imported: dataRows.length,
+          imported: result.imported,
           total: dataRows.length,
         });
 
         setDataPreview(null);
+        setCsvText(null);
         await onSuccess();
       } catch (err) {
-        setError(importExecutionErrorMessage(err, importPlan.rowNumbers));
+        setError(importExecutionErrorMessage(err));
       } finally {
         setImporting(false);
       }
     },
-    [dataPreview]
+    [csvText, dataPreview]
   );
 
   const reset = useCallback(() => {
     setDataPreview(null);
+    setCsvText(null);
     setError(null);
     setImportProgress(null);
   }, []);

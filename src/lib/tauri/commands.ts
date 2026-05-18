@@ -47,6 +47,7 @@ export const CMD = {
   // Operations
   operationExecute: "operation_execute",
   operationExecuteTransaction: "operation_execute_transaction",
+  operationImportCsvTransaction: "operation_import_csv_transaction",
   operationCancel: "operation_cancel",
   operationChunkAck: "operation_chunk_ack",
 
