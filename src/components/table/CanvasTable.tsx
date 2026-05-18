@@ -12,10 +12,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import {
-  isBlobColumnType,
-  isJsonColumnType,
-} from "src/utils/sqlDialect";
+import { isBlobColumnType, isJsonColumnType } from "src/utils/sqlDialect";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -189,12 +186,30 @@ function getCellEditorKind(column?: ColumnMeta): CellEditorKind {
   if (isBlobColumnType(type)) return "blob";
   if (isJsonColumnType(type)) return "json";
   if (/\b(bool|boolean|bit)\b/.test(type)) return "bool";
-  if (/\b(timestamp|datetime|timestamptz|timestamp with time zone)\b/.test(type)) {
+  if (
+    /\b(timestamp|datetime|timestamptz|timestamp with time zone)\b/.test(type)
+  ) {
     return "datetime";
   }
   if (/\b(date)\b/.test(type)) return "date";
   return "text";
 }
+
+function toDateInputValue(value: string, kind: CellEditorKind) {
+  if (!value) return "";
+  if (kind === "date") {
+    return value.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+  }
+  return value;
+}
+
+function fromDateInputValue(value: string, _kind: CellEditorKind) {
+  if (!value) return "";
+  return value;
+}
+
+export const __testToDateInputValue = toDateInputValue;
+export const __testFromDateInputValue = fromDateInputValue;
 
 // ============================================================================
 // Main Component
@@ -260,9 +275,9 @@ export function CanvasTable({
   const [isResizing, setIsResizing] = useState(false);
 
   // --- Editor State ---
-  const editorRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
-    null
-  );
+  const editorRef = useRef<
+    HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+  >(null);
   const [editorValue, setEditorValue] = useState("");
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorRect, setEditorRect] = useState<{
@@ -676,8 +691,9 @@ export function CanvasTable({
         return;
       }
     } else if (editorKind === "bool") {
-      nextValue =
-        editorValue === "__NULL__" ? null : editorValue === "true";
+      nextValue = editorValue === "__NULL__" ? null : editorValue === "true";
+    } else if (editorKind === "date" || editorKind === "datetime") {
+      nextValue = fromDateInputValue(editorValue, editorKind);
     }
 
     onCommitEdit?.(editing, nextValue);
@@ -910,6 +926,8 @@ export function CanvasTable({
               ? "false"
               : "__NULL__"
         );
+      } else if (kind === "date" || kind === "datetime") {
+        setEditorValue(toDateInputValue(s ?? "", kind));
       } else {
         setEditorValue(s ?? "");
       }
@@ -1086,7 +1104,10 @@ export function CanvasTable({
           style={{
             left: editorRect.x + 2,
             top: editorRect.y + HEADER_HEIGHT + 4,
-            width: Math.max(editorRect.w - 4, editorKind === "json" ? 260 : 120),
+            width: Math.max(
+              editorRect.w - 4,
+              editorKind === "json" ? 260 : 120
+            ),
           }}
         >
           {editorKind === "json" ? (
@@ -1094,7 +1115,8 @@ export function CanvasTable({
               ref={editorRef as any}
               class={cn(
                 "min-h-24 w-full resize bg-white px-2 py-1 font-mono text-xs shadow-sm outline-none",
-                editorError && "border border-red-400"
+                "ring-2 ring-blue-500",
+                editorError && "ring-red-500"
               )}
               value={editorValue}
               onInput={(e) =>
@@ -1116,6 +1138,9 @@ export function CanvasTable({
               onInput={(e) =>
                 setEditorValue((e.currentTarget as HTMLSelectElement).value)
               }
+              onChange={(e) =>
+                setEditorValue((e.currentTarget as HTMLSelectElement).value)
+              }
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitAndExit();
                 if (e.key === "Escape") cancelExit();
@@ -1130,11 +1155,28 @@ export function CanvasTable({
             <input
               ref={editorRef as any}
               class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500"
-              type={editorKind === "date" ? "date" : editorKind === "datetime" ? "datetime-local" : "text"}
-              placeholder={editorKind === "blob" ? "Binary value is read-only" : "NULL"}
+              type={
+                editorKind === "date"
+                  ? "date"
+                  : "text"
+              }
+              placeholder={
+                editorKind === "blob"
+                  ? "Binary value is read-only"
+                  : editorKind === "datetime"
+                    ? "YYYY-MM-DD HH:mm:ss+07"
+                    : "NULL"
+              }
               disabled={editorKind === "blob"}
-              value={editorKind === "blob" ? "Binary value is read-only" : editorValue}
+              value={
+                editorKind === "blob"
+                  ? "Binary value is read-only"
+                  : editorValue
+              }
               onInput={(e) =>
+                setEditorValue((e.currentTarget as HTMLInputElement).value)
+              }
+              onChange={(e) =>
                 setEditorValue((e.currentTarget as HTMLInputElement).value)
               }
               onKeyDown={(e) => {

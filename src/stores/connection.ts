@@ -337,10 +337,7 @@ export type ConnectionState = {
     rowKey: string
   ) => void;
   clearDataPatchMap: (tabId: string, tableWindowId?: string) => void;
-  setVirtualKeySafety: (
-    key: string,
-    issues: VirtualKeySafetyIssue[]
-  ) => void;
+  setVirtualKeySafety: (key: string, issues: VirtualKeySafetyIssue[]) => void;
   clearVirtualKeySafety: (key: string) => void;
 
   setNewTableData: (

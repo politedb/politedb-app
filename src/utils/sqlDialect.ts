@@ -49,7 +49,10 @@ export function quoteTableName(
   return `${quoteIdentifier(schema, engine)}.${quoteIdentifier(tableName, engine)}`;
 }
 
-export function unsupportedSql(feature: string, engine?: DatabaseEngine): never {
+export function unsupportedSql(
+  feature: string,
+  engine?: DatabaseEngine
+): never {
   throw new Error(
     `${feature} is not supported for ${engine ?? "this database"} yet.`
   );
@@ -238,14 +241,24 @@ export function alterColumnStatements(args: {
   defaultExpression?: string | null;
   engine?: DatabaseEngine;
 }) {
-  const { schema, tableName, columnName, dataType, nullable, defaultExpression, engine } =
-    args;
+  const {
+    schema,
+    tableName,
+    columnName,
+    dataType,
+    nullable,
+    defaultExpression,
+    engine,
+  } = args;
   const table = quoteTableName(schema, tableName, engine);
   const col = quoteIdentifier(columnName, engine);
 
   if (isMysqlFamilyEngine(engine)) {
     if (!dataType) {
-      unsupportedSql("Changing MySQL column null/default without column type", engine);
+      unsupportedSql(
+        "Changing MySQL column null/default without column type",
+        engine
+      );
     }
     const nullClause = nullable === false ? " NOT NULL" : "";
     const defaultClause =
@@ -254,7 +267,9 @@ export function alterColumnStatements(args: {
         : defaultExpression === null
           ? " DEFAULT NULL"
           : ` DEFAULT ${defaultExpression}`;
-    return [`ALTER TABLE ${table} MODIFY COLUMN ${col} ${dataType}${nullClause}${defaultClause};`];
+    return [
+      `ALTER TABLE ${table} MODIFY COLUMN ${col} ${dataType}${nullClause}${defaultClause};`,
+    ];
   }
 
   if (engine === "sqlite") {
@@ -267,7 +282,9 @@ export function alterColumnStatements(args: {
 
   const statements: string[] = [];
   if (dataType) {
-    statements.push(`ALTER TABLE ${table} ALTER COLUMN ${col} TYPE ${dataType};`);
+    statements.push(
+      `ALTER TABLE ${table} ALTER COLUMN ${col} TYPE ${dataType};`
+    );
   }
   if (nullable !== undefined) {
     statements.push(
@@ -277,7 +294,9 @@ export function alterColumnStatements(args: {
   if (defaultExpression !== undefined) {
     statements.push(
       `ALTER TABLE ${table} ALTER COLUMN ${col} ${
-        defaultExpression === null ? "DROP DEFAULT" : `SET DEFAULT ${defaultExpression}`
+        defaultExpression === null
+          ? "DROP DEFAULT"
+          : `SET DEFAULT ${defaultExpression}`
       };`
     );
   }

@@ -19,6 +19,7 @@ import { highlightSql } from "src/screens/connection/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheck, CopyIcon } from "src/components/icons";
 import { buildPatchDiffs } from "src/utils/patchDiff";
+import { cn } from "src/utils/cn";
 
 type ChangeSummary = {
   inserts: number;
@@ -202,14 +203,14 @@ export function SaveChangesDialog({
 
   return (
     <Dialog size="lg" open={open} onClose={onClose} closeOnOutsideClick={false}>
-      <DialogHeader>
+      <DialogHeader className="shrink-0">
         <DialogTitle>Review Changes Before Saving</DialogTitle>
         <DialogDescription>
           Review all changes before saving to the database.
         </DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="py-1">
+      <DialogContent className="min-h-0 flex-1 overflow-y-auto py-1">
         {/* Summary Section */}
         <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
           <h3 class="mb-3 text-sm font-semibold text-neutral-900">
@@ -264,7 +265,7 @@ export function SaveChangesDialog({
                 Row & Column Diff ({rowDiffs.length})
               </h3>
             </div>
-            <div class="max-h-56 space-y-3 overflow-y-auto p-4">
+            <div class="max-h-52 space-y-3 overflow-y-auto p-4">
               {rowDiffs.map((diff, index) => (
                 <div
                   key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
@@ -279,7 +280,16 @@ export function SaveChangesDialog({
                         {diff.identity}
                       </p>
                     </div>
-                    <span class="rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold uppercase text-neutral-700">
+                    <span
+                      class={cn(
+                        "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
+                        diff.action === "insert" &&
+                          "bg-green-100 text-green-700",
+                        diff.action === "update" &&
+                          "bg-amber-100 text-amber-700",
+                        diff.action === "delete" && "bg-red-100 text-red-700"
+                      )}
+                    >
                       {diff.action}
                     </span>
                   </div>
@@ -316,7 +326,7 @@ export function SaveChangesDialog({
                 : `SQL Statements to Execute (${allSqlStatements.length})`}
             </h3>
           </div>
-          <div class="max-h-64 overflow-y-auto p-4">
+          <div class="max-h-60 overflow-y-auto p-4">
             {allSqlStatements.length === 0 ? (
               <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 {isMongo
@@ -355,7 +365,7 @@ export function SaveChangesDialog({
                           )}
                         </Button>
                       </div>
-                      <div class="pr-8 line-clamp-3 font-mono text-xs wrap-break-word">
+                      <div class="line-clamp-3 pr-8 font-mono text-xs wrap-break-word">
                         {highlightSql(sql)}
                       </div>
                     </div>
@@ -367,7 +377,7 @@ export function SaveChangesDialog({
         </div>
       </DialogContent>
 
-      <DialogFooter>
+      <DialogFooter className="shrink-0">
         <Button className="py-1.5" variant="outline" onClick={onClose}>
           Cancel
         </Button>

@@ -795,9 +795,7 @@ export function useConnectionActions(
       });
 
       clearTablePatchChanges(activeProfileScreen);
-      useConnectionStore
-        .getState()
-        .clearVirtualKeySafety(activeProfileScreen);
+      useConnectionStore.getState().clearVirtualKeySafety(activeProfileScreen);
 
       let shouldRefreshSchema = false;
       await Promise.all(

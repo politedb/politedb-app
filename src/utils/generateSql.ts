@@ -50,7 +50,9 @@ function isUnsafeFallbackWhereColumn(
 ) {
   if (!dbType) return false;
   if (isBlobColumnType(dbType)) return true;
-  return (engine === "mysql" || engine === "mariadb") && isJsonColumnType(dbType);
+  return (
+    (engine === "mysql" || engine === "mariadb") && isJsonColumnType(dbType)
+  );
 }
 
 function isVirtualIdentityColumn(
@@ -1094,11 +1096,11 @@ export function generateSqlPlanFromPatches(
 
     plan.data.push(
       ...generateInsertSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      engine,
-      columns ?? undefined
+        patches,
+        schema,
+        tableName,
+        engine,
+        columns ?? undefined
       ),
       ...generateUpdateSqlFromPatches(
         patches,
@@ -1150,7 +1152,9 @@ export function generateSqlFromPatches(
   engine: DatabaseEngine = "postgres",
   options?: PatchSqlPlanOptions
 ): string[] {
-  return flattenPatchSqlPlan(generateSqlPlanFromPatches(patchMap, engine, options));
+  return flattenPatchSqlPlan(
+    generateSqlPlanFromPatches(patchMap, engine, options)
+  );
 }
 
 export function formatMongoScalar(v: unknown): string {

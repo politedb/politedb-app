@@ -137,7 +137,7 @@ function EditableRowFieldList({
               </div>
             ) : (
               <Input
-                className="text-sm"
+                className="h-9 border border-slate-300 text-sm"
                 value={draft}
                 placeholder={field.isNull ? "NULL" : undefined}
                 onValueChange={(value) =>
@@ -173,13 +173,13 @@ function TableSizeSection({ sizeInfo }: { sizeInfo: TableSizeInfo }) {
     <div class="space-y-2 border-t border-neutral-100 pt-3">
       <div class="space-y-1 rounded-md">
         <div class="mb-1 text-xs font-medium text-neutral-500">Total Size</div>
-        <div class="rounded-md border border-neutral-200 px-2 py-1 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
           {sizeInfo.totalSize || "0 KB"}
         </div>
       </div>
       <div class="space-y-1 rounded-md">
         <div class="mb-1 text-xs font-medium text-neutral-500">Data Size</div>
-        <div class="rounded-md border border-neutral-200 px-2 py-1 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
           {sizeInfo.dataSize || "0 KB"}
         </div>
       </div>
@@ -187,7 +187,7 @@ function TableSizeSection({ sizeInfo }: { sizeInfo: TableSizeInfo }) {
         <div class="mb-1 text-xs font-medium text-neutral-500">
           Indexes Size
         </div>
-        <div class="rounded-md border border-neutral-200 px-2 py-1 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
           {sizeInfo.indexSize || "0 KB"}
         </div>
       </div>

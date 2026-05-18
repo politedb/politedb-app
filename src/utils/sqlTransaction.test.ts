@@ -55,11 +55,11 @@ describe("sqlTransaction", () => {
   });
 
   it("rolls back when a statement fails", async () => {
-    const run = vi.fn<(_: string) => Promise<void>>().mockImplementation(
-      async (sql) => {
+    const run = vi
+      .fn<(_: string) => Promise<void>>()
+      .mockImplementation(async (sql) => {
         if (sql.startsWith("UPDATE")) throw new Error("failed");
-      }
-    );
+      });
 
     await expect(
       runSqlTransaction({

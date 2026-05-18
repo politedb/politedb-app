@@ -64,7 +64,11 @@ function typeIssue(value: string, dbType?: string): string | null {
       return "Invalid JSON";
     }
   }
-  if (/^(tinyint|smallint|mediumint|int|integer|bigint|float|double|real|numeric|decimal)/i.test(type)) {
+  if (
+    /^(tinyint|smallint|mediumint|int|integer|bigint|float|double|real|numeric|decimal)/i.test(
+      type
+    )
+  ) {
     return Number.isFinite(Number(value)) ? null : "Invalid number";
   }
   if (/\b(bool|boolean|bit)\b/.test(type)) {
@@ -106,7 +110,11 @@ export function validateImportPreview(
     : [preview.headers, ...preview.rows];
   const maxRows = options.fullValidation ? dataRows.length : 100;
   const issues: ImportIssue[] = [];
-  for (let rowIndex = 0; rowIndex < Math.min(dataRows.length, maxRows); rowIndex++) {
+  for (
+    let rowIndex = 0;
+    rowIndex < Math.min(dataRows.length, maxRows);
+    rowIndex++
+  ) {
     const row = dataRows[rowIndex] ?? [];
     for (const column of columns) {
       const csvIndex = options.columnMapping[column.name];
@@ -136,23 +144,14 @@ export function buildImportInsertPlan(args: {
   nullMode: ImportNullMode;
   engine?: DatabaseEngine;
 }): ImportStatementPlan {
-  const {
-    schema,
-    tableName,
-    columns,
-    rows,
-    columnMapping,
-    nullMode,
-    engine,
-  } = args;
+  const { schema, tableName, columns, rows, columnMapping, nullMode, engine } =
+    args;
   const colOrder = columns
     .map((column) => column.name)
     .filter((name) => columnMapping[name] != null && columnMapping[name]! >= 0);
 
   const quotedTable = quoteTableName(schema, tableName, engine);
-  const quotedCols = colOrder
-    .map((c) => quoteIdentifier(c, engine))
-    .join(", ");
+  const quotedCols = colOrder.map((c) => quoteIdentifier(c, engine)).join(", ");
   const statements: string[] = [];
   const rowNumbers: number[] = [];
 
@@ -308,7 +307,10 @@ export function useImportTableData() {
           connectionId,
           statements: importPlan.statements,
         });
-        setImportProgress({ imported: dataRows.length, total: dataRows.length });
+        setImportProgress({
+          imported: dataRows.length,
+          total: dataRows.length,
+        });
 
         setDataPreview(null);
         await onSuccess();

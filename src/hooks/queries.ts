@@ -389,7 +389,7 @@ export const tableDataQuery = (
       ? `SELECT * FROM ${tableIdent}${where}${orderBy} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
       : engine === "sqlserver"
         ? `SELECT * FROM ${tableIdent}${where}${orderBy || " ORDER BY (SELECT NULL)"} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY;`
-      : `SELECT * FROM ${tableIdent}${where}${orderBy} LIMIT ${limit} OFFSET ${offset};`;
+        : `SELECT * FROM ${tableIdent}${where}${orderBy} LIMIT ${limit} OFFSET ${offset};`;
   return regexEscape(queryStr);
 };
 

@@ -48,9 +48,12 @@ function primaryKeyColumns(
     .filter(Boolean);
 }
 
-function virtualIdentityColumns(columns: Array<{ name: string; db_type?: string }>) {
+function virtualIdentityColumns(
+  columns: Array<{ name: string; db_type?: string }>
+) {
   return columns.filter(
-    (column) => !isJsonColumnType(column.db_type) && !isBlobColumnType(column.db_type)
+    (column) =>
+      !isJsonColumnType(column.db_type) && !isBlobColumnType(column.db_type)
   );
 }
 
@@ -98,7 +101,7 @@ export function buildPatchDiffs(
         table,
         action: "insert",
         rowKey,
-        identity: `New row ${rowKey}`,
+        identity: `New row #${rowKey}`,
         cells: Object.entries(patch)
           .filter(([column]) => column !== "__rowKey")
           .map(([column, value]) => ({
@@ -145,11 +148,7 @@ export function buildPatchDiffs(
         action: "delete",
         rowKey,
         identity: rowIdentity(columns, originalRow, rowKey, pkColumns),
-        cells: columns.map((column, index) => ({
-          column: column.name,
-          oldValue: displayValue(originalRow?.[index]),
-          newValue: "",
-        })),
+        cells: [],
       });
     }
   }

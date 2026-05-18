@@ -8,8 +8,8 @@ pub mod postgres;
 pub mod redis;
 pub mod registry;
 pub mod secrets_util;
-pub mod sqlserver;
 pub mod sqlite;
+pub mod sqlserver;
 
 use std::sync::Arc;
 use uuid::Uuid;

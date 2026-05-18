@@ -171,9 +171,13 @@ export function ImportTableDialog({
                 <table class="w-full text-xs">
                   <thead class="sticky top-0 bg-neutral-50">
                     <tr>
-                      <th class="px-2 py-1 text-left font-medium">Table column</th>
+                      <th class="px-2 py-1 text-left font-medium">
+                        Table column
+                      </th>
                       <th class="px-2 py-1 text-left font-medium">Type</th>
-                      <th class="px-2 py-1 text-left font-medium">CSV column</th>
+                      <th class="px-2 py-1 text-left font-medium">
+                        CSV column
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -192,18 +196,22 @@ export function ImportTableDialog({
                                 : String(columnMapping[column.name])
                             }
                             onChange={(e) => {
-                              const value = (e.currentTarget as HTMLSelectElement)
-                                .value;
+                              const value = (
+                                e.currentTarget as HTMLSelectElement
+                              ).value;
                               setColumnMapping((prev) => ({
                                 ...prev,
-                                [column.name]: value === "" ? null : Number(value),
+                                [column.name]:
+                                  value === "" ? null : Number(value),
                               }));
                             }}
                           >
                             <option value="">Skip</option>
                             {dataPreview.headers.map((header, index) => (
                               <option key={`${header}:${index}`} value={index}>
-                                {firstIsHeaders ? header || `Column ${index + 1}` : `Column ${index + 1}`}
+                                {firstIsHeaders
+                                  ? header || `Column ${index + 1}`
+                                  : `Column ${index + 1}`}
                               </option>
                             ))}
                           </select>
@@ -223,7 +231,9 @@ export function ImportTableDialog({
                 />
               </div>
               <p class="text-xs text-neutral-600">
-                CSV {dataPreview.headers.length} columns, {dataPreview.rows.length} rows, {mappedColumnCount} mapped columns
+                CSV {dataPreview.headers.length} columns,{" "}
+                {dataPreview.rows.length} rows, {mappedColumnCount} mapped
+                columns
               </p>
               {validationIssues.length > 0 && (
                 <div class="max-h-28 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
@@ -274,7 +284,11 @@ export function ImportTableDialog({
               onClick={() =>
                 onImport({ firstIsHeaders, columnMapping, nullMode })
               }
-              disabled={importing || mappedColumnCount === 0 || validationIssues.length > 0}
+              disabled={
+                importing ||
+                mappedColumnCount === 0 ||
+                validationIssues.length > 0
+              }
             >
               {importing ? "Importing..." : "Import"}
             </Button>
