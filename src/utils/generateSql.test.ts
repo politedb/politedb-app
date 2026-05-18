@@ -273,4 +273,61 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(sql[0]).not.toContain("[\\\"\\']");
     expect(sql[0]).not.toContain("\\u0027");
   });
+
+  it("uses a virtual identity from safe columns when no primary key exists", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              name: "new",
+            },
+          },
+        },
+      },
+      "public",
+      "events",
+      {
+        columns: [
+          { name: "name", db_type: "text" },
+          { name: "payload", db_type: "json" },
+          { name: "raw", db_type: "bytea" },
+        ],
+        rows: [["old", { t: "Json", v: '{"a":1}' }, "abc"]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain("WHERE `name` = CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain("`payload`");
+    expect(sql[0]).not.toContain("`raw`");
+  });
+
+  it("blocks unsafe fallback updates when no primary key or safe virtual key exists", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              payload: { next: true },
+            },
+          },
+        },
+      },
+      "public",
+      "events",
+      {
+        columns: [{ name: "payload", db_type: "json" }],
+        rows: [[{ t: "Json", v: '{"a":1}' }]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(0);
+  });
 });

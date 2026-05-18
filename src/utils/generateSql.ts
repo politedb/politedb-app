@@ -42,6 +42,13 @@ function isUnsafeFallbackWhereColumn(
   return (engine === "mysql" || engine === "mariadb") && isJsonColumnType(dbType);
 }
 
+function isVirtualIdentityColumn(
+  dbType: string | undefined,
+  engine?: DatabaseEngine
+) {
+  return !isUnsafeFallbackWhereColumn(dbType, engine);
+}
+
 /**
  * Extract primary key column names from constraints
  */
@@ -137,10 +144,7 @@ export function generateUpdateSqlFromPatches(
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
         continue;
       }
-      if (
-        !usePrimaryKey &&
-        isUnsafeFallbackWhereColumn(col.db_type, engine)
-      ) {
+      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type, engine)) {
         continue;
       }
 
@@ -681,10 +685,7 @@ export function generateDeleteSqlFromPatches(
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
         continue;
       }
-      if (
-        !usePrimaryKey &&
-        isUnsafeFallbackWhereColumn(col.db_type, engine)
-      ) {
+      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type, engine)) {
         continue;
       }
 

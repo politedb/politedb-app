@@ -41,6 +41,6 @@ describe("buildPatchDiffs", () => {
     expect(diffs[1]?.cells).toEqual([
       { column: "name", oldValue: "Old", newValue: "Grace" },
     ]);
-    expect(diffs[2]?.identity).toBe("id=3, name=Delete me");
+    expect(diffs[2]?.identity).toBe("Virtual key: id=3, name=Delete me");
   });
 });

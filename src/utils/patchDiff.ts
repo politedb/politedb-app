@@ -1,5 +1,6 @@
 import type { PatchMap } from "./generateSql";
 import { cellToString } from "./convert";
+import { isBlobColumnType, isJsonColumnType } from "./sqlDialect";
 
 export type PatchCellDiff = {
   column: string;
@@ -23,17 +24,53 @@ function displayValue(value: unknown) {
   return cellToString(value, true) ?? "";
 }
 
+function isTruthy(value: unknown) {
+  return value === true || String(value ?? "").toLowerCase() === "true";
+}
+
+function primaryKeyColumns(
+  constraints: Array<{
+    index_name: string;
+    is_primary?: boolean | string;
+    is_unique?: boolean | string;
+    column_name: string;
+  }> | null
+) {
+  const constraint = constraints?.find(
+    (item) =>
+      isTruthy(item.is_primary) ||
+      item.index_name.toLowerCase() === "primary" ||
+      item.index_name.toLowerCase().includes("pkey")
+  );
+  return (constraint?.column_name ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function virtualIdentityColumns(columns: Array<{ name: string; db_type?: string }>) {
+  return columns.filter(
+    (column) => !isJsonColumnType(column.db_type) && !isBlobColumnType(column.db_type)
+  );
+}
+
 function rowIdentity(
-  columns: Array<{ name: string }>,
+  columns: Array<{ name: string; db_type?: string }>,
   row: unknown[] | undefined,
-  rowKey: string
+  rowKey: string,
+  pkColumns: string[]
 ) {
   if (!row) return `Row ${rowKey}`;
-  const parts = columns.slice(0, 3).map((column, index) => {
+  const identityColumns = pkColumns.length
+    ? columns.filter((column) => pkColumns.includes(column.name))
+    : virtualIdentityColumns(columns);
+  const parts = identityColumns.slice(0, 3).map((column) => {
+    const index = columns.findIndex((item) => item.name === column.name);
     const value = cellToString(row[index], true);
     return `${column.name}=${value || "NULL"}`;
   });
-  return parts.length ? parts.join(", ") : `Row ${rowKey}`;
+  const label = pkColumns.length ? "Primary key" : "Virtual key";
+  return parts.length ? `${label}: ${parts.join(", ")}` : `Row ${rowKey}`;
 }
 
 export function buildPatchDiffs(
@@ -53,6 +90,7 @@ export function buildPatchDiffs(
     const { schema, name } = tableWindow.table;
     const table = tableLabel(schema, name);
     const columns = tableData.columns ?? [];
+    const pkColumns = primaryKeyColumns(tableData.constraints ?? null);
     const tableKey = activeScreen ? `${activeScreen}.${schema}.${name}` : "";
 
     for (const [rowKey, patch] of Object.entries(patches.create?.data ?? {})) {
@@ -82,7 +120,7 @@ export function buildPatchDiffs(
         table,
         action: "update",
         rowKey,
-        identity: rowIdentity(columns, originalRow, rowKey),
+        identity: rowIdentity(columns, originalRow, rowKey, pkColumns),
         cells: Object.entries(patch).map(([column, value]) => {
           const columnIndex = columns.findIndex((item) => item.name === column);
           return {
@@ -106,7 +144,7 @@ export function buildPatchDiffs(
         table,
         action: "delete",
         rowKey,
-        identity: rowIdentity(columns, originalRow, rowKey),
+        identity: rowIdentity(columns, originalRow, rowKey, pkColumns),
         cells: columns.map((column, index) => ({
           column: column.name,
           oldValue: displayValue(originalRow?.[index]),
