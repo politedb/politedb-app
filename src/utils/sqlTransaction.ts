@@ -36,8 +36,14 @@ export async function runSqlTransaction(args: {
   engine: DatabaseEngine;
   statements: string[];
   run: (sql: string) => Promise<void>;
+  runBatch?: (statements: string[]) => Promise<void>;
 }) {
-  const { engine, statements, run } = args;
+  const { engine, statements, run, runBatch } = args;
+  if (runBatch) {
+    await runBatch(statements);
+    return;
+  }
+
   const tx = sqlTransactionControl(engine);
 
   if (tx.begin) {

@@ -17,6 +17,18 @@ export async function operationCancel(opId: string): Promise<void> {
   await invoke(CMD.operationCancel, { op_id: opId });
 }
 
+export async function operationExecuteTransaction(args: {
+  connectionId: string;
+  statements: string[];
+}): Promise<void> {
+  await invoke(CMD.operationExecuteTransaction, {
+    input: {
+      connection_id: args.connectionId,
+      statements: args.statements,
+    },
+  });
+}
+
 /* Convenience helper for SQL query */
 export async function runQuery(
   connectionId: string,

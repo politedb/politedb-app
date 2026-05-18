@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::operations;
 use crate::state::AppState;
-use crate::types::{OperationExecuteInput, TableChunkAckInput};
+use crate::types::{OperationExecuteInput, SqlTransactionExecuteInput, TableChunkAckInput};
 
 /* ============================================================================
  * Operation commands (thin wrappers)
@@ -17,6 +17,20 @@ pub async fn operation_execute(
     input: OperationExecuteInput,
 ) -> Result<Uuid, String> {
     operations::dispatch_operation(app, state, input).await
+}
+
+#[tauri::command]
+pub async fn operation_execute_transaction(
+    state: State<'_, AppState>,
+    input: SqlTransactionExecuteInput,
+) -> Result<(), String> {
+    let conn = state
+        .connections
+        .get(&input.connection_id)
+        .ok_or("CONNECTION_NOT_FOUND")?
+        .clone();
+
+    conn.execute_sql_transaction(input.statements).await
 }
 
 #[tauri::command]

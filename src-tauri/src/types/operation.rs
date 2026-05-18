@@ -58,3 +58,9 @@ pub struct OperationExecuteInput {
     pub sql: Option<SqlQueryInput>,
     pub redis: Option<RedisCommandInput>,
 }
+
+#[derive(Clone, serde::Deserialize)]
+pub struct SqlTransactionExecuteInput {
+    pub connection_id: Uuid,
+    pub statements: Vec<String>,
+}

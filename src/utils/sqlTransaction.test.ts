@@ -36,6 +36,24 @@ describe("sqlTransaction", () => {
     ]);
   });
 
+  it("delegates to backend batch execution when available", async () => {
+    const run = vi.fn<(_: string) => Promise<void>>().mockResolvedValue();
+    const runBatch = vi
+      .fn<(_: string[]) => Promise<void>>()
+      .mockResolvedValue();
+    const statements = ["UPDATE t SET a=1;", "DELETE FROM t WHERE id=2;"];
+
+    await runSqlTransaction({
+      engine: "postgres",
+      statements,
+      run,
+      runBatch,
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(runBatch).toHaveBeenCalledWith(statements);
+  });
+
   it("rolls back when a statement fails", async () => {
     const run = vi.fn<(_: string) => Promise<void>>().mockImplementation(
       async (sql) => {

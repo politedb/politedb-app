@@ -6,7 +6,7 @@ import type {
   TableItem,
   TableWindow,
 } from "src/types";
-import { connectionRemove } from "src/lib/tauri";
+import { connectionRemove, operationExecuteTransaction } from "src/lib/tauri";
 import {
   mongoDeleteDocuments,
   mongoInsertDocuments,
@@ -757,6 +757,17 @@ export function useConnectionActions(
       await runSqlTransaction({
         engine: engine ?? "postgres",
         statements: sql,
+        runBatch: async (statements) => {
+          await operationExecuteTransaction({
+            connectionId: runtimeConnectionId,
+            statements,
+          });
+          for (const statement of statements) {
+            useConnectionStore
+              .getState()
+              .addQueryHistory(activeProfileScreen, statement);
+          }
+        },
         run: async (stmt) => {
           await runSqlWithHistory({
             connectionId: runtimeConnectionId,

@@ -45,7 +45,7 @@ fn col_to_cell(v: &tiberius::ColumnData<'static>) -> CellValue {
     }
 }
 
-async fn make_client(
+pub(crate) async fn make_client(
     host: &str,
     port: u16,
     database: &str,

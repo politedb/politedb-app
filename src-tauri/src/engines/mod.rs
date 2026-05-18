@@ -18,6 +18,8 @@ use crate::engines::cancel::CancelHandle;
 use crate::operations::ctx::{OperationCtx, SqlBusyRegistry};
 use crate::types::{EngineKind, SqlQueryInput};
 use crate::types::{OperationKind, RedisCommandInput};
+use futures_util::TryStreamExt;
+use mysql_async::prelude::Queryable;
 
 #[derive(Clone)]
 pub enum EngineConnection {
@@ -28,6 +30,25 @@ pub enum EngineConnection {
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
+}
+
+async fn drain_sqlserver_query(
+    client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,
+    sql: &str,
+) -> Result<(), String> {
+    let mut stream = client
+        .simple_query(sql)
+        .await
+        .map_err(|e| format!("SQLSERVER_QUERY_FAILED: {e}"))?;
+
+    while stream
+        .try_next()
+        .await
+        .map_err(|e| format!("SQLSERVER_ROW_STREAM_FAILED: {e}"))?
+        .is_some()
+    {}
+
+    Ok(())
 }
 
 pub struct OpCleanup {
@@ -124,6 +145,140 @@ impl EngineConnection {
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Redis(r) => drop(r.pool),
+        }
+    }
+
+    pub async fn execute_sql_transaction(&self, statements: Vec<String>) -> Result<(), String> {
+        let statements = statements
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+
+        if statements.is_empty() {
+            return Ok(());
+        }
+
+        match self {
+            EngineConnection::Postgres(pg) => {
+                let mut client = pg
+                    .pool
+                    .get()
+                    .await
+                    .map_err(|e| format!("POSTGRES_TX_GET_CONN_FAILED: {e}"))?;
+                let tx = client
+                    .transaction()
+                    .await
+                    .map_err(|e| format!("POSTGRES_TX_BEGIN_FAILED: {e}"))?;
+
+                for (idx, stmt) in statements.iter().enumerate() {
+                    if let Err(e) = tx.batch_execute(stmt).await {
+                        let _ = tx.rollback().await;
+                        return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                    }
+                }
+
+                tx.commit()
+                    .await
+                    .map_err(|e| format!("POSTGRES_TX_COMMIT_FAILED: {e}"))
+            }
+            EngineConnection::MySql(my) => {
+                let mut conn = my
+                    .pool
+                    .get_conn()
+                    .await
+                    .map_err(|e| format!("MYSQL_TX_GET_CONN_FAILED: {e}"))?;
+
+                conn.query_drop("START TRANSACTION")
+                    .await
+                    .map_err(|e| format!("MYSQL_TX_BEGIN_FAILED: {e}"))?;
+
+                for (idx, stmt) in statements.iter().enumerate() {
+                    if let Err(e) = conn.query_drop(stmt).await {
+                        let _ = conn.query_drop("ROLLBACK").await;
+                        return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                    }
+                }
+
+                conn.query_drop("COMMIT")
+                    .await
+                    .map_err(|e| format!("MYSQL_TX_COMMIT_FAILED: {e}"))
+            }
+            EngineConnection::Sqlite(sqlite) => {
+                let shared = sqlite.conn.clone();
+                tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    let conn = shared
+                        .lock()
+                        .map_err(|_| "SQLITE_CONN_MUTEX_POISONED".to_string())?;
+
+                    conn.execute_batch("BEGIN")
+                        .map_err(|e| format!("SQLITE_TX_BEGIN_FAILED: {e}"))?;
+
+                    for (idx, stmt) in statements.iter().enumerate() {
+                        if let Err(e) = conn.execute_batch(stmt) {
+                            let _ = conn.execute_batch("ROLLBACK");
+                            return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                        }
+                    }
+
+                    conn.execute_batch("COMMIT")
+                        .map_err(|e| format!("SQLITE_TX_COMMIT_FAILED: {e}"))
+                })
+                .await
+                .map_err(|e| format!("SQLITE_TX_JOIN_FAILED: {e}"))?
+            }
+            EngineConnection::SqlServer(ss) => {
+                let mut client = sqlserver::operation::make_client(
+                    &ss.host,
+                    ss.port,
+                    &ss.database,
+                    &ss.user,
+                    &ss.password,
+                    ss.encrypt,
+                    ss.connect_timeout_ms,
+                )
+                .await?;
+
+                drain_sqlserver_query(&mut client, "BEGIN TRANSACTION").await?;
+
+                for (idx, stmt) in statements.iter().enumerate() {
+                    if let Err(e) = drain_sqlserver_query(&mut client, stmt).await {
+                        let _ = drain_sqlserver_query(&mut client, "ROLLBACK TRANSACTION").await;
+                        return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                    }
+                }
+
+                drain_sqlserver_query(&mut client, "COMMIT TRANSACTION")
+                    .await
+                    .map_err(|e| format!("SQLSERVER_TX_COMMIT_FAILED: {e}"))
+            }
+            EngineConnection::Oracle(oracle) => {
+                let connect_string = oracle.connect_string.clone();
+                let user = oracle.user.clone();
+                let password = oracle.password.clone();
+
+                tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    crate::engines::oracle::ensure_oracle_client_initialized()
+                        .map_err(|e| format!("ORACLE_CLIENT_INIT_FAILED: {e}"))?;
+                    let conn = ::oracle::Connection::connect(&user, &password, &connect_string)
+                        .map_err(|e| format!("ORACLE_TX_CONNECT_FAILED: {e}"))?;
+
+                    for (idx, stmt) in statements.iter().enumerate() {
+                        if let Err(e) = conn.execute(stmt, &[]) {
+                            let _ = conn.rollback();
+                            return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                        }
+                    }
+
+                    conn.commit()
+                        .map_err(|e| format!("ORACLE_TX_COMMIT_FAILED: {e}"))
+                })
+                .await
+                .map_err(|e| format!("ORACLE_TX_JOIN_FAILED: {e}"))?
+            }
+            EngineConnection::Mongo(_) | EngineConnection::Redis(_) => {
+                Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into())
+            }
         }
     }
 

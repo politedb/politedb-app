@@ -159,6 +159,7 @@ fn main() {
             commands::connection::connection_test,
             // Operations
             commands::operation::operation_execute,
+            commands::operation::operation_execute_transaction,
             commands::operation::operation_cancel,
             commands::operation::operation_chunk_ack,
             // Profiles
