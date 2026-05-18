@@ -765,6 +765,7 @@ export function useConnectionActions(
       const sql = generateSqlFromPatches(patchMap, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
         getRowAt: store.getRowAt,
+        offset,
       });
 
       if (!sql.length) {

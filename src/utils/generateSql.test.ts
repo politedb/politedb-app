@@ -384,6 +384,58 @@ describe("generateUpdateSqlFromPatches", () => {
 });
 
 describe("generateSqlPlanFromPatches", () => {
+  it("uses the offset row when generating update predicates from a paged table", () => {
+    const patchMap: PatchMap = {
+      "table:public.users": {
+        tableWindow: {
+          id: "table:public.users",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "name", db_type: "text" },
+          ],
+          structure: null,
+          constraints: [
+            {
+              index_name: "users_pkey",
+              index_algorithm: "BTREE",
+              is_unique: true,
+              is_primary: true,
+              column_name: "id",
+            },
+          ],
+          foreignKeys: null,
+          sizeInfo: null,
+          rowCount: 100,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches: {
+          update: {
+            data: {
+              "0": { name: "Ada" },
+            },
+          },
+        },
+      },
+    };
+
+    const sql = generateSqlFromPatches(patchMap, "postgres", {
+      activeScreen: "screen",
+      offset: 50,
+      getRowAt: (_key, rowIndex) =>
+        rowIndex === 50 ? [51, "Old Ada"] : [1, "Wrong row"],
+    });
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(`WHERE "id" = 51;`);
+    expect(sql[0]).not.toContain(`WHERE "id" = 1;`);
+  });
+
   it("orders structure changes before data and constraints", () => {
     const patchMap: PatchMap = {
       "table:public.users": {

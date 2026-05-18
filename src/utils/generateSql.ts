@@ -1002,17 +1002,19 @@ export type PatchSqlPlan = {
 export type PatchSqlPlanOptions = {
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  offset?: number;
 };
 
 function tableDataForPatchSql(args: {
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  offset?: number;
   schema: string;
   tableName: string;
   columns: TableDataState["columns"];
   patches: PatchData;
 }): TableDataType | null {
-  const { activeScreen, getRowAt, schema, tableName, columns, patches } = args;
+  const { activeScreen, getRowAt, offset = 0, schema, tableName, columns, patches } = args;
   if (!columns || !getRowAt || !activeScreen) return null;
 
   const rowIndices = new Set<number>();
@@ -1040,7 +1042,8 @@ function tableDataForPatchSql(args: {
   const maxIndex = Math.max(...Array.from(rowIndices), -1);
 
   for (let i = 0; i <= maxIndex; i++) {
-    const row = getRowAt(tableKey, i);
+    const row =
+      getRowAt(tableKey, i + offset) ?? (offset === 0 ? undefined : getRowAt(tableKey, i));
     rows.push(row ? (row as unknown[]) : []);
   }
 
@@ -1061,7 +1064,7 @@ export function generateSqlPlanFromPatches(
   options?: PatchSqlPlanOptions
 ): PatchSqlPlan {
   const plan: PatchSqlPlan = { preData: [], data: [], postData: [] };
-  const { activeScreen, getRowAt } = options || {};
+  const { activeScreen, getRowAt, offset } = options || {};
 
   for (const [_windowId, patchData] of Object.entries(patchMap)) {
     const { tableData, tableWindow, patches } = patchData;
@@ -1075,6 +1078,7 @@ export function generateSqlPlanFromPatches(
     const tableDataForSql = tableDataForPatchSql({
       activeScreen,
       getRowAt,
+      offset,
       schema,
       tableName,
       columns,
