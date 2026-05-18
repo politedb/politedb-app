@@ -58,4 +58,10 @@ describe("sqlDialect", () => {
       'DELETE FROM "users";'
     );
   });
+
+  it("throws for unsupported table actions instead of generating unsafe SQL", () => {
+    expect(() => cloneTableSql("dbo", "Users", "UsersCopy", "sqlserver")).toThrow(
+      "Clone table is not supported"
+    );
+  });
 });

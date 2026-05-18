@@ -10,11 +10,22 @@ import { cellToString } from "./convert";
 import { TableDataState } from "src/stores/connection";
 import { getDbConfig } from "./dbConfig";
 import {
+  addColumnSql,
+  addForeignKeySql,
+  addPrimaryKeySql,
+  alterColumnStatements,
+  createIndexSql,
+  dropColumnSql,
+  dropForeignKeySql,
+  dropIndexSql,
+  dropPrimaryKeySql,
   formatSqlValue,
   isBlobColumnType,
   isJsonColumnType,
   quoteIdentifier,
   quoteTableName,
+  renameColumnSql,
+  renameTableSql,
   sqlStringLiteral,
 } from "./sqlDialect";
 
@@ -243,7 +254,6 @@ export function generateStructureSqlFromPatches(
   opts: { includeForeignKeys?: boolean } = {}
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = quoteTableName(schema, tableName, engine);
   const includeForeignKeys = opts.includeForeignKeys !== false;
 
   // Handle CREATE (new columns)
@@ -269,12 +279,11 @@ export function generateStructureSqlFromPatches(
         ) {
           columnDef += ` DEFAULT ${defaultVal}`;
         } else {
-          columnDef += ` DEFAULT ${qLiteral(defaultVal)}`;
+          columnDef += ` DEFAULT ${qLiteral(defaultVal, engine)}`;
         }
       }
 
-      const sql = `ALTER TABLE ${tableIdent} ADD COLUMN ${columnDef};`;
-      sqlStatements.push(sql);
+      sqlStatements.push(addColumnSql(schema, tableName, columnDef, engine));
     }
   }
 
@@ -287,7 +296,7 @@ export function generateStructureSqlFromPatches(
       // Handle table name change
       if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
         sqlStatements.push(
-          `ALTER TABLE ${tableIdent} RENAME TO ${qIdent(metadataPatch.tableName, engine)};`
+          renameTableSql(schema, tableName, metadataPatch.tableName, engine)
         );
       }
 
@@ -320,17 +329,19 @@ export function generateStructureSqlFromPatches(
           // Drop existing primary key if it exists
           if (existingPkConstraint) {
             sqlStatements.push(
-              `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingPkConstraint.index_name, engine)};`
+              dropPrimaryKeySql(
+                schema,
+                tableName,
+                existingPkConstraint.index_name,
+                engine
+              )
             );
           }
 
           // Add new primary key if columns are specified
           if (newPrimaryKey.length > 0) {
-            const pkColumns = newPrimaryKey
-              .map((col: string) => qIdent(col, engine))
-              .join(", ");
             sqlStatements.push(
-              `ALTER TABLE ${tableIdent} ADD PRIMARY KEY (${pkColumns});`
+              addPrimaryKeySql(schema, tableName, newPrimaryKey, engine)
             );
           }
         }
@@ -361,8 +372,9 @@ export function generateStructureSqlFromPatches(
         ) {
           const oldName = originalColumn.column_name;
           const newName = patchData.column_name.trim();
-          const sql = `ALTER TABLE ${tableIdent} RENAME COLUMN ${qIdent(oldName, engine)} TO ${qIdent(newName, engine)};`;
-          sqlStatements.push(sql);
+          sqlStatements.push(
+            renameColumnSql(schema, tableName, oldName, newName, engine)
+          );
         }
       }
 
@@ -389,14 +401,16 @@ export function generateStructureSqlFromPatches(
             ? patchData.column_name.trim()
             : originalColumn.column_name;
 
-        const changes: string[] = [];
+        let dataType: string | undefined;
+        let nullable: boolean | undefined;
+        let defaultExpression: string | null | undefined;
 
         // Handle data type change
         if (
           patchData.data_type &&
           patchData.data_type !== originalColumn.data_type
         ) {
-          changes.push(`TYPE ${patchData.data_type}`);
+          dataType = patchData.data_type;
         }
 
         // Handle nullable change
@@ -405,9 +419,9 @@ export function generateStructureSqlFromPatches(
           patchData.is_nullable !== originalColumn.is_nullable
         ) {
           if (patchData.is_nullable) {
-            changes.push("DROP NOT NULL");
+            nullable = true;
           } else {
-            changes.push("SET NOT NULL");
+            nullable = false;
           }
         }
 
@@ -420,7 +434,7 @@ export function generateStructureSqlFromPatches(
             !patchData.column_default ||
             patchData.column_default.trim() === ""
           ) {
-            changes.push("DROP DEFAULT");
+            defaultExpression = null;
           } else {
             const defaultVal = patchData.column_default.trim();
             if (
@@ -428,17 +442,29 @@ export function generateStructureSqlFromPatches(
               defaultVal.match(/^[0-9]+$/) ||
               defaultVal.toUpperCase() === "NULL"
             ) {
-              changes.push(`SET DEFAULT ${defaultVal}`);
+              defaultExpression = defaultVal;
             } else {
-              changes.push(`SET DEFAULT ${qLiteral(defaultVal)}`);
+              defaultExpression = qLiteral(defaultVal, engine);
             }
           }
         }
 
-        // Only generate ALTER COLUMN if there are changes (excluding column_name which is handled above)
-        if (changes.length > 0) {
-          const sql = `ALTER TABLE ${tableIdent} ALTER COLUMN ${qIdent(columnName, engine)} ${changes.join(", ")};`;
-          sqlStatements.push(sql);
+        if (
+          dataType !== undefined ||
+          nullable !== undefined ||
+          defaultExpression !== undefined
+        ) {
+          sqlStatements.push(
+            ...alterColumnStatements({
+              schema,
+              tableName,
+              columnName,
+              dataType,
+              nullable,
+              defaultExpression,
+              engine,
+            })
+          );
         }
 
         // Handle foreign key definition changes stored on the column's `foreign_key` field.
@@ -463,15 +489,14 @@ export function generateStructureSqlFromPatches(
             ) ?? null;
 
           if (fkDef === "" && existingFk?.constraint_name) {
-            if (engine === "mysql" || engine === "mariadb") {
-              sqlStatements.push(
-                `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
-              );
-            } else {
-              sqlStatements.push(
-                `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
-              );
-            }
+            sqlStatements.push(
+              dropForeignKeySql(
+                schema,
+                tableName,
+                existingFk.constraint_name,
+                engine
+              )
+            );
             continue;
           }
 
@@ -493,29 +518,28 @@ export function generateStructureSqlFromPatches(
                 `${tableName}_${columnName}_fkey`;
 
               if (existingFk?.constraint_name) {
-                if (engine === "mysql" || engine === "mariadb") {
-                  sqlStatements.push(
-                    `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
-                  );
-                } else {
-                  sqlStatements.push(
-                    `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
-                  );
-                }
+                sqlStatements.push(
+                  dropForeignKeySql(
+                    schema,
+                    tableName,
+                    existingFk.constraint_name,
+                    engine
+                  )
+                );
               }
 
-              const fkSql = `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
-                constraintName,
-                engine
-              )} FOREIGN KEY (${qIdent(
-                columnName,
-                engine
-              )}) REFERENCES ${qIdent(refSchema, engine)}.${qIdent(
-                refTableName,
-                engine
-              )} (${qIdent(refColRaw, engine)});`;
-
-              sqlStatements.push(fkSql);
+              sqlStatements.push(
+                addForeignKeySql({
+                  schema,
+                  tableName,
+                  constraintName,
+                  columnName,
+                  refSchema,
+                  refTableName,
+                  refColumnName: refColRaw,
+                  engine,
+                })
+              );
             }
           }
         }
@@ -535,8 +559,9 @@ export function generateStructureSqlFromPatches(
       const originalColumn = initStructure[rowIndex];
       if (!originalColumn) continue;
 
-      const sql = `ALTER TABLE ${tableIdent} DROP COLUMN ${qIdent(originalColumn.column_name, engine)};`;
-      sqlStatements.push(sql);
+      sqlStatements.push(
+        dropColumnSql(schema, tableName, originalColumn.column_name, engine)
+      );
     }
   }
 
@@ -554,7 +579,6 @@ export function generateForeignKeySqlFromPatches(
   if (!initStructure) return [];
 
   const sqlStatements: string[] = [];
-  const tableIdent = quoteTableName(schema, tableName, engine);
   const updatePatches = patchMap["update"]?.["structure"];
   const dbConfig = getDbConfig(engine);
 
@@ -596,15 +620,9 @@ export function generateForeignKeySqlFromPatches(
       ) ?? null;
 
     if (fkDef === "" && existingFk?.constraint_name) {
-      if (engine === "mysql" || engine === "mariadb") {
-        sqlStatements.push(
-          `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
-        );
-      } else {
-        sqlStatements.push(
-          `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
-        );
-      }
+      sqlStatements.push(
+        dropForeignKeySql(schema, tableName, existingFk.constraint_name, engine)
+      );
       continue;
     }
 
@@ -626,25 +644,22 @@ export function generateForeignKeySqlFromPatches(
       existingFk?.constraint_name || `${tableName}_${columnName}_fkey`;
 
     if (existingFk?.constraint_name) {
-      if (engine === "mysql" || engine === "mariadb") {
-        sqlStatements.push(
-          `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
-        );
-      } else {
-        sqlStatements.push(
-          `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
-        );
-      }
+      sqlStatements.push(
+        dropForeignKeySql(schema, tableName, existingFk.constraint_name, engine)
+      );
     }
 
     sqlStatements.push(
-      `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
+      addForeignKeySql({
+        schema,
+        tableName,
         constraintName,
-        engine
-      )} FOREIGN KEY (${qIdent(columnName, engine)}) REFERENCES ${qIdent(
+        columnName,
         refSchema,
-        engine
-      )}.${qIdent(refTableName, engine)} (${qIdent(refColRaw, engine)});`
+        refTableName,
+        refColumnName: refColRaw,
+        engine,
+      })
     );
   }
 
@@ -662,7 +677,6 @@ export function generateConstraintSqlFromPatches(
   engine: DatabaseEngine = "postgres"
 ): string[] {
   const sqlStatements: string[] = [];
-  const tableIdent = quoteTableName(schema, tableName, engine);
 
   // Handle CREATE (new indexes/constraints)
   const createPatches = patchMap["create"]?.["constraints"];
@@ -673,11 +687,18 @@ export function generateConstraintSqlFromPatches(
       const isUnique = patchData.is_unique;
       const algorithm = patchData.index_algorithm;
 
-      const uniqueClause = isUnique ? "UNIQUE " : "";
-      const algorithmClause = ` USING ${algorithm || "BTREE"}`;
-      const columnClause = columnName ? ` (${qIdent(columnName, engine)})` : "";
-      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(indexName, engine)} ON ${tableIdent}${algorithmClause}${columnClause};`;
-      sqlStatements.push(sql);
+      if (!columnName) continue;
+      sqlStatements.push(
+        createIndexSql({
+          schema,
+          tableName,
+          indexName,
+          columnName,
+          unique: isUnique,
+          algorithm: algorithm || "BTREE",
+          engine,
+        })
+      );
     }
   }
 
@@ -701,9 +722,7 @@ export function generateConstraintSqlFromPatches(
 
       // For updates, we typically need to drop and recreate
       // Drop the old index
-      sqlStatements.push(
-        `DROP INDEX IF EXISTS ${qIdent(schema, engine)}.${qIdent(indexName, engine)};`
-      );
+      sqlStatements.push(dropIndexSql(schema, tableName, indexName, engine));
 
       // Create the new index with updated properties
       const newIndexName = patchData.index_name || indexName;
@@ -716,10 +735,17 @@ export function generateConstraintSqlFromPatches(
       const algorithm =
         patchData.index_algorithm || originalConstraint.index_algorithm;
 
-      const uniqueClause = isUnique ? "UNIQUE " : "";
-      const algorithmClause = algorithm ? `USING ${algorithm} ` : "";
-      const sql = `CREATE ${uniqueClause}INDEX ${qIdent(newIndexName, engine)} ${algorithmClause}ON ${tableIdent} (${qIdent(columnName, engine)});`;
-      sqlStatements.push(sql);
+      sqlStatements.push(
+        createIndexSql({
+          schema,
+          tableName,
+          indexName: newIndexName,
+          columnName,
+          unique: isUnique,
+          algorithm,
+          engine,
+        })
+      );
     }
   }
 
@@ -739,8 +765,9 @@ export function generateConstraintSqlFromPatches(
       const originalConstraint = initConstraints[rowIndex];
       if (!originalConstraint) continue;
 
-      const sql = `DROP INDEX IF EXISTS ${qIdent(schema, engine)}.${qIdent(originalConstraint.index_name, engine)};`;
-      sqlStatements.push(sql);
+      sqlStatements.push(
+        dropIndexSql(schema, tableName, originalConstraint.index_name, engine)
+      );
     }
   }
 

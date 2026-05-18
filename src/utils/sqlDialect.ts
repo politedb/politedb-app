@@ -116,6 +116,23 @@ export function dropTableSql(
   return `DROP TABLE ${quoteTableName(schema, tableName, engine)};`;
 }
 
+export function renameTableSql(
+  schema: string,
+  tableName: string,
+  newTableName: string,
+  engine?: DatabaseEngine
+) {
+  if (isMysqlFamilyEngine(engine)) {
+    return `RENAME TABLE ${quoteTableName(schema, tableName, engine)} TO ${quoteTableName(schema, newTableName, engine)};`;
+  }
+
+  if (engine === "sqlserver") {
+    return `EXEC sp_rename ${sqlStringLiteral(`${schema}.${tableName}`, engine)}, ${sqlStringLiteral(newTableName, engine)};`;
+  }
+
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} RENAME TO ${quoteIdentifier(newTableName, engine)};`;
+}
+
 export function truncateTableSql(
   schema: string,
   tableName: string,
@@ -168,7 +185,9 @@ export function addColumnSql(
   columnDefinition: string,
   engine?: DatabaseEngine
 ) {
-  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ADD COLUMN ${columnDefinition};`;
+  const keyword =
+    engine === "sqlserver" || engine === "oracle" ? "ADD" : "ADD COLUMN";
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ${keyword} ${columnDefinition};`;
 }
 
 export function dropColumnSql(
@@ -178,6 +197,134 @@ export function dropColumnSql(
   engine?: DatabaseEngine
 ) {
   return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} DROP COLUMN ${quoteIdentifier(columnName, engine)};`;
+}
+
+export function dropPrimaryKeySql(
+  schema: string,
+  tableName: string,
+  constraintName: string,
+  engine?: DatabaseEngine
+) {
+  const table = quoteTableName(schema, tableName, engine);
+  if (isMysqlFamilyEngine(engine)) {
+    return `ALTER TABLE ${table} DROP PRIMARY KEY;`;
+  }
+  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+    unsupportedSql("Changing primary key", engine);
+  }
+  return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
+}
+
+export function addPrimaryKeySql(
+  schema: string,
+  tableName: string,
+  columns: string[],
+  engine?: DatabaseEngine
+) {
+  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+    unsupportedSql("Changing primary key", engine);
+  }
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ADD PRIMARY KEY (${columns
+    .map((col) => quoteIdentifier(col, engine))
+    .join(", ")});`;
+}
+
+export function alterColumnStatements(args: {
+  schema: string;
+  tableName: string;
+  columnName: string;
+  dataType?: string;
+  nullable?: boolean;
+  defaultExpression?: string | null;
+  engine?: DatabaseEngine;
+}) {
+  const { schema, tableName, columnName, dataType, nullable, defaultExpression, engine } =
+    args;
+  const table = quoteTableName(schema, tableName, engine);
+  const col = quoteIdentifier(columnName, engine);
+
+  if (isMysqlFamilyEngine(engine)) {
+    if (!dataType) {
+      unsupportedSql("Changing MySQL column null/default without column type", engine);
+    }
+    const nullClause = nullable === false ? " NOT NULL" : "";
+    const defaultClause =
+      defaultExpression === undefined
+        ? ""
+        : defaultExpression === null
+          ? " DEFAULT NULL"
+          : ` DEFAULT ${defaultExpression}`;
+    return [`ALTER TABLE ${table} MODIFY COLUMN ${col} ${dataType}${nullClause}${defaultClause};`];
+  }
+
+  if (engine === "sqlite") {
+    unsupportedSql("Altering SQLite column type/null/default", engine);
+  }
+
+  if (engine === "sqlserver" || engine === "oracle") {
+    unsupportedSql("Altering column type/null/default", engine);
+  }
+
+  const statements: string[] = [];
+  if (dataType) {
+    statements.push(`ALTER TABLE ${table} ALTER COLUMN ${col} TYPE ${dataType};`);
+  }
+  if (nullable !== undefined) {
+    statements.push(
+      `ALTER TABLE ${table} ALTER COLUMN ${col} ${nullable ? "DROP NOT NULL" : "SET NOT NULL"};`
+    );
+  }
+  if (defaultExpression !== undefined) {
+    statements.push(
+      `ALTER TABLE ${table} ALTER COLUMN ${col} ${
+        defaultExpression === null ? "DROP DEFAULT" : `SET DEFAULT ${defaultExpression}`
+      };`
+    );
+  }
+  return statements;
+}
+
+export function dropForeignKeySql(
+  schema: string,
+  tableName: string,
+  constraintName: string,
+  engine?: DatabaseEngine
+) {
+  const table = quoteTableName(schema, tableName, engine);
+  if (isMysqlFamilyEngine(engine)) {
+    return `ALTER TABLE ${table} DROP FOREIGN KEY ${quoteIdentifier(constraintName, engine)};`;
+  }
+  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+    unsupportedSql("Changing foreign keys", engine);
+  }
+  return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
+}
+
+export function addForeignKeySql(args: {
+  schema: string;
+  tableName: string;
+  constraintName: string;
+  columnName: string;
+  refSchema: string;
+  refTableName: string;
+  refColumnName: string;
+  engine?: DatabaseEngine;
+}) {
+  if (
+    args.engine === "sqlite" ||
+    args.engine === "sqlserver" ||
+    args.engine === "oracle"
+  ) {
+    unsupportedSql("Changing foreign keys", args.engine);
+  }
+  return `ALTER TABLE ${quoteTableName(args.schema, args.tableName, args.engine)} ADD CONSTRAINT ${quoteIdentifier(
+    args.constraintName,
+    args.engine
+  )} FOREIGN KEY (${quoteIdentifier(args.columnName, args.engine)}) REFERENCES ${quoteTableName(
+    args.refSchema,
+    args.refTableName,
+    args.engine
+  )} (${quoteIdentifier(args.refColumnName, args.engine)});`;
 }
 
 export function dropIndexSql(
@@ -217,7 +364,7 @@ export function createIndexSql(args: {
 
   if (isMysqlFamilyEngine(args.engine)) {
     const using = args.algorithm ? ` USING ${args.algorithm}` : "";
-    return `CREATE ${unique}INDEX ${index} ON ${table} (${column})${using};`;
+    return `CREATE ${unique}INDEX ${index}${using} ON ${table} (${column});`;
   }
 
   const using =
