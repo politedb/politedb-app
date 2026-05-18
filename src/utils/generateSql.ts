@@ -45,21 +45,15 @@ const qLiteral = sqlStringLiteral;
 const formatValue = formatSqlValue;
 
 function isUnsafeFallbackWhereColumn(
-  dbType: string | undefined,
-  engine?: DatabaseEngine
+  dbType: string | undefined
 ) {
   if (!dbType) return false;
   if (isBlobColumnType(dbType)) return true;
-  return (
-    (engine === "mysql" || engine === "mariadb") && isJsonColumnType(dbType)
-  );
+  return isJsonColumnType(dbType);
 }
 
-function isVirtualIdentityColumn(
-  dbType: string | undefined,
-  engine?: DatabaseEngine
-) {
-  return !isUnsafeFallbackWhereColumn(dbType, engine);
+function isVirtualIdentityColumn(dbType: string | undefined) {
+  return !isUnsafeFallbackWhereColumn(dbType);
 }
 
 export type VirtualKeySafetyIssue = {
@@ -74,11 +68,10 @@ export type VirtualKeySafetyIssue = {
 };
 
 function virtualIdentityColumns(
-  columns: TableDataType["columns"],
-  engine: DatabaseEngine
+  columns: TableDataType["columns"]
 ): string[] {
   return columns
-    .filter((col) => isVirtualIdentityColumn(col.db_type, engine))
+    .filter((col) => isVirtualIdentityColumn(col.db_type))
     .map((col) => col.name)
     .filter(Boolean);
 }
@@ -88,14 +81,13 @@ function assertSafeRowIdentity(args: {
   tableName: string;
   columns: TableDataType["columns"];
   constraints: TableConstraintType[] | null | undefined;
-  engine: DatabaseEngine;
   action: "update" | "delete";
   rowKey: string;
 }): string[] {
   const primaryKeyColumns = getPrimaryKeyColumns(args.constraints);
   if (primaryKeyColumns.length > 0) return primaryKeyColumns;
 
-  const virtualColumns = virtualIdentityColumns(args.columns, args.engine);
+  const virtualColumns = virtualIdentityColumns(args.columns);
   if (virtualColumns.length === 0) {
     throw new Error(
       `TABLE_EDIT_UNSAFE_IDENTITY: Cannot ${args.action} row ${args.rowKey} in ${args.schema}.${args.tableName} because the table has no primary key and no safe non-JSON/non-BLOB virtual key columns. Choose a primary key or virtual key before saving.`
@@ -107,7 +99,7 @@ function assertSafeRowIdentity(args: {
 
 export function analyzePatchIdentitySafety(
   patchMap: PatchMap,
-  engine: DatabaseEngine = "postgres"
+  _engine: DatabaseEngine = "postgres"
 ): VirtualKeySafetyIssue[] {
   const issues: VirtualKeySafetyIssue[] = [];
 
@@ -123,7 +115,7 @@ export function analyzePatchIdentitySafety(
 
     const { schema, name: tableName } = tableWindow.table;
     const tableKey = `${schema}.${tableName}`;
-    const virtualColumns = virtualIdentityColumns(columns, engine);
+    const virtualColumns = virtualIdentityColumns(columns);
     const updateRows = Object.keys(patches.update?.data ?? {});
     const deleteRows = Object.keys(patches.delete?.data ?? {});
 
@@ -227,7 +219,6 @@ export function generateUpdateSqlFromPatches(
       tableName,
       columns,
       constraints,
-      engine,
       action: "update",
       rowKey: "*",
     });
@@ -270,7 +261,7 @@ export function generateUpdateSqlFromPatches(
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
         continue;
       }
-      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type, engine)) {
+      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type)) {
         continue;
       }
 
@@ -922,7 +913,6 @@ export function generateDeleteSqlFromPatches(
       tableName,
       columns,
       constraints,
-      engine,
       action: "delete",
       rowKey: "*",
     });
@@ -950,7 +940,7 @@ export function generateDeleteSqlFromPatches(
       if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
         continue;
       }
-      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type, engine)) {
+      if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type)) {
         continue;
       }
 

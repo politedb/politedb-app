@@ -337,6 +337,36 @@ describe("generateUpdateSqlFromPatches", () => {
     ).toThrow("TABLE_EDIT_UNSAFE_IDENTITY");
   });
 
+  it("blocks JSON/BLOB-only virtual keys across relational engines", () => {
+    for (const engine of ["postgres", "mysql", "sqlite"] as const) {
+      expect(() =>
+        generateUpdateSqlFromPatches(
+          {
+            update: {
+              data: {
+                "0": {
+                  payload: { next: true },
+                },
+              },
+            },
+          },
+          "public",
+          "events",
+          {
+            columns: [
+              { name: "payload", db_type: engine === "postgres" ? "jsonb" : "json" },
+              { name: "raw", db_type: engine === "postgres" ? "bytea" : "blob" },
+            ],
+            rows: [[{ t: "Json", v: '{"a":1}' }, "abc"]],
+            rowCount: 1,
+          },
+          [],
+          engine
+        )
+      ).toThrow("TABLE_EDIT_UNSAFE_IDENTITY");
+    }
+  });
+
   it("reports virtual key safety metadata for tables without primary keys", () => {
     const issues = analyzePatchIdentitySafety(
       {
