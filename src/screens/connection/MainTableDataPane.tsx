@@ -1090,7 +1090,11 @@ export function MainTableDataPane(props: {
   );
 
   const handleImport = useCallback(
-    async (firstIsHeaders: boolean) => {
+    async (options: {
+      firstIsHeaders: boolean;
+      columnMapping: import("src/hooks/useImportTableData").ImportColumnMapping;
+      nullMode: import("src/hooks/useImportTableData").ImportNullMode;
+    }) => {
       if (isProfileLocked) return;
       const { schema, name } = activeTableWindow.table;
       runImport({
@@ -1101,7 +1105,9 @@ export function MainTableDataPane(props: {
         limit,
         offset,
         engine,
-        firstIsHeaders,
+        firstIsHeaders: options.firstIsHeaders,
+        columnMapping: options.columnMapping,
+        nullMode: options.nullMode,
         onSuccess: async () => reloadTableData(schema, name),
       });
     },

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -7,7 +7,13 @@ import {
   DialogFooter,
   DialogDescription,
 } from "src/components/common/Dialog";
-import { DataImportPreview } from "src/hooks/useImportTableData";
+import {
+  buildDefaultImportMapping,
+  DataImportPreview,
+  ImportColumnMapping,
+  ImportNullMode,
+  validateImportPreview,
+} from "src/hooks/useImportTableData";
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
@@ -24,7 +30,11 @@ interface Props {
   importing: boolean;
   progress: { imported: number; total: number } | null;
   handleClose: () => void;
-  onImport: (firstIsHeaders: boolean) => void;
+  onImport: (options: {
+    firstIsHeaders: boolean;
+    columnMapping: ImportColumnMapping;
+    nullMode: ImportNullMode;
+  }) => void;
 }
 
 /** Normalize rows to header length so every row has exactly one cell per column. */
@@ -58,6 +68,8 @@ export function ImportTableDialog({
   onImport,
 }: Props) {
   const [firstIsHeaders, setFirstIsHeaders] = useState(true);
+  const [nullMode, setNullMode] = useState<ImportNullMode>("empty-string");
+  const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
 
   const onClose = useCallback(() => {
     if (importing) return;
@@ -81,6 +93,30 @@ export function ImportTableDialog({
     if (!dataPreview) return [];
     return previewTableData(dataPreview, firstIsHeaders);
   }, [dataPreview, firstIsHeaders]);
+
+  useEffect(() => {
+    if (!dataPreview) return;
+    setColumnMapping(
+      buildDefaultImportMapping(dataPreview, columns, firstIsHeaders)
+    );
+  }, [dataPreview, columns, firstIsHeaders]);
+
+  const validationIssues = useMemo(() => {
+    if (!dataPreview) return [];
+    return validateImportPreview(dataPreview, columns, {
+      firstIsHeaders,
+      columnMapping,
+      nullMode,
+    });
+  }, [dataPreview, columns, firstIsHeaders, columnMapping, nullMode]);
+
+  const mappedColumnCount = useMemo(
+    () =>
+      Object.values(columnMapping).filter(
+        (value): value is number => value != null && value >= 0
+      ).length,
+    [columnMapping]
+  );
 
   const progressPct = useMemo(() => {
     if (!progress || progress.total === 0) return 0;
@@ -117,7 +153,65 @@ export function ImportTableDialog({
                     }
                     label="First row is headers"
                   />
+                  <Checkbox
+                    checked={nullMode === "empty-as-null"}
+                    onChange={(e) =>
+                      setNullMode(
+                        (e.target as HTMLInputElement).checked
+                          ? "empty-as-null"
+                          : "empty-string"
+                      )
+                    }
+                    label="Empty values as NULL"
+                  />
                 </div>
+              </div>
+
+              <div class="max-h-40 overflow-auto rounded border border-neutral-200">
+                <table class="w-full text-xs">
+                  <thead class="sticky top-0 bg-neutral-50">
+                    <tr>
+                      <th class="px-2 py-1 text-left font-medium">Table column</th>
+                      <th class="px-2 py-1 text-left font-medium">Type</th>
+                      <th class="px-2 py-1 text-left font-medium">CSV column</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {columns.map((column) => (
+                      <tr key={column.name} class="border-t border-neutral-100">
+                        <td class="px-2 py-1 font-mono">{column.name}</td>
+                        <td class="px-2 py-1 text-neutral-500">
+                          {column.db_type || "text"}
+                        </td>
+                        <td class="px-2 py-1">
+                          <select
+                            class="w-full rounded border border-neutral-200 bg-white px-2 py-1"
+                            value={
+                              columnMapping[column.name] == null
+                                ? ""
+                                : String(columnMapping[column.name])
+                            }
+                            onChange={(e) => {
+                              const value = (e.currentTarget as HTMLSelectElement)
+                                .value;
+                              setColumnMapping((prev) => ({
+                                ...prev,
+                                [column.name]: value === "" ? null : Number(value),
+                              }));
+                            }}
+                          >
+                            <option value="">Skip</option>
+                            {dataPreview.headers.map((header, index) => (
+                              <option key={`${header}:${index}`} value={index}>
+                                {firstIsHeaders ? header || `Column ${index + 1}` : `Column ${index + 1}`}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               <div class="max-h-48 overflow-auto rounded border border-neutral-200">
@@ -129,9 +223,20 @@ export function ImportTableDialog({
                 />
               </div>
               <p class="text-xs text-neutral-600">
-                CSV {dataPreview.headers.length} columns,{" "}
-                {dataPreview.rows.length} rows
+                CSV {dataPreview.headers.length} columns, {dataPreview.rows.length} rows, {mappedColumnCount} mapped columns
               </p>
+              {validationIssues.length > 0 && (
+                <div class="max-h-28 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                  <p class="mb-1 font-medium">
+                    {validationIssues.length} validation issue(s)
+                  </p>
+                  {validationIssues.slice(0, 8).map((issue) => (
+                    <p key={`${issue.row}:${issue.column}:${issue.value}`}>
+                      Row {issue.row}, {issue.column}: {issue.message}
+                    </p>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -166,8 +271,10 @@ export function ImportTableDialog({
           {dataPreview && (dataPreview.rows.length > 0 || !firstIsHeaders) && (
             <Button
               variant="default"
-              onClick={() => onImport(firstIsHeaders)}
-              disabled={importing}
+              onClick={() =>
+                onImport({ firstIsHeaders, columnMapping, nullMode })
+              }
+              disabled={importing || mappedColumnCount === 0 || validationIssues.length > 0}
             >
               {importing ? "Importing..." : "Import"}
             </Button>

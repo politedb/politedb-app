@@ -12,6 +12,22 @@ export type DataImportPreview = {
   rows: string[][];
 };
 
+export type ImportColumnMapping = Record<string, number | null>;
+export type ImportNullMode = "empty-string" | "empty-as-null";
+
+export type ImportIssue = {
+  row: number;
+  column: string;
+  value: string;
+  message: string;
+};
+
+export type ImportOptions = {
+  firstIsHeaders: boolean;
+  columnMapping: ImportColumnMapping;
+  nullMode: ImportNullMode;
+};
+
 export type ImportConfig = {
   connectionId: string | null;
   schema: string;
@@ -21,10 +37,85 @@ export type ImportConfig = {
   offset: number;
   engine?: DatabaseEngine;
   firstIsHeaders?: boolean;
+  columnMapping?: ImportColumnMapping;
+  nullMode?: ImportNullMode;
   onSuccess: () => Promise<void>;
 };
 
 const BATCH = 50;
+
+function typeIssue(value: string, dbType?: string): string | null {
+  if (value === "") return null;
+  const type = dbType?.toLowerCase() ?? "";
+  if (/\b(jsonb?|array)\b/.test(type)) {
+    try {
+      JSON.parse(value);
+      return null;
+    } catch {
+      return "Invalid JSON";
+    }
+  }
+  if (/^(tinyint|smallint|mediumint|int|integer|bigint|float|double|real|numeric|decimal)/i.test(type)) {
+    return Number.isFinite(Number(value)) ? null : "Invalid number";
+  }
+  if (/\b(bool|boolean|bit)\b/.test(type)) {
+    return /^(true|false|1|0)$/i.test(value) ? null : "Invalid boolean";
+  }
+  if (/\b(date|time|timestamp|datetime)\b/.test(type)) {
+    return Number.isNaN(Date.parse(value)) ? "Invalid date/time" : null;
+  }
+  return null;
+}
+
+export function buildDefaultImportMapping(
+  preview: DataImportPreview,
+  columns: ColumnMeta[],
+  firstIsHeaders: boolean
+): ImportColumnMapping {
+  const mapping: ImportColumnMapping = {};
+  const tableCols = columns.map((c) => c.name);
+  if (firstIsHeaders) {
+    const headerToIndex = new Map(preview.headers.map((h, i) => [h.trim(), i]));
+    for (const name of tableCols) {
+      mapping[name] = headerToIndex.has(name) ? headerToIndex.get(name)! : null;
+    }
+    return mapping;
+  }
+  tableCols.forEach((name, index) => {
+    mapping[name] = index < preview.headers.length ? index : null;
+  });
+  return mapping;
+}
+
+export function validateImportPreview(
+  preview: DataImportPreview,
+  columns: ColumnMeta[],
+  options: ImportOptions
+): ImportIssue[] {
+  const dataRows = options.firstIsHeaders
+    ? preview.rows
+    : [preview.headers, ...preview.rows];
+  const issues: ImportIssue[] = [];
+  for (let rowIndex = 0; rowIndex < Math.min(dataRows.length, 100); rowIndex++) {
+    const row = dataRows[rowIndex] ?? [];
+    for (const column of columns) {
+      const csvIndex = options.columnMapping[column.name];
+      if (csvIndex == null || csvIndex < 0) continue;
+      const raw = row[csvIndex] ?? "";
+      if (raw === "" && options.nullMode === "empty-as-null") continue;
+      const message = typeIssue(raw, column.db_type);
+      if (message) {
+        issues.push({
+          row: rowIndex + 1,
+          column: column.name,
+          value: raw,
+          message,
+        });
+      }
+    }
+  }
+  return issues;
+}
 
 export function useImportTableData() {
   const [dataPreview, setDataPreview] = useState<DataImportPreview | null>(
@@ -71,26 +162,25 @@ export function useImportTableData() {
         columns,
         engine,
         firstIsHeaders = true,
+        columnMapping,
+        nullMode = "empty-string",
         onSuccess,
       } = config;
 
       if (!dataPreview) return;
 
-      const tableCols = columns.map((c) => c.name);
-      let colOrder: string[];
-      let headerToIndex: Map<string, number>;
+      const mapping =
+        columnMapping ??
+        buildDefaultImportMapping(dataPreview, columns, firstIsHeaders);
+      const colOrder = columns
+        .map((column) => column.name)
+        .filter((name) => mapping[name] != null && mapping[name]! >= 0);
       let dataRows: string[][];
 
       if (firstIsHeaders) {
         if (dataPreview.rows.length === 0) return;
-        headerToIndex = new Map(
-          dataPreview.headers.map((h, i) => [h.trim(), i])
-        );
-        colOrder = tableCols.filter((name) => headerToIndex.has(name));
         dataRows = dataPreview.rows;
       } else {
-        colOrder = tableCols.slice(0, dataPreview.headers.length);
-        headerToIndex = new Map(colOrder.map((name, i) => [name, i]));
         dataRows = [dataPreview.headers, ...dataPreview.rows];
       }
 
@@ -105,6 +195,21 @@ export function useImportTableData() {
 
       if (!connectionId) {
         setError("Not connected.");
+        return;
+      }
+
+      const issues = validateImportPreview(dataPreview, columns, {
+        firstIsHeaders,
+        columnMapping: mapping,
+        nullMode,
+      });
+      if (issues.length > 0) {
+        setError(
+          `CSV validation failed: ${issues
+            .slice(0, 5)
+            .map((issue) => `row ${issue.row} ${issue.column}: ${issue.message}`)
+            .join("; ")}`
+        );
         return;
       }
 
@@ -123,10 +228,11 @@ export function useImportTableData() {
           const values = batch
             .map((row) => {
               const vals = colOrder.map((col) => {
-                const idx = headerToIndex.get(col)!;
+                const idx = mapping[col]!;
                 const raw = row[idx] ?? "";
                 const column = columns.find((item) => item.name === col);
-                return formatSqlValue(raw, column?.db_type, engine);
+                const value = raw === "" && nullMode === "empty-as-null" ? null : raw;
+                return formatSqlValue(value, column?.db_type, engine);
               });
               return `(${vals.join(", ")})`;
             })
