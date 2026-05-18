@@ -239,10 +239,12 @@ export function generateStructureSqlFromPatches(
   initStructure: TableStructureType[] | null,
   initConstraints: TableConstraintType[] | null = null,
   initForeignKeys: ForeignKeyInfo[] | null = null,
-  engine: DatabaseEngine = "postgres"
+  engine: DatabaseEngine = "postgres",
+  opts: { includeForeignKeys?: boolean } = {}
 ): string[] {
   const sqlStatements: string[] = [];
   const tableIdent = quoteTableName(schema, tableName, engine);
+  const includeForeignKeys = opts.includeForeignKeys !== false;
 
   // Handle CREATE (new columns)
   const createPatches = patchMap["create"]?.["structure"];
@@ -444,6 +446,7 @@ export function generateStructureSqlFromPatches(
         // or "ref_schema.ref_table(ref_column)" for Postgres/MySQL engines.
         const dbConfig = getDbConfig(engine);
         if (
+          includeForeignKeys &&
           dbConfig.allowFk &&
           "foreign_key" in patchData &&
           patchData.foreign_key !== undefined &&
@@ -535,6 +538,114 @@ export function generateStructureSqlFromPatches(
       const sql = `ALTER TABLE ${tableIdent} DROP COLUMN ${qIdent(originalColumn.column_name, engine)};`;
       sqlStatements.push(sql);
     }
+  }
+
+  return sqlStatements;
+}
+
+export function generateForeignKeySqlFromPatches(
+  patchMap: PatchData,
+  schema: string,
+  tableName: string,
+  initStructure: TableStructureType[] | null,
+  initForeignKeys: ForeignKeyInfo[] | null = null,
+  engine: DatabaseEngine = "postgres"
+): string[] {
+  if (!initStructure) return [];
+
+  const sqlStatements: string[] = [];
+  const tableIdent = quoteTableName(schema, tableName, engine);
+  const updatePatches = patchMap["update"]?.["structure"];
+  const dbConfig = getDbConfig(engine);
+
+  if (!updatePatches || !dbConfig.allowFk) {
+    return sqlStatements;
+  }
+
+  for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+    const rowIndex = parseInt(rowKey, 10);
+    if (isNaN(rowIndex) || rowIndex < 0 || rowIndex >= initStructure.length) {
+      continue;
+    }
+
+    const originalColumn = initStructure[rowIndex];
+    if (!originalColumn) continue;
+
+    if (
+      !("foreign_key" in patchData) ||
+      patchData.foreign_key === undefined ||
+      patchData.foreign_key === originalColumn.foreign_key ||
+      typeof patchData.foreign_key !== "string"
+    ) {
+      continue;
+    }
+
+    const columnName =
+      patchData.column_name &&
+      patchData.column_name !== originalColumn.column_name &&
+      patchData.column_name.trim() !== ""
+        ? patchData.column_name.trim()
+        : originalColumn.column_name;
+    const fkDef = patchData.foreign_key.trim();
+    const existingFk =
+      initForeignKeys?.find((fk) =>
+        fk.column_names
+          .split(",")
+          .map((s) => s.trim())
+          .includes(originalColumn.column_name)
+      ) ?? null;
+
+    if (fkDef === "" && existingFk?.constraint_name) {
+      if (engine === "mysql" || engine === "mariadb") {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+        );
+      } else {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+        );
+      }
+      continue;
+    }
+
+    const fkMatch = fkDef.match(/^([\w.]+)\s*\(([^)]+)\)/);
+    if (!fkMatch) continue;
+
+    const refTableFull = fkMatch[1];
+    const refColRaw = fkMatch[2].split(",")[0]?.trim();
+    if (!refColRaw) continue;
+
+    let refSchema = schema;
+    let refTableName = refTableFull;
+    const parts = refTableFull.split(".");
+    if (parts.length === 2) {
+      [refSchema, refTableName] = parts;
+    }
+
+    const constraintName =
+      existingFk?.constraint_name || `${tableName}_${columnName}_fkey`;
+
+    if (existingFk?.constraint_name) {
+      if (engine === "mysql" || engine === "mariadb") {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} DROP FOREIGN KEY ${qIdent(existingFk.constraint_name, engine)};`
+        );
+      } else {
+        sqlStatements.push(
+          `ALTER TABLE ${tableIdent} DROP CONSTRAINT IF EXISTS ${qIdent(existingFk.constraint_name, engine)};`
+        );
+      }
+    }
+
+    sqlStatements.push(
+      `ALTER TABLE ${tableIdent} ADD CONSTRAINT ${qIdent(
+        constraintName,
+        engine
+      )} FOREIGN KEY (${qIdent(columnName, engine)}) REFERENCES ${qIdent(
+        refSchema,
+        engine
+      )}.${qIdent(refTableName, engine)} (${qIdent(refColRaw, engine)});`
+    );
   }
 
   return sqlStatements;
@@ -728,19 +839,74 @@ export function generateDeleteSqlFromPatches(
   return sqlStatements;
 }
 
-/**
- * Generate all SQL statements from patchMap
- */
-export function generateSqlFromPatches(
+export type PatchSqlPlan = {
+  preData: string[];
+  data: string[];
+  postData: string[];
+};
+
+export type PatchSqlPlanOptions = {
+  activeScreen?: string;
+  getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+};
+
+function tableDataForPatchSql(args: {
+  activeScreen?: string;
+  getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  schema: string;
+  tableName: string;
+  columns: TableDataState["columns"];
+  patches: PatchData;
+}): TableDataType | null {
+  const { activeScreen, getRowAt, schema, tableName, columns, patches } = args;
+  if (!columns || !getRowAt || !activeScreen) return null;
+
+  const rowIndices = new Set<number>();
+  const updatePatches = patches["update"]?.["data"];
+  const deletePatches = patches["delete"]?.["data"];
+
+  if (updatePatches) {
+    for (const rowKey of Object.keys(updatePatches)) {
+      const rowIndex = parseInt(rowKey, 10);
+      if (!isNaN(rowIndex) && rowIndex >= 0) rowIndices.add(rowIndex);
+    }
+  }
+
+  if (deletePatches) {
+    for (const rowKey of Object.keys(deletePatches)) {
+      const rowIndex = parseInt(rowKey, 10);
+      if (!isNaN(rowIndex) && rowIndex >= 0) rowIndices.add(rowIndex);
+    }
+  }
+
+  if (rowIndices.size === 0) return null;
+
+  const tableKey = `${activeScreen}.${schema}.${tableName}`;
+  const rows: unknown[][] = [];
+  const maxIndex = Math.max(...Array.from(rowIndices), -1);
+
+  for (let i = 0; i <= maxIndex; i++) {
+    const row = getRowAt(tableKey, i);
+    rows.push(row ? (row as unknown[]) : []);
+  }
+
+  return {
+    columns,
+    rows,
+    rowCount: rows.length,
+  };
+}
+
+export function flattenPatchSqlPlan(plan: PatchSqlPlan): string[] {
+  return [...plan.preData, ...plan.data, ...plan.postData];
+}
+
+export function generateSqlPlanFromPatches(
   patchMap: PatchMap,
   engine: DatabaseEngine = "postgres",
-  options?: {
-    activeScreen?: string;
-    getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
-  }
-): string[] {
-  // engine parameter is passed to individual functions for future use
-  const allStatements: string[] = [];
+  options?: PatchSqlPlanOptions
+): PatchSqlPlan {
+  const plan: PatchSqlPlan = { preData: [], data: [], postData: [] };
   const { activeScreen, getRowAt } = options || {};
 
   for (const [_windowId, patchData] of Object.entries(patchMap)) {
@@ -752,115 +918,87 @@ export function generateSqlFromPatches(
     const { schema, name: tableName } = tableWindow.table;
     const { structure, constraints, columns, foreignKeys } = tableData;
 
-    // Construct TableDataType for UPDATE and DELETE operations
-    // These need row data to build WHERE clauses
-    let tableDataForSql: TableDataType | null = null;
-    if (columns && getRowAt && activeScreen) {
-      // Build rows array from getRowAt function
-      // We need to get rows for all row indices that appear in patches
-      const rowIndices = new Set<number>();
+    const tableDataForSql = tableDataForPatchSql({
+      activeScreen,
+      getRowAt,
+      schema,
+      tableName,
+      columns,
+      patches,
+    });
 
-      // Collect all row indices from update and delete patches
-      const updatePatches = patches["update"]?.["data"];
-      const deletePatches = patches["delete"]?.["data"];
+    plan.preData.push(
+      ...generateStructureSqlFromPatches(
+        patches,
+        schema,
+        tableName,
+        structure,
+        constraints,
+        foreignKeys,
+        engine,
+        { includeForeignKeys: false }
+      )
+    );
 
-      if (updatePatches) {
-        for (const rowKey of Object.keys(updatePatches)) {
-          const rowIndex = parseInt(rowKey, 10);
-          if (!isNaN(rowIndex) && rowIndex >= 0) {
-            rowIndices.add(rowIndex);
-          }
-        }
-      }
-
-      if (deletePatches) {
-        for (const rowKey of Object.keys(deletePatches)) {
-          const rowIndex = parseInt(rowKey, 10);
-          if (!isNaN(rowIndex) && rowIndex >= 0) {
-            rowIndices.add(rowIndex);
-          }
-        }
-      }
-
-      if (rowIndices.size > 0) {
-        // Construct table key: activeScreen.schema.tableName
-        const tableKey = `${activeScreen}.${schema}.${tableName}`;
-        const rows: unknown[][] = [];
-        const maxIndex = Math.max(...Array.from(rowIndices), -1);
-
-        // Build rows array - only include rows that exist
-        // Use empty arrays for missing rows (functions will handle this)
-        for (let i = 0; i <= maxIndex; i++) {
-          const row = getRowAt(tableKey, i);
-          // Push the row if it exists, otherwise push empty array
-          // Functions check for array validity and will skip invalid rows
-          rows.push(row ? (row as unknown[]) : []);
-        }
-
-        tableDataForSql = {
-          columns,
-          rows,
-          rowCount: rows.length,
-        };
-      }
-    }
-
-    // Generate INSERT statements
-    const insertStatements = generateInsertSqlFromPatches(
+    plan.data.push(
+      ...generateInsertSqlFromPatches(
       patches,
       schema,
       tableName,
       engine,
       columns ?? undefined
+      ),
+      ...generateUpdateSqlFromPatches(
+        patches,
+        schema,
+        tableName,
+        tableDataForSql,
+        constraints,
+        engine
+      ),
+      ...generateDeleteSqlFromPatches(
+        patches,
+        schema,
+        tableName,
+        tableDataForSql,
+        constraints,
+        engine
+      )
     );
-    allStatements.push(...insertStatements);
 
-    // Generate UPDATE statements
-    const updateStatements = generateUpdateSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      tableDataForSql,
-      constraints,
-      engine
+    plan.postData.push(
+      ...generateForeignKeySqlFromPatches(
+        patches,
+        schema,
+        tableName,
+        structure,
+        foreignKeys,
+        engine
+      ),
+      ...generateConstraintSqlFromPatches(
+        patches,
+        schema,
+        tableName,
+        constraints,
+        engine
+      )
     );
-    allStatements.push(...updateStatements);
-
-    // Generate DELETE statements
-    const deleteStatements = generateDeleteSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      tableDataForSql,
-      constraints,
-      engine
-    );
-    allStatements.push(...deleteStatements);
-
-    // Generate structure ALTER TABLE statements (should come before data changes)
-    const structureStatements = generateStructureSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      structure,
-      constraints,
-      foreignKeys,
-      engine
-    );
-    allStatements.push(...structureStatements);
-
-    // Generate constraint ALTER TABLE statements
-    const constraintStatements = generateConstraintSqlFromPatches(
-      patches,
-      schema,
-      tableName,
-      constraints,
-      engine
-    );
-    allStatements.push(...constraintStatements);
   }
 
-  return allStatements;
+  return plan;
+}
+
+/**
+ * Generate all SQL statements from patchMap.
+ * Kept for existing callers; returns pre-data DDL, data DML, then post-data
+ * constraints/index/FK SQL in execution order.
+ */
+export function generateSqlFromPatches(
+  patchMap: PatchMap,
+  engine: DatabaseEngine = "postgres",
+  options?: PatchSqlPlanOptions
+): string[] {
+  return flattenPatchSqlPlan(generateSqlPlanFromPatches(patchMap, engine, options));
 }
 
 export function formatMongoScalar(v: unknown): string {

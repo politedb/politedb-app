@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { generateUpdateSqlFromPatches } from "./generateSql";
+import {
+  generateSqlFromPatches,
+  generateSqlPlanFromPatches,
+  generateUpdateSqlFromPatches,
+  type PatchMap,
+} from "./generateSql";
 
 function mysqlJsonDisplayLiteral(value: unknown) {
   const json = typeof value === "string" ? value : JSON.stringify(value);
@@ -329,5 +334,75 @@ describe("generateUpdateSqlFromPatches", () => {
     );
 
     expect(sql).toHaveLength(0);
+  });
+});
+
+describe("generateSqlPlanFromPatches", () => {
+  it("orders structure changes before data and constraints", () => {
+    const patchMap: PatchMap = {
+      "table:public.users": {
+        tableWindow: {
+          id: "table:public.users",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "name", db_type: "text" },
+          ],
+          structure: [
+            {
+              column_name: "id",
+              data_type: "int",
+              is_nullable: "NO",
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+          ],
+          constraints: [],
+          foreignKeys: [],
+          sizeInfo: null,
+          rowCount: 0,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches: {
+          create: {
+            structure: {
+              "1": {
+                column_name: "name",
+                data_type: "text",
+                is_nullable: true,
+              },
+            },
+            data: {
+              new: { id: 1, name: "Ada" },
+            },
+            constraints: {
+              "0": {
+                index_name: "users_name_idx",
+                column_name: "name",
+                is_unique: false,
+                index_algorithm: "BTREE",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const plan = generateSqlPlanFromPatches(patchMap, "postgres");
+    expect(plan.preData[0]).toContain("ADD COLUMN");
+    expect(plan.data[0]).toContain("INSERT INTO");
+    expect(plan.postData[0]).toContain("CREATE INDEX");
+    expect(generateSqlFromPatches(patchMap, "postgres")).toEqual([
+      ...plan.preData,
+      ...plan.data,
+      ...plan.postData,
+    ]);
   });
 });
