@@ -81,10 +81,25 @@ export function buildPatchDiffs(
   options?: {
     activeScreen?: string;
     getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+    getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+    offset?: number;
   }
 ): PatchRowDiff[] {
   const diffs: PatchRowDiff[] = [];
-  const { activeScreen, getRowAt } = options ?? {};
+  const { activeScreen, getRowAt, getOriginalRowAt, offset = 0 } = options ?? {};
+
+  const resolveOriginalRow = (tableKey: string, rowIndex: number) => {
+    const candidates = [rowIndex + offset, rowIndex];
+    for (const candidate of candidates) {
+      const cached = getOriginalRowAt?.(tableKey, candidate);
+      if (Array.isArray(cached)) return cached;
+    }
+    for (const candidate of candidates) {
+      const row = getRowAt?.(tableKey, candidate);
+      if (Array.isArray(row)) return row;
+    }
+    return undefined;
+  };
 
   for (const entry of Object.values(patchMap)) {
     const { tableData, tableWindow, patches } = entry;
@@ -115,8 +130,8 @@ export function buildPatchDiffs(
     for (const [rowKey, patch] of Object.entries(patches.update?.data ?? {})) {
       const rowIndex = Number(rowKey);
       const originalRow =
-        Number.isFinite(rowIndex) && getRowAt && tableKey
-          ? getRowAt(tableKey, rowIndex)
+        Number.isFinite(rowIndex) && tableKey
+          ? resolveOriginalRow(tableKey, rowIndex)
           : undefined;
 
       diffs.push({
@@ -139,8 +154,8 @@ export function buildPatchDiffs(
     for (const [rowKey] of Object.entries(patches.delete?.data ?? {})) {
       const rowIndex = Number(rowKey);
       const originalRow =
-        Number.isFinite(rowIndex) && getRowAt && tableKey
-          ? getRowAt(tableKey, rowIndex)
+        Number.isFinite(rowIndex) && tableKey
+          ? resolveOriginalRow(tableKey, rowIndex)
           : undefined;
 
       diffs.push({

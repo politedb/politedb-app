@@ -144,7 +144,10 @@ export function TableData({
       if (!patches || patchHelpers.isNewRow(rowIdx)) return false;
 
       // existing row
-      return !!patches?.[rowIdx]?.[colName];
+      return Object.prototype.hasOwnProperty.call(
+        patches?.[rowIdx] ?? EMPTY_OBJECT,
+        colName
+      );
     },
     [patches, patchHelpers, newRows]
   );

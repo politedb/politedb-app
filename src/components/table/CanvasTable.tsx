@@ -1106,7 +1106,7 @@ export function CanvasTable({
             top: editorRect.y + HEADER_HEIGHT + 4,
             width: Math.max(
               editorRect.w - 4,
-              editorKind === "json" ? 260 : 120
+              editorKind === "json" ? 260 : 116
             ),
           }}
         >
@@ -1154,12 +1154,11 @@ export function CanvasTable({
           ) : (
             <input
               ref={editorRef as any}
-              class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500"
-              type={
-                editorKind === "date"
-                  ? "date"
-                  : "text"
-              }
+              class={cn(
+                "h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500",
+                "ring-2 ring-blue-500"
+              )}
+              type={editorKind === "date" ? "date" : "text"}
               placeholder={
                 editorKind === "blob"
                   ? "Binary value is read-only"

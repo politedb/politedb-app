@@ -149,6 +149,7 @@ interface Props {
   newTableSql?: string[];
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
   offset?: number;
 }
 
@@ -161,6 +162,7 @@ export function SaveChangesDialog({
   newTableSql = [],
   activeScreen,
   getRowAt,
+  getOriginalRowAt,
   offset = 0,
 }: Props) {
   const isMongo = engine === "mongo";
@@ -177,8 +179,14 @@ export function SaveChangesDialog({
   }, [summary.sqlStatements, newTableSql]);
 
   const rowDiffs = useMemo(
-    () => buildPatchDiffs(patchMap, { activeScreen, getRowAt }),
-    [patchMap, activeScreen, getRowAt]
+    () =>
+      buildPatchDiffs(patchMap, {
+        activeScreen,
+        getRowAt,
+        getOriginalRowAt,
+        offset,
+      }),
+    [patchMap, activeScreen, getRowAt, getOriginalRowAt, offset]
   );
 
   const hasChanges =

@@ -1038,6 +1038,13 @@ export function ConnectionScreen() {
               newTableSql={newTableSql}
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
+              getOriginalRowAt={(key, rowIndex) =>
+                useConnectionStore
+                  .getState()
+                  .tableRowCacheByKey[key]?.map.get(rowIndex) as
+                  | unknown[]
+                  | undefined
+              }
               offset={offset}
             />
           )}
