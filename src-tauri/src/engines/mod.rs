@@ -32,6 +32,83 @@ pub enum EngineConnection {
     Redis(redis::connection::RedisConn),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SqlStatementKind {
+    Ddl,
+    Dml,
+    TransactionControl,
+    Other,
+}
+
+fn first_sql_token(sql: &str) -> String {
+    sql.trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| !c.is_ascii_alphabetic())
+        .to_ascii_uppercase()
+}
+
+fn classify_sql_statement(sql: &str) -> SqlStatementKind {
+    match first_sql_token(sql).as_str() {
+        "CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "RENAME" | "COMMENT" => SqlStatementKind::Ddl,
+        "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "REPLACE" => SqlStatementKind::Dml,
+        "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "SAVEPOINT" => {
+            SqlStatementKind::TransactionControl
+        }
+        _ => SqlStatementKind::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        classify_sql_statement, reject_non_transactional_ddl, SqlStatementKind,
+    };
+
+    #[test]
+    fn classifies_transaction_batch_statements() {
+        assert_eq!(
+            classify_sql_statement("ALTER TABLE users ADD COLUMN age int"),
+            SqlStatementKind::Ddl
+        );
+        assert_eq!(
+            classify_sql_statement("insert into users(id) values (1)"),
+            SqlStatementKind::Dml
+        );
+        assert_eq!(
+            classify_sql_statement("ROLLBACK"),
+            SqlStatementKind::TransactionControl
+        );
+    }
+
+    #[test]
+    fn rejects_non_transactional_ddl_batches() {
+        let statements = vec![
+            "ALTER TABLE users ADD COLUMN age int".to_string(),
+            "UPDATE users SET age = 1".to_string(),
+        ];
+
+        let err = reject_non_transactional_ddl("MYSQL_MARIADB", &statements)
+            .expect_err("DDL should be rejected");
+
+        assert!(err.contains("MYSQL_MARIADB_DDL_TRANSACTION_UNSUPPORTED"));
+    }
+}
+
+fn reject_non_transactional_ddl(engine: &str, statements: &[String]) -> Result<(), String> {
+    if statements
+        .iter()
+        .any(|stmt| classify_sql_statement(stmt) == SqlStatementKind::Ddl)
+    {
+        return Err(format!(
+            "{engine}_DDL_TRANSACTION_UNSUPPORTED: {engine} implicitly commits DDL, so schema edits cannot be safely rolled back in this batch. Run schema and data changes separately."
+        ));
+    }
+
+    Ok(())
+}
+
 async fn drain_sqlserver_query(
     client: &mut tiberius::Client<tokio_util::compat::Compat<tokio::net::TcpStream>>,
     sql: &str,
@@ -183,6 +260,8 @@ impl EngineConnection {
                     .map_err(|e| format!("POSTGRES_TX_COMMIT_FAILED: {e}"))
             }
             EngineConnection::MySql(my) => {
+                reject_non_transactional_ddl("MYSQL_MARIADB", &statements)?;
+
                 let mut conn = my
                     .pool
                     .get_conn()
@@ -253,6 +332,8 @@ impl EngineConnection {
                     .map_err(|e| format!("SQLSERVER_TX_COMMIT_FAILED: {e}"))
             }
             EngineConnection::Oracle(oracle) => {
+                reject_non_transactional_ddl("ORACLE", &statements)?;
+
                 let connect_string = oracle.connect_string.clone();
                 let user = oracle.user.clone();
                 let password = oracle.password.clone();
