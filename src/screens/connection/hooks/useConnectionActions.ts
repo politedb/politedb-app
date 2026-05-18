@@ -15,7 +15,11 @@ import {
 import { runRedisCommand } from "src/lib/tauri/redis";
 import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
-import { generateSqlFromPatches, type PatchMap } from "src/utils/generateSql";
+import {
+  analyzePatchIdentitySafety,
+  generateSqlFromPatches,
+  type PatchMap,
+} from "src/utils/generateSql";
 import { runSqlTransaction } from "src/utils/sqlTransaction";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
@@ -744,6 +748,20 @@ export function useConnectionActions(
       }
 
       const store = useConnectionStore.getState();
+      const safetyIssues = analyzePatchIdentitySafety(
+        patchMap,
+        engine ?? "postgres"
+      );
+      store.setVirtualKeySafety(activeProfileScreen, safetyIssues);
+
+      const blockingIssue = safetyIssues.find(
+        (issue) => issue.kind === "blocked"
+      );
+      if (blockingIssue) {
+        setError(blockingIssue.message);
+        return;
+      }
+
       const sql = generateSqlFromPatches(patchMap, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
         getRowAt: store.getRowAt,
@@ -777,6 +795,9 @@ export function useConnectionActions(
       });
 
       clearTablePatchChanges(activeProfileScreen);
+      useConnectionStore
+        .getState()
+        .clearVirtualKeySafety(activeProfileScreen);
 
       let shouldRefreshSchema = false;
       await Promise.all(

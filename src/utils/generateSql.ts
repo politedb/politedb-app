@@ -60,6 +60,107 @@ function isVirtualIdentityColumn(
   return !isUnsafeFallbackWhereColumn(dbType, engine);
 }
 
+export type VirtualKeySafetyIssue = {
+  tableKey: string;
+  schema: string;
+  tableName: string;
+  action: "update" | "delete";
+  rowKey: string;
+  kind: "virtual-key" | "blocked";
+  columns: string[];
+  message: string;
+};
+
+function virtualIdentityColumns(
+  columns: TableDataType["columns"],
+  engine: DatabaseEngine
+): string[] {
+  return columns
+    .filter((col) => isVirtualIdentityColumn(col.db_type, engine))
+    .map((col) => col.name)
+    .filter(Boolean);
+}
+
+function assertSafeRowIdentity(args: {
+  schema: string;
+  tableName: string;
+  columns: TableDataType["columns"];
+  constraints: TableConstraintType[] | null | undefined;
+  engine: DatabaseEngine;
+  action: "update" | "delete";
+  rowKey: string;
+}): string[] {
+  const primaryKeyColumns = getPrimaryKeyColumns(args.constraints);
+  if (primaryKeyColumns.length > 0) return primaryKeyColumns;
+
+  const virtualColumns = virtualIdentityColumns(args.columns, args.engine);
+  if (virtualColumns.length === 0) {
+    throw new Error(
+      `TABLE_EDIT_UNSAFE_IDENTITY: Cannot ${args.action} row ${args.rowKey} in ${args.schema}.${args.tableName} because the table has no primary key and no safe non-JSON/non-BLOB virtual key columns. Choose a primary key or virtual key before saving.`
+    );
+  }
+
+  return virtualColumns;
+}
+
+export function analyzePatchIdentitySafety(
+  patchMap: PatchMap,
+  engine: DatabaseEngine = "postgres"
+): VirtualKeySafetyIssue[] {
+  const issues: VirtualKeySafetyIssue[] = [];
+
+  for (const [_windowId, patchData] of Object.entries(patchMap)) {
+    const { tableData, tableWindow, patches } = patchData;
+    if (!tableData || !tableWindow || !patches) continue;
+
+    const columns = tableData.columns ?? [];
+    if (!columns.length) continue;
+
+    const primaryKeyColumns = getPrimaryKeyColumns(tableData.constraints);
+    if (primaryKeyColumns.length > 0) continue;
+
+    const { schema, name: tableName } = tableWindow.table;
+    const tableKey = `${schema}.${tableName}`;
+    const virtualColumns = virtualIdentityColumns(columns, engine);
+    const updateRows = Object.keys(patches.update?.data ?? {});
+    const deleteRows = Object.keys(patches.delete?.data ?? {});
+
+    for (const [action, rowKeys] of [
+      ["update", updateRows],
+      ["delete", deleteRows],
+    ] as const) {
+      for (const rowKey of rowKeys) {
+        if (virtualColumns.length === 0) {
+          issues.push({
+            tableKey,
+            schema,
+            tableName,
+            action,
+            rowKey,
+            kind: "blocked",
+            columns: [],
+            message: `Cannot ${action} row ${rowKey} in ${tableKey}: no primary key and no safe non-JSON/non-BLOB virtual key columns.`,
+          });
+          continue;
+        }
+
+        issues.push({
+          tableKey,
+          schema,
+          tableName,
+          action,
+          rowKey,
+          kind: "virtual-key",
+          columns: virtualColumns,
+          message: `${tableKey} has no primary key; ${action} row ${rowKey} will match by virtual key columns: ${virtualColumns.join(", ")}.`,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
 /**
  * Extract primary key column names from constraints
  */
@@ -117,6 +218,18 @@ export function generateUpdateSqlFromPatches(
   // Get primary key columns if available
   const primaryKeyColumns = getPrimaryKeyColumns(constraints);
   const usePrimaryKey = primaryKeyColumns.length > 0;
+
+  if (!usePrimaryKey) {
+    assertSafeRowIdentity({
+      schema,
+      tableName,
+      columns,
+      constraints,
+      engine,
+      action: "update",
+      rowKey: "*",
+    });
+  }
 
   // Process each row that has updates
   for (const [rowKey, patchData] of Object.entries(updatePatches)) {
@@ -800,6 +913,18 @@ export function generateDeleteSqlFromPatches(
   // Get primary key columns if available
   const primaryKeyColumns = getPrimaryKeyColumns(constraints);
   const usePrimaryKey = primaryKeyColumns.length > 0;
+
+  if (!usePrimaryKey) {
+    assertSafeRowIdentity({
+      schema,
+      tableName,
+      columns,
+      constraints,
+      engine,
+      action: "delete",
+      rowKey: "*",
+    });
+  }
 
   // Process each row to delete
   for (const [rowKey] of Object.entries(deletePatches)) {

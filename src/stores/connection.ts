@@ -11,7 +11,7 @@ import type {
   TableWindow,
 } from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
-import { PatchMap } from "src/utils/generateSql";
+import type { PatchMap, VirtualKeySafetyIssue } from "src/utils/generateSql";
 import { cellToString } from "src/utils/convert";
 import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 import { TableFilterCondition } from "src/hooks/queries";
@@ -257,6 +257,7 @@ export type ConnectionState = {
   tableStructure: Record<string, Record<string, TableStructure[]>>;
   tableConstraints: Record<string, Record<string, TableConstraint[]>>;
   dataPatchMap: Record<string, PatchMap>;
+  virtualKeySafetyByKey: Record<string, VirtualKeySafetyIssue[]>;
   newTableData: Record<string, Record<string, NewTableDataState>>;
   tableFilterByKey: Record<string, TableFilterState>;
 
@@ -336,6 +337,11 @@ export type ConnectionState = {
     rowKey: string
   ) => void;
   clearDataPatchMap: (tabId: string, tableWindowId?: string) => void;
+  setVirtualKeySafety: (
+    key: string,
+    issues: VirtualKeySafetyIssue[]
+  ) => void;
+  clearVirtualKeySafety: (key: string) => void;
 
   setNewTableData: (
     tabId: string,
@@ -446,6 +452,7 @@ export const useConnectionStore = create<ConnectionState>()(
       tableStructure: {},
       tableConstraints: {},
       dataPatchMap: {},
+      virtualKeySafetyByKey: {},
       newTableData: {},
 
       tableFilterByKey: {},
@@ -907,6 +914,21 @@ export const useConnectionStore = create<ConnectionState>()(
 
           const { [tabId]: _, ...rest } = s.dataPatchMap;
           return { dataPatchMap: rest };
+        }),
+
+      setVirtualKeySafety: (key, issues) =>
+        set((s) => ({
+          virtualKeySafetyByKey: {
+            ...s.virtualKeySafetyByKey,
+            [key]: issues,
+          },
+        })),
+
+      clearVirtualKeySafety: (key) =>
+        set((s) => {
+          if (!s.virtualKeySafetyByKey[key]) return s;
+          const { [key]: _, ...rest } = s.virtualKeySafetyByKey;
+          return { virtualKeySafetyByKey: rest };
         }),
 
       setNewTableData: (tabId, tableWindowId, data) =>

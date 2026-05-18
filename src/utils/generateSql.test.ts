@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  analyzePatchIdentitySafety,
   generateSqlFromPatches,
   generateSqlPlanFromPatches,
   generateUpdateSqlFromPatches,
@@ -312,28 +313,73 @@ describe("generateUpdateSqlFromPatches", () => {
   });
 
   it("blocks unsafe fallback updates when no primary key or safe virtual key exists", () => {
-    const sql = generateUpdateSqlFromPatches(
+    expect(() =>
+      generateUpdateSqlFromPatches(
+        {
+          update: {
+            data: {
+              "0": {
+                payload: { next: true },
+              },
+            },
+          },
+        },
+        "public",
+        "events",
+        {
+          columns: [{ name: "payload", db_type: "json" }],
+          rows: [[{ t: "Json", v: '{"a":1}' }]],
+          rowCount: 1,
+        },
+        [],
+        "mysql"
+      )
+    ).toThrow("TABLE_EDIT_UNSAFE_IDENTITY");
+  });
+
+  it("reports virtual key safety metadata for tables without primary keys", () => {
+    const issues = analyzePatchIdentitySafety(
       {
-        update: {
-          data: {
-            "0": {
-              payload: { next: true },
+        "table:public.events": {
+          tableWindow: {
+            id: "table:public.events",
+            type: "table",
+            table: { schema: "public", name: "events" },
+          },
+          tableData: {
+            columns: [
+              { name: "name", db_type: "text" },
+              { name: "payload", db_type: "json" },
+            ],
+            structure: null,
+            constraints: [],
+            foreignKeys: null,
+            sizeInfo: null,
+            rowCount: 1,
+            connectionId: null,
+            busy: false,
+            error: null,
+          },
+          patches: {
+            update: {
+              data: {
+                "0": {
+                  name: "new",
+                },
+              },
             },
           },
         },
       },
-      "public",
-      "events",
-      {
-        columns: [{ name: "payload", db_type: "json" }],
-        rows: [[{ t: "Json", v: '{"a":1}' }]],
-        rowCount: 1,
-      },
-      [],
       "mysql"
     );
 
-    expect(sql).toHaveLength(0);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      kind: "virtual-key",
+      columns: ["name"],
+      tableKey: "public.events",
+    });
   });
 });
 
