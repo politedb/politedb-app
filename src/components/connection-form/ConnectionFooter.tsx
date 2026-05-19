@@ -60,7 +60,7 @@ export function ConnectionFooter(props: {
   const statusNode = (() => {
     if (status.kind === "idle") {
       const msg = !requiredOk
-        ? requiredHint || "Required: Host, Port, Database, User."
+        ? requiredHint || "Required: Host, Port, User."
         : storeKeychain
           ? "Tip: In Keychain mode, Test may fail if password isn’t resolved."
           : "Ready";

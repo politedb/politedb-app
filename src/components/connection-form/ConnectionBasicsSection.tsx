@@ -63,11 +63,10 @@ export function ConnectionBasicsSection(
     name: "database",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo) return true;
         if (isSqlite) {
           return String(v ?? "").trim().length > 0 || "Database is required.";
         }
-        return String(v ?? "").trim().length > 0 || "Database is required.";
+        return true;
       },
     },
   });
@@ -108,11 +107,6 @@ export function ConnectionBasicsSection(
     onDirty?.();
   }
 
-  const passwordError =
-    !storeKeychain && errors?.password
-      ? String(errors.password.message || "Password is required.")
-      : undefined;
-
   // Keychain saved => password value empty AND user is not editing a new password
   const shouldShowMasked = useMemo(() => {
     const v = String(password.field.value ?? "");
@@ -150,9 +144,9 @@ export function ConnectionBasicsSection(
         <div class="text-xs text-slate-500">
           {isSqlite
             ? "SQLite file path"
-            : isRedis
-              ? "Host, Port, User"
-              : "Host, Port, User, Database"}
+            : isRedis || isMongo
+              ? "Host, Port"
+              : "Host, Port, User (database optional)"}
         </div>
       </div>
 
@@ -199,10 +193,20 @@ export function ConnectionBasicsSection(
         )}
 
         <Field
-          label={isSqlite ? "Database File Path" : isRedis ? "User" : "Database / User"}
+          label={
+            isSqlite
+              ? "Database File Path"
+              : isRedis
+                ? "User"
+                : "Database / User"
+          }
           alignTop
         >
-          <div class={isSqlite ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+          <div
+            class={
+              isSqlite ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"
+            }
+          >
             {!isRedis && (
               <Input
                 value={database.field.value}
@@ -235,124 +239,122 @@ export function ConnectionBasicsSection(
         {/* Password + Storage (merged) */}
         {!isSqlite && (
           <Field label="Password" alignTop>
-          <div class="space-y-2">
-            {/* Password row */}
-            {shouldShowMasked ? (
-              <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-semibold text-slate-700">
-                    ••••••••
-                  </span>
-                  <span class="text-xs text-slate-500">Saved in Keychain</span>
-                </div>
+            <div class="space-y-2">
+              {/* Password row */}
+              {shouldShowMasked ? (
+                <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold text-slate-700">
+                      ••••••••
+                    </span>
+                    <span class="text-xs text-slate-500">
+                      Saved in Keychain
+                    </span>
+                  </div>
 
-                <button
-                  type="button"
-                  class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                  title="Replace password"
-                  onClick={() => {
-                    setEditingPassword(true);
-                    setShowPassword(false);
-                    // keep password empty; user will type a new one
-                    dirty();
-                  }}
-                >
-                  Replace
-                </button>
-              </div>
-            ) : (
-              <div class="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={password.field.value}
-                  error={pwErr}
-                  placeholder={
-                    storeKeychain
-                      ? "Enter password (save in Keychain)"
-                      : "Enter password (not saved)"
-                  }
-                  onInput={(e: InputEvt) => {
-                    password.field.onChange(e.currentTarget.value);
-                    dirty();
-                  }}
-                  class="pr-12"
-                />
-
-                {showTogglePassword ? (
                   <button
                     type="button"
-                    onClick={() => setShowPassword((x) => !x)}
-                    class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                    title={showPassword ? "Hide" : "Show"}
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
-                ) : null}
-              </div>
-            )}
-
-            {/* Storage radio */}
-            <div
-              class={`flex flex-wrap items-center gap-4 rounded-xl border px-3 py-2 ${
-                storeKeychain
-                  ? "border-slate-200 bg-white"
-                  : "border-slate-200 bg-white"
-              }`}
-            >
-              <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
-                <input
-                  type="radio"
-                  name="password-storage"
-                  checked={!!storeKeychain}
-                  onChange={() => {
-                    storeKeychainCtl.field.onChange(true);
-                    // if switching to keychain, user might keep password empty to mean "keep existing"
-                    dirty();
-                  }}
-                />
-                Save in Keychain
-              </label>
-
-              <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
-                <input
-                  type="radio"
-                  name="password-storage"
-                  checked={!storeKeychain}
-                  onChange={() => {
-                    storeKeychainCtl.field.onChange(false);
-
-                    // If they turn off keychain while we were masked, force editing mode
-                    // because we now need an inline password to test/connect.
-                    if (shouldShowMasked) {
+                    class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                    title="Replace password"
+                    onClick={() => {
                       setEditingPassword(true);
                       setShowPassword(false);
+                      // keep password empty; user will type a new one
+                      dirty();
+                    }}
+                  >
+                    Replace
+                  </button>
+                </div>
+              ) : (
+                <div class="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={password.field.value}
+                    error={pwErr}
+                    placeholder={
+                      storeKeychain
+                        ? "Enter password (save in Keychain)"
+                        : "Enter password (not saved)"
                     }
+                    onInput={(e: InputEvt) => {
+                      password.field.onChange(e.currentTarget.value);
+                      dirty();
+                    }}
+                    class="pr-12"
+                  />
 
-                    dirty();
-                  }}
-                />
-                Do not save
-              </label>
+                  {showTogglePassword ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((x) => !x)}
+                      class="absolute top-1/2 right-2 -translate-y-1/2 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      title={showPassword ? "Hide" : "Show"}
+                    >
+                      {showPassword ? "Hide" : "Show"}
+                    </button>
+                  ) : null}
+                </div>
+              )}
 
-              <div class="w-full text-xs leading-snug text-slate-500">
-                {storeKeychain ? (
-                  <>
-                    Stored securely in OS keychain. You can leave password empty
-                    to keep the existing one.
-                  </>
-                ) : (
-                  <>
-                    Password is used for this session only and will not be
-                    saved.
-                  </>
-                )}
+              {/* Storage radio */}
+              <div
+                class={`flex flex-wrap items-center gap-4 rounded-xl border px-3 py-2 ${
+                  storeKeychain
+                    ? "border-slate-200 bg-white"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
+                  <input
+                    type="radio"
+                    name="password-storage"
+                    checked={!!storeKeychain}
+                    onChange={() => {
+                      storeKeychainCtl.field.onChange(true);
+                      // if switching to keychain, user might keep password empty to mean "keep existing"
+                      dirty();
+                    }}
+                  />
+                  Save in Keychain
+                </label>
+
+                <label class="flex items-center gap-2 text-sm text-slate-700 hover:text-slate-700/80">
+                  <input
+                    type="radio"
+                    name="password-storage"
+                    checked={!storeKeychain}
+                    onChange={() => {
+                      storeKeychainCtl.field.onChange(false);
+
+                      // If they turn off keychain while we were masked, force editing mode
+                      // because we now need an inline password to test/connect.
+                      if (shouldShowMasked) {
+                        setEditingPassword(true);
+                        setShowPassword(false);
+                      }
+
+                      dirty();
+                    }}
+                  />
+                  Do not save
+                </label>
+
+                <div class="w-full text-xs leading-snug text-slate-500">
+                  {storeKeychain ? (
+                    <>
+                      Stored securely in OS keychain. You can leave password
+                      empty to keep the existing one.
+                    </>
+                  ) : (
+                    <>
+                      Password is used for this session only and will not be
+                      saved.
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-
-            {!storeKeychain && passwordError ? (
-              <div class="text-xs text-rose-600">{passwordError}</div>
-            ) : null}
-          </div>
           </Field>
         )}
 

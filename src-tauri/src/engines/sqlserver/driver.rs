@@ -93,7 +93,8 @@ async fn make_client(
     let mut config = tiberius::Config::new();
     config.host(input.host.trim());
     config.port(input.port);
-    config.database(input.database.trim());
+    let db = input.database.trim();
+    config.database(if db.is_empty() { "master" } else { db });
     config.authentication(tiberius::AuthMethod::sql_server(
         input.user.trim(),
         password,
@@ -137,7 +138,14 @@ pub async fn connect_sqlserver(
         label,
         host: input.host.trim().to_string(),
         port: input.port,
-        database: input.database.trim().to_string(),
+        database: {
+            let db = input.database.trim();
+            if db.is_empty() {
+                "master".to_string()
+            } else {
+                db.to_string()
+            }
+        },
         user: input.user.trim().to_string(),
         password,
         encrypt: input.encrypt.unwrap_or(false),
@@ -159,9 +167,6 @@ pub async fn test_sqlserver_direct(input: SqlServerConnectInput, password: Strin
 fn validate_input(input: &SqlServerConnectInput) -> Result<(), String> {
     if input.host.trim().is_empty() {
         return Err("SQLSERVER_HOST_REQUIRED".into());
-    }
-    if input.database.trim().is_empty() {
-        return Err("SQLSERVER_DATABASE_REQUIRED".into());
     }
     if input.user.trim().is_empty() {
         return Err("SQLSERVER_USER_REQUIRED".into());

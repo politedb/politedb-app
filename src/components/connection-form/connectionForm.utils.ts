@@ -186,7 +186,7 @@ function buildPostgresInput(v: FormValues): ConnectionCreateInput {
   const postgres: ConnectionCreateInput["postgres"] = {
     host: v.host,
     port,
-    database: v.database,
+    database: String(v.database ?? "").trim(),
     user: v.user,
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
@@ -218,7 +218,7 @@ function buildMySqlInput(
   const mysql: ConnectionCreateInput["mysql"] = {
     host: v.host,
     port,
-    database: v.database,
+    database: String(v.database ?? "").trim(),
     user: v.user,
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
@@ -243,7 +243,7 @@ function buildSqlServerInput(v: FormValues): ConnectionCreateInput {
   const sqlserver: ConnectionCreateInput["sqlserver"] = {
     host: v.host,
     port,
-    database: v.database,
+    database: String(v.database ?? "").trim(),
     user: v.user,
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
@@ -317,7 +317,7 @@ function buildOracleInput(v: FormValues): ConnectionCreateInput {
   const oracle: ConnectionCreateInput["oracle"] = {
     host: v.host,
     port,
-    database: v.database,
+    database: v.database?.trim() ?? "",
     user: v.user,
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
@@ -432,11 +432,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     pickByEngine(engine, {
       postgres: pg?.database,
       mysql: my?.database,
-      sqlserver: ss?.database ?? "master",
+      sqlserver: ss?.database,
       sqlite: sqlite?.path,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
-    }) || (engine === "mongo" || engine === "sqlite" ? "" : "root");
+    }) ?? (engine === "mongo" || engine === "sqlite" ? "" : "");
 
   const password =
     engine === "postgres"

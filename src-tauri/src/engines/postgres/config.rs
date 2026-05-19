@@ -16,7 +16,8 @@ pub fn build_pg_config(input: &PgConnectInput, password: &str) -> anyhow::Result
     cfg.port(input.port as u16);
     cfg.user(&input.user);
     cfg.password(password);
-    cfg.dbname(&input.database);
+    let db = input.database.trim();
+    cfg.dbname(if db.is_empty() { "postgres" } else { db });
 
     // ---------------------------------------------------------------------
     // Optional: connect timeout

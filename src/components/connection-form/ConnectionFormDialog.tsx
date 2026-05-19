@@ -90,7 +90,7 @@ export function ConnectionFormDialog({
       return hostOk;
     }
 
-    return hostOk && !!user && !!database;
+    return hostOk && !!user;
   }, [v]);
 
   const onTest = handleSubmit(async (v) => {
@@ -209,7 +209,9 @@ export function ConnectionFormDialog({
         updateTab(reuseTabId, tabPatch);
         setActiveProfileScreen(reuseTabId);
         connectedTab =
-          useScreenStore.getState().profileTabs.find((t) => t.id === reuseTabId) ??
+          useScreenStore
+            .getState()
+            .profileTabs.find((t) => t.id === reuseTabId) ??
           ({ id: reuseTabId, ...tabPatch } as ProfileTab);
       } else {
         connectedTab = {
@@ -221,8 +223,9 @@ export function ConnectionFormDialog({
         setActiveProfileScreen(connectedTab.id);
       }
 
-      void import("src/stores/connectionLog").then(({ recordConnectionSessionOpened }) =>
-        recordConnectionSessionOpened(connectedTab)
+      void import("src/stores/connectionLog").then(
+        ({ recordConnectionSessionOpened }) =>
+          recordConnectionSessionOpened(connectedTab)
       );
 
       onSaved?.(res.profile);
@@ -298,7 +301,9 @@ export function ConnectionFormDialog({
           requiredHint={
             v.engine === "sqlite"
               ? "Required: Database file path."
-              : "Required: Host, Port, Database, User."
+              : v.engine === "redis" || v.engine === "mongo"
+                ? "Required: Host, Port."
+                : "Required: Host, Port, User."
           }
           onTest={onTest}
           onSave={onSave}

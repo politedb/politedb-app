@@ -365,7 +365,7 @@ export function LeftNav({
                           "w-full justify-start",
                           "rounded-md px-2.5 py-1.5",
                           "gap-2",
-                          "text-left text-sm",
+                          "text-left text-sm font-medium",
                           "overflow-hidden text-ellipsis select-none",
                           "transition-none",
                           !isActive &&

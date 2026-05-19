@@ -152,17 +152,6 @@ export function SSHSection(props: SectionProps) {
                   }}
                 />
               </div>
-
-              {hostErr ? (
-                <div class="text-xs font-medium text-rose-600">
-                  {_attach(hostErr)}
-                </div>
-              ) : null}
-              {!hostErr && portErr ? (
-                <div class="text-xs font-medium text-rose-600">
-                  {_attach(portErr)}
-                </div>
-              ) : null}
             </div>
           </Field>
 
@@ -178,11 +167,6 @@ export function SSHSection(props: SectionProps) {
                   dirty();
                 }}
               />
-              {userErr ? (
-                <div class="text-xs font-medium text-rose-600">
-                  {_attach(userErr)}
-                </div>
-              ) : null}
             </div>
           </Field>
 
@@ -247,18 +231,6 @@ export function SSHSection(props: SectionProps) {
               {authErr ? (
                 <div class="text-xs font-medium text-rose-600">
                   {_attach(authErr)}
-                </div>
-              ) : null}
-
-              {isKeyAuth && keyErr ? (
-                <div class="text-xs font-medium text-rose-600">
-                  {_attach(keyErr)}
-                </div>
-              ) : null}
-
-              {isPasswordAuth && pwErr ? (
-                <div class="text-xs font-medium text-rose-600">
-                  {_attach(pwErr)}
                 </div>
               ) : null}
             </div>

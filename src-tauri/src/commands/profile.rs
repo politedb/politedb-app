@@ -104,9 +104,6 @@ fn validate_pg_input(pg: &PgConnectInput) -> Result<(), String> {
     if pg.host.trim().is_empty() {
         return Err("PG_HOST_REQUIRED".into());
     }
-    if pg.database.trim().is_empty() {
-        return Err("PG_DATABASE_REQUIRED".into());
-    }
     if pg.user.trim().is_empty() {
         return Err("PG_USER_REQUIRED".into());
     }
@@ -121,9 +118,6 @@ fn validate_pg_input(pg: &PgConnectInput) -> Result<(), String> {
 fn validate_mysql_input(my: &MySqlConnectInput) -> Result<(), String> {
     if my.host.trim().is_empty() {
         return Err("MYSQL_HOST_REQUIRED".into());
-    }
-    if my.database.trim().is_empty() {
-        return Err("MYSQL_DATABASE_REQUIRED".into());
     }
     if my.user.trim().is_empty() {
         return Err("MYSQL_USER_REQUIRED".into());
@@ -168,9 +162,6 @@ fn validate_sqlserver_input(ss: &SqlServerConnectInput) -> Result<(), String> {
     if ss.host.trim().is_empty() {
         return Err("SQLSERVER_HOST_REQUIRED".into());
     }
-    if ss.database.trim().is_empty() {
-        return Err("SQLSERVER_DATABASE_REQUIRED".into());
-    }
     if ss.user.trim().is_empty() {
         return Err("SQLSERVER_USER_REQUIRED".into());
     }
@@ -183,9 +174,6 @@ fn validate_sqlserver_input(ss: &SqlServerConnectInput) -> Result<(), String> {
 fn validate_oracle_input(oc: &OracleConnectInput) -> Result<(), String> {
     if oc.host.trim().is_empty() {
         return Err("ORACLE_HOST_REQUIRED".into());
-    }
-    if oc.database.trim().is_empty() {
-        return Err("ORACLE_DATABASE_REQUIRED".into());
     }
     if oc.user.trim().is_empty() {
         return Err("ORACLE_USER_REQUIRED".into());

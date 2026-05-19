@@ -107,9 +107,6 @@ pub async fn connect_oracle(
     if input.host.trim().is_empty() {
         return Err("ORACLE_HOST_REQUIRED".into());
     }
-    if input.database.trim().is_empty() {
-        return Err("ORACLE_DATABASE_REQUIRED".into());
-    }
     if input.user.trim().is_empty() {
         return Err("ORACLE_USER_REQUIRED".into());
     }
@@ -151,9 +148,6 @@ pub async fn test_oracle_direct(input: OracleConnectInput, password: String) -> 
 
     if input.host.trim().is_empty() {
         return Err("ORACLE_HOST_REQUIRED".into());
-    }
-    if input.database.trim().is_empty() {
-        return Err("ORACLE_DATABASE_REQUIRED".into());
     }
     if input.user.trim().is_empty() {
         return Err("ORACLE_USER_REQUIRED".into());
