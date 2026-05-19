@@ -84,6 +84,8 @@ const EMPTY_SET = new Set<number>();
 const loadedQuerySignatureByTable = new Map<string, string>();
 const loadedRowCountSignatureByTable = new Map<string, string>();
 const loadedRowsDataSignatureByTable = new Map<string, string>();
+/** User-dismissed execution errors survive pane remounts (e.g. toggling query history). */
+const dismissedTableErrorByKey = new Map<string, string>();
 
 function extractPatches(patches: WindowPatches | null) {
   if (!patches) return null;
@@ -343,31 +345,6 @@ export function MainTableDataPane(props: {
     filterApplySeq,
   ]);
 
-  const dismissTableError = useCallback(() => {
-    const store = useConnectionStore.getState();
-    const tm = store.tableDataMap[activeKey];
-    if (tm?.error) {
-      store.addTableDataMap(activeKey, { ...tm, error: null });
-    }
-    const rows = store.tableRowsByKey[activeKey];
-    if (rows?.error) {
-      useConnectionStore.setState({
-        tableRowsByKey: {
-          ...store.tableRowsByKey,
-          [activeKey]: { ...rows, error: null },
-        },
-      });
-    }
-    startedRef.current = null;
-  }, [activeKey]);
-
-  const retryTableLoad = useCallback(() => {
-    dismissTableError();
-    loadedQuerySignatureByTable.delete(activeKey);
-    startedRef.current = null;
-    void handleLoadRows();
-  }, [activeKey, dismissTableError, handleLoadRows]);
-
   useEffect(() => {
     if (!activeKey) return;
 
@@ -427,10 +404,14 @@ export function MainTableDataPane(props: {
   const errorText = String(meta.error || rowsInfo?.error || "");
 
   useEffect(() => {
-    if (hasError) {
-      setErrorDialogOpen(true);
+    if (!hasError) {
+      dismissedTableErrorByKey.delete(activeKey);
+      setErrorDialogOpen(false);
+      return;
     }
-  }, [hasError]);
+    if (dismissedTableErrorByKey.get(activeKey) === errorText) return;
+    setErrorDialogOpen(true);
+  }, [hasError, errorText, activeKey]);
 
   // Lazy-load structure/constraints when switching to Structure view.
   useEffect(() => {
@@ -1382,8 +1363,12 @@ export function MainTableDataPane(props: {
           variant="execution"
           backdropClassName="bg-transparent"
           error={errorText}
-          onClose={() => setErrorDialogOpen(false)}
-          onRetry={retryTableLoad}
+          onClose={() => {
+            setErrorDialogOpen(false);
+            if (hasError) {
+              dismissedTableErrorByKey.set(activeKey, errorText);
+            }
+          }}
         />
       )}
     </div>

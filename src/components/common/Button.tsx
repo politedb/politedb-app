@@ -20,7 +20,8 @@ interface ButtonProps extends React.ComponentProps<"button"> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  default: "bg-blue-700 text-white hover:bg-blue-700/90 active:bg-blue-800",
+  default:
+    "bg-blue-700 text-white hover:bg-blue-700/90 active:bg-blue-800 font-bold",
   shadow: "shadow-sm hover:bg-neutral-100",
   primary:
     "bg-neutral-800/50 text-neutral-50 hover:bg-neutral-700 hover:text-white",
