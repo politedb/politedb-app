@@ -35,12 +35,13 @@ export type AmbiguousPromptReply = {
   followup?: string;
 };
 
-export type ReplyLanguage = "english";
+export type { ReplyLanguageInfo } from "./language";
 
 export type AiIntentDecision = {
   kind: "chat" | "metadata" | "sql" | "clarify";
-  questionLanguage: "english" | "vietnamese" | "unknown";
-  replyLanguage: ReplyLanguage;
+  /** ISO 639-3 code, or "unknown". */
+  questionLanguage: string;
+  replyLanguage: import("./language").ReplyLanguageInfo;
   clarification?: string;
 };
 
@@ -50,6 +51,8 @@ export type GenerateOptions = {
   prompt: string;
   maxTokens?: number;
   onStatusChange?: (status: "loading_model" | "generating") => void;
+  /** Called with the full accumulated text as new tokens arrive. */
+  onDelta?: (text: string) => void;
   signal?: AbortSignal;
 };
 

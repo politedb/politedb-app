@@ -4,10 +4,25 @@ import { CopyIcon, CopyCheck } from "src/components/icons";
 import type { ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 
+type AssistantStreamStatus = "loading_model" | "thinking";
+
 type Props = {
   message: ChatMessage;
+  streamStatus?: AssistantStreamStatus;
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
+
+function AssistantStreamingPlaceholder() {
+  return (
+    <div class="space-y-3" aria-busy="true" aria-live="polite">
+      <div class="flex items-center gap-2 text-xs text-neutral-700">
+        <span class="gradient-to-r animate-pulse from-neutral-300 to-neutral-600 font-medium">
+          Thinking...
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function formatMessageTime(value?: number) {
   if (!value) return "";
@@ -53,9 +68,12 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
   const [copied, setCopied] = useState(false);
   const previewColumns = getPreviewColumns(message.resultPreview);
   const messageTime = formatMessageTime(message.createdAt);
-  const durationText = message.role === "assistant"
-    ? formatDuration(message.durationMs)
-    : "";
+  const durationText =
+    message.role === "assistant" && !message.streaming
+      ? formatDuration(message.durationMs)
+      : "";
+  const isStreamingEmpty =
+    message.streaming && message.role === "assistant" && !message.text.trim();
 
   const handleCopySql = async () => {
     if (!message.sql) return;
@@ -75,7 +93,7 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
       <div class="mb-1 flex items-center justify-between gap-2 text-xs font-bold tracking-wide text-neutral-500 uppercase">
         <span>{message.role === "user" ? "You" : "PoliteDB AI"}</span>
         {messageTime ? (
-          <span class="text-[10px] font-medium tracking-normal normal-case text-neutral-400">
+          <span class="text-[10px] font-medium tracking-normal text-neutral-400 normal-case">
             {messageTime}
           </span>
         ) : null}
@@ -86,9 +104,13 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
         </div>
       ) : null}
 
-      <div class="text-sm wrap-break-word whitespace-pre-wrap text-neutral-800">
-        {message.text}
-      </div>
+      {isStreamingEmpty ? (
+        <AssistantStreamingPlaceholder />
+      ) : (
+        <div class="text-sm wrap-break-word whitespace-pre-wrap text-neutral-800">
+          {message.text}
+        </div>
+      )}
 
       {message.clarification ? (
         <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">

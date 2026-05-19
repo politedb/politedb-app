@@ -3,7 +3,9 @@ import type { TableItem } from "src/types";
 import {
   getDirectMetadataReply,
   getFastSqlReply,
+  looksLikeMetadataQuestion,
   wantsSqlGeneration,
+  wantsTableData,
 } from "./index";
 
 const sampleTables: TableItem[] = [
@@ -15,14 +17,25 @@ const sampleTables: TableItem[] = [
 
 describe("wantsSqlGeneration", () => {
   it("detects truncate SQL requests", () => {
-    expect(
-      wantsSqlGeneration("give me sql to truncate table licenses")
-    ).toBe(true);
+    expect(wantsSqlGeneration("give me sql to truncate table licenses")).toBe(
+      true
+    );
   });
 
   it("does not treat plain table listing as SQL generation", () => {
     expect(wantsSqlGeneration("show me all tables")).toBe(false);
     expect(wantsSqlGeneration("list tables")).toBe(false);
+  });
+
+  it("treats show table data requests as SQL", () => {
+    expect(wantsTableData("show data licenses table")).toBe(true);
+    expect(wantsSqlGeneration("show data licenses table")).toBe(true);
+    expect(looksLikeMetadataQuestion("show data licenses table")).toBe(false);
+  });
+
+  it("does not treat list-table-name as metadata listing", () => {
+    expect(looksLikeMetadataQuestion("list users")).toBe(false);
+    expect(looksLikeMetadataQuestion("list tables")).toBe(true);
   });
 });
 
@@ -51,6 +64,17 @@ describe("getDirectMetadataReply", () => {
 });
 
 describe("getFastSqlReply", () => {
+  it("returns SELECT for show data table requests", () => {
+    const reply = getFastSqlReply({
+      engine: "postgres",
+      question: "show data licenses table",
+      activeSchema: "public",
+      tables: sampleTables,
+    });
+
+    expect(reply?.sql).toBe("SELECT * FROM public.licenses LIMIT 50;");
+  });
+
   it("returns TRUNCATE SQL for truncate table requests", () => {
     const reply = getFastSqlReply({
       engine: "postgres",

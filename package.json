@@ -24,6 +24,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "clsx": "^2.1.1",
+    "franc": "^6.2.0",
     "monaco-editor": "^0.53.0",
     "papaparse": "^5.5.3",
     "path": "^0.12.7",

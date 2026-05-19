@@ -9,11 +9,22 @@ import {
   MODEL_LOADING_RETRY_MS,
 } from "src/utils/assistant";
 import {
+  buildChatReplyPlainPrompt,
   buildChatReplyPrompt,
   buildIntentClassifierPrompt,
+  buildResultAnswerPlainPrompt,
   buildResultAnswerPrompt,
   buildSqlPlanPrompt,
 } from "@root/src/lib/ai-assistant/prompts";
+import {
+  detectQuestionLanguageCode,
+  formatReplyLanguageForPrompt,
+  parseExplicitLanguageRequest,
+  resolveReplyLanguage,
+  supportsLocalizedFastPath,
+  toReplyLanguageInfo,
+  type ReplyLanguageInfo,
+} from "@root/src/lib/ai-assistant/language";
 import type {
   AiAnswer,
   AiChatReply,
@@ -24,8 +35,29 @@ import type {
   DirectMetadataReply,
   GenerateOptions,
   LocalAiSettings,
-  ReplyLanguage,
 } from "@root/src/lib/ai-assistant/types";
+
+export {
+  detectLanguageFromText,
+  detectQuestionLanguageCode,
+  formatReplyLanguageForPrompt,
+  languageNameFromCode,
+  parseExplicitLanguageRequest,
+  resolveReplyLanguage,
+  supportsLocalizedFastPath,
+  toReplyLanguageInfo,
+  type ReplyLanguageInfo,
+} from "@root/src/lib/ai-assistant/language";
+
+export {
+  extractTablesFromSql,
+  formatSqlExecutionError,
+  formatSqlValidationIssues,
+  parseDatabaseExecutionError,
+  validateSqlAgainstMetadata,
+  type SqlMetadataIssue,
+  type SqlMetadataValidation,
+} from "@root/src/lib/ai-assistant/sqlMetadata";
 
 function safeGetLocalStorage(key: string) {
   try {
@@ -172,9 +204,72 @@ async function generateJson<T>(opts: GenerateOptions): Promise<T> {
   return extractJsonObject(content) as T;
 }
 
+function extractStreamingJsonStringField(buffer: string, field: string) {
+  const pattern = new RegExp(
+    `"${field}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)(?:")?`,
+    "s"
+  );
+  const match = pattern.exec(buffer);
+  if (!match?.[1]) return "";
+  try {
+    return JSON.parse(`"${match[1]}"`);
+  } catch {
+    return match[1]
+      .replace(/\\n/g, "\n")
+      .replace(/\\t/g, "\t")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
+  }
+}
+
+async function readStreamingCompletion(
+  res: Response,
+  onDelta?: (text: string) => void
+) {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    throw new Error("OLLAMA_GENERATE_FAILED: empty streaming response body");
+  }
+
+  const decoder = new TextDecoder();
+  let accumulated = "";
+  let sseBuffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    sseBuffer += decoder.decode(value, { stream: true });
+    const lines = sseBuffer.split("\n");
+    sseBuffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+
+      try {
+        const parsed = JSON.parse(payload);
+        const delta = String(parsed?.choices?.[0]?.delta?.content ?? "");
+        if (!delta) continue;
+        accumulated += delta;
+        onDelta?.(accumulated);
+      } catch {
+        // ignore malformed SSE chunks
+      }
+    }
+  }
+
+  return accumulated.trim();
+}
+
 async function generateText(opts: GenerateOptions): Promise<string> {
   const endpoint = trimTrailingSlash(opts.endpoint.trim());
   const maxTokens = Math.max(32, Math.min(opts.maxTokens ?? 256, 1024));
+  const useStream = Boolean(opts.onDelta);
+
   for (let attempt = 0; attempt <= MODEL_LOADING_MAX_RETRIES; attempt++) {
     throwIfAborted(opts.signal);
     opts.onStatusChange?.("generating");
@@ -183,7 +278,7 @@ async function generateText(opts: GenerateOptions): Promise<string> {
       signal: opts.signal,
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json",
+        Accept: useStream ? "text/event-stream" : "application/json",
       },
       body: JSON.stringify({
         model: opts.model.trim(),
@@ -195,13 +290,18 @@ async function generateText(opts: GenerateOptions): Promise<string> {
         ],
         temperature: 0.1,
         max_tokens: maxTokens,
-        stream: false,
+        stream: useStream,
       }),
     });
 
     if (res.ok) {
+      if (useStream) {
+        return await readStreamingCompletion(res, opts.onDelta);
+      }
       const data = await res.json();
-      return String(data?.choices?.[0]?.message?.content ?? "").trim();
+      const content = String(data?.choices?.[0]?.message?.content ?? "").trim();
+      opts.onDelta?.(content);
+      return content;
     }
 
     const bodyText = await res.text().catch(() => "");
@@ -309,55 +409,26 @@ function toConversationLines(history: AiHistoryItem[] = [], limit = 6) {
     .join("\n\n");
 }
 
-function detectReplyLanguage(text: string): "english" | "vietnamese" | null {
-  const raw = String(text ?? "").trim();
-  const normalized = normalizeIntentText(text);
-  if (!raw || !normalized) return null;
-
-  if (
-    /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(
-      raw
-    ) ||
-    /\b(xin chao|chao|toi|cho toi|giup toi|lay|liet ke|hien thi|dem|du lieu|bang|cot|truy van|schema|co so du lieu)\b/.test(
-      normalized
-    )
-  ) {
-    return "vietnamese";
-  }
-
-  if (
-    /\b(use|speak|answer|reply|respond)( in)? english\b/.test(normalized) ||
-    /\benglish please\b/.test(normalized) ||
-    /\btieng anh\b/.test(normalized)
-  ) {
-    return "english";
-  }
-
-  if (
-    /\b(use|speak|answer|reply|respond)( in)? vietnamese\b/.test(normalized) ||
-    /\btieng viet\b/.test(normalized)
-  ) {
-    return "vietnamese";
-  }
-
-  return null;
-}
-
 function getPreferredReplyLanguage(
-  _question: string,
-  _history: AiHistoryItem[] = []
-): ReplyLanguage {
-  return "english";
+  question: string,
+  history: AiHistoryItem[] = []
+): ReplyLanguageInfo {
+  return resolveReplyLanguage(question, history);
 }
 
-function detectQuestionLanguage(
-  text: string
-): "english" | "vietnamese" | "unknown" {
-  const detected = detectReplyLanguage(text);
-  if (detected === "english" || detected === "vietnamese") {
-    return detected;
-  }
-  return "unknown";
+function normalizeIntentLanguageField(
+  value: unknown,
+  fallback: ReplyLanguageInfo
+): ReplyLanguageInfo {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return fallback;
+  if (raw === "unknown" || raw === "und") return fallback;
+  if (raw === "english" || raw === "en") return toReplyLanguageInfo("eng");
+  if (raw === "vietnamese" || raw === "vi") return toReplyLanguageInfo("vie");
+  if (/^[a-z]{3}$/.test(raw)) return toReplyLanguageInfo(raw);
+  return fallback;
 }
 
 function hasDatabaseIntent(text: string) {
@@ -371,8 +442,70 @@ function hasDatabaseIntent(text: string) {
   ].some((pattern) => pattern.test(normalized));
 }
 
+/** True when the user wants row data from a table, not a schema listing. */
+export function wantsTableData(question: string) {
+  const text = normalizeIntentText(question);
+  if (!text) return false;
+
+  if (
+    /\b(show|display|view|see|get|fetch|read|print|preview|hien thi|xem|lay|cho xem)\s+(?:me\s+)?(?:the\s+)?(?:all\s+)?(?:data|rows|records|du lieu|ban ghi)\b/.test(
+      text
+    ) ||
+    /\b(data|rows|records|du lieu|ban ghi)\s+(?:from|in|of|tu|cua|trong)\s+\w+/.test(
+      text
+    ) ||
+    /\b(show|display|hien thi|xem)\s+.+\s+(?:data|rows|records|du lieu)\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /\b(list|liet ke)\s+(?:all\s+)?tables?\b/.test(text) ||
+    /\bwhat\s+tables?\b/.test(text) ||
+    /\b(tat ca|toan bo|all)\s+tables?\b/.test(text)
+  ) {
+    return false;
+  }
+
+  if (
+    /\b(list|liet ke|show|display|hien thi|xem)\s+(?!all\b|tables?\b|schemas?\b|databases?\b)[a-z0-9_]+\b/.test(
+      text
+    )
+  ) {
+    return true;
+  }
+
+  return /\b(show|display|view|see|get|hien thi|xem)\s+\w+\s+(?:table|bang)\b/.test(
+    text
+  );
+}
+
+function extractTableNameFromDataRequest(text: string) {
+  const patterns = [
+    /\bshow\s+data\s+([a-z0-9_]+)(?:\s+table)?\b/,
+    /\b(?:display|view|get|fetch|hien thi|xem|lay)\s+(?:du lieu|ban ghi|data|rows|records)\s+(?:bang\s+|table\s+)?([a-z0-9_]+)\b/,
+    /\b(?:show|display|view|get|fetch|hien thi|xem|lay)\s+(?:me\s+)?(?:the\s+)?(?:all\s+)?(?:data|rows|records|du lieu|ban ghi)\s+(?:(?:from|in|of|tu|cua|trong)\s+)?(?:(?:the\s+)?(?:table|bang)\s+)?([a-z0-9_]+)\b/,
+    /\b(?:data|rows|records|du lieu|ban ghi)\s+(?:from|in|of|tu|cua|trong)\s+(?:(?:the\s+)?(?:table|bang)\s+)?([a-z0-9_]+)\b/,
+    /\b(?:show|display|hien thi|xem)\s+([a-z0-9_]+)\s+(?:table|bang)\b/,
+  ];
+
+  const skip = new Set(["table", "tables", "data", "rows", "records", "bang", "du", "lieu"]);
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const name = match?.[1]?.toLowerCase();
+    if (name && !skip.has(name)) return name;
+  }
+
+  return null;
+}
+
 /** True when the user wants generated SQL, not a schema/table listing. */
 export function wantsSqlGeneration(question: string) {
+  if (wantsTableData(question)) return true;
+
   const text = normalizeIntentText(question);
   if (!text) return false;
 
@@ -418,6 +551,19 @@ export function getAmbiguousPromptReply(args: {
     !isGeneralChatPrompt(raw);
 
   if (!obviouslyVague && !tooShortWithoutIntent) {
+    return null;
+  }
+
+  const lang = resolveReplyLanguage(args.question, args.history);
+  if (lang.code === "vie") {
+    return {
+      answer: "Tôi chưa chắc bạn muốn làm gì với dữ liệu.",
+      followup:
+        "Hãy mô tả rõ hơn, ví dụ: hiển thị 10 dòng mới nhất, đếm bản ghi, lọc theo điều kiện, hoặc giải thích một câu SQL cụ thể.",
+    };
+  }
+
+  if (!supportsLocalizedFastPath(lang)) {
     return null;
   }
 
@@ -471,13 +617,26 @@ export async function classifyAssistantIntent(args: {
       ? raw.kind
       : "clarify";
 
-  const questionLanguage =
-    raw?.questionLanguage === "english" ||
-    raw?.questionLanguage === "vietnamese" ||
-    raw?.questionLanguage === "unknown"
-      ? raw.questionLanguage
-      : detectQuestionLanguage(args.question);
-  const replyLanguage = "english";
+  const detectedReplyLanguage = resolveReplyLanguage(
+    args.question,
+    args.history
+  );
+  const questionLanguage = String(raw?.questionLanguage ?? "").trim()
+    ? normalizeIntentLanguageField(
+        raw?.questionLanguage,
+        toReplyLanguageInfo(
+          detectQuestionLanguageCode(args.question) === "unknown"
+            ? detectedReplyLanguage.code
+            : detectQuestionLanguageCode(args.question)
+        )
+      ).code
+    : detectQuestionLanguageCode(args.question);
+  const replyLanguage = normalizeIntentLanguageField(
+    raw?.replyLanguage,
+    questionLanguage !== "unknown"
+      ? toReplyLanguageInfo(questionLanguage)
+      : detectedReplyLanguage
+  );
 
   return {
     kind,
@@ -515,9 +674,33 @@ export function getFastSqlReply(args: {
   activeSchema?: string;
   tables: TableItem[];
 }): { sql: string; explanation: string } | null {
-  if (!wantsSqlGeneration(args.question)) return null;
-
   const text = normalizeIntentText(args.question);
+  const lang = resolveReplyLanguage(args.question);
+  const vi = lang.code === "vie";
+
+  if (wantsTableData(args.question)) {
+    const tableName = extractTableNameFromDataRequest(text);
+    if (tableName) {
+      const table = findTableInContext(args.tables, tableName, args.activeSchema);
+      const schema = table?.schema ?? args.activeSchema ?? "public";
+      const name = table?.name ?? tableName;
+      const qualified = `${quoteIdentifier(args.engine, schema)}.${quoteIdentifier(args.engine, name)}`;
+
+      return {
+        sql: `SELECT * FROM ${qualified} LIMIT 50;`,
+        explanation: vi
+          ? table
+            ? `Hiển thị tối đa 50 dòng từ bảng ${schema}.${name}.`
+            : `Gợi ý truy vấn dữ liệu cho bảng ${schema}.${name}. Hãy xác nhận bảng tồn tại.`
+          : table
+            ? `Showing up to 50 rows from ${schema}.${name}.`
+            : `Suggested data query for ${schema}.${name}. Verify the table exists.`,
+      };
+    }
+    return null;
+  }
+
+  if (!wantsSqlGeneration(args.question)) return null;
 
   const truncateMatch = text.match(
     /\btruncate\s+(?:table\s+)?(?:(?:([a-z0-9_]+)\.)?([a-z0-9_]+)|table\s+([a-z0-9_]+))\b/
@@ -542,13 +725,71 @@ export function getFastSqlReply(args: {
 
     return {
       sql: `TRUNCATE TABLE ${qualified};`,
-      explanation: table
-        ? `Removes all rows from ${schema}.${name}. Review carefully before running this statement.`
-        : `Suggested TRUNCATE for ${schema}.${name}. Verify the table exists before running.`,
+      explanation:
+        vi
+          ? table
+            ? `Xóa toàn bộ dòng trong ${schema}.${name}. Hãy kiểm tra kỹ trước khi chạy lệnh này.`
+            : `Gợi ý TRUNCATE cho ${schema}.${name}. Hãy xác nhận bảng tồn tại trước khi chạy.`
+          : table
+            ? `Removes all rows from ${schema}.${name}. Review carefully before running this statement.`
+            : `Suggested TRUNCATE for ${schema}.${name}. Verify the table exists before running.`,
     };
   }
 
   return null;
+}
+
+export function looksLikeMetadataQuestion(question: string) {
+  if (wantsSqlGeneration(question) || wantsTableData(question)) return false;
+
+  const text = normalizeIntentText(question);
+  if (!text) return false;
+
+  const asksAllDatabases = [
+    /\b(all )?(database|databases|db)\b/,
+    /\b(toan bo db|tat ca db|liet ke db|hien thi db)\b/,
+    /\b(toutes les bases|liste des bases|bases de donnees)\b/,
+    /\b(alle datenbanken|datenbanken)\b/,
+    /\b(todas las bases de datos|bases de datos)\b/,
+  ].some((pattern) => pattern.test(text));
+
+  const asksSchemas = [
+    /\b(schema|schemas)\b/,
+    /\b(so do|liet ke schema|tat ca schema)\b/,
+    /\b(schemas?|liste des schemas)\b/,
+    /\b(esquemas?)\b/,
+  ].some((pattern) => pattern.test(text));
+
+  const asksTables = [
+    /\b(table|tables|collection|collections|key|keys)\b/,
+    /\b(liet ke bang|tat ca bang|toan bo bang|liet ke collection|liet ke key)\b/,
+    /\b(tables?|liste des tables|montre les tables)\b/,
+    /\b(tablas?|mostrar tablas)\b/,
+    /\b(tabellen|zeige tabellen)\b/,
+    /\b(colecciones?|claves?)\b/,
+  ].some((pattern) => pattern.test(text));
+
+  const asksListLike = [
+    /\b(list|show|display|what are|which are|give me)\b/,
+    /\b(liet ke|hien thi|cho toi|toan bo|tat ca|common)\b/,
+    /\b(montre|affiche|liste|quels sont)\b/,
+    /\b(muestra|lista|mostrar)\b/,
+    /\b(zeige|auflisten|anzeigen)\b/,
+  ].some((pattern) => pattern.test(text));
+
+  if (
+    asksListLike &&
+    !asksTables &&
+    !asksSchemas &&
+    !asksAllDatabases &&
+    /\b(list|liet ke)\s+(?!all\b|tables?\b|schemas?\b|databases?\b)[a-z0-9_]+\b/.test(
+      text
+    )
+  ) {
+    return false;
+  }
+
+  return asksListLike || asksAllDatabases || asksSchemas || asksTables;
 }
 
 export function getDirectMetadataReply(args: {
@@ -557,9 +798,9 @@ export function getDirectMetadataReply(args: {
   activeSchema?: string;
   tables: TableItem[];
 }) {
+  if (!looksLikeMetadataQuestion(args.question)) return null;
+
   const text = normalizeIntentText(args.question);
-  if (!text) return null;
-  if (wantsSqlGeneration(args.question)) return null;
   const visibleTables = args.tables.filter(
     (table) => !args.activeSchema || table.schema === args.activeSchema
   );
@@ -570,32 +811,39 @@ export function getDirectMetadataReply(args: {
 
   const asksAllDatabases =
     /\b(all )?(database|databases|db)\b/.test(text) ||
-    /\b(toan bo db|tat ca db|liet ke db|hien thi db)\b/.test(text);
+    /\b(toan bo db|tat ca db|liet ke db|hien thi db)\b/.test(text) ||
+    /\b(toutes les bases|bases de donnees)\b/.test(text) ||
+    /\b(alle datenbanken)\b/.test(text) ||
+    /\b(todas las bases de datos|bases de datos)\b/.test(text);
   const asksSchemas =
     /\b(schema|schemas)\b/.test(text) ||
-    /\b(so do|liet ke schema|tat ca schema)\b/.test(text);
+    /\b(so do|liet ke schema|tat ca schema)\b/.test(text) ||
+    /\b(liste des schemas|esquemas?)\b/.test(text);
   const asksTables =
     /\b(table|tables|collection|collections|key|keys)\b/.test(text) ||
     /\b(liet ke bang|tat ca bang|toan bo bang|liet ke collection|liet ke key)\b/.test(
       text
-    );
-  const asksListLike = [
-    /\b(list|show|display|what are|which are|give me)\b/,
-    /\b(liet ke|hien thi|cho toi|toan bo|tat ca|common)\b/,
-  ].some((pattern) => pattern.test(text));
+    ) ||
+    /\b(liste des tables|tabellen|colecciones?)\b/.test(text) ||
+    /\b(tablas|tabla)\b/.test(text);
 
-  if (!asksListLike && !asksAllDatabases && !asksSchemas && !asksTables) {
-    return null;
-  }
+  const lang = resolveReplyLanguage(args.question);
+  if (!supportsLocalizedFastPath(lang)) return null;
+  const vi = lang.code === "vie";
 
   if (
     args.engine === "redis" &&
     (asksTables || asksAllDatabases || asksSchemas)
   ) {
     return {
-      answer: visibleNames.length
-        ? `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
-        : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
+      answer:
+        vi
+          ? visibleNames.length
+            ? `Hiện có ${visibleNames.length} key trong db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+            : `Chưa thấy key nào trong db ${args.activeSchema || "0"}.`
+          : visibleNames.length
+            ? `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+            : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
@@ -604,44 +852,69 @@ export function getDirectMetadataReply(args: {
     (asksTables || asksAllDatabases || asksSchemas)
   ) {
     return {
-      answer: visibleNames.length
-        ? `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
-        : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
+      answer:
+        vi
+          ? visibleNames.length
+            ? `Hiện có ${visibleNames.length} collection trong database ${args.activeSchema || "(hiện tại)"}: ${formatListPreview(visibleNames)}.`
+            : `Chưa thấy collection nào trong database ${args.activeSchema || "(hiện tại)"}.`
+          : visibleNames.length
+            ? `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
+            : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
   if (asksAllDatabases) {
     if (schemaNames.length > 1) {
       return {
-        answer: `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
+        answer:
+          vi
+            ? `Trong kết nối hiện tại có ${schemaNames.length} schema/database: ${formatListPreview(schemaNames)}.`
+            : `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
         followup:
           visibleNames.length > 0
-            ? `For the active scope ${args.activeSchema || schemaNames[0]}, I can also list ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+            ? vi
+              ? `Trong phạm vi ${args.activeSchema || schemaNames[0]}, còn có ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
+              : `For the active scope ${args.activeSchema || schemaNames[0]}, I can also list ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
             : undefined,
       } satisfies DirectMetadataReply;
     }
 
     return {
-      answer: `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
+      answer:
+        vi
+          ? `Trong kết nối hiện tại chỉ có metadata cho ${args.activeSchema || schemaNames[0] || "schema/database hiện tại"}.`
+          : `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
       followup: visibleNames.length
-        ? `It currently contains ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
+        ? vi
+          ? `Hiện có ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
+          : `It currently contains ${visibleNames.length} table(s): ${formatListPreview(visibleNames)}.`
         : undefined,
     } satisfies DirectMetadataReply;
   }
 
   if (asksSchemas) {
     return {
-      answer: schemaNames.length
-        ? `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
-        : "I do not have any schema metadata loaded yet.",
+      answer:
+        vi
+          ? schemaNames.length
+            ? `Hiện có ${schemaNames.length} schema: ${formatListPreview(schemaNames)}.`
+            : "Chưa có metadata schema nào."
+          : schemaNames.length
+            ? `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
+            : "I do not have any schema metadata loaded yet.",
     } satisfies DirectMetadataReply;
   }
 
   if (asksTables) {
     return {
-      answer: visibleNames.length
-        ? `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
-        : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
+      answer:
+        vi
+          ? visibleNames.length
+            ? `Hiện có ${visibleNames.length} bảng trong ${args.activeSchema || "schema hiện tại"}: ${formatListPreview(visibleNames)}.`
+            : `Chưa thấy bảng nào trong ${args.activeSchema || "schema hiện tại"}.`
+          : visibleNames.length
+            ? `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
+            : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
@@ -760,7 +1033,12 @@ function formatScalarForAnswer(value: unknown) {
 export function buildFastResultAnswer(args: {
   result: QueryResult;
   preview: Record<string, unknown>[];
-}) {
+  language?: ReplyLanguageInfo;
+}): Pick<AiAnswer, "answer" | "confidence"> | null {
+  const lang = args.language ?? toReplyLanguageInfo("eng");
+  if (!supportsLocalizedFastPath(lang)) return null;
+
+  const vi = lang.code === "vie";
   const rowCount = Number(args.result.rowCount ?? args.preview.length ?? 0);
   const columns = (args.result.columns ?? [])
     .map((col) => col.name)
@@ -768,15 +1046,20 @@ export function buildFastResultAnswer(args: {
 
   if (rowCount === 0) {
     return {
-      answer: "I ran the query, but it returned no rows.",
+      answer:
+        vi
+          ? "Đã chạy truy vấn nhưng không có dòng nào."
+          : "I ran the query, but it returned no rows.",
       confidence: "high" as const,
     };
   }
 
   if (args.preview.length === 1 && columns.length === 1) {
     const onlyColumn = columns[0]!;
+    const value = formatScalarForAnswer(args.preview[0]?.[onlyColumn]);
     return {
-      answer: `The result is ${formatScalarForAnswer(args.preview[0]?.[onlyColumn])}.`,
+      answer:
+        vi ? `Kết quả là ${value}.` : `The result is ${value}.`,
       confidence: "high" as const,
     };
   }
@@ -788,7 +1071,8 @@ export function buildFastResultAnswer(args: {
       .map((col) => `${col}: ${formatScalarForAnswer(row[col])}`)
       .join(", ");
     return {
-      answer: `I found 1 row: ${summary}.`,
+      answer:
+        vi ? `Tìm thấy 1 dòng: ${summary}.` : `I found 1 row: ${summary}.`,
       confidence: "high" as const,
     };
   }
@@ -800,13 +1084,19 @@ export function buildFastResultAnswer(args: {
       .map((row) => formatScalarForAnswer(row[col]))
       .join(", ");
     return {
-      answer: `I found ${rowCount} row(s). ${col}: ${values}.`,
+      answer:
+        vi
+          ? `Tìm thấy ${rowCount} dòng. ${col}: ${values}.`
+          : `I found ${rowCount} row(s). ${col}: ${values}.`,
       confidence: "high" as const,
     };
   }
 
   return {
-    answer: `I ran the query and found ${rowCount} row(s). Here is a preview of the result.`,
+    answer:
+      vi
+        ? `Đã chạy truy vấn và tìm thấy ${rowCount} dòng. Dưới đây là phần xem trước kết quả.`
+        : `I ran the query and found ${rowCount} row(s). Here is a preview of the result.`,
     confidence:
       rowCount <= args.preview.length
         ? ("high" as const)
@@ -825,6 +1115,7 @@ export async function planSqlFromQuestion(args: {
   currentSql?: string;
   history?: AiHistoryItem[];
   onStatusChange?: (status: "loading_model" | "generating") => void;
+  onDelta?: (text: string) => void;
   signal?: AbortSignal;
 }) {
   const preferredReplyLanguage = getPreferredReplyLanguage(
@@ -841,21 +1132,50 @@ export async function planSqlFromQuestion(args: {
   const prompt = buildSqlPlanPrompt({
     engine: args.engine,
     activeSchema: args.activeSchema,
-    preferredReplyLanguage,
+    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
     conversationSummary,
     schemaSummary,
     currentSql: args.currentSql,
     question: args.question,
   });
 
-  const raw = await generateJson<Partial<AiPlan>>({
-    endpoint: args.endpoint,
-    model: args.model,
-    prompt,
-    maxTokens: 320,
-    onStatusChange: args.onStatusChange,
-    signal: args.signal,
-  });
+  let raw: Partial<AiPlan>;
+  if (args.onDelta) {
+    let lastExplanation = "";
+    const content = await generateText({
+      endpoint: args.endpoint,
+      model: args.model,
+      prompt,
+      maxTokens: 320,
+      onStatusChange: args.onStatusChange,
+      signal: args.signal,
+      onDelta: (accumulated) => {
+        const explanation = extractStreamingJsonStringField(
+          accumulated,
+          "explanation"
+        );
+        const clarification = extractStreamingJsonStringField(
+          accumulated,
+          "clarification"
+        );
+        const nextText = explanation || clarification;
+        if (nextText && nextText !== lastExplanation) {
+          lastExplanation = nextText;
+          args.onDelta?.(nextText);
+        }
+      },
+    });
+    raw = extractJsonObject(content) as Partial<AiPlan>;
+  } else {
+    raw = await generateJson<Partial<AiPlan>>({
+      endpoint: args.endpoint,
+      model: args.model,
+      prompt,
+      maxTokens: 320,
+      onStatusChange: args.onStatusChange,
+      signal: args.signal,
+    });
+  }
 
   return {
     sql: normalizeQuotedIdentifiers({
@@ -884,6 +1204,7 @@ export async function answerFromResult(args: {
   sql: string;
   result: QueryResult;
   onStatusChange?: (status: "loading_model" | "generating") => void;
+  onDelta?: (text: string) => void;
   signal?: AbortSignal;
   history?: AiHistoryItem[];
 }) {
@@ -892,9 +1213,40 @@ export async function answerFromResult(args: {
     args.history
   );
   const rows = queryResultToObjects(args.result, 50);
+  if (args.onDelta) {
+    const answer = sanitizeAiText(
+      await generateText({
+        endpoint: args.endpoint,
+        model: args.model,
+        prompt: buildResultAnswerPlainPrompt({
+          engine: args.engine,
+          preferredReplyLanguage:
+            formatReplyLanguageForPrompt(preferredReplyLanguage),
+          question: args.question,
+          sql: args.sql,
+          rowCount: Number(args.result.rowCount ?? rows.length),
+          columns: (args.result.columns ?? [])
+            .map((col) => col.name)
+            .join(", "),
+          rowsJson: JSON.stringify(rows, null, 2),
+        }),
+        maxTokens: 160,
+        onStatusChange: args.onStatusChange,
+        signal: args.signal,
+        onDelta: args.onDelta,
+      })
+    );
+
+    return {
+      answer,
+      highlights: [],
+      confidence: "medium",
+    } satisfies AiAnswer;
+  }
+
   const prompt = buildResultAnswerPrompt({
     engine: args.engine,
-    preferredReplyLanguage,
+    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
     question: args.question,
     sql: args.sql,
     rowCount: Number(args.result.rowCount ?? rows.length),
@@ -927,10 +1279,14 @@ export function isGeneralChatPrompt(question: string) {
   const text = normalizeIntentText(question);
   if (!text) return false;
 
+  if (parseExplicitLanguageRequest(question) && !hasDatabaseIntent(text)) {
+    return true;
+  }
+
   if (
     [
-      /\b(use|answer|reply|respond|speak)( in)? english\b/,
-      /\b(use|answer|reply|respond|speak)( in)? vietnamese\b/,
+      /\b(use|answer|reply|respond|speak|write)( in)? english\b/,
+      /\b(use|answer|reply|respond|speak|write)( in)? vietnamese\b/,
       /\btieng anh\b/,
       /\btieng viet\b/,
       /\bshort(er)? answer\b/,
@@ -961,37 +1317,54 @@ export function getFastChatReply(question: string): AiChatReply | null {
   const text = normalizeIntentText(question);
   if (!text) return null;
 
-  if (/^(hi|hello|hey|yo|xin chao|chao|helo|alo)\b/.test(text)) {
+  const explicit = parseExplicitLanguageRequest(question);
+  if (explicit) {
     return {
-      answer: "Hello! How can I assist you today?",
-      followup:
-        "You can ask me about your data, request SQL, or ask me to explain a query.",
+      answer: `Understood. I will reply in ${explicit.name}.`,
     };
+  }
+
+  const lang = resolveReplyLanguage(question);
+  if (!supportsLocalizedFastPath(lang)) return null;
+
+  const vi = lang.code === "vie";
+
+  if (/^(hi|hello|hey|yo|xin chao|chao|helo|alo)\b/.test(text)) {
+    return vi
+      ? {
+          answer: "Xin chào! Tôi có thể giúp gì cho bạn?",
+          followup:
+            "Bạn có thể hỏi về dữ liệu, yêu cầu SQL, hoặc nhờ tôi giải thích một truy vấn.",
+        }
+      : {
+          answer: "Hello! How can I assist you today?",
+          followup:
+            "You can ask me about your data, request SQL, or ask me to explain a query.",
+        };
   }
 
   if (/\b(thanks?|cam on)\b/.test(text)) {
-    return {
-      answer: "You're welcome.",
-      followup: "Let me know if you'd like help with data or SQL.",
-    };
+    return vi
+      ? {
+          answer: "Không có gì.",
+          followup: "Cần hỗ trợ thêm về dữ liệu hoặc SQL cứ nói nhé.",
+        }
+      : {
+          answer: "You're welcome.",
+          followup: "Let me know if you'd like help with data or SQL.",
+        };
   }
 
   if (/^(ok|okay|oke|duoc|roi|continue|tiep di)\b/.test(text)) {
-    return {
-      answer: "Sure.",
-      followup: "Tell me what you want to do next with the database.",
-    };
-  }
-
-  if (
-    /\b(use|answer|reply|respond|speak)( in)? english\b/.test(text) ||
-    /\btieng anh\b/.test(text) ||
-    /\b(use|answer|reply|respond|speak)( in)? vietnamese\b/.test(text) ||
-    /\btieng viet\b/.test(text)
-  ) {
-    return {
-      answer: "Understood. I will continue in English.",
-    };
+    return vi
+      ? {
+          answer: "Được.",
+          followup: "Bạn muốn làm gì tiếp theo với cơ sở dữ liệu?",
+        }
+      : {
+          answer: "Sure.",
+          followup: "Tell me what you want to do next with the database.",
+        };
   }
 
   if (
@@ -1001,8 +1374,9 @@ export function getFastChatReply(question: string): AiChatReply | null {
     )
   ) {
     return {
-      answer:
-        "I am PoliteDB AI Assistant. I can answer database questions, suggest SQL, explain queries, and summarize query results.",
+      answer: vi
+        ? "Tôi là PoliteDB AI Assistant. Tôi có thể trả lời câu hỏi về dữ liệu, gợi ý SQL, giải thích truy vấn và tóm tắt kết quả."
+        : "I am PoliteDB AI Assistant. I can answer database questions, suggest SQL, explain queries, and summarize query results.",
     };
   }
 
@@ -1018,6 +1392,7 @@ export async function chatReply(args: {
   tables: TableItem[];
   history?: AiHistoryItem[];
   onStatusChange?: (status: "loading_model" | "generating") => void;
+  onDelta?: (text: string) => void;
   signal?: AbortSignal;
 }) {
   const preferredReplyLanguage = getPreferredReplyLanguage(
@@ -1031,10 +1406,37 @@ export async function chatReply(args: {
     .join(", ");
   const conversationSummary = toConversationLines(args.history);
 
+  if (args.onDelta) {
+    const answer = sanitizeAiText(
+      await generateText({
+        endpoint: args.endpoint,
+        model: args.model,
+        prompt: buildChatReplyPlainPrompt({
+          engine: args.engine,
+          activeSchema: args.activeSchema,
+          preferredReplyLanguage:
+            formatReplyLanguageForPrompt(preferredReplyLanguage),
+          visibleTables,
+          conversationSummary,
+          question: args.question,
+        }),
+        maxTokens: 192,
+        onStatusChange: args.onStatusChange,
+        signal: args.signal,
+        onDelta: args.onDelta,
+      })
+    );
+
+    return {
+      answer,
+      followup: undefined,
+    } satisfies AiChatReply;
+  }
+
   const prompt = buildChatReplyPrompt({
     engine: args.engine,
     activeSchema: args.activeSchema,
-    preferredReplyLanguage,
+    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
     visibleTables,
     conversationSummary,
     question: args.question,
@@ -1043,7 +1445,7 @@ export async function chatReply(args: {
     endpoint: args.endpoint,
     model: args.model,
     prompt,
-    maxTokens: 64,
+    maxTokens: 192,
     onStatusChange: args.onStatusChange,
     signal: args.signal,
   });

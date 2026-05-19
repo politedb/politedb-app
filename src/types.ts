@@ -166,6 +166,8 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  /** True while the assistant message is still being streamed from the model. */
+  streaming?: boolean;
   createdAt?: number;
   durationMs?: number;
   sql?: string;

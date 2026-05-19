@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantMessageCard";
 import { AiAssistantSettingsPopover } from "src/components/ai-assistant/AiAssistantSettingsPopover";
 import { Button } from "src/components/common/Button";
@@ -12,6 +18,7 @@ import {
   getFastSqlReply,
   getAmbiguousPromptReply,
   getDirectMetadataReply,
+  looksLikeMetadataQuestion,
   wantsSqlGeneration,
   getLocalAiSettings,
   hasSeenLocalAiModel,
@@ -21,7 +28,11 @@ import {
   markLocalAiModelSeen,
   planSqlFromQuestion,
   queryResultToObjects,
+  resolveReplyLanguage,
   saveLocalAiSettings,
+  formatSqlExecutionError,
+  formatSqlValidationIssues,
+  validateSqlAgainstMetadata,
 } from "@root/src/lib/ai-assistant";
 import {
   aiRuntimeCancelModelDownload,
@@ -123,8 +134,7 @@ async function pollRuntimeUntilReady(
   return null;
 }
 
-function ThinkingCard(props: { status: AssistantStatus }) {
-  const isLoadingModel = props.status === "loading_model";
+function ThinkingCard() {
   return (
     <div class="rounded-xl border border-neutral-200 bg-white p-3">
       <div class="mb-1 text-xs font-bold tracking-wide text-neutral-500 uppercase">
@@ -132,18 +142,9 @@ function ThinkingCard(props: { status: AssistantStatus }) {
       </div>
 
       <div class="flex items-center gap-2 text-xs text-neutral-700">
-        <span>{isLoadingModel ? "Loading model" : "Thinking"}</span>
-        <div class="flex items-center gap-1">
-          <span class="size-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:0ms]" />
-          <span class="size-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:150ms]" />
-          <span class="size-2 animate-pulse rounded-full bg-neutral-400 [animation-delay:300ms]" />
-        </div>
-      </div>
-
-      <div class="mt-1 text-xs text-neutral-500">
-        {isLoadingModel
-          ? "Starting the local model for the first request. This can take a little while."
-          : "Generating a response..."}
+        <span class="gradient-to-r animate-pulse from-neutral-300 to-neutral-600 font-medium">
+          Thinking...
+        </span>
       </div>
     </div>
   );
@@ -157,7 +158,8 @@ function RuntimeLoadingPane(props: {
   forceDownloading?: boolean;
 }) {
   const details = props.status?.last_error?.trim() || "Please wait...";
-  const isDownloading = props.forceDownloading || isModelDownloading(props.status);
+  const isDownloading =
+    props.forceDownloading || isModelDownloading(props.status);
   const downloaded = Number(props.status?.model_downloaded_bytes ?? 0);
   const total = Number(props.status?.model_total_bytes ?? 0);
   const progressPct =
@@ -715,16 +717,17 @@ export function AiAssistantPanel(props: Props) {
       if (modelOnDisk) {
         setRuntimeStartFailed(true);
         setRuntimeStatus((prev) => ({
-          ...(latest ?? prev ?? {
-            endpoint: null,
-            model_name: null,
-            server_bin: null,
-            model_path: null,
-            pid: null,
-            managed_by_app: true,
-            missing: [],
-            phase: "error",
-          }),
+          ...(latest ??
+            prev ?? {
+              endpoint: null,
+              model_name: null,
+              server_bin: null,
+              model_path: null,
+              pid: null,
+              managed_by_app: true,
+              missing: [],
+              phase: "error",
+            }),
           phase: "error",
           last_error: message,
           model_downloaded_bytes: null,
@@ -795,10 +798,53 @@ export function AiAssistantPanel(props: Props) {
     ]);
   };
 
+  const beginStreamingAssistantMessage = () => {
+    const id = makeId();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id,
+        role: "assistant",
+        text: "",
+        streaming: true,
+        createdAt: Date.now(),
+      },
+    ]);
+    return id;
+  };
+
+  const updateStreamingAssistantText = (id: string, text: string) => {
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === id ? { ...message, text } : message
+      )
+    );
+  };
+
+  const finalizeStreamingAssistantMessage = (
+    id: string,
+    message: Omit<ChatMessage, "id" | "role" | "streaming">,
+    startedAt = Date.now()
+  ) => {
+    setMessages((prev) =>
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              ...message,
+              streaming: false,
+              durationMs: Math.max(0, Date.now() - startedAt),
+            }
+          : item
+      )
+    );
+  };
+
   const handleCancelSubmit = () => {
     requestSeqRef.current += 1;
     requestAbortRef.current?.abort();
     requestAbortRef.current = null;
+    setMessages((prev) => prev.filter((message) => !message.streaming));
     setAssistantStatus("idle");
     setSubmitting(false);
   };
@@ -851,9 +897,7 @@ export function AiAssistantPanel(props: Props) {
         intentKind = "chat";
       } else if (wantsSqlGeneration(question)) {
         intentKind = "sql";
-      } else if (
-        getDirectMetadataReply({ engine, question, activeSchema, tables })
-      ) {
+      } else if (looksLikeMetadataQuestion(question)) {
         intentKind = "metadata";
       } else if (getAmbiguousPromptReply({ question, history: messages })) {
         intentKind = "clarify";
@@ -861,7 +905,14 @@ export function AiAssistantPanel(props: Props) {
         intentKind = "sql";
       }
 
+      const onAssistantStatus = (status: "loading_model" | "generating") => {
+        setAssistantStatus(
+          status === "loading_model" ? "loading_model" : "thinking"
+        );
+      };
+
       if (intentKind === "chat") {
+        const streamId = beginStreamingAssistantMessage();
         const reply = await chatReply({
           endpoint,
           model,
@@ -870,16 +921,18 @@ export function AiAssistantPanel(props: Props) {
           activeSchema,
           tables,
           history: messages,
-          onStatusChange: (status) =>
-            setAssistantStatus(
-              status === "loading_model" ? "loading_model" : "thinking"
-            ),
+          onStatusChange: onAssistantStatus,
+          onDelta: (text) => {
+            if (requestSeqRef.current !== requestId) return;
+            updateStreamingAssistantText(streamId, text);
+          },
           signal: abortController.signal,
         });
 
         if (requestSeqRef.current !== requestId) return;
 
-        appendAssistantMessage(
+        finalizeStreamingAssistantMessage(
+          streamId,
           {
             text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
           },
@@ -910,7 +963,6 @@ export function AiAssistantPanel(props: Props) {
       }
 
       if (intentKind === "metadata") {
-        await sleep(500);
         const directReply = getDirectMetadataReply({
           engine,
           question,
@@ -918,21 +970,42 @@ export function AiAssistantPanel(props: Props) {
           tables,
         });
 
-        if (!directReply) {
+        if (directReply) {
+          await sleep(500);
           appendAssistantMessage(
             {
-              text: "I do not have enough metadata loaded yet to answer that directly.",
+              text: [directReply.answer, directReply.followup]
+                .filter(Boolean)
+                .join("\n\n"),
             },
             requestStartedAt
           );
           return;
         }
 
-        appendAssistantMessage(
+        const streamId = beginStreamingAssistantMessage();
+        const reply = await chatReply({
+          endpoint,
+          model,
+          engine,
+          question: `The user asked: "${question}". Using only the visible tables/schemas in this connection, answer directly. Do not generate SQL.`,
+          activeSchema,
+          tables,
+          history: messages,
+          onStatusChange: onAssistantStatus,
+          onDelta: (text) => {
+            if (requestSeqRef.current !== requestId) return;
+            updateStreamingAssistantText(streamId, text);
+          },
+          signal: abortController.signal,
+        });
+
+        if (requestSeqRef.current !== requestId) return;
+
+        finalizeStreamingAssistantMessage(
+          streamId,
           {
-            text: [directReply.answer, directReply.followup]
-              .filter(Boolean)
-              .join("\n\n"),
+            text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
           },
           requestStartedAt
         );
@@ -957,6 +1030,7 @@ export function AiAssistantPanel(props: Props) {
         return;
       }
 
+      const streamId = beginStreamingAssistantMessage();
       const plan = await planSqlFromQuestion({
         endpoint,
         model,
@@ -967,17 +1041,19 @@ export function AiAssistantPanel(props: Props) {
         columnsByTable,
         currentSql,
         history: messages,
-        onStatusChange: (status) =>
-          setAssistantStatus(
-            status === "loading_model" ? "loading_model" : "thinking"
-          ),
+        onStatusChange: onAssistantStatus,
+        onDelta: (text) => {
+          if (requestSeqRef.current !== requestId) return;
+          updateStreamingAssistantText(streamId, text);
+        },
         signal: abortController.signal,
       });
 
       if (requestSeqRef.current !== requestId) return;
 
       if (plan.needsClarification && !plan.sql) {
-        appendAssistantMessage(
+        finalizeStreamingAssistantMessage(
+          streamId,
           {
             text:
               plan.explanation ||
@@ -991,11 +1067,59 @@ export function AiAssistantPanel(props: Props) {
       }
 
       if (runtimeConnectionId && plan.sql && isReadOnlySql(plan.sql)) {
-        const result = await runSqlQuery(runtimeConnectionId, plan.sql, {
-          maxRows: 200,
-          batchSize: 200,
-          timeoutMs: 45_000,
+        const replyLang = resolveReplyLanguage(question, messages);
+        const metadataValidation = validateSqlAgainstMetadata({
+          sql: plan.sql,
+          tables,
+          columnsByTable,
+          activeSchema,
         });
+
+        if (!metadataValidation.ok) {
+          finalizeStreamingAssistantMessage(
+            streamId,
+            {
+              text: formatSqlValidationIssues(
+                metadataValidation.issues,
+                replyLang
+              ),
+              sql: plan.sql,
+              assumptions: plan.assumptions,
+              clarification: plan.clarification,
+            },
+            requestStartedAt
+          );
+          return;
+        }
+
+        let result;
+        try {
+          result = await runSqlQuery(runtimeConnectionId, plan.sql, {
+            maxRows: 200,
+            batchSize: 200,
+            timeoutMs: 45_000,
+          });
+        } catch (queryErr) {
+          if (requestSeqRef.current !== requestId) return;
+          finalizeStreamingAssistantMessage(
+            streamId,
+            {
+              text: formatSqlExecutionError({
+                error: queryErr,
+                lang: replyLang,
+                sql: plan.sql,
+                tables,
+                columnsByTable,
+                activeSchema,
+                engine,
+              }),
+              sql: plan.sql,
+              assumptions: plan.assumptions,
+            },
+            requestStartedAt
+          );
+          return;
+        }
 
         if (requestSeqRef.current !== requestId) return;
 
@@ -1003,18 +1127,25 @@ export function AiAssistantPanel(props: Props) {
         const fastAnswer = buildFastResultAnswer({
           result,
           preview,
+          language: resolveReplyLanguage(question, messages),
         });
 
-        let answer = {
-          answer: fastAnswer.answer,
-          confidence: fastAnswer.confidence,
-        };
+        let answer: {
+          answer: string;
+          confidence: "high" | "medium" | "low";
+        } | null = fastAnswer
+          ? {
+              answer: fastAnswer.answer,
+              confidence: fastAnswer.confidence,
+            }
+          : null;
 
         const shouldUseLlmSummary =
-          preview.length > 0 &&
-          preview.length <= 3 &&
-          (result.columns ?? []).length <= 6 &&
-          Number(result.rowCount ?? preview.length) <= 3;
+          !fastAnswer ||
+          (preview.length > 0 &&
+            preview.length <= 3 &&
+            (result.columns ?? []).length <= 6 &&
+            Number(result.rowCount ?? preview.length) <= 3);
 
         if (shouldUseLlmSummary) {
           answer = await answerFromResult({
@@ -1025,20 +1156,22 @@ export function AiAssistantPanel(props: Props) {
             sql: plan.sql,
             result,
             history: messages,
-            onStatusChange: (status) =>
-              setAssistantStatus(
-                status === "loading_model" ? "loading_model" : "thinking"
-              ),
+            onStatusChange: onAssistantStatus,
+            onDelta: (text) => {
+              if (requestSeqRef.current !== requestId) return;
+              updateStreamingAssistantText(streamId, text);
+            },
             signal: abortController.signal,
           });
         }
 
         if (requestSeqRef.current !== requestId) return;
 
-        appendAssistantMessage(
+        finalizeStreamingAssistantMessage(
+          streamId,
           {
             text:
-              answer.answer ||
+              answer?.answer ||
               plan.explanation ||
               "I have run the query and got the result.",
             sql: plan.sql,
@@ -1048,14 +1181,15 @@ export function AiAssistantPanel(props: Props) {
               : undefined,
             resultPreview: preview,
             rowCount: Number(result.rowCount ?? preview.length),
-            confidence: answer.confidence,
+            confidence: answer?.confidence,
           },
           requestStartedAt
         );
         return;
       }
 
-      appendAssistantMessage(
+      finalizeStreamingAssistantMessage(
+        streamId,
         {
           text:
             plan.explanation ||
@@ -1072,10 +1206,16 @@ export function AiAssistantPanel(props: Props) {
       if (isAbortError(err) || requestSeqRef.current !== requestId) {
         return;
       }
-      const msg = formatError(err);
       appendAssistantMessage(
         {
-          text: `Cannot process this request: ${msg}`,
+          text: formatSqlExecutionError({
+            error: err,
+            lang: resolveReplyLanguage(question, messages),
+            tables,
+            columnsByTable,
+            activeSchema,
+            engine,
+          }),
         },
         requestStartedAt
       );
@@ -1183,7 +1323,10 @@ export function AiAssistantPanel(props: Props) {
                   />
                 ))}
 
-                {submitting ? <ThinkingCard status={assistantStatus} /> : null}
+                {submitting &&
+                !messages.some((message) => message.streaming) ? (
+                  <ThinkingCard />
+                ) : null}
 
                 <div ref={messagesEndRef} />
               </div>
