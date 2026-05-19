@@ -69,6 +69,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     defaultLabels: ["Aphrodite", "Poseidon", "Hestia"],
   },
   {
+    engine: "d1",
+    label: "Cloudflare D1",
+    abbreviation: "D1",
+    color: "bg-amber-500",
+    available: true,
+    desc: "Serverless SQLite on Cloudflare's edge network.",
+    defaultLabels: ["Aeolus", "Boreas", "Notus"],
+  },
+  {
     engine: "oracle",
     label: "Oracle",
     abbreviation: "Oc",

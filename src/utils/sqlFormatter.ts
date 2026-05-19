@@ -5,6 +5,7 @@ const engineToLanguage: Partial<Record<DatabaseEngine, SqlLanguage>> = {
   postgres: "postgresql",
   mysql: "mysql",
   sqlite: "sqlite",
+  d1: "sqlite",
   mariadb: "mariadb",
 };
 

@@ -1,4 +1,5 @@
 import type { DatabaseEngine, TableColumn } from "src/types";
+import { isSqliteLike } from "src/utils/sqliteLike";
 import {
   cloneTableSql,
   copyTableDataSql,
@@ -55,6 +56,14 @@ export const tableSizeInfoQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
+  // Cloudflare D1 has no dbstat virtual table (local SQLite only).
+  if (engine === "d1") {
+    const queryStr = `
+      SELECT 0 AS total_size, 0 AS data_size, 0 AS index_size;
+    `;
+    return regexEscape(queryStr);
+  }
+
   if (engine === "sqlite") {
     const queryStr = `
       WITH table_pages AS (
@@ -184,7 +193,7 @@ export const tableColumnsQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     const queryStr = `
       SELECT name AS column_name, type AS data_type
       FROM pragma_table_info(${qLiteral(tableName)})
@@ -220,7 +229,7 @@ export function diagramTableColumnsQuery(
   tableName: string,
   engine?: DatabaseEngine
 ): string | null {
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     const queryStr = `
       SELECT name AS column_name, type AS data_type,
         CASE WHEN IFNULL(pk, 0) != 0 THEN 1 ELSE 0 END AS is_primary
@@ -468,7 +477,7 @@ export const tableOidQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite" || engine === "oracle" || engine === "sqlserver") {
+  if (isSqliteLike(engine) || engine === "oracle" || engine === "sqlserver") {
     return "SELECT 0;";
   }
 
@@ -482,7 +491,7 @@ export const tableStructuresQuery = (
   oid: number,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     const queryStr = `
       SELECT
         cid + 1 AS ordinal_position,
@@ -583,7 +592,7 @@ export const tableConstraintsQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     const queryStr = `
       WITH pk AS (
         SELECT

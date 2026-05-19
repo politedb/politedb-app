@@ -84,6 +84,7 @@ export type DatabaseEngine =
   | "sqlserver"
   | "mongo"
   | "sqlite"
+  | "d1"
   | "oracle";
 
 export type DatabaseType = {

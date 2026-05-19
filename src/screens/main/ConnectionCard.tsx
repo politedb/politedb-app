@@ -48,6 +48,7 @@ type EngineInput =
   | ConnectionProfile["input"]["mysql"]
   | ConnectionProfile["input"]["sqlserver"]
   | ConnectionProfile["input"]["sqlite"]
+  | ConnectionProfile["input"]["d1"]
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["redis"];
@@ -71,6 +72,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "sqlite") {
     return { engine, input: profile.input?.sqlite };
+  }
+  if (engine === "d1") {
+    return { engine, input: profile.input?.d1 };
   }
   if (engine === "oracle") {
     return { engine, input: profile.input?.oracle };
@@ -104,6 +108,9 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "sqlite":
       database = profile.input?.sqlite?.path ?? "";
       break;
+    case "d1":
+      database = profile.input?.d1?.database_id ?? "";
+      break;
     case "oracle":
       database = profile.input?.oracle?.database ?? "";
       break;
@@ -116,7 +123,14 @@ function buildSubtitle(profile: ConnectionProfile) {
       break;
   }
 
-  const hostPort = host ? `${host}${port != null ? `:${port}` : ""}` : "";
+  const accountId =
+    engine === "d1" ? profile.input?.d1?.account_id?.trim() : host;
+  const hostPort =
+    engine === "d1"
+      ? accountId || ""
+      : host
+        ? `${host}${port != null ? `:${port}` : ""}`
+        : "";
   const subtitle = firstNonEmpty(
     hostPort && database ? `${hostPort} • ${database}` : hostPort,
     database

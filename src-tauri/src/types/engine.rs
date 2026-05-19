@@ -8,9 +8,20 @@ pub enum EngineKind {
     Mariadb,
     Sqlserver,
     Sqlite,
+    D1,
     Oracle,
     Mongo,
     Redis,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct D1ConnectInput {
+    pub account_id: String,
+    pub database_id: String,
+    pub api_token: SecretRef,
+    #[serde(default)]
+    pub api_base_url: Option<String>,
+    pub statement_timeout_ms: Option<u64>,
 }
 
 use crate::types::secret::SecretRef;

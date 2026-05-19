@@ -1,4 +1,5 @@
 import type { DatabaseEngine } from "src/types";
+import { isSqliteLike } from "src/utils/sqliteLike";
 
 export function isSqlServerEngine(engine?: DatabaseEngine) {
   return engine === "sqlserver";
@@ -43,7 +44,7 @@ export function quoteTableName(
   tableName: string,
   engine?: DatabaseEngine
 ) {
-  if (engine === "sqlite" || !schema) {
+  if (isSqliteLike(engine) || !schema) {
     return quoteIdentifier(tableName, engine);
   }
   return `${quoteIdentifier(schema, engine)}.${quoteIdentifier(tableName, engine)}`;
@@ -100,7 +101,7 @@ export function cloneTableSql(
     return `CREATE TABLE ${target} LIKE ${source};`;
   }
 
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     return `CREATE TABLE ${target} AS SELECT * FROM ${source} WHERE 0;`;
   }
 
@@ -144,7 +145,7 @@ export function truncateTableSql(
 ) {
   const table = quoteTableName(schema, tableName, engine);
 
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     return `DELETE FROM ${table};`;
   }
 
@@ -212,7 +213,7 @@ export function dropPrimaryKeySql(
   if (isMysqlFamilyEngine(engine)) {
     return `ALTER TABLE ${table} DROP PRIMARY KEY;`;
   }
-  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
     unsupportedSql("Changing primary key", engine);
   }
   return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
@@ -224,7 +225,7 @@ export function addPrimaryKeySql(
   columns: string[],
   engine?: DatabaseEngine
 ) {
-  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
     unsupportedSql("Changing primary key", engine);
   }
   return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ADD PRIMARY KEY (${columns
@@ -272,7 +273,7 @@ export function alterColumnStatements(args: {
     ];
   }
 
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     unsupportedSql("Altering SQLite column type/null/default", engine);
   }
 
@@ -313,7 +314,7 @@ export function dropForeignKeySql(
   if (isMysqlFamilyEngine(engine)) {
     return `ALTER TABLE ${table} DROP FOREIGN KEY ${quoteIdentifier(constraintName, engine)};`;
   }
-  if (engine === "sqlite" || engine === "sqlserver" || engine === "oracle") {
+  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
     unsupportedSql("Changing foreign keys", engine);
   }
   return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
@@ -330,7 +331,7 @@ export function addForeignKeySql(args: {
   engine?: DatabaseEngine;
 }) {
   if (
-    args.engine === "sqlite" ||
+    isSqliteLike(args.engine) ||
     args.engine === "sqlserver" ||
     args.engine === "oracle"
   ) {
@@ -360,7 +361,7 @@ export function dropIndexSql(
     return `DROP INDEX ${quoteIdentifier(indexName, engine)} ON ${quoteTableName(schema, tableName, engine)};`;
   }
 
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     return `DROP INDEX IF EXISTS ${quoteIdentifier(indexName, engine)};`;
   }
 

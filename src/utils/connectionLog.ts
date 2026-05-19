@@ -31,6 +31,7 @@ function getEngineInput(profile: ConnectionProfile) {
   if (engine === "sqlserver") return profile.input?.sqlserver;
   if (engine === "mongo") return profile.input?.mongo;
   if (engine === "sqlite") return profile.input?.sqlite;
+  if (engine === "d1") return profile.input?.d1;
   if (engine === "oracle") return profile.input?.oracle;
   if (engine === "redis") return profile.input?.redis;
   void input;
@@ -51,6 +52,14 @@ export function profileConnectionHost(profile: ConnectionProfile): string {
 
   if (engine === "sqlite") {
     return firstNonEmpty(input?.path, profile.label);
+  }
+  if (engine === "d1") {
+    const d1 = profile.input?.d1;
+    return firstNonEmpty(
+      d1?.database_id,
+      d1?.account_id,
+      profile.label
+    );
   }
 
   const host = input?.host;

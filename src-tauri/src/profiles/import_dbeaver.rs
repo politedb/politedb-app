@@ -165,6 +165,7 @@ fn build_input(
         mysql: None,
         sqlserver: None,
         sqlite: None,
+        d1: None,
         oracle: None,
         mongo: None,
         redis: None,
@@ -264,6 +265,9 @@ fn build_input(
                 connect_timeout_ms: None,
                 pool_max_size: None,
             });
+        }
+        EngineKind::D1 => {
+            return Err("Cloudflare D1 is not supported for DBeaver import".into());
         }
     }
 
@@ -368,7 +372,7 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 6379)),
-        EngineKind::Sqlite => ("127.0.0.1".into(), 0),
+        EngineKind::Sqlite | EngineKind::D1 => ("127.0.0.1".into(), 0),
     }
 }
 

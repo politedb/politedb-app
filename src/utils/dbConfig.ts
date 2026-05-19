@@ -44,6 +44,11 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     dataTypes: SQLITE_DATA_TYPES,
     indexAlgorithms: [],
   },
+  d1: {
+    dataTypes: SQLITE_DATA_TYPES,
+    indexAlgorithms: [],
+    allowFk: true,
+  },
   oracle: {
     dataTypes: ORACLE_DATA_TYPES,
     indexAlgorithms: [],

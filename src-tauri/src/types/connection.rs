@@ -5,8 +5,8 @@ use crate::{
     ssh_tunnel::types::SshTunnelInput,
     types::{
         engine::{
-            EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
-            SqlServerConnectInput, SqliteConnectInput,
+            D1ConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
+            PgConnectInput, SqlServerConnectInput, SqliteConnectInput,
         },
         RedisConnectInput,
     },
@@ -28,6 +28,7 @@ pub struct ConnectionCreateInput {
     pub mysql: Option<MySqlConnectInput>,
     pub sqlserver: Option<SqlServerConnectInput>,
     pub sqlite: Option<SqliteConnectInput>,
+    pub d1: Option<D1ConnectInput>,
     pub oracle: Option<OracleConnectInput>,
     pub mongo: Option<MongoConnectInput>,
     pub redis: Option<RedisConnectInput>,

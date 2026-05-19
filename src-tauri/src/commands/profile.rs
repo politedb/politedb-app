@@ -15,7 +15,7 @@ use crate::state::AppState;
 use crate::types::{
     ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MongoConnectInput,
     MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef,
-    SecretRefKind, SqlServerConnectInput, SqliteConnectInput,
+    D1ConnectInput, SecretRefKind, SqlServerConnectInput, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -158,6 +158,16 @@ fn validate_sqlite_input(s: &SqliteConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_d1_input(d1: &D1ConnectInput) -> Result<(), String> {
+    if d1.account_id.trim().is_empty() {
+        return Err("D1_ACCOUNT_ID_REQUIRED".into());
+    }
+    if d1.database_id.trim().is_empty() {
+        return Err("D1_DATABASE_ID_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_sqlserver_input(ss: &SqlServerConnectInput) -> Result<(), String> {
     if ss.host.trim().is_empty() {
         return Err("SQLSERVER_HOST_REQUIRED".into());
@@ -210,6 +220,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let s = input.sqlite.as_ref().ok_or("SQLITE_CONFIG_MISSING")?;
             validate_sqlite_input(s)
         }
+        EngineKind::D1 => {
+            let d1 = input.d1.as_ref().ok_or("D1_CONFIG_MISSING")?;
+            validate_d1_input(d1)
+        }
         EngineKind::Oracle => {
             let oc = input.oracle.as_ref().ok_or("ORACLE_CONFIG_MISSING")?;
             validate_oracle_input(oc)
@@ -239,6 +253,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Mariadb => "mariadb",
         EngineKind::Sqlserver => "sqlserver",
         EngineKind::Sqlite => "sqlite",
+        EngineKind::D1 => "d1",
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
         EngineKind::Redis => "redis",
@@ -346,6 +361,16 @@ pub fn persist_input_with_secrets(
             )?;
         }
         EngineKind::Sqlite => {}
+        EngineKind::D1 => {
+            let d1 = input.d1.as_mut().ok_or("D1_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::D1,
+                persist_secrets,
+                &mut d1.api_token,
+            )?;
+        }
 
         EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;

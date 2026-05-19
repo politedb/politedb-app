@@ -49,6 +49,7 @@ fn rewrite_input_host_port(
             oracle.port = port;
         }
         crate::types::EngineKind::Sqlite => {}
+        crate::types::EngineKind::D1 => {}
         crate::types::EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
             mongo.host = host.into();
@@ -241,6 +242,7 @@ pub async fn connection_test(
                     }
                 }
                 crate::types::EngineKind::Sqlite => {}
+                crate::types::EngineKind::D1 => {}
                 crate::types::EngineKind::Mongo => {
                     if let Some(mongo) = input.mongo.as_mut() {
                         if mongo.password.kind == crate::types::SecretRefKind::Keychain
@@ -461,6 +463,10 @@ pub async fn connection_version(
             .await
             .map_err(|e| format!("SQLITE_VERSION_JOIN_FAILED: {e}"))??;
             Ok(version)
+        }
+        crate::engines::EngineConnection::D1(_) => {
+            // D1 HTTP API rejects sqlite_version(); version is display-only in the UI.
+            Ok("Cloudflare D1".to_string())
         }
         crate::engines::EngineConnection::Oracle(oracle_conn) => {
             crate::engines::oracle::ensure_oracle_client_initialized()

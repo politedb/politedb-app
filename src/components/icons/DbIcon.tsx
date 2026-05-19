@@ -9,6 +9,7 @@ import mongo from "src/assets/db/mongodb.svg";
 import sqlite from "src/assets/db/sqlite.svg";
 import oracle from "src/assets/db/oracle.svg";
 import sqlserver from "src/assets/db/sqlserver.svg";
+import cloudflared1 from "src/assets/db/d1.svg";
 
 // Import DatabaseEngine from shared types if available; otherwise keep this local alias.
 export type DatabaseEngine =
@@ -19,6 +20,7 @@ export type DatabaseEngine =
   | "sqlserver"
   | "mongo"
   | "sqlite"
+  | "d1"
   | "oracle";
 
 type DbIconSrc = string;
@@ -31,6 +33,7 @@ const DB_ICON_MAP: Record<DatabaseEngine, DbIconSrc> = {
   sqlserver,
   mongo,
   sqlite,
+  d1: cloudflared1,
   oracle,
 };
 
@@ -59,6 +62,7 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "ss") return "sqlserver";
   if (k === "mg") return "mongo";
   if (k === "sl") return "sqlite";
+  if (k === "d1") return "d1";
   if (k === "oc") return "oracle";
   return null;
 }

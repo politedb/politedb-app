@@ -258,6 +258,7 @@ fn build_tableplus_input(
         mysql: None,
         sqlserver: None,
         sqlite: None,
+        d1: None,
         oracle: None,
         mongo: None,
         redis: None,
@@ -366,6 +367,9 @@ fn build_tableplus_input(
                 pool_max_size: None,
             });
         }
+        EngineKind::D1 => {
+            return Err("Cloudflare D1 is not supported for TablePlus import".into());
+        }
     }
 
     Ok(input)
@@ -445,7 +449,7 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .redis
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
-        EngineKind::Sqlite => false,
+        EngineKind::Sqlite | EngineKind::D1 => false,
     }
 }
 

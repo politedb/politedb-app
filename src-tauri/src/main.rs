@@ -109,6 +109,7 @@ fn main() {
         Arc::new(engines::mysql::driver::MariaDbDriver),
         Arc::new(engines::sqlserver::driver::SqlServerDriver),
         Arc::new(engines::sqlite::driver::SqliteDriver),
+        Arc::new(engines::d1::driver::D1Driver),
         Arc::new(engines::oracle::driver::OracleDriver),
         Arc::new(engines::mongo::driver::MongoDriver),
         Arc::new(engines::redis::driver::RedisDriver),

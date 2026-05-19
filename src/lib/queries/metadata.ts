@@ -99,6 +99,22 @@ const SQLITE: MetadataQueries = {
   `,
 };
 
+/** D1: same table discovery as SQLite; hide Cloudflare internal tables. */
+const D1: MetadataQueries = {
+  ...SQLITE,
+  tablesQuery: `
+    SELECT
+      'main' AS table_schema,
+      name AS table_name
+    FROM sqlite_master
+    WHERE type='table'
+      AND name NOT LIKE 'sqlite_%'
+      AND name NOT GLOB '_cf_*'
+    ORDER BY name;
+  `,
+  columnsQuery: `SELECT '' WHERE 1=0;`,
+};
+
 const ORACLE: MetadataQueries = {
   schemasQuery: `
     SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS schema_name
@@ -186,6 +202,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
       return MYSQL;
     case "sqlite":
       return SQLITE;
+    case "d1":
+      return D1;
     case "oracle":
       return ORACLE;
     case "sqlserver":

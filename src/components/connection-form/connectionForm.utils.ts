@@ -78,6 +78,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
     case "redis":
       return 6379;
     case "sqlite":
+    case "d1":
       return 0;
     case "oracle":
       return 1521;
@@ -87,7 +88,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
 }
 
 function defaultHostForEngine(engine: DatabaseEngine): string {
-  if (engine === "sqlite") return "";
+  if (engine === "sqlite" || engine === "d1") return "";
   return "127.0.0.1";
 }
 
@@ -98,6 +99,7 @@ function pickByEngine<T>(
     mysql?: T;
     sqlserver?: T;
     sqlite?: T;
+    d1?: T;
     oracle?: T;
     mongo?: T;
     redis?: T;
@@ -107,6 +109,7 @@ function pickByEngine<T>(
   if (engine === "mysql" || engine === "mariadb") return by.mysql;
   if (engine === "sqlserver") return by.sqlserver;
   if (engine === "sqlite") return by.sqlite;
+  if (engine === "d1") return by.d1;
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
   if (engine === "redis") return by.redis;
@@ -351,6 +354,23 @@ function buildSqliteInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildD1Input(v: FormValues): ConnectionCreateInput {
+  return {
+    engine: "d1",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    d1: {
+      account_id: String(v.host ?? "").trim(),
+      database_id: String(v.database ?? "").trim(),
+      api_token: v.storeKeychain
+        ? { kind: "keychain", value: v.password }
+        : { kind: "inline", value: v.password },
+      statement_timeout_ms: 60_000,
+    },
+  };
+}
+
 export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   switch (v.engine) {
     case "postgres":
@@ -365,6 +385,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildMongoInput(v);
     case "sqlite":
       return buildSqliteInput(v);
+    case "d1":
+      return buildD1Input(v);
     case "oracle":
       return buildOracleInput(v);
     case "redis":
@@ -391,6 +413,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const my = input?.mysql;
   const ss = input?.sqlserver;
   const sqlite = input?.sqlite;
+  const d1 = input?.d1;
   const oracle = input?.oracle;
   const mongo = input?.mongo;
   const rd = input?.redis;
@@ -401,6 +424,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       mysql: my?.host,
       sqlserver: ss?.host,
       sqlite: "",
+      d1: d1?.account_id,
       oracle: oracle?.host,
       mongo: mongo?.host,
       redis: rd?.host,
@@ -412,6 +436,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       mysql: my?.port,
       sqlserver: ss?.port,
       sqlite: 0,
+      d1: 0,
       oracle: oracle?.port,
       mongo: mongo?.port,
       redis: rd?.port,
@@ -426,7 +451,10 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       oracle: oracle?.user,
       mongo: mongo?.user,
       redis: rd?.user,
-    }) || (engine === "mongo" || engine === "sqlite" ? "" : "root");
+    }) ||
+    (engine === "mongo" || engine === "sqlite" || engine === "d1"
+      ? ""
+      : "root");
 
   const database =
     pickByEngine(engine, {
@@ -434,9 +462,13 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       mysql: my?.database,
       sqlserver: ss?.database,
       sqlite: sqlite?.path,
+      d1: d1?.database_id,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
-    }) ?? (engine === "mongo" || engine === "sqlite" ? "" : "");
+    }) ||
+    (engine === "mongo" || engine === "sqlite" || engine === "d1"
+      ? ""
+      : "root");
 
   const password =
     engine === "postgres"
@@ -461,7 +493,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
                 : ""
               : engine === "sqlite"
                 ? ""
-                : "";
+                : engine === "d1"
+                  ? d1?.api_token?.kind === "inline"
+                    ? (d1.api_token.value ?? "")
+                    : ""
+                  : "";
 
   const storeKeychain =
     engine === "postgres"
@@ -476,7 +512,9 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
               ? mongo?.password?.kind !== "inline"
               : engine === "sqlite"
                 ? false
-                : true;
+                : engine === "d1"
+                  ? d1?.api_token?.kind !== "inline"
+                  : true;
 
   return { host, port, user, database, password, storeKeychain };
 }

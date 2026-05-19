@@ -50,7 +50,7 @@ pub fn default_port(engine: EngineKind) -> u16 {
         EngineKind::Oracle => 1521,
         EngineKind::Mongo => 27017,
         EngineKind::Redis => 6379,
-        EngineKind::Sqlite => 0,
+        EngineKind::Sqlite | EngineKind::D1 => 0,
     }
 }
 

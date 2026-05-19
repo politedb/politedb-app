@@ -124,7 +124,7 @@ fn resolve_db_passwords_inline(
                 r.password = inline_secret_from_ref(app, &r.password)?;
             }
         }
-        EngineKind::Sqlite => {}
+        EngineKind::Sqlite | EngineKind::D1 => {}
         #[allow(unreachable_patterns)]
         _ => {}
     }
@@ -170,7 +170,7 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
                 redact(&mut r.password);
             }
         }
-        EngineKind::Sqlite => {}
+        EngineKind::Sqlite | EngineKind::D1 => {}
         #[allow(unreachable_patterns)]
         _ => {}
     }
@@ -337,6 +337,7 @@ mod tests {
                 mysql: None,
                 sqlserver: None,
                 sqlite: None,
+                d1: None,
                 oracle: None,
                 mongo: None,
                 redis: None,

@@ -81,7 +81,7 @@ export function ConnectionFormDialog({
 
     const hostOk = !!host && Number.isFinite(Number(port));
 
-    if (v.engine === "sqlite") {
+    if (v.engine === "sqlite" || v.engine === "d1") {
       return !!database;
     }
 
@@ -303,7 +303,9 @@ export function ConnectionFormDialog({
               ? "Required: Database file path."
               : v.engine === "redis" || v.engine === "mongo"
                 ? "Required: Host, Port."
-                : "Required: Host, Port, User."
+                : v.engine === "d1"
+                  ? "Required: Account ID, Database ID, API token."
+                  : "Required: Host, Port, User."
           }
           onTest={onTest}
           onSave={onSave}

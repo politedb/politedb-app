@@ -145,6 +145,14 @@ export type SqliteConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type D1ConnectInput = {
+  account_id: string;
+  database_id: string;
+  api_token: SecretRef;
+  api_base_url?: string | null;
+  statement_timeout_ms?: number | null;
+};
+
 export type OracleConnectInput = {
   host: string;
   port: number;
@@ -184,6 +192,7 @@ export type ConnectionCreateInput = {
   mysql?: MySqlConnectInput;
   sqlserver?: SqlServerConnectInput;
   sqlite?: SqliteConnectInput;
+  d1?: D1ConnectInput;
   oracle?: OracleConnectInput;
   mongo?: MongoConnectInput;
   redis?: RedisConnectInput;

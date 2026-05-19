@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
+import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
 import { useScreenStore } from "src/stores/screen";
 import { connectProfileOnce } from "src/lib/runtimeConnection";
@@ -679,7 +680,7 @@ async function loadMeta(params: {
 }): Promise<{ structure: any[]; constraints: any[] }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
-  if (engine === "sqlite") {
+  if (isSqliteLike(engine)) {
     const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
     const qConstraints = tableConstraintsQuery(schema, tableName, engine);
 
@@ -840,7 +841,7 @@ async function loadForeignKeys(params: {
 }): Promise<any[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
-  if (engine === "mysql" || engine === "mariadb" || engine === "sqlite") {
+  if (engine === "mysql" || engine === "mariadb" || isSqliteLike(engine)) {
     return [];
   }
 

@@ -84,6 +84,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "d1") {
+    const d1 = conn.input?.d1;
+    return {
+      host: d1?.account_id ?? "",
+      database: d1?.database_id ?? "",
+      user: "",
+    };
+  }
+
   if (engine === "oracle") {
     const oc = conn.input?.oracle;
     return {

@@ -445,7 +445,9 @@ export function ConnectionScreen() {
         ? "public"
         : engine === "redis"
           ? `db ${profile?.input?.redis?.db ?? 0}`
-          : "",
+          : engine === "sqlite" || engine === "d1"
+            ? "main"
+            : "",
   });
 
   const prevRuntimeConnectionIdRef = useRef<string | undefined>(undefined);

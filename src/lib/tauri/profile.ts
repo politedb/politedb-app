@@ -258,6 +258,28 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "d1") {
+    const d1 = input.d1;
+    if (!d1) throw new Error("D1_CONFIG_MISSING");
+
+    const tokenRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      d1: {
+        ...d1,
+        api_token: tokenRef,
+      },
+    };
+  }
+
   if (engine === "oracle") {
     const oracle = input.oracle;
     if (!oracle) throw new Error("ORACLE_CONFIG_MISSING");

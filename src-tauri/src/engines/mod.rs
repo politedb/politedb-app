@@ -1,4 +1,5 @@
 pub mod cancel;
+pub mod d1;
 pub mod driver;
 pub mod merge;
 pub mod mongo;
@@ -27,6 +28,7 @@ pub enum EngineConnection {
     MySql(mysql::connection::MySqlConn),
     SqlServer(sqlserver::connection::SqlServerConn),
     Sqlite(sqlite::connection::SqliteConn),
+    D1(d1::connection::D1Conn),
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
@@ -157,7 +159,7 @@ fn quote_import_identifier(ident: &str, engine: EngineKind) -> String {
 }
 
 fn quote_import_table(schema: &str, table_name: &str, engine: EngineKind) -> String {
-    if schema.trim().is_empty() || matches!(engine, EngineKind::Sqlite) {
+    if schema.trim().is_empty() || matches!(engine, EngineKind::Sqlite | EngineKind::D1) {
         return quote_import_identifier(table_name, engine);
     }
     format!(
@@ -431,6 +433,7 @@ impl EngineConnection {
             EngineConnection::MySql(c) => c.id,
             EngineConnection::SqlServer(c) => c.id,
             EngineConnection::Sqlite(c) => c.id,
+            EngineConnection::D1(c) => c.id,
             EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
             EngineConnection::Redis(c) => c.id,
@@ -443,6 +446,7 @@ impl EngineConnection {
             EngineConnection::MySql(c) => c.label.clone(),
             EngineConnection::SqlServer(c) => c.label.clone(),
             EngineConnection::Sqlite(c) => c.label.clone(),
+            EngineConnection::D1(c) => c.label.clone(),
             EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
@@ -455,6 +459,7 @@ impl EngineConnection {
             EngineConnection::MySql(c) => c.engine,
             EngineConnection::SqlServer(_) => EngineKind::Sqlserver,
             EngineConnection::Sqlite(_) => EngineKind::Sqlite,
+            EngineConnection::D1(_) => EngineKind::D1,
             EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Redis(_) => EngineKind::Redis,
@@ -471,6 +476,7 @@ impl EngineConnection {
             },
             EngineConnection::SqlServer(_) => "sqlserver",
             EngineConnection::Sqlite(_) => "sqlite",
+            EngineConnection::D1(_) => "d1",
             EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Redis(_) => "redis",
@@ -485,6 +491,7 @@ impl EngineConnection {
             }
             EngineConnection::SqlServer(_) => {}
             EngineConnection::Sqlite(_) => {}
+            EngineConnection::D1(_) => {}
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Redis(r) => drop(r.pool),
@@ -571,6 +578,26 @@ impl EngineConnection {
                 })
                 .await
                 .map_err(|e| format!("SQLITE_TX_JOIN_FAILED: {e}"))?
+            }
+            EngineConnection::D1(d1) => {
+                let http = d1.http.clone();
+                let api_base = d1.api_base.clone();
+                let account_id = d1.account_id.clone();
+                let database_id = d1.database_id.clone();
+                let api_token = d1.api_token.clone();
+                for (idx, stmt) in statements.iter().enumerate() {
+                    d1::api::execute_d1_query(
+                        &http,
+                        &api_base,
+                        &account_id,
+                        &database_id,
+                        &api_token,
+                        stmt,
+                    )
+                    .await
+                    .map_err(|e| format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1))?;
+                }
+                Ok(())
             }
             EngineConnection::SqlServer(ss) => {
                 let mut client = sqlserver::operation::make_client(
@@ -777,6 +804,29 @@ impl EngineConnection {
                         default_timeout,
                     )
                     .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+            EngineConnection::D1(d1) => {
+                let d1 = d1.clone();
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::d1::operation::run_d1_sql_query(ctx, d1, input).await;
                 });
 
                 op_tasks.insert(op_id, handle);
