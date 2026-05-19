@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { trackEvent } from "src/lib/analytics";
 import { connectProfileOnce } from "src/lib/runtimeConnection";
+import {
+  recordConnectionSessionFailed,
+  recordConnectionSessionOpened,
+} from "src/stores/connectionLog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 
 export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
@@ -37,6 +41,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
         if (latestTab?.runtimeConnectionId) return;
 
         updateTab(tabId, { runtimeConnectionId: connectionId });
+        void recordConnectionSessionOpened(activeTab);
         trackEvent("runtime_connection_opened", {
           engine: activeTab.engine,
           source: "auto_restore",
@@ -45,6 +50,9 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
       } catch (e: any) {
         const msg = e?.message ? String(e.message) : String(e);
         setError(msg);
+        if (!canceled) {
+          void recordConnectionSessionFailed(activeTab, msg);
+        }
         trackEvent("runtime_connection_open_error", {
           engine: activeTab.engine,
           source: "auto_restore",
@@ -76,6 +84,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
       const connectionId = await connectProfileOnce(activeTab.profileId);
       setError(null);
       updateTab(activeTab.id, { runtimeConnectionId: connectionId });
+      void recordConnectionSessionOpened(activeTab);
       trackEvent("runtime_connection_opened", {
         engine: activeTab.engine,
         source: "manual_reload",
@@ -85,6 +94,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
       setError(msg);
+      void recordConnectionSessionFailed(activeTab, msg);
       trackEvent("runtime_connection_open_error", {
         engine: activeTab.engine,
         source: "manual_reload",

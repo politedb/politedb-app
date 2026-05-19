@@ -174,6 +174,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   onOpen: () => void;
   onEdit: () => void;
   onDuplicate?: () => void | Promise<void>;
+  onSelectProfile: () => void;
 }) {
   const {
     profileId,
@@ -184,6 +185,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     onOpen,
     onEdit,
     onDuplicate,
+    onSelectProfile,
   } = props;
 
   const profile = useProfileStore((s) =>
@@ -318,7 +320,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     <div
       role="button"
       tabIndex={0}
-      onClick={(e) => {
+      onClick={onSelectProfile}
+      onDblClick={(e) => {
         e.stopPropagation();
         onOpen();
       }}

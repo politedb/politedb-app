@@ -58,6 +58,7 @@ export function ConnectionsSection(props: {
   onEdit: (id: string) => void;
   onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
   onDuplicate?: (id: string) => void | Promise<void>;
+  onSelectProfile: (id: string) => void;
 }) {
   const {
     profiles,
@@ -73,6 +74,7 @@ export function ConnectionsSection(props: {
     onEdit,
     onAssignGroups,
     onDuplicate,
+    onSelectProfile,
   } = props;
 
   const hasSearch = !!searchQuery.trim();
@@ -107,6 +109,7 @@ export function ConnectionsSection(props: {
                 onOpen={() => onOpen(p.id)}
                 onEdit={() => onEdit(p.id)}
                 onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+                onSelectProfile={() => onSelectProfile(p.id)}
               />
             </div>
           ))}
@@ -124,6 +127,7 @@ export function ConnectionsSection(props: {
               onOpen={() => onOpen(p.id)}
               onEdit={() => onEdit(p.id)}
               onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+              onSelectProfile={() => onSelectProfile(p.id)}
             />
           ))}
         </div>

@@ -1,7 +1,22 @@
 import type { JSX } from "preact";
 import { ColumnMeta } from "./lib/tauri";
 
-export type NavId = "connections" | "keychain";
+export type NavId = "connections" | "keychain" | "logs";
+
+export type ConnectionOpenLogEntry = {
+  id: string;
+  tabId: string;
+  profileId: string;
+  profileLabel: string;
+  engine: DatabaseEngine;
+  host: string;
+  dbUser?: string;
+  deviceName: string;
+  openedAt: number;
+  closedAt?: number;
+  status: "active" | "closed" | "failed";
+  error?: string;
+};
 export type ViewMode = "grid" | "list";
 export type ConnectionSortMode =
   | "label-asc"

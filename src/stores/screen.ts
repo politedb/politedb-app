@@ -265,6 +265,12 @@ export const useScreenStore = create<ScreenState>((set) => ({
 
   removeTab: (id) =>
     set((s) => {
+      queueMicrotask(() => {
+        void import("src/stores/connectionLog").then(({ useConnectionLogStore }) => {
+          useConnectionLogStore.getState().endSession(id);
+        });
+      });
+
       const profileTabs = s.profileTabs.filter((t) => t.id !== id);
 
       const activeProfileScreen =

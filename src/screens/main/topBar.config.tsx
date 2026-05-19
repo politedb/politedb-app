@@ -4,7 +4,7 @@ import {
   FolderIcon,
   RestoreIcon,
 } from "src/components/icons";
-import type { ConnectionSortMode, KeychainSortMode } from "src/types";
+import type { ConnectionSortMode, KeychainSortMode, NavId } from "src/types";
 import type { DropdownItemConfig } from "src/components/common/Dropdown";
 
 function alphaSortBadge(label: "Az" | "Za") {
@@ -102,16 +102,24 @@ export function buildKeychainSortItems(args: {
   ];
 }
 
-export function getTopBarSearchPlaceholder(isConnections: boolean) {
-  return isConnections
-    ? "Search connections or paste a URL..."
-    : "Search keychain keys...";
+export function getTopBarSearchPlaceholder(mode: NavId) {
+  if (mode === "connections") {
+    return "Search connections or paste a URL...";
+  }
+  if (mode === "logs") {
+    return "Search connection history...";
+  }
+  return "Search keychain keys...";
 }
 
-export function getTopBarCreateLabel(isConnections: boolean) {
-  return isConnections ? "New Connection" : "New Key";
+export function getTopBarCreateLabel(mode: NavId) {
+  if (mode === "connections") return "New Connection";
+  if (mode === "logs") return "";
+  return "New Key";
 }
 
-export function getTopBarCreateTitle(isConnections: boolean) {
-  return isConnections ? "Create" : "New keychain key";
+export function getTopBarCreateTitle(mode: NavId) {
+  if (mode === "connections") return "Create";
+  if (mode === "logs") return "";
+  return "New keychain key";
 }

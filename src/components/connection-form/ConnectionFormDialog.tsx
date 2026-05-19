@@ -203,18 +203,27 @@ export function ConnectionFormDialog({
         profileId: res.profile.id,
       };
 
+      let connectedTab: ProfileTab;
+
       if (reuseTabId) {
         updateTab(reuseTabId, tabPatch);
         setActiveProfileScreen(reuseTabId);
+        connectedTab =
+          useScreenStore.getState().profileTabs.find((t) => t.id === reuseTabId) ??
+          ({ id: reuseTabId, ...tabPatch } as ProfileTab);
       } else {
-        const newTab: ProfileTab = {
+        connectedTab = {
           id: `tab-${uuid()}`,
           ...tabPatch,
         } as ProfileTab;
 
-        addTab(newTab);
-        setActiveProfileScreen(newTab.id);
+        addTab(connectedTab);
+        setActiveProfileScreen(connectedTab.id);
       }
+
+      void import("src/stores/connectionLog").then(({ recordConnectionSessionOpened }) =>
+        recordConnectionSessionOpened(connectedTab)
+      );
 
       onSaved?.(res.profile);
       onClose?.();
@@ -226,6 +235,16 @@ export function ConnectionFormDialog({
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
       setError(msg);
+      const failedTab: ProfileTab = {
+        id: reuseTabId ?? `failed-${uuid()}`,
+        profileId: profileId ?? initialData?.id ?? "",
+        label: v.name?.trim() || initialData?.label || "Unnamed Connection",
+        engine: v.engine,
+      };
+      void import("src/stores/connectionLog").then(
+        ({ recordConnectionSessionFailed }) =>
+          recordConnectionSessionFailed(failedTab, msg, initialData)
+      );
       trackEvent("connection_connect_error", {
         engine: v.engine,
         mode: profileId ? "update" : "create",

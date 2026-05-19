@@ -26,6 +26,7 @@ import { TopBar } from "./TopBar";
 import { ConnectionsSection } from "./ConnectionsSection";
 import { GroupsSection } from "./GroupsSection";
 import { KeychainSection } from "./KeychainSection";
+import { ConnectionLogsSection } from "./ConnectionLogsSection";
 
 import { filterConnections } from "src/utils/connection";
 import {
@@ -376,6 +377,10 @@ export function MainScreen() {
       };
       addTab(newTab);
       setActiveProfileScreen(newTab.id);
+      void import("src/stores/connectionLog").then(
+        ({ recordConnectionSessionOpened }) =>
+          recordConnectionSessionOpened(newTab)
+      );
 
       trackEvent("connection_sqlite_template_created", { engine: "sqlite" });
     } catch (err) {
@@ -449,28 +454,37 @@ export function MainScreen() {
         <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* TopBar: pinned */}
           <div class="shrink-0 border-b border-slate-200 bg-white">
-            <div class="px-3 py-2">
-              <TopBar
-                mode={activeNav}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                onNewConnection={handleTopBarCreate}
-                onNewGroup={() => setNewGroupOpen(true)}
-                onImportConnections={handleImportConnections}
-                viewMode={viewMode}
-                onViewMode={setViewMode}
-                connectionSortMode={connectionSortMode}
-                onConnectionSortModeChange={setConnectionSortMode}
-                keychainSortMode={keychainSortMode}
-                onKeychainSortModeChange={setKeychainSortMode}
-              />
-            </div>
+            <TopBar
+              mode={activeNav}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              onNewConnection={handleTopBarCreate}
+              onNewGroup={() => setNewGroupOpen(true)}
+              onImportConnections={handleImportConnections}
+              viewMode={viewMode}
+              onViewMode={setViewMode}
+              connectionSortMode={connectionSortMode}
+              onConnectionSortModeChange={setConnectionSortMode}
+              keychainSortMode={keychainSortMode}
+              onKeychainSortModeChange={setKeychainSortMode}
+            />
           </div>
 
           {/* Content canvas (scroll only here) */}
-          <div class="min-h-0 flex-1 overflow-y-auto bg-neutral-100">
-            {activeNav === "connections" ? (
-              <div class="px-4 py-4">
+          <div
+            class="min-h-0 flex-1 overflow-y-auto bg-neutral-100"
+            data-scroll-root
+          >
+            {activeNav === "logs" ? (
+              <ConnectionLogsSection
+                searchQuery={searchQuery}
+                onShowConnection={(profileId) => {
+                  setActiveNav("connections");
+                  selectProfile(profileId);
+                }}
+              />
+            ) : activeNav === "connections" ? (
+              <div class="px-6 py-5">
                 {/* Centered canvas */}
                 <div class="mx-auto w-full max-w-400">
                   <GroupsSection
@@ -501,6 +515,7 @@ export function MainScreen() {
                       openEdit(id);
                     }}
                     onDuplicate={handleDuplicate}
+                    onSelectProfile={selectProfile}
                   />
                 </div>
               </div>

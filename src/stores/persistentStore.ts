@@ -7,7 +7,8 @@ import {
   useScreenStore,
 } from "src/stores/screen";
 
-import type { OpenWindow, SqlEditorWindow } from "src/types";
+import type { ConnectionOpenLogEntry, OpenWindow, SqlEditorWindow } from "src/types";
+import { useConnectionLogStore } from "src/stores/connectionLog";
 import { debounce } from "../utils/common";
 import {
   persistentClear,
@@ -59,6 +60,9 @@ export type PersistentSnapshotV1 = {
 
   openWindows: Record<string, PersistedWindow[]>;
   activeWindowId: Record<string, string | null>;
+
+  connectionOpenLog?: ConnectionOpenLogEntry[];
+  activeConnectionLogByTabId?: Record<string, string>;
 };
 
 export type PersistentSnapshot = PersistentSnapshotV1;
@@ -120,6 +124,8 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
     querySafetyByProfileId[t.profileId] = normalizeSafetyMode(mode);
   }
 
+  const logSnap = useConnectionLogStore.getState().getPersistedSnapshot();
+
   return {
     version: 1,
     savedAt: Date.now(),
@@ -138,6 +144,9 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
 
     openWindows: s.openWindows,
     activeWindowId: s.activeWindowId,
+
+    connectionOpenLog: logSnap.entries,
+    activeConnectionLogByTabId: logSnap.activeByTabId,
   };
 }
 
@@ -266,6 +275,16 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       }
 
       const snap = clampSnapshotV1(raw);
+
+      useConnectionLogStore
+        .getState()
+        .hydrate(
+          Array.isArray(snap.connectionOpenLog) ? snap.connectionOpenLog : [],
+          snap.activeConnectionLogByTabId ?? {}
+        );
+      useConnectionLogStore
+        .getState()
+        .closeOrphanedActiveSessions(snap.savedAt);
 
       const profiles = useProfileStore.getState().profiles;
       const profileIdSet = new Set(profiles.map((p) => p.id));

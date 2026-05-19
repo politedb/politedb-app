@@ -1,4 +1,9 @@
-import { DatabaseIcon, KeyIcon, SettingsIcon } from "src/components/icons";
+import {
+  ClockIcon,
+  DatabaseIcon,
+  KeyIcon,
+  SettingsIcon,
+} from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
 import { useLicenseStore } from "src/stores/license";
@@ -14,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
     icon: <DatabaseIcon className="size-4" />,
   },
   { id: "keychain", label: "Keychain", icon: <KeyIcon className="size-4" /> },
+  { id: "logs", label: "Logs", icon: <ClockIcon className="size-4" /> },
 ];
 
 export function LeftNav(props: {
@@ -128,7 +134,9 @@ export function LeftNav(props: {
                   <div class="mt-0.5 truncate text-[11px] text-slate-500">
                     {item.id === "connections"
                       ? "Saved profiles"
-                      : "Secrets & keychain"}
+                      : item.id === "logs"
+                        ? "Open sessions"
+                        : "Secrets & keychain"}
                   </div>
                 </div>
 
@@ -146,8 +154,14 @@ export function LeftNav(props: {
 
       {/* Bottom spacer */}
       <div class="mt-auto space-y-2.5 px-3 pb-3">
-        <div class="rounded-xl border border-slate-200 bg-white/60 px-3 py-2 text-[11px] text-slate-600">
-          <div>Tip: Right-click a connection for actions.</div>
+        <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
+          <div>
+            Tips:
+            <ul class="list-decimal pl-4.5">
+              <li>Right-click a connection for actions.</li>
+              <li>Double-click a connection to open it.</li>
+            </ul>
+          </div>
         </div>
         {updateAvailable && canInstallUpdate && (
           <Button

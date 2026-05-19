@@ -239,9 +239,10 @@ export function TopBar(props: TopBarProps) {
   } = props;
 
   const isConnections = mode === "connections";
-  const searchPlaceholder = getTopBarSearchPlaceholder(isConnections);
-  const createLabel = getTopBarCreateLabel(isConnections);
-  const createTitle = getTopBarCreateTitle(isConnections);
+  const isLogs = mode === "logs";
+  const searchPlaceholder = getTopBarSearchPlaceholder(mode);
+  const createLabel = getTopBarCreateLabel(mode);
+  const createTitle = getTopBarCreateTitle(mode);
 
   const newConnectionMenuItems = useMemo(
     () =>
@@ -273,34 +274,42 @@ export function TopBar(props: TopBarProps) {
   );
 
   return (
-    <div class="flex shrink-0 items-center gap-2 bg-white px-1 py-2">
+    <div class="flex h-[64px] w-full shrink-0 items-center gap-2 bg-white p-4">
       <SearchField
         value={searchQuery}
         placeholder={searchPlaceholder}
         onChange={onSearchChange}
       />
 
-      {isConnections ? (
-        <CreateConnectionButtonGroup
-          label={createLabel}
-          title={createTitle}
-          onCreate={onNewConnection}
-          dropdownItems={newConnectionMenuItems}
-        />
-      ) : (
-        <CreateKeychainButton
-          label={createLabel}
-          title={createTitle}
-          onCreate={onNewConnection}
-        />
-      )}
+      {!isLogs ? (
+        isConnections ? (
+          <CreateConnectionButtonGroup
+            label={createLabel}
+            title={createTitle}
+            onCreate={onNewConnection}
+            dropdownItems={newConnectionMenuItems}
+          />
+        ) : (
+          <CreateKeychainButton
+            label={createLabel}
+            title={createTitle}
+            onCreate={onNewConnection}
+          />
+        )
+      ) : null}
 
-      <UtilityActions
-        sortTitle={isConnections ? "Sort connections" : "Sort keychain keys"}
-        sortItems={sortItems}
-      />
+      {!isLogs ? (
+        <>
+          <UtilityActions
+            sortTitle={
+              isConnections ? "Sort connections" : "Sort keychain keys"
+            }
+            sortItems={sortItems}
+          />
 
-      <ViewModeToggle mode={viewMode} onChange={onViewMode} />
+          <ViewModeToggle mode={viewMode} onChange={onViewMode} />
+        </>
+      ) : null}
     </div>
   );
 }

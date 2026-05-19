@@ -428,14 +428,18 @@ export function MenuBar({
       const conn = await connectionCreate(nextInput);
 
       const nextTabId = `tab-${uuid()}`;
-      addTab({
+      const nextTab = {
         id: nextTabId,
         label: `${profile.label} · ${nextDb}`,
         engine: profile.engine,
         runtimeConnectionId: conn.id,
         profileId: profile.id,
-      });
+      };
+      addTab(nextTab);
       setActiveProfileScreen(nextTabId);
+      void import("src/stores/connectionLog").then(({ recordConnectionSessionOpened }) =>
+        recordConnectionSessionOpened(nextTab)
+      );
     },
     [
       activeTab,
