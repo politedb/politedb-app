@@ -25,6 +25,10 @@ export type FormValues = {
   password: string;
   database: string;
 
+  snowflakeWarehouse: string;
+  snowflakeRole: string;
+  snowflakeSchema: string;
+
   storeKeychain: boolean;
 
   sslMode: SslMode;
@@ -82,13 +86,16 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
       return 0;
     case "oracle":
       return 1521;
+    case "snowflake":
+      return 0;
     default:
       return 5432;
   }
 }
 
 function defaultHostForEngine(engine: DatabaseEngine): string {
-  if (engine === "sqlite" || engine === "d1") return "";
+  if (engine === "sqlite" || engine === "d1" || engine === "snowflake")
+    return "";
   return "127.0.0.1";
 }
 
@@ -103,6 +110,7 @@ function pickByEngine<T>(
     oracle?: T;
     mongo?: T;
     redis?: T;
+    snowflake?: T;
   }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
@@ -113,6 +121,7 @@ function pickByEngine<T>(
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
   if (engine === "redis") return by.redis;
+  if (engine === "snowflake") return by.snowflake;
   return undefined;
 }
 
@@ -314,6 +323,30 @@ function buildMongoInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildSnowflakeInput(v: FormValues): ConnectionCreateInput {
+  const snowflake: ConnectionCreateInput["snowflake"] = {
+    account: String(v.host ?? "").trim(),
+    warehouse: String(v.snowflakeWarehouse ?? "").trim(),
+    database: String(v.database ?? "").trim(),
+    schema: v.snowflakeSchema?.trim() || null,
+    role: v.snowflakeRole?.trim() || null,
+    user: v.user,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    connect_timeout_ms: 60_000,
+    statement_timeout_ms: 60_000,
+  };
+
+  return {
+    engine: "snowflake",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    snowflake,
+  };
+}
+
 function buildOracleInput(v: FormValues): ConnectionCreateInput {
   const port = toNumber(v.port, 1521);
 
@@ -389,6 +422,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildD1Input(v);
     case "oracle":
       return buildOracleInput(v);
+    case "snowflake":
+      return buildSnowflakeInput(v);
     case "redis":
       return buildRedisInput(v);
     default:
@@ -417,6 +452,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const oracle = input?.oracle;
   const mongo = input?.mongo;
   const rd = input?.redis;
+  const sf = input?.snowflake;
 
   const host =
     pickByEngine(engine, {
@@ -428,6 +464,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       oracle: oracle?.host,
       mongo: mongo?.host,
       redis: rd?.host,
+      snowflake: sf?.account,
     }) || defaultHostForEngine(engine);
 
   const port =
@@ -440,6 +477,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       oracle: oracle?.port,
       mongo: mongo?.port,
       redis: rd?.port,
+      snowflake: 0,
     }) ?? defaultPortForEngine(engine);
 
   const user =
@@ -451,6 +489,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       oracle: oracle?.user,
       mongo: mongo?.user,
       redis: rd?.user,
+      snowflake: sf?.user,
     }) ||
     (engine === "mongo" || engine === "sqlite" || engine === "d1"
       ? ""
@@ -465,10 +504,15 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       d1: d1?.database_id,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
+      snowflake: sf?.database,
     }) ||
     (engine === "mongo" || engine === "sqlite" || engine === "d1"
       ? ""
       : "root");
+
+  const snowflakeWarehouse = sf?.warehouse ?? "";
+  const snowflakeRole = sf?.role ?? "";
+  const snowflakeSchema = sf?.schema ?? "PUBLIC";
 
   const password =
     engine === "postgres"
@@ -487,17 +531,21 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
             ? oracle?.password?.kind === "inline"
               ? (oracle.password.value ?? "")
               : ""
-            : engine === "mongo"
-              ? mongo?.password?.kind === "inline"
-                ? (mongo.password.value ?? "")
+            : engine === "snowflake"
+              ? sf?.password?.kind === "inline"
+                ? (sf.password.value ?? "")
                 : ""
-              : engine === "sqlite"
-                ? ""
-                : engine === "d1"
-                  ? d1?.api_token?.kind === "inline"
-                    ? (d1.api_token.value ?? "")
-                    : ""
-                  : "";
+              : engine === "mongo"
+                ? mongo?.password?.kind === "inline"
+                  ? (mongo.password.value ?? "")
+                  : ""
+                : engine === "sqlite"
+                  ? ""
+                  : engine === "d1"
+                    ? d1?.api_token?.kind === "inline"
+                      ? (d1.api_token.value ?? "")
+                      : ""
+                    : "";
 
   const storeKeychain =
     engine === "postgres"
@@ -508,15 +556,27 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
           ? ss?.password?.kind !== "inline"
           : engine === "oracle"
             ? oracle?.password?.kind !== "inline"
-            : engine === "mongo"
-              ? mongo?.password?.kind !== "inline"
-              : engine === "sqlite"
-                ? false
-                : engine === "d1"
-                  ? d1?.api_token?.kind !== "inline"
-                  : true;
+            : engine === "snowflake"
+              ? sf?.password?.kind !== "inline"
+              : engine === "mongo"
+                ? mongo?.password?.kind !== "inline"
+                : engine === "sqlite"
+                  ? false
+                  : engine === "d1"
+                    ? d1?.api_token?.kind !== "inline"
+                    : true;
 
-  return { host, port, user, database, password, storeKeychain };
+  return {
+    host,
+    port,
+    user,
+    database,
+    password,
+    storeKeychain,
+    snowflakeWarehouse,
+    snowflakeRole,
+    snowflakeSchema,
+  };
 }
 
 function makeSslDefaults(
@@ -626,6 +686,9 @@ export function makeDefaultValues(
     user: db.user,
     password: db.password,
     database: db.database,
+    snowflakeWarehouse: db.snowflakeWarehouse,
+    snowflakeRole: db.snowflakeRole,
+    snowflakeSchema: db.snowflakeSchema,
 
     storeKeychain: db.storeKeychain,
 

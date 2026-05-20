@@ -51,7 +51,8 @@ type EngineInput =
   | ConnectionProfile["input"]["d1"]
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
-  | ConnectionProfile["input"]["redis"];
+  | ConnectionProfile["input"]["redis"]
+  | ConnectionProfile["input"]["snowflake"];
 
 function getEngineInput(profile: ConnectionProfile): {
   engine: string;
@@ -78,6 +79,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "oracle") {
     return { engine, input: profile.input?.oracle };
+  }
+  if (engine === "snowflake") {
+    return { engine, input: profile.input?.snowflake };
   }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
@@ -114,6 +118,9 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "oracle":
       database = profile.input?.oracle?.database ?? "";
       break;
+    case "snowflake":
+      database = profile.input?.snowflake?.database ?? "";
+      break;
     case "mongo":
       database = profile.input?.mongo?.database ?? "";
       break;
@@ -124,9 +131,13 @@ function buildSubtitle(profile: ConnectionProfile) {
   }
 
   const accountId =
-    engine === "d1" ? profile.input?.d1?.account_id?.trim() : host;
-  const hostPort =
     engine === "d1"
+      ? profile.input?.d1?.account_id?.trim()
+      : engine === "snowflake"
+        ? profile.input?.snowflake?.account?.trim()
+        : host;
+  const hostPort =
+    engine === "d1" || engine === "snowflake"
       ? accountId || ""
       : host
         ? `${host}${port != null ? `:${port}` : ""}`

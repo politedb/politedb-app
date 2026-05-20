@@ -85,7 +85,8 @@ export type DatabaseEngine =
   | "mongo"
   | "sqlite"
   | "d1"
-  | "oracle";
+  | "oracle"
+  | "snowflake";
 
 export type DatabaseType = {
   engine: DatabaseEngine;

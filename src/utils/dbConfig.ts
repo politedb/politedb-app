@@ -4,6 +4,7 @@ import {
   ORACLE_DATA_TYPES,
   POSTGRES_DATA_TYPES,
   SQLSERVER_DATA_TYPES,
+  SNOWFLAKE_DATA_TYPES,
   SQLITE_DATA_TYPES,
 } from "src/constant";
 
@@ -52,5 +53,10 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
   oracle: {
     dataTypes: ORACLE_DATA_TYPES,
     indexAlgorithms: [],
+  },
+  snowflake: {
+    dataTypes: SNOWFLAKE_DATA_TYPES,
+    indexAlgorithms: [],
+    allowFk: true,
   },
 };

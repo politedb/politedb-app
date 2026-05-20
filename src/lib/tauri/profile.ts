@@ -303,6 +303,28 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "snowflake") {
+    const snowflake = input.snowflake;
+    if (!snowflake) throw new Error("SNOWFLAKE_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      snowflake: {
+        ...snowflake,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "redis") {
     const rd = input.redis;
     if (!rd) throw new Error("REDIS_CONFIG_MISSING");
@@ -551,6 +573,8 @@ function dbPasswordRef(input: ConnectionCreateInput): SecretRef | undefined {
       return input.sqlserver?.password;
     case "oracle":
       return input.oracle?.password;
+    case "snowflake":
+      return input.snowflake?.password;
     case "mongo":
       return input.mongo?.password;
     case "redis":
@@ -570,6 +594,7 @@ function inferStoreKeychainFromCreateInput(
     return input.mysql?.password?.kind !== "inline";
   if (e === "sqlserver") return input.sqlserver?.password?.kind !== "inline";
   if (e === "oracle") return input.oracle?.password?.kind !== "inline";
+  if (e === "snowflake") return input.snowflake?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
   if (e === "sqlite") return false;
   return true;

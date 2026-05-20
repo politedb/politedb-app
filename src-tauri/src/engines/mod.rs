@@ -9,6 +9,7 @@ pub mod postgres;
 pub mod redis;
 pub mod registry;
 pub mod secrets_util;
+pub mod snowflake;
 pub mod sqlite;
 pub mod sqlserver;
 
@@ -17,7 +18,9 @@ use uuid::Uuid;
 
 use crate::engines::cancel::CancelHandle;
 use crate::operations::ctx::{OperationCtx, SqlBusyRegistry};
-use crate::types::{EngineKind, ImportNullMode, SqlImportCsvInput, SqlImportCsvResult, SqlQueryInput};
+use crate::types::{
+    EngineKind, ImportNullMode, SqlImportCsvInput, SqlImportCsvResult, SqlQueryInput,
+};
 use crate::types::{OperationKind, RedisCommandInput};
 use futures_util::TryStreamExt;
 use mysql_async::prelude::Queryable;
@@ -32,6 +35,7 @@ pub enum EngineConnection {
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
+    Snowflake(snowflake::connection::SnowflakeConn),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,9 +70,7 @@ fn classify_sql_statement(sql: &str) -> SqlStatementKind {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::types::{
-        EngineKind, ImportNullMode, SqlImportColumnInput, SqlImportCsvInput,
-    };
+    use crate::types::{EngineKind, ImportNullMode, SqlImportColumnInput, SqlImportCsvInput};
     use uuid::Uuid;
 
     use super::{
@@ -111,7 +113,13 @@ mod tests {
         mapping.insert("id".to_string(), Some(0));
 
         let csv_text = std::iter::once("id".to_string())
-            .chain((0..101).map(|i| if i == 100 { "bad".to_string() } else { i.to_string() }))
+            .chain((0..101).map(|i| {
+                if i == 100 {
+                    "bad".to_string()
+                } else {
+                    i.to_string()
+                }
+            }))
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -196,8 +204,17 @@ fn import_type_issue(value: &str, db_type: &str) -> Option<&'static str> {
         return None;
     }
     if [
-        "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "float", "double",
-        "real", "numeric", "decimal",
+        "tinyint",
+        "smallint",
+        "mediumint",
+        "int",
+        "integer",
+        "bigint",
+        "float",
+        "double",
+        "real",
+        "numeric",
+        "decimal",
     ]
     .iter()
     .any(|prefix| typ.starts_with(prefix))
@@ -208,7 +225,10 @@ fn import_type_issue(value: &str, db_type: &str) -> Option<&'static str> {
         return Some("Invalid number");
     }
     if typ.contains("bool") || typ.contains("boolean") || typ.contains("bit") {
-        if matches!(value.to_ascii_lowercase().as_str(), "true" | "false" | "1" | "0") {
+        if matches!(
+            value.to_ascii_lowercase().as_str(),
+            "true" | "false" | "1" | "0"
+        ) {
             return None;
         }
         return Some("Invalid boolean");
@@ -226,8 +246,17 @@ fn format_import_value(value: Option<&str>, db_type: &str, engine: EngineKind) -
         return "NULL".into();
     }
     if [
-        "tinyint", "smallint", "mediumint", "int", "integer", "bigint", "float", "double",
-        "real", "numeric", "decimal",
+        "tinyint",
+        "smallint",
+        "mediumint",
+        "int",
+        "integer",
+        "bigint",
+        "float",
+        "double",
+        "real",
+        "numeric",
+        "decimal",
     ]
     .iter()
     .any(|prefix| typ.starts_with(prefix))
@@ -307,7 +336,13 @@ fn build_csv_import_statements(input: &SqlImportCsvInput) -> Result<Vec<String>,
     let import_columns = input
         .columns
         .iter()
-        .filter(|col| input.column_mapping.get(&col.name).and_then(|v| *v).is_some())
+        .filter(|col| {
+            input
+                .column_mapping
+                .get(&col.name)
+                .and_then(|v| *v)
+                .is_some()
+        })
         .collect::<Vec<_>>();
 
     if import_columns.is_empty() {
@@ -360,11 +395,12 @@ fn build_csv_import_statements(input: &SqlImportCsvInput) -> Result<Vec<String>,
                     .and_then(|v| *v)
                     .expect("mapped import column");
                 let raw = row.get(csv_idx).map(|s| s.as_str()).unwrap_or("");
-                let value = if raw.is_empty() && matches!(input.null_mode, ImportNullMode::EmptyAsNull) {
-                    None
-                } else {
-                    Some(raw)
-                };
+                let value =
+                    if raw.is_empty() && matches!(input.null_mode, ImportNullMode::EmptyAsNull) {
+                        None
+                    } else {
+                        Some(raw)
+                    };
                 format_import_value(value, &col.db_type, input.engine)
             })
             .collect::<Vec<_>>()
@@ -437,6 +473,7 @@ impl EngineConnection {
             EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
             EngineConnection::Redis(c) => c.id,
+            EngineConnection::Snowflake(c) => c.id,
         }
     }
 
@@ -450,6 +487,7 @@ impl EngineConnection {
             EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
+            EngineConnection::Snowflake(c) => c.label.clone(),
         }
     }
 
@@ -463,6 +501,7 @@ impl EngineConnection {
             EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Redis(_) => EngineKind::Redis,
+            EngineConnection::Snowflake(_) => EngineKind::Snowflake,
         }
     }
 
@@ -480,6 +519,7 @@ impl EngineConnection {
             EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Redis(_) => "redis",
+            EngineConnection::Snowflake(_) => "snowflake",
         }
     }
 
@@ -495,6 +535,7 @@ impl EngineConnection {
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Redis(r) => drop(r.pool),
+            EngineConnection::Snowflake(_) => {}
         }
     }
 
@@ -649,6 +690,36 @@ impl EngineConnection {
                 })
                 .await
                 .map_err(|e| format!("ORACLE_TX_JOIN_FAILED: {e}"))?
+            }
+            EngineConnection::Snowflake(sf) => {
+                reject_non_transactional_ddl("SNOWFLAKE", &statements)?;
+
+                let input = {
+                    use crate::types::secret::{SecretRef, SecretRefKind};
+                    crate::types::SnowflakeConnectInput {
+                        account: sf.account.clone(),
+                        warehouse: sf.warehouse.clone(),
+                        database: sf.database.clone(),
+                        schema: Some(sf.schema.clone()),
+                        role: sf.role.clone(),
+                        user: sf.user.clone(),
+                        password: SecretRef {
+                            kind: SecretRefKind::Inline,
+                            value: sf.password.clone(),
+                        },
+                        connect_timeout_ms: sf.connect_timeout_ms,
+                        statement_timeout_ms: sf.default_statement_timeout_ms,
+                    }
+                };
+
+                let session = snowflake::create_session(&input, &sf.password).await?;
+                for (idx, stmt) in statements.iter().enumerate() {
+                    session
+                        .query(stmt.as_str())
+                        .await
+                        .map_err(|e| format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1))?;
+                }
+                Ok(())
             }
             EngineConnection::Mongo(_) | EngineConnection::Redis(_) => {
                 Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into())
@@ -857,6 +928,37 @@ impl EngineConnection {
                         connect_string,
                         user,
                         password,
+                        input,
+                        default_timeout,
+                    )
+                    .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+
+            EngineConnection::Snowflake(sf) => {
+                let conn = sf.clone();
+                let default_timeout = sf.default_statement_timeout_ms;
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::snowflake::operation::run_snowflake_sql_query(
+                        ctx,
+                        conn,
                         input,
                         default_timeout,
                     )

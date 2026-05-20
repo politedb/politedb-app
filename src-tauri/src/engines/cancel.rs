@@ -22,6 +22,9 @@ pub enum CancelHandle {
     Oracle {
         notify: Arc<Notify>,
     },
+    Snowflake {
+        notify: Arc<Notify>,
+    },
     Redis {
         notify: Arc<Notify>,
     },
@@ -57,6 +60,9 @@ impl CancelHandle {
                 notify.notify_waiters();
             }
             CancelHandle::Oracle { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Snowflake { notify } => {
                 notify.notify_waiters();
             }
 

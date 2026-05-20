@@ -36,10 +36,7 @@ fn rewrite_input_host_port(
             my.port = port;
         }
         crate::types::EngineKind::Sqlserver => {
-            let ss = input
-                .sqlserver
-                .as_mut()
-                .ok_or("SQLSERVER_CONFIG_MISSING")?;
+            let ss = input.sqlserver.as_mut().ok_or("SQLSERVER_CONFIG_MISSING")?;
             ss.host = host.into();
             ss.port = port;
         }
@@ -60,8 +57,7 @@ fn rewrite_input_host_port(
             r.host = host.into();
             r.port = port;
         }
-        #[allow(unreachable_patterns)]
-        _ => return Err("ENGINE_NOT_SUPPORTED_YET".into()),
+        crate::types::EngineKind::Snowflake => {}
     }
     Ok(input)
 }
@@ -263,8 +259,16 @@ pub async fn connection_test(
                         }
                     }
                 }
-                #[allow(unreachable_patterns)]
-                _ => {}
+                crate::types::EngineKind::Snowflake => {
+                    if let Some(sf) = input.snowflake.as_mut() {
+                        if sf.password.kind == crate::types::SecretRefKind::Keychain
+                            && sf.password.value.trim().is_empty()
+                        {
+                            sf.password.kind = crate::types::SecretRefKind::Inline;
+                            sf.password.value = pw.to_string();
+                        }
+                    }
+                }
             }
         }
 
@@ -432,17 +436,16 @@ pub async fn connection_version(
                 .await
                 .map_err(|e| format!("SQLSERVER_CONNECT_FAILED: {e}"))?;
             let row = client
-                .simple_query("SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS version")
+                .simple_query(
+                    "SELECT CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(128)) AS version",
+                )
                 .await
                 .map_err(|e| format!("SQLSERVER_VERSION_QUERY_FAILED: {e}"))?
                 .into_row()
                 .await
                 .map_err(|e| format!("SQLSERVER_VERSION_ROW_FAILED: {e}"))?
                 .ok_or("SQLSERVER_VERSION_NOT_FOUND")?;
-            let version = row
-                .get::<&str, _>(0)
-                .unwrap_or("")
-                .to_string();
+            let version = row.get::<&str, _>(0).unwrap_or("").to_string();
             if version.is_empty() {
                 Err("SQLSERVER_VERSION_NOT_FOUND".into())
             } else {
@@ -512,6 +515,36 @@ pub async fn connection_version(
                 .await
                 .map_err(|e| format!("REDIS_INFO_QUERY_FAILED: {e}"))?;
             parse_redis_version(&info).ok_or("REDIS_VERSION_NOT_FOUND".into())
+        }
+        crate::engines::EngineConnection::Snowflake(sf) => {
+            use crate::types::secret::{SecretRef, SecretRefKind};
+            let input = crate::types::SnowflakeConnectInput {
+                account: sf.account.clone(),
+                warehouse: sf.warehouse.clone(),
+                database: sf.database.clone(),
+                schema: Some(sf.schema.clone()),
+                role: sf.role.clone(),
+                user: sf.user.clone(),
+                password: SecretRef {
+                    kind: SecretRefKind::Inline,
+                    value: sf.password.clone(),
+                },
+                connect_timeout_ms: sf.connect_timeout_ms,
+                statement_timeout_ms: sf.default_statement_timeout_ms,
+            };
+            let session = crate::engines::snowflake::create_session(&input, &sf.password)
+                .await
+                .map_err(|e| format!("SNOWFLAKE_VERSION_SESSION_FAILED: {e}"))?;
+            let rows = session
+                .query("SELECT CURRENT_VERSION()")
+                .await
+                .map_err(|e| format!("SNOWFLAKE_VERSION_QUERY_FAILED: {e}"))?;
+            let version = rows
+                .first()
+                .and_then(|r| r.get::<String>("CURRENT_VERSION()").ok())
+                .filter(|v| !v.is_empty())
+                .ok_or("SNOWFLAKE_VERSION_NOT_FOUND")?;
+            Ok(version)
         }
     }
 }

@@ -29,6 +29,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],
   d1: ["index_name", "index_algorithm", "is_unique", "column_name"],
   oracle: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  snowflake: ["index_name", "index_algorithm", "is_unique", "column_name"],
 };
 
 interface Props {

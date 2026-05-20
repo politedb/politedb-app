@@ -21,7 +21,7 @@ function isBusy(status: Status) {
 
 function Spinner() {
   return (
-    <span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+    <span class="inline-block size-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
   );
 }
 

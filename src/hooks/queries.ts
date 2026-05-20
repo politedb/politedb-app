@@ -118,6 +118,27 @@ export const tableSizeInfoQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "snowflake") {
+    // Size metadata is often unavailable for INFORMATION_SCHEMA or limited roles.
+    if (schema.toUpperCase() === "INFORMATION_SCHEMA") {
+      const queryStr = `
+        SELECT 0 AS total_size, 0 AS data_size, 0 AS index_size;
+      `;
+      return regexEscape(queryStr);
+    }
+    const queryStr = `
+      SELECT
+        COALESCE(t.BYTES, 0) AS total_size,
+        COALESCE(t.BYTES, 0) AS data_size,
+        0 AS index_size
+      FROM information_schema.tables t
+      WHERE t.table_schema = ${qLiteral(schema)}
+        AND t.table_name = ${qLiteral(tableName)}
+      LIMIT 1;
+    `;
+    return regexEscape(queryStr);
+  }
+
   if (engine === "oracle") {
     const table = tableName.toUpperCase();
     const queryStr = `
@@ -235,6 +256,20 @@ export function diagramTableColumnsQuery(
         CASE WHEN IFNULL(pk, 0) != 0 THEN 1 ELSE 0 END AS is_primary
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "snowflake") {
+    const queryStr = `
+      SELECT
+        c.column_name,
+        c.data_type,
+        0 AS is_primary
+      FROM information_schema.columns c
+      WHERE c.table_schema = ${qLiteral(schema)}
+        AND c.table_name = ${qLiteral(tableName)}
+      ORDER BY c.ordinal_position;
     `;
     return regexEscape(queryStr);
   }
@@ -466,6 +501,17 @@ export const tableEstimatedRowCountQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "snowflake") {
+    const queryStr = `
+      SELECT COALESCE(row_count, 0)
+      FROM information_schema.tables
+      WHERE table_schema = ${qLiteral(schema)}
+        AND table_name = ${qLiteral(tableName)}
+      LIMIT 1;
+    `;
+    return regexEscape(queryStr);
+  }
+
   return null;
 };
 
@@ -477,7 +523,12 @@ export const tableOidQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (isSqliteLike(engine) || engine === "oracle" || engine === "sqlserver") {
+  if (
+    isSqliteLike(engine) ||
+    engine === "oracle" ||
+    engine === "sqlserver" ||
+    engine === "snowflake"
+  ) {
     return "SELECT 0;";
   }
 
@@ -537,7 +588,7 @@ export const tableStructuresQuery = (
     return regexEscape(queryStr);
   }
 
-  if (engine === "sqlserver") {
+  if (engine === "sqlserver" || engine === "snowflake") {
     const queryStr = `
       SELECT
         c.ORDINAL_POSITION AS ordinal_position,
@@ -640,6 +691,10 @@ export const tableConstraintsQuery = (
       ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 ELSE 1 END, index_name;
     `;
     return regexEscape(queryStr);
+  }
+
+  if (engine === "snowflake") {
+    return regexEscape(`SELECT '' WHERE 1=0;`);
   }
 
   if (engine === "oracle") {
@@ -812,6 +867,11 @@ export const tableForeignKeysQuery = (
       ORDER BY fk.constraint_name;
     `;
     return regexEscape(queryStr);
+  }
+
+  // Snowflake read-only roles often cannot access KEY_COLUMN_USAGE / referential_constraints.
+  if (engine === "snowflake") {
+    return regexEscape(`SELECT '' WHERE 1=0;`);
   }
 
   if (engine === "sqlserver") {
@@ -1049,6 +1109,9 @@ export const dbListQuery = (engine?: DatabaseEngine) => {
   }
   if (engine === "sqlserver") {
     return "SELECT name FROM sys.databases WHERE state = 0 ORDER BY name;";
+  }
+  if (engine === "snowflake") {
+    return "SHOW DATABASES;";
   }
   return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;";
 };

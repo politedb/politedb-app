@@ -174,6 +174,18 @@ export type SqlServerConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type SnowflakeConnectInput = {
+  account: string;
+  warehouse: string;
+  database: string;
+  schema?: string | null;
+  role?: string | null;
+  user: string;
+  password: SecretRef;
+  connect_timeout_ms?: number | null;
+  statement_timeout_ms?: number | null;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -196,6 +208,7 @@ export type ConnectionCreateInput = {
   oracle?: OracleConnectInput;
   mongo?: MongoConnectInput;
   redis?: RedisConnectInput;
+  snowflake?: SnowflakeConnectInput;
 };
 
 export type ConnectionInfo = {

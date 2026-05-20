@@ -113,6 +113,7 @@ fn main() {
         Arc::new(engines::oracle::driver::OracleDriver),
         Arc::new(engines::mongo::driver::MongoDriver),
         Arc::new(engines::redis::driver::RedisDriver),
+        Arc::new(engines::snowflake::driver::SnowflakeDriver),
     ];
 
     let engines = EngineRegistry::new(drivers);

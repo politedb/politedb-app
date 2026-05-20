@@ -7,7 +7,8 @@ use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
     ConnectionCreateInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
-    PgConnectInput, RedisConnectInput, SqlServerConnectInput, SqliteConnectInput,
+    PgConnectInput, RedisConnectInput, SnowflakeConnectInput, SqlServerConnectInput,
+    SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -232,6 +233,9 @@ fn map_tableplus_engine(driver: &str) -> Option<EngineKind> {
     if d.contains("redis") {
         return Some(EngineKind::Redis);
     }
+    if d.contains("snowflake") {
+        return Some(EngineKind::Snowflake);
+    }
     None
 }
 
@@ -262,6 +266,7 @@ fn build_tableplus_input(
         oracle: None,
         mongo: None,
         redis: None,
+        snowflake: None,
         ssh: None,
     };
 
@@ -370,6 +375,19 @@ fn build_tableplus_input(
         EngineKind::D1 => {
             return Err("Cloudflare D1 is not supported for TablePlus import".into());
         }
+        EngineKind::Snowflake => {
+            input.snowflake = Some(SnowflakeConnectInput {
+                account: host.to_string(),
+                warehouse: String::new(),
+                database: database.to_string(),
+                schema: None,
+                role: None,
+                user: user.to_string(),
+                password,
+                connect_timeout_ms: None,
+                statement_timeout_ms: None,
+            });
+        }
     }
 
     Ok(input)
@@ -450,6 +468,10 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
         EngineKind::Sqlite | EngineKind::D1 => false,
+        EngineKind::Snowflake => input
+            .snowflake
+            .as_ref()
+            .is_some_and(|p| secret_nonempty(&p.password)),
     }
 }
 

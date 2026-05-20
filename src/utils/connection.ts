@@ -9,31 +9,29 @@ export function sortConnections(
   connections: ConnectionProfile[],
   mode: ConnectionSortMode = "created-desc"
 ): ConnectionProfile[] {
-  return connections
-    .slice()
-    .sort((a, b) => {
-      if (mode === "label-asc") {
-        const byLabel = safeLower(a.label).localeCompare(safeLower(b.label));
-        if (byLabel !== 0) return byLabel;
-      }
-      if (mode === "label-desc") {
-        const byLabel = safeLower(b.label).localeCompare(safeLower(a.label));
-        if (byLabel !== 0) return byLabel;
-      }
-      if (mode === "created-asc") {
-        const byCreated = (a.created_at ?? 0) - (b.created_at ?? 0);
-        if (byCreated !== 0) return byCreated;
-        const byUpdated = (a.updated_at ?? 0) - (b.updated_at ?? 0);
-        if (byUpdated !== 0) return byUpdated;
-      }
-      if (mode === "created-desc") {
-        const byCreated = (b.created_at ?? 0) - (a.created_at ?? 0);
-        if (byCreated !== 0) return byCreated;
-        const byUpdated = (b.updated_at ?? 0) - (a.updated_at ?? 0);
-        if (byUpdated !== 0) return byUpdated;
-      }
-      return safeLower(a.label).localeCompare(safeLower(b.label));
-    });
+  return connections.slice().sort((a, b) => {
+    if (mode === "label-asc") {
+      const byLabel = safeLower(a.label).localeCompare(safeLower(b.label));
+      if (byLabel !== 0) return byLabel;
+    }
+    if (mode === "label-desc") {
+      const byLabel = safeLower(b.label).localeCompare(safeLower(a.label));
+      if (byLabel !== 0) return byLabel;
+    }
+    if (mode === "created-asc") {
+      const byCreated = (a.created_at ?? 0) - (b.created_at ?? 0);
+      if (byCreated !== 0) return byCreated;
+      const byUpdated = (a.updated_at ?? 0) - (b.updated_at ?? 0);
+      if (byUpdated !== 0) return byUpdated;
+    }
+    if (mode === "created-desc") {
+      const byCreated = (b.created_at ?? 0) - (a.created_at ?? 0);
+      if (byCreated !== 0) return byCreated;
+      const byUpdated = (b.updated_at ?? 0) - (a.updated_at ?? 0);
+      if (byUpdated !== 0) return byUpdated;
+    }
+    return safeLower(a.label).localeCompare(safeLower(b.label));
+  });
 }
 
 export function pickHostDbUser(conn: ConnectionProfile) {
@@ -99,6 +97,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
       host: oc?.host ?? "",
       database: oc?.database ?? "",
       user: oc?.user ?? "",
+    };
+  }
+
+  if (engine === "snowflake") {
+    const sf = conn.input?.snowflake;
+    return {
+      host: sf?.account ?? "",
+      database: sf?.database ?? "",
+      user: sf?.user ?? "",
     };
   }
 

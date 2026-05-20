@@ -86,6 +86,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     desc: "Enterprise-grade relational database.",
     defaultLabels: ["Zeus", "Cronus", "Nereus"],
   },
+  {
+    engine: "snowflake",
+    label: "Snowflake",
+    abbreviation: "Sf",
+    color: "bg-sky-500",
+    available: true,
+    desc: "Cloud data warehouse for analytics and SQL workloads.",
+    defaultLabels: ["Chione", "Khione", "Boreas"],
+  },
 ] as const;
 
 export const POSTGRES_DATA_TYPES = [
@@ -203,6 +212,33 @@ export const SQLSERVER_DATA_TYPES = [
   "uniqueidentifier",
   "xml",
   "json",
+];
+
+export const SNOWFLAKE_DATA_TYPES = [
+  "NUMBER",
+  "DECIMAL",
+  "NUMERIC",
+  "INT",
+  "INTEGER",
+  "BIGINT",
+  "SMALLINT",
+  "FLOAT",
+  "DOUBLE",
+  "VARCHAR",
+  "CHAR",
+  "STRING",
+  "TEXT",
+  "BOOLEAN",
+  "DATE",
+  "TIME",
+  "TIMESTAMP",
+  "TIMESTAMP_NTZ",
+  "TIMESTAMP_LTZ",
+  "TIMESTAMP_TZ",
+  "VARIANT",
+  "OBJECT",
+  "ARRAY",
+  "BINARY",
 ];
 
 export const DATA_KEYS: Record<DataKey, DataKey> = {

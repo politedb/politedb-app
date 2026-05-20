@@ -13,9 +13,9 @@ use crate::profiles::types::{
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, EngineKind, MongoConnectInput,
-    MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef,
-    D1ConnectInput, SecretRefKind, SqlServerConnectInput, SqliteConnectInput,
+    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, D1ConnectInput, EngineKind,
+    MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
+    SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -168,6 +168,22 @@ fn validate_d1_input(d1: &D1ConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_snowflake_input(sf: &SnowflakeConnectInput) -> Result<(), String> {
+    if sf.account.trim().is_empty() {
+        return Err("SNOWFLAKE_ACCOUNT_REQUIRED".into());
+    }
+    if sf.warehouse.trim().is_empty() {
+        return Err("SNOWFLAKE_WAREHOUSE_REQUIRED".into());
+    }
+    if sf.database.trim().is_empty() {
+        return Err("SNOWFLAKE_DATABASE_REQUIRED".into());
+    }
+    if sf.user.trim().is_empty() {
+        return Err("SNOWFLAKE_USER_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_sqlserver_input(ss: &SqlServerConnectInput) -> Result<(), String> {
     if ss.host.trim().is_empty() {
         return Err("SQLSERVER_HOST_REQUIRED".into());
@@ -236,8 +252,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
             validate_redis_input(r)
         }
-        #[allow(unreachable_patterns)]
-        _ => Err("ENGINE_NOT_SUPPORTED_YET".into()),
+        EngineKind::Snowflake => {
+            let sf = input.snowflake.as_ref().ok_or("SNOWFLAKE_CONFIG_MISSING")?;
+            validate_snowflake_input(sf)
+        }
     }
 }
 
@@ -257,8 +275,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
         EngineKind::Redis => "redis",
-        #[allow(unreachable_patterns)]
-        _ => "unknown",
+        EngineKind::Snowflake => "snowflake",
     }
 }
 
@@ -358,6 +375,16 @@ pub fn persist_input_with_secrets(
                 EngineKind::Oracle,
                 persist_secrets,
                 &mut oc.password,
+            )?;
+        }
+        EngineKind::Snowflake => {
+            let sf = input.snowflake.as_mut().ok_or("SNOWFLAKE_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Snowflake,
+                persist_secrets,
+                &mut sf.password,
             )?;
         }
         EngineKind::Sqlite => {}
@@ -892,9 +919,5 @@ pub fn profile_import_external(
     app: AppHandle,
     payload: ProfileImportExternalPayload,
 ) -> Result<ExternalImportResult, String> {
-    import_external::import_external_file(
-        &app,
-        &payload.path,
-        payload.password.as_deref(),
-    )
+    import_external::import_external_file(&app, &payload.path, payload.password.as_deref())
 }

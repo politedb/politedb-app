@@ -8,7 +8,8 @@ use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
     ConnectionCreateInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
-    PgConnectInput, RedisConnectInput, SqlServerConnectInput, SqliteConnectInput,
+    PgConnectInput, RedisConnectInput, SnowflakeConnectInput, SqlServerConnectInput,
+    SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -109,6 +110,9 @@ fn map_dbeaver_engine(provider: &str) -> Option<EngineKind> {
     if p.contains("redis") {
         return Some(EngineKind::Redis);
     }
+    if p.contains("snowflake") {
+        return Some(EngineKind::Snowflake);
+    }
     None
 }
 
@@ -169,6 +173,7 @@ fn build_input(
         oracle: None,
         mongo: None,
         redis: None,
+        snowflake: None,
         ssh: None,
     };
 
@@ -268,6 +273,28 @@ fn build_input(
         }
         EngineKind::D1 => {
             return Err("Cloudflare D1 is not supported for DBeaver import".into());
+        }
+        EngineKind::Snowflake => {
+            let account = config_str(config, "account")
+                .or_else(|| {
+                    if !host.is_empty() && host != "localhost" {
+                        Some(host.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            input.snowflake = Some(SnowflakeConnectInput {
+                account,
+                warehouse: config_str(config, "warehouse").unwrap_or_default(),
+                database,
+                schema: config_str(config, "schema"),
+                role: config_str(config, "role"),
+                user,
+                password,
+                connect_timeout_ms: None,
+                statement_timeout_ms: None,
+            });
         }
     }
 
@@ -372,7 +399,7 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 6379)),
-        EngineKind::Sqlite | EngineKind::D1 => ("127.0.0.1".into(), 0),
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Snowflake => ("127.0.0.1".into(), 0),
     }
 }
 

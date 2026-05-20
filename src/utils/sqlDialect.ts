@@ -213,7 +213,12 @@ export function dropPrimaryKeySql(
   if (isMysqlFamilyEngine(engine)) {
     return `ALTER TABLE ${table} DROP PRIMARY KEY;`;
   }
-  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
+  if (
+    isSqliteLike(engine) ||
+    engine === "sqlserver" ||
+    engine === "oracle" ||
+    engine === "snowflake"
+  ) {
     unsupportedSql("Changing primary key", engine);
   }
   return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
@@ -225,7 +230,12 @@ export function addPrimaryKeySql(
   columns: string[],
   engine?: DatabaseEngine
 ) {
-  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
+  if (
+    isSqliteLike(engine) ||
+    engine === "sqlserver" ||
+    engine === "oracle" ||
+    engine === "snowflake"
+  ) {
     unsupportedSql("Changing primary key", engine);
   }
   return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} ADD PRIMARY KEY (${columns
@@ -277,7 +287,7 @@ export function alterColumnStatements(args: {
     unsupportedSql("Altering SQLite column type/null/default", engine);
   }
 
-  if (engine === "sqlserver" || engine === "oracle") {
+  if (engine === "sqlserver" || engine === "oracle" || engine === "snowflake") {
     unsupportedSql("Altering column type/null/default", engine);
   }
 
@@ -314,7 +324,12 @@ export function dropForeignKeySql(
   if (isMysqlFamilyEngine(engine)) {
     return `ALTER TABLE ${table} DROP FOREIGN KEY ${quoteIdentifier(constraintName, engine)};`;
   }
-  if (isSqliteLike(engine) || engine === "sqlserver" || engine === "oracle") {
+  if (
+    isSqliteLike(engine) ||
+    engine === "sqlserver" ||
+    engine === "oracle" ||
+    engine === "snowflake"
+  ) {
     unsupportedSql("Changing foreign keys", engine);
   }
   return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
@@ -333,7 +348,8 @@ export function addForeignKeySql(args: {
   if (
     isSqliteLike(args.engine) ||
     args.engine === "sqlserver" ||
-    args.engine === "oracle"
+    args.engine === "oracle" ||
+    args.engine === "snowflake"
   ) {
     unsupportedSql("Changing foreign keys", args.engine);
   }

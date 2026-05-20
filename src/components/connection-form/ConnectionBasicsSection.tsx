@@ -18,7 +18,8 @@ export function ConnectionBasicsSection(
   const isMongo = engine === "mongo";
   const isSqlite = engine === "sqlite";
   const isD1 = engine === "d1";
-  const isFilelessSql = isSqlite || isD1;
+  const isSnowflake = engine === "snowflake";
+  const isFilelessSql = isSqlite || isD1 || isSnowflake;
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -76,6 +77,11 @@ export function ConnectionBasicsSection(
             String(v ?? "").trim().length > 0 || "Database ID is required."
           );
         }
+        if (isSnowflake) {
+          return (
+            String(v ?? "").trim().length > 0 || "Database name is required."
+          );
+        }
         return true;
       },
     },
@@ -108,6 +114,20 @@ export function ConnectionBasicsSection(
     },
   });
 
+  const snowflakeWarehouse = useController({
+    control,
+    name: "snowflakeWarehouse",
+    rules: {
+      validate: (v) => {
+        if (!isSnowflake) return true;
+        return String(v ?? "").trim().length > 0 || "Warehouse is required.";
+      },
+    },
+  });
+
+  const snowflakeRole = useController({ control, name: "snowflakeRole" });
+  const snowflakeSchema = useController({ control, name: "snowflakeSchema" });
+
   const sslMode = useController({ control, name: "sslMode" });
   const sslKey = useController({ control, name: "sslKey" });
   const sslCert = useController({ control, name: "sslCert" });
@@ -136,7 +156,8 @@ export function ConnectionBasicsSection(
     if (engine === "sqlserver") return 1433;
     if (engine === "mongo") return 27017;
     if (engine === "redis") return 6379;
-    if (engine === "sqlite" || engine === "d1") return 0;
+    if (engine === "sqlite" || engine === "d1" || engine === "snowflake")
+      return 0;
     return 5432;
   }, [engine]);
 
@@ -163,9 +184,11 @@ export function ConnectionBasicsSection(
             ? "SQLite file path"
             : isD1
               ? "Cloudflare account, database, API token"
-              : isRedis || isMongo
-                ? "Host, Port"
-                : "Host, Port, User (database optional)"}
+              : isSnowflake
+                ? "Account, warehouse, database, user"
+                : isRedis || isMongo
+                  ? "Host, Port"
+                  : "Host, Port, User (database optional)"}
         </div>
       </div>
 
@@ -209,6 +232,75 @@ export function ConnectionBasicsSection(
           </>
         ) : null}
 
+        {isSnowflake ? (
+          <>
+            <Field label="Account">
+              <Input
+                value={host.field.value}
+                placeholder="xy12345.us-east-1"
+                error={hostErr}
+                onInput={(e: InputEvt) => {
+                  host.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              />
+            </Field>
+            <Field label="Warehouse">
+              <Input
+                value={snowflakeWarehouse.field.value}
+                placeholder="COMPUTE_WH"
+                error={!!errors?.snowflakeWarehouse}
+                onInput={(e: InputEvt) => {
+                  snowflakeWarehouse.field.onChange(e.currentTarget.value);
+                  dirty();
+                }}
+              />
+            </Field>
+            <Field label="DB / Schema" alignTop>
+              <div class="grid grid-cols-2 gap-3">
+                <Input
+                  value={database.field.value}
+                  placeholder="MY_DATABASE"
+                  error={dbErr}
+                  onInput={(e: InputEvt) => {
+                    database.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                />
+                <Input
+                  value={snowflakeSchema.field.value}
+                  placeholder="PUBLIC"
+                  onInput={(e: InputEvt) => {
+                    snowflakeSchema.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                />
+              </div>
+            </Field>
+            <Field label="User / Role" alignTop>
+              <div class="grid grid-cols-2 gap-3">
+                <Input
+                  value={user.field.value}
+                  placeholder="username"
+                  error={userErr}
+                  onInput={(e: InputEvt) => {
+                    user.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                />
+                <Input
+                  value={snowflakeRole.field.value}
+                  placeholder="ACCOUNTADMIN (optional)"
+                  onInput={(e: InputEvt) => {
+                    snowflakeRole.field.onChange(e.currentTarget.value);
+                    dirty();
+                  }}
+                />
+              </div>
+            </Field>
+          </>
+        ) : null}
+
         {!isFilelessSql && (
           <Field label="Host / Port" alignTop>
             <div class="grid grid-cols-3 gap-3">
@@ -238,14 +330,10 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isD1 ? (
+        {!isD1 && !isSnowflake ? (
           <Field
             label={
-              isSqlite
-                ? "Database File Path"
-                : isRedis
-                  ? "User"
-                  : "Database / User"
+              isSqlite ? "Database Path" : isRedis ? "User" : "Database / User"
             }
             alignTop
           >
@@ -406,7 +494,7 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isSqlite && (
+        {!isSqlite && !isSnowflake && (
           <SSLSection
             sslMode={sslMode.field.value}
             sslKey={sslKey.field.value}

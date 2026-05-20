@@ -331,27 +331,31 @@ async function loadRowCount(params: {
 
   if (estimatedQ) {
     const estQ = estimatedQ;
-    const estRes = await runSqlQuery(connId, estQ);
-    addLogQuery(estQ);
-    const estimatedValue = Number(
-      cellToString((estRes.rows as unknown[][])?.[0]?.[0])
-    );
-    if (estimatedValue < ESTIMATE_USE_EXACT_BELOW) {
-      const exactQ = tableRowCountQuery(
-        schema,
-        tableName,
-        filters,
-        filterCombine,
-        engine
+    try {
+      const estRes = await runSqlQuery(connId, estQ);
+      addLogQuery(estQ);
+      const estimatedValue = Number(
+        cellToString((estRes.rows as unknown[][])?.[0]?.[0])
       );
-      const exactRes = await runSqlQuery(connId, exactQ);
-      addLogQuery(exactQ);
-      return {
-        value: Number(cellToString((exactRes.rows as unknown[][])?.[0]?.[0])),
-        estimated: false,
-      };
+      if (estimatedValue < ESTIMATE_USE_EXACT_BELOW) {
+        const exactQ = tableRowCountQuery(
+          schema,
+          tableName,
+          filters,
+          filterCombine,
+          engine
+        );
+        const exactRes = await runSqlQuery(connId, exactQ);
+        addLogQuery(exactQ);
+        return {
+          value: Number(cellToString((exactRes.rows as unknown[][])?.[0]?.[0])),
+          estimated: false,
+        };
+      }
+      return { value: estimatedValue, estimated: true };
+    } catch (e) {
+      if (engine !== "snowflake") throw e;
     }
-    return { value: estimatedValue, estimated: true };
   }
 
   const q = tableRowCountQuery(
@@ -378,7 +382,15 @@ async function loadSizeInfo(params: {
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
   const q = tableSizeInfoQuery(schema, tableName, engine);
-  const res = await runSqlQuery(connId, q);
+  let res;
+  try {
+    res = await runSqlQuery(connId, q);
+  } catch (e) {
+    if (engine === "snowflake") {
+      return { totalSize: "N/A", dataSize: "N/A", indexSize: "N/A" };
+    }
+    throw e;
+  }
   addLogQuery(q);
 
   const r0 = (res.rows as unknown[][])?.[0] ?? [];
@@ -716,7 +728,7 @@ async function loadMeta(params: {
     return { structure, constraints };
   }
 
-  if (engine === "oracle") {
+  if (engine === "oracle" || engine === "snowflake") {
     const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
     const qConstraints = tableConstraintsQuery(schema, tableName, engine);
 
@@ -841,7 +853,12 @@ async function loadForeignKeys(params: {
 }): Promise<any[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
-  if (engine === "mysql" || engine === "mariadb" || isSqliteLike(engine)) {
+  if (
+    engine === "mysql" ||
+    engine === "mariadb" ||
+    engine === "snowflake" ||
+    isSqliteLike(engine)
+  ) {
     return [];
   }
 
@@ -1401,7 +1418,11 @@ export function useLoadTableData() {
             );
           }
 
-          if (plan.needForeignKeys && supportsMeta) {
+          if (
+            plan.needForeignKeys &&
+            supportsMeta &&
+            activeTab.engine !== "snowflake"
+          ) {
             metaTasks.push(
               (async () => {
                 const foreignKeys = await loadForeignKeys({
@@ -1415,6 +1436,8 @@ export function useLoadTableData() {
                 patchMeta(setMeta, key, prev, { foreignKeys });
               })()
             );
+          } else if (plan.needForeignKeys && activeTab.engine === "snowflake") {
+            patchMeta(setMeta, key, prev, { foreignKeys: [] });
           }
 
           // If no meta tasks needed, we are done

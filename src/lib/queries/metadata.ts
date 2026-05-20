@@ -150,6 +150,29 @@ const ORACLE: MetadataQueries = {
   `,
 };
 
+const SNOWFLAKE: MetadataQueries = {
+  schemasQuery: `
+    SELECT schema_name
+    FROM information_schema.schemata
+    WHERE catalog_name = CURRENT_DATABASE()
+    ORDER BY schema_name;
+  `,
+  functionsQuery: `SELECT '' WHERE 1=0;`,
+  tablesQuery: `
+    SELECT table_schema, table_name, table_type
+    FROM information_schema.tables
+    WHERE table_catalog = CURRENT_DATABASE()
+      AND table_type IN ('BASE TABLE', 'VIEW')
+    ORDER BY table_schema, table_type, table_name;
+  `,
+  columnsQuery: `
+    SELECT table_schema, table_name, column_name
+    FROM information_schema.columns
+    WHERE table_catalog = CURRENT_DATABASE()
+    ORDER BY table_schema, table_name, ordinal_position;
+  `,
+};
+
 const SQLSERVER: MetadataQueries = {
   schemasQuery: `
     SELECT name AS schema_name
@@ -208,6 +231,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
       return ORACLE;
     case "sqlserver":
       return SQLSERVER;
+    case "snowflake":
+      return SNOWFLAKE;
 
     // not supported for table/column completion
     case "redis":

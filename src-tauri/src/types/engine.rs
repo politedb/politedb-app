@@ -12,6 +12,7 @@ pub enum EngineKind {
     Oracle,
     Mongo,
     Redis,
+    Snowflake,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +105,19 @@ pub struct SqlServerConnectInput {
     pub user: String,
     pub password: crate::types::SecretRef,
     pub encrypt: Option<bool>,
+    pub connect_timeout_ms: Option<u64>,
+    pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnowflakeConnectInput {
+    pub account: String,
+    pub warehouse: String,
+    pub database: String,
+    pub schema: Option<String>,
+    pub role: Option<String>,
+    pub user: String,
+    pub password: SecretRef,
     pub connect_timeout_ms: Option<u64>,
     pub statement_timeout_ms: Option<u64>,
 }

@@ -18,9 +18,7 @@ pub fn sharing_checklist(options: &SharingExportOptions) -> Vec<String> {
     let mut items = Vec::new();
 
     if options.include_db_password {
-        items.push(
-            "Database password is included inside the encrypted file (inline).".into(),
-        );
+        items.push("Database password is included inside the encrypted file (inline).".into());
     } else {
         items.push("Database password is not included — enter it after import.".into());
     }
@@ -124,9 +122,12 @@ fn resolve_db_passwords_inline(
                 r.password = inline_secret_from_ref(app, &r.password)?;
             }
         }
+        EngineKind::Snowflake => {
+            if let Some(sf) = input.snowflake.as_mut() {
+                sf.password = inline_secret_from_ref(app, &sf.password)?;
+            }
+        }
         EngineKind::Sqlite | EngineKind::D1 => {}
-        #[allow(unreachable_patterns)]
-        _ => {}
     }
     Ok(())
 }
@@ -170,9 +171,12 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
                 redact(&mut r.password);
             }
         }
+        EngineKind::Snowflake => {
+            if let Some(sf) = input.snowflake.as_mut() {
+                redact(&mut sf.password);
+            }
+        }
         EngineKind::Sqlite | EngineKind::D1 => {}
-        #[allow(unreachable_patterns)]
-        _ => {}
     }
 }
 
@@ -275,13 +279,17 @@ mod tests {
     #[test]
     fn checklist_reflects_options() {
         let none = sharing_checklist(&SharingExportOptions::default());
-        assert!(none.iter().any(|s| s.contains("Database password is not included")));
+        assert!(none
+            .iter()
+            .any(|s| s.contains("Database password is not included")));
 
         let both = sharing_checklist(&SharingExportOptions {
             include_db_password: true,
             include_ssh_password: true,
         });
-        assert!(both.iter().any(|s| s.contains("Database password is included")));
+        assert!(both
+            .iter()
+            .any(|s| s.contains("Database password is included")));
         assert!(both.iter().any(|s| s.contains("SSH password is included")));
     }
 
@@ -342,6 +350,7 @@ mod tests {
                 mongo: None,
                 redis: None,
                 ssh: None,
+                snowflake: None,
             },
             tags: vec![],
             indicator_color: None,

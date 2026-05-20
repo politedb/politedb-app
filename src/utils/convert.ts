@@ -150,6 +150,7 @@ export function normalizeEngineName(
     mongo: "MongoDB",
     sqlite: "SQLite",
     oracle: "Oracle",
+    snowflake: "Snowflake",
     sqlserver: "SQL Server",
     redis: "Redis",
   };
@@ -191,6 +192,7 @@ export function formatDatabaseVersion(
       "mongo",
       "sqlite",
       "oracle",
+      "snowflake",
       "redis",
     ].includes(normalizedEngine)
   ) {
