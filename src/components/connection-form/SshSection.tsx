@@ -14,6 +14,7 @@ export function SSHSection(props: SectionProps) {
   const { control, onDirty } = props;
   const engine = useWatch({ control, name: "engine" });
   const isSqlite = engine === "sqlite" || engine === "d1";
+  const isDuckDB = engine === "duckdb";
 
   const sshEnabled = useController({ control, name: "sshEnabled" });
 
@@ -101,7 +102,7 @@ export function SSHSection(props: SectionProps) {
   const keyErr = sshKeyPath.fieldState.error?.message;
   const pwErr = sshPassword.fieldState.error?.message;
 
-  if (isSqlite) return null;
+  if (isSqlite || isDuckDB) return null;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">

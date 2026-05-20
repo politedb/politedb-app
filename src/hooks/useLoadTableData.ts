@@ -386,7 +386,7 @@ async function loadSizeInfo(params: {
   try {
     res = await runSqlQuery(connId, q);
   } catch (e) {
-    if (engine === "snowflake") {
+    if (engine === "snowflake" || engine === "duckdb") {
       return { totalSize: "N/A", dataSize: "N/A", indexSize: "N/A" };
     }
     throw e;

@@ -110,7 +110,7 @@ function EditableRowFieldList({
   }, [commitAllDirty]);
 
   return (
-    <div ref={panelRef} class="space-y-2 border-t border-neutral-100 pt-3">
+    <div ref={panelRef} class="space-y-2 border-t border-neutral-200 pt-3">
       {fields.map((field) => {
         const fieldReadOnly = readOnly || field.readonly;
         const draft = drafts[field.name] ?? "";
@@ -122,7 +122,7 @@ function EditableRowFieldList({
                 {field.name}
               </div>
               {field.dataType ? (
-                <div class="shrink-0 text-[10px] text-neutral-400">
+                <div class="shrink-0 text-[10px] text-neutral-500">
                   {field.dataType}
                 </div>
               ) : null}
@@ -137,7 +137,7 @@ function EditableRowFieldList({
               </div>
             ) : (
               <Input
-                className="h-9 border border-slate-300 text-sm"
+                className="h-9 border border-slate-300 bg-white text-sm"
                 value={draft}
                 placeholder={field.isNull ? "NULL" : undefined}
                 onValueChange={(value) =>
@@ -170,16 +170,16 @@ function EditableRowFieldList({
 
 function TableSizeSection({ sizeInfo }: { sizeInfo: TableSizeInfo }) {
   return (
-    <div class="space-y-2 border-t border-neutral-100 pt-3">
+    <div class="space-y-2 border-t border-neutral-200 pt-3">
       <div class="space-y-1 rounded-md">
         <div class="mb-1 text-xs font-medium text-neutral-500">Total Size</div>
-        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 bg-white p-2 text-sm font-semibold capitalize">
           {sizeInfo.totalSize || "0 KB"}
         </div>
       </div>
       <div class="space-y-1 rounded-md">
         <div class="mb-1 text-xs font-medium text-neutral-500">Data Size</div>
-        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 bg-white p-2 text-sm font-semibold capitalize">
           {sizeInfo.dataSize || "0 KB"}
         </div>
       </div>
@@ -187,7 +187,7 @@ function TableSizeSection({ sizeInfo }: { sizeInfo: TableSizeInfo }) {
         <div class="mb-1 text-xs font-medium text-neutral-500">
           Indexes Size
         </div>
-        <div class="rounded-md border border-neutral-200 p-2 text-sm font-semibold capitalize">
+        <div class="rounded-md border border-neutral-200 bg-white p-2 text-sm font-semibold capitalize">
           {sizeInfo.indexSize || "0 KB"}
         </div>
       </div>
@@ -218,9 +218,9 @@ function DataInfoPane({
 
   if (!hasRow) {
     return (
-      <div class="flex h-full flex-col gap-2 overflow-y-auto bg-white px-3 py-2">
+      <div class="flex h-full flex-col gap-2 overflow-y-auto bg-neutral-100 px-3 py-2">
         <p class="text-xs text-neutral-500">
-          Select a row in the table to view column values.
+          Data information for the current table.
         </p>
         {sizeInfo ? <TableSizeSection sizeInfo={sizeInfo} /> : null}
       </div>
@@ -228,7 +228,7 @@ function DataInfoPane({
   }
 
   return (
-    <div class="flex h-full flex-col gap-2 overflow-y-auto bg-white px-3 py-2">
+    <div class="flex h-full flex-col gap-2 overflow-y-auto bg-neutral-100 px-3 py-2">
       <p class="text-xs text-neutral-500">Row data for selected row.</p>
       <EditableRowFieldList
         rowIndex={selectedRowDetail.rowIndex}
@@ -257,7 +257,7 @@ export function RightNav({
   onInsertSql,
 }: Props) {
   return (
-    <div class="flex h-full min-h-0 flex-col bg-white">
+    <div class="flex h-full min-h-0 flex-col bg-neutral-100">
       <div class="shrink-0 border-b border-neutral-200 px-2 py-2">
         <div class="flex items-center justify-center gap-1">
           <TabButton

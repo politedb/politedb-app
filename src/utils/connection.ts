@@ -34,6 +34,21 @@ export function sortConnections(
   });
 }
 
+/** UI label for database/path — sqlite & duckdb show file name only. */
+export function formatConnectionDatabaseDisplay(
+  database: string,
+  engine?: string | null
+): string {
+  const db = database.trim();
+  if (!db) return "";
+  if (engine === "sqlite" || engine === "duckdb") {
+    const normalized = db.replace(/\\/g, "/").replace(/\/+$/g, "");
+    const slash = normalized.lastIndexOf("/");
+    return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  }
+  return db;
+}
+
 export function pickHostDbUser(conn: ConnectionProfile) {
   const engine = conn.engine;
 
@@ -78,6 +93,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     return {
       host: "",
       database: sqlite?.path ?? "",
+      user: "",
+    };
+  }
+
+  if (engine === "duckdb") {
+    const duckdb = conn.input?.duckdb;
+    return {
+      host: "",
+      database: duckdb?.path ?? "",
       user: "",
     };
   }

@@ -81,7 +81,7 @@ export function ConnectionFormDialog({
 
     const hostOk = !!host && Number.isFinite(Number(port));
 
-    if (v.engine === "sqlite" || v.engine === "d1") {
+    if (v.engine === "sqlite" || v.engine === "d1" || v.engine === "duckdb") {
       return !!database;
     }
 
@@ -299,7 +299,7 @@ export function ConnectionFormDialog({
           requiredOk={requiredOk}
           storeKeychain={v.storeKeychain}
           requiredHint={
-            v.engine === "sqlite"
+            v.engine === "sqlite" || v.engine === "duckdb"
               ? "Required: Database file path."
               : v.engine === "redis" || v.engine === "mongo"
                 ? "Required: Host, Port."

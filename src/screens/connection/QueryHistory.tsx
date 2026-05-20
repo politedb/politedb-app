@@ -1,5 +1,10 @@
-import { useMemo, useCallback } from "preact/hooks";
-import { ClockIcon, TrashIcon, CopyIcon } from "src/components/icons";
+import { useMemo, useCallback, useState } from "preact/hooks";
+import {
+  ClockIcon,
+  TrashIcon,
+  CopyIcon,
+  CopyCheckIcon,
+} from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Box } from "src/components/common/Box";
 import { cn } from "src/utils/cn";
@@ -81,6 +86,7 @@ export function highlightSql(sql: string): ComponentChildren {
 export function QueryHistory({ activeProfileId }: Props) {
   const queryHistory = useConnectionStore((s) => s.queryHistory);
   const clearHistory = useConnectionStore((s) => s.clearQueryHistory);
+  const [copied, setCopied] = useState(false);
 
   const queries = useMemo(
     () => queryHistory[activeProfileId] ?? [],
@@ -95,6 +101,8 @@ export function QueryHistory({ activeProfileId }: Props) {
   const onCopy = useCallback(async (sql: string) => {
     try {
       await navigator.clipboard.writeText(sql);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignore
     }
@@ -168,9 +176,13 @@ export function QueryHistory({ activeProfileId }: Props) {
                         e.stopPropagation();
                         void onCopy(sqlRaw);
                       }}
-                      title="Copy"
+                      title={copied ? "Copied" : "Copy"}
                     >
-                      <CopyIcon className="size-4" />
+                      {copied ? (
+                        <CopyCheckIcon className="size-4" />
+                      ) : (
+                        <CopyIcon className="size-4" />
+                      )}
                     </Button>
                   </div>
                 </div>
@@ -181,7 +193,11 @@ export function QueryHistory({ activeProfileId }: Props) {
       </div>
 
       <div class="border-t border-neutral-200 bg-white px-3 py-2">
-        <p class="text-[11px] text-neutral-500">Click a row to copy the SQL.</p>
+        <p class="text-[11px] text-neutral-500">
+          {copied
+            ? "Copied the SQL to clipboard!"
+            : "Click a row to copy the SQL."}
+        </p>
       </div>
     </div>
   );

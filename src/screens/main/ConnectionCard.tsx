@@ -19,6 +19,7 @@ import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { cn } from "src/utils/cn";
+import { formatConnectionDatabaseDisplay } from "src/utils/connection";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
@@ -52,7 +53,8 @@ type EngineInput =
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["redis"]
-  | ConnectionProfile["input"]["snowflake"];
+  | ConnectionProfile["input"]["snowflake"]
+  | ConnectionProfile["input"]["duckdb"];
 
 function getEngineInput(profile: ConnectionProfile): {
   engine: string;
@@ -82,6 +84,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "snowflake") {
     return { engine, input: profile.input?.snowflake };
+  }
+  if (engine === "duckdb") {
+    return { engine, input: profile.input?.duckdb };
   }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
@@ -121,6 +126,9 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "snowflake":
       database = profile.input?.snowflake?.database ?? "";
       break;
+    case "duckdb":
+      database = profile.input?.duckdb?.path ?? "";
+      break;
     case "mongo":
       database = profile.input?.mongo?.database ?? "";
       break;
@@ -142,9 +150,10 @@ function buildSubtitle(profile: ConnectionProfile) {
       : host
         ? `${host}${port != null ? `:${port}` : ""}`
         : "";
+  const databaseLabel = formatConnectionDatabaseDisplay(database, engine);
   const subtitle = firstNonEmpty(
-    hostPort && database ? `${hostPort} • ${database}` : hostPort,
-    database
+    hostPort && databaseLabel ? `${hostPort} • ${databaseLabel}` : hostPort,
+    databaseLabel
   );
 
   return { engine, subtitle, hasSsh: !!profile.input?.ssh };
@@ -362,7 +371,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         }
       }}
       class={cn(
-        "group relative flex cursor-default items-center justify-between gap-3",
+        "group relative flex cursor-default items-center justify-between gap-3 select-none",
         "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
         selected
           ? "border-blue-600 bg-blue-50"

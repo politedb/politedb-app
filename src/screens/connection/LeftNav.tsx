@@ -257,11 +257,13 @@ export function LeftNav({
         <div class="relative">
           <Input
             type="text"
-            placeholder="Search tables…"
+            placeholder="Search tables, functions..."
             left={<SearchIcon className="size-3.5 text-neutral-500" />}
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-            className={cn("rounded-lg border border-neutral-200 bg-white!")}
+            className={cn(
+              "rounded-lg border border-neutral-200 bg-white! text-[11px]"
+            )}
           />
         </div>
       </div>

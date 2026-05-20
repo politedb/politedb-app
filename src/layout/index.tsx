@@ -64,7 +64,7 @@ export function MainLayout() {
     (isValidationStale || (!isLicenseActive && isTrialExpired));
 
   return (
-    <div class="app-header flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50">
+    <div class="app-header flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50 select-none">
       <AppHeader
         activeTabId={activeProfileScreen}
         activeNav={activeProfileScreen || "main"}

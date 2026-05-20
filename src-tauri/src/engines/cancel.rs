@@ -16,6 +16,9 @@ pub enum CancelHandle {
     Sqlite {
         notify: Arc<Notify>,
     },
+    Duckdb {
+        notify: Arc<Notify>,
+    },
     D1 {
         notify: Arc<Notify>,
     },
@@ -54,6 +57,9 @@ impl CancelHandle {
             }
 
             CancelHandle::Sqlite { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Duckdb { notify } => {
                 notify.notify_waiters();
             }
             CancelHandle::D1 { notify } => {

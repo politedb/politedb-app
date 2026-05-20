@@ -292,8 +292,14 @@ export function ConnectionScreen() {
    * ============================================================================= */
   const metadata = useDatabaseMetadata();
   const engine = activeTab?.engine;
-  const { getProfileById, showEditProfile, selectedProfileId, closeEdit, saveProfile, loadProfiles } =
-    useProfileStore();
+  const {
+    getProfileById,
+    showEditProfile,
+    selectedProfileId,
+    closeEdit,
+    saveProfile,
+    loadProfiles,
+  } = useProfileStore();
 
   const profile = useMemo(() => {
     if (!activeTab?.profileId) return null;
@@ -315,8 +321,9 @@ export function ConnectionScreen() {
       setErrorDialogOpen(false);
 
       const currentTab =
-        useScreenStore.getState().profileTabs.find((t) => t.id === activeTab.id) ??
-        activeTab;
+        useScreenStore
+          .getState()
+          .profileTabs.find((t) => t.id === activeTab.id) ?? activeTab;
 
       // Connect path sets runtimeConnectionId on the tab; Save-only clears it to retry.
       const runtimeConnectionId = currentTab.runtimeConnectionId;

@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { CopyIcon, CopyCheck } from "src/components/icons";
+import { CopyIcon, CopyCheckIcon } from "src/components/icons";
 import type { ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 
@@ -142,7 +142,7 @@ export function AiAssistantMessageCard({ message, onInsertSql }: Props) {
               class="absolute top-2 right-2 z-10 hidden rounded-md border border-neutral-700 bg-neutral-900/80 p-1 text-neutral-200 transition-colors group-hover:block hover:bg-neutral-800 hover:text-white"
             >
               {copied ? (
-                <CopyCheck className="size-3.5 text-green-300" />
+                <CopyCheckIcon className="size-3.5 text-green-300" />
               ) : (
                 <CopyIcon className="size-3.5" />
               )}

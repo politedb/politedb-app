@@ -86,7 +86,8 @@ export type DatabaseEngine =
   | "sqlite"
   | "d1"
   | "oracle"
-  | "snowflake";
+  | "snowflake"
+  | "duckdb";
 
 export type DatabaseType = {
   engine: DatabaseEngine;

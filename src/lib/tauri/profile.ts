@@ -258,6 +258,21 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "duckdb") {
+    const duckdb = input.duckdb;
+    if (!duckdb) throw new Error("DUCKDB_CONFIG_MISSING");
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      duckdb: {
+        ...duckdb,
+      },
+    };
+  }
+
   if (engine === "d1") {
     const d1 = input.d1;
     if (!d1) throw new Error("D1_CONFIG_MISSING");
@@ -360,6 +375,7 @@ export function preparePayloadWithSecret(
     mysql: input.mysql,
     sqlserver: input.sqlserver,
     sqlite: input.sqlite,
+    duckdb: input.duckdb,
     oracle: input.oracle,
     mongo: input.mongo,
     redis: input.redis,
@@ -596,7 +612,7 @@ function inferStoreKeychainFromCreateInput(
   if (e === "oracle") return input.oracle?.password?.kind !== "inline";
   if (e === "snowflake") return input.snowflake?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
-  if (e === "sqlite") return false;
+  if (e === "sqlite" || e === "duckdb") return false;
   return true;
 }
 

@@ -6,9 +6,9 @@ use crate::profiles::import_common::{
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
-    ConnectionCreateInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
-    PgConnectInput, RedisConnectInput, SnowflakeConnectInput, SqlServerConnectInput,
-    SqliteConnectInput,
+    ConnectionCreateInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
+    OracleConnectInput, PgConnectInput, RedisConnectInput, SnowflakeConnectInput,
+    SqlServerConnectInput, SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -236,6 +236,9 @@ fn map_tableplus_engine(driver: &str) -> Option<EngineKind> {
     if d.contains("snowflake") {
         return Some(EngineKind::Snowflake);
     }
+    if d.contains("duckdb") {
+        return Some(EngineKind::Duckdb);
+    }
     None
 }
 
@@ -267,6 +270,7 @@ fn build_tableplus_input(
         mongo: None,
         redis: None,
         snowflake: None,
+        duckdb: None,
         ssh: None,
     };
 
@@ -388,6 +392,17 @@ fn build_tableplus_input(
                 statement_timeout_ms: None,
             });
         }
+        EngineKind::Duckdb => {
+            let path = if database.is_empty() {
+                host.to_string()
+            } else {
+                database.to_string()
+            };
+            input.duckdb = Some(DuckdbConnectInput {
+                path,
+                statement_timeout_ms: None,
+            });
+        }
     }
 
     Ok(input)
@@ -467,7 +482,7 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .redis
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
-        EngineKind::Sqlite | EngineKind::D1 => false,
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => false,
         EngineKind::Snowflake => input
             .snowflake
             .as_ref()

@@ -92,6 +92,7 @@ tauri-plugin-process = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sha2 = "0.10"
 snowflake-connector-rs = "0.9"
+duckdb = { version = "1.1", features = ["bundled", "chrono"] }
 
 [features]
 default = ["engine-postgres"]

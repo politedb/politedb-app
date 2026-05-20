@@ -15,6 +15,11 @@ export function isMySqlLike(engine?: DatabaseEngine) {
   return engine === "mysql" || engine === "mariadb";
 }
 
+/** SQLite/D1 only — DuckDB uses information_schema / duckdb_* metadata instead. */
+function isSqlitePragmaEngine(engine?: DatabaseEngine) {
+  return engine === "sqlite" || engine === "d1";
+}
+
 export function qIdent(ident: string, engine?: DatabaseEngine) {
   return quoteIdentifier(ident, engine);
 }
@@ -60,6 +65,30 @@ export const tableSizeInfoQuery = (
   if (engine === "d1") {
     const queryStr = `
       SELECT 0 AS total_size, 0 AS data_size, 0 AS index_size;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  // DuckDB has no pg_catalog size views; per-table size via pragma is optional.
+  if (engine === "duckdb") {
+    const tableRef =
+      schema && schema.toLowerCase() !== "main"
+        ? `${schema}.${tableName}`
+        : tableName;
+    const queryStr = `
+      WITH block_info AS (
+        SELECT CAST(block_size AS BIGINT) AS block_size
+        FROM pragma_database_size()
+      ),
+      table_storage AS (
+        SELECT COUNT(DISTINCT block_id) AS used_blocks
+        FROM pragma_storage_info(${qLiteral(tableRef)})
+        WHERE persistent = TRUE AND block_id IS NOT NULL
+      )
+      SELECT
+        COALESCE((SELECT block_size FROM block_info), 0) * COALESCE((SELECT used_blocks FROM table_storage), 0) AS total_size,
+        COALESCE((SELECT block_size FROM block_info), 0) * COALESCE((SELECT used_blocks FROM table_storage), 0) AS data_size,
+        0 AS index_size;
     `;
     return regexEscape(queryStr);
   }
@@ -214,7 +243,7 @@ export const tableColumnsQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (isSqliteLike(engine)) {
+  if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
       SELECT name AS column_name, type AS data_type
       FROM pragma_table_info(${qLiteral(tableName)})
@@ -250,12 +279,33 @@ export function diagramTableColumnsQuery(
   tableName: string,
   engine?: DatabaseEngine
 ): string | null {
-  if (isSqliteLike(engine)) {
+  if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
       SELECT name AS column_name, type AS data_type,
         CASE WHEN IFNULL(pk, 0) != 0 THEN 1 ELSE 0 END AS is_primary
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "duckdb") {
+    const queryStr = `
+      SELECT
+        c.column_name,
+        c.data_type,
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM duckdb_constraints() dc
+          WHERE dc.constraint_type = 'PRIMARY KEY'
+            AND dc.schema_name = ${qLiteral(schema)}
+            AND dc.table_name = ${qLiteral(tableName)}
+            AND list_contains(dc.constraint_column_names, c.column_name)
+        ) THEN 1 ELSE 0 END AS is_primary
+      FROM information_schema.columns c
+      WHERE c.table_schema = ${qLiteral(schema)}
+        AND c.table_name = ${qLiteral(tableName)}
+      ORDER BY c.ordinal_position;
     `;
     return regexEscape(queryStr);
   }
@@ -542,7 +592,7 @@ export const tableStructuresQuery = (
   oid: number,
   engine?: DatabaseEngine
 ) => {
-  if (isSqliteLike(engine)) {
+  if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
       SELECT
         cid + 1 AS ordinal_position,
@@ -560,6 +610,30 @@ export const tableStructuresQuery = (
         '' AS comment
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "duckdb") {
+    const queryStr = `
+      SELECT
+        c.ordinal_position,
+        c.column_name,
+        c.data_type,
+        c.data_type AS format_type,
+        c.numeric_precision,
+        c.datetime_precision,
+        c.numeric_scale,
+        c.character_maximum_length AS data_length,
+        c.is_nullable,
+        '' AS "check",
+        '' AS check_constraint,
+        c.column_default,
+        '' AS comment
+      FROM information_schema.columns c
+      WHERE c.table_schema = ${qLiteral(schema)}
+        AND c.table_name = ${qLiteral(tableName)}
+      ORDER BY c.ordinal_position;
     `;
     return regexEscape(queryStr);
   }
@@ -643,7 +717,7 @@ export const tableConstraintsQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  if (isSqliteLike(engine)) {
+  if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
       WITH pk AS (
         SELECT
@@ -687,6 +761,59 @@ export const tableConstraintsQuery = (
         UNION ALL
         SELECT *
         FROM idx
+      )
+      ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 ELSE 1 END, index_name;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "duckdb") {
+    const queryStr = `
+      WITH constraint_indexes AS (
+        SELECT
+          CASE
+            WHEN constraint_type = 'PRIMARY KEY' THEN 'PRIMARY'
+            ELSE COALESCE(constraint_text, constraint_type)
+          END AS index_name,
+          'BTREE' AS index_algorithm,
+          CASE
+            WHEN constraint_type IN ('PRIMARY KEY', 'UNIQUE') THEN 'true'
+            ELSE 'false'
+          END AS is_unique,
+          CASE WHEN constraint_type = 'PRIMARY KEY' THEN 'true' ELSE 'false' END AS is_primary,
+          COALESCE(constraint_text, '') AS index_definition,
+          array_to_string(constraint_column_names, ',') AS column_name,
+          '' AS condition,
+          '' AS include,
+          '' AS comment
+        FROM duckdb_constraints()
+        WHERE schema_name = ${qLiteral(schema)}
+          AND table_name = ${qLiteral(tableName)}
+          AND constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+      ),
+      secondary_indexes AS (
+        SELECT
+          index_name,
+          'BTREE' AS index_algorithm,
+          CASE WHEN is_unique THEN 'true' ELSE 'false' END AS is_unique,
+          'false' AS is_primary,
+          COALESCE(sql, '') AS index_definition,
+          COALESCE(NULLIF(expressions, ''), index_name) AS column_name,
+          '' AS condition,
+          '' AS include,
+          '' AS comment
+        FROM duckdb_indexes()
+        WHERE schema_name = ${qLiteral(schema)}
+          AND table_name = ${qLiteral(tableName)}
+      )
+      SELECT *
+      FROM (
+        SELECT *
+        FROM constraint_indexes
+        WHERE column_name IS NOT NULL AND trim(column_name) <> ''
+        UNION ALL
+        SELECT *
+        FROM secondary_indexes
       )
       ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 ELSE 1 END, index_name;
     `;

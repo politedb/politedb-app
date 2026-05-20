@@ -83,6 +83,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
       return 6379;
     case "sqlite":
     case "d1":
+    case "duckdb":
       return 0;
     case "oracle":
       return 1521;
@@ -94,7 +95,12 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
 }
 
 function defaultHostForEngine(engine: DatabaseEngine): string {
-  if (engine === "sqlite" || engine === "d1" || engine === "snowflake")
+  if (
+    engine === "sqlite" ||
+    engine === "d1" ||
+    engine === "duckdb" ||
+    engine === "snowflake"
+  )
     return "";
   return "127.0.0.1";
 }
@@ -111,12 +117,14 @@ function pickByEngine<T>(
     mongo?: T;
     redis?: T;
     snowflake?: T;
+    duckdb?: T;
   }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
   if (engine === "mysql" || engine === "mariadb") return by.mysql;
   if (engine === "sqlserver") return by.sqlserver;
   if (engine === "sqlite") return by.sqlite;
+  if (engine === "duckdb") return by.duckdb;
   if (engine === "d1") return by.d1;
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
@@ -387,6 +395,21 @@ function buildSqliteInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildDuckdbInput(v: FormValues): ConnectionCreateInput {
+  const path = String(v.database ?? "").trim();
+
+  return {
+    engine: "duckdb",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    duckdb: {
+      path,
+      statement_timeout_ms: 60_000,
+    },
+  };
+}
+
 function buildD1Input(v: FormValues): ConnectionCreateInput {
   return {
     engine: "d1",
@@ -418,6 +441,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildMongoInput(v);
     case "sqlite":
       return buildSqliteInput(v);
+    case "duckdb":
+      return buildDuckdbInput(v);
     case "d1":
       return buildD1Input(v);
     case "oracle":
@@ -448,6 +473,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const my = input?.mysql;
   const ss = input?.sqlserver;
   const sqlite = input?.sqlite;
+  const duckdb = input?.duckdb;
   const d1 = input?.d1;
   const oracle = input?.oracle;
   const mongo = input?.mongo;
@@ -491,7 +517,10 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       redis: rd?.user,
       snowflake: sf?.user,
     }) ||
-    (engine === "mongo" || engine === "sqlite" || engine === "d1"
+    (engine === "mongo" ||
+    engine === "sqlite" ||
+    engine === "duckdb" ||
+    engine === "d1"
       ? ""
       : "root");
 
@@ -501,12 +530,16 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       mysql: my?.database,
       sqlserver: ss?.database,
       sqlite: sqlite?.path,
+      duckdb: duckdb?.path,
       d1: d1?.database_id,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
       snowflake: sf?.database,
     }) ||
-    (engine === "mongo" || engine === "sqlite" || engine === "d1"
+    (engine === "mongo" ||
+    engine === "sqlite" ||
+    engine === "duckdb" ||
+    engine === "d1"
       ? ""
       : "root");
 
@@ -535,13 +568,13 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
               ? sf?.password?.kind === "inline"
                 ? (sf.password.value ?? "")
                 : ""
-              : engine === "mongo"
-                ? mongo?.password?.kind === "inline"
-                  ? (mongo.password.value ?? "")
-                  : ""
-                : engine === "sqlite"
-                  ? ""
-                  : engine === "d1"
+              : engine === "duckdb" || engine === "sqlite"
+                ? ""
+                : engine === "mongo"
+              ? mongo?.password?.kind === "inline"
+                ? (mongo.password.value ?? "")
+                : ""
+              : engine === "d1"
                     ? d1?.api_token?.kind === "inline"
                       ? (d1.api_token.value ?? "")
                       : ""
@@ -558,11 +591,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
             ? oracle?.password?.kind !== "inline"
             : engine === "snowflake"
               ? sf?.password?.kind !== "inline"
-              : engine === "mongo"
-                ? mongo?.password?.kind !== "inline"
-                : engine === "sqlite"
-                  ? false
-                  : engine === "d1"
+              : engine === "duckdb" || engine === "sqlite"
+                ? false
+                : engine === "mongo"
+              ? mongo?.password?.kind !== "inline"
+              : engine === "d1"
                     ? d1?.api_token?.kind !== "inline"
                     : true;
 

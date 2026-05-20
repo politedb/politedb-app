@@ -17,7 +17,7 @@ import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/QueryHistory";
 import type { DatabaseEngine } from "src/types";
-import { CopyCheck, CopyIcon } from "src/components/icons";
+import { CopyCheckIcon, CopyIcon } from "src/components/icons";
 import { buildPatchDiffs } from "src/utils/patchDiff";
 import { cn } from "src/utils/cn";
 
@@ -367,7 +367,7 @@ export function SaveChangesDialog({
                           title={copied ? "Copied!" : "Copy statement"}
                         >
                           {copied ? (
-                            <CopyCheck className="size-3.5 text-green-700" />
+                            <CopyCheckIcon className="size-3.5 text-green-700" />
                           ) : (
                             <CopyIcon className="size-3.5" />
                           )}

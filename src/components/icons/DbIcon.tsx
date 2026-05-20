@@ -10,6 +10,7 @@ import sqlite from "src/assets/db/sqlite.svg";
 import oracle from "src/assets/db/oracle.svg";
 import sqlserver from "src/assets/db/sqlserver.svg";
 import snowflake from "src/assets/db/snowflake.svg";
+import duckdb from "src/assets/db/duckdb.svg";
 import cloudflared1 from "src/assets/db/d1.svg";
 
 // Import DatabaseEngine from shared types if available; otherwise keep this local alias.
@@ -23,7 +24,8 @@ export type DatabaseEngine =
   | "sqlite"
   | "d1"
   | "oracle"
-  | "snowflake";
+  | "snowflake"
+  | "duckdb";
 
 type DbIconSrc = string;
 
@@ -38,6 +40,7 @@ const DB_ICON_MAP: Record<DatabaseEngine, DbIconSrc> = {
   d1: cloudflared1,
   oracle,
   snowflake,
+  duckdb,
 };
 
 function normalizeEngine(engine?: string): DatabaseEngine | null {
@@ -50,6 +53,7 @@ function normalizeEngine(engine?: string): DatabaseEngine | null {
   if (k === "maria") return "mariadb";
   if (k === "mssql") return "sqlserver";
   if (k === "sf") return "snowflake";
+  if (k === "dk") return "duckdb";
 
   // exact
   if (k in DB_ICON_MAP) return k as DatabaseEngine;
@@ -69,6 +73,7 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "d1") return "d1";
   if (k === "oc") return "oracle";
   if (k === "sf") return "snowflake";
+  if (k === "dk") return "duckdb";
   return null;
 }
 

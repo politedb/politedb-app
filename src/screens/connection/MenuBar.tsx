@@ -24,7 +24,10 @@ import {
   SchemaIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
-import { pickHostDbUser } from "src/utils/connection";
+import {
+  formatConnectionDatabaseDisplay,
+  pickHostDbUser,
+} from "src/utils/connection";
 import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
 import { TagChips } from "src/components/common/TagChips";
@@ -111,7 +114,7 @@ function EnvBadge({ text }: { text: string }) {
   const t = text.toUpperCase();
   const isProd = t.includes("PROD");
   const isStaging = t.includes("STAGING");
-  const isDev = t.includes("DEV") || t.includes("LOCAL");
+  const isDev = t.includes("DEV");
 
   const cls = isProd
     ? "bg-red-50 text-red-700 border-red-200"
@@ -368,11 +371,12 @@ export function MenuBar({
   }, [profile]);
 
   const dbLabel = useMemo(() => {
-    if (!connectionInfo) return { db: "", target: "" };
+    if (!connectionInfo) return { db: "", dbTitle: "", target: "" };
     const { database, schema, table, engine } = connectionInfo;
 
     return {
-      db: database,
+      db: formatConnectionDatabaseDisplay(database, engine),
+      dbTitle: database,
       target: table
         ? engine === "postgres"
           ? `${schema}.${table}`
@@ -437,8 +441,9 @@ export function MenuBar({
       };
       addTab(nextTab);
       setActiveProfileScreen(nextTabId);
-      void import("src/stores/connectionLog").then(({ recordConnectionSessionOpened }) =>
-        recordConnectionSessionOpened(nextTab)
+      void import("src/stores/connectionLog").then(
+        ({ recordConnectionSessionOpened }) =>
+          recordConnectionSessionOpened(nextTab)
       );
     },
     [
@@ -580,7 +585,10 @@ export function MenuBar({
 
               {connectionInfo ? (
                 <div class="flex min-w-0 flex-1 items-center gap-1 truncate">
-                  <span class="text-xs font-semibold text-neutral-800">
+                  <span
+                    class="text-xs font-semibold text-neutral-800"
+                    title={dbLabel.dbTitle || dbLabel.db}
+                  >
                     {dbLabel.db}
                   </span>
                   <ChevronRightIcon className="size-2" />

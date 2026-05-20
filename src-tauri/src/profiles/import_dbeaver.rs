@@ -7,9 +7,9 @@ use crate::profiles::import_common::{
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
-    ConnectionCreateInput, EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput,
-    PgConnectInput, RedisConnectInput, SnowflakeConnectInput, SqlServerConnectInput,
-    SqliteConnectInput,
+    ConnectionCreateInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
+    OracleConnectInput, PgConnectInput, RedisConnectInput, SnowflakeConnectInput,
+    SqlServerConnectInput, SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -113,6 +113,9 @@ fn map_dbeaver_engine(provider: &str) -> Option<EngineKind> {
     if p.contains("snowflake") {
         return Some(EngineKind::Snowflake);
     }
+    if p.contains("duckdb") {
+        return Some(EngineKind::Duckdb);
+    }
     None
 }
 
@@ -174,6 +177,7 @@ fn build_input(
         mongo: None,
         redis: None,
         snowflake: None,
+        duckdb: None,
         ssh: None,
     };
 
@@ -273,6 +277,17 @@ fn build_input(
         }
         EngineKind::D1 => {
             return Err("Cloudflare D1 is not supported for DBeaver import".into());
+        }
+        EngineKind::Duckdb => {
+            let path = if !database.is_empty() {
+                database
+            } else {
+                url.unwrap_or_else(|| ":memory:".to_string())
+            };
+            input.duckdb = Some(DuckdbConnectInput {
+                path,
+                statement_timeout_ms: None,
+            });
         }
         EngineKind::Snowflake => {
             let account = config_str(config, "account")
@@ -399,7 +414,9 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 6379)),
-        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Snowflake => ("127.0.0.1".into(), 0),
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb | EngineKind::Snowflake => {
+            ("127.0.0.1".into(), 0)
+        }
     }
 }
 

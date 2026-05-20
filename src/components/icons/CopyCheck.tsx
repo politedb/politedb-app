@@ -1,6 +1,6 @@
 import { SVGAttributes } from "preact";
 
-export function CopyCheck(props: SVGAttributes<SVGSVGElement>) {
+export function CopyCheckIcon(props: SVGAttributes<SVGSVGElement>) {
   return (
     <svg
       width="24"

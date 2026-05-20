@@ -58,6 +58,7 @@ fn rewrite_input_host_port(
             r.port = port;
         }
         crate::types::EngineKind::Snowflake => {}
+        crate::types::EngineKind::Duckdb => {}
     }
     Ok(input)
 }
@@ -238,6 +239,7 @@ pub async fn connection_test(
                     }
                 }
                 crate::types::EngineKind::Sqlite => {}
+                crate::types::EngineKind::Duckdb => {}
                 crate::types::EngineKind::D1 => {}
                 crate::types::EngineKind::Mongo => {
                     if let Some(mongo) = input.mongo.as_mut() {
@@ -465,6 +467,18 @@ pub async fn connection_version(
             })
             .await
             .map_err(|e| format!("SQLITE_VERSION_JOIN_FAILED: {e}"))??;
+            Ok(version)
+        }
+        crate::engines::EngineConnection::Duckdb(duckdb) => {
+            let shared = duckdb.conn.clone();
+            let version = tokio::task::spawn_blocking(move || -> Result<String, String> {
+                crate::engines::duckdb::util::with_duckdb_connection(&shared, |conn| {
+                    conn.query_row("SELECT version()", [], |row| row.get(0))
+                        .map_err(|e| format!("DUCKDB_VERSION_QUERY_FAILED: {e}"))
+                })
+            })
+            .await
+            .map_err(|e| format!("DUCKDB_VERSION_JOIN_FAILED: {e}"))??;
             Ok(version)
         }
         crate::engines::EngineConnection::D1(_) => {

@@ -127,7 +127,7 @@ fn resolve_db_passwords_inline(
                 sf.password = inline_secret_from_ref(app, &sf.password)?;
             }
         }
-        EngineKind::Sqlite | EngineKind::D1 => {}
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
     }
     Ok(())
 }
@@ -176,7 +176,7 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
                 redact(&mut sf.password);
             }
         }
-        EngineKind::Sqlite | EngineKind::D1 => {}
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
     }
 }
 
@@ -351,6 +351,7 @@ mod tests {
                 redis: None,
                 ssh: None,
                 snowflake: None,
+                duckdb: None,
             },
             tags: vec![],
             indicator_color: None,

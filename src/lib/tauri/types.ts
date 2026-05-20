@@ -145,6 +145,11 @@ export type SqliteConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type DuckdbConnectInput = {
+  path: string;
+  statement_timeout_ms?: number | null;
+};
+
 export type D1ConnectInput = {
   account_id: string;
   database_id: string;
@@ -209,6 +214,7 @@ export type ConnectionCreateInput = {
   mongo?: MongoConnectInput;
   redis?: RedisConnectInput;
   snowflake?: SnowflakeConnectInput;
+  duckdb?: DuckdbConnectInput;
 };
 
 export type ConnectionInfo = {

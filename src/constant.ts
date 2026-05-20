@@ -95,6 +95,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     desc: "Cloud data warehouse for analytics and SQL workloads.",
     defaultLabels: ["Chione", "Khione", "Boreas"],
   },
+  {
+    engine: "duckdb",
+    label: "DuckDB",
+    abbreviation: "Dk",
+    color: "bg-yellow-600",
+    available: true,
+    desc: "Embedded analytical database (.duckdb file or in-memory).",
+    defaultLabels: ["Daedalus", "Icarus", "Talos"],
+  },
 ] as const;
 
 export const POSTGRES_DATA_TYPES = [

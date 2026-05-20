@@ -19,7 +19,8 @@ export function ConnectionBasicsSection(
   const isSqlite = engine === "sqlite";
   const isD1 = engine === "d1";
   const isSnowflake = engine === "snowflake";
-  const isFilelessSql = isSqlite || isD1 || isSnowflake;
+  const isDuckDB = engine === "duckdb";
+  const isFilelessSql = isSqlite || isD1 || isDuckDB || isSnowflake;
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -66,7 +67,7 @@ export function ConnectionBasicsSection(
     name: "database",
     rules: {
       validate: (v) => {
-        if (isSqlite) {
+        if (isSqlite || isDuckDB) {
           return (
             String(v ?? "").trim().length > 0 ||
             "Database file path is required."
@@ -92,7 +93,7 @@ export function ConnectionBasicsSection(
     name: "user",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo || isFilelessSql) return true;
+        if (isRedis || isMongo || isFilelessSql || isDuckDB) return true;
         return String(v ?? "").trim().length > 0 || "User is required.";
       },
     },
@@ -104,7 +105,7 @@ export function ConnectionBasicsSection(
     name: "password",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo || isSqlite) return true;
+        if (isRedis || isMongo || isSqlite || isDuckDB) return true;
         if (isD1) {
           return String(v ?? "").trim().length > 0 || "API token is required.";
         }
@@ -156,7 +157,12 @@ export function ConnectionBasicsSection(
     if (engine === "sqlserver") return 1433;
     if (engine === "mongo") return 27017;
     if (engine === "redis") return 6379;
-    if (engine === "sqlite" || engine === "d1" || engine === "snowflake")
+    if (
+      engine === "sqlite" ||
+      engine === "duckdb" ||
+      engine === "d1" ||
+      engine === "snowflake"
+    )
       return 0;
     return 5432;
   }, [engine]);
@@ -171,6 +177,7 @@ export function ConnectionBasicsSection(
     !isRedis &&
     !isMongo &&
     !isSqlite &&
+    !isDuckDB &&
     (isD1 || !!errors?.password);
 
   return (
@@ -180,8 +187,8 @@ export function ConnectionBasicsSection(
           Connection basics
         </div>
         <div class="text-xs text-slate-500">
-          {isSqlite
-            ? "SQLite file path"
+          {isSqlite || isDuckDB
+            ? "Database file path"
             : isD1
               ? "Cloudflare account, database, API token"
               : isSnowflake
@@ -333,30 +340,40 @@ export function ConnectionBasicsSection(
         {!isD1 && !isSnowflake ? (
           <Field
             label={
-              isSqlite ? "Database Path" : isRedis ? "User" : "Database / User"
+              isSqlite || isDuckDB
+                ? "Database Path"
+                : isRedis
+                  ? "User"
+                  : "Database / User"
             }
             alignTop
           >
             <div
               class={
-                isSqlite ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"
+                isSqlite || isDuckDB
+                  ? "grid grid-cols-1 gap-3"
+                  : "grid grid-cols-2 gap-3"
               }
             >
               {!isRedis && (
                 <Input
                   value={database.field.value}
                   placeholder={
-                    isSqlite ? "/absolute/path/to/file.db" : "database"
+                    isSqlite
+                      ? "/absolute/path/to/file.db"
+                      : isDuckDB
+                        ? "/absolute/path/to/file.duckdb"
+                        : "database"
                   }
                   error={dbErr}
-                  class={isSqlite ? "col-span-2" : ""}
+                  class={isSqlite || isDuckDB ? "col-span-2" : ""}
                   onInput={(e: InputEvt) => {
                     database.field.onChange(e.currentTarget.value);
                     dirty();
                   }}
                 />
               )}
-              {!isSqlite && (
+              {!isSqlite && !isDuckDB && (
                 <Input
                   value={user.field.value}
                   placeholder="user"
@@ -373,7 +390,7 @@ export function ConnectionBasicsSection(
         ) : null}
 
         {/* Password + Storage (merged) */}
-        {!isSqlite && (
+        {!isSqlite && !isDuckDB && (
           <Field label={isD1 ? "API Token" : "Password"} alignTop>
             <div class="space-y-2">
               {/* Password row */}
@@ -494,7 +511,7 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isSqlite && !isSnowflake && (
+        {!isSqlite && !isDuckDB && !isSnowflake && (
           <SSLSection
             sslMode={sslMode.field.value}
             sslKey={sslKey.field.value}

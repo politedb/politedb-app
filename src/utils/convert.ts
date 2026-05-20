@@ -151,6 +151,7 @@ export function normalizeEngineName(
     sqlite: "SQLite",
     oracle: "Oracle",
     snowflake: "Snowflake",
+    duckdb: "DuckDB",
     sqlserver: "SQL Server",
     redis: "Redis",
   };

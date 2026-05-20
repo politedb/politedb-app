@@ -1,6 +1,7 @@
 pub mod cancel;
 pub mod d1;
 pub mod driver;
+pub mod duckdb;
 pub mod merge;
 pub mod mongo;
 pub mod mysql;
@@ -36,6 +37,7 @@ pub enum EngineConnection {
     Mongo(mongo::connection::MongoConn),
     Redis(redis::connection::RedisConn),
     Snowflake(snowflake::connection::SnowflakeConn),
+    Duckdb(duckdb::connection::DuckdbConn),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,7 +169,12 @@ fn quote_import_identifier(ident: &str, engine: EngineKind) -> String {
 }
 
 fn quote_import_table(schema: &str, table_name: &str, engine: EngineKind) -> String {
-    if schema.trim().is_empty() || matches!(engine, EngineKind::Sqlite | EngineKind::D1) {
+    if schema.trim().is_empty()
+        || matches!(
+            engine,
+            EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb
+        )
+    {
         return quote_import_identifier(table_name, engine);
     }
     format!(
@@ -474,6 +481,7 @@ impl EngineConnection {
             EngineConnection::Mongo(c) => c.id,
             EngineConnection::Redis(c) => c.id,
             EngineConnection::Snowflake(c) => c.id,
+            EngineConnection::Duckdb(c) => c.id,
         }
     }
 
@@ -488,6 +496,7 @@ impl EngineConnection {
             EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
             EngineConnection::Snowflake(c) => c.label.clone(),
+            EngineConnection::Duckdb(c) => c.label.clone(),
         }
     }
 
@@ -502,6 +511,7 @@ impl EngineConnection {
             EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Redis(_) => EngineKind::Redis,
             EngineConnection::Snowflake(_) => EngineKind::Snowflake,
+            EngineConnection::Duckdb(_) => EngineKind::Duckdb,
         }
     }
 
@@ -520,6 +530,7 @@ impl EngineConnection {
             EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Redis(_) => "redis",
             EngineConnection::Snowflake(_) => "snowflake",
+            EngineConnection::Duckdb(_) => "duckdb",
         }
     }
 
@@ -536,6 +547,7 @@ impl EngineConnection {
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Redis(r) => drop(r.pool),
             EngineConnection::Snowflake(_) => {}
+            EngineConnection::Duckdb(_) => {}
         }
     }
 
@@ -619,6 +631,27 @@ impl EngineConnection {
                 })
                 .await
                 .map_err(|e| format!("SQLITE_TX_JOIN_FAILED: {e}"))?
+            }
+            EngineConnection::Duckdb(duckdb) => {
+                let shared = duckdb.conn.clone();
+                tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    duckdb::util::with_duckdb_connection(&shared, |conn| {
+                    conn.execute_batch("BEGIN")
+                        .map_err(|e| format!("DUCKDB_TX_BEGIN_FAILED: {e}"))?;
+
+                    for (idx, stmt) in statements.iter().enumerate() {
+                        if let Err(e) = conn.execute_batch(stmt) {
+                            let _ = conn.execute_batch("ROLLBACK");
+                            return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                        }
+                    }
+
+                    conn.execute_batch("COMMIT")
+                        .map_err(|e| format!("DUCKDB_TX_COMMIT_FAILED: {e}"))
+                    })
+                })
+                .await
+                .map_err(|e| format!("DUCKDB_TX_JOIN_FAILED: {e}"))?
             }
             EngineConnection::D1(d1) => {
                 let http = d1.http.clone();
@@ -869,6 +902,36 @@ impl EngineConnection {
                     };
 
                     crate::engines::sqlite::operation::run_sqlite_sql_query(
+                        ctx,
+                        shared,
+                        input,
+                        default_timeout,
+                    )
+                    .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+            EngineConnection::Duckdb(duckdb) => {
+                let shared = duckdb.conn.clone();
+                let default_timeout = duckdb.default_statement_timeout_ms;
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::duckdb::operation::run_duckdb_sql_query(
                         ctx,
                         shared,
                         input,

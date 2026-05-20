@@ -224,6 +224,7 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
     case "mariadb":
       return MYSQL;
     case "sqlite":
+    case "duckdb":
       return SQLITE;
     case "d1":
       return D1;

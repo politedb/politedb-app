@@ -6,7 +6,7 @@ import {
   DialogContent,
 } from "src/components/common/Dialog";
 import { Button } from "src/components/common/Button";
-import { CopyIcon, CopyCheck } from "src/components/icons";
+import { CopyIcon, CopyCheckIcon } from "src/components/icons";
 
 export function SqlPreviewModal(props: {
   open: boolean;
@@ -43,7 +43,7 @@ export function SqlPreviewModal(props: {
             title={copied ? "Copied!" : "Copy"}
           >
             {copied ? (
-              <CopyCheck className="size-4" />
+              <CopyCheckIcon className="size-4" />
             ) : (
               <CopyIcon className="size-4" />
             )}

@@ -13,9 +13,10 @@ use crate::profiles::types::{
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, D1ConnectInput, EngineKind,
-    MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
-    SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
+    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, D1ConnectInput, DuckdbConnectInput,
+    EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
+    RedisConnectInput, SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput,
+    SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -151,6 +152,13 @@ fn validate_mongo_input(m: &MongoConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_duckdb_input(s: &DuckdbConnectInput) -> Result<(), String> {
+    if s.path.trim().is_empty() {
+        return Err("DUCKDB_PATH_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_sqlite_input(s: &SqliteConnectInput) -> Result<(), String> {
     if s.path.trim().is_empty() {
         return Err("SQLITE_PATH_REQUIRED".into());
@@ -236,6 +244,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let s = input.sqlite.as_ref().ok_or("SQLITE_CONFIG_MISSING")?;
             validate_sqlite_input(s)
         }
+        EngineKind::Duckdb => {
+            let d = input.duckdb.as_ref().ok_or("DUCKDB_CONFIG_MISSING")?;
+            validate_duckdb_input(d)
+        }
         EngineKind::D1 => {
             let d1 = input.d1.as_ref().ok_or("D1_CONFIG_MISSING")?;
             validate_d1_input(d1)
@@ -271,6 +283,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Mariadb => "mariadb",
         EngineKind::Sqlserver => "sqlserver",
         EngineKind::Sqlite => "sqlite",
+        EngineKind::Duckdb => "duckdb",
         EngineKind::D1 => "d1",
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
@@ -388,6 +401,7 @@ pub fn persist_input_with_secrets(
             )?;
         }
         EngineKind::Sqlite => {}
+        EngineKind::Duckdb => {}
         EngineKind::D1 => {
             let d1 = input.d1.as_mut().ok_or("D1_CONFIG_MISSING")?;
             maybe_persist_secret_ref(

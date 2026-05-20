@@ -13,6 +13,7 @@ pub enum EngineKind {
     Mongo,
     Redis,
     Snowflake,
+    Duckdb,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +83,12 @@ pub struct MongoConnectInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SqliteConnectInput {
+    pub path: String,
+    pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DuckdbConnectInput {
     pub path: String,
     pub statement_timeout_ms: Option<u64>,
 }
