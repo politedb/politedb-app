@@ -24,6 +24,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   mysql: ["index_name", "index_algorithm", "is_unique", "column_name"],
   mariadb: ["index_name", "index_algorithm", "is_unique", "column_name"],
   mongo: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  cassandra: ["index_name", "index_algorithm", "is_unique", "column_name"],
   redis: [],
   sqlserver: ["index_name", "index_algorithm", "is_unique", "column_name"],
   sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],

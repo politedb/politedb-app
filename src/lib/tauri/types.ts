@@ -140,6 +140,16 @@ export type MongoConnectInput = {
   connect_timeout_ms?: number | null;
 };
 
+export type CassandraConnectInput = {
+  host: string;
+  port: number;
+  keyspace?: string | null;
+  user?: string | null;
+  password: SecretRef;
+  ssl_mode?: SslMode | null;
+  connect_timeout_ms?: number | null;
+};
+
 export type SqliteConnectInput = {
   path: string;
   statement_timeout_ms?: number | null;
@@ -212,6 +222,7 @@ export type ConnectionCreateInput = {
   d1?: D1ConnectInput;
   oracle?: OracleConnectInput;
   mongo?: MongoConnectInput;
+  cassandra?: CassandraConnectInput;
   redis?: RedisConnectInput;
   snowflake?: SnowflakeConnectInput;
   duckdb?: DuckdbConnectInput;

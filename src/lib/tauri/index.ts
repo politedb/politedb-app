@@ -3,6 +3,7 @@ export * from "./secrets";
 export * from "./connection";
 export * from "./profile";
 export * from "./operation";
+export * from "./cassandra";
 export * from "./mongo";
 export * from "./redis";
 export * from "./ai";

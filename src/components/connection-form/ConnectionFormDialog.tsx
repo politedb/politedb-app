@@ -85,7 +85,11 @@ export function ConnectionFormDialog({
       return !!database;
     }
 
-    if (v.engine === "redis" || v.engine === "mongo") {
+    if (
+      v.engine === "redis" ||
+      v.engine === "mongo" ||
+      v.engine === "cassandra"
+    ) {
       // Redis: only host + port are required; user/password/db are optional
       return hostOk;
     }
@@ -301,7 +305,9 @@ export function ConnectionFormDialog({
           requiredHint={
             v.engine === "sqlite" || v.engine === "duckdb"
               ? "Required: Database file path."
-              : v.engine === "redis" || v.engine === "mongo"
+              : v.engine === "redis" ||
+                  v.engine === "mongo" ||
+                  v.engine === "cassandra"
                 ? "Required: Host, Port."
                 : v.engine === "d1"
                   ? "Required: Account ID, Database ID, API token."

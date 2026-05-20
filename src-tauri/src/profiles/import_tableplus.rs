@@ -6,9 +6,9 @@ use crate::profiles::import_common::{
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
-    ConnectionCreateInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
-    OracleConnectInput, PgConnectInput, RedisConnectInput, SnowflakeConnectInput,
-    SqlServerConnectInput, SqliteConnectInput,
+    CassandraConnectInput, ConnectionCreateInput, DuckdbConnectInput, EngineKind,
+    MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
+    SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -230,6 +230,9 @@ fn map_tableplus_engine(driver: &str) -> Option<EngineKind> {
     if d.contains("mongo") {
         return Some(EngineKind::Mongo);
     }
+    if d.contains("cassandra") {
+        return Some(EngineKind::Cassandra);
+    }
     if d.contains("redis") {
         return Some(EngineKind::Redis);
     }
@@ -268,6 +271,7 @@ fn build_tableplus_input(
         d1: None,
         oracle: None,
         mongo: None,
+        cassandra: None,
         redis: None,
         snowflake: None,
         duckdb: None,
@@ -346,6 +350,25 @@ fn build_tableplus_input(
                 host: host.to_string(),
                 port,
                 database: if database.is_empty() {
+                    None
+                } else {
+                    Some(database.to_string())
+                },
+                user: if user.is_empty() {
+                    None
+                } else {
+                    Some(user.to_string())
+                },
+                password,
+                ssl_mode: None,
+                connect_timeout_ms: None,
+            });
+        }
+        EngineKind::Cassandra => {
+            input.cassandra = Some(CassandraConnectInput {
+                host: host.to_string(),
+                port,
+                keyspace: if database.is_empty() {
                     None
                 } else {
                     Some(database.to_string())
@@ -476,6 +499,10 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .is_some_and(|p| secret_nonempty(&p.password)),
         EngineKind::Mongo => input
             .mongo
+            .as_ref()
+            .is_some_and(|p| secret_nonempty(&p.password)),
+        EngineKind::Cassandra => input
+            .cassandra
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
         EngineKind::Redis => input

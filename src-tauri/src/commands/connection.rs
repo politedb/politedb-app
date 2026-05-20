@@ -52,6 +52,11 @@ fn rewrite_input_host_port(
             mongo.host = host.into();
             mongo.port = port;
         }
+        crate::types::EngineKind::Cassandra => {
+            let cassandra = input.cassandra.as_mut().ok_or("CASSANDRA_CONFIG_MISSING")?;
+            cassandra.host = host.into();
+            cassandra.port = port;
+        }
         crate::types::EngineKind::Redis => {
             let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
             r.host = host.into();
@@ -257,6 +262,16 @@ pub async fn connection_test(
                         {
                             mongo.password.kind = crate::types::SecretRefKind::Inline;
                             mongo.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Cassandra => {
+                    if let Some(cassandra) = input.cassandra.as_mut() {
+                        if cassandra.password.kind == crate::types::SecretRefKind::Keychain
+                            && cassandra.password.value.trim().is_empty()
+                        {
+                            cassandra.password.kind = crate::types::SecretRefKind::Inline;
+                            cassandra.password.value = pw.to_string();
                         }
                     }
                 }
@@ -480,6 +495,7 @@ pub async fn connection_version(
         }
         crate::engines::EngineConnection::Duckdb(duckdb) => {
             let shared = duckdb.conn.clone();
+            let db_path = duckdb.db_path.clone();
             let version = tokio::task::spawn_blocking(move || -> Result<String, String> {
                 crate::engines::duckdb::util::with_duckdb_connection(&shared, |conn| {
                     conn.query_row("SELECT version()", [], |row| row.get(0))
@@ -488,7 +504,11 @@ pub async fn connection_version(
             })
             .await
             .map_err(|e| format!("DUCKDB_VERSION_JOIN_FAILED: {e}"))??;
-            Ok(version)
+            Ok(if db_path.is_empty() || db_path == ":memory:" {
+                version
+            } else {
+                format!("{version} ({db_path})")
+            })
         }
         crate::engines::EngineConnection::D1(_) => {
             // D1 HTTP API rejects sqlite_version(); version is display-only in the UI.
@@ -525,6 +545,22 @@ pub async fn connection_version(
                 .get_str("version")
                 .map_err(|e| format!("MONGO_VERSION_PARSE_FAILED: {e}"))?;
             Ok(version.to_string())
+        }
+        crate::engines::EngineConnection::Cassandra(cassandra) => {
+            let default_keyspace = cassandra.default_keyspace.clone();
+            let (version,): (String,) = cassandra
+                .session
+                .query_unpaged("SELECT release_version FROM system.local", &[])
+                .await
+                .map_err(|e| format!("CASSANDRA_VERSION_QUERY_FAILED: {e}"))?
+                .into_rows_result()
+                .map_err(|e| format!("CASSANDRA_VERSION_ROWS_FAILED: {e}"))?
+                .single_row()
+                .map_err(|e| format!("CASSANDRA_VERSION_ROW_FAILED: {e}"))?;
+            Ok(match default_keyspace {
+                Some(ks) if !ks.is_empty() => format!("{version} ({ks})"),
+                _ => version,
+            })
         }
         crate::engines::EngineConnection::Redis(redis) => {
             let mut conn = redis

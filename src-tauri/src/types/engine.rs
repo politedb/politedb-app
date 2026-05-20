@@ -14,6 +14,7 @@ pub enum EngineKind {
     Redis,
     Snowflake,
     Duckdb,
+    Cassandra,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +68,18 @@ pub struct MySqlConnectInput {
     pub pool_max_size: Option<usize>,
     pub connect_timeout_ms: Option<u64>,
     pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CassandraConnectInput {
+    pub host: String,
+    pub port: u16,
+    pub keyspace: Option<String>,
+    pub user: Option<String>,
+    pub password: crate::types::SecretRef,
+
+    pub ssl_mode: Option<String>,
+    pub connect_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

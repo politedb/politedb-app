@@ -41,6 +41,10 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     dataTypes: [],
     indexAlgorithms: [],
   },
+  cassandra: {
+    dataTypes: [],
+    indexAlgorithms: [],
+  },
   sqlite: {
     dataTypes: SQLITE_DATA_TYPES,
     indexAlgorithms: [],

@@ -104,6 +104,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     desc: "Embedded analytical database (.duckdb file or in-memory).",
     defaultLabels: ["Daedalus", "Icarus", "Talos"],
   },
+  {
+    engine: "cassandra",
+    label: "Cassandra",
+    abbreviation: "Cs",
+    color: "bg-indigo-600",
+    available: true,
+    desc: "Distributed wide-column store for high availability workloads.",
+    defaultLabels: ["Cassandra", "Scylla", "Styx"],
+  },
 ] as const;
 
 export const POSTGRES_DATA_TYPES = [

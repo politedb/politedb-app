@@ -87,7 +87,8 @@ export type DatabaseEngine =
   | "d1"
   | "oracle"
   | "snowflake"
-  | "duckdb";
+  | "duckdb"
+  | "cassandra";
 
 export type DatabaseType = {
   engine: DatabaseEngine;

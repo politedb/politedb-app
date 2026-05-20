@@ -1,5 +1,6 @@
-pub mod app;
 pub mod ai;
+pub mod app;
+pub mod cassandra;
 pub mod connection;
 pub mod export;
 pub mod license;

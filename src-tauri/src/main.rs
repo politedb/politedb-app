@@ -113,6 +113,7 @@ fn main() {
         Arc::new(engines::d1::driver::D1Driver),
         Arc::new(engines::oracle::driver::OracleDriver),
         Arc::new(engines::mongo::driver::MongoDriver),
+        Arc::new(engines::cassandra::driver::CassandraDriver),
         Arc::new(engines::redis::driver::RedisDriver),
         Arc::new(engines::snowflake::driver::SnowflakeDriver),
     ];
@@ -199,6 +200,13 @@ fn main() {
             commands::persistent::persistent_clear,
             // export (streaming append for large table export)
             commands::export::export_append_to_file,
+            // cassandra
+            commands::cassandra::cassandra_list_keyspaces,
+            commands::cassandra::cassandra_list_tables,
+            commands::cassandra::cassandra_table_overview,
+            commands::cassandra::cassandra_fetch_rows,
+            commands::cassandra::cassandra_primary_key_columns,
+            commands::cassandra::cassandra_update_rows,
             // mongo
             commands::mongo::mongo_list_databases,
             commands::mongo::mongo_list_collections,

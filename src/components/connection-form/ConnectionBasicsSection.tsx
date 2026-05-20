@@ -16,6 +16,8 @@ export function ConnectionBasicsSection(
   const engine = useWatch({ control, name: "engine" });
   const isRedis = engine === "redis";
   const isMongo = engine === "mongo";
+  const isCassandra = engine === "cassandra";
+  const isOptionalAuth = isRedis || isMongo || isCassandra;
   const isSqlite = engine === "sqlite";
   const isD1 = engine === "d1";
   const isSnowflake = engine === "snowflake";
@@ -93,7 +95,7 @@ export function ConnectionBasicsSection(
     name: "user",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo || isFilelessSql || isDuckDB) return true;
+        if (isOptionalAuth || isFilelessSql || isDuckDB) return true;
         return String(v ?? "").trim().length > 0 || "User is required.";
       },
     },
@@ -105,7 +107,7 @@ export function ConnectionBasicsSection(
     name: "password",
     rules: {
       validate: (v) => {
-        if (isRedis || isMongo || isSqlite || isDuckDB) return true;
+        if (isOptionalAuth || isSqlite || isDuckDB) return true;
         if (storeKeychain) return true;
         if (isD1) {
           return String(v ?? "").trim().length > 0 || "API token is required.";
@@ -156,6 +158,7 @@ export function ConnectionBasicsSection(
     if (engine === "mysql" || engine === "mariadb") return 3306;
     if (engine === "sqlserver") return 1433;
     if (engine === "mongo") return 27017;
+    if (engine === "cassandra") return 9042;
     if (engine === "redis") return 6379;
     if (
       engine === "sqlite" ||
@@ -170,12 +173,11 @@ export function ConnectionBasicsSection(
   const nameErr = !!errors?.name;
   const hostErr = !!errors?.host;
   const portErr = !!errors?.port;
-  const dbErr = !isMongo && !!errors?.database;
-  const userErr = !isMongo && !isFilelessSql && !!errors?.user;
+  const dbErr = !isMongo && !isCassandra && !!errors?.database;
+  const userErr = !isOptionalAuth && !isFilelessSql && !!errors?.user;
   const pwErr =
     !storeKeychain &&
-    !isRedis &&
-    !isMongo &&
+    !isOptionalAuth &&
     !isSqlite &&
     !isDuckDB &&
     (isD1 || !!errors?.password);
@@ -193,8 +195,8 @@ export function ConnectionBasicsSection(
               ? "Cloudflare account, database, API token"
               : isSnowflake
                 ? "Account, warehouse, database, user"
-                : isRedis || isMongo
-                  ? "Host, Port"
+                : isOptionalAuth
+                  ? "Host, Port (keyspace optional)"
                   : "Host, Port, User (database optional)"}
         </div>
       </div>
@@ -363,7 +365,9 @@ export function ConnectionBasicsSection(
                       ? "/absolute/path/to/file.db"
                       : isDuckDB
                         ? "/absolute/path/to/file.duckdb"
-                        : "database"
+                        : isCassandra
+                          ? "keyspace (optional)"
+                          : "database"
                   }
                   error={dbErr}
                   class={isSqlite || isDuckDB ? "col-span-2" : ""}

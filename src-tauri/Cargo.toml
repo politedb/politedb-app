@@ -93,6 +93,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sha2 = "0.10"
 snowflake-connector-rs = "0.9"
 duckdb = { version = "1.1", features = ["bundled", "chrono"] }
+scylla = { version = "1.5", features = ["chrono-04"] }
+num-bigint = "0.4"
 
 [features]
 default = ["engine-postgres"]

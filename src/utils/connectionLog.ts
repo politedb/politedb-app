@@ -30,6 +30,7 @@ function getEngineInput(profile: ConnectionProfile) {
   if (engine === "mysql" || engine === "mariadb") return profile.input?.mysql;
   if (engine === "sqlserver") return profile.input?.sqlserver;
   if (engine === "mongo") return profile.input?.mongo;
+  if (engine === "cassandra") return profile.input?.cassandra;
   if (engine === "sqlite") return profile.input?.sqlite;
   if (engine === "d1") return profile.input?.d1;
   if (engine === "oracle") return profile.input?.oracle;
@@ -55,11 +56,7 @@ export function profileConnectionHost(profile: ConnectionProfile): string {
   }
   if (engine === "d1") {
     const d1 = profile.input?.d1;
-    return firstNonEmpty(
-      d1?.database_id,
-      d1?.account_id,
-      profile.label
-    );
+    return firstNonEmpty(d1?.database_id, d1?.account_id, profile.label);
   }
 
   const host = input?.host;
@@ -83,6 +80,9 @@ export function profileConnectionHost(profile: ConnectionProfile): string {
       break;
     case "mongo":
       database = profile.input?.mongo?.database ?? "";
+      break;
+    case "cassandra":
+      database = profile.input?.cassandra?.keyspace ?? "";
       break;
     case "redis":
       database =
@@ -111,6 +111,8 @@ export function profileDbUser(profile: ConnectionProfile): string | undefined {
       return profile.input?.oracle?.user?.trim() || undefined;
     case "mongo":
       return profile.input?.mongo?.user?.trim() || undefined;
+    case "cassandra":
+      return profile.input?.cassandra?.user?.trim() || undefined;
     case "redis":
       return profile.input?.redis?.user?.trim() || undefined;
     default:

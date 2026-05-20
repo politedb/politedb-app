@@ -22,6 +22,8 @@ import {
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import {
+  cassandraFetchRows,
+  cassandraTableOverview,
   mongoCollectionOverview,
   mongoCollectionSizeInfo,
   mongoFindDocuments,
@@ -145,7 +147,7 @@ function computeLoadPlan(params: {
 
   const hasColumnsArray = Array.isArray(prev.columns);
   const hasColumns =
-    engine === "mongo"
+    engine === "mongo" || engine === "cassandra"
       ? hasColumnsArray
       : hasColumnsArray && prev.columns.length > 0;
 
@@ -516,6 +518,96 @@ async function loadMongoRows(params: {
 
   const store = useConnectionStore.getState();
   const opId = `mongo:${key}:${offset}:${limit}`;
+  const cap = Math.max(1000, limit * 4);
+
+  store.initRows(key, DEFAULT_ROWS_CAP);
+  store.beginRowsStream(key, opId, cap, offset, !!resetCache, !!forceRefresh);
+  store.applyRowsChunk(key, opId, {
+    rows: result.rows ?? [],
+    row_offset: 0,
+    seq: 0,
+  } as TableChunk);
+  store.endRowsStream(key, opId);
+
+  return {
+    columns: (result.columns ?? []).map((col) => ({
+      name: col.name,
+      db_type: col.db_type,
+    })),
+    rowCount: Number(result.rowCount ?? 0),
+  };
+}
+
+async function loadCassandraOverview(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+}): Promise<{
+  columns: ColumnRow[];
+  structure: any[];
+  constraints: any[];
+  rowCount: number;
+}> {
+  const { connId, schema, tableName } = params;
+  const overview = await cassandraTableOverview({
+    connectionId: connId,
+    keyspace: schema,
+    table: tableName,
+  });
+
+  const columns = (overview.columns ?? []).map((col) => ({
+    name: col.name,
+    db_type: col.db_type,
+  }));
+
+  const structure = columns.map((col) => ({
+    column_name: col.name,
+    data_type: col.db_type,
+    is_nullable: true,
+    check: "",
+    column_default: "",
+    comment: "",
+  }));
+
+  return {
+    columns,
+    structure,
+    constraints: [],
+    rowCount: Number(overview.row_count ?? 0),
+  };
+}
+
+async function loadCassandraRows(params: {
+  key: string;
+  connId: string;
+  schema: string;
+  tableName: string;
+  limit: number;
+  offset: number;
+  resetCache?: boolean;
+  forceRefresh?: boolean;
+}): Promise<{ columns: ColumnRow[]; rowCount: number }> {
+  const {
+    key,
+    connId,
+    schema,
+    tableName,
+    limit,
+    offset,
+    resetCache,
+    forceRefresh,
+  } = params;
+
+  const result = await cassandraFetchRows({
+    connectionId: connId,
+    keyspace: schema,
+    table: tableName,
+    limit,
+    offset,
+  });
+
+  const store = useConnectionStore.getState();
+  const opId = `cassandra:${key}:${offset}:${limit}`;
   const cap = Math.max(1000, limit * 4);
 
   store.initRows(key, DEFAULT_ROWS_CAP);
@@ -1083,7 +1175,9 @@ export function useLoadTableData() {
           const limit = pagination?.limit ?? DEFAULT_LIMIT;
           const offset = pagination?.offset ?? DEFAULT_OFFSET;
           const supportsMeta =
-            activeTab.engine !== "redis" && activeTab.engine !== "mongo";
+            activeTab.engine !== "redis" &&
+            activeTab.engine !== "mongo" &&
+            activeTab.engine !== "cassandra";
 
           // Set busy/error state
           if (plan.needAnyMetaWork)
@@ -1184,6 +1278,76 @@ export function useLoadTableData() {
                   rowCount: mongoRowCount,
                   sizeInfo: mongoSizeInfo,
                   rowCountIsEstimated: false,
+                  connectionId: prev.connectionId ?? connId,
+                  busy: false,
+                });
+              }
+
+              patchMeta(setMeta, key, prev, { busy: false, error: null });
+            } catch (e) {
+              patchMeta(setMeta, key, prev, {
+                busy: false,
+                error: getErrorMessage(e),
+              });
+            }
+            return;
+          }
+
+          if (activeTab.engine === "cassandra") {
+            try {
+              let cassandraColumns = Array.isArray(prev.columns)
+                ? (prev.columns as ColumnRow[])
+                : [];
+              let cassandraStructure = prev.structure ?? [];
+              let cassandraRowCount =
+                typeof prev.rowCount === "number" ? prev.rowCount : 0;
+
+              if (plan.needColumns || plan.needMeta || plan.needRowCount) {
+                const overview = await loadCassandraOverview({
+                  connId,
+                  schema,
+                  tableName,
+                });
+                cassandraColumns = overview.columns;
+                cassandraStructure = overview.structure;
+                cassandraRowCount = overview.rowCount;
+
+                patchMeta(setMeta, key, prev, {
+                  columns: cassandraColumns,
+                  structure: cassandraStructure,
+                  constraints: overview.constraints,
+                  foreignKeys: [],
+                  rowCount: cassandraRowCount,
+                  rowCountIsEstimated: true,
+                  connectionId: prev.connectionId ?? connId,
+                  busy: false,
+                });
+                try {
+                  setColumnsCache(key, cassandraColumns as any);
+                } catch {}
+              }
+
+              if (plan.needRows) {
+                const rowsRes = await loadCassandraRows({
+                  key,
+                  connId,
+                  schema,
+                  tableName,
+                  limit,
+                  offset,
+                  resetCache: !!flags.force || !!flags.forceRows,
+                  forceRefresh: !!flags.forceRefresh,
+                });
+
+                if (rowsRes.columns.length > 0) {
+                  cassandraColumns = rowsRes.columns;
+                }
+                cassandraRowCount = rowsRes.rowCount || cassandraRowCount;
+
+                patchMeta(setMeta, key, prev, {
+                  columns: cassandraColumns,
+                  rowCount: cassandraRowCount,
+                  rowCountIsEstimated: true,
                   connectionId: prev.connectionId ?? connId,
                   busy: false,
                 });

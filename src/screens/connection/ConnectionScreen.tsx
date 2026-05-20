@@ -766,6 +766,8 @@ export function ConnectionScreen() {
     actions,
   });
 
+  console.log(loadError);
+
   /* =============================================================================
    * Guards
    * ============================================================================= */
@@ -911,16 +913,20 @@ export function ConnectionScreen() {
                       currSchema={activeSchema}
                       onSchemaChange={onSchemaChange}
                       schemaLabel={
-                        engine === "mongo" || engine === "redis"
+                        engine === "mongo" ||
+                        engine === "cassandra" ||
+                        engine === "redis"
                           ? "Database"
                           : "Schema"
                       }
                       tablesSectionTitle={
                         engine === "mongo"
                           ? "Collections"
-                          : engine === "redis"
-                            ? "Keys"
-                            : "Tables"
+                          : engine === "cassandra"
+                            ? "Tables"
+                            : engine === "redis"
+                              ? "Keys"
+                              : "Tables"
                       }
                       tableSearchQuery={tableSearchQuery}
                       setTableSearchQuery={setTableSearchQuery}
@@ -1074,7 +1080,9 @@ export function ConnectionScreen() {
           tables={meta.tables ?? []}
           schemas={meta.schemas ?? []}
           schemaLabel={
-            engine === "mongo" || engine === "redis" ? "Database" : "Schema"
+            engine === "mongo" || engine === "cassandra" || engine === "redis"
+              ? "Database"
+              : "Schema"
           }
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}

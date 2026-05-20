@@ -2,6 +2,9 @@ import { useCallback, useRef, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { runSqlQuery } from "src/lib/tauri/query";
 import {
+  cassandraListKeyspaces,
+  cassandraListTables,
+  cassandraTableOverview,
   connectionVersion,
   mongoCollectionOverview,
   mongoListCollections,
@@ -167,6 +170,56 @@ export function useDatabaseMetadata() {
                   columnsByTable[`${schema}.${name}`] = overview.columns.map(
                     (c) => c.name
                   );
+                }
+              }
+
+              const prog =
+                20 + Math.floor(((i + 1) / Math.max(1, schemas.length)) * 70);
+              setCache(metaKey, { progress: Math.min(95, prog) });
+            }
+
+            setCache(metaKey, {
+              functions: [],
+              tables,
+              columnsByTable,
+              columnsLoaded: includeColumns,
+              version: (version ?? "").trim(),
+              loading: false,
+              loaded: true,
+              error: null,
+              progress: 100,
+              stage: "done",
+            });
+
+            return cacheRef.current[metaKey]!;
+          }
+
+          if (engine === "cassandra") {
+            const schemas = await cassandraListKeyspaces(connectionId);
+            setCache(metaKey, { schemas, progress: 20, stage: "tables" });
+
+            const tables: TableItem[] = [];
+            const columnsByTable: Record<string, string[]> = {};
+
+            for (let i = 0; i < schemas.length; i++) {
+              const schema = schemas[i]!;
+              const tableNames = await cassandraListTables(
+                connectionId,
+                schema
+              );
+
+              for (const name of tableNames) {
+                tables.push({ schema, name, kind: "table" });
+
+                if (includeColumns) {
+                  const overview = await cassandraTableOverview({
+                    connectionId,
+                    keyspace: schema,
+                    table: name,
+                  });
+                  columnsByTable[`${schema}.${name}`] = (
+                    overview.columns ?? []
+                  ).map((c) => c.name);
                 }
               }
 
@@ -364,8 +417,7 @@ export function useDatabaseMetadata() {
 
       // Lazy load when connected. Do not auto-retry on error — that retriggers on
       // every render and can pin the UI in a perpetual "connecting" state.
-      const needsLoad =
-        !meta.loaded || (includeColumns && !meta.columnsLoaded);
+      const needsLoad = !meta.loaded || (includeColumns && !meta.columnsLoaded);
 
       if (lazy && connectionId && needsLoad && !meta.loading && !meta.error) {
         void load({

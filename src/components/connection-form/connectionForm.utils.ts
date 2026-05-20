@@ -79,6 +79,8 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
       return 1433;
     case "mongo":
       return 27017;
+    case "cassandra":
+      return 9042;
     case "redis":
       return 6379;
     case "sqlite":
@@ -115,6 +117,7 @@ function pickByEngine<T>(
     d1?: T;
     oracle?: T;
     mongo?: T;
+    cassandra?: T;
     redis?: T;
     snowflake?: T;
     duckdb?: T;
@@ -128,6 +131,7 @@ function pickByEngine<T>(
   if (engine === "d1") return by.d1;
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
+  if (engine === "cassandra") return by.cassandra;
   if (engine === "redis") return by.redis;
   if (engine === "snowflake") return by.snowflake;
   return undefined;
@@ -306,6 +310,31 @@ function buildRedisInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildCassandraInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 9042);
+
+  const cassandra: ConnectionCreateInput["cassandra"] = {
+    host: v.host,
+    port,
+    keyspace: v.database?.trim() || null,
+    user: v.user?.trim() || null,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    connect_timeout_ms: 60_000,
+    ssl_mode: v.sslMode,
+  };
+
+  return {
+    engine: "cassandra",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    cassandra,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
 function buildMongoInput(v: FormValues): ConnectionCreateInput {
   const port = toNumber(v.port, 27017);
 
@@ -439,6 +468,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildSqlServerInput(v);
     case "mongo":
       return buildMongoInput(v);
+    case "cassandra":
+      return buildCassandraInput(v);
     case "sqlite":
       return buildSqliteInput(v);
     case "duckdb":
@@ -477,6 +508,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const d1 = input?.d1;
   const oracle = input?.oracle;
   const mongo = input?.mongo;
+  const cassandra = input?.cassandra;
   const rd = input?.redis;
   const sf = input?.snowflake;
 
@@ -489,6 +521,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       d1: d1?.account_id,
       oracle: oracle?.host,
       mongo: mongo?.host,
+      cassandra: cassandra?.host,
       redis: rd?.host,
       snowflake: sf?.account,
     }) || defaultHostForEngine(engine);
@@ -502,6 +535,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       d1: 0,
       oracle: oracle?.port,
       mongo: mongo?.port,
+      cassandra: cassandra?.port,
       redis: rd?.port,
       snowflake: 0,
     }) ?? defaultPortForEngine(engine);
@@ -514,10 +548,12 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       sqlite: "",
       oracle: oracle?.user,
       mongo: mongo?.user,
+      cassandra: cassandra?.user,
       redis: rd?.user,
       snowflake: sf?.user,
     }) ||
     (engine === "mongo" ||
+    engine === "cassandra" ||
     engine === "sqlite" ||
     engine === "duckdb" ||
     engine === "d1"
@@ -534,9 +570,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       d1: d1?.database_id,
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
+      cassandra: cassandra?.keyspace ?? undefined,
       snowflake: sf?.database,
     }) ||
     (engine === "mongo" ||
+    engine === "cassandra" ||
     engine === "sqlite" ||
     engine === "duckdb" ||
     engine === "d1"
@@ -571,14 +609,18 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
               : engine === "duckdb" || engine === "sqlite"
                 ? ""
                 : engine === "mongo"
-              ? mongo?.password?.kind === "inline"
-                ? (mongo.password.value ?? "")
-                : ""
-              : engine === "d1"
-                    ? d1?.api_token?.kind === "inline"
-                      ? (d1.api_token.value ?? "")
+                  ? mongo?.password?.kind === "inline"
+                    ? (mongo.password.value ?? "")
+                    : ""
+                  : engine === "cassandra"
+                    ? cassandra?.password?.kind === "inline"
+                      ? (cassandra.password.value ?? "")
                       : ""
-                    : "";
+                    : engine === "d1"
+                      ? d1?.api_token?.kind === "inline"
+                        ? (d1.api_token.value ?? "")
+                        : ""
+                      : "";
 
   const storeKeychain =
     engine === "postgres"
@@ -594,10 +636,12 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
               : engine === "duckdb" || engine === "sqlite"
                 ? false
                 : engine === "mongo"
-              ? mongo?.password?.kind !== "inline"
-              : engine === "d1"
-                    ? d1?.api_token?.kind !== "inline"
-                    : true;
+                  ? mongo?.password?.kind !== "inline"
+                  : engine === "cassandra"
+                    ? cassandra?.password?.kind !== "inline"
+                    : engine === "d1"
+                      ? d1?.api_token?.kind !== "inline"
+                      : true;
 
   return {
     host,
@@ -620,6 +664,7 @@ function makeSslDefaults(
   const my = input?.mysql;
   const ss = input?.sqlserver;
   const mongo = input?.mongo;
+  const cassandra = input?.cassandra;
   const rd = input?.redis;
 
   const ssl_mode = pickByEngine<FormValues["sslMode"]>(engine, {
@@ -628,6 +673,7 @@ function makeSslDefaults(
     sqlserver: ss?.encrypt === false ? "disable" : "prefer",
     oracle: undefined,
     mongo: mongo?.ssl_mode as SslMode | undefined,
+    cassandra: cassandra?.ssl_mode as SslMode | undefined,
     redis: rd?.ssl_mode as SslMode | undefined,
   });
 
@@ -649,7 +695,7 @@ function makeSslDefaults(
   // Redis/Mongo: default to "disable" so local instances work without TLS.
   // Postgres/MySQL keep "prefer" for smoother dev/prod behavior.
   const defaultSsl =
-    engine === "redis" || engine === "mongo"
+    engine === "redis" || engine === "mongo" || engine === "cassandra"
       ? ("disable" as const)
       : ("prefer" as const);
 

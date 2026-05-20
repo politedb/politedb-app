@@ -52,6 +52,7 @@ type EngineInput =
   | ConnectionProfile["input"]["d1"]
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
+  | ConnectionProfile["input"]["cassandra"]
   | ConnectionProfile["input"]["redis"]
   | ConnectionProfile["input"]["snowflake"]
   | ConnectionProfile["input"]["duckdb"];
@@ -72,6 +73,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "mongo") {
     return { engine, input: profile.input?.mongo };
+  }
+  if (engine === "cassandra") {
+    return { engine, input: profile.input?.cassandra };
   }
   if (engine === "sqlite") {
     return { engine, input: profile.input?.sqlite };
@@ -131,6 +135,9 @@ function buildSubtitle(profile: ConnectionProfile) {
       break;
     case "mongo":
       database = profile.input?.mongo?.database ?? "";
+      break;
+    case "cassandra":
+      database = profile.input?.cassandra?.keyspace ?? "";
       break;
     case "redis":
       database =

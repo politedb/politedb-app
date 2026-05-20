@@ -138,7 +138,8 @@ export function MainTableDataPane(props: {
   const { profileId, engine, limit, offset } = rt;
   const isRedis = engine === "redis";
   const isDataReadOnly = isProfileLocked;
-  const isStructureReadOnly = isProfileLocked || engine === "mongo" || isRedis;
+  const isStructureReadOnly =
+    isProfileLocked || engine === "mongo" || engine === "cassandra" || isRedis;
   const canAddDataRow = !isDataReadOnly && !isRedis;
 
   const { loadTableData } = useLoadTableData();
@@ -468,7 +469,7 @@ export function MainTableDataPane(props: {
 
   const columnsLoaded =
     Array.isArray(meta.columns) &&
-    (engine === "mongo" || meta.columns.length > 0);
+    (engine === "mongo" || engine === "cassandra" || meta.columns.length > 0);
   const foreignKeysLoaded = Array.isArray(meta.foreignKeys);
   const rowsKnownEmpty = !!rowsInfo && !rowsRunning && loadedMax < streamOffset;
   const hasAppliedFilters = appliedFilters.some(

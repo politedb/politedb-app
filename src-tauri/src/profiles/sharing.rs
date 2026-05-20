@@ -117,6 +117,11 @@ fn resolve_db_passwords_inline(
                 mongo.password = inline_secret_from_ref(app, &mongo.password)?;
             }
         }
+        EngineKind::Cassandra => {
+            if let Some(cassandra) = input.cassandra.as_mut() {
+                cassandra.password = inline_secret_from_ref(app, &cassandra.password)?;
+            }
+        }
         EngineKind::Redis => {
             if let Some(r) = input.redis.as_mut() {
                 r.password = inline_secret_from_ref(app, &r.password)?;
@@ -164,6 +169,11 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
         EngineKind::Mongo => {
             if let Some(mongo) = input.mongo.as_mut() {
                 redact(&mut mongo.password);
+            }
+        }
+        EngineKind::Cassandra => {
+            if let Some(cassandra) = input.cassandra.as_mut() {
+                redact(&mut cassandra.password);
             }
         }
         EngineKind::Redis => {
@@ -348,6 +358,7 @@ mod tests {
                 d1: None,
                 oracle: None,
                 mongo: None,
+                cassandra: None,
                 redis: None,
                 ssh: None,
                 snowflake: None,

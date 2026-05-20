@@ -219,6 +219,29 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "cassandra") {
+    const cassandra = input.cassandra;
+    if (!cassandra) throw new Error("CASSANDRA_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      cassandra: {
+        ...cassandra,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "sqlserver") {
     const sqlserver = input.sqlserver;
     if (!sqlserver) throw new Error("SQLSERVER_CONFIG_MISSING");
@@ -593,6 +616,8 @@ function dbPasswordRef(input: ConnectionCreateInput): SecretRef | undefined {
       return input.snowflake?.password;
     case "mongo":
       return input.mongo?.password;
+    case "cassandra":
+      return input.cassandra?.password;
     case "redis":
       return input.redis?.password;
     default:
@@ -612,6 +637,7 @@ function inferStoreKeychainFromCreateInput(
   if (e === "oracle") return input.oracle?.password?.kind !== "inline";
   if (e === "snowflake") return input.snowflake?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
+  if (e === "cassandra") return input.cassandra?.password?.kind !== "inline";
   if (e === "sqlite" || e === "duckdb") return false;
   return true;
 }

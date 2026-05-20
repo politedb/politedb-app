@@ -88,6 +88,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "cassandra") {
+    const cassandra = conn.input?.cassandra;
+    return {
+      host: cassandra?.host ?? "",
+      database: cassandra?.keyspace ?? "",
+      user: cassandra?.user ?? "",
+    };
+  }
+
   if (engine === "sqlite") {
     const sqlite = conn.input?.sqlite;
     return {

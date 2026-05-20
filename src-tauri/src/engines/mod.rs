@@ -1,4 +1,5 @@
 pub mod cancel;
+pub mod cassandra;
 pub mod d1;
 pub mod driver;
 pub mod duckdb;
@@ -35,6 +36,7 @@ pub enum EngineConnection {
     D1(d1::connection::D1Conn),
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
+    Cassandra(cassandra::connection::CassandraConn),
     Redis(redis::connection::RedisConn),
     Snowflake(snowflake::connection::SnowflakeConn),
     Duckdb(duckdb::connection::DuckdbConn),
@@ -479,6 +481,7 @@ impl EngineConnection {
             EngineConnection::D1(c) => c.id,
             EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
+            EngineConnection::Cassandra(c) => c.id,
             EngineConnection::Redis(c) => c.id,
             EngineConnection::Snowflake(c) => c.id,
             EngineConnection::Duckdb(c) => c.id,
@@ -494,6 +497,7 @@ impl EngineConnection {
             EngineConnection::D1(c) => c.label.clone(),
             EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
+            EngineConnection::Cassandra(c) => c.label.clone(),
             EngineConnection::Redis(c) => c.label.clone(),
             EngineConnection::Snowflake(c) => c.label.clone(),
             EngineConnection::Duckdb(c) => c.label.clone(),
@@ -509,6 +513,7 @@ impl EngineConnection {
             EngineConnection::D1(_) => EngineKind::D1,
             EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
+            EngineConnection::Cassandra(_) => EngineKind::Cassandra,
             EngineConnection::Redis(_) => EngineKind::Redis,
             EngineConnection::Snowflake(_) => EngineKind::Snowflake,
             EngineConnection::Duckdb(_) => EngineKind::Duckdb,
@@ -528,6 +533,7 @@ impl EngineConnection {
             EngineConnection::D1(_) => "d1",
             EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
+            EngineConnection::Cassandra(_) => "cassandra",
             EngineConnection::Redis(_) => "redis",
             EngineConnection::Snowflake(_) => "snowflake",
             EngineConnection::Duckdb(_) => "duckdb",
@@ -545,6 +551,7 @@ impl EngineConnection {
             EngineConnection::D1(_) => {}
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
+            EngineConnection::Cassandra(_) => {}
             EngineConnection::Redis(r) => drop(r.pool),
             EngineConnection::Snowflake(_) => {}
             EngineConnection::Duckdb(_) => {}
@@ -636,18 +643,18 @@ impl EngineConnection {
                 let shared = duckdb.conn.clone();
                 tokio::task::spawn_blocking(move || -> Result<(), String> {
                     duckdb::util::with_duckdb_connection(&shared, |conn| {
-                    conn.execute_batch("BEGIN")
-                        .map_err(|e| format!("DUCKDB_TX_BEGIN_FAILED: {e}"))?;
+                        conn.execute_batch("BEGIN")
+                            .map_err(|e| format!("DUCKDB_TX_BEGIN_FAILED: {e}"))?;
 
-                    for (idx, stmt) in statements.iter().enumerate() {
-                        if let Err(e) = conn.execute_batch(stmt) {
-                            let _ = conn.execute_batch("ROLLBACK");
-                            return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                        for (idx, stmt) in statements.iter().enumerate() {
+                            if let Err(e) = conn.execute_batch(stmt) {
+                                let _ = conn.execute_batch("ROLLBACK");
+                                return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                            }
                         }
-                    }
 
-                    conn.execute_batch("COMMIT")
-                        .map_err(|e| format!("DUCKDB_TX_COMMIT_FAILED: {e}"))
+                        conn.execute_batch("COMMIT")
+                            .map_err(|e| format!("DUCKDB_TX_COMMIT_FAILED: {e}"))
                     })
                 })
                 .await
@@ -754,9 +761,9 @@ impl EngineConnection {
                 }
                 Ok(())
             }
-            EngineConnection::Mongo(_) | EngineConnection::Redis(_) => {
-                Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into())
-            }
+            EngineConnection::Mongo(_)
+            | EngineConnection::Cassandra(_)
+            | EngineConnection::Redis(_) => Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into()),
         }
     }
 
@@ -1032,7 +1039,9 @@ impl EngineConnection {
                 Ok(())
             }
 
-            EngineConnection::Mongo(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
+            EngineConnection::Mongo(_) | EngineConnection::Cassandra(_) => {
+                Err("ENGINE_OPERATION_NOT_SUPPORTED".into())
+            }
             EngineConnection::Redis(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
         }
     }

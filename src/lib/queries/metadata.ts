@@ -237,6 +237,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
 
     // not supported for table/column completion
     case "redis":
+    case "mongo":
+    case "cassandra":
     default:
       return EMPTY;
   }

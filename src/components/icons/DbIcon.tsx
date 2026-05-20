@@ -12,6 +12,7 @@ import sqlserver from "src/assets/db/sqlserver.svg";
 import snowflake from "src/assets/db/snowflake.svg";
 import duckdb from "src/assets/db/duckdb.svg";
 import cloudflared1 from "src/assets/db/d1.svg";
+import cassandra from "src/assets/db/cassandra.svg";
 
 // Import DatabaseEngine from shared types if available; otherwise keep this local alias.
 export type DatabaseEngine =
@@ -25,11 +26,12 @@ export type DatabaseEngine =
   | "d1"
   | "oracle"
   | "snowflake"
-  | "duckdb";
+  | "duckdb"
+  | "cassandra";
 
 type DbIconSrc = string;
 
-const DB_ICON_MAP: Record<DatabaseEngine, DbIconSrc> = {
+const DB_ICON_MAP: Partial<Record<DatabaseEngine, DbIconSrc>> = {
   postgres,
   mysql,
   redis,
@@ -41,6 +43,7 @@ const DB_ICON_MAP: Record<DatabaseEngine, DbIconSrc> = {
   oracle,
   snowflake,
   duckdb,
+  cassandra,
 };
 
 function normalizeEngine(engine?: string): DatabaseEngine | null {
@@ -50,6 +53,7 @@ function normalizeEngine(engine?: string): DatabaseEngine | null {
   // alias / compat
   if (k === "postgresql") return "postgres";
   if (k === "mongodb") return "mongo";
+  if (k === "scylla" || k === "scylladb") return "cassandra";
   if (k === "maria") return "mariadb";
   if (k === "mssql") return "sqlserver";
   if (k === "sf") return "snowflake";
@@ -69,11 +73,13 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "mr") return "mariadb";
   if (k === "ss") return "sqlserver";
   if (k === "mg") return "mongo";
+  if (k === "cs") return "cassandra";
   if (k === "sl") return "sqlite";
   if (k === "d1") return "d1";
   if (k === "oc") return "oracle";
   if (k === "sf") return "snowflake";
   if (k === "dk") return "duckdb";
+  if (k === "cs") return "cassandra";
   return null;
 }
 
@@ -82,10 +88,10 @@ export function getDbIconSrc(
   abbreviation?: string
 ): DbIconSrc | null {
   const normalized = normalizeEngine(engine);
-  if (normalized) return DB_ICON_MAP[normalized];
+  if (normalized) return DB_ICON_MAP[normalized] ?? null;
 
   const fromAbbr = engineFromAbbr(abbreviation);
-  if (fromAbbr) return DB_ICON_MAP[fromAbbr];
+  if (fromAbbr) return DB_ICON_MAP[fromAbbr] ?? null;
 
   return null;
 }

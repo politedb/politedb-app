@@ -359,7 +359,9 @@ export function MenuBar({
   const runtimeConnectionId = rt.runtimeConnectionId ?? "";
   const connectionBlocked = !rt.runtimeConnectionId;
   const canOpenSql =
-    connectionInfo?.engine !== "mongo" && connectionInfo?.engine !== "redis";
+    connectionInfo?.engine !== "mongo" &&
+    connectionInfo?.engine !== "cassandra" &&
+    connectionInfo?.engine !== "redis";
 
   useEffect(() => {
     if (connectionBlocked) setSafeModeOpen(false);

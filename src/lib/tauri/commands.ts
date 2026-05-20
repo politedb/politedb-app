@@ -66,6 +66,12 @@ export const CMD = {
   exportAppendToFile: "export_append_to_file",
 
   // Mongo
+  cassandraListKeyspaces: "cassandra_list_keyspaces",
+  cassandraListTables: "cassandra_list_tables",
+  cassandraTableOverview: "cassandra_table_overview",
+  cassandraFetchRows: "cassandra_fetch_rows",
+  cassandraPrimaryKeyColumns: "cassandra_primary_key_columns",
+  cassandraUpdateRows: "cassandra_update_rows",
   mongoListDatabases: "mongo_list_databases",
   mongoListCollections: "mongo_list_collections",
   mongoCollectionOverview: "mongo_collection_overview",

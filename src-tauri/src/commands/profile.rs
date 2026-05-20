@@ -13,10 +13,10 @@ use crate::profiles::types::{
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    ConnectionCreateInput, ConnectionInfo as AppConnectionInfo, D1ConnectInput, DuckdbConnectInput,
-    EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
-    RedisConnectInput, SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput,
-    SqliteConnectInput,
+    CassandraConnectInput, ConnectionCreateInput, ConnectionInfo as AppConnectionInfo,
+    D1ConnectInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
+    OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
+    SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -152,6 +152,16 @@ fn validate_mongo_input(m: &MongoConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_cassandra_input(c: &CassandraConnectInput) -> Result<(), String> {
+    if c.host.trim().is_empty() {
+        return Err("CASSANDRA_HOST_REQUIRED".into());
+    }
+    if c.port == 0 {
+        return Err("CASSANDRA_PORT_INVALID".into());
+    }
+    Ok(())
+}
+
 fn validate_duckdb_input(s: &DuckdbConnectInput) -> Result<(), String> {
     if s.path.trim().is_empty() {
         return Err("DUCKDB_PATH_REQUIRED".into());
@@ -260,6 +270,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let mongo = input.mongo.as_ref().ok_or("MONGO_CONFIG_MISSING")?;
             validate_mongo_input(mongo)
         }
+        EngineKind::Cassandra => {
+            let cassandra = input.cassandra.as_ref().ok_or("CASSANDRA_CONFIG_MISSING")?;
+            validate_cassandra_input(cassandra)
+        }
         EngineKind::Redis => {
             let r = input.redis.as_ref().ok_or("REDIS_CONFIG_MISSING")?;
             validate_redis_input(r)
@@ -287,6 +301,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::D1 => "d1",
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
+        EngineKind::Cassandra => "cassandra",
         EngineKind::Redis => "redis",
         EngineKind::Snowflake => "snowflake",
     }
@@ -421,6 +436,17 @@ pub fn persist_input_with_secrets(
                 EngineKind::Mongo,
                 persist_secrets,
                 &mut mongo.password,
+            )?;
+        }
+
+        EngineKind::Cassandra => {
+            let cassandra = input.cassandra.as_mut().ok_or("CASSANDRA_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Cassandra,
+                persist_secrets,
+                &mut cassandra.password,
             )?;
         }
 

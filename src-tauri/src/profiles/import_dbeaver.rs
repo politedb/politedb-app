@@ -7,9 +7,9 @@ use crate::profiles::import_common::{
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
 use crate::types::{
-    ConnectionCreateInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
-    OracleConnectInput, PgConnectInput, RedisConnectInput, SnowflakeConnectInput,
-    SqlServerConnectInput, SqliteConnectInput,
+    CassandraConnectInput, ConnectionCreateInput, DuckdbConnectInput, EngineKind,
+    MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
+    SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
 #[derive(Debug, Default)]
@@ -107,6 +107,9 @@ fn map_dbeaver_engine(provider: &str) -> Option<EngineKind> {
     if p.contains("mongo") {
         return Some(EngineKind::Mongo);
     }
+    if p.contains("cassandra") {
+        return Some(EngineKind::Cassandra);
+    }
     if p.contains("redis") {
         return Some(EngineKind::Redis);
     }
@@ -175,6 +178,7 @@ fn build_input(
         d1: None,
         oracle: None,
         mongo: None,
+        cassandra: None,
         redis: None,
         snowflake: None,
         duckdb: None,
@@ -253,6 +257,21 @@ fn build_input(
                 host,
                 port,
                 database: if database.is_empty() {
+                    None
+                } else {
+                    Some(database)
+                },
+                user: if user.is_empty() { None } else { Some(user) },
+                password,
+                ssl_mode: None,
+                connect_timeout_ms: None,
+            });
+        }
+        EngineKind::Cassandra => {
+            input.cassandra = Some(CassandraConnectInput {
+                host,
+                port,
+                keyspace: if database.is_empty() {
                     None
                 } else {
                     Some(database)
@@ -409,6 +428,11 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 27017)),
+        EngineKind::Cassandra => input
+            .cassandra
+            .as_ref()
+            .map(|p| (p.host.clone(), p.port))
+            .unwrap_or_else(|| ("127.0.0.1".into(), 9042)),
         EngineKind::Redis => input
             .redis
             .as_ref()
@@ -453,11 +477,13 @@ mod tests {
     }
 
     #[test]
-    fn skips_unknown_driver() {
-        let json =
-            r#"{"connections":{"x":{"provider":"cassandra","name":"x","configuration":{}}}}"#;
+    fn imports_cassandra_driver() {
+        let json = r#"{"connections":{"x":{"provider":"cassandra","name":"x","configuration":{"host":"10.0.0.2","port":"9042","database":"ks","user":"cassandra"}}}}"#;
         let report = parse_dbeaver_json(json).unwrap();
-        assert!(report.profiles.is_empty());
-        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(report.profiles.len(), 1);
+        let cfg = report.profiles[0].input.cassandra.as_ref().unwrap();
+        assert_eq!(cfg.host, "10.0.0.2");
+        assert_eq!(cfg.port, 9042);
+        assert_eq!(cfg.keyspace.as_deref(), Some("ks"));
     }
 }

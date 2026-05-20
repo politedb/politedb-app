@@ -45,8 +45,13 @@ export function ActiveWindowContent() {
   const rt = useConnectionRuntimeCtx();
 
   const { profileId, isProfileLocked } = rt;
-  const { hasAnyWindow, activeId, activeTab, activeSqlWindow, activeTableWindow } =
-    useConnectionWindows(profileId);
+  const {
+    hasAnyWindow,
+    activeId,
+    activeTab,
+    activeSqlWindow,
+    activeTableWindow,
+  } = useConnectionWindows(profileId);
 
   const openEditConnection = useCallback(() => {
     const profileId = activeTab?.profileId;
@@ -207,7 +212,7 @@ export function ActiveWindowContent() {
     return (
       <EmptyWindow
         onNewSql={actions.openSql}
-        canOpenSql={rt.engine !== "mongo"}
+        canOpenSql={rt.engine !== "mongo" && rt.engine !== "cassandra"}
       />
     );
   }
@@ -270,9 +275,7 @@ export function ActiveWindowContent() {
     return (
       <ConnectionFailedPlaceholder
         message={rt.loadError!}
-        onEditConnection={
-          activeTab?.profileId ? openEditConnection : undefined
-        }
+        onEditConnection={activeTab?.profileId ? openEditConnection : undefined}
       />
     );
   }

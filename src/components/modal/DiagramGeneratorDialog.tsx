@@ -122,7 +122,13 @@ function diagramConstraintsSql(
   tableName: string,
   engine?: DatabaseEngine
 ): string | null {
-  if (!engine || engine === "mongo" || engine === "redis") return null;
+  if (
+    !engine ||
+    engine === "mongo" ||
+    engine === "cassandra" ||
+    engine === "redis"
+  )
+    return null;
   if (engine === "mysql" || engine === "mariadb") {
     return tableConstraintsMySqlQuery(schema, tableName);
   }
