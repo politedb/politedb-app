@@ -240,7 +240,16 @@ pub async fn connection_test(
                 }
                 crate::types::EngineKind::Sqlite => {}
                 crate::types::EngineKind::Duckdb => {}
-                crate::types::EngineKind::D1 => {}
+                crate::types::EngineKind::D1 => {
+                    if let Some(d1) = input.d1.as_mut() {
+                        if d1.api_token.kind == crate::types::SecretRefKind::Keychain
+                            && d1.api_token.value.trim().is_empty()
+                        {
+                            d1.api_token.kind = crate::types::SecretRefKind::Inline;
+                            d1.api_token.value = pw.to_string();
+                        }
+                    }
+                }
                 crate::types::EngineKind::Mongo => {
                     if let Some(mongo) = input.mongo.as_mut() {
                         if mongo.password.kind == crate::types::SecretRefKind::Keychain

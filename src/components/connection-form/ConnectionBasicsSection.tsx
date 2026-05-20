@@ -106,10 +106,10 @@ export function ConnectionBasicsSection(
     rules: {
       validate: (v) => {
         if (isRedis || isMongo || isSqlite || isDuckDB) return true;
+        if (storeKeychain) return true;
         if (isD1) {
           return String(v ?? "").trim().length > 0 || "API token is required.";
         }
-        if (storeKeychain) return true;
         return String(v ?? "").trim().length > 0 || "Password is required.";
       },
     },
