@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useRef } from "preact/hooks";
+import { useMemo, useCallback, useRef, useEffect } from "preact/hooks";
 import type {
   DatabaseEngine,
   ForeignKeyInfo,
@@ -12,7 +12,7 @@ import {
 import { Input, InputOption } from "src/components/common/Input";
 import { cn } from "src/utils/cn";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
-import { getDbConfig } from "src/utils/dbConfig";
+import { getDbConfig, supportsForeignKeyEditing } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { ArrowRightIcon } from "src/components/icons";
@@ -136,20 +136,35 @@ export function TableStructure({
     [tableData]
   );
 
+  const dbConfig = getDbConfig(engine);
+  const allowForeignKeyEditing = supportsForeignKeyEditing(engine);
+
+  const visibleColumns = useMemo(
+    () =>
+      COLUMNS_NAME.filter(
+        (name) => name !== "foreign_key" || allowForeignKeyEditing
+      ),
+    [allowForeignKeyEditing]
+  );
+
   const filteredTableData = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
     if (!normalizedQuery) return tableDataWithRowNumber;
 
     return tableDataWithRowNumber.filter((row) =>
-      COLUMNS_NAME.some((column) =>
+      visibleColumns.some((column) =>
         String(row[column] ?? "")
           .toLowerCase()
           .includes(normalizedQuery)
       )
     );
-  }, [searchQuery, tableDataWithRowNumber]);
+  }, [searchQuery, tableDataWithRowNumber, visibleColumns]);
 
-  const dbConfig = getDbConfig(engine);
+  useEffect(() => {
+    if (!allowForeignKeyEditing && fkRowIndex !== null) {
+      closeFkDialog();
+    }
+  }, [allowForeignKeyEditing, fkRowIndex, closeFkDialog]);
 
   const columnInputOptions = useMemo(
     () => ({
@@ -196,7 +211,7 @@ export function TableStructure({
             <></>
           ),
       },
-      ...COLUMNS_NAME.map((name) => ({
+      ...visibleColumns.map((name) => ({
         key: name,
         label: name,
         sortable: true,
@@ -211,7 +226,7 @@ export function TableStructure({
           const isDeleted = deletedRows.has(sourceIndex);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRows.has(sourceIndex);
-          const colIndex = COLUMNS_NAME.indexOf(name);
+          const colIndex = visibleColumns.indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
           const isFkColumn = name === "foreign_key";
@@ -330,6 +345,8 @@ export function TableStructure({
       JSON.stringify(structureUpdatePatches),
       openFkDialog,
       readOnly,
+      visibleColumns,
+      allowForeignKeyEditing,
     ]
   );
 
@@ -365,7 +382,7 @@ export function TableStructure({
         onDoubleClickRow={handleDoubleClickRow}
       />
 
-      {fkRowIndex !== null && (
+      {allowForeignKeyEditing && fkRowIndex !== null && (
         <ForeignKeyDialog
           open={true}
           onClose={closeFkDialog}

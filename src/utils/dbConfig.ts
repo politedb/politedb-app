@@ -12,6 +12,11 @@ export function getDbConfig(engine: DatabaseEngine): DatabaseConfig {
   return DATABASES_CONFIG[engine];
 }
 
+/** ALTER TABLE add/drop foreign key (Structure tab editor). */
+export function supportsForeignKeyEditing(engine: DatabaseEngine): boolean {
+  return getDbConfig(engine).allowFk === true;
+}
+
 const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
   postgres: {
     dataTypes: POSTGRES_DATA_TYPES,
@@ -35,7 +40,6 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
   sqlserver: {
     dataTypes: SQLSERVER_DATA_TYPES,
     indexAlgorithms: ["CLUSTERED", "NONCLUSTERED", "COLUMNSTORE", "HASH"],
-    allowFk: true,
   },
   mongo: {
     dataTypes: [],
@@ -52,12 +56,10 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
   d1: {
     dataTypes: SQLITE_DATA_TYPES,
     indexAlgorithms: [],
-    allowFk: true,
   },
   turso: {
     dataTypes: SQLITE_DATA_TYPES,
     indexAlgorithms: [],
-    allowFk: true,
   },
   oracle: {
     dataTypes: ORACLE_DATA_TYPES,
@@ -66,12 +68,10 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
   snowflake: {
     dataTypes: SNOWFLAKE_DATA_TYPES,
     indexAlgorithms: [],
-    allowFk: true,
   },
   duckdb: {
     dataTypes: SQLITE_DATA_TYPES,
     indexAlgorithms: [],
-    allowFk: true,
   },
   clickhouse: {
     dataTypes: MYSQL_DATA_TYPES,
