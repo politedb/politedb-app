@@ -14,6 +14,8 @@ export function useSchemaTablesPanel(args: {
 
   // optional initial schema for UI filter
   defaultSchema?: string;
+  /** Active database/keyspace when the engine has no schema catalog. */
+  currentDatabase?: string;
 }) {
   const {
     metadata,
@@ -21,6 +23,7 @@ export function useSchemaTablesPanel(args: {
     engine,
     connectionId,
     defaultSchema = "public",
+    currentDatabase = "",
   } = args;
 
   // Lazy: first get() triggers load() if connectionId is available
@@ -28,6 +31,7 @@ export function useSchemaTablesPanel(args: {
     metaKey,
     engine,
     connectionId: connectionId ?? undefined,
+    currentDatabase,
     lazy: true,
   });
 
@@ -77,8 +81,9 @@ export function useSchemaTablesPanel(args: {
       metaKey,
       engine,
       connectionId,
+      currentDatabase,
     });
-  }, [metadata, metaKey, engine, connectionId]);
+  }, [metadata, metaKey, engine, connectionId, currentDatabase]);
 
   // Filter tables for sidebar
   const filteredTables = useMemo(() => {

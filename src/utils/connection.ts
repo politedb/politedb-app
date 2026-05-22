@@ -1,5 +1,5 @@
-import type { ConnectionProfile } from "src/lib/tauri";
-import type { ConnectionSortMode } from "src/types";
+import type { ConnectionCreateInput, ConnectionProfile } from "src/lib/tauri";
+import type { ConnectionSortMode, DatabaseEngine } from "src/types";
 
 export function safeLower(v?: string | null) {
   return (v ?? "").toLowerCase();
@@ -47,6 +47,35 @@ export function formatConnectionDatabaseDisplay(
     return slash >= 0 ? normalized.slice(slash + 1) : normalized;
   }
   return db;
+}
+
+/** Active database/keyspace from the connection profile (for sidebar when no SQL schemas). */
+export function currentDatabaseFromInput(
+  engine?: DatabaseEngine,
+  input?: ConnectionCreateInput | null
+): string {
+  if (!engine || !input) return "";
+  switch (engine) {
+    case "postgres":
+      return input.postgres?.database?.trim() ?? "";
+    case "mysql":
+    case "mariadb":
+      return input.mysql?.database?.trim() ?? "";
+    case "sqlserver":
+      return input.sqlserver?.database?.trim() ?? "";
+    case "mongo":
+      return input.mongo?.database?.trim() ?? "";
+    case "cassandra":
+      return input.cassandra?.keyspace?.trim() ?? "";
+    case "clickhouse":
+      return input.clickhouse?.database?.trim() ?? "";
+    case "snowflake":
+      return input.snowflake?.database?.trim() ?? "";
+    case "oracle":
+      return input.oracle?.database?.trim() ?? "";
+    default:
+      return "";
+  }
 }
 
 export function pickHostDbUser(conn: ConnectionProfile) {

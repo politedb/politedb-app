@@ -1,7 +1,24 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
+import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
+
+function resolveCassandraKeyspaceForLoad(
+  schema: string,
+  profileId: string
+): string {
+  const fromSchema = schema?.trim();
+  if (fromSchema && fromSchema !== "default") return fromSchema;
+
+  const profile = useProfileStore.getState().getProfileById(profileId);
+  const fromProfile = profile?.input?.cassandra?.keyspace?.trim();
+  if (fromProfile) return fromProfile;
+
+  throw new Error(
+    "Cassandra keyspace is required. Set keyspace in the connection or choose one with the database icon."
+  );
+}
 import { connectProfileOnce } from "src/lib/runtimeConnection";
 import {
   tableColumnsQuery,
@@ -1300,6 +1317,11 @@ export function useLoadTableData() {
 
           if (activeTab.engine === "cassandra") {
             try {
+              const keyspace = resolveCassandraKeyspaceForLoad(
+                schema,
+                activeTab.profileId
+              );
+
               let cassandraColumns = Array.isArray(prev.columns)
                 ? (prev.columns as ColumnRow[])
                 : [];
@@ -1310,7 +1332,7 @@ export function useLoadTableData() {
               if (plan.needColumns || plan.needMeta || plan.needRowCount) {
                 const overview = await loadCassandraOverview({
                   connId,
-                  schema,
+                  schema: keyspace,
                   tableName,
                 });
                 cassandraColumns = overview.columns;
@@ -1336,7 +1358,7 @@ export function useLoadTableData() {
                 const rowsRes = await loadCassandraRows({
                   key,
                   connId,
-                  schema,
+                  schema: keyspace,
                   tableName,
                   limit,
                   offset,

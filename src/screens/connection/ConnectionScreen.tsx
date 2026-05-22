@@ -50,6 +50,7 @@ import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
+import { currentDatabaseFromInput } from "src/utils/connection";
 import type { PatchMap } from "src/utils/generateSql";
 import { pickHostDbUser } from "src/utils/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
@@ -306,6 +307,11 @@ export function ConnectionScreen() {
     return getProfileById(activeTab.profileId);
   }, [activeTab, getProfileById]);
 
+  const currentDatabase = useMemo(
+    () => currentDatabaseFromInput(engine, profile?.input),
+    [engine, profile?.input]
+  );
+
   const editProfile = useMemo(() => {
     if (!selectedProfileId) return undefined;
     return getProfileById(selectedProfileId);
@@ -447,6 +453,7 @@ export function ConnectionScreen() {
     metaKey,
     engine,
     connectionId: runtimeConnectionId,
+    currentDatabase,
     defaultSchema:
       engine === "postgres"
         ? "public"
@@ -454,8 +461,8 @@ export function ConnectionScreen() {
           ? `db ${profile?.input?.redis?.db ?? 0}`
           : engine === "sqlite" || engine === "d1"
             ? "main"
-            : engine === "clickhouse"
-              ? "default"
+            : engine === "clickhouse" || engine === "cassandra"
+              ? currentDatabase || "default"
               : "",
   });
 
@@ -915,9 +922,7 @@ export function ConnectionScreen() {
                       currSchema={activeSchema}
                       onSchemaChange={onSchemaChange}
                       schemaLabel={
-                        engine === "mongo" ||
-                        engine === "cassandra" ||
-                        engine === "redis"
+                        engine === "mongo" || engine === "redis"
                           ? "Database"
                           : "Schema"
                       }
@@ -1082,9 +1087,7 @@ export function ConnectionScreen() {
           tables={meta.tables ?? []}
           schemas={meta.schemas ?? []}
           schemaLabel={
-            engine === "mongo" || engine === "cassandra" || engine === "redis"
-              ? "Database"
-              : "Schema"
+            engine === "mongo" || engine === "redis" ? "Database" : "Schema"
           }
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}

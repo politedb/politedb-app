@@ -55,7 +55,8 @@ type EngineInput =
   | ConnectionProfile["input"]["cassandra"]
   | ConnectionProfile["input"]["redis"]
   | ConnectionProfile["input"]["snowflake"]
-  | ConnectionProfile["input"]["duckdb"];
+  | ConnectionProfile["input"]["duckdb"]
+  | ConnectionProfile["input"]["clickhouse"];
 
 function getEngineInput(profile: ConnectionProfile): {
   engine: string;
@@ -94,6 +95,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "redis") {
     return { engine, input: profile.input?.redis };
+  }
+  if (engine === "clickhouse") {
+    return { engine, input: profile.input?.clickhouse };
   }
   return { engine, input: undefined };
 }
@@ -142,6 +146,9 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "redis":
       database =
         profile.input?.redis?.db != null ? `db ${profile.input.redis.db}` : "";
+      break;
+    case "clickhouse":
+      database = profile.input?.clickhouse?.database ?? "";
       break;
   }
 

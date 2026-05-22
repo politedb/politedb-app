@@ -14,6 +14,16 @@ import {
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
 
+const CASSANDRA_SYSTEM_KEYSPACES = new Set([
+  "system",
+  "system_schema",
+  "system_auth",
+  "system_distributed",
+  "system_traces",
+  "system_views",
+  "system_virtual_schema",
+]);
+
 export type FunctionItem = {
   schema: string;
   name: string;
@@ -94,6 +104,8 @@ export function useDatabaseMetadata() {
       metaKey: string; // ✅ stable
       engine?: DatabaseEngine;
       connectionId: string; // ✅ runtime id for executing queries
+      /** Profile database/keyspace — used when the engine has no schema list. */
+      currentDatabase?: string;
       force?: boolean;
       includeColumns?: boolean;
     }) => {
@@ -101,9 +113,11 @@ export function useDatabaseMetadata() {
         metaKey,
         engine,
         connectionId,
+        currentDatabase = "",
         force = false,
         includeColumns = false,
       } = args;
+      const currentDb = currentDatabase.trim();
 
       const existing = cacheRef.current[metaKey];
 
@@ -195,36 +209,62 @@ export function useDatabaseMetadata() {
           }
 
           if (engine === "cassandra") {
-            const schemas = await cassandraListKeyspaces(connectionId);
+            // No SQL schemas — sidebar shows current keyspace only (like ClickHouse DB fallback).
+            let keyspace = currentDb;
+            if (!keyspace) {
+              const names = await cassandraListKeyspaces(connectionId);
+              keyspace =
+                names.find((n) => !CASSANDRA_SYSTEM_KEYSPACES.has(n))?.trim() ??
+                names[0]?.trim() ??
+                "";
+            }
+            if (!keyspace) {
+              setCache(metaKey, {
+                schemas: [],
+                functions: [],
+                tables: [],
+                columnsByTable: {},
+                columnsLoaded: includeColumns,
+                version: (version ?? "").trim(),
+                loading: false,
+                loaded: true,
+                error:
+                  "Cassandra keyspace is required. Set keyspace in the connection or choose one with the database icon.",
+                progress: 0,
+                stage: "error",
+              });
+              return cacheRef.current[metaKey]!;
+            }
+
+            const schemas = [keyspace];
             setCache(metaKey, { schemas, progress: 20, stage: "tables" });
 
             const tables: TableItem[] = [];
             const columnsByTable: Record<string, string[]> = {};
 
-            for (let i = 0; i < schemas.length; i++) {
-              const schema = schemas[i]!;
-              const tableNames = await cassandraListTables(
-                connectionId,
-                schema
-              );
+            const tableNames = await cassandraListTables(
+              connectionId,
+              keyspace
+            );
 
-              for (const name of tableNames) {
-                tables.push({ schema, name, kind: "table" });
+            for (let i = 0; i < tableNames.length; i++) {
+              const name = tableNames[i]!;
+              tables.push({ schema: keyspace, name, kind: "table" });
 
-                if (includeColumns) {
-                  const overview = await cassandraTableOverview({
-                    connectionId,
-                    keyspace: schema,
-                    table: name,
-                  });
-                  columnsByTable[`${schema}.${name}`] = (
-                    overview.columns ?? []
-                  ).map((c) => c.name);
-                }
+              if (includeColumns) {
+                const overview = await cassandraTableOverview({
+                  connectionId,
+                  keyspace,
+                  table: name,
+                });
+                columnsByTable[`${keyspace}.${name}`] = (
+                  overview.columns ?? []
+                ).map((c) => c.name);
               }
 
               const prog =
-                20 + Math.floor(((i + 1) / Math.max(1, schemas.length)) * 70);
+                20 +
+                Math.floor(((i + 1) / Math.max(1, tableNames.length)) * 70);
               setCache(metaKey, { progress: Math.min(95, prog) });
             }
 
@@ -304,7 +344,9 @@ export function useDatabaseMetadata() {
           let schemas = (schemasRes.rows ?? [])
             .map((r: any) => cellToString(r?.[0]) ?? "")
             .filter(Boolean);
-          if (engine === "clickhouse" && schemas.length === 0) {
+          if (schemas.length === 0 && currentDb) {
+            schemas = [currentDb];
+          } else if (engine === "clickhouse" && schemas.length === 0) {
             schemas = ["default"];
           }
           setCache(metaKey, { schemas, progress: 10, stage: "functions" });
@@ -406,6 +448,7 @@ export function useDatabaseMetadata() {
       engine?: DatabaseEngine;
       lazy?: boolean;
       connectionId?: string;
+      currentDatabase?: string;
       includeColumns?: boolean;
     }) => {
       const {
@@ -413,6 +456,7 @@ export function useDatabaseMetadata() {
         engine,
         lazy = true,
         connectionId,
+        currentDatabase,
         includeColumns = false,
       } = args;
 
@@ -427,6 +471,7 @@ export function useDatabaseMetadata() {
           metaKey,
           engine,
           connectionId,
+          currentDatabase,
           includeColumns,
         });
       }
@@ -448,14 +493,22 @@ export function useDatabaseMetadata() {
       metaKey: string;
       engine?: DatabaseEngine;
       connectionId: string;
+      currentDatabase?: string;
       includeColumns?: boolean;
     }) => {
-      const { metaKey, engine, connectionId, includeColumns = false } = args;
+      const {
+        metaKey,
+        engine,
+        connectionId,
+        currentDatabase,
+        includeColumns = false,
+      } = args;
       invalidate({ metaKey });
       return await load({
         metaKey,
         engine,
         connectionId,
+        currentDatabase,
         force: true,
         includeColumns,
       });

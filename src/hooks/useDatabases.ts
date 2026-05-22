@@ -10,6 +10,7 @@ import {
 } from "./queries";
 import { cellToString } from "src/utils/convert";
 import { mongoListDatabases } from "src/lib/tauri/mongo";
+import { cassandraListKeyspaces } from "src/lib/tauri/cassandra";
 
 export type DatabaseEditorMode = null | "create" | "rename";
 
@@ -21,6 +22,11 @@ export function canManageDatabases(engine?: DatabaseEngine) {
     engine === "clickhouse" ||
     isMySqlLike(engine)
   );
+}
+
+/** Toolbar database icon: list/switch database or keyspace. */
+export function canOpenDatabases(engine?: DatabaseEngine) {
+  return canManageDatabases(engine) || engine === "cassandra";
 }
 
 interface UseDatabasesParams {
@@ -51,7 +57,7 @@ export function useDatabases({
   }, [dbs, search]);
 
   const loadDatabases = useCallback(async () => {
-    if (!runtimeConnectionId || !canManageDatabases(engine)) return;
+    if (!runtimeConnectionId || !canOpenDatabases(engine)) return;
     setBusy(true);
     setError("");
     try {
@@ -59,6 +65,8 @@ export function useDatabases({
 
       if (engine === "mongo") {
         list = await mongoListDatabases(runtimeConnectionId);
+      } else if (engine === "cassandra") {
+        list = await cassandraListKeyspaces(runtimeConnectionId);
       } else {
         const res = await runSqlQuery(runtimeConnectionId, dbListQuery(engine));
         list = (res.rows ?? [])

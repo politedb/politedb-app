@@ -11,7 +11,11 @@ import { DatabaseIcon, SearchIcon } from "src/components/icons";
 import type { DatabaseEngine } from "src/types";
 import { cn } from "src/utils/cn";
 import { useCallback, useEffect, useState } from "preact/hooks";
-import { canManageDatabases, useDatabases } from "src/hooks/useDatabases";
+import {
+  canManageDatabases,
+  canOpenDatabases,
+  useDatabases,
+} from "src/hooks/useDatabases";
 import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
@@ -149,7 +153,7 @@ export function DatabaseManagerDialog({
           left={<SearchIcon className="size-5 text-neutral-500" />}
         />
 
-        {!canManageDatabases(engine) && (
+        {!canOpenDatabases(engine) && (
           <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             Database management is not supported for this engine.
           </div>

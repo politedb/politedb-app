@@ -33,7 +33,7 @@ import { TabViewMode } from "src/types";
 import { TagChips } from "src/components/common/TagChips";
 import { formatDatabaseVersion, normalizeEngineName } from "src/utils/convert";
 import { DatabaseManagerDialog } from "src/components/modal/DatabaseManagerDialog";
-import { canManageDatabases } from "src/hooks/useDatabases";
+import { canOpenDatabases } from "src/hooks/useDatabases";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { v4 as uuid } from "uuid";
@@ -267,6 +267,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "cassandra") {
+    if (!input.cassandra) throw new Error("CASSANDRA_CONFIG_MISSING");
+    return {
+      ...input,
+      cassandra: {
+        ...input.cassandra,
+        keyspace: database,
+      },
+    };
+  }
+
   throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
 }
 
@@ -387,14 +398,26 @@ export function MenuBar({
     if (!connectionInfo) return { db: "", dbTitle: "", target: "" };
     const { database, schema, table, engine } = connectionInfo;
 
+    const usesDbOnlyBreadcrumb =
+      engine === "clickhouse" ||
+      engine === "cassandra" ||
+      engine === "mongo" ||
+      engine === "redis";
+
+    const displayDb =
+      database ||
+      (usesDbOnlyBreadcrumb && schema && schema !== "default" ? schema : "");
+
     return {
-      db: formatConnectionDatabaseDisplay(database, engine),
-      dbTitle: database,
+      db: formatConnectionDatabaseDisplay(displayDb, engine),
+      dbTitle: displayDb,
       target: table
         ? engine === "postgres"
           ? `${schema}.${table}`
           : table
-        : schema,
+        : usesDbOnlyBreadcrumb || !schema || schema === displayDb
+          ? ""
+          : schema,
     };
   }, [connectionInfo]);
 
@@ -539,7 +562,7 @@ export function MenuBar({
                 connectionBlocked ||
                 activeTab?.isLocked ||
                 !runtimeConnectionId ||
-                !canManageDatabases(connectionInfo?.engine)
+                !canOpenDatabases(connectionInfo?.engine)
               }
               onClick={() => setDbDialogOpen(true)}
             >
@@ -604,10 +627,14 @@ export function MenuBar({
                   >
                     {dbLabel.db}
                   </span>
-                  <ChevronRightIcon className="size-2" />
-                  <span class="text-xs font-medium text-neutral-600">
-                    {dbLabel.target}
-                  </span>
+                  {dbLabel.target ? (
+                    <>
+                      <ChevronRightIcon className="size-2" />
+                      <span class="text-xs font-medium text-neutral-600">
+                        {dbLabel.target}
+                      </span>
+                    </>
+                  ) : null}
                 </div>
               ) : (
                 <div class="text-xs text-neutral-500">No connection</div>
