@@ -28,7 +28,7 @@
     "monaco-editor": "^0.53.0",
     "papaparse": "^5.5.3",
     "path": "^0.12.7",
-    "posthog-js": "^1.364.3",
+    "posthog-js": "^1.375.0",
     "preact": "^10.25.1",
     "react-hook-form": "^7.70.0",
     "react-tiny-popover": "^8.1.6",

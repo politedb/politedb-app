@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
 import { TrialExpiredOverlay } from "src/screens/main/TrialExpiredOverlay";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
+import { trackScreenView } from "src/lib/analytics";
 
 const LICENSE_VALIDATION_GRACE_MS = 60 * 60 * 1000;
 
@@ -26,6 +27,10 @@ export function MainLayout() {
   useEffect(() => {
     if (isTab && !activeTab) setActiveProfileScreen("main");
   }, [isTab, activeTab, setActiveProfileScreen]);
+
+  useEffect(() => {
+    trackScreenView(activeProfileScreen || "main");
+  }, [activeProfileScreen]);
 
   useEffect(() => {
     void loadLicense();
