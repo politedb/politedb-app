@@ -68,4 +68,9 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: [],
     allowFk: true,
   },
+  clickhouse: {
+    dataTypes: MYSQL_DATA_TYPES,
+    indexAlgorithms: [],
+    allowFk: false,
+  },
 };

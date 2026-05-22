@@ -256,6 +256,17 @@ function withDatabaseInput(
     };
   }
 
+  if (input.engine === "clickhouse") {
+    if (!input.clickhouse) throw new Error("CLICKHOUSE_CONFIG_MISSING");
+    return {
+      ...input,
+      clickhouse: {
+        ...input.clickhouse,
+        database,
+      },
+    };
+  }
+
   throw new Error("ENGINE_NOT_SUPPORTED_FOR_OPEN_DATABASE");
 }
 

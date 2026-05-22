@@ -64,6 +64,14 @@ fn rewrite_input_host_port(
         }
         crate::types::EngineKind::Snowflake => {}
         crate::types::EngineKind::Duckdb => {}
+        crate::types::EngineKind::Clickhouse => {
+            let ch = input
+                .clickhouse
+                .as_mut()
+                .ok_or("CLICKHOUSE_CONFIG_MISSING")?;
+            ch.host = host.into();
+            ch.port = port;
+        }
     }
     Ok(input)
 }
@@ -292,6 +300,16 @@ pub async fn connection_test(
                         {
                             sf.password.kind = crate::types::SecretRefKind::Inline;
                             sf.password.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Clickhouse => {
+                    if let Some(ch) = input.clickhouse.as_mut() {
+                        if ch.password.kind == crate::types::SecretRefKind::Keychain
+                            && ch.password.value.trim().is_empty()
+                        {
+                            ch.password.kind = crate::types::SecretRefKind::Inline;
+                            ch.password.value = pw.to_string();
                         }
                     }
                 }
@@ -604,6 +622,23 @@ pub async fn connection_version(
                 .filter(|v| !v.is_empty())
                 .ok_or("SNOWFLAKE_VERSION_NOT_FOUND")?;
             Ok(version)
+        }
+        crate::engines::EngineConnection::Clickhouse(ch) => {
+            use clickhouse::Row;
+            use serde::Deserialize;
+
+            #[derive(Row, Deserialize)]
+            struct VersionRow {
+                version: String,
+            }
+
+            let row = ch
+                .client
+                .query("SELECT version() AS version")
+                .fetch_one::<VersionRow>()
+                .await
+                .map_err(|e| format!("CLICKHOUSE_VERSION_QUERY_FAILED: {e}"))?;
+            Ok(row.version)
         }
     }
 }

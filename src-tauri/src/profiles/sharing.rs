@@ -132,6 +132,11 @@ fn resolve_db_passwords_inline(
                 sf.password = inline_secret_from_ref(app, &sf.password)?;
             }
         }
+        EngineKind::Clickhouse => {
+            if let Some(ch) = input.clickhouse.as_mut() {
+                ch.password = inline_secret_from_ref(app, &ch.password)?;
+            }
+        }
         EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
     }
     Ok(())
@@ -184,6 +189,11 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
         EngineKind::Snowflake => {
             if let Some(sf) = input.snowflake.as_mut() {
                 redact(&mut sf.password);
+            }
+        }
+        EngineKind::Clickhouse => {
+            if let Some(ch) = input.clickhouse.as_mut() {
+                redact(&mut ch.password);
             }
         }
         EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
@@ -363,6 +373,7 @@ mod tests {
                 ssh: None,
                 snowflake: None,
                 duckdb: None,
+                clickhouse: None,
             },
             tags: vec![],
             indicator_color: None,

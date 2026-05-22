@@ -52,6 +52,7 @@ pub fn default_port(engine: EngineKind) -> u16 {
         EngineKind::Cassandra => 9042,
         EngineKind::Redis => 6379,
         EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb | EngineKind::Snowflake => 0,
+        EngineKind::Clickhouse => 8123,
     }
 }
 

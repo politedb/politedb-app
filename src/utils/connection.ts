@@ -142,6 +142,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "clickhouse") {
+    const ch = conn.input?.clickhouse;
+    return {
+      host: ch?.host ?? "",
+      database: ch?.database ?? "",
+      user: ch?.user ?? "",
+    };
+  }
+
   if (engine === "redis") {
     const rd = conn.input?.redis;
     return {

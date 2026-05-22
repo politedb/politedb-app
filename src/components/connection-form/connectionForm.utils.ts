@@ -91,6 +91,8 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
       return 1521;
     case "snowflake":
       return 0;
+    case "clickhouse":
+      return 8123;
     default:
       return 5432;
   }
@@ -121,6 +123,7 @@ function pickByEngine<T>(
     redis?: T;
     snowflake?: T;
     duckdb?: T;
+    clickhouse?: T;
   }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
@@ -134,6 +137,7 @@ function pickByEngine<T>(
   if (engine === "cassandra") return by.cassandra;
   if (engine === "redis") return by.redis;
   if (engine === "snowflake") return by.snowflake;
+  if (engine === "clickhouse") return by.clickhouse;
   return undefined;
 }
 
@@ -439,6 +443,32 @@ function buildDuckdbInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildClickhouseInput(v: FormValues): ConnectionCreateInput {
+  const port = toNumber(v.port, 8123);
+
+  const clickhouse: ConnectionCreateInput["clickhouse"] = {
+    host: v.host,
+    port,
+    database: String(v.database ?? "").trim(),
+    user: v.user,
+    password: v.storeKeychain
+      ? { kind: "keychain", value: v.password }
+      : { kind: "inline", value: v.password },
+    ssl_mode: v.sslMode,
+    connect_timeout_ms: 60_000,
+    statement_timeout_ms: 60_000,
+  };
+
+  return {
+    engine: "clickhouse",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    clickhouse,
+    ssh: buildSshInput(v, v.host, port),
+  };
+}
+
 function buildD1Input(v: FormValues): ConnectionCreateInput {
   return {
     engine: "d1",
@@ -482,6 +512,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildSnowflakeInput(v);
     case "redis":
       return buildRedisInput(v);
+    case "clickhouse":
+      return buildClickhouseInput(v);
     default:
       throw new Error(`Unsupported engine: ${String(v.engine)}`);
   }
@@ -511,6 +543,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const cassandra = input?.cassandra;
   const rd = input?.redis;
   const sf = input?.snowflake;
+  const ch = input?.clickhouse;
 
   const host =
     pickByEngine(engine, {
@@ -524,6 +557,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       cassandra: cassandra?.host,
       redis: rd?.host,
       snowflake: sf?.account,
+      clickhouse: ch?.host,
     }) || defaultHostForEngine(engine);
 
   const port =
@@ -538,6 +572,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       cassandra: cassandra?.port,
       redis: rd?.port,
       snowflake: 0,
+      clickhouse: ch?.port,
     }) ?? defaultPortForEngine(engine);
 
   const user =
@@ -551,6 +586,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       cassandra: cassandra?.user,
       redis: rd?.user,
       snowflake: sf?.user,
+      clickhouse: ch?.user,
     }) ||
     (engine === "mongo" ||
     engine === "cassandra" ||
@@ -572,6 +608,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       mongo: mongo?.database ?? undefined,
       cassandra: cassandra?.keyspace ?? undefined,
       snowflake: sf?.database,
+      clickhouse: ch?.database,
     }) ||
     (engine === "mongo" ||
     engine === "cassandra" ||
@@ -606,21 +643,25 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
               ? sf?.password?.kind === "inline"
                 ? (sf.password.value ?? "")
                 : ""
-              : engine === "duckdb" || engine === "sqlite"
-                ? ""
-                : engine === "mongo"
-                  ? mongo?.password?.kind === "inline"
-                    ? (mongo.password.value ?? "")
-                    : ""
-                  : engine === "cassandra"
-                    ? cassandra?.password?.kind === "inline"
-                      ? (cassandra.password.value ?? "")
+              : engine === "clickhouse"
+                ? ch?.password?.kind === "inline"
+                  ? (ch.password.value ?? "")
+                  : ""
+                : engine === "duckdb" || engine === "sqlite"
+                  ? ""
+                  : engine === "mongo"
+                    ? mongo?.password?.kind === "inline"
+                      ? (mongo.password.value ?? "")
                       : ""
-                    : engine === "d1"
-                      ? d1?.api_token?.kind === "inline"
-                        ? (d1.api_token.value ?? "")
+                    : engine === "cassandra"
+                      ? cassandra?.password?.kind === "inline"
+                        ? (cassandra.password.value ?? "")
                         : ""
-                      : "";
+                      : engine === "d1"
+                        ? d1?.api_token?.kind === "inline"
+                          ? (d1.api_token.value ?? "")
+                          : ""
+                        : "";
 
   const storeKeychain =
     engine === "postgres"
@@ -633,15 +674,17 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
             ? oracle?.password?.kind !== "inline"
             : engine === "snowflake"
               ? sf?.password?.kind !== "inline"
-              : engine === "duckdb" || engine === "sqlite"
-                ? false
-                : engine === "mongo"
-                  ? mongo?.password?.kind !== "inline"
-                  : engine === "cassandra"
-                    ? cassandra?.password?.kind !== "inline"
-                    : engine === "d1"
-                      ? d1?.api_token?.kind !== "inline"
-                      : true;
+              : engine === "clickhouse"
+                ? ch?.password?.kind !== "inline"
+                : engine === "duckdb" || engine === "sqlite"
+                  ? false
+                  : engine === "mongo"
+                    ? mongo?.password?.kind !== "inline"
+                    : engine === "cassandra"
+                      ? cassandra?.password?.kind !== "inline"
+                      : engine === "d1"
+                        ? d1?.api_token?.kind !== "inline"
+                        : true;
 
   return {
     host,

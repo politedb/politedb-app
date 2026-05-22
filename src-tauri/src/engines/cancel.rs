@@ -28,6 +28,9 @@ pub enum CancelHandle {
     Snowflake {
         notify: Arc<Notify>,
     },
+    Clickhouse {
+        notify: Arc<Notify>,
+    },
     Redis {
         notify: Arc<Notify>,
     },
@@ -69,6 +72,9 @@ impl CancelHandle {
                 notify.notify_waiters();
             }
             CancelHandle::Snowflake { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Clickhouse { notify } => {
                 notify.notify_waiters();
             }
 

@@ -119,6 +119,9 @@ fn map_dbeaver_engine(provider: &str) -> Option<EngineKind> {
     if p.contains("duckdb") {
         return Some(EngineKind::Duckdb);
     }
+    if p.contains("clickhouse") {
+        return Some(EngineKind::Clickhouse);
+    }
     None
 }
 
@@ -182,6 +185,7 @@ fn build_input(
         redis: None,
         snowflake: None,
         duckdb: None,
+        clickhouse: None,
         ssh: None,
     };
 
@@ -330,6 +334,18 @@ fn build_input(
                 statement_timeout_ms: None,
             });
         }
+        EngineKind::Clickhouse => {
+            input.clickhouse = Some(crate::types::ClickhouseConnectInput {
+                host,
+                port,
+                database,
+                user,
+                password,
+                ssl_mode: None,
+                connect_timeout_ms: None,
+                statement_timeout_ms: None,
+            });
+        }
     }
 
     Ok(input)
@@ -441,6 +457,11 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
         EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb | EngineKind::Snowflake => {
             ("127.0.0.1".into(), 0)
         }
+        EngineKind::Clickhouse => input
+            .clickhouse
+            .as_ref()
+            .map(|p| (p.host.clone(), p.port))
+            .unwrap_or_else(|| ("127.0.0.1".into(), 8123)),
     }
 }
 

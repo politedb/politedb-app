@@ -388,7 +388,11 @@ async function loadSizeInfo(params: {
   try {
     res = await runSqlQuery(connId, q);
   } catch (e) {
-    if (engine === "snowflake" || engine === "duckdb") {
+    if (
+      engine === "snowflake" ||
+      engine === "duckdb" ||
+      engine === "clickhouse"
+    ) {
       return { totalSize: "N/A", dataSize: "N/A", indexSize: "N/A" };
     }
     throw e;
@@ -820,7 +824,7 @@ async function loadMeta(params: {
     return { structure, constraints };
   }
 
-  if (engine === "oracle" || engine === "snowflake") {
+  if (engine === "oracle" || engine === "snowflake" || engine === "clickhouse") {
     const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
     const qConstraints = tableConstraintsQuery(schema, tableName, engine);
 
@@ -949,6 +953,7 @@ async function loadForeignKeys(params: {
     engine === "mysql" ||
     engine === "mariadb" ||
     engine === "snowflake" ||
+    engine === "clickhouse" ||
     isSqliteLike(engine)
   ) {
     return [];

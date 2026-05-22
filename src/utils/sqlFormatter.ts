@@ -7,6 +7,7 @@ const engineToLanguage: Partial<Record<DatabaseEngine, SqlLanguage>> = {
   sqlite: "sqlite",
   d1: "sqlite",
   duckdb: "sqlite",
+  clickhouse: "sql",
   mariadb: "mariadb",
 };
 

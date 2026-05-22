@@ -201,6 +201,17 @@ export type SnowflakeConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type ClickhouseConnectInput = {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: SecretRef;
+  ssl_mode?: SslMode | null;
+  connect_timeout_ms?: number | null;
+  statement_timeout_ms?: number | null;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -226,6 +237,7 @@ export type ConnectionCreateInput = {
   redis?: RedisConnectInput;
   snowflake?: SnowflakeConnectInput;
   duckdb?: DuckdbConnectInput;
+  clickhouse?: ClickhouseConnectInput;
 };
 
 export type ConnectionInfo = {

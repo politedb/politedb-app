@@ -160,6 +160,7 @@ export function ConnectionBasicsSection(
     if (engine === "mongo") return 27017;
     if (engine === "cassandra") return 9042;
     if (engine === "redis") return 6379;
+    if (engine === "clickhouse") return 8123;
     if (
       engine === "sqlite" ||
       engine === "duckdb" ||

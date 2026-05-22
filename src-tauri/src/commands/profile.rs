@@ -13,10 +13,10 @@ use crate::profiles::types::{
 use crate::security::secrets;
 use crate::state::AppState;
 use crate::types::{
-    CassandraConnectInput, ConnectionCreateInput, ConnectionInfo as AppConnectionInfo,
-    D1ConnectInput, DuckdbConnectInput, EngineKind, MongoConnectInput, MySqlConnectInput,
-    OracleConnectInput, PgConnectInput, RedisConnectInput, SecretRef, SecretRefKind,
-    SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
+    CassandraConnectInput, ClickhouseConnectInput, ConnectionCreateInput,
+    ConnectionInfo as AppConnectionInfo, D1ConnectInput, DuckdbConnectInput, EngineKind,
+    MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
+    SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
 /* ============================================================================
@@ -228,6 +228,19 @@ fn validate_oracle_input(oc: &OracleConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_clickhouse_input(ch: &ClickhouseConnectInput) -> Result<(), String> {
+    if ch.host.trim().is_empty() {
+        return Err("CLICKHOUSE_HOST_REQUIRED".into());
+    }
+    if ch.user.trim().is_empty() {
+        return Err("CLICKHOUSE_USER_REQUIRED".into());
+    }
+    if ch.port == 0 {
+        return Err("CLICKHOUSE_PORT_INVALID".into());
+    }
+    Ok(())
+}
+
 fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
     if input.label.trim().is_empty() {
         return Err("LABEL_REQUIRED".into());
@@ -282,6 +295,13 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let sf = input.snowflake.as_ref().ok_or("SNOWFLAKE_CONFIG_MISSING")?;
             validate_snowflake_input(sf)
         }
+        EngineKind::Clickhouse => {
+            let ch = input
+                .clickhouse
+                .as_ref()
+                .ok_or("CLICKHOUSE_CONFIG_MISSING")?;
+            validate_clickhouse_input(ch)
+        }
     }
 }
 
@@ -304,6 +324,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Cassandra => "cassandra",
         EngineKind::Redis => "redis",
         EngineKind::Snowflake => "snowflake",
+        EngineKind::Clickhouse => "clickhouse",
     }
 }
 
@@ -413,6 +434,19 @@ pub fn persist_input_with_secrets(
                 EngineKind::Snowflake,
                 persist_secrets,
                 &mut sf.password,
+            )?;
+        }
+        EngineKind::Clickhouse => {
+            let ch = input
+                .clickhouse
+                .as_mut()
+                .ok_or("CLICKHOUSE_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Clickhouse,
+                persist_secrets,
+                &mut ch.password,
             )?;
         }
         EngineKind::Sqlite => {}

@@ -116,6 +116,7 @@ fn main() {
         Arc::new(engines::cassandra::driver::CassandraDriver),
         Arc::new(engines::redis::driver::RedisDriver),
         Arc::new(engines::snowflake::driver::SnowflakeDriver),
+        Arc::new(engines::clickhouse::driver::ClickhouseDriver),
     ];
 
     let engines = EngineRegistry::new(drivers);

@@ -15,6 +15,22 @@ pub enum EngineKind {
     Snowflake,
     Duckdb,
     Cassandra,
+    Clickhouse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClickhouseConnectInput {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub user: String,
+    pub password: crate::types::SecretRef,
+
+    /// "disable" | "prefer" | "require"
+    pub ssl_mode: Option<String>,
+
+    pub connect_timeout_ms: Option<u64>,
+    pub statement_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

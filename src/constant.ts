@@ -113,6 +113,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     desc: "Distributed wide-column store for high availability workloads.",
     defaultLabels: ["Cassandra", "Scylla", "Styx"],
   },
+  {
+    engine: "clickhouse",
+    label: "ClickHouse",
+    abbreviation: "Ch",
+    color: "bg-yellow-500",
+    available: true,
+    desc: "Column-oriented OLAP database for real-time analytics.",
+    defaultLabels: ["Chronos", "Helix", "Vector"],
+  },
 ] as const;
 
 export const POSTGRES_DATA_TYPES = [

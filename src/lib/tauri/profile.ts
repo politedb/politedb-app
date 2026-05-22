@@ -363,6 +363,29 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "clickhouse") {
+    const clickhouse = input.clickhouse;
+    if (!clickhouse) throw new Error("CLICKHOUSE_CONFIG_MISSING");
+
+    const dbRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      ssh,
+      clickhouse: {
+        ...clickhouse,
+        password: dbRef,
+      },
+    };
+  }
+
   if (engine === "redis") {
     const rd = input.redis;
     if (!rd) throw new Error("REDIS_CONFIG_MISSING");
@@ -402,6 +425,7 @@ export function preparePayloadWithSecret(
     oracle: input.oracle,
     mongo: input.mongo,
     redis: input.redis,
+    clickhouse: input.clickhouse,
   };
 }
 
@@ -614,6 +638,8 @@ function dbPasswordRef(input: ConnectionCreateInput): SecretRef | undefined {
       return input.oracle?.password;
     case "snowflake":
       return input.snowflake?.password;
+    case "clickhouse":
+      return input.clickhouse?.password;
     case "mongo":
       return input.mongo?.password;
     case "cassandra":
@@ -636,6 +662,7 @@ function inferStoreKeychainFromCreateInput(
   if (e === "sqlserver") return input.sqlserver?.password?.kind !== "inline";
   if (e === "oracle") return input.oracle?.password?.kind !== "inline";
   if (e === "snowflake") return input.snowflake?.password?.kind !== "inline";
+  if (e === "clickhouse") return input.clickhouse?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
   if (e === "cassandra") return input.cassandra?.password?.kind !== "inline";
   if (e === "sqlite" || e === "duckdb") return false;

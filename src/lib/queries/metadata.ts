@@ -150,6 +150,29 @@ const ORACLE: MetadataQueries = {
   `,
 };
 
+const CLICKHOUSE: MetadataQueries = {
+  schemasQuery: `
+    SELECT schema_name
+    FROM information_schema.schemata
+    WHERE catalog_name = currentDatabase()
+    ORDER BY schema_name
+  `,
+  functionsQuery: `SELECT '' WHERE 1=0`,
+  tablesQuery: `
+    SELECT table_schema, table_name, table_type
+    FROM information_schema.tables
+    WHERE table_catalog = currentDatabase()
+      AND table_type IN ('BASE TABLE', 'VIEW')
+    ORDER BY table_schema, table_name
+  `,
+  columnsQuery: `
+    SELECT table_schema, table_name, column_name
+    FROM information_schema.columns
+    WHERE table_catalog = currentDatabase()
+    ORDER BY table_schema, table_name, ordinal_position
+  `,
+};
+
 const SNOWFLAKE: MetadataQueries = {
   schemasQuery: `
     SELECT schema_name
@@ -234,6 +257,8 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
       return SQLSERVER;
     case "snowflake":
       return SNOWFLAKE;
+    case "clickhouse":
+      return CLICKHOUSE;
 
     // not supported for table/column completion
     case "redis":

@@ -18,6 +18,7 @@ export function canManageDatabases(engine?: DatabaseEngine) {
     engine === "postgres" ||
     engine === "mongo" ||
     engine === "sqlserver" ||
+    engine === "clickhouse" ||
     isMySqlLike(engine)
   );
 }

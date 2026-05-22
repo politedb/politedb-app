@@ -263,6 +263,18 @@ export const tableColumnsQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "clickhouse") {
+    const queryStr = `
+      SELECT column_name, data_type
+      FROM information_schema.columns
+      WHERE table_catalog = currentDatabase()
+        AND table_schema = ${qLiteral(schema)}
+        AND table_name = ${qLiteral(tableName)}
+      ORDER BY ordinal_position;
+    `;
+    return regexEscape(queryStr);
+  }
+
   const queryStr = `
     SELECT column_name, data_type
     FROM information_schema.columns
@@ -318,6 +330,21 @@ export function diagramTableColumnsQuery(
         0 AS is_primary
       FROM information_schema.columns c
       WHERE c.table_schema = ${qLiteral(schema)}
+        AND c.table_name = ${qLiteral(tableName)}
+      ORDER BY c.ordinal_position;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "clickhouse") {
+    const queryStr = `
+      SELECT
+        c.column_name,
+        c.data_type,
+        0 AS is_primary
+      FROM information_schema.columns AS c
+      WHERE c.table_catalog = currentDatabase()
+        AND c.table_schema = ${qLiteral(schema)}
         AND c.table_name = ${qLiteral(tableName)}
       ORDER BY c.ordinal_position;
     `;
@@ -562,6 +589,17 @@ export const tableEstimatedRowCountQuery = (
     return regexEscape(queryStr);
   }
 
+  if (engine === "clickhouse") {
+    const queryStr = `
+      SELECT toInt64(greatest(total_rows, 0))
+      FROM system.tables
+      WHERE database = currentDatabase()
+        AND name = ${qLiteral(tableName)}
+      LIMIT 1
+    `;
+    return regexEscape(queryStr);
+  }
+
   return null;
 };
 
@@ -577,7 +615,8 @@ export const tableOidQuery = (
     isSqliteLike(engine) ||
     engine === "oracle" ||
     engine === "sqlserver" ||
-    engine === "snowflake"
+    engine === "snowflake" ||
+    engine === "clickhouse"
   ) {
     return "SELECT 0;";
   }
@@ -658,6 +697,31 @@ export const tableStructuresQuery = (
       WHERE owner = ${qLiteral(schema.toUpperCase())}
         AND table_name = ${qLiteral(tableName.toUpperCase())}
       ORDER BY column_id;
+    `;
+    return regexEscape(queryStr);
+  }
+
+  if (engine === "clickhouse") {
+    const queryStr = `
+      SELECT
+        ordinal_position,
+        column_name,
+        data_type,
+        data_type AS format_type,
+        numeric_precision,
+        datetime_precision,
+        numeric_scale,
+        character_maximum_length AS data_length,
+        if(is_nullable IN (1), 'YES', 'NO') AS is_nullable,
+        '' AS check_expr_txt,
+        '' AS check_constraint_txt,
+        column_default AS column_default_txt,
+        column_comment AS comment_txt
+      FROM information_schema.columns
+      WHERE table_catalog = currentDatabase()
+        AND table_schema = ${qLiteral(schema)}
+        AND table_name = ${qLiteral(tableName)}
+      ORDER BY ordinal_position;
     `;
     return regexEscape(queryStr);
   }
@@ -821,7 +885,27 @@ export const tableConstraintsQuery = (
   }
 
   if (engine === "snowflake") {
-    return regexEscape(`SELECT '' WHERE 1=0;`);
+    return regexEscape(`SELECT '' WHERE 1=0`);
+  }
+
+  if (engine === "clickhouse") {
+    const queryStr = `
+      SELECT
+        'PRIMARY' AS index_name,
+        'PRIMARY' AS index_algorithm,
+        'true' AS is_unique,
+        'true' AS is_primary,
+        sorting_key AS index_definition,
+        if(primary_key != '', primary_key, sorting_key) AS column_name,
+        '' AS condition_txt,
+        '' AS include_txt,
+        '' AS comment_txt
+      FROM system.tables
+      WHERE database = currentDatabase()
+        AND name = ${qLiteral(tableName)}
+        AND (primary_key != '' OR sorting_key != '')
+    `;
+    return regexEscape(queryStr);
   }
 
   if (engine === "oracle") {
@@ -997,8 +1081,8 @@ export const tableForeignKeysQuery = (
   }
 
   // Snowflake read-only roles often cannot access KEY_COLUMN_USAGE / referential_constraints.
-  if (engine === "snowflake") {
-    return regexEscape(`SELECT '' WHERE 1=0;`);
+  if (engine === "snowflake" || engine === "clickhouse") {
+    return regexEscape(`SELECT '' WHERE 1=0`);
   }
 
   if (engine === "sqlserver") {
@@ -1240,6 +1324,14 @@ export const dbListQuery = (engine?: DatabaseEngine) => {
   if (engine === "snowflake") {
     return "SHOW DATABASES;";
   }
+  if (engine === "clickhouse") {
+    return `
+      SELECT name
+      FROM system.databases
+      WHERE name NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')
+      ORDER BY name
+    `;
+  }
   return "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;";
 };
 
@@ -1259,6 +1351,11 @@ export const renameDatabaseQuery = (
   if (engine === "sqlserver") {
     return regexEscape(
       `ALTER DATABASE ${qIdent(database, engine)} MODIFY NAME = ${qIdent(newDatabase, engine)};`
+    );
+  }
+  if (engine === "clickhouse") {
+    return regexEscape(
+      `RENAME DATABASE ${qIdent(database, engine)} TO ${qIdent(newDatabase, engine)}`
     );
   }
   const queryStr = `ALTER DATABASE ${qIdent(database, engine)} RENAME TO ${qIdent(newDatabase, engine)};`;

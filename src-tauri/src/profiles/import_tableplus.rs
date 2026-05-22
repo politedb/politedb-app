@@ -242,6 +242,9 @@ fn map_tableplus_engine(driver: &str) -> Option<EngineKind> {
     if d.contains("duckdb") {
         return Some(EngineKind::Duckdb);
     }
+    if d.contains("clickhouse") {
+        return Some(EngineKind::Clickhouse);
+    }
     None
 }
 
@@ -275,6 +278,7 @@ fn build_tableplus_input(
         redis: None,
         snowflake: None,
         duckdb: None,
+        clickhouse: None,
         ssh: None,
     };
 
@@ -426,6 +430,18 @@ fn build_tableplus_input(
                 statement_timeout_ms: None,
             });
         }
+        EngineKind::Clickhouse => {
+            input.clickhouse = Some(crate::types::ClickhouseConnectInput {
+                host: host.to_string(),
+                port,
+                database: database.to_string(),
+                user: user.to_string(),
+                password,
+                ssl_mode: None,
+                connect_timeout_ms: None,
+                statement_timeout_ms: None,
+            });
+        }
     }
 
     Ok(input)
@@ -512,6 +528,10 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
         EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => false,
         EngineKind::Snowflake => input
             .snowflake
+            .as_ref()
+            .is_some_and(|p| secret_nonempty(&p.password)),
+        EngineKind::Clickhouse => input
+            .clickhouse
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
     }

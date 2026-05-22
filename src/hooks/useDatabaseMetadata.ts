@@ -301,9 +301,12 @@ export function useDatabaseMetadata() {
                 : Promise.resolve(null),
             ]);
 
-          const schemas = (schemasRes.rows ?? [])
+          let schemas = (schemasRes.rows ?? [])
             .map((r: any) => cellToString(r?.[0]) ?? "")
             .filter(Boolean);
+          if (engine === "clickhouse" && schemas.length === 0) {
+            schemas = ["default"];
+          }
           setCache(metaKey, { schemas, progress: 10, stage: "functions" });
 
           const functions: FunctionItem[] = (functionsRes.rows ?? [])

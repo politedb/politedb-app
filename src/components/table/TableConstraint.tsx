@@ -32,6 +32,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   oracle: ["index_name", "index_algorithm", "is_unique", "column_name"],
   snowflake: ["index_name", "index_algorithm", "is_unique", "column_name"],
   duckdb: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  clickhouse: ["index_name", "index_algorithm", "is_unique", "column_name"],
 };
 
 interface Props {

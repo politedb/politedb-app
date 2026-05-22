@@ -1,5 +1,6 @@
 pub mod cancel;
 pub mod cassandra;
+pub mod clickhouse;
 pub mod d1;
 pub mod driver;
 pub mod duckdb;
@@ -40,6 +41,7 @@ pub enum EngineConnection {
     Redis(redis::connection::RedisConn),
     Snowflake(snowflake::connection::SnowflakeConn),
     Duckdb(duckdb::connection::DuckdbConn),
+    Clickhouse(clickhouse::connection::ClickhouseConn),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,7 +166,9 @@ fn reject_non_transactional_ddl(engine: &str, statements: &[String]) -> Result<(
 
 fn quote_import_identifier(ident: &str, engine: EngineKind) -> String {
     match engine {
-        EngineKind::Mysql | EngineKind::Mariadb => format!("`{}`", ident.replace('`', "``")),
+        EngineKind::Mysql | EngineKind::Mariadb | EngineKind::Clickhouse => {
+            format!("`{}`", ident.replace('`', "``"))
+        }
         EngineKind::Sqlserver => format!("[{}]", ident.replace(']', "]]")),
         _ => format!("\"{}\"", ident.replace('"', "\"\"")),
     }
@@ -485,6 +489,7 @@ impl EngineConnection {
             EngineConnection::Redis(c) => c.id,
             EngineConnection::Snowflake(c) => c.id,
             EngineConnection::Duckdb(c) => c.id,
+            EngineConnection::Clickhouse(c) => c.id,
         }
     }
 
@@ -501,6 +506,7 @@ impl EngineConnection {
             EngineConnection::Redis(c) => c.label.clone(),
             EngineConnection::Snowflake(c) => c.label.clone(),
             EngineConnection::Duckdb(c) => c.label.clone(),
+            EngineConnection::Clickhouse(c) => c.label.clone(),
         }
     }
 
@@ -517,6 +523,7 @@ impl EngineConnection {
             EngineConnection::Redis(_) => EngineKind::Redis,
             EngineConnection::Snowflake(_) => EngineKind::Snowflake,
             EngineConnection::Duckdb(_) => EngineKind::Duckdb,
+            EngineConnection::Clickhouse(_) => EngineKind::Clickhouse,
         }
     }
 
@@ -537,6 +544,7 @@ impl EngineConnection {
             EngineConnection::Redis(_) => "redis",
             EngineConnection::Snowflake(_) => "snowflake",
             EngineConnection::Duckdb(_) => "duckdb",
+            EngineConnection::Clickhouse(_) => "clickhouse",
         }
     }
 
@@ -555,6 +563,7 @@ impl EngineConnection {
             EngineConnection::Redis(r) => drop(r.pool),
             EngineConnection::Snowflake(_) => {}
             EngineConnection::Duckdb(_) => {}
+            EngineConnection::Clickhouse(_) => {}
         }
     }
 
@@ -758,6 +767,20 @@ impl EngineConnection {
                         .query(stmt.as_str())
                         .await
                         .map_err(|e| format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1))?;
+                }
+                Ok(())
+            }
+            EngineConnection::Clickhouse(ch) => {
+                reject_non_transactional_ddl("CLICKHOUSE", &statements)?;
+
+                for (idx, stmt) in statements.iter().enumerate() {
+                    clickhouse::operation::execute_json_query(
+                        ch,
+                        stmt,
+                        ch.default_statement_timeout_ms,
+                    )
+                    .await
+                    .map_err(|e| format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1))?;
                 }
                 Ok(())
             }
@@ -1027,6 +1050,37 @@ impl EngineConnection {
                     };
 
                     crate::engines::snowflake::operation::run_snowflake_sql_query(
+                        ctx,
+                        conn,
+                        input,
+                        default_timeout,
+                    )
+                    .await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+
+            EngineConnection::Clickhouse(ch) => {
+                let conn = ch.clone();
+                let default_timeout = ch.default_statement_timeout_ms;
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::clickhouse::operation::run_clickhouse_sql_query(
                         ctx,
                         conn,
                         input,

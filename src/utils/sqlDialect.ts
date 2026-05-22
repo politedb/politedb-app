@@ -6,7 +6,7 @@ export function isSqlServerEngine(engine?: DatabaseEngine) {
 }
 
 export function isMysqlFamilyEngine(engine?: DatabaseEngine) {
-  return engine === "mysql" || engine === "mariadb";
+  return engine === "mysql" || engine === "mariadb" || engine === "clickhouse";
 }
 
 export function isJsonColumnType(dbType: string | undefined): boolean {
