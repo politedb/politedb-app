@@ -21,10 +21,26 @@ export function isBlobColumnType(dbType: string | undefined): boolean {
   );
 }
 
+import {
+  clickhouseDecimalScale,
+  formatClickhouseDecimalForSql,
+} from "./clickhouseTypes";
+
+export {
+  clickhouseDecimalScale,
+  formatClickhouseDecimalForSql,
+  normalizeClickhouseDbType,
+  unwrapClickhouseType,
+} from "./clickhouseTypes";
+
 export function isNumericColumnType(dbType: string | undefined): boolean {
   if (!dbType || typeof dbType !== "string") return false;
-  return /^(bit|tinyint|smallint|mediumint|int|integer|bigint|int2|int4|int8|serial|bigserial|float|double|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?(\s+unsigned)?$/i.test(
-    dbType.trim()
+  const t = dbType.trim();
+  return (
+    /^(bit|tinyint|smallint|mediumint|int|integer|bigint|int2|int4|int8|serial|bigserial|float|double|float4|float8|real|double\s*precision|numeric|decimal)(\s*\([^)]*\))?(\s+unsigned)?$/i.test(
+      t
+    ) ||
+    /^(u?int(8|16|32|64|128|256)?|float32|float64)(?:\s*\([^)]*\))?$/i.test(t)
   );
 }
 
@@ -118,6 +134,27 @@ export function dropTableSql(
   engine?: DatabaseEngine
 ) {
   return `DROP TABLE ${quoteTableName(schema, tableName, engine)};`;
+}
+
+/** ClickHouse row updates use `ALTER TABLE ... UPDATE`, not standard SQL `UPDATE`. */
+export function clickhouseUpdateSql(
+  schema: string,
+  tableName: string,
+  assignments: string[],
+  whereClauses: string[]
+) {
+  const table = quoteTableName(schema, tableName, "clickhouse");
+  return `ALTER TABLE ${table} UPDATE ${assignments.join(", ")} WHERE ${whereClauses.join(" AND ")};`;
+}
+
+/** ClickHouse row deletes use `ALTER TABLE ... DELETE`, not `DELETE FROM`. */
+export function clickhouseDeleteSql(
+  schema: string,
+  tableName: string,
+  whereClauses: string[]
+) {
+  const table = quoteTableName(schema, tableName, "clickhouse");
+  return `ALTER TABLE ${table} DELETE WHERE ${whereClauses.join(" AND ")};`;
 }
 
 export function renameTableSql(
@@ -486,14 +523,41 @@ export function formatSqlValue(
   }
 
   if (typeof raw === "number" && Number.isFinite(raw)) {
+    if (engine === "clickhouse") {
+      const scale = clickhouseDecimalScale(dbType);
+      if (scale !== null) {
+        return formatClickhouseDecimalForSql(raw, scale);
+      }
+    }
     return String(raw);
+  }
+
+  if (engine === "clickhouse") {
+    const scale = clickhouseDecimalScale(dbType);
+    if (scale !== null) {
+      const text = String(raw).trim();
+      if (text !== "" && text.toLowerCase() !== "null") {
+        const numberValue = Number(text);
+        if (Number.isFinite(numberValue)) {
+          return formatClickhouseDecimalForSql(numberValue, scale);
+        }
+      }
+    }
   }
 
   if (isNumericColumnType(dbType)) {
     const text = String(raw).trim();
     if (text === "" || text.toLowerCase() === "null") return "NULL";
     const numberValue = Number(text);
-    if (Number.isFinite(numberValue)) return String(numberValue);
+    if (Number.isFinite(numberValue)) {
+      if (engine === "clickhouse") {
+        const scale = clickhouseDecimalScale(dbType);
+        if (scale !== null) {
+          return formatClickhouseDecimalForSql(numberValue, scale);
+        }
+      }
+      return String(numberValue);
+    }
   }
 
   return sqlStringLiteral(raw, engine);

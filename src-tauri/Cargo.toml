@@ -95,7 +95,8 @@ snowflake-connector-rs = "0.9"
 duckdb = { version = "1.1", features = ["bundled", "chrono"] }
 scylla = { version = "1.5", features = ["chrono-04"] }
 num-bigint = "0.4"
-clickhouse = { version = "0.15", features = ["inserter", "rustls-tls"] }
+klickhouse = { version = "0.14", features = ["compression", "serde"] }
+clickhouse = { version = "0.15", features = ["rustls-tls"] }
 
 [features]
 default = ["engine-postgres"]

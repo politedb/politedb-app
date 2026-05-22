@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::profiles::import_common::{
-    default_port, empty_secret, inline_secret, new_profile, parse_port, tag_from_env,
+    default_port, empty_secret, inline_secret, new_profile,
+    parse_port, tag_from_env,
 };
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
@@ -437,6 +438,11 @@ fn build_tableplus_input(
                 database: database.to_string(),
                 user: user.to_string(),
                 password,
+                protocol: match port {
+                    8123 | 8443 => Some(crate::types::ClickhouseProtocol::Http),
+                    9000 | 9440 => Some(crate::types::ClickhouseProtocol::Native),
+                    _ => None,
+                },
                 ssl_mode: None,
                 connect_timeout_ms: None,
                 statement_timeout_ms: None,

@@ -18,6 +18,14 @@ pub enum EngineKind {
     Clickhouse,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickhouseProtocol {
+    #[default]
+    Native,
+    Http,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickhouseConnectInput {
     pub host: String,
@@ -25,6 +33,10 @@ pub struct ClickhouseConnectInput {
     pub database: String,
     pub user: String,
     pub password: crate::types::SecretRef,
+
+    /// Native TCP (9000) or HTTP interface (8123). When omitted, inferred from port for legacy profiles.
+    #[serde(default)]
+    pub protocol: Option<ClickhouseProtocol>,
 
     /// "disable" | "prefer" | "require"
     pub ssl_mode: Option<String>,

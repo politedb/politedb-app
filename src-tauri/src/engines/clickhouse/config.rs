@@ -1,10 +1,45 @@
-use clickhouse::Client;
+use std::time::Duration;
 
-use crate::types::ClickhouseConnectInput;
+use clickhouse::Client as HttpClient;
+use klickhouse::{Client as NativeClient, ClientOptions};
 
-pub fn build_url(input: &ClickhouseConnectInput) -> String {
+use crate::types::{ClickhouseConnectInput, ClickhouseProtocol};
+
+pub fn resolved_protocol(input: &ClickhouseConnectInput) -> ClickhouseProtocol {
+    if let Some(p) = input.protocol {
+        return p;
+    }
+    // Legacy profiles saved before `protocol` existed.
+    let port = input.port;
+    if port == 8123 || port == 8443 {
+        ClickhouseProtocol::Http
+    } else {
+        ClickhouseProtocol::Native
+    }
+}
+
+pub fn uses_http(input: &ClickhouseConnectInput) -> bool {
+    resolved_protocol(input) == ClickhouseProtocol::Http
+}
+
+pub fn default_port_for_protocol(protocol: ClickhouseProtocol) -> u16 {
+    match protocol {
+        ClickhouseProtocol::Native => 9000,
+        ClickhouseProtocol::Http => 8123,
+    }
+}
+
+pub fn effective_port(input: &ClickhouseConnectInput) -> u16 {
+    if input.port != 0 {
+        input.port
+    } else {
+        default_port_for_protocol(resolved_protocol(input))
+    }
+}
+
+pub fn build_http_url(input: &ClickhouseConnectInput) -> String {
     let host = input.host.trim();
-    let port = if input.port == 0 { 8123 } else { input.port };
+    let port = effective_port(input);
     let scheme = match input.ssl_mode.as_deref() {
         Some("require") | Some("verify-ca") | Some("verify-full") => "https",
         _ => "http",
@@ -12,12 +47,12 @@ pub fn build_url(input: &ClickhouseConnectInput) -> String {
     format!("{scheme}://{host}:{port}")
 }
 
-pub fn build_client(input: &ClickhouseConnectInput, password: &str) -> Client {
+pub fn build_http_client(input: &ClickhouseConnectInput, password: &str) -> HttpClient {
     let database = input.database.trim();
     let user = input.user.trim();
 
-    let mut client = Client::default()
-        .with_url(build_url(input))
+    let mut client = HttpClient::default()
+        .with_url(build_http_url(input))
         .with_user(user)
         .with_password(password);
 
@@ -26,4 +61,34 @@ pub fn build_client(input: &ClickhouseConnectInput, password: &str) -> Client {
     }
 
     client
+}
+
+pub fn build_native_address(input: &ClickhouseConnectInput) -> String {
+    let host = input.host.trim();
+    let port = effective_port(input);
+    format!("{host}:{port}")
+}
+
+pub fn build_native_options(input: &ClickhouseConnectInput, password: &str) -> ClientOptions {
+    let mut options = ClientOptions::default();
+    options.username = input.user.trim().to_string();
+    options.password = password.to_string();
+    options.default_database = input.database.trim().to_string();
+    options
+}
+
+pub async fn connect_native(
+    input: &ClickhouseConnectInput,
+    password: &str,
+) -> Result<NativeClient, String> {
+    let address = build_native_address(input);
+    let options = build_native_options(input, password);
+    let timeout_ms = input.connect_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
+    let timeout = Duration::from_millis(timeout_ms);
+
+    let fut = NativeClient::connect(&address, options);
+    tokio::time::timeout(timeout, fut)
+        .await
+        .map_err(|_| format!("CLICKHOUSE_CONNECT_TIMEOUT after {timeout_ms}ms"))?
+        .map_err(|e| format!("CLICKHOUSE_CONNECT_FAILED: {e}"))
 }

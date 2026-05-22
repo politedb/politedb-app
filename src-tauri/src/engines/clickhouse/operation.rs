@@ -1,245 +1,149 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use reqwest::Client as HttpClient;
-use serde::Deserialize;
-use serde_json::Value;
+use futures_util::StreamExt;
+use klickhouse::block::Block;
+use klickhouse::{Type, Value as ChValue};
 use tauri::Emitter;
 use tokio::sync::Notify;
 
 use crate::engines::cancel::CancelHandle;
-use crate::engines::clickhouse::config::build_url;
 use crate::engines::clickhouse::connection::ClickhouseConn;
+use crate::engines::clickhouse::convert::klick_value_to_cell;
+use crate::engines::clickhouse::http;
+use crate::engines::clickhouse::response::{ChJsonMeta, ChJsonResponse};
+use crate::engines::clickhouse::sql::{looks_like_query, split_clickhouse_statements};
 use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
 use crate::operations::emit::{emit_done, emit_error};
-use crate::types::{CellValue, ClickhouseConnectInput, ColumnMeta, SqlQueryInput, TableChunk};
+use crate::types::{CellValue, ColumnMeta, SqlQueryInput, TableChunk};
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct ChJsonMeta {
-    name: String,
-    #[serde(rename = "type")]
-    db_type: String,
-}
+fn block_to_matrix(block: &Block) -> (Vec<ChJsonMeta>, Vec<Vec<CellValue>>) {
+    let meta: Vec<ChJsonMeta> = block
+        .column_types
+        .iter()
+        .map(|(name, ty): (&String, &Type)| ChJsonMeta {
+            name: name.clone(),
+            db_type: ty.to_string(),
+        })
+        .collect();
 
-#[derive(Debug, Deserialize)]
-struct ChJsonRaw {
-    meta: Option<Vec<ChJsonMeta>>,
-    data: Option<Vec<Value>>,
-    rows: Option<u64>,
-}
+    let col_names: Vec<&String> = block.column_types.keys().collect();
+    let row_count = block.rows as usize;
+    let mut matrix = Vec::with_capacity(row_count);
 
-#[derive(Debug)]
-pub(crate) struct ChJsonResponse {
-    pub meta: Option<Vec<ChJsonMeta>>,
-    pub data: Option<Vec<Vec<Value>>>,
-    pub rows: Option<u64>,
-}
-
-fn parse_clickhouse_json_response(text: &str) -> Result<ChJsonResponse, String> {
-    let raw: ChJsonRaw =
-        serde_json::from_str(text).map_err(|e| format!("CLICKHOUSE_JSON_PARSE_FAILED: {e}"))?;
-
-    let meta = raw.meta.unwrap_or_default();
-    let mut matrix: Vec<Vec<Value>> = Vec::new();
-
-    if let Some(data) = raw.data {
-        for row in data {
-            match row {
-                Value::Array(vals) => matrix.push(vals),
-                Value::Object(map) => {
-                    let vals = meta
-                        .iter()
-                        .map(|col| map.get(&col.name).cloned().unwrap_or(Value::Null))
-                        .collect();
-                    matrix.push(vals);
-                }
-                Value::Null => matrix.push(Vec::new()),
-                other => matrix.push(vec![other]),
-            }
-        }
+    for i in 0..row_count {
+        let row: Vec<CellValue> = col_names
+            .iter()
+            .map(|name| {
+                block
+                    .column_data
+                    .get(*name)
+                    .and_then(|col: &Vec<ChValue>| col.get(i).cloned())
+                    .map(|v| {
+                        klick_value_to_cell(v, block.column_types.get(*name))
+                    })
+                    .unwrap_or(CellValue::Null)
+            })
+            .collect();
+        matrix.push(row);
     }
 
-    let rows = raw
-        .rows
-        .unwrap_or(matrix.len() as u64);
-
-    Ok(ChJsonResponse {
-        meta: if meta.is_empty() { None } else { Some(meta) },
-        data: if matrix.is_empty() {
-            None
-        } else {
-            Some(matrix)
-        },
-        rows: Some(rows),
-    })
+    (meta, matrix)
 }
 
-/// ClickHouse HTTP allows one statement per request; strip trailing `;` before format clause.
-fn normalize_clickhouse_statement(sql: &str) -> String {
-    sql.trim()
-        .trim_end_matches(|c: char| c == ';' || c.is_whitespace())
-        .to_string()
-}
-
-fn split_clickhouse_statements(sql: &str) -> Vec<String> {
-    sql.split(';')
-        .map(normalize_clickhouse_statement)
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-fn prepare_clickhouse_http_body(sql: &str, json_result: bool) -> String {
-    let stmt = normalize_clickhouse_statement(sql);
-    if !json_result {
-        return stmt;
+fn merge_block_response(acc: &mut ChJsonResponse, block: &Block) {
+    let (meta, rows) = block_to_matrix(block);
+    if acc.meta.is_none() && !meta.is_empty() {
+        acc.meta = Some(meta);
     }
-    if stmt.to_uppercase().contains("FORMAT ") {
-        stmt
-    } else {
-        // JSONCompact => `data` is [[col1, col2], ...]; plain JSON uses objects per row.
-        format!("{stmt} FORMAT JSONCompact")
-    }
+    let data = acc.data.get_or_insert_with(Vec::new);
+    data.extend(rows);
+    acc.rows = Some(data.len() as u64);
 }
 
-fn looks_like_query(sql: &str) -> bool {
-    let s = sql.trim_start();
-    if s.is_empty() {
-        return false;
-    }
-    let up = s.chars().take(24).collect::<String>().to_uppercase();
-    up.starts_with("SELECT")
-        || up.starts_with("WITH")
-        || up.starts_with("SHOW")
-        || up.starts_with("DESCRIBE")
-        || up.starts_with("DESC")
-        || up.starts_with("EXPLAIN")
-}
-
-fn json_value_to_cell(v: &Value) -> CellValue {
-    match v {
-        Value::Null => CellValue::Null,
-        Value::Bool(b) => CellValue::Bool(*b),
-        Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                CellValue::I64(i)
-            } else if let Some(f) = n.as_f64() {
-                CellValue::F64(f)
-            } else {
-                CellValue::Str(n.to_string())
-            }
-        }
-        Value::String(s) => CellValue::Str(s.clone()),
-        Value::Array(arr) => {
-            CellValue::Str(serde_json::to_string(arr).unwrap_or_else(|_| "[]".to_string()))
-        }
-        Value::Object(obj) => {
-            CellValue::Str(serde_json::to_string(obj).unwrap_or_else(|_| "{}".to_string()))
-        }
-    }
-}
-
-fn connect_input_from_conn(conn: &ClickhouseConn) -> ClickhouseConnectInput {
-    use crate::types::secret::{SecretRef, SecretRefKind};
-
-    ClickhouseConnectInput {
-        host: conn.host.clone(),
-        port: conn.port,
-        database: conn.database.clone(),
-        user: conn.user.clone(),
-        password: SecretRef {
-            kind: SecretRefKind::Inline,
-            value: conn.password.clone(),
-        },
-        ssl_mode: conn.ssl_mode.clone(),
-        connect_timeout_ms: conn.connect_timeout_ms,
-        statement_timeout_ms: conn.default_statement_timeout_ms,
-    }
-}
-
-async fn execute_clickhouse_http(
+async fn query_native_blocks(
     conn: &ClickhouseConn,
     sql: &str,
-    json_result: bool,
     timeout_ms: Option<u64>,
-) -> Result<Option<ChJsonResponse>, String> {
+) -> Result<ChJsonResponse, String> {
+    use crate::engines::clickhouse::connection::ClickhouseClient;
+    use crate::engines::clickhouse::sql::normalize_clickhouse_statement;
+
+    let ClickhouseClient::Native(client) = &conn.client else {
+        return Err("CLICKHOUSE_NATIVE_CLIENT_EXPECTED".into());
+    };
+
     let stmt = normalize_clickhouse_statement(sql);
     if stmt.is_empty() {
         return Err("CLICKHOUSE_SQL_EMPTY".into());
     }
 
-    let input = connect_input_from_conn(conn);
-    let base_url = build_url(&input);
-    let database = conn.database.trim();
-    let mut url = format!("{base_url}/");
-    if json_result {
-        url.push_str("?default_format=JSONCompact");
-    }
-    if !database.is_empty() {
-        url.push_str(if json_result { "&" } else { "?" });
-        url.push_str("database=");
-        url.push_str(&urlencoding::encode(database));
-    }
+    let fut = async {
+        let mut stream = client
+            .query_raw(&stmt)
+            .await
+            .map_err(|e| format!("CLICKHOUSE_QUERY_FAILED: {e}"))?;
 
-    let body = prepare_clickhouse_http_body(&stmt, json_result);
+        let mut response = ChJsonResponse {
+            meta: None,
+            data: None,
+            rows: Some(0),
+        };
 
-    let http = HttpClient::builder()
-        .build()
-        .map_err(|e| format!("CLICKHOUSE_HTTP_CLIENT_FAILED: {e}"))?;
+        while let Some(block) = stream.next().await {
+            let block = block.map_err(|e| format!("CLICKHOUSE_QUERY_FAILED: {e}"))?;
+            if block.rows > 0 {
+                merge_block_response(&mut response, &block);
+            }
+        }
 
-    let req = http
-        .post(&url)
-        .basic_auth(&conn.user, Some(&conn.password))
-        .body(body);
+        Ok(response)
+    };
 
-    let fut = req.send();
-    let resp = match timeout_ms {
+    match timeout_ms {
         Some(ms) => {
             let ms = ms.clamp(100, 300_000);
-            tokio::time::timeout(std::time::Duration::from_millis(ms), fut)
+            tokio::time::timeout(Duration::from_millis(ms), fut)
                 .await
                 .map_err(|_| format!("CLICKHOUSE_QUERY_TIMEOUT after {ms}ms"))?
         }
         None => fut.await,
     }
-    .map_err(|e| format!("CLICKHOUSE_HTTP_REQUEST_FAILED: {e}"))?;
-
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("CLICKHOUSE_HTTP_BODY_FAILED: {e}"))?;
-
-    if !status.is_success() {
-        return Err(format!("CLICKHOUSE_QUERY_FAILED: {text}"));
-    }
-
-    if !json_result {
-        return Ok(None);
-    }
-
-    if text.trim().is_empty() {
-        return Ok(Some(ChJsonResponse {
-            meta: None,
-            data: None,
-            rows: Some(0),
-        }));
-    }
-
-    parse_clickhouse_json_response(&text)
-        .map(Some)
-        .map_err(|e| format!("{e}: {text}"))
 }
 
-pub async fn execute_json_query(
+async fn execute_native(
     conn: &ClickhouseConn,
     sql: &str,
     timeout_ms: Option<u64>,
-) -> Result<ChJsonResponse, String> {
-    execute_clickhouse_batch(conn, sql, timeout_ms).await
+) -> Result<(), String> {
+    use crate::engines::clickhouse::connection::ClickhouseClient;
+    use crate::engines::clickhouse::sql::normalize_clickhouse_statement;
+
+    let ClickhouseClient::Native(client) = &conn.client else {
+        return Err("CLICKHOUSE_NATIVE_CLIENT_EXPECTED".into());
+    };
+
+    let stmt = normalize_clickhouse_statement(sql);
+    if stmt.is_empty() {
+        return Err("CLICKHOUSE_SQL_EMPTY".into());
+    }
+
+    let fut = client.execute(&stmt);
+    match timeout_ms {
+        Some(ms) => {
+            let ms = ms.clamp(100, 300_000);
+            tokio::time::timeout(Duration::from_millis(ms), fut)
+                .await
+                .map_err(|_| format!("CLICKHOUSE_QUERY_TIMEOUT after {ms}ms"))?
+                .map_err(|e| format!("CLICKHOUSE_QUERY_FAILED: {e}"))
+        }
+        None => fut
+            .await
+            .map_err(|e| format!("CLICKHOUSE_QUERY_FAILED: {e}")),
+    }
 }
 
-/// Run one or more statements (split on `;`). Returns JSON for the last SELECT-like statement.
-pub async fn execute_clickhouse_batch(
+async fn execute_clickhouse_batch_native(
     conn: &ClickhouseConn,
     sql: &str,
     timeout_ms: Option<u64>,
@@ -254,9 +158,9 @@ pub async fn execute_clickhouse_batch(
     for (i, stmt) in statements.iter().enumerate() {
         let is_last = i + 1 == statements.len();
         if is_last && looks_like_query(stmt) {
-            last_json = execute_clickhouse_http(conn, stmt, true, timeout_ms).await?;
+            last_json = Some(query_native_blocks(conn, stmt, timeout_ms).await?);
         } else {
-            execute_clickhouse_http(conn, stmt, false, timeout_ms).await?;
+            execute_native(conn, stmt, timeout_ms).await?;
         }
     }
 
@@ -265,6 +169,26 @@ pub async fn execute_clickhouse_batch(
         data: None,
         rows: Some(0),
     }))
+}
+
+pub async fn execute_json_query(
+    conn: &ClickhouseConn,
+    sql: &str,
+    timeout_ms: Option<u64>,
+) -> Result<ChJsonResponse, String> {
+    execute_clickhouse_batch(conn, sql, timeout_ms).await
+}
+
+pub async fn execute_clickhouse_batch(
+    conn: &ClickhouseConn,
+    sql: &str,
+    timeout_ms: Option<u64>,
+) -> Result<ChJsonResponse, String> {
+    if conn.uses_http() {
+        http::execute_clickhouse_batch(conn, sql, timeout_ms).await
+    } else {
+        execute_clickhouse_batch_native(conn, sql, timeout_ms).await
+    }
 }
 
 pub async fn run_clickhouse_sql_query(
@@ -323,15 +247,25 @@ pub async fn run_clickhouse_sql_query(
             result = async {
                 for stmt in &statements {
                     if looks_like_query(stmt) {
-                        execute_clickhouse_http(
-                            &conn,
-                            &format!("EXPLAIN {stmt}"),
-                            true,
-                            timeout_ms,
-                        )
-                        .await?;
+                        if conn.uses_http() {
+                            http::execute_clickhouse_batch(
+                                &conn,
+                                &format!("EXPLAIN {stmt}"),
+                                timeout_ms,
+                            )
+                            .await?;
+                        } else {
+                            query_native_blocks(
+                                &conn,
+                                &format!("EXPLAIN {stmt}"),
+                                timeout_ms,
+                            )
+                            .await?;
+                        }
+                    } else if conn.uses_http() {
+                        http::execute_clickhouse_batch(&conn, stmt, timeout_ms).await?;
                     } else {
-                        execute_clickhouse_http(&conn, stmt, false, timeout_ms).await?;
+                        execute_native(&conn, stmt, timeout_ms).await?;
                     }
                 }
                 Ok::<(), String>(())
@@ -369,7 +303,10 @@ pub async fn run_clickhouse_sql_query(
     };
 
     let statements = split_clickhouse_statements(&sql);
-    let last_stmt = statements.last().map(String::as_str).unwrap_or(sql.as_str());
+    let last_stmt = statements
+        .last()
+        .map(String::as_str)
+        .unwrap_or(sql.as_str());
     if !looks_like_query(last_stmt) {
         let affected = parsed.rows.unwrap_or(0);
         emit_done(
@@ -395,8 +332,7 @@ pub async fn run_clickhouse_sql_query(
     let mut out_rows: Vec<Vec<CellValue>> = Vec::new();
     if let Some(data) = parsed.data {
         for row in data.into_iter().take(max_rows) {
-            let cells = row.iter().map(json_value_to_cell).collect();
-            out_rows.push(cells);
+            out_rows.push(row);
         }
     }
 

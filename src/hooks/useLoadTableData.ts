@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
+import { normalizeClickhouseDbType } from "src/utils/clickhouseTypes";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
 
@@ -313,10 +314,14 @@ async function loadColumns(params: {
   addLogQuery(q);
 
   return (res.rows as unknown[][])
-    .map((r) => ({
-      name: cellToString(r?.[0]),
-      db_type: cellToString(r?.[1]),
-    }))
+    .map((r) => {
+      const name = cellToString(r?.[0]);
+      let db_type = cellToString(r?.[1]) ?? "";
+      if (engine === "clickhouse") {
+        db_type = normalizeClickhouseDbType(db_type, cellToString(r?.[2]));
+      }
+      return { name, db_type };
+    })
     .filter(isNonEmptyName);
 }
 

@@ -624,21 +624,40 @@ pub async fn connection_version(
             Ok(version)
         }
         crate::engines::EngineConnection::Clickhouse(ch) => {
-            use clickhouse::Row;
-            use serde::Deserialize;
+            use crate::engines::clickhouse::connection::ClickhouseClient;
 
-            #[derive(Row, Deserialize)]
-            struct VersionRow {
-                version: String,
+            match &ch.client {
+                ClickhouseClient::Native(client) => {
+                    use klickhouse::Row;
+
+                    #[derive(Row, Debug)]
+                    struct VersionRow {
+                        version: String,
+                    }
+
+                    let row = client
+                        .query_one::<VersionRow>("SELECT version() AS version")
+                        .await
+                        .map_err(|e| format!("CLICKHOUSE_VERSION_QUERY_FAILED: {e}"))?;
+                    Ok(row.version)
+                }
+                ClickhouseClient::Http(client) => {
+                    use clickhouse::Row;
+                    use serde::Deserialize;
+
+                    #[derive(Row, Deserialize)]
+                    struct VersionRow {
+                        version: String,
+                    }
+
+                    let row = client
+                        .query("SELECT version() AS version")
+                        .fetch_one::<VersionRow>()
+                        .await
+                        .map_err(|e| format!("CLICKHOUSE_VERSION_QUERY_FAILED: {e}"))?;
+                    Ok(row.version)
+                }
             }
-
-            let row = ch
-                .client
-                .query("SELECT version() AS version")
-                .fetch_one::<VersionRow>()
-                .await
-                .map_err(|e| format!("CLICKHOUSE_VERSION_QUERY_FAILED: {e}"))?;
-            Ok(row.version)
         }
     }
 }

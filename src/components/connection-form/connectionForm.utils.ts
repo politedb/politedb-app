@@ -1,5 +1,7 @@
 import { Control, FieldErrors } from "react-hook-form";
 import type {
+  ClickhouseConnectInput,
+  ClickhouseProtocol,
   ConnectionCreateInput,
   ConnectionProfile,
   SslMode,
@@ -28,6 +30,8 @@ export type FormValues = {
   snowflakeWarehouse: string;
   snowflakeRole: string;
   snowflakeSchema: string;
+
+  clickhouseProtocol: ClickhouseProtocol;
 
   storeKeychain: boolean;
 
@@ -92,7 +96,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
     case "snowflake":
       return 0;
     case "clickhouse":
-      return 8123;
+      return 9000;
     default:
       return 5432;
   }
@@ -443,8 +447,24 @@ function buildDuckdbInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+export function defaultClickhousePort(protocol: ClickhouseProtocol): number {
+  return protocol === "http" ? 8123 : 9000;
+}
+
+function resolveClickhouseProtocol(
+  ch?: ClickhouseConnectInput | null
+): ClickhouseProtocol {
+  if (ch?.protocol === "http" || ch?.protocol === "native") {
+    return ch.protocol;
+  }
+  const port = ch?.port ?? 0;
+  if (port === 8123 || port === 8443) return "http";
+  return "native";
+}
+
 function buildClickhouseInput(v: FormValues): ConnectionCreateInput {
-  const port = toNumber(v.port, 8123);
+  const protocol = v.clickhouseProtocol;
+  const port = toNumber(v.port, defaultClickhousePort(protocol));
 
   const clickhouse: ConnectionCreateInput["clickhouse"] = {
     host: v.host,
@@ -454,6 +474,7 @@ function buildClickhouseInput(v: FormValues): ConnectionCreateInput {
     password: v.storeKeychain
       ? { kind: "keychain", value: v.password }
       : { kind: "inline", value: v.password },
+    protocol,
     ssl_mode: v.sslMode,
     connect_timeout_ms: 60_000,
     statement_timeout_ms: 60_000,
@@ -811,6 +832,11 @@ export function makeDefaultValues(
     snowflakeWarehouse: db.snowflakeWarehouse,
     snowflakeRole: db.snowflakeRole,
     snowflakeSchema: db.snowflakeSchema,
+
+    clickhouseProtocol:
+      engine === "clickhouse"
+        ? resolveClickhouseProtocol(input?.clickhouse)
+        : "native",
 
     storeKeychain: db.storeKeychain,
 

@@ -3,6 +3,7 @@ import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
   generateSqlPlanFromPatches,
+  generateDeleteSqlFromPatches,
   generateUpdateSqlFromPatches,
   type PatchMap,
 } from "./generateSql";
@@ -104,6 +105,113 @@ describe("generateUpdateSqlFromPatches", () => {
     );
     expect(sql[0]).toContain("WHERE `id` = 1;");
     expect(sql[0]).not.toContain("AND `json_value`");
+  });
+
+  it("formats ClickHouse Decimal values for UPDATE", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": { total: 6941 },
+          },
+        },
+      },
+      "demo_db",
+      "orders",
+      {
+        columns: [
+          { name: "id", db_type: "UInt64" },
+          { name: "total", db_type: "Decimal64(18, 2)" },
+        ],
+        rows: [[1, 6941]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql[0]).toContain("`total` = 6941.00");
+    expect(sql[0]).not.toContain("`total` = 694100");
+  });
+
+  it("uses ALTER TABLE UPDATE for ClickHouse", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": { unit_price: 4991 },
+          },
+        },
+      },
+      "demo_db",
+      "order_items",
+      {
+        columns: [
+          { name: "id", db_type: "UInt64" },
+          { name: "unit_price", db_type: "UInt32" },
+        ],
+        rows: [[1, 100]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      "ALTER TABLE `demo_db`.`order_items` UPDATE `unit_price` = 4991 WHERE `id` = 1;"
+    );
+    expect(sql[0]).not.toMatch(/^UPDATE /);
+  });
+
+  it("uses ALTER TABLE DELETE for ClickHouse", () => {
+    const sql = generateDeleteSqlFromPatches(
+      {
+        delete: {
+          data: {
+            "0": {},
+          },
+        },
+      },
+      "demo_db",
+      "order_items",
+      {
+        columns: [{ name: "id", db_type: "UInt64" }],
+        rows: [[1]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toBe(
+      "ALTER TABLE `demo_db`.`order_items` DELETE WHERE `id` = 1;"
+    );
   });
 
   it("normalizes double-encoded JSON strings for MySQL updates", () => {

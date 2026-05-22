@@ -1,13 +1,16 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use clickhouse::{Client, Row};
+use clickhouse::Row as HttpRow;
+use klickhouse::Row as NativeRow;
 use serde::Deserialize;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-use crate::engines::clickhouse::config::build_client;
-use crate::engines::clickhouse::connection::ClickhouseConn;
+use crate::engines::clickhouse::config::{
+    build_http_client, connect_native, effective_port, uses_http,
+};
+use crate::engines::clickhouse::connection::{ClickhouseClient, ClickhouseConn};
 use crate::engines::driver::EngineDriver;
 use crate::engines::merge::{inline_db_pw, merge_secret_ref_for_test, merge_ssh_for_test};
 use crate::engines::secrets_util::{resolve_secret_ref, resolve_secret_ref_for_test};
@@ -19,8 +22,13 @@ use crate::types::{
 
 pub struct ClickhouseDriver;
 
-#[derive(Row, Deserialize)]
-struct PingRow {
+#[derive(NativeRow, Debug)]
+struct NativePingRow {
+    result: u8,
+}
+
+#[derive(HttpRow, Deserialize)]
+struct HttpPingRow {
     #[allow(dead_code)]
     result: u8,
 }
@@ -80,6 +88,7 @@ impl EngineDriver for ClickhouseDriver {
             b.user = ov_ch.user;
             b.database = ov_ch.database;
             b.ssl_mode = ov_ch.ssl_mode;
+            b.protocol = ov_ch.protocol;
             b.connect_timeout_ms = ov_ch.connect_timeout_ms;
             b.statement_timeout_ms = ov_ch.statement_timeout_ms;
 
@@ -104,16 +113,21 @@ pub async fn connect_clickhouse(
     password: String,
 ) -> Result<ClickhouseConn, String> {
     validate_input(&input)?;
-    let client = build_client(&input, &password);
-    ping_client(&client, input.connect_timeout_ms).await?;
-
-    let host = input.host.trim().to_string();
-    let port = if input.port == 0 { 8123 } else { input.port };
+    let port = effective_port(&input);
+    let client = if uses_http(&input) {
+        let http = build_http_client(&input, &password);
+        ping_http(&http, input.connect_timeout_ms).await?;
+        ClickhouseClient::Http(http)
+    } else {
+        let native = connect_native(&input, &password).await?;
+        ping_native(&native, input.connect_timeout_ms).await?;
+        ClickhouseClient::Native(native)
+    };
 
     Ok(ClickhouseConn {
         id: conn_id,
         label,
-        host,
+        host: input.host.trim().to_string(),
         port,
         database: input.database.trim().to_string(),
         user: input.user.trim().to_string(),
@@ -130,15 +144,38 @@ pub async fn test_clickhouse_direct(
     password: String,
 ) -> Result<(), String> {
     validate_input(&input)?;
-    let client = build_client(&input, &password);
-    ping_client(&client, input.connect_timeout_ms).await
+    if uses_http(&input) {
+        let http = build_http_client(&input, &password);
+        ping_http(&http, input.connect_timeout_ms).await
+    } else {
+        let native = connect_native(&input, &password).await?;
+        ping_native(&native, input.connect_timeout_ms).await
+    }
 }
 
-async fn ping_client(client: &Client, connect_timeout_ms: Option<u64>) -> Result<(), String> {
+async fn ping_native(
+    client: &klickhouse::Client,
+    connect_timeout_ms: Option<u64>,
+) -> Result<(), String> {
     let timeout_ms = connect_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
     let timeout = Duration::from_millis(timeout_ms);
 
-    let fut = client.query("SELECT 1 AS result").fetch_one::<PingRow>();
+    let fut = client.query_one::<NativePingRow>("SELECT 1 AS result");
+    tokio::time::timeout(timeout, fut)
+        .await
+        .map_err(|_| format!("CLICKHOUSE_CONNECT_TIMEOUT after {timeout_ms}ms"))?
+        .map_err(|e| format!("CLICKHOUSE_PING_FAILED: {e}"))?;
+    Ok(())
+}
+
+async fn ping_http(
+    client: &clickhouse::Client,
+    connect_timeout_ms: Option<u64>,
+) -> Result<(), String> {
+    let timeout_ms = connect_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
+    let timeout = Duration::from_millis(timeout_ms);
+
+    let fut = client.query("SELECT 1 AS result").fetch_one::<HttpPingRow>();
     tokio::time::timeout(timeout, fut)
         .await
         .map_err(|_| format!("CLICKHOUSE_CONNECT_TIMEOUT after {timeout_ms}ms"))?

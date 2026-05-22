@@ -24,6 +24,8 @@ import {
   isJsonColumnType,
   quoteIdentifier,
   quoteTableName,
+  clickhouseDeleteSql,
+  clickhouseUpdateSql,
   renameColumnSql,
   renameTableSql,
   sqlStringLiteral,
@@ -297,7 +299,10 @@ export function generateUpdateSqlFromPatches(
       continue;
     }
 
-    const sql = `UPDATE ${tableIdent}\nSET ${setClauses.join(", ")}\nWHERE ${whereClauses.join(" AND ")};`;
+    const sql =
+      engine === "clickhouse"
+        ? clickhouseUpdateSql(schema, tableName, setClauses, whereClauses)
+        : `UPDATE ${tableIdent}\nSET ${setClauses.join(", ")}\nWHERE ${whereClauses.join(" AND ")};`;
     sqlStatements.push(sql);
   }
 
@@ -976,7 +981,10 @@ export function generateDeleteSqlFromPatches(
       continue;
     }
 
-    const sql = `DELETE FROM ${tableIdent}\nWHERE ${whereClauses.join(" AND ")};`;
+    const sql =
+      engine === "clickhouse"
+        ? clickhouseDeleteSql(schema, tableName, whereClauses)
+        : `DELETE FROM ${tableIdent}\nWHERE ${whereClauses.join(" AND ")};`;
     sqlStatements.push(sql);
   }
 

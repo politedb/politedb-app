@@ -201,12 +201,16 @@ export type SnowflakeConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type ClickhouseProtocol = "native" | "http";
+
 export type ClickhouseConnectInput = {
   host: string;
   port: number;
   database: string;
   user: string;
   password: SecretRef;
+  /** Native TCP or HTTP interface. Omit on legacy profiles (inferred from port). */
+  protocol?: ClickhouseProtocol | null;
   ssl_mode?: SslMode | null;
   connect_timeout_ms?: number | null;
   statement_timeout_ms?: number | null;

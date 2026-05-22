@@ -1,10 +1,14 @@
 import { TargetedEvent } from "preact";
 import { useMemo, useState } from "preact/hooks";
 import { useController, useWatch } from "react-hook-form";
+import { Select } from "src/components/common/Select";
 import { Field, Input } from "src/components/form";
+import type { ClickhouseProtocol } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
 import { SSLSection } from "./SSLSection";
 import type { SectionProps } from "./connectionForm.utils";
+import { defaultClickhousePort } from "./connectionForm.utils";
+import { cn } from "src/utils/cn";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
@@ -22,7 +26,18 @@ export function ConnectionBasicsSection(
   const isD1 = engine === "d1";
   const isSnowflake = engine === "snowflake";
   const isDuckDB = engine === "duckdb";
-  const isFilelessSql = isSqlite || isD1 || isDuckDB || isSnowflake;
+  const isClickHouse = engine === "clickhouse";
+  const isFileLessSql = isSqlite || isD1 || isDuckDB || isSnowflake;
+
+  const clickhouseProtocolCtl = useController({
+    control,
+    name: "clickhouseProtocol",
+    defaultValue: "native" as ClickhouseProtocol,
+  });
+  const clickhouseProtocol = useWatch({
+    control,
+    name: "clickhouseProtocol",
+  }) as ClickhouseProtocol | undefined;
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -43,7 +58,7 @@ export function ConnectionBasicsSection(
     name: "host",
     rules: {
       validate: (v) => {
-        if (isFilelessSql) return true;
+        if (isFileLessSql) return true;
         return String(v ?? "").trim().length > 0 || "Host is required.";
       },
     },
@@ -55,7 +70,7 @@ export function ConnectionBasicsSection(
     rules: {
       required: "Port is required.",
       validate: (v) => {
-        if (isFilelessSql) return true;
+        if (isFileLessSql) return true;
         const n = Number(v);
         if (!Number.isFinite(n)) return "Port is invalid.";
         if (n <= 0 || n > 65535) return "Port must be 1..65535.";
@@ -95,7 +110,7 @@ export function ConnectionBasicsSection(
     name: "user",
     rules: {
       validate: (v) => {
-        if (isOptionalAuth || isFilelessSql || isDuckDB) return true;
+        if (isOptionalAuth || isFileLessSql || isDuckDB) return true;
         return String(v ?? "").trim().length > 0 || "User is required.";
       },
     },
@@ -160,7 +175,9 @@ export function ConnectionBasicsSection(
     if (engine === "mongo") return 27017;
     if (engine === "cassandra") return 9042;
     if (engine === "redis") return 6379;
-    if (engine === "clickhouse") return 8123;
+    if (engine === "clickhouse") {
+      return defaultClickhousePort(clickhouseProtocol ?? "native");
+    }
     if (
       engine === "sqlite" ||
       engine === "duckdb" ||
@@ -169,13 +186,13 @@ export function ConnectionBasicsSection(
     )
       return 0;
     return 5432;
-  }, [engine]);
+  }, [engine, clickhouseProtocol]);
 
   const nameErr = !!errors?.name;
   const hostErr = !!errors?.host;
   const portErr = !!errors?.port;
   const dbErr = !isMongo && !isCassandra && !!errors?.database;
-  const userErr = !isOptionalAuth && !isFilelessSql && !!errors?.user;
+  const userErr = !isOptionalAuth && !isFileLessSql && !!errors?.user;
   const pwErr =
     !storeKeychain &&
     !isOptionalAuth &&
@@ -196,23 +213,46 @@ export function ConnectionBasicsSection(
               ? "Cloudflare account, database, API token"
               : isSnowflake
                 ? "Account, warehouse, database, user"
-                : isOptionalAuth
-                  ? "Host, Port (keyspace optional)"
-                  : "Host, Port, User (database optional)"}
+                : isClickHouse
+                  ? "Driver + host/port"
+                  : isOptionalAuth
+                    ? "Host, Port (keyspace optional)"
+                    : "Host, Port, User (database optional)"}
         </div>
       </div>
 
       <div class="space-y-4">
-        <Field label="Name">
-          <Input
-            value={name.field.value}
-            placeholder="Local Postgres, Production DB..."
-            error={nameErr}
-            onInput={(e: InputEvt) => {
-              name.field.onChange(e.currentTarget.value);
-              dirty();
-            }}
-          />
+        <Field label={isClickHouse ? "Name / Driver" : "Name"}>
+          <div
+            class={cn(
+              "grid grid-cols-1 gap-3",
+              isClickHouse ? "grid-cols-2" : ""
+            )}
+          >
+            <Input
+              value={name.field.value}
+              placeholder="Local Postgres, Production DB..."
+              error={nameErr}
+              onInput={(e: InputEvt) => {
+                name.field.onChange(e.currentTarget.value);
+                dirty();
+              }}
+            />
+            {isClickHouse ? (
+              <Select
+                value={clickhouseProtocolCtl.field.value ?? "native"}
+                onChange={(e) => {
+                  const protocol = e.currentTarget.value as ClickhouseProtocol;
+                  clickhouseProtocolCtl.field.onChange(protocol);
+                  port.field.onChange(defaultClickhousePort(protocol));
+                  dirty();
+                }}
+              >
+                <option value="native">Native Driver</option>
+                <option value="http">HTTP Driver</option>
+              </Select>
+            ) : null}
+          </div>
         </Field>
 
         {isD1 ? (
@@ -311,7 +351,7 @@ export function ConnectionBasicsSection(
           </>
         ) : null}
 
-        {!isFilelessSql && (
+        {!isFileLessSql && (
           <Field label="Host / Port" alignTop>
             <div class="grid grid-cols-3 gap-3">
               <Input
@@ -328,6 +368,11 @@ export function ConnectionBasicsSection(
                 value={String(port.field.value ?? "")}
                 inputMode="numeric"
                 placeholder={String(defaultPort)}
+                title={
+                  isClickHouse
+                    ? "Any port your server exposes for the selected driver."
+                    : undefined
+                }
                 error={portErr}
                 onInput={(e: InputEvt) => {
                   port.field.onChange(

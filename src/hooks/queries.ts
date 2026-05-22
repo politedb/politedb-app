@@ -265,7 +265,7 @@ export const tableColumnsQuery = (
 
   if (engine === "clickhouse") {
     const queryStr = `
-      SELECT column_name, data_type
+      SELECT column_name, data_type, numeric_scale
       FROM information_schema.columns
       WHERE table_catalog = currentDatabase()
         AND table_schema = ${qLiteral(schema)}
