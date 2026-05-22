@@ -9,6 +9,7 @@ pub enum EngineKind {
     Sqlserver,
     Sqlite,
     D1,
+    Turso,
     Oracle,
     Mongo,
     Redis,
@@ -52,6 +53,14 @@ pub struct D1ConnectInput {
     pub api_token: SecretRef,
     #[serde(default)]
     pub api_base_url: Option<String>,
+    pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TursoConnectInput {
+    /// `libsql://…`, `https://…`, or host name (normalized to libsql://)
+    pub url: String,
+    pub auth_token: SecretRef,
     pub statement_timeout_ms: Option<u64>,
 }
 

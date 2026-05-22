@@ -29,6 +29,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   sqlserver: ["index_name", "index_algorithm", "is_unique", "column_name"],
   sqlite: ["index_name", "index_algorithm", "is_unique", "column_name"],
   d1: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  turso: ["index_name", "index_algorithm", "is_unique", "column_name"],
   oracle: ["index_name", "index_algorithm", "is_unique", "column_name"],
   snowflake: ["index_name", "index_algorithm", "is_unique", "column_name"],
   duckdb: ["index_name", "index_algorithm", "is_unique", "column_name"],

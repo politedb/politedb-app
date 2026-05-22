@@ -85,6 +85,10 @@ export function ConnectionFormDialog({
       return !!database;
     }
 
+    if (v.engine === "turso") {
+      return !!host;
+    }
+
     if (
       v.engine === "redis" ||
       v.engine === "mongo" ||
@@ -311,7 +315,9 @@ export function ConnectionFormDialog({
                 ? "Required: Host, Port."
                 : v.engine === "d1"
                   ? "Required: Account ID, Database ID, API token."
-                  : "Required: Host, Port, User."
+                  : v.engine === "turso"
+                    ? "Required: Database URL, Auth token."
+                    : "Required: Host, Port, User."
           }
           onTest={onTest}
           onSave={onSave}

@@ -46,9 +46,7 @@ const qIdent = quoteIdentifier;
 const qLiteral = sqlStringLiteral;
 const formatValue = formatSqlValue;
 
-function isUnsafeFallbackWhereColumn(
-  dbType: string | undefined
-) {
+function isUnsafeFallbackWhereColumn(dbType: string | undefined) {
   if (!dbType) return false;
   if (isBlobColumnType(dbType)) return true;
   return isJsonColumnType(dbType);
@@ -69,9 +67,7 @@ export type VirtualKeySafetyIssue = {
   message: string;
 };
 
-function virtualIdentityColumns(
-  columns: TableDataType["columns"]
-): string[] {
+function virtualIdentityColumns(columns: TableDataType["columns"]): string[] {
   return columns
     .filter((col) => isVirtualIdentityColumn(col.db_type))
     .map((col) => col.name)
@@ -1000,20 +996,33 @@ export type PatchSqlPlan = {
 export type PatchSqlPlanOptions = {
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  /** Prefer cached DB rows over optimistic in-grid edits when building WHERE clauses. */
+  getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
   offset?: number;
 };
 
 function tableDataForPatchSql(args: {
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+  getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
   offset?: number;
   schema: string;
   tableName: string;
   columns: TableDataState["columns"];
   patches: PatchData;
 }): TableDataType | null {
-  const { activeScreen, getRowAt, offset = 0, schema, tableName, columns, patches } = args;
-  if (!columns || !getRowAt || !activeScreen) return null;
+  const {
+    activeScreen,
+    getRowAt,
+    getOriginalRowAt,
+    offset = 0,
+    schema,
+    tableName,
+    columns,
+    patches,
+  } = args;
+  const resolveRow = getOriginalRowAt ?? getRowAt;
+  if (!columns || !resolveRow || !activeScreen) return null;
 
   const rowIndices = new Set<number>();
   const updatePatches = patches["update"]?.["data"];
@@ -1041,7 +1050,8 @@ function tableDataForPatchSql(args: {
 
   for (let i = 0; i <= maxIndex; i++) {
     const row =
-      getRowAt(tableKey, i + offset) ?? (offset === 0 ? undefined : getRowAt(tableKey, i));
+      resolveRow(tableKey, i + offset) ??
+      (offset === 0 ? undefined : resolveRow(tableKey, i));
     rows.push(row ? (row as unknown[]) : []);
   }
 
@@ -1062,7 +1072,7 @@ export function generateSqlPlanFromPatches(
   options?: PatchSqlPlanOptions
 ): PatchSqlPlan {
   const plan: PatchSqlPlan = { preData: [], data: [], postData: [] };
-  const { activeScreen, getRowAt, offset } = options || {};
+  const { activeScreen, getRowAt, getOriginalRowAt, offset } = options || {};
 
   for (const [_windowId, patchData] of Object.entries(patchMap)) {
     const { tableData, tableWindow, patches } = patchData;
@@ -1076,6 +1086,7 @@ export function generateSqlPlanFromPatches(
     const tableDataForSql = tableDataForPatchSql({
       activeScreen,
       getRowAt,
+      getOriginalRowAt,
       offset,
       schema,
       tableName,

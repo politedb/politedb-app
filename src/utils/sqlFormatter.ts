@@ -6,6 +6,7 @@ const engineToLanguage: Partial<Record<DatabaseEngine, SqlLanguage>> = {
   mysql: "mysql",
   sqlite: "sqlite",
   d1: "sqlite",
+  turso: "sqlite",
   duckdb: "sqlite",
   clickhouse: "sql",
   mariadb: "mariadb",

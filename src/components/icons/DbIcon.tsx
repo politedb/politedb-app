@@ -14,6 +14,7 @@ import duckdb from "src/assets/db/duckdb.svg";
 import cloudflared1 from "src/assets/db/d1.svg";
 import cassandra from "src/assets/db/cassandra.svg";
 import clickhouse from "src/assets/db/clickhouse.svg";
+import turso from "src/assets/db/turso.svg";
 
 // Import DatabaseEngine from shared types if available; otherwise keep this local alias.
 export type DatabaseEngine =
@@ -25,6 +26,7 @@ export type DatabaseEngine =
   | "mongo"
   | "sqlite"
   | "d1"
+  | "turso"
   | "oracle"
   | "snowflake"
   | "duckdb"
@@ -42,6 +44,7 @@ const DB_ICON_MAP: Partial<Record<DatabaseEngine, DbIconSrc>> = {
   mongo,
   sqlite,
   d1: cloudflared1,
+  turso,
   oracle,
   snowflake,
   duckdb,
@@ -62,6 +65,7 @@ function normalizeEngine(engine?: string): DatabaseEngine | null {
   if (k === "sf") return "snowflake";
   if (k === "dk") return "duckdb";
   if (k === "ch") return "clickhouse";
+  if (k === "tu") return "turso";
 
   // exact
   if (k in DB_ICON_MAP) return k as DatabaseEngine;
@@ -80,6 +84,7 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "cs") return "cassandra";
   if (k === "sl") return "sqlite";
   if (k === "d1") return "d1";
+  if (k === "tu") return "turso";
   if (k === "oc") return "oracle";
   if (k === "sf") return "snowflake";
   if (k === "dk") return "duckdb";

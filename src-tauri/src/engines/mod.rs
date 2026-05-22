@@ -15,6 +15,7 @@ pub mod secrets_util;
 pub mod snowflake;
 pub mod sqlite;
 pub mod sqlserver;
+pub mod turso;
 
 use std::sync::Arc;
 use uuid::Uuid;
@@ -35,6 +36,7 @@ pub enum EngineConnection {
     SqlServer(sqlserver::connection::SqlServerConn),
     Sqlite(sqlite::connection::SqliteConn),
     D1(d1::connection::D1Conn),
+    Turso(turso::connection::TursoConn),
     Oracle(oracle::connection::OracleConn),
     Mongo(mongo::connection::MongoConn),
     Cassandra(cassandra::connection::CassandraConn),
@@ -99,8 +101,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        build_csv_import_statements, classify_sql_statement,
-        classify_sql_statement_for_engine, reject_non_transactional_ddl, SqlStatementKind,
+        build_csv_import_statements, classify_sql_statement, classify_sql_statement_for_engine,
+        reject_non_transactional_ddl, SqlStatementKind,
     };
 
     #[test]
@@ -143,8 +145,10 @@ mod tests {
         );
         assert!(reject_non_transactional_ddl(
             "CLICKHOUSE",
-            &["ALTER TABLE `demo_db`.`order_items` UPDATE `unit_price` = 4991 WHERE `id` = 1"
-                .to_string()]
+            &[
+                "ALTER TABLE `demo_db`.`order_items` UPDATE `unit_price` = 4991 WHERE `id` = 1"
+                    .to_string()
+            ]
         )
         .is_ok());
     }
@@ -201,9 +205,7 @@ mod tests {
 fn reject_non_transactional_ddl(engine: &str, statements: &[String]) -> Result<(), String> {
     if statements
         .iter()
-        .any(|stmt| {
-            classify_sql_statement_for_engine(stmt, Some(engine)) == SqlStatementKind::Ddl
-        })
+        .any(|stmt| classify_sql_statement_for_engine(stmt, Some(engine)) == SqlStatementKind::Ddl)
     {
         return Err(format!(
             "{engine}_DDL_TRANSACTION_UNSUPPORTED: {engine} implicitly commits DDL, so schema edits cannot be safely rolled back in this batch. Run schema and data changes separately."
@@ -227,7 +229,7 @@ fn quote_import_table(schema: &str, table_name: &str, engine: EngineKind) -> Str
     if schema.trim().is_empty()
         || matches!(
             engine,
-            EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb
+            EngineKind::Sqlite | EngineKind::D1 | EngineKind::Turso | EngineKind::Duckdb
         )
     {
         return quote_import_identifier(table_name, engine);
@@ -532,6 +534,7 @@ impl EngineConnection {
             EngineConnection::SqlServer(c) => c.id,
             EngineConnection::Sqlite(c) => c.id,
             EngineConnection::D1(c) => c.id,
+            EngineConnection::Turso(c) => c.id,
             EngineConnection::Oracle(c) => c.id,
             EngineConnection::Mongo(c) => c.id,
             EngineConnection::Cassandra(c) => c.id,
@@ -549,6 +552,7 @@ impl EngineConnection {
             EngineConnection::SqlServer(c) => c.label.clone(),
             EngineConnection::Sqlite(c) => c.label.clone(),
             EngineConnection::D1(c) => c.label.clone(),
+            EngineConnection::Turso(c) => c.label.clone(),
             EngineConnection::Oracle(c) => c.label.clone(),
             EngineConnection::Mongo(c) => c.label.clone(),
             EngineConnection::Cassandra(c) => c.label.clone(),
@@ -566,6 +570,7 @@ impl EngineConnection {
             EngineConnection::SqlServer(_) => EngineKind::Sqlserver,
             EngineConnection::Sqlite(_) => EngineKind::Sqlite,
             EngineConnection::D1(_) => EngineKind::D1,
+            EngineConnection::Turso(_) => EngineKind::Turso,
             EngineConnection::Oracle(_) => EngineKind::Oracle,
             EngineConnection::Mongo(_) => EngineKind::Mongo,
             EngineConnection::Cassandra(_) => EngineKind::Cassandra,
@@ -587,6 +592,7 @@ impl EngineConnection {
             EngineConnection::SqlServer(_) => "sqlserver",
             EngineConnection::Sqlite(_) => "sqlite",
             EngineConnection::D1(_) => "d1",
+            EngineConnection::Turso(_) => "turso",
             EngineConnection::Oracle(_) => "oracle",
             EngineConnection::Mongo(_) => "mongo",
             EngineConnection::Cassandra(_) => "cassandra",
@@ -606,6 +612,7 @@ impl EngineConnection {
             EngineConnection::SqlServer(_) => {}
             EngineConnection::Sqlite(_) => {}
             EngineConnection::D1(_) => {}
+            EngineConnection::Turso(_) => {}
             EngineConnection::Oracle(_) => {}
             EngineConnection::Mongo(mongo) => drop(mongo.client),
             EngineConnection::Cassandra(_) => {}
@@ -737,6 +744,9 @@ impl EngineConnection {
                     .map_err(|e| format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1))?;
                 }
                 Ok(())
+            }
+            EngineConnection::Turso(turso) => {
+                turso::operation::execute_turso_statements(&turso, &statements).await
             }
             EngineConnection::SqlServer(ss) => {
                 let mut client = sqlserver::operation::make_client(
@@ -1040,6 +1050,29 @@ impl EngineConnection {
                     };
 
                     crate::engines::d1::operation::run_d1_sql_query(ctx, d1, input).await;
+                });
+
+                op_tasks.insert(op_id, handle);
+                Ok(())
+            }
+            EngineConnection::Turso(turso) => {
+                let turso = turso.clone();
+
+                let handle = tokio::spawn(async move {
+                    let _cleanup = OpCleanup {
+                        op_id,
+                        connection_id,
+                        kind: OperationKind::SqlQuery,
+                        sql_busy,
+                        is_stream_sql,
+                        running_ops: Arc::clone(&ctx.running_ops),
+                        cancel_requested: Arc::clone(&ctx.cancel_requested),
+                        active_ops: Arc::clone(&ctx.active_ops),
+                        op_to_conn: Arc::clone(&ctx.op_to_conn),
+                        op_tasks: Arc::clone(&ctx.op_tasks),
+                    };
+
+                    crate::engines::turso::operation::run_turso_sql_query(ctx, turso, input).await;
                 });
 
                 op_tasks.insert(op_id, handle);

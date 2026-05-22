@@ -459,7 +459,7 @@ export function ConnectionScreen() {
         ? "public"
         : engine === "redis"
           ? `db ${profile?.input?.redis?.db ?? 0}`
-          : engine === "sqlite" || engine === "d1"
+          : engine === "sqlite" || engine === "d1" || engine === "turso"
             ? "main"
             : engine === "clickhouse" || engine === "cassandra"
               ? currentDatabase || "default"
@@ -1060,13 +1060,7 @@ export function ConnectionScreen() {
               newTableSql={newTableSql}
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
-              getOriginalRowAt={(key, rowIndex) =>
-                useConnectionStore
-                  .getState()
-                  .tableRowCacheByKey[key]?.map.get(rowIndex) as
-                  | unknown[]
-                  | undefined
-              }
+              getOriginalRowAt={useConnectionStore.getState().getOriginalRowAt}
               offset={offset}
             />
           )}

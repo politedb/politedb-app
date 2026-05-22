@@ -81,7 +81,9 @@ function isMySql(ctx: CompletionCtx): boolean {
 }
 
 function isSqlite(ctx: CompletionCtx): boolean {
-  return ctx.engine === "sqlite" || ctx.engine === "d1";
+  return (
+    ctx.engine === "sqlite" || ctx.engine === "d1" || ctx.engine === "turso"
+  );
 }
 
 const PG_SAFE_IDENT = /^[a-z_][a-z0-9_]*$/;

@@ -1,7 +1,7 @@
 import { Control, FieldErrors } from "react-hook-form";
 import type {
-  ClickhouseConnectInput,
-  ClickhouseProtocol,
+  ClickHouseConnectInput,
+  ClickHouseProtocol,
   ConnectionCreateInput,
   ConnectionProfile,
   SslMode,
@@ -31,7 +31,7 @@ export type FormValues = {
   snowflakeRole: string;
   snowflakeSchema: string;
 
-  clickhouseProtocol: ClickhouseProtocol;
+  clickhouseProtocol: ClickHouseProtocol;
 
   storeKeychain: boolean;
 
@@ -89,6 +89,7 @@ function defaultPortForEngine(engine: DatabaseEngine): number {
       return 6379;
     case "sqlite":
     case "d1":
+    case "turso":
     case "duckdb":
       return 0;
     case "oracle":
@@ -108,8 +109,14 @@ function defaultHostForEngine(engine: DatabaseEngine): string {
     engine === "d1" ||
     engine === "duckdb" ||
     engine === "snowflake"
-  )
+  ) {
     return "";
+  }
+
+  if (engine === "turso") {
+    return "http://127.0.0.1:8080";
+  }
+
   return "127.0.0.1";
 }
 
@@ -121,6 +128,7 @@ function pickByEngine<T>(
     sqlserver?: T;
     sqlite?: T;
     d1?: T;
+    turso?: T;
     oracle?: T;
     mongo?: T;
     cassandra?: T;
@@ -136,6 +144,7 @@ function pickByEngine<T>(
   if (engine === "sqlite") return by.sqlite;
   if (engine === "duckdb") return by.duckdb;
   if (engine === "d1") return by.d1;
+  if (engine === "turso") return by.turso;
   if (engine === "oracle") return by.oracle;
   if (engine === "mongo") return by.mongo;
   if (engine === "cassandra") return by.cassandra;
@@ -447,13 +456,13 @@ function buildDuckdbInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
-export function defaultClickhousePort(protocol: ClickhouseProtocol): number {
+export function defaultClickHousePort(protocol: ClickHouseProtocol): number {
   return protocol === "http" ? 8123 : 9000;
 }
 
 function resolveClickhouseProtocol(
-  ch?: ClickhouseConnectInput | null
-): ClickhouseProtocol {
+  ch?: ClickHouseConnectInput | null
+): ClickHouseProtocol {
   if (ch?.protocol === "http" || ch?.protocol === "native") {
     return ch.protocol;
   }
@@ -464,7 +473,7 @@ function resolveClickhouseProtocol(
 
 function buildClickhouseInput(v: FormValues): ConnectionCreateInput {
   const protocol = v.clickhouseProtocol;
-  const port = toNumber(v.port, defaultClickhousePort(protocol));
+  const port = toNumber(v.port, defaultClickHousePort(protocol));
 
   const clickhouse: ConnectionCreateInput["clickhouse"] = {
     host: v.host,
@@ -507,6 +516,22 @@ function buildD1Input(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildTursoInput(v: FormValues): ConnectionCreateInput {
+  return {
+    engine: "turso",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    turso: {
+      url: String(v.host ?? "").trim(),
+      auth_token: v.storeKeychain
+        ? { kind: "keychain", value: v.password }
+        : { kind: "inline", value: v.password },
+      statement_timeout_ms: 60_000,
+    },
+  };
+}
+
 export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   switch (v.engine) {
     case "postgres":
@@ -527,6 +552,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildDuckdbInput(v);
     case "d1":
       return buildD1Input(v);
+    case "turso":
+      return buildTursoInput(v);
     case "oracle":
       return buildOracleInput(v);
     case "snowflake":
@@ -559,6 +586,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const sqlite = input?.sqlite;
   const duckdb = input?.duckdb;
   const d1 = input?.d1;
+  const turso = input?.turso;
   const oracle = input?.oracle;
   const mongo = input?.mongo;
   const cassandra = input?.cassandra;
@@ -573,6 +601,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       sqlserver: ss?.host,
       sqlite: "",
       d1: d1?.account_id,
+      turso: turso?.url,
       oracle: oracle?.host,
       mongo: mongo?.host,
       cassandra: cassandra?.host,
@@ -588,6 +617,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       sqlserver: ss?.port,
       sqlite: 0,
       d1: 0,
+      turso: 0,
       oracle: oracle?.port,
       mongo: mongo?.port,
       cassandra: cassandra?.port,
@@ -613,7 +643,8 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     engine === "cassandra" ||
     engine === "sqlite" ||
     engine === "duckdb" ||
-    engine === "d1"
+    engine === "d1" ||
+    engine === "turso"
       ? ""
       : "root");
 
@@ -625,6 +656,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       sqlite: sqlite?.path,
       duckdb: duckdb?.path,
       d1: d1?.database_id,
+      turso: "",
       oracle: oracle?.database,
       mongo: mongo?.database ?? undefined,
       cassandra: cassandra?.keyspace ?? undefined,
@@ -635,7 +667,8 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     engine === "cassandra" ||
     engine === "sqlite" ||
     engine === "duckdb" ||
-    engine === "d1"
+    engine === "d1" ||
+    engine === "turso"
       ? ""
       : "root");
 
@@ -682,7 +715,11 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
                         ? d1?.api_token?.kind === "inline"
                           ? (d1.api_token.value ?? "")
                           : ""
-                        : "";
+                        : engine === "turso"
+                          ? turso?.auth_token?.kind === "inline"
+                            ? (turso.auth_token.value ?? "")
+                            : ""
+                          : "";
 
   const storeKeychain =
     engine === "postgres"
@@ -705,7 +742,9 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
                       ? cassandra?.password?.kind !== "inline"
                       : engine === "d1"
                         ? d1?.api_token?.kind !== "inline"
-                        : true;
+                        : engine === "turso"
+                          ? turso?.auth_token?.kind !== "inline"
+                          : true;
 
   return {
     host,

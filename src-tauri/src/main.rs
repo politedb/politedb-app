@@ -111,6 +111,7 @@ fn main() {
         Arc::new(engines::sqlite::driver::SqliteDriver),
         Arc::new(engines::duckdb::driver::DuckdbDriver),
         Arc::new(engines::d1::driver::D1Driver),
+        Arc::new(engines::turso::driver::TursoDriver),
         Arc::new(engines::oracle::driver::OracleDriver),
         Arc::new(engines::mongo::driver::MongoDriver),
         Arc::new(engines::cassandra::driver::CassandraDriver),

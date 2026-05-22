@@ -97,6 +97,7 @@ scylla = { version = "1.5", features = ["chrono-04"] }
 num-bigint = "0.4"
 klickhouse = { version = "0.14", features = ["compression", "serde"] }
 clickhouse = { version = "0.15", features = ["rustls-tls"] }
+libsql = { version = "0.9.30", default-features = true, features = ["remote", "tls"] }
 
 [features]
 default = ["engine-postgres"]

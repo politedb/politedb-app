@@ -1,8 +1,7 @@
 use serde_json::Value;
 
 use crate::profiles::import_common::{
-    default_port, empty_secret, inline_secret, new_profile,
-    parse_port, tag_from_env,
+    default_port, empty_secret, inline_secret, new_profile, parse_port, tag_from_env,
 };
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
@@ -273,6 +272,7 @@ fn build_tableplus_input(
         sqlserver: None,
         sqlite: None,
         d1: None,
+        turso: None,
         oracle: None,
         mongo: None,
         cassandra: None,
@@ -407,6 +407,9 @@ fn build_tableplus_input(
         EngineKind::D1 => {
             return Err("Cloudflare D1 is not supported for TablePlus import".into());
         }
+        EngineKind::Turso => {
+            return Err("Turso is not supported for TablePlus import".into());
+        }
         EngineKind::Snowflake => {
             input.snowflake = Some(SnowflakeConnectInput {
                 account: host.to_string(),
@@ -531,7 +534,7 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .redis
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
-        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => false,
+        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Turso | EngineKind::Duckdb => false,
         EngineKind::Snowflake => input
             .snowflake
             .as_ref()

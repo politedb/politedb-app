@@ -153,6 +153,15 @@ export function pickHostDbUser(conn: ConnectionProfile) {
     };
   }
 
+  if (engine === "turso") {
+    const turso = conn.input?.turso;
+    return {
+      host: turso?.url ?? "",
+      database: "",
+      user: "",
+    };
+  }
+
   if (engine === "oracle") {
     const oc = conn.input?.oracle;
     return {

@@ -47,6 +47,7 @@ fn rewrite_input_host_port(
         }
         crate::types::EngineKind::Sqlite => {}
         crate::types::EngineKind::D1 => {}
+        crate::types::EngineKind::Turso => {}
         crate::types::EngineKind::Mongo => {
             let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
             mongo.host = host.into();
@@ -260,6 +261,16 @@ pub async fn connection_test(
                         {
                             d1.api_token.kind = crate::types::SecretRefKind::Inline;
                             d1.api_token.value = pw.to_string();
+                        }
+                    }
+                }
+                crate::types::EngineKind::Turso => {
+                    if let Some(turso) = input.turso.as_mut() {
+                        if turso.auth_token.kind == crate::types::SecretRefKind::Keychain
+                            && turso.auth_token.value.trim().is_empty()
+                        {
+                            turso.auth_token.kind = crate::types::SecretRefKind::Inline;
+                            turso.auth_token.value = pw.to_string();
                         }
                     }
                 }
@@ -531,6 +542,27 @@ pub async fn connection_version(
         crate::engines::EngineConnection::D1(_) => {
             // D1 HTTP API rejects sqlite_version(); version is display-only in the UI.
             Ok("Cloudflare D1".to_string())
+        }
+        crate::engines::EngineConnection::Turso(turso) => {
+            let db = turso.db.clone();
+            let version = async {
+                let conn = db
+                    .connect()
+                    .map_err(|e| format!("TURSO_VERSION_CONNECT_FAILED: {e}"))?;
+                let mut rows = conn
+                    .query("SELECT sqlite_version()", ())
+                    .await
+                    .map_err(|e| format!("TURSO_VERSION_QUERY_FAILED: {e}"))?;
+                let row = rows
+                    .next()
+                    .await
+                    .map_err(|e| format!("TURSO_VERSION_ROW_FAILED: {e}"))?
+                    .ok_or("TURSO_VERSION_EMPTY")?;
+                row.get::<String>(0)
+                    .map_err(|e| format!("TURSO_VERSION_DECODE_FAILED: {e}"))
+            }
+            .await?;
+            Ok(format!("Turso (SQLite {version})"))
         }
         crate::engines::EngineConnection::Oracle(oracle_conn) => {
             crate::engines::oracle::ensure_oracle_client_initialized()

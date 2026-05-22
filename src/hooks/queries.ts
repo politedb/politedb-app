@@ -17,7 +17,7 @@ export function isMySqlLike(engine?: DatabaseEngine) {
 
 /** SQLite/D1 only — DuckDB uses information_schema / duckdb_* metadata instead. */
 function isSqlitePragmaEngine(engine?: DatabaseEngine) {
-  return engine === "sqlite" || engine === "d1";
+  return engine === "sqlite" || engine === "d1" || engine === "turso";
 }
 
 export function qIdent(ident: string, engine?: DatabaseEngine) {
@@ -61,8 +61,8 @@ export const tableSizeInfoQuery = (
   tableName: string,
   engine?: DatabaseEngine
 ) => {
-  // Cloudflare D1 has no dbstat virtual table (local SQLite only).
-  if (engine === "d1") {
+  // Cloudflare D1 / Turso remote have no dbstat virtual table (local SQLite only).
+  if (engine === "d1" || engine === "turso") {
     const queryStr = `
       SELECT 0 AS total_size, 0 AS data_size, 0 AS index_size;
     `;

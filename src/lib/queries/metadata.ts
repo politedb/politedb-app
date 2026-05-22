@@ -250,6 +250,7 @@ export function getMetadataQueries(engine?: DatabaseEngine): MetadataQueries {
     case "duckdb":
       return SQLITE;
     case "d1":
+    case "turso":
       return D1;
     case "oracle":
       return ORACLE;

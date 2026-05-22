@@ -318,6 +318,28 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "turso") {
+    const turso = input.turso;
+    if (!turso) throw new Error("TURSO_CONFIG_MISSING");
+
+    const tokenRef = secretRefForDb(
+      persistSecrets,
+      plan.dbKey,
+      plan.dbPasswordPlain
+    );
+
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      turso: {
+        ...turso,
+        auth_token: tokenRef,
+      },
+    };
+  }
+
   if (engine === "oracle") {
     const oracle = input.oracle;
     if (!oracle) throw new Error("ORACLE_CONFIG_MISSING");

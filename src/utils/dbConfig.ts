@@ -54,6 +54,11 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: [],
     allowFk: true,
   },
+  turso: {
+    dataTypes: SQLITE_DATA_TYPES,
+    indexAlgorithms: [],
+    allowFk: true,
+  },
   oracle: {
     dataTypes: ORACLE_DATA_TYPES,
     indexAlgorithms: [],

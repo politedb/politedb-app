@@ -33,6 +33,7 @@ function getEngineInput(profile: ConnectionProfile) {
   if (engine === "cassandra") return profile.input?.cassandra;
   if (engine === "sqlite") return profile.input?.sqlite;
   if (engine === "d1") return profile.input?.d1;
+  if (engine === "turso") return profile.input?.turso;
   if (engine === "oracle") return profile.input?.oracle;
   if (engine === "redis") return profile.input?.redis;
   void input;
@@ -57,6 +58,11 @@ export function profileConnectionHost(profile: ConnectionProfile): string {
   if (engine === "d1") {
     const d1 = profile.input?.d1;
     return firstNonEmpty(d1?.database_id, d1?.account_id, profile.label);
+  }
+
+  if (engine === "turso") {
+    const turso = profile.input?.turso;
+    return firstNonEmpty(turso?.url, profile.label);
   }
 
   const host = input?.host;

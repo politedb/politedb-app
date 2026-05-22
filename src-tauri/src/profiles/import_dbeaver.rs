@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use crate::profiles::import_common::{
-    default_port, empty_secret, inline_secret, new_profile,
-    parse_jdbc_url, parse_port, tag_from_env,
+    default_port, empty_secret, inline_secret, new_profile, parse_jdbc_url, parse_port,
+    tag_from_env,
 };
 use crate::profiles::types::ConnectionProfile;
 use crate::ssh_tunnel::types::{SshAuth, SshTunnelInput};
@@ -179,6 +179,7 @@ fn build_input(
         sqlserver: None,
         sqlite: None,
         d1: None,
+        turso: None,
         oracle: None,
         mongo: None,
         cassandra: None,
@@ -300,6 +301,9 @@ fn build_input(
         }
         EngineKind::D1 => {
             return Err("Cloudflare D1 is not supported for DBeaver import".into());
+        }
+        EngineKind::Turso => {
+            return Err("Turso is not supported for DBeaver import".into());
         }
         EngineKind::Duckdb => {
             let path = if !database.is_empty() {
@@ -459,9 +463,11 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 6379)),
-        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb | EngineKind::Snowflake => {
-            ("127.0.0.1".into(), 0)
-        }
+        EngineKind::Sqlite
+        | EngineKind::D1
+        | EngineKind::Turso
+        | EngineKind::Duckdb
+        | EngineKind::Snowflake => ("127.0.0.1".into(), 0),
         EngineKind::Clickhouse => input
             .clickhouse
             .as_ref()

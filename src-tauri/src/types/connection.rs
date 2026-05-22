@@ -7,7 +7,7 @@ use crate::{
         engine::{
             CassandraConnectInput, ClickhouseConnectInput, D1ConnectInput, DuckdbConnectInput,
             EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
-            SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
+            SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput, TursoConnectInput,
         },
         RedisConnectInput,
     },
@@ -30,6 +30,7 @@ pub struct ConnectionCreateInput {
     pub sqlserver: Option<SqlServerConnectInput>,
     pub sqlite: Option<SqliteConnectInput>,
     pub d1: Option<D1ConnectInput>,
+    pub turso: Option<TursoConnectInput>,
     pub oracle: Option<OracleConnectInput>,
     pub mongo: Option<MongoConnectInput>,
     pub cassandra: Option<CassandraConnectInput>,

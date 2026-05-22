@@ -373,6 +373,8 @@ export type ConnectionState = {
   applyRowsChunk: (key: string, opId: string, chunk: any) => void;
 
   getRowAt: (key: string, rowIndex: number) => unknown[] | undefined;
+  /** Row values before in-grid edits (cache-first; used for UPDATE/DELETE WHERE). */
+  getOriginalRowAt: (key: string, rowIndex: number) => unknown[] | undefined;
   getRowsWindowInfo: (key: string) => TableRowState | null;
 
   updateRow: (key: string, rowIndex: number, row: unknown[]) => void;
@@ -1378,6 +1380,15 @@ export const useConnectionStore = create<ConnectionState>()(
 
         const cache = get().tableRowCacheByKey[key];
         return cacheGet(cache, idx) as any;
+      },
+
+      getOriginalRowAt: (key, rowIndex) => {
+        const idx = clampNonNeg(rowIndex);
+        const cache = get().tableRowCacheByKey[key];
+        const cached = cacheGet(cache, idx);
+        if (cached !== undefined) return cached as unknown[];
+
+        return get().getRowAt(key, rowIndex);
       },
 
       getRowsWindowInfo: (key) => {

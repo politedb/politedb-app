@@ -3,14 +3,18 @@ import { useMemo, useState } from "preact/hooks";
 import { useController, useWatch } from "react-hook-form";
 import { Select } from "src/components/common/Select";
 import { Field, Input } from "src/components/form";
-import type { ClickhouseProtocol } from "src/lib/tauri";
+import type { ClickHouseProtocol } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
 import { SSLSection } from "./SSLSection";
 import type { SectionProps } from "./connectionForm.utils";
-import { defaultClickhousePort } from "./connectionForm.utils";
+import { defaultClickHousePort } from "./connectionForm.utils";
 import { cn } from "src/utils/cn";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
+
+function isEmpty(v: unknown) {
+  return !String(v ?? "").trim();
+}
 
 export function ConnectionBasicsSection(
   props: SectionProps & { isCreateNewConnection: boolean }
@@ -24,20 +28,21 @@ export function ConnectionBasicsSection(
   const isOptionalAuth = isRedis || isMongo || isCassandra;
   const isSqlite = engine === "sqlite";
   const isD1 = engine === "d1";
+  const isTurso = engine === "turso";
   const isSnowflake = engine === "snowflake";
   const isDuckDB = engine === "duckdb";
   const isClickHouse = engine === "clickhouse";
-  const isFileLessSql = isSqlite || isD1 || isDuckDB || isSnowflake;
+  const isFileLessSql = isSqlite || isD1 || isTurso || isDuckDB || isSnowflake;
 
   const clickhouseProtocolCtl = useController({
     control,
     name: "clickhouseProtocol",
-    defaultValue: "native" as ClickhouseProtocol,
+    defaultValue: "native" as ClickHouseProtocol,
   });
-  const clickhouseProtocol = useWatch({
+  const clickHouseProtocol = useWatch({
     control,
     name: "clickhouseProtocol",
-  }) as ClickhouseProtocol | undefined;
+  }) as ClickHouseProtocol | undefined;
 
   // storeKeychain needs to be controlled (for radio)
   const storeKeychainCtl = useController({
@@ -58,6 +63,14 @@ export function ConnectionBasicsSection(
     name: "host",
     rules: {
       validate: (v) => {
+        if (isTurso) {
+          return (
+            String(v ?? "").trim().length > 0 || "Database URL is required."
+          );
+        }
+        if (isD1) {
+          return String(v ?? "").trim().length > 0 || "Account ID is required.";
+        }
         if (isFileLessSql) return true;
         return String(v ?? "").trim().length > 0 || "Host is required.";
       },
@@ -124,7 +137,7 @@ export function ConnectionBasicsSection(
       validate: (v) => {
         if (isOptionalAuth || isSqlite || isDuckDB) return true;
         if (storeKeychain) return true;
-        if (isD1) {
+        if (isD1 || isTurso) {
           return String(v ?? "").trim().length > 0 || "API token is required.";
         }
         return String(v ?? "").trim().length > 0 || "Password is required.";
@@ -176,29 +189,45 @@ export function ConnectionBasicsSection(
     if (engine === "cassandra") return 9042;
     if (engine === "redis") return 6379;
     if (engine === "clickhouse") {
-      return defaultClickhousePort(clickhouseProtocol ?? "native");
+      return defaultClickHousePort(clickHouseProtocol ?? "native");
     }
     if (
       engine === "sqlite" ||
       engine === "duckdb" ||
       engine === "d1" ||
+      engine === "turso" ||
       engine === "snowflake"
     )
       return 0;
     return 5432;
-  }, [engine, clickhouseProtocol]);
+  }, [engine, clickHouseProtocol]);
 
-  const nameErr = !!errors?.name;
-  const hostErr = !!errors?.host;
-  const portErr = !!errors?.port;
-  const dbErr = !isMongo && !isCassandra && !!errors?.database;
-  const userErr = !isOptionalAuth && !isFileLessSql && !!errors?.user;
+  const nameErr = !!errors?.name || isEmpty(name.field.value);
+  const hostErr =
+    !!errors?.host ||
+    !!host.fieldState.error ||
+    (isTurso && isEmpty(host.field.value)) ||
+    (isD1 && isEmpty(host.field.value));
+  const portErr =
+    !!errors?.port ||
+    (!isFileLessSql && isEmpty(String(port.field.value ?? "")));
+  const dbErr =
+    (!isMongo && !isCassandra && !!errors?.database) ||
+    ((isSqlite || isDuckDB || isD1) && isEmpty(database.field.value));
+  const userErr =
+    (!isOptionalAuth && !isFileLessSql && !!errors?.user) ||
+    (!isOptionalAuth &&
+      !isFileLessSql &&
+      !isDuckDB &&
+      isEmpty(user.field.value));
   const pwErr =
     !storeKeychain &&
     !isOptionalAuth &&
     !isSqlite &&
     !isDuckDB &&
-    (isD1 || !!errors?.password);
+    (!!errors?.password ||
+      !!password.fieldState.error ||
+      isEmpty(password.field.value));
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -211,13 +240,15 @@ export function ConnectionBasicsSection(
             ? "Database file path"
             : isD1
               ? "Cloudflare account, database, API token"
-              : isSnowflake
-                ? "Account, warehouse, database, user"
-                : isClickHouse
-                  ? "Driver + host/port"
-                  : isOptionalAuth
-                    ? "Host, Port (keyspace optional)"
-                    : "Host, Port, User (database optional)"}
+              : isTurso
+                ? "Database URL and auth token"
+                : isSnowflake
+                  ? "Account, warehouse, database, user"
+                  : isClickHouse
+                    ? "Driver + host/port"
+                    : isOptionalAuth
+                      ? "Host, Port (keyspace optional)"
+                      : "Host, Port, User (database optional)"}
         </div>
       </div>
 
@@ -242,9 +273,9 @@ export function ConnectionBasicsSection(
               <Select
                 value={clickhouseProtocolCtl.field.value ?? "native"}
                 onChange={(e) => {
-                  const protocol = e.currentTarget.value as ClickhouseProtocol;
+                  const protocol = e.currentTarget.value as ClickHouseProtocol;
                   clickhouseProtocolCtl.field.onChange(protocol);
-                  port.field.onChange(defaultClickhousePort(protocol));
+                  port.field.onChange(defaultClickHousePort(protocol));
                   dirty();
                 }}
               >
@@ -280,6 +311,20 @@ export function ConnectionBasicsSection(
               />
             </Field>
           </>
+        ) : null}
+
+        {isTurso ? (
+          <Field label="Database URL">
+            <Input
+              value={host.field.value}
+              placeholder="http://127.0.0.1:8080"
+              error={hostErr}
+              onInput={(e: InputEvt) => {
+                host.field.onChange(e.currentTarget.value);
+                dirty();
+              }}
+            />
+          </Field>
         ) : null}
 
         {isSnowflake ? (
@@ -385,7 +430,7 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isD1 && !isSnowflake ? (
+        {!isD1 && !isTurso && !isSnowflake ? (
           <Field
             label={
               isSqlite || isDuckDB
@@ -441,7 +486,10 @@ export function ConnectionBasicsSection(
 
         {/* Password + Storage (merged) */}
         {!isSqlite && !isDuckDB && (
-          <Field label={isD1 ? "API Token" : "Password"} alignTop>
+          <Field
+            label={isD1 ? "API Token" : isTurso ? "Auth Token" : "Password"}
+            alignTop
+          >
             <div class="space-y-2">
               {/* Password row */}
               {shouldShowMasked ? (

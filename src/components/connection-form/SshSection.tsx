@@ -13,7 +13,7 @@ type InputEvt = TargetedEvent<HTMLInputElement>;
 export function SSHSection(props: SectionProps) {
   const { control, onDirty } = props;
   const engine = useWatch({ control, name: "engine" });
-  const isSqlite = engine === "sqlite" || engine === "d1";
+  const isSqlite = engine === "sqlite" || engine === "d1" || engine === "turso";
   const isDuckDB = engine === "duckdb";
 
   const sshEnabled = useController({ control, name: "sshEnabled" });

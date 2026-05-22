@@ -47,6 +47,7 @@ function analyzePatches(
   options?: {
     activeScreen?: string;
     getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
+    getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
     offset?: number;
   }
 ): ChangeSummary {
@@ -169,8 +170,14 @@ export function SaveChangesDialog({
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   const summary = useMemo(
-    () => analyzePatches(patchMap, engine, { activeScreen, getRowAt, offset }),
-    [patchMap, engine, activeScreen, getRowAt, offset]
+    () =>
+      analyzePatches(patchMap, engine, {
+        activeScreen,
+        getRowAt,
+        getOriginalRowAt,
+        offset,
+      }),
+    [patchMap, engine, activeScreen, getRowAt, getOriginalRowAt, offset]
   );
 
   const allSqlStatements = useMemo(() => {

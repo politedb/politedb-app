@@ -78,6 +78,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     defaultLabels: ["Aeolus", "Boreas", "Notus"],
   },
   {
+    engine: "turso",
+    label: "Turso",
+    abbreviation: "Tu",
+    color: "bg-emerald-600",
+    available: true,
+    desc: "Distributed SQLite (libSQL) on Turso Cloud.",
+    defaultLabels: ["Turia", "Libra", "Nimbus"],
+  },
+  {
     engine: "oracle",
     label: "Oracle",
     abbreviation: "Oc",

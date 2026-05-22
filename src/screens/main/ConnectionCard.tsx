@@ -50,6 +50,7 @@ type EngineInput =
   | ConnectionProfile["input"]["sqlserver"]
   | ConnectionProfile["input"]["sqlite"]
   | ConnectionProfile["input"]["d1"]
+  | ConnectionProfile["input"]["turso"]
   | ConnectionProfile["input"]["oracle"]
   | ConnectionProfile["input"]["mongo"]
   | ConnectionProfile["input"]["cassandra"]
@@ -83,6 +84,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "d1") {
     return { engine, input: profile.input?.d1 };
+  }
+  if (engine === "turso") {
+    return { engine, input: profile.input?.turso };
   }
   if (engine === "oracle") {
     return { engine, input: profile.input?.oracle };
@@ -128,6 +132,9 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "d1":
       database = profile.input?.d1?.database_id ?? "";
       break;
+    case "turso":
+      database = "";
+      break;
     case "oracle":
       database = profile.input?.oracle?.database ?? "";
       break;
@@ -155,11 +162,13 @@ function buildSubtitle(profile: ConnectionProfile) {
   const accountId =
     engine === "d1"
       ? profile.input?.d1?.account_id?.trim()
-      : engine === "snowflake"
-        ? profile.input?.snowflake?.account?.trim()
-        : host;
+      : engine === "turso"
+        ? profile.input?.turso?.url?.trim()
+        : engine === "snowflake"
+          ? profile.input?.snowflake?.account?.trim()
+          : host;
   const hostPort =
-    engine === "d1" || engine === "snowflake"
+    engine === "d1" || engine === "turso" || engine === "snowflake"
       ? accountId || ""
       : host
         ? `${host}${port != null ? `:${port}` : ""}`

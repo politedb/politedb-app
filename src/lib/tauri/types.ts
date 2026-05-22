@@ -168,6 +168,12 @@ export type D1ConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type TursoConnectInput = {
+  url: string;
+  auth_token: SecretRef;
+  statement_timeout_ms?: number | null;
+};
+
 export type OracleConnectInput = {
   host: string;
   port: number;
@@ -201,16 +207,16 @@ export type SnowflakeConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
-export type ClickhouseProtocol = "native" | "http";
+export type ClickHouseProtocol = "native" | "http";
 
-export type ClickhouseConnectInput = {
+export type ClickHouseConnectInput = {
   host: string;
   port: number;
   database: string;
   user: string;
   password: SecretRef;
   /** Native TCP or HTTP interface. Omit on legacy profiles (inferred from port). */
-  protocol?: ClickhouseProtocol | null;
+  protocol?: ClickHouseProtocol | null;
   ssl_mode?: SslMode | null;
   connect_timeout_ms?: number | null;
   statement_timeout_ms?: number | null;
@@ -235,13 +241,14 @@ export type ConnectionCreateInput = {
   sqlserver?: SqlServerConnectInput;
   sqlite?: SqliteConnectInput;
   d1?: D1ConnectInput;
+  turso?: TursoConnectInput;
   oracle?: OracleConnectInput;
   mongo?: MongoConnectInput;
   cassandra?: CassandraConnectInput;
   redis?: RedisConnectInput;
   snowflake?: SnowflakeConnectInput;
   duckdb?: DuckdbConnectInput;
-  clickhouse?: ClickhouseConnectInput;
+  clickhouse?: ClickHouseConnectInput;
 };
 
 export type ConnectionInfo = {

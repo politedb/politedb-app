@@ -137,7 +137,17 @@ fn resolve_db_passwords_inline(
                 ch.password = inline_secret_from_ref(app, &ch.password)?;
             }
         }
-        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
+        EngineKind::D1 => {
+            if let Some(d1) = input.d1.as_mut() {
+                d1.api_token = inline_secret_from_ref(app, &d1.api_token)?;
+            }
+        }
+        EngineKind::Turso => {
+            if let Some(turso) = input.turso.as_mut() {
+                turso.auth_token = inline_secret_from_ref(app, &turso.auth_token)?;
+            }
+        }
+        EngineKind::Sqlite | EngineKind::Duckdb => {}
     }
     Ok(())
 }
@@ -196,7 +206,17 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
                 redact(&mut ch.password);
             }
         }
-        EngineKind::Sqlite | EngineKind::D1 | EngineKind::Duckdb => {}
+        EngineKind::D1 => {
+            if let Some(d1) = input.d1.as_mut() {
+                redact(&mut d1.api_token);
+            }
+        }
+        EngineKind::Turso => {
+            if let Some(turso) = input.turso.as_mut() {
+                redact(&mut turso.auth_token);
+            }
+        }
+        EngineKind::Sqlite | EngineKind::Duckdb => {}
     }
 }
 
@@ -366,6 +386,7 @@ mod tests {
                 sqlserver: None,
                 sqlite: None,
                 d1: None,
+                turso: None,
                 oracle: None,
                 mongo: None,
                 cassandra: None,

@@ -15,6 +15,7 @@ use crate::state::AppState;
 use crate::types::{
     CassandraConnectInput, ClickhouseConnectInput, ConnectionCreateInput,
     ConnectionInfo as AppConnectionInfo, D1ConnectInput, DuckdbConnectInput, EngineKind,
+    TursoConnectInput,
     MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput, RedisConnectInput,
     SecretRef, SecretRefKind, SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
@@ -186,6 +187,13 @@ fn validate_d1_input(d1: &D1ConnectInput) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_turso_input(turso: &TursoConnectInput) -> Result<(), String> {
+    if turso.url.trim().is_empty() {
+        return Err("TURSO_URL_REQUIRED".into());
+    }
+    Ok(())
+}
+
 fn validate_snowflake_input(sf: &SnowflakeConnectInput) -> Result<(), String> {
     if sf.account.trim().is_empty() {
         return Err("SNOWFLAKE_ACCOUNT_REQUIRED".into());
@@ -275,6 +283,10 @@ fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
             let d1 = input.d1.as_ref().ok_or("D1_CONFIG_MISSING")?;
             validate_d1_input(d1)
         }
+        EngineKind::Turso => {
+            let turso = input.turso.as_ref().ok_or("TURSO_CONFIG_MISSING")?;
+            validate_turso_input(turso)
+        }
         EngineKind::Oracle => {
             let oc = input.oracle.as_ref().ok_or("ORACLE_CONFIG_MISSING")?;
             validate_oracle_input(oc)
@@ -319,6 +331,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Sqlite => "sqlite",
         EngineKind::Duckdb => "duckdb",
         EngineKind::D1 => "d1",
+        EngineKind::Turso => "turso",
         EngineKind::Oracle => "oracle",
         EngineKind::Mongo => "mongo",
         EngineKind::Cassandra => "cassandra",
@@ -459,6 +472,16 @@ pub fn persist_input_with_secrets(
                 EngineKind::D1,
                 persist_secrets,
                 &mut d1.api_token,
+            )?;
+        }
+        EngineKind::Turso => {
+            let turso = input.turso.as_mut().ok_or("TURSO_CONFIG_MISSING")?;
+            maybe_persist_secret_ref(
+                app,
+                profile_id,
+                EngineKind::Turso,
+                persist_secrets,
+                &mut turso.auth_token,
             )?;
         }
 

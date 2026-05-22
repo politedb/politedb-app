@@ -747,12 +747,7 @@ export function useConnectionActions(
         });
       }
     },
-    [
-      activeProfileScreen,
-      offset,
-      patchValueToString,
-      runtimeConnectionId,
-    ]
+    [activeProfileScreen, offset, patchValueToString, runtimeConnectionId]
   );
 
   const applyRedisPatchEntry = useCallback(
@@ -900,6 +895,7 @@ export function useConnectionActions(
       const sql = generateSqlFromPatches(patchMap, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
         getRowAt: store.getRowAt,
+        getOriginalRowAt: store.getOriginalRowAt,
         offset,
       });
 
@@ -969,7 +965,13 @@ export function useConnectionActions(
             tableWindow.table.schema,
             targetTableName,
             { limit, offset },
-            { force: true, refreshRows, refreshMeta, refreshStats }
+            {
+              force: true,
+              forceRefresh: refreshRows,
+              refreshRows,
+              refreshMeta,
+              refreshStats,
+            }
           );
         })
       );
@@ -1221,6 +1223,7 @@ export function useConnectionActions(
       { limit, offset },
       {
         force: true,
+        forceRefresh: true,
         refreshRows: true,
         refreshMeta: false,
         refreshStats: false,

@@ -85,6 +85,7 @@ export type DatabaseEngine =
   | "mongo"
   | "sqlite"
   | "d1"
+  | "turso"
   | "oracle"
   | "snowflake"
   | "duckdb"

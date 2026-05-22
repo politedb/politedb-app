@@ -22,6 +22,9 @@ pub enum CancelHandle {
     D1 {
         notify: Arc<Notify>,
     },
+    Turso {
+        notify: Arc<Notify>,
+    },
     Oracle {
         notify: Arc<Notify>,
     },
@@ -66,6 +69,9 @@ impl CancelHandle {
                 notify.notify_waiters();
             }
             CancelHandle::D1 { notify } => {
+                notify.notify_waiters();
+            }
+            CancelHandle::Turso { notify } => {
                 notify.notify_waiters();
             }
             CancelHandle::Oracle { notify } => {
