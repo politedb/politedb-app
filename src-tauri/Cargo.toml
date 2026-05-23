@@ -1,6 +1,6 @@
 [package]
 name = "PoliteDB"
-version = "0.12.0"
+version = "0.13.0"
 description = "PoliteDB - Modern Database Management Tool"
 authors = ["you"]
 edition = "2021"
