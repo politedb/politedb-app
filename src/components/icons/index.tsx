@@ -51,3 +51,4 @@ export * from "./Download";
 export * from "./Sort";
 export * from "./DateAsc";
 export * from "./DateDesc";
+export * from "./Pin";

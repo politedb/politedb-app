@@ -5,11 +5,31 @@ export function safeLower(v?: string | null) {
   return (v ?? "").toLowerCase();
 }
 
+export function applyPinnedOrder(
+  connections: ConnectionProfile[],
+  pinnedIds: readonly string[] = []
+): ConnectionProfile[] {
+  if (!pinnedIds.length) return connections;
+
+  const pinnedSet = new Set(pinnedIds);
+  const byId = new Map(connections.map((conn) => [conn.id, conn]));
+  const pinned: ConnectionProfile[] = [];
+
+  for (const id of pinnedIds) {
+    const conn = byId.get(id);
+    if (conn) pinned.push(conn);
+  }
+
+  const rest = connections.filter((conn) => !pinnedSet.has(conn.id));
+  return [...pinned, ...rest];
+}
+
 export function sortConnections(
   connections: ConnectionProfile[],
-  mode: ConnectionSortMode = "created-desc"
+  mode: ConnectionSortMode = "created-desc",
+  pinnedIds: readonly string[] = []
 ): ConnectionProfile[] {
-  return connections.slice().sort((a, b) => {
+  const sorted = connections.slice().sort((a, b) => {
     if (mode === "label-asc") {
       const byLabel = safeLower(a.label).localeCompare(safeLower(b.label));
       if (byLabel !== 0) return byLabel;
@@ -32,6 +52,8 @@ export function sortConnections(
     }
     return safeLower(a.label).localeCompare(safeLower(b.label));
   });
+
+  return applyPinnedOrder(sorted, pinnedIds);
 }
 
 /** UI label for database/path — sqlite & duckdb show file name only. */
@@ -211,10 +233,11 @@ export function pickHostDbUser(conn: ConnectionProfile) {
 export function filterConnections(
   connections: ConnectionProfile[],
   searchQuery: string,
-  sortMode: ConnectionSortMode = "created-desc"
+  sortMode: ConnectionSortMode = "created-desc",
+  pinnedIds: readonly string[] = []
 ) {
   const q = safeLower(searchQuery.trim());
-  if (!q) return sortConnections(connections, sortMode);
+  if (!q) return sortConnections(connections, sortMode, pinnedIds);
 
   return sortConnections(
     connections.filter((conn) => {
@@ -238,7 +261,8 @@ export function filterConnections(
         userHost.includes(q)
       );
     }),
-    sortMode
+    sortMode,
+    pinnedIds
   );
 }
 

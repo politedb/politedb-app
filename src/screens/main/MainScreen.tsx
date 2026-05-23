@@ -18,6 +18,7 @@ import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
+import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
@@ -92,6 +93,8 @@ export function MainScreen() {
   const deleteGroup = useConnectionGroupsStore((s) => s.deleteGroup);
   const assignGroup = useConnectionGroupsStore((s) => s.assignGroup);
   const assignGroups = useConnectionGroupsStore((s) => s.assignGroups);
+  const ensurePinnedLoaded = usePinnedConnectionsStore((s) => s.ensureLoaded);
+  const pinnedIds = usePinnedConnectionsStore((s) => s.pinnedIds);
   const loadLicense = useLicenseStore((s) => s.load);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -129,6 +132,10 @@ export function MainScreen() {
   }, [ensureGroupsLoaded]);
 
   useEffect(() => {
+    ensurePinnedLoaded();
+  }, [ensurePinnedLoaded]);
+
+  useEffect(() => {
     void loadLicense();
   }, [loadLicense]);
 
@@ -160,7 +167,8 @@ export function MainScreen() {
     const searched = filterConnections(
       profiles,
       searchQuery,
-      connectionSortMode
+      connectionSortMode,
+      pinnedIds
     );
     if (!selectedGroupId) return searched;
     return searched.filter((profile) =>
@@ -172,6 +180,7 @@ export function MainScreen() {
     selectedGroupId,
     groupIdsByProfile,
     connectionSortMode,
+    pinnedIds,
   ]);
 
   useEffect(() => {
@@ -495,6 +504,7 @@ export function MainScreen() {
                   />
                   <ConnectionsSection
                     profiles={filteredProfiles}
+                    pinnedIds={pinnedIds}
                     selectedId={selectedProfileId}
                     viewMode={viewMode}
                     searchQuery={searchQuery}

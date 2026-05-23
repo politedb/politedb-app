@@ -1,5 +1,7 @@
+import { useMemo } from "preact/hooks";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
+import { PinFilledIcon } from "src/components/icons";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
 import type { ConnectionGroup } from "src/stores/connectionGroups";
@@ -44,8 +46,76 @@ function EmptyState(props: {
   );
 }
 
+function ConnectionCards(props: {
+  profiles: ConnectionProfile[];
+  selectedId?: string;
+  viewMode: ViewMode;
+  groups: ConnectionGroup[];
+  groupIdsByProfile: Record<string, string[]>;
+  onOpen: (id: string) => void;
+  onEdit: (id: string) => void;
+  onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
+  onDuplicate?: (id: string) => void | Promise<void>;
+  onSelectProfile: (id: string) => void;
+}) {
+  const {
+    profiles,
+    selectedId,
+    viewMode,
+    groups,
+    groupIdsByProfile,
+    onOpen,
+    onEdit,
+    onAssignGroups,
+    onDuplicate,
+    onSelectProfile,
+  } = props;
+
+  if (viewMode === "grid") {
+    return (
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {profiles.map((p) => (
+          <div key={p.id} class="min-w-0">
+            <ConnectionCard
+              profileId={p.id}
+              selected={selectedId === p.id}
+              groups={groups}
+              selectedGroupIds={groupIdsByProfile[p.id] ?? []}
+              onAssignGroups={onAssignGroups}
+              onOpen={() => onOpen(p.id)}
+              onEdit={() => onEdit(p.id)}
+              onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+              onSelectProfile={() => onSelectProfile(p.id)}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div class="space-y-2">
+      {profiles.map((p) => (
+        <ConnectionCard
+          key={p.id}
+          profileId={p.id}
+          selected={selectedId === p.id}
+          groups={groups}
+          selectedGroupIds={groupIdsByProfile[p.id] ?? []}
+          onAssignGroups={onAssignGroups}
+          onOpen={() => onOpen(p.id)}
+          onEdit={() => onEdit(p.id)}
+          onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+          onSelectProfile={() => onSelectProfile(p.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function ConnectionsSection(props: {
   profiles: ConnectionProfile[];
+  pinnedIds: string[];
   selectedId?: string;
   viewMode: ViewMode;
   searchQuery: string;
@@ -62,6 +132,7 @@ export function ConnectionsSection(props: {
 }) {
   const {
     profiles,
+    pinnedIds,
     selectedId,
     viewMode,
     searchQuery,
@@ -79,57 +150,72 @@ export function ConnectionsSection(props: {
 
   const hasSearch = !!searchQuery.trim();
 
+  const { favoriteProfiles, otherProfiles } = useMemo(() => {
+    const pinnedSet = new Set(pinnedIds);
+    const favorites: ConnectionProfile[] = [];
+    const others: ConnectionProfile[] = [];
+
+    for (const profile of profiles) {
+      if (pinnedSet.has(profile.id)) favorites.push(profile);
+      else others.push(profile);
+    }
+
+    return { favoriteProfiles: favorites, otherProfiles: others };
+  }, [profiles, pinnedIds]);
+
+  const cardProps = {
+    selectedId,
+    viewMode,
+    groups,
+    groupIdsByProfile,
+    onOpen,
+    onEdit,
+    onAssignGroups,
+    onDuplicate,
+    onSelectProfile,
+  };
+
   return (
     <div class="min-w-0">
       {/* Header row */}
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-sm font-semibold tracking-wide text-slate-800">
-          Connections ({profiles.length})
-        </h2>
-      </div>
 
       {profiles.length === 0 ? (
-        <EmptyState
-          hasSearch={hasSearch}
-          profilesEmpty={profiles.length === 0}
-          onCreate={onCreate}
-          onUseTemplate={onUseSqliteTemplate}
-          templateSaving={templateSaving}
-        />
-      ) : viewMode === "grid" ? (
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {profiles.map((p) => (
-            <div key={p.id} class="min-w-0">
-              <ConnectionCard
-                profileId={p.id}
-                selected={selectedId === p.id}
-                groups={groups}
-                selectedGroupIds={groupIdsByProfile[p.id] ?? []}
-                onAssignGroups={onAssignGroups}
-                onOpen={() => onOpen(p.id)}
-                onEdit={() => onEdit(p.id)}
-                onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
-                onSelectProfile={() => onSelectProfile(p.id)}
-              />
-            </div>
-          ))}
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+              All Connections ({profiles.length})
+            </h3>
+          </div>
+          <EmptyState
+            hasSearch={hasSearch}
+            profilesEmpty={profiles.length === 0}
+            onCreate={onCreate}
+            onUseTemplate={onUseSqliteTemplate}
+            templateSaving={templateSaving}
+          />
         </div>
       ) : (
-        <div class="space-y-2">
-          {profiles.map((p) => (
-            <ConnectionCard
-              key={p.id}
-              profileId={p.id}
-              selected={selectedId === p.id}
-              groups={groups}
-              selectedGroupIds={groupIdsByProfile[p.id] ?? []}
-              onAssignGroups={onAssignGroups}
-              onOpen={() => onOpen(p.id)}
-              onEdit={() => onEdit(p.id)}
-              onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
-              onSelectProfile={() => onSelectProfile(p.id)}
-            />
-          ))}
+        <div class="space-y-5">
+          {favoriteProfiles.length > 0 ? (
+            <section class="space-y-3">
+              <div class="flex items-center gap-2">
+                <PinFilledIcon className="size-4.5 text-amber-500" />
+                <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+                  Favorites ({favoriteProfiles.length})
+                </h2>
+              </div>
+              <ConnectionCards profiles={favoriteProfiles} {...cardProps} />
+            </section>
+          ) : null}
+
+          {otherProfiles.length > 0 ? (
+            <section class="space-y-3">
+              <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+                All connections ({otherProfiles.length})
+              </h2>
+              <ConnectionCards profiles={otherProfiles} {...cardProps} />
+            </section>
+          ) : null}
         </div>
       )}
     </div>

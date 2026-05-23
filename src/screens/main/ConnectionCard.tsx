@@ -13,11 +13,14 @@ import {
   BackupIcon,
   FolderIcon,
   CopyIcon,
+  PinIcon,
+  PinFilledIcon,
 } from "src/components/icons";
 import { TagChips } from "src/components/common/TagChips";
 import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
+import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { cn } from "src/utils/cn";
 import { formatConnectionDatabaseDisplay } from "src/utils/connection";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
@@ -249,6 +252,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     s.profiles.find((p) => p.id === profileId)
   );
   const removeProfile = useProfileStore((s) => s.removeProfile);
+  const ensurePinnedLoaded = usePinnedConnectionsStore((s) => s.ensureLoaded);
+  const isPinned = usePinnedConnectionsStore((s) => s.isPinned(profileId));
+  const togglePin = usePinnedConnectionsStore((s) => s.togglePin);
   const selectedGroupIdSet = new Set(selectedGroupIds);
   const currentGroups = groups.filter((group) =>
     selectedGroupIdSet.has(group.id)
@@ -362,6 +368,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   }
 
   useEffect(() => {
+    ensurePinnedLoaded();
+  }, [ensurePinnedLoaded]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     return () => closeMenu();
   }, [profileId]);
@@ -398,7 +408,9 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
         selected
           ? "border-blue-600 bg-blue-50"
-          : "border-slate-200 bg-white hover:bg-neutral-50"
+          : isPinned
+            ? "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70"
+            : "border-slate-200 bg-white hover:bg-neutral-50"
       )}
     >
       {/* LEFT */}
@@ -489,6 +501,21 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
         x={menuPosition.x}
         y={menuPosition.y}
         items={[
+          {
+            type: "item",
+            label: isPinned ? "Unpin from favorites" : "Pin to favorites",
+            icon: isPinned ? (
+              <PinFilledIcon className="size-4 text-amber-500" />
+            ) : (
+              <PinIcon className="size-4" />
+            ),
+            onClick: () => {
+              closeMenu();
+              ensurePinnedLoaded();
+              togglePin(profileId);
+            },
+          },
+          { type: "sep" },
           {
             type: "item",
             label: "Edit Connection",

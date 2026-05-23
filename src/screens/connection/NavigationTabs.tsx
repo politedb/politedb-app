@@ -85,6 +85,15 @@ export function NavigationTabs({
           onClick: () =>
             openWindows.forEach((w) => w.id !== ctx.tabId && closeNow(w.id)),
         },
+        {
+          type: "item",
+          label: "Close to the Right",
+          disabled: ctx.tabIndex >= openWindows.length - 1,
+          onClick: () =>
+            openWindows
+              .slice(ctx.tabIndex + 1)
+              .forEach((w) => closeNow(w.id)),
+        },
         { type: "sep" },
         {
           type: "item",

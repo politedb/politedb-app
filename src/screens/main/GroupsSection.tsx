@@ -24,10 +24,10 @@ export function GroupsSection(props: {
 
   return (
     <div class="mb-5">
-      <div class="mb-2 flex items-center">
-        <h2 class="text-sm font-semibold tracking-wide text-slate-800">
+      <div class="mb-3 flex items-center">
+        <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
           Groups ({groups.length})
-        </h2>
+        </h3>
       </div>
 
       <div class="flex flex-wrap gap-2">

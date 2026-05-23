@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { profileList, profileRemove } from "src/lib/tauri";
+import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { DatabaseEngine } from "../types";
 
 /**
@@ -82,6 +83,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const list = await profileList();
+      usePinnedConnectionsStore.getState().pruneMissing(list.map((p) => p.id));
       set({ profiles: list, busy: false });
     } catch (e) {
       set({ busy: false, error: toErrorMessage(e) });
@@ -92,6 +94,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       await profileRemove(profileId);
+      usePinnedConnectionsStore.getState().unpin(profileId);
       set((s) => ({
         profiles: s.profiles.filter((p) => p.id !== profileId),
         busy: false,

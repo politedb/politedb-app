@@ -75,6 +75,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     x: number;
     y: number;
     tabId: string;
+    tabIndex: number;
   } | null>(null);
 
   const handleHeaderMouseDown = useCallback(
@@ -203,6 +204,17 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                 .map((tab) => tab.id)
             ),
         },
+        {
+          type: "item",
+          label: "Close to the Right",
+          disabled: ctx.tabIndex >= profileTabs.length - 1,
+          onClick: () =>
+            void closeTabs(
+              profileTabs
+                .slice(ctx.tabIndex + 1)
+                .map((tab) => tab.id)
+            ),
+        },
         { type: "sep" },
         {
           type: "item",
@@ -270,7 +282,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
 
         <div class="flex min-w-0 flex-1 items-center">
           <div class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg p-1 pr-2">
-            {profileTabs.map((tab) => {
+            {profileTabs.map((tab, tabIndex) => {
               const isActive = activeProfileScreen === tab.id;
 
               return (
@@ -289,6 +301,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                       x: e.clientX,
                       y: e.clientY,
                       tabId: tab.id,
+                      tabIndex,
                     });
                   }}
                   data-tauri-drag-region="false"

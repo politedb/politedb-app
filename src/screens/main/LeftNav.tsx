@@ -160,6 +160,7 @@ export function LeftNav(props: {
             <ul class="list-decimal pl-4.5">
               <li>Right-click a connection for actions.</li>
               <li>Double-click a connection to open it.</li>
+              <li>Pin connections to keep it at the top.</li>
             </ul>
           </div>
         </div>

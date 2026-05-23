@@ -214,7 +214,7 @@ export function LeftNav({
           { type: "sep" },
           {
             type: "item",
-            label: "Export data",
+            label: "Export data...",
             onClick: () => actions.exportTableData(tableMenu.table),
           },
           {
