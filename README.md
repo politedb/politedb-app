@@ -1,23 +1,131 @@
-# PoliteDB
+# PoliteDB - Modern database client for massive datasets
 
-PoliteDB is a desktop app built with Tauri + Preact + TypeScript.
+<p align="center">
+  <img src="public/logo.png" alt="PoliteDB app icon" width="280" />
+</p>
 
-## Stack
+**PoliteDB** is a fast, privacy-conscious database client for developers who want a clean desktop SQL editor, reliable table editing, secure connection management, and local AI assistance in one native macOS app.
 
-- Tauri v2 (Rust backend + native app packaging)
-- Preact + Vite (frontend)
-- TypeScript
-- Vitest + Testing Library
+PoliteDB is built with **Tauri**, **Rust**, **Preact**, and **TypeScript**. It is designed for daily database work across PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle, MongoDB, Redis, DuckDB, Turso, Cassandra, Snowflake, ClickHouse, and Cloudflare D1.
 
-## Prerequisites
+## Database Client Keywords
 
-- Node.js (LTS recommended)
-- Rust toolchain (`rustup`, `cargo`)
-- Tauri system dependencies for your OS
+PoliteDB is a database GUI, SQL client, PostgreSQL client, MySQL client, SQLite browser, Redis GUI, MongoDB client, database table editor, SQL query editor, TablePlus alternative, DBeaver alternative, and native macOS database management app.
 
-For Tauri setup details, see [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+## Supported Databases
 
-## Getting started
+| PostgreSQL | MySQL     | SQLite        | SQL Server    | MongoDB        | Redis             | MariaDB    |
+| ---------- | --------- | ------------- | ------------- | -------------- | ----------------- | ---------- |
+| **DuckDB** | **Turso** | **Cassandra** | **Snowflake** | **ClickHouse** | **Cloudflare D1** | **Oracle** |
+
+## Why PoliteDB?
+
+- **Native desktop performance** - a lightweight Tauri app with a Rust backend and a responsive Preact interface.
+- **Reliable SQL editing** - Monaco-powered SQL editing, query execution, query history, and safer statement handling.
+- **Hardened table editing** - row edits, inserts, deletes, schema edits, change review, and engine-specific SQL generation.
+- **Transactional save flow** - relational table edits can execute through backend transaction commands with rollback on failure.
+- **Safe editing without primary keys** - virtual-key safety blocks risky updates and deletes when rows cannot be identified safely.
+- **CSV import and export workflows** - import data with column mapping, null handling, validation, and transactional execution.
+- **Secure connection profiles** - store secrets in the system keychain and share encrypted profile exports.
+- **TablePlus and DBeaver migration** - import connections from TablePlus and DBeaver to move your workspace into PoliteDB faster.
+- **Local AI assistant** - optional bundled local AI runtime for database workflows without sending raw SQL to third-party services.
+- **Privacy-first analytics** - detailed analytics are opt-in, and raw SQL/query text is not sent.
+
+## Table Editing Built for Safety
+
+PoliteDB focuses heavily on reliable table editing across different SQL engines:
+
+- dialect-aware table actions for create, clone, copy, truncate, drop, and rename flows
+- phase-based patch generation so structure changes run before data changes and constraints run afterward
+- engine-specific DDL for PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, and Oracle where supported
+- clear unsupported-operation errors instead of silently generating unsafe SQL
+- backend transaction execution for relational edit batches
+- guarded DDL transaction behavior for engines with implicit commits
+- row-diff review before saving changes
+- paginated row identity handling so edits target the correct original row
+
+## Import Connections from TablePlus and DBeaver
+
+PoliteDB can import external connection profiles from popular database tools.
+
+| TablePlus import                                                             | DBeaver import                                                           |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| ![Import TablePlus database connections into PoliteDB](public/tableplus.png) | ![Import DBeaver database connections into PoliteDB](public/dbeaver.png) |
+
+Supported migration workflows include:
+
+- DBeaver `data-sources.json` import
+- TablePlus `.tableplusconnection` and connection plist import
+- encrypted PoliteDB connection export/import
+- password prompts for encrypted imported data
+- keychain-aware secret handling
+
+## Features
+
+### SQL Query Editor
+
+- Monaco SQL editor
+- query execution history
+- SQL formatting support
+- safer multi-statement splitting
+- query safety modes for destructive SQL
+- Touch ID authentication for protected query workflows on macOS
+
+### Table Browser and Data Editor
+
+- browse schemas, tables, columns, indexes, and constraints
+- edit cells with improved table cell editors
+- insert, update, and delete rows
+- selected-row detail panel
+- filter and sort table data
+- loading progress indicator for large table reads
+- review pending row diffs before saving
+
+### Import, Export, and Sharing
+
+- CSV import with mapping, null handling, and validation
+- transactional CSV imports for SQL engines
+- encrypted connection profile export/import
+- DBeaver connection import
+- TablePlus connection import
+- local profile storage with secure keychain integration
+
+### AI Assistant
+
+- optional local AI runtime
+- configurable GGUF model path
+- bundled-runtime support for release builds
+- model download management and cancellation
+- local-first design for sensitive database workflows
+
+### Security and Privacy
+
+- native keychain integration for secrets
+- SSH tunnel support
+- encrypted profile exports
+- opt-in product analytics
+- no raw SQL or query text in telemetry
+- masked file paths and sensitive database identifiers
+
+## Built With
+
+- [Tauri v2](https://tauri.app/) - Rust backend and native desktop packaging
+- [Preact](https://preactjs.com/) - fast frontend UI
+- [Vite](https://vite.dev/) - development and build tooling
+- [TypeScript](https://www.typescriptlang.org/) - typed frontend code
+- [Rust](https://www.rust-lang.org/) - database drivers, native commands, and desktop integration
+- [Monaco Editor](https://microsoft.github.io/monaco-editor/) - SQL editor experience
+
+## Requirements
+
+- macOS 13.3 or later for official macOS builds
+- Node.js LTS for local development
+- Rust toolchain for Tauri development
+- Tauri system dependencies for your operating system
+
+For Tauri setup details, see the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+## Getting Started
 
 Install dependencies:
 
@@ -31,65 +139,48 @@ Run the frontend only:
 npm run dev
 ```
 
-Run the full Tauri app in development mode:
+Run the full Tauri desktop app in development mode:
 
 ```bash
 npm run tauri:dev
 ```
 
-## Available scripts
+Build the frontend:
 
-- `npm run dev` - Start Vite dev server
-- `npm run build` - Type-check and build frontend bundle
-- `npm run preview` - Preview built frontend
-- `npm run test` - Run tests in watch mode
-- `npm run test:run` - Run tests once
-- `npm run test:ui` - Open Vitest UI
-- `npm run tauri` - Run Tauri CLI directly
-- `npm run tauri:dev` - Start desktop app in dev mode
-- `npm run format` - Format codebase with Prettier
+```bash
+npm run build
+```
 
-## Building release artifacts
-
-Local Tauri build:
+Build the desktop app:
 
 ```bash
 npm run tauri build
 ```
 
-The CI release workflow is defined in `.github/workflows/release.yml` and runs on tags matching `v*`.
+## Available Scripts
 
-## Releasing
+- `npm run dev` - start the Vite dev server
+- `npm run build` - type-check and build the frontend bundle
+- `npm run preview` - preview the built frontend
+- `npm run test` - run tests in watch mode
+- `npm run test:run` - run tests once
+- `npm run test:ui` - open the Vitest UI
+- `npm run tauri` - run the Tauri CLI directly
+- `npm run tauri:dev` - start the desktop app in development mode
+- `npm run tauri:dev:trace` - start the desktop app with trace logging
+- `npm run format` - format the codebase with Prettier
 
-1. Ensure app versions are updated where needed (for example `package.json` and `src-tauri/tauri.conf.json`).
-2. Create and push a version tag (for example `v1.0.0`).
-3. GitHub Actions builds and uploads signed artifacts and updater metadata (`latest.json`).
+## Analytics Configuration
 
-## Notes
+PoliteDB can send privacy-first product telemetry to PostHog.
 
-- Current updater endpoint is configured in `src-tauri/tauri.conf.json`.
-- Current release workflow is set up for macOS targets.
-- Official macOS support starts at `macOS 13.3+`.
-- Builds are blocked at startup on macOS versions below `13.3`.
-
-## Analytics (PostHog)
-
-The app can send product telemetry to PostHog so you can measure installs and usage.
-Telemetry is privacy-first:
-
-- essential telemetry is always on for installs, app opens, daily active usage, and app update events
-- detailed product analytics are off by default until the user explicitly allows them
-- users can disable detailed analytics later from the in-app Privacy dialog
-- no raw SQL or query text is sent
-- file paths and sensitive database identifiers are masked before capture
-
-Setup:
+Detailed product analytics are off by default until the user explicitly allows them. Raw SQL and query text are not sent.
 
 ```bash
 cp .env.example .env
 ```
 
-Then configure:
+Configure:
 
 ```bash
 VITE_ANALYTICS_ENABLED=true
@@ -99,78 +190,29 @@ VITE_ANALYTICS_DEBUG=true
 ```
 
 Common hosts:
+
 - US Cloud: `https://us.i.posthog.com`
 - EU Cloud: `https://eu.i.posthog.com`
-- Self-host: your PostHog domain
+- self-hosted: your PostHog domain
 
-Tracked lifecycle events:
-- `app_installed`: fired once per machine/browser profile
-- `app_opened`: fired on each launch
-- `app_active_daily`: fired once per day per machine/browser profile
-
-Tracked usage events:
-- `runtime_connection_opened`, `runtime_connection_open_error`
-- `connection_test_success`, `connection_test_error`
-- `connection_save_success`, `connection_save_error`
-- `connection_connect_success`, `connection_connect_error`
-- `sql_query_success`, `sql_query_error`, `sql_query_timeout`
-- `sql_query_stream_start`, `sql_query_stream_error`
-- `app_update_available`, `app_update_install_started`
-
-Consent model:
-- always tracked: `app_installed`, `app_opened`, `app_active_daily`, `app_update_available`, `app_update_install_started`
-- allow-only: connection and SQL usage events
-
-## License activation
+## License Activation
 
 The desktop app includes an app-side license flow for per-device activation.
-
-Configure:
 
 ```bash
 VITE_LICENSE_API_BASE=https://your-license-api.example.com
 VITE_LICENSE_PRODUCT=politedb
 ```
 
-The app expects these endpoints:
+Expected endpoints:
 
 - `POST /v1/licenses/activate`
 - `POST /v1/licenses/validate`
 - `POST /v1/licenses/deactivate`
 
-Request body shape:
-
-```json
-{
-  "product": "politedb",
-  "licenseKey": "LIC-XXXX-XXXX",
-  "activationToken": "optional",
-  "device": {
-    "device_id": "stable-device-id",
-    "device_name": "MacBook Pro",
-    "platform": "macos",
-    "arch": "aarch64"
-  }
-}
-```
-
-The response can return fields such as:
-
-- `status`
-- `activationToken`
-- `licenseId`
-- `planName`
-- `customerEmail`
-- `expiresAt`
-- `seatsAllowed`
-- `devicesUsed`
-- `message`
-
-## Local AI environment variables
+## Local AI Environment Variables
 
 The AI assistant can use bundled assets, app data, or explicit environment overrides.
-
-Useful local overrides:
 
 ```bash
 export POLITEDB_LLM_SERVER_BIN=/absolute/path/to/llama-server
@@ -179,17 +221,23 @@ npm run tauri:dev
 ```
 
 Resolution order:
+
 - `POLITEDB_LLM_SERVER_BIN`
 - bundled `llama-server`
 - `POLITEDB_LLM_MODEL_PATH`
 - downloaded app-data model at `ai/models/default.gguf`
 - local dev fallback in `src-tauri/resources/ai/models/default.gguf`
 
-## Release workflow environment variables
+## Release Workflow
 
-The GitHub release workflow reads these repository variables / secrets:
+The GitHub release workflow is defined in `.github/workflows/release.yml` and runs on tags matching `v*`.
+
+1. Update app versions in `package.json`, `src-tauri/tauri.conf.json`, Cargo files, and lockfiles.
+2. Create and push a version tag, for example `v1.0.0`.
+3. GitHub Actions builds signed artifacts and updater metadata.
 
 Repository variables:
+
 - `VITE_ANALYTICS_ENABLED`
 - `VITE_POSTHOG_HOST`
 - `BUNDLE_AI_ASSISTANT`
@@ -199,10 +247,11 @@ Repository variables:
 - `AI_LLAMA_REF`
 
 Repository secrets:
+
 - `VITE_POSTHOG_KEY`
 - `HF_TOKEN`
 
-Recommended defaults:
+Recommended AI release defaults:
 
 ```bash
 BUNDLE_AI_ASSISTANT=true
@@ -211,3 +260,25 @@ AI_MODEL_REPO=Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
 AI_MODEL_PATTERN=qwen2.5-coder-7b-instruct-q4_k_m*.gguf
 AI_LLAMA_REF=master
 ```
+
+## FAQ
+
+### Is PoliteDB a TablePlus alternative?
+
+Yes. PoliteDB is a modern database client for developers who want a native SQL client, table editor, secure connection manager, and local AI assistant. It also includes TablePlus connection import support.
+
+### Is PoliteDB a DBeaver alternative?
+
+Yes. PoliteDB supports many popular SQL and NoSQL engines, provides a desktop database GUI, and can import DBeaver connection profiles.
+
+### Does PoliteDB support PostgreSQL, MySQL, and SQLite?
+
+Yes. PoliteDB supports PostgreSQL, MySQL, MariaDB, SQLite, and several other engines including SQL Server, Oracle, MongoDB, Redis, DuckDB, Turso, Cassandra, Snowflake, ClickHouse, and Cloudflare D1.
+
+### Does PoliteDB send SQL queries to analytics?
+
+No. PoliteDB does not send raw SQL or query text in telemetry.
+
+## License
+
+PoliteDB is currently distributed as a private desktop application. Check the project license and release policy before redistributing builds.
