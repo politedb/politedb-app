@@ -125,8 +125,8 @@ export function NewTablePane({
                 "h-8 cursor-default! rounded-none text-sm",
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
-                  : "bg-green-100! focus:bg-white!",
-                isRowSelected && !isEmptyRow && "bg-blue-200!"
+                  : "bg-new! focus:bg-white!",
+                isRowSelected && !isEmptyRow && "bg-selected!"
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions[colKey]}

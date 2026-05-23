@@ -219,7 +219,7 @@ export function SaveChangesDialog({
   return (
     <Dialog size="lg" open={open} onClose={onClose} closeOnOutsideClick={false}>
       <DialogHeader className="shrink-0">
-        <DialogTitle>Review Changes Before Saving</DialogTitle>
+        <DialogTitle>Review changes before saving</DialogTitle>
         <DialogDescription>
           Review all changes before saving to the database.
         </DialogDescription>
@@ -284,14 +284,14 @@ export function SaveChangesDialog({
               {rowDiffs.map((diff, index) => (
                 <div
                   key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
-                  class="rounded-md border border-neutral-200 bg-white p-3"
+                  class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
                 >
-                  <div class="mb-2 flex items-center justify-between gap-2">
+                  <div class="flex items-center justify-between gap-2">
                     <div class="min-w-0">
                       <p class="truncate font-mono text-xs text-neutral-600">
-                        {diff.table}
+                        Table: {diff.table}
                       </p>
-                      <p class="truncate text-xs text-neutral-500">
+                      <p class="truncate font-mono text-xs text-neutral-600">
                         {diff.identity}
                       </p>
                     </div>
@@ -308,24 +308,26 @@ export function SaveChangesDialog({
                       {diff.action}
                     </span>
                   </div>
-                  <div class="space-y-1">
-                    {diff.cells.map((cell) => (
-                      <div
-                        key={cell.column}
-                        class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
-                      >
-                        <span class="truncate font-medium text-neutral-700">
-                          {cell.column}
-                        </span>
-                        <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
-                          {cell.oldValue || "NULL"}
-                        </span>
-                        <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
-                          {cell.newValue || "NULL"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  {diff.cells.length > 0 && (
+                    <div class="space-y-1">
+                      {diff.cells.map((cell) => (
+                        <div
+                          key={cell.column}
+                          class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
+                        >
+                          <span class="truncate font-medium text-neutral-700">
+                            {cell.column}
+                          </span>
+                          <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
+                            {cell.oldValue || "NULL"}
+                          </span>
+                          <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
+                            {cell.newValue || "NULL"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

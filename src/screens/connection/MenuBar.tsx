@@ -27,6 +27,7 @@ import { cn } from "src/utils/cn";
 import {
   formatConnectionDatabaseDisplay,
   pickHostDbUser,
+  usesTableOnlyBreadcrumb,
 } from "src/utils/connection";
 import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
@@ -403,21 +404,26 @@ export function MenuBar({
       engine === "cassandra" ||
       engine === "mongo" ||
       engine === "redis";
+    const tableOnlyBreadcrumb = usesTableOnlyBreadcrumb(engine);
 
     const displayDb =
       database ||
       (usesDbOnlyBreadcrumb && schema && schema !== "default" ? schema : "");
 
     return {
-      db: formatConnectionDatabaseDisplay(displayDb, engine),
-      dbTitle: displayDb,
+      db: tableOnlyBreadcrumb
+        ? ""
+        : formatConnectionDatabaseDisplay(displayDb, engine),
+      dbTitle: tableOnlyBreadcrumb ? "" : displayDb,
       target: table
         ? engine === "postgres"
           ? `${schema}.${table}`
           : table
-        : usesDbOnlyBreadcrumb || !schema || schema === displayDb
-          ? ""
-          : schema,
+        : tableOnlyBreadcrumb
+          ? schema || "main"
+          : usesDbOnlyBreadcrumb || !schema || schema === displayDb
+            ? ""
+            : schema,
     };
   }, [connectionInfo]);
 
@@ -621,16 +627,25 @@ export function MenuBar({
 
               {connectionInfo ? (
                 <div class="flex min-w-0 flex-1 items-center gap-1 truncate">
-                  <span
-                    class="text-xs font-semibold text-neutral-800"
-                    title={dbLabel.dbTitle || dbLabel.db}
-                  >
-                    {dbLabel.db}
-                  </span>
+                  {dbLabel.db ? (
+                    <span
+                      class="text-xs font-semibold text-neutral-800"
+                      title={dbLabel.dbTitle || dbLabel.db}
+                    >
+                      {dbLabel.db}
+                    </span>
+                  ) : null}
                   {dbLabel.target ? (
                     <>
-                      <ChevronRightIcon className="size-2" />
-                      <span class="text-xs font-medium text-neutral-600">
+                      {dbLabel.db ? (
+                        <ChevronRightIcon className="size-2" />
+                      ) : null}
+                      <span
+                        class={cn(
+                          "text-xs font-medium text-neutral-600",
+                          !dbLabel.db && "font-semibold text-neutral-800"
+                        )}
+                      >
                         {dbLabel.target}
                       </span>
                     </>

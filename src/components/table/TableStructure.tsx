@@ -244,6 +244,8 @@ export function TableStructure({
             ? String(fieldValue)
             : String(fieldValue || fkLabel);
           const fkInitValue = String(initValue || fkLabel);
+          const isNewRow =
+            hasSourceIndex && (!initData || sourceIndex >= initData.length);
           const isDirtyCell = isFkColumn
             ? normalizeFkLabel(fkDisplayValue) !== normalizeFkLabel(fkInitValue)
             : initValue !== fieldValue;
@@ -253,9 +255,9 @@ export function TableStructure({
               <Input
                 className={cn(
                   "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
-                  isDirtyCell && "bg-amber-200",
+                  isDirtyCell && !isNewRow && "bg-dirty",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                  isRowSelected && !isEmptyRow && "bg-blue-200!",
+                  isRowSelected && !isEmptyRow && "bg-selected!",
                   isFkColumn && !isEmptyRow && "pr-6"
                 )}
                 showSelect={!isEmptyRow && showSelect}
@@ -374,7 +376,7 @@ export function TableStructure({
         selectedRow={selectedRowIndex}
         selectedRows={selectedRows}
         rowClassName={(_row, index) => {
-          return deletedRows.has(index) ? "bg-red-300!" : "";
+          return deletedRows.has(index) ? "bg-deleted!" : "";
         }}
         onSelectRow={(_row, index, multi, range) => {
           handleRowSelect(index, multi, range);

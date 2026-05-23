@@ -72,7 +72,7 @@ function rowIdentity(
     const value = cellToString(row[index], true);
     return `${column.name}=${value || "NULL"}`;
   });
-  const label = pkColumns.length ? "Primary key" : "Virtual key";
+  const label = pkColumns.length ? "Primary Key" : "Virtual Key";
   return parts.length ? `${label}: ${parts.join(", ")}` : `Row ${rowKey}`;
 }
 
@@ -86,7 +86,12 @@ export function buildPatchDiffs(
   }
 ): PatchRowDiff[] {
   const diffs: PatchRowDiff[] = [];
-  const { activeScreen, getRowAt, getOriginalRowAt, offset = 0 } = options ?? {};
+  const {
+    activeScreen,
+    getRowAt,
+    getOriginalRowAt,
+    offset = 0,
+  } = options ?? {};
 
   const resolveOriginalRow = (tableKey: string, rowIndex: number) => {
     const candidates = [rowIndex + offset, rowIndex];

@@ -377,7 +377,7 @@ export function LeftNav({
                             "bg-green-200 text-emerald-900 hover:border-green-200! hover:bg-green-200/80 active:border-green-200! active:bg-green-200/90",
                           hasChanges &&
                             !isActive &&
-                            "border-amber-200 bg-amber-200 text-neutral-600 hover:border-amber-200! hover:bg-amber-200/60 active:bg-amber-200/80"
+                            "border-amber-200 bg-amber-200 text-neutral-600 hover:border-amber-200! hover:bg-amber-200/80 active:bg-amber-200/90"
                         )}
                         title={key}
                       >

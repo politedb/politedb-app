@@ -49,6 +49,13 @@ export function formatConnectionDatabaseDisplay(
   return db;
 }
 
+/** Turso has no database in the profile — breadcrumb shows schema (main) or active table. */
+export function usesTableOnlyBreadcrumb(
+  engine?: DatabaseEngine | string | null
+): boolean {
+  return engine === "turso";
+}
+
 /** Active database/keyspace from the connection profile (for sidebar when no SQL schemas). */
 export function currentDatabaseFromInput(
   engine?: DatabaseEngine,

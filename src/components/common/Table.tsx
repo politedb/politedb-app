@@ -394,8 +394,8 @@ export function Table<T = any>({
                 }
                 data-row={originalIndex}
                 class={cn(
-                  isNewRow && "bg-green-200!",
-                  isSelected && "bg-blue-200!",
+                  isNewRow && "bg-new!",
+                  isSelected && "bg-selected!",
                   dynamicClassName
                 )}
               >

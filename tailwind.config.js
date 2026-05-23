@@ -2,6 +2,14 @@
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
+    extend: {
+      colors: {
+        dirty: "#fdf0bb",
+        deleted: "#fbbdbd",
+        selected: "#bedbff",
+        new: "#dcfce7",
+      },
+    },
     fontFamily: {
       sans: [
         "-apple-system",

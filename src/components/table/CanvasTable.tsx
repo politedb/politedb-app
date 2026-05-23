@@ -497,12 +497,12 @@ export function CanvasTable({
         const dirty = isCellDirty?.(r, col.name);
 
         if (dirty) {
-          ctx.fillStyle = "#fde68a"; // amber-100
+          ctx.fillStyle = "#fdf0bb";
           ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
         }
 
         if (deletedRows?.has(r)) {
-          ctx.fillStyle = "#ffa2a2";
+          ctx.fillStyle = "#fbbdbd";
           ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
         }
 

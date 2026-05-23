@@ -3,6 +3,18 @@
 
 :root {
   --font-ui: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --color-new: #dcfce7;
+  --color-dirty: #fdf0bb;
+  --color-deleted: #fbbdbd;
+  --color-selected: #bedbff;
+}
+
+
+@theme {
+  --color-new: var(--color-new);
+  --color-dirty: var(--color-dirty);
+  --color-deleted: var(--color-deleted);
+  --color-selected: var(--color-selected);
 }
 
 @supports (-apple-system: none) {

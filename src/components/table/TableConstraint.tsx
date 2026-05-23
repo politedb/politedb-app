@@ -181,20 +181,23 @@ export function TableConstraints({
           const initValue = initData?.[sourceIndex]?.[name] ?? "";
           const fieldValue = row[name] ?? "";
           const isEmptyRow = !hasSourceIndex;
+          const isNewRow =
+            hasSourceIndex && (!initData || sourceIndex >= initData.length);
           const isDeleted = deletedRows.has(sourceIndex);
           const placeholder = isEmptyRow ? "" : "NULL";
           const isRowSelected = selectedRows.has(sourceIndex);
           const colIndex = COLUMNS_NAME[engine].indexOf(name);
           const showSelect = Object.keys(columnInputOptions).includes(name);
           const columnOptions = columnInputOptions[name];
+          const isDirtyCell = initValue !== fieldValue;
 
           return (
             <Input
               className={cn(
                 "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
-                initValue !== fieldValue && "bg-amber-200",
+                isDirtyCell && !isNewRow && "bg-dirty",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                isRowSelected && !isEmptyRow && "bg-blue-200!"
+                isRowSelected && !isEmptyRow && "bg-selected!"
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions}
@@ -274,7 +277,7 @@ export function TableConstraints({
         selectedRow={selectedRowIndex}
         selectedRows={selectedRows}
         rowClassName={(_row, index) => {
-          return deletedRows.has(index) ? "bg-red-300!" : "";
+          return deletedRows.has(index) ? "bg-deleted!" : "";
         }}
         onSelectRow={(_row, index, multi, range) => {
           handleRowSelect(index, multi, range);
