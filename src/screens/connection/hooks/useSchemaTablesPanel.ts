@@ -134,11 +134,12 @@ export function useSchemaTablesPanel(args: {
     [meta.columnsByTable]
   );
 
-  // Initial metadata hydration only — not a runtime DB connect spinner.
+  // Initial metadata hydration only — not column autocomplete enrichment.
   const isConnecting = useMemo(() => {
     if (!connectionId) return false;
     if (meta.error && !meta.loading) return false;
-    return meta.loading && !meta.loaded;
+    if (meta.loaded) return false;
+    return meta.loading;
   }, [connectionId, meta.loading, meta.loaded, meta.error]);
 
   return {

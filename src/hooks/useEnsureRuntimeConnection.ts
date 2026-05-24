@@ -1,25 +1,50 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { trackEvent } from "src/lib/analytics";
-import { connectProfileOnce } from "src/lib/runtimeConnection";
+import {
+  connectProfileOnce,
+  resolveTabRuntimeConnectionId,
+} from "src/lib/runtimeConnection";
+import { useConnectionStore } from "src/stores/connection";
 import {
   recordConnectionSessionFailed,
   recordConnectionSessionOpened,
 } from "src/stores/connectionLog";
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 
+function readResolvedConnectionId(
+  activeTab: ProfileTab,
+  activeProfileScreen: string
+): string | undefined {
+  return resolveTabRuntimeConnectionId({
+    tabRuntimeConnectionId: activeTab.runtimeConnectionId,
+    activeProfileScreen,
+    tableDataMap: useConnectionStore.getState().tableDataMap,
+  });
+}
+
 export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
-  const { updateTab } = useScreenStore();
+  const { updateTab, activeProfileScreen } = useScreenStore();
 
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    if (!activeTab?.profileId) return;
+    if (!activeTab?.profileId || activeProfileScreen === "main") return;
+
+    const resolvedConnectionId = readResolvedConnectionId(
+      activeTab,
+      activeProfileScreen
+    );
 
     // already connected — clear any stale error from a previous failed attempt
-    if (activeTab.runtimeConnectionId) {
+    if (resolvedConnectionId) {
       setError(null);
       setConnecting(false);
+      if (!activeTab.runtimeConnectionId) {
+        updateTab(activeTab.id, {
+          runtimeConnectionId: resolvedConnectionId,
+        });
+      }
       return;
     }
 
@@ -72,12 +97,19 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     activeTab?.profileId,
     activeTab?.runtimeConnectionId,
     activeTab?.engine,
+    activeProfileScreen,
     updateTab,
   ]);
 
   const reload = useCallback(async () => {
-    if (!activeTab?.profileId) return null;
-    if (activeTab.runtimeConnectionId) return activeTab.runtimeConnectionId;
+    if (!activeTab?.profileId || activeProfileScreen === "main") return null;
+
+    const resolvedConnectionId = readResolvedConnectionId(
+      activeTab,
+      activeProfileScreen
+    );
+    if (resolvedConnectionId) return resolvedConnectionId;
+
     setConnecting(true);
     const startedAt = Date.now();
     try {
@@ -108,6 +140,8 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     activeTab?.id,
     activeTab?.profileId,
     activeTab?.runtimeConnectionId,
+    activeTab?.engine,
+    activeProfileScreen,
     updateTab,
   ]);
 

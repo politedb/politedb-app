@@ -135,7 +135,13 @@ export function useDatabaseMetadata() {
         return inflightRef.current[metaKey]!;
       }
 
-      // Start/restart load
+      const columnsOnly =
+        existing?.loaded &&
+        !force &&
+        includeColumns &&
+        !existing.columnsLoaded;
+
+      // Start/restart load — keep loaded=true when only enriching columns (SQL editor)
       setCache(metaKey, {
         engine,
         schemas: force ? [] : (existing?.schemas ?? []),
@@ -147,14 +153,120 @@ export function useDatabaseMetadata() {
           includeColumns && force ? false : (existing?.columnsLoaded ?? false),
         version: force ? "" : (existing?.version ?? ""),
         loading: true,
-        loaded: false,
+        loaded: columnsOnly ? true : false,
         error: null,
-        progress: 0,
-        stage: "schemas",
+        progress: columnsOnly ? (existing?.progress ?? 35) : 0,
+        stage: columnsOnly ? "columns" : "schemas",
       });
 
       const p = (async (): Promise<DbMetadata> => {
         try {
+          if (columnsOnly && existing) {
+            if (engine === "mongo") {
+              const columnsByTable: Record<string, string[]> = {
+                ...existing.columnsByTable,
+              };
+              const tables = existing.tables ?? [];
+
+              for (let i = 0; i < tables.length; i++) {
+                const { schema, name } = tables[i]!;
+                const overview = await mongoCollectionOverview({
+                  connectionId,
+                  database: schema,
+                  collection: name,
+                  sampleSize: 50,
+                });
+                columnsByTable[`${schema}.${name}`] = overview.columns.map(
+                  (c) => c.name
+                );
+                const prog =
+                  35 + Math.floor(((i + 1) / Math.max(1, tables.length)) * 65);
+                setCache(metaKey, { progress: Math.min(99, prog) });
+              }
+
+              setCache(metaKey, {
+                columnsByTable,
+                columnsLoaded: true,
+                loading: false,
+                loaded: true,
+                error: null,
+                progress: 100,
+                stage: "done",
+              });
+              return cacheRef.current[metaKey]!;
+            }
+
+            if (engine === "cassandra") {
+              const columnsByTable: Record<string, string[]> = {
+                ...existing.columnsByTable,
+              };
+              const tables = existing.tables ?? [];
+
+              for (let i = 0; i < tables.length; i++) {
+                const { schema, name } = tables[i]!;
+                const overview = await cassandraTableOverview({
+                  connectionId,
+                  keyspace: schema,
+                  table: name,
+                });
+                columnsByTable[`${schema}.${name}`] = (
+                  overview.columns ?? []
+                ).map((c) => c.name);
+                const prog =
+                  35 + Math.floor(((i + 1) / Math.max(1, tables.length)) * 65);
+                setCache(metaKey, { progress: Math.min(99, prog) });
+              }
+
+              setCache(metaKey, {
+                columnsByTable,
+                columnsLoaded: true,
+                loading: false,
+                loaded: true,
+                error: null,
+                progress: 100,
+                stage: "done",
+              });
+              return cacheRef.current[metaKey]!;
+            }
+
+            const q = getMetadataQueries(engine);
+            const colsRes = await runMetadataQuery(
+              connectionId,
+              q.columnsQuery
+            );
+            const rows = colsRes.rows ?? [];
+            const columnsByTable: Record<string, string[]> = {};
+            const total = rows.length || 1;
+
+            for (let i = 0; i < rows.length; i++) {
+              const r = rows[i];
+              const schema = cellToString(r?.[0]);
+              const table = cellToString(r?.[1]);
+              const col = cellToString(r?.[2]);
+              if (!schema || !table || !col) continue;
+
+              const k = `${schema}.${table}`;
+              if (!columnsByTable[k]) columnsByTable[k] = [];
+              columnsByTable[k].push(col);
+
+              if (i % 250 === 0) {
+                const prog = 35 + Math.floor((i / total) * 65);
+                setCache(metaKey, { progress: Math.min(99, prog) });
+              }
+            }
+
+            setCache(metaKey, {
+              columnsByTable,
+              columnsLoaded: true,
+              loading: false,
+              loaded: true,
+              error: null,
+              progress: 100,
+              stage: "done",
+            });
+            return cacheRef.current[metaKey]!;
+          }
+
           const version = await connectionVersion(connectionId);
 
           if (engine === "mongo") {
@@ -424,7 +536,7 @@ export function useDatabaseMetadata() {
 
           setCache(metaKey, {
             loading: false,
-            loaded: false,
+            loaded: columnsOnly ? true : false,
             error: msg,
             progress: 0,
             stage: "error",

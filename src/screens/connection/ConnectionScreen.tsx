@@ -28,6 +28,7 @@ import { useSqlHistoryRunner } from "./hooks/useSqlHistoryRunner";
 import { useSchemaTablesPanel } from "./hooks/useSchemaTablesPanel";
 import { useDatabaseMetadata } from "src/hooks/useDatabaseMetadata";
 import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection";
+import { resolveTabRuntimeConnectionId } from "src/lib/runtimeConnection";
 
 import { SplitPane } from "src/components/SplitPane";
 import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog";
@@ -411,21 +412,13 @@ export function ConnectionScreen() {
    * runtimeConnectionId (derived from tab runtime conn OR table conn)
    * NOTE: this is where store + windows + tab meet
    * ============================================================================= */
-  const runtimeConnectionId = useConnectionStore((s) => {
-    // 1) tab-level runtime connection first
-    if (activeTab?.runtimeConnectionId) return activeTab.runtimeConnectionId;
-
-    // 2) fallback to table-level connection id
-    if (!activeTableWindow) return undefined;
-
-    const k = tableKey(
+  const runtimeConnectionId = useConnectionStore((s) =>
+    resolveTabRuntimeConnectionId({
+      tabRuntimeConnectionId: activeTab?.runtimeConnectionId,
       activeProfileScreen,
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name
-    );
-
-    return s.tableDataMap[k]?.connectionId || undefined;
-  });
+      tableDataMap: s.tableDataMap,
+    })
+  );
 
   const newTableDrafts = useConnectionStore((s) => {
     if (!activeProfileScreen) return EMPTY_NEW_TABLE_DRAFTS;

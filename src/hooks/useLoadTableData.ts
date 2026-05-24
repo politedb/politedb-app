@@ -1229,6 +1229,12 @@ export function useLoadTableData() {
             connectionId: prev.connectionId ?? connId,
           });
 
+          if (!activeTab.runtimeConnectionId) {
+            useScreenStore
+              .getState()
+              .updateTab(activeTab.id, { runtimeConnectionId: connId });
+          }
+
           if (activeTab.engine === "mongo") {
             try {
               let mongoColumns = Array.isArray(prev.columns)
