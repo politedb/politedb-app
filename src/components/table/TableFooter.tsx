@@ -109,33 +109,34 @@ export function TableFooter({
       return "0 rows";
     }
 
-    if (typeof loadedMax !== "number" || loadedMax < 0) {
-      return rowCountIsEstimated && totalRows > 0
-        ? `0 of ~${formatNumber(totalRows)} rows`
-        : "0 rows";
-    }
-
-    // loadedMax is 0-based index => +1 rows count
-    const loadedCount = loadedMax + 1;
-
-    // show "x–y" for current page, based on loadedMax
-    const start = offset + 1;
-    // Clamp by totalRows so filtered totals like "1 row" never display as
-    // "1-300 of 1 rows" when loadedMax still reflects a previous window.
-    const end = Math.min(
-      offset + limit,
-      loadedCount,
-      totalRows > 0 ? totalRows : loadedCount
-    );
-
-    if (end < start) return `${formatNumber(loadedCount)} rows`;
-
-    // If totalRows is unknown, you can pass 0. We won't show "of N".
     const totalPrefix = rowCountIsEstimated ? "~" : "";
     const totalPart =
       totalRows > 0 ? ` of ${totalPrefix}${formatNumber(totalRows)} rows` : "";
 
-    return `${formatNumber(start)}-${formatNumber(end)}${totalPart}`;
+    // Known total: always show the logical page window (e.g. 601-900 of 1,381).
+    if (totalRows > 0) {
+      const start = offset + 1;
+      const end = Math.min(offset + limit, totalRows);
+      if (end < start) {
+        return rowCountIsEstimated
+          ? `0 of ~${formatNumber(totalRows)} rows`
+          : "0 rows";
+      }
+      return `${formatNumber(start)}-${formatNumber(end)}${totalPart}`;
+    }
+
+    // Unknown total: fall back to streamed row count for the current window.
+    if (typeof loadedMax !== "number" || loadedMax < 0) {
+      return "0 rows";
+    }
+
+    const pageStart = offset + 1;
+    const pageEnd = Math.min(offset + limit, loadedMax + 1);
+    if (pageEnd < pageStart) {
+      return `${formatNumber(loadedMax + 1)} rows`;
+    }
+
+    return `${formatNumber(pageStart)}-${formatNumber(pageEnd)} rows`;
   }, [viewMode, loadedMax, offset, limit, totalRows, rowCountIsEstimated]);
 
   const handleCountConfirm = useCallback(async () => {

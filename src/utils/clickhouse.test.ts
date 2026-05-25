@@ -4,16 +4,20 @@ import {
   formatClickhouseDecimalForSql,
   normalizeClickhouseDbType,
   unwrapClickhouseType,
-} from "./clickhouseTypes";
+} from "./clickhouse";
 
 describe("clickhouseTypes", () => {
   it("unwraps Nullable decimal types", () => {
-    expect(unwrapClickhouseType("Nullable(Decimal(18, 2))")).toBe("Decimal(18, 2)");
+    expect(unwrapClickhouseType("Nullable(Decimal(18, 2))")).toBe(
+      "Decimal(18, 2)"
+    );
     expect(clickhouseDecimalScale("Nullable(Decimal(18, 2))")).toBe(2);
   });
 
   it("normalizes decimal type with separate numeric_scale", () => {
-    expect(normalizeClickhouseDbType("Decimal64(9)", "2")).toBe("Decimal64(9, 2)");
+    expect(normalizeClickhouseDbType("Decimal64(9)", "2")).toBe(
+      "Decimal64(9, 2)"
+    );
   });
 
   it("formats human decimals for SQL, not scaled integers", () => {

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from "preact/hooks";
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
-import { normalizeClickhouseDbType } from "src/utils/clickhouseTypes";
+import { normalizeClickhouseDbType } from "src/utils/clickhouse";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
 
@@ -846,7 +846,11 @@ async function loadMeta(params: {
     return { structure, constraints };
   }
 
-  if (engine === "oracle" || engine === "snowflake" || engine === "clickhouse") {
+  if (
+    engine === "oracle" ||
+    engine === "snowflake" ||
+    engine === "clickhouse"
+  ) {
     const qStructure = tableStructuresQuery(schema, tableName, 0, engine);
     const qConstraints = tableConstraintsQuery(schema, tableName, engine);
 
@@ -1297,7 +1301,7 @@ export function useLoadTableData() {
                   tableName,
                   limit,
                   offset,
-                  resetCache: !!flags.force || !!flags.forceRows,
+                  resetCache: !!flags.force,
                   forceRefresh: !!flags.forceRefresh,
                 });
 
@@ -1373,7 +1377,7 @@ export function useLoadTableData() {
                   tableName,
                   limit,
                   offset,
-                  resetCache: !!flags.force || !!flags.forceRows,
+                  resetCache: !!flags.force,
                   forceRefresh: !!flags.forceRefresh,
                 });
 
@@ -1529,7 +1533,7 @@ export function useLoadTableData() {
             void (async () => {
               try {
                 // Force rows refresh invalidates only the rows cache.
-                const shouldReset = !!flags.force || !!flags.forceRows;
+                const shouldReset = !!flags.force;
 
                 await startRowsStream({
                   key,

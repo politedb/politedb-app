@@ -166,6 +166,10 @@ export function MainTableDataPane(props: {
   const [sortState, setSortState] = useState<TableSort | null>(null);
   const [progressNow, setProgressNow] = useState(() => Date.now());
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [settledPagination, setSettledPagination] = useState(() => ({
+    limit,
+    offset,
+  }));
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -208,6 +212,7 @@ export function MainTableDataPane(props: {
   useEffect(() => {
     setSortState(null);
     clearSelectedRowDetail(activeKey);
+    setSettledPagination({ limit, offset });
   }, [activeKey, clearSelectedRowDetail]);
 
   const handleSelectedRowDetailChange = useCallback(
@@ -459,6 +464,7 @@ export function MainTableDataPane(props: {
   const loadedMax = rowsInfo?.loadedMax ?? -1;
   const loadedRowCount =
     loadedMax >= streamOffset ? loadedMax - streamOffset + 1 : 0;
+  const rowsMatchRequestedOffset = streamOffset === offset;
 
   const basePageTotal = useMemo(() => {
     if (typeof meta.rowCount === "number") {
@@ -471,16 +477,26 @@ export function MainTableDataPane(props: {
     Array.isArray(meta.columns) &&
     (engine === "mongo" || engine === "cassandra" || meta.columns.length > 0);
   const foreignKeysLoaded = Array.isArray(meta.foreignKeys);
-  const rowsKnownEmpty = !!rowsInfo && !rowsRunning && loadedMax < streamOffset;
+  const rowsKnownEmpty =
+    !!rowsInfo &&
+    rowsMatchRequestedOffset &&
+    !rowsRunning &&
+    loadedMax < streamOffset;
   const hasAppliedFilters = appliedFilters.some(
     (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
   );
   const currentPageLoaded =
-    rowsKnownEmpty ||
-    (!rowsRunning &&
+    rowsMatchRequestedOffset &&
+    (rowsKnownEmpty ||
+      (!rowsRunning &&
       (hasAppliedFilters ||
         typeof meta.rowCount !== "number" ||
-        loadedRowCount >= basePageTotal));
+        loadedRowCount >= basePageTotal)));
+  const showingStalePage =
+    !currentPageLoaded &&
+    (settledPagination.limit !== limit || settledPagination.offset !== offset);
+  const renderLimit = showingStalePage ? settledPagination.limit : limit;
+  const renderOffset = showingStalePage ? settledPagination.offset : offset;
   const hasRenderedTableBefore = loadedQuerySignatureByTable.has(activeKey);
   const queryMatchesRenderedData =
     loadedQuerySignatureByTable.get(activeKey) === activeQuerySignature;
@@ -509,6 +525,13 @@ export function MainTableDataPane(props: {
       progressNow
     );
   }, [rowsInfo, meta.rowCount, progressNow]);
+
+  useEffect(() => {
+    if (!currentPageLoaded) return;
+    setSettledPagination((prev) =>
+      prev.limit === limit && prev.offset === offset ? prev : { limit, offset }
+    );
+  }, [currentPageLoaded, limit, offset]);
 
   // Foreign key metadata powers cross-table navigation, but it can be loaded
   // after the first page of rows is already visible.
@@ -581,7 +604,7 @@ export function MainTableDataPane(props: {
       const globalRowIdx =
         rowIndex === -1
           ? -1
-          : offset + (Number.isNaN(pageRowIdx) ? rowIndex : pageRowIdx);
+          : renderOffset + (Number.isNaN(pageRowIdx) ? rowIndex : pageRowIdx);
 
       if (globalRowIdx < 0) return;
 
@@ -627,7 +650,7 @@ export function MainTableDataPane(props: {
       meta,
       activeTableWindow,
       activeKey,
-      offset,
+      renderOffset,
       basePageTotal,
     ]
   );
@@ -660,14 +683,21 @@ export function MainTableDataPane(props: {
     columnsKey
   );
 
+  const renderBasePageTotal = useMemo(() => {
+    if (typeof meta.rowCount === "number") {
+      return Math.min(renderLimit, Math.max(0, meta.rowCount - renderOffset));
+    }
+    return renderLimit;
+  }, [meta.rowCount, renderLimit, renderOffset]);
+
   const rowFieldEditCtxRef = useRef({
     activeKey,
     tableColumns,
     patchHelpers,
     newRowsForDetail,
     hasError,
-    basePageTotal,
-    offset,
+    basePageTotal: renderBasePageTotal,
+    offset: renderOffset,
     rowsVersion: 0,
   });
   rowFieldEditCtxRef.current = {
@@ -676,8 +706,8 @@ export function MainTableDataPane(props: {
     patchHelpers,
     newRowsForDetail,
     hasError,
-    basePageTotal,
-    offset,
+    basePageTotal: renderBasePageTotal,
+    offset: renderOffset,
     rowsVersion: rowsInfo?.version ?? 0,
   };
 
@@ -827,7 +857,7 @@ export function MainTableDataPane(props: {
     return Math.min(basePageTotal, loadedRowCount);
   }, [rowsInfo, hasAppliedFilters, basePageTotal, loadedRowCount]);
 
-  const visiblePageTotal = pageTotal;
+  const visiblePageTotal = showingStalePage ? renderBasePageTotal : pageTotal;
 
   const totalRows = useMemo(() => {
     if (typeof rowsInfo?.loadedMax !== "number" || rowsInfo.loadedMax < 0) {
@@ -836,8 +866,8 @@ export function MainTableDataPane(props: {
 
     return typeof meta.rowCount === "number"
       ? meta.rowCount
-      : offset + pageTotal;
-  }, [meta.rowCount, rowsInfo?.loadedMax, pageTotal, offset]);
+      : renderOffset + pageTotal;
+  }, [meta.rowCount, rowsInfo?.loadedMax, pageTotal, renderOffset]);
 
   const footerTotalRows = useMemo(() => {
     if (hasAppliedFilters) {
@@ -847,7 +877,7 @@ export function MainTableDataPane(props: {
   }, [hasAppliedFilters, meta.rowCount, loadedRowCount, totalRows]);
 
   const getRowAt = (i: number) =>
-    useConnectionStore.getState().getRowAt(activeKey, offset + i);
+    useConnectionStore.getState().getRowAt(activeKey, renderOffset + i);
 
   const getEmptyRowAt = useCallback(() => undefined, []);
 
@@ -1224,7 +1254,7 @@ export function MainTableDataPane(props: {
               <TableData
                 key={activeKey}
                 columns={meta.columns ?? []}
-                baseRows={hasError ? 0 : basePageTotal}
+                baseRows={hasError ? 0 : renderBasePageTotal}
                 totalRows={hasError ? 0 : visiblePageTotal}
                 getRowAt={hasError ? getEmptyRowAt : getRowAt}
                 readOnly={isDataReadOnly}
@@ -1246,7 +1276,7 @@ export function MainTableDataPane(props: {
                 }
                 onDeleteRow={(rowIndex) => {
                   if (hasError || isDataReadOnly) return;
-                  handleDeleteRow(rowIndex, offset);
+                  handleDeleteRow(rowIndex, renderOffset);
                 }}
                 deletedRows={
                   hasError ? EMPTY_SET : extractDeleted(patches, DATA_KEYS.data)
@@ -1257,7 +1287,7 @@ export function MainTableDataPane(props: {
                 sortState={sortState}
                 onChangeSort={(nextSort) => {
                   setSortState(nextSort);
-                  if (offset !== 0) {
+                  if (renderOffset !== 0) {
                     pageChange(limit, 0);
                   }
                 }}
@@ -1273,8 +1303,8 @@ export function MainTableDataPane(props: {
         onViewModeChange={setViewMode}
         structPaneTab={structPaneTab}
         filterBarVisible={filterBarVisible}
-        limit={limit}
-        offset={offset}
+        limit={renderLimit}
+        offset={renderOffset}
         loadedMax={hasError ? -1 : loadedMax}
         totalRows={hasError ? 0 : footerTotalRows}
         rowCountIsEstimated={!!meta.rowCountIsEstimated}
