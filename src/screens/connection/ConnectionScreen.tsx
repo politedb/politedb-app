@@ -8,10 +8,16 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
+import {
+  DEFAULT_LIMIT,
+  DEFAULT_OFFSET,
+  tableKey,
+  useLoadTableData,
+} from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { usePersistentStore } from "src/stores/persistentStore";
+import { getTablePagination } from "./tablePagination";
 
 import { MenuBar } from "./MenuBar";
 import { LeftNav } from "./LeftNav";
@@ -183,8 +189,8 @@ export function ConnectionScreen() {
   /* =============================================================================
    * Local UI state (screen-level)
    * ============================================================================= */
-  const [limit, setLimit] = useState(300);
-  const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [offset, setOffset] = useState(DEFAULT_OFFSET);
   const [warningRefresh, setWarningRefresh] = useState(false);
   const [pendingAppQuit, setPendingAppQuit] = useState(false);
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
@@ -277,6 +283,13 @@ export function ConnectionScreen() {
     openTable,
     closeWindow,
   } = useConnectionWindows(activeProfileScreen);
+
+  const activeTablePagination = useMemo(() => {
+    if (!activeTableWindow) return null;
+    return getTablePagination(activeTableWindow.id);
+  }, [activeTableWindow?.id, limit, offset]);
+  const currentLimit = activeTablePagination?.limit ?? limit;
+  const currentOffset = activeTablePagination?.offset ?? offset;
 
   const {
     connecting: connectingRuntime,
@@ -581,8 +594,8 @@ export function ConnectionScreen() {
     runtimeConnectionId,
     engine,
 
-    limit,
-    offset,
+    limit: currentLimit,
+    offset: currentOffset,
     setLimit,
     setOffset,
 
@@ -805,8 +818,8 @@ export function ConnectionScreen() {
       runtimeConnectionId,
       isProfileLocked,
       sqlSafetyMode,
-      limit,
-      offset,
+      limit: currentLimit,
+      offset: currentOffset,
       loadError,
       runSqlWithHistory,
       refreshSchemaAndTables,
@@ -823,8 +836,8 @@ export function ConnectionScreen() {
       runtimeConnectionId,
       isProfileLocked,
       sqlSafetyMode,
-      limit,
-      offset,
+      currentLimit,
+      currentOffset,
       loadError,
       runSqlWithHistory,
       refreshSchemaAndTables,
@@ -1052,7 +1065,7 @@ export function ConnectionScreen() {
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
               getOriginalRowAt={useConnectionStore.getState().getOriginalRowAt}
-              offset={offset}
+              offset={currentOffset}
             />
           )}
         </div>

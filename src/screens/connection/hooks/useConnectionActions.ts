@@ -20,6 +20,10 @@ import { runRedisCommand } from "src/lib/tauri/redis";
 import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
 import { tableKey } from "src/hooks/useLoadTableData";
 import {
+  clearTablePagination,
+  setTablePagination,
+} from "src/screens/connection/tablePagination";
+import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
   type PatchMap,
@@ -406,17 +410,29 @@ export function useConnectionActions(
 
   const closeWindow = useCallback(
     async (windowId: string, e: MouseEvent) => {
+      const window = openWindows[activeProfileScreen]?.find(
+        (w) => w.id === windowId
+      );
+      if (window?.type === "table") {
+        clearTablePagination(windowId);
+      }
       await closeWindowFn(windowId, e);
     },
-    [closeWindowFn]
+    [activeProfileScreen, closeWindowFn, openWindows]
   );
 
   const pageChange = useCallback(
     async (nextLimit: number, nextOffset: number) => {
       setLimit(nextLimit);
       setOffset(nextOffset);
+      if (activeTableWindow) {
+        setTablePagination(activeTableWindow.id, {
+          limit: nextLimit,
+          offset: nextOffset,
+        });
+      }
     },
-    [setLimit, setOffset]
+    [activeTableWindow, setLimit, setOffset]
   );
 
   const refresh = useCallback(async () => {

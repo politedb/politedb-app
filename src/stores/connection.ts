@@ -209,6 +209,7 @@ export type TableRowState = {
 
   startedAt?: number;
   lastChunkAt?: number;
+  receivedAnyChunk?: boolean;
 };
 
 export const DEFAULT_ROWS_CAP = 1000;
@@ -236,6 +237,7 @@ function makeRowsState(cap: number): TableRowState {
     truncated: false,
 
     version: 0,
+    receivedAnyChunk: false,
   };
 }
 
@@ -1095,6 +1097,7 @@ export const useConnectionStore = create<ConnectionState>()(
             startedAt: Date.now(),
             lastChunkAt: prev.lastChunkAt,
             version: prev.version,
+            receivedAnyChunk: false,
           };
 
           // Schedule 1/frame notify
@@ -1115,7 +1118,15 @@ export const useConnectionStore = create<ConnectionState>()(
           if (!prev || prev.opId !== opId) return s;
 
           const nextRowsByKey = { ...s.tableRowsByKey };
-          nextRowsByKey[key] = { ...prev, running: false };
+          nextRowsByKey[key] = prev.receivedAnyChunk
+            ? { ...prev, running: false }
+            : {
+                ...prev,
+                running: false,
+                rows: new Array(prev.cap).fill(undefined),
+                loadedMax: prev.streamOffset - 1,
+                version: prev.version + 1,
+              };
 
           raf(() => scheduleRowsNotify(key));
           return { tableRowsByKey: nextRowsByKey };
@@ -1226,6 +1237,7 @@ export const useConnectionStore = create<ConnectionState>()(
 
           const lastChunkAt = Date.now();
           let loadedMax = prev.loadedMax;
+          prev.receivedAnyChunk = true;
 
           let touched = 0;
 
