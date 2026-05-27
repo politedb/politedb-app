@@ -46,6 +46,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rusqlite",
  "rust_decimal",
+ "rustls 0.23.37",
  "scylla",
  "security-framework-sys",
  "serde",

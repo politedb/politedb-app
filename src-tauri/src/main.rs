@@ -99,6 +99,9 @@ fn enforce_minimum_macos_version() -> Result<(), String> {
 }
 
 fn main() {
+    // Ensure rustls has a process-level crypto provider before any TLS usage.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
