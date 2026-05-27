@@ -64,6 +64,7 @@ type Props = {
   onDeleteRows?: (rowIndices: number[]) => void;
   onAddRow?: () => void;
   onClearSelection?: () => void;
+  onSelectAllRows?: () => void;
 };
 
 // ============================================================================
@@ -236,6 +237,7 @@ export function CanvasTable({
   onDeleteRows,
   onAddRow,
   onClearSelection,
+  onSelectAllRows,
   isCellDirty,
   isNewRow,
   onChangeSort,
@@ -871,6 +873,7 @@ export function CanvasTable({
         commitAndExit();
       }
 
+      rootRef.current?.focus();
       onSelect?.(rowIdx, colIdx, e.metaKey || e.ctrlKey, e.shiftKey);
     },
     [
@@ -972,6 +975,12 @@ export function CanvasTable({
         // When editing a cell, let the input handle Backspace/Delete
         // instead of triggering row delete at the table level.
         if (editing) return;
+
+        if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+          e.preventDefault();
+          onSelectAllRows?.();
+          return;
+        }
 
         const hasSelection =
           (selectedRows && selectedRows.size > 0) || selected;

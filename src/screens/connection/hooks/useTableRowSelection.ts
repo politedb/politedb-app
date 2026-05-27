@@ -5,6 +5,8 @@ export interface UseTableRowSelectionProps {
   deletedRows?: Set<number>;
   isNewRow?: (rowIndex: number) => boolean;
   containerRef?: { current: HTMLDivElement | null };
+  /** Number of selectable data rows on the current page (excludes viewport filler rows). */
+  totalRows?: number;
 }
 
 export function useTableRowSelection({
@@ -12,6 +14,7 @@ export function useTableRowSelection({
   deletedRows = new Set(),
   isNewRow,
   containerRef,
+  totalRows = 0,
 }: UseTableRowSelectionProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // Kept for backwards compatibility
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
@@ -23,13 +26,38 @@ export function useTableRowSelection({
   // Handle keyboard events for row deletion
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = document.activeElement?.tagName;
+      const isEditingCell =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        (document.activeElement as HTMLElement | null)?.isContentEditable;
+
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === "a" &&
+        !isEditingCell &&
+        totalRows > 0
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        const all = new Set<number>();
+        for (let i = 0; i < totalRows; i++) {
+          all.add(i);
+        }
+        setSelectedRows(all);
+        setSelectedRowIndex(0);
+        setLastSelectedRow(totalRows - 1);
+        return;
+      }
+
       // Only handle backspace if:
       // 1. Backspace key is pressed
       // 2. No input field is focused (user is not editing a cell)
       // 3. At least one row is selected
       if (
         e.key === "Backspace" &&
-        document.activeElement?.tagName !== "INPUT" &&
+        !isEditingCell &&
         selectedRows.size > 0
       ) {
         e.preventDefault();
@@ -53,7 +81,14 @@ export function useTableRowSelection({
         container.removeEventListener("keydown", handleKeyDown);
       };
     }
-  }, [selectedRows, deletedRows, onDeleteRow, isNewRow, containerRef]);
+  }, [
+    selectedRows,
+    deletedRows,
+    onDeleteRow,
+    isNewRow,
+    containerRef,
+    totalRows,
+  ]);
 
   const handleRowSelect = useCallback(
     (rowIndex: number, multi?: boolean, range?: boolean) => {

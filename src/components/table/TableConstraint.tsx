@@ -100,6 +100,7 @@ export function TableConstraints({
     onDeleteRow: handleDeleteRecord,
     deletedRows,
     containerRef: containerRef,
+    totalRows: editedData.length,
   });
 
   const handleDoubleClickRow = useCallback(

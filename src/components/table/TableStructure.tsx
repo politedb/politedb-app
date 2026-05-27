@@ -106,6 +106,7 @@ export function TableStructure({
     onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
     deletedRows,
     containerRef: containerRef,
+    totalRows: editedData.length,
   });
 
   const handleDoubleClickRow = useCallback(

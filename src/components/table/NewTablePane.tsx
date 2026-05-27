@@ -65,6 +65,7 @@ export function NewTablePane({
   const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
     onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
     containerRef: containerRef,
+    totalRows: tableState.columns.length,
   });
 
   useEffect(() => {

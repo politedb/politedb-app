@@ -371,6 +371,18 @@ export function TableData({
           setLastSelectedRow(null);
           publishSelectedRowDetail(null);
         }}
+        onSelectAllRows={() => {
+          if (totalDataLength <= 0) return;
+          const all = new Set<number>();
+          for (let i = 0; i < totalDataLength; i++) {
+            all.add(i);
+          }
+          setSelectedRows(all);
+          setLastSelectedRow(totalDataLength - 1);
+          setSelected({ rowIdx: 0, colIdx: 0 });
+          setEditing(null);
+          publishSelectedRowDetail(0);
+        }}
       />
     </div>
   );
