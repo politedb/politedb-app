@@ -144,6 +144,8 @@ fn parse_expiry_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> 
 }
 
 fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
+    normalize_state_timestamps(&mut state);
+
     let status = state.status.trim().to_lowercase();
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -189,6 +191,25 @@ pub fn blocks_app_update(state: &LicenseState) -> bool {
     state
         .trial_expires_at
         .is_some_and(|trial_expires_at| trial_expires_at <= now)
+}
+
+fn normalize_unix_timestamp_millis(value: i64) -> i64 {
+    let abs = value.saturating_abs();
+
+    // License APIs commonly return Unix seconds. The frontend and local expiry
+    // checks use milliseconds, so normalize seconds before persisting.
+    if abs > 0 && abs < 10_000_000_000 {
+        value.saturating_mul(1_000)
+    } else {
+        value
+    }
+}
+
+fn normalize_state_timestamps(state: &mut LicenseState) {
+    state.activated_at = state.activated_at.map(normalize_unix_timestamp_millis);
+    state.last_validated_at = state.last_validated_at.map(normalize_unix_timestamp_millis);
+    state.trial_started_at = state.trial_started_at.map(normalize_unix_timestamp_millis);
+    state.trial_expires_at = state.trial_expires_at.map(normalize_unix_timestamp_millis);
 }
 
 fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
@@ -372,7 +393,7 @@ fn default_trial_expires_at(previous: Option<&LicenseState>, trial_started_at: i
     previous
         .and_then(|state| state.trial_expires_at)
         .unwrap_or_else(|| {
-            trial_started_at + chrono::Duration::seconds(TRIAL_DURATION_DAYS).num_milliseconds()
+            trial_started_at + chrono::Duration::days(TRIAL_DURATION_DAYS).num_milliseconds()
         })
 }
 
@@ -385,7 +406,7 @@ fn normalize_api_state(
     let trial_started_at = default_trial_started_at(previous);
     let trial_expires_at = default_trial_expires_at(previous, trial_started_at);
 
-    LicenseState {
+    let mut state = LicenseState {
         version: LICENSE_STATE_VERSION,
         status: pick_string(&[
             payload.status,
@@ -446,7 +467,9 @@ fn normalize_api_state(
             payload.error,
             previous.and_then(|state| state.message.clone()),
         ]),
-    }
+    };
+    normalize_state_timestamps(&mut state);
+    state
 }
 
 async fn post_license_api(
@@ -618,4 +641,81 @@ pub async fn license_deactivate(
     .await?;
 
     license_state_clear(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_device() -> LicenseDeviceInfo {
+        LicenseDeviceInfo {
+            device_id: "device-id".to_string(),
+            device_name: "device".to_string(),
+            platform: "test".to_string(),
+            arch: "test".to_string(),
+        }
+    }
+
+    fn empty_payload() -> LicenseApiResponse {
+        LicenseApiResponse {
+            status: None,
+            activation_token: None,
+            license_id: None,
+            plan_name: None,
+            customer_email: None,
+            instance_name: None,
+            expires_at: None,
+            activated_at: None,
+            last_validated_at: None,
+            seats_allowed: None,
+            devices_used: None,
+            message: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn normalize_unix_timestamp_millis_converts_seconds() {
+        assert_eq!(
+            normalize_unix_timestamp_millis(1_767_000_000),
+            1_767_000_000_000
+        );
+        assert_eq!(
+            normalize_unix_timestamp_millis(1_767_000_000_123),
+            1_767_000_000_123
+        );
+    }
+
+    #[test]
+    fn normalize_api_state_uses_fourteen_day_trial_fallback() {
+        let device = test_device();
+        let trial_started_at = 1_767_000_000_000;
+        let previous = LicenseState {
+            trial_started_at: Some(trial_started_at),
+            trial_expires_at: None,
+            ..LicenseState::inactive(&device)
+        };
+
+        let state = normalize_api_state(empty_payload(), &device, Some(&previous), None);
+
+        assert_eq!(
+            state.trial_expires_at,
+            Some(trial_started_at + chrono::Duration::days(TRIAL_DURATION_DAYS).num_milliseconds())
+        );
+    }
+
+    #[test]
+    fn normalize_api_state_converts_api_seconds_to_millis() {
+        let device = test_device();
+        let mut payload = empty_payload();
+        payload.status = Some("active".to_string());
+        payload.activated_at = Some(1_767_000_000);
+        payload.last_validated_at = Some(1_767_000_100);
+
+        let state = normalize_api_state(payload, &device, None, Some("key".to_string()));
+
+        assert_eq!(state.status, "active");
+        assert_eq!(state.activated_at, Some(1_767_000_000_000));
+        assert_eq!(state.last_validated_at, Some(1_767_000_100_000));
+    }
 }

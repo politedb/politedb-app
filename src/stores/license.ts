@@ -12,7 +12,6 @@ const LICENSE_API_BASE = (import.meta.env.VITE_LICENSE_API_BASE ?? "").trim();
 const LICENSE_PRODUCT = (
   import.meta.env.VITE_LICENSE_PRODUCT ?? "politedb"
 ).trim();
-const LICENSE_VALIDATION_GRACE_MS = 60 * 60 * 1000;
 
 type LicenseStoreState = {
   state: LicenseState | null;
@@ -35,15 +34,6 @@ function toErrorMessage(error: unknown) {
 
 function hasActivationData(state?: LicenseState | null) {
   return Boolean(state?.license_key || state?.activation_token);
-}
-
-function isActiveLicenseValidationStale(state?: LicenseState | null) {
-  if (!state) return false;
-  if (String(state.status ?? "").toLowerCase() !== "active") return false;
-  if (!hasActivationData(state)) return false;
-  const lastValidatedAt = Number(state.last_validated_at ?? 0);
-  if (!Number.isFinite(lastValidatedAt) || lastValidatedAt <= 0) return true;
-  return Date.now() - lastValidatedAt > LICENSE_VALIDATION_GRACE_MS;
 }
 
 async function refreshLicenseSilently() {
@@ -74,18 +64,7 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
             set({ state: next, loaded: true });
           })
           .catch(() => {
-            const current = get().state;
-            if (!current || !isActiveLicenseValidationStale(current)) return;
-            set({
-              state: {
-                ...current,
-                status: "unverified",
-                message:
-                  current?.message ||
-                  "License validation expired. Please reconnect and refresh your license.",
-              },
-              loaded: true,
-            });
+            set({ loaded: true });
           });
       }
     } catch (error) {
