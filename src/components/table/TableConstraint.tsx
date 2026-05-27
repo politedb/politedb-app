@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useRef } from "preact/hooks";
+import { useMemo, useCallback } from "preact/hooks";
 import type { DatabaseEngine, TableConstraint } from "src/types";
 import {
   Table,
@@ -9,6 +9,8 @@ import { cn } from "src/utils/cn";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
+import { useTableFocusState } from "src/hooks/useTableFocusState";
+import { selectionRowClass } from "./selectionClasses";
 import { getDbConfig } from "src/utils/dbConfig";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
@@ -74,7 +76,8 @@ export function TableConstraints({
   engine,
   searchQuery = "",
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
+    useTableFocusState();
 
   // Use constraint operations hook
   const { handleDataChange, handleDeleteRecord } = useTableConstraintOperations(
@@ -87,32 +90,6 @@ export function TableConstraints({
       onDataChange,
       onDeleteRecord,
     }
-  );
-
-  // Use row selection hook
-  const {
-    selectedRowIndex,
-    selectedRows,
-    handleRowSelect,
-    selectedColIndex,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: handleDeleteRecord,
-    deletedRows,
-    containerRef: containerRef,
-    totalRows: editedData.length,
-  });
-
-  const handleDoubleClickRow = useCallback(
-    (_row: any, index: number) => {
-      if (readOnly) return;
-      if (searchQuery.trim()) return;
-      // Check if it's an empty row (index >= editedData.length)
-      if (index >= editedData.length) {
-        onAddNewRecord();
-      }
-    },
-    [readOnly, searchQuery, editedData.length, onAddNewRecord]
   );
 
   const tableData = useMemo(() => {
@@ -144,6 +121,41 @@ export function TableConstraints({
       )
     );
   }, [searchQuery, searchableTableData, engine]);
+
+  const selectableRowIndices = useMemo(
+    () =>
+      filteredTableData
+        .map((row) => row._sourceIndex)
+        .filter((index): index is number => typeof index === "number" && index >= 0),
+    [filteredTableData]
+  );
+
+  // Use row selection hook
+  const {
+    selectedRowIndex,
+    selectedRows,
+    handleRowSelect,
+    selectedColIndex,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: handleDeleteRecord,
+    deletedRows,
+    containerRef: rootRef,
+    totalRows: tableData.length,
+    selectableRowIndices,
+    isTableFocused,
+  });
+
+  const handleDoubleClickRow = useCallback(
+    (_row: any, index: number) => {
+      if (readOnly) return;
+      if (searchQuery.trim()) return;
+      if (index >= tableData.length) {
+        onAddNewRecord();
+      }
+    },
+    [readOnly, searchQuery, tableData.length, onAddNewRecord]
+  );
 
   const dbConfig = getDbConfig(engine);
 
@@ -198,7 +210,7 @@ export function TableConstraints({
                 "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
                 isDirtyCell && !isNewRow && "bg-dirty",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                isRowSelected && !isEmptyRow && "bg-selected!"
+                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions}
@@ -216,21 +228,40 @@ export function TableConstraints({
                   : undefined
               }
               onMouseDown={(e) => {
-                if (!isRowSelected && !isEmptyRow && !isDeleted) {
+                if (!isEmptyRow && !isDeleted) {
                   e.preventDefault();
                 }
               }}
               onClick={(e) => {
                 if (readOnly) return;
-                if (isRowSelected) {
+
+                const multi = e.metaKey || e.ctrlKey;
+                const range = e.shiftKey;
+                if (
+                  !multi &&
+                  !range &&
+                  selectedRows.size > 1 &&
+                  isRowSelected
+                ) {
+                  handleRowSelect(sourceIndex);
                   e.preventDefault();
                   e.stopPropagation();
-                  if (selectedColIndex !== colIndex) {
-                    const input = e.currentTarget as HTMLInputElement;
-                    input.select();
-                    handleColSelect(colIndex);
-                  }
                 }
+              }}
+              onDblClick={(e) => {
+                if (readOnly || isEmptyRow || isDeleted) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (!isRowSelected) {
+                  handleRowSelect(sourceIndex);
+                }
+
+                handleColSelect(colIndex);
+                const input = e.currentTarget as HTMLInputElement;
+                input.focus();
+                input.select();
               }}
               disabled={busy || isDeleted || readOnly}
               readOnly={isEmptyRow || isDeleted || readOnly}
@@ -247,16 +278,18 @@ export function TableConstraints({
       selectedRowIndex,
       selectedColIndex,
       handleDataChange,
+      handleRowSelect,
       onDeleteRecord,
       initData,
       readOnly,
+      isTableFocused,
     ]
   );
 
   return (
     <div
       ref={containerRef}
-      class="h-full w-full"
+      class="table-focus-root h-full w-full outline-none"
       tabIndex={0}
       onMouseDown={(e) => {
         // Focus container when clicking to enable keyboard events
@@ -264,7 +297,7 @@ export function TableConstraints({
           e.target === e.currentTarget ||
           (e.target as HTMLElement).closest("table")
         ) {
-          containerRef.current?.focus();
+          rootRef.current?.focus();
         }
       }}
     >
@@ -284,6 +317,7 @@ export function TableConstraints({
           handleRowSelect(index, multi, range);
         }}
         onDoubleClickRow={handleDoubleClickRow}
+        selectionFocused={isTableFocused}
       />
     </div>
   );

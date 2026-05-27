@@ -7,6 +7,7 @@
   --color-dirty: #fdf0bb;
   --color-deleted: #fbbdbd;
   --color-selected: #bedbff;
+  --color-selected-unfocused: #dbdbdb;
 }
 
 
@@ -15,6 +16,19 @@
   --color-dirty: var(--color-dirty);
   --color-deleted: var(--color-deleted);
   --color-selected: var(--color-selected);
+  --color-selected-unfocused: var(--color-selected-unfocused);
+}
+
+/* Dim row selection when the table area loses focus (e.g. click sidebar/history). */
+.table-focus-root.is-unfocused .bg-selected\! {
+  background-color: var(--color-selected-unfocused) !important;
+  color: #6b7280;
+}
+
+.table-focus-root.is-unfocused .bg-selected\! input,
+.table-focus-root.is-unfocused .bg-selected\! select,
+.table-focus-root.is-unfocused .bg-selected\! textarea {
+  color: #6b7280;
 }
 
 @supports (-apple-system: none) {

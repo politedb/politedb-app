@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "preact/hooks";
+import { useEffect, useMemo } from "preact/hooks";
 import { Input, InputOption } from "src/components/common/Input";
 import { Button } from "src/components/common/Button";
 import { Table } from "src/components/common/Table";
@@ -13,6 +13,8 @@ import { useNewTableState } from "src/hooks/useNewTableState";
 import { getDbConfig } from "src/utils/dbConfig";
 import { cn } from "src/utils/cn";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
+import { useTableFocusState } from "src/hooks/useTableFocusState";
+import { selectionRowClass } from "./selectionClasses";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -41,7 +43,8 @@ export function NewTablePane({
   onSuccess,
   onSaveRef,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
+    useTableFocusState();
 
   const { busy } = useCreateSchemaTable();
   const setNewTableData = useConnectionStore((s) => s.setNewTableData);
@@ -62,11 +65,13 @@ export function NewTablePane({
   });
 
   // Use row selection hook
-  const { selectedRowIndex, handleRowSelect } = useTableRowSelection({
-    onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
-    containerRef: containerRef,
-    totalRows: tableState.columns.length,
-  });
+  const { selectedRowIndex, selectedRows, handleRowSelect } =
+    useTableRowSelection({
+      onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
+      containerRef: rootRef,
+      totalRows: tableState.columns.length,
+      isTableFocused,
+    });
 
   useEffect(() => {
     if (!activeProfileScreen || !tableWindowId) return;
@@ -116,7 +121,7 @@ export function NewTablePane({
         className: "px-0",
         render: (_, row, index) => {
           const isEmptyRow = index + 1 > tableState.columns.length;
-          const isRowSelected = selectedRowIndex === index;
+          const isRowSelected = selectedRows.has(index);
           const placeholder = isEmptyRow ? "" : "NULL";
           const showSelect = Object.keys(columnOptions).includes(colKey);
 
@@ -127,7 +132,7 @@ export function NewTablePane({
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
                   : "bg-new! focus:bg-white!",
-                isRowSelected && !isEmptyRow && "bg-selected!"
+                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions[colKey]}
@@ -149,19 +154,39 @@ export function NewTablePane({
                   : undefined
               }
               onMouseDown={(e) => {
-                // Prevent input focus if row is not selected yet
-                // This allows first click to select row, second click to focus input
-                if (!isRowSelected && !isEmptyRow) {
+                if (!isEmptyRow) {
                   e.preventDefault();
                 }
               }}
               onClick={(e) => {
-                if (isRowSelected) {
+                if (isProfileLocked) return;
+
+                const multi = e.metaKey || e.ctrlKey;
+                const range = e.shiftKey;
+                if (
+                  !multi &&
+                  !range &&
+                  selectedRows.size > 1 &&
+                  isRowSelected
+                ) {
+                  handleRowSelect(index);
                   e.preventDefault();
                   e.stopPropagation();
-                  const input = e.currentTarget as HTMLInputElement;
-                  input.select();
                 }
+              }}
+              onDblClick={(e) => {
+                if (isEmptyRow || isProfileLocked) return;
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (!isRowSelected) {
+                  handleRowSelect(index);
+                }
+
+                const input = e.currentTarget as HTMLInputElement;
+                input.focus();
+                input.select();
               }}
               disabled={busy || isProfileLocked}
               readOnly={isEmptyRow || isProfileLocked}
@@ -172,10 +197,13 @@ export function NewTablePane({
     [
       tableState.columns.length,
       selectedRowIndex,
+      selectedRows,
       busy,
       isProfileLocked,
       columnOptions,
       tableState.updateColumn,
+      isTableFocused,
+      handleRowSelect,
     ]
   );
 
@@ -214,7 +242,7 @@ export function NewTablePane({
       <div class="flex-1 overflow-hidden">
         <div
           ref={containerRef}
-          class="h-full w-full"
+          class="table-focus-root h-full w-full outline-none"
           tabIndex={0}
           onMouseDown={(e) => {
             // Focus container when clicking to enable keyboard events
@@ -222,7 +250,7 @@ export function NewTablePane({
               e.target === e.currentTarget ||
               (e.target as HTMLElement).closest("table")
             ) {
-              containerRef.current?.focus();
+              rootRef.current?.focus();
             }
           }}
         >
@@ -232,8 +260,13 @@ export function NewTablePane({
             fillViewport
             stickyHeader
             showEmptyMessage={false}
+            selectedRow={selectedRowIndex}
+            selectedRows={selectedRows}
+            selectionFocused={isTableFocused}
             onDoubleClickRow={tableState.addColumn}
-            onSelectRow={(_row, index) => handleRowSelect(index)}
+            onSelectRow={(_row, index, multi, range) =>
+              handleRowSelect(index, multi, range)
+            }
           />
         </div>
       </div>

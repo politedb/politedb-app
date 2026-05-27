@@ -39,6 +39,8 @@ interface TableProps<T = any> {
   ) => void;
   onDoubleClickRow?: (row: T, index: number) => void;
   enableSort?: boolean;
+  /** When false, selected rows use the muted unfocused highlight. */
+  selectionFocused?: boolean;
 }
 
 const TABLE_STYLE = { minHeight: "100%", tableLayout: "auto" } as const;
@@ -62,6 +64,7 @@ export function Table<T = any>({
   onSelectRow,
   onDoubleClickRow,
   enableSort = true,
+  selectionFocused = true,
 }: TableProps<T>) {
   const [headerMenu, setHeaderMenu] = useState<HeaderMenuState<T> | null>(null);
   const [colWidths, setColWidths] = useState<(number | undefined)[]>(() =>
@@ -395,7 +398,10 @@ export function Table<T = any>({
                 data-row={originalIndex}
                 class={cn(
                   isNewRow && "bg-new!",
-                  isSelected && "bg-selected!",
+                  isSelected &&
+                    (selectionFocused
+                      ? "bg-selected!"
+                      : "bg-selected-unfocused! text-neutral-500!"),
                   dynamicClassName
                 )}
               >

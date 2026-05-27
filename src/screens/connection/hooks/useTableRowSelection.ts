@@ -5,8 +5,12 @@ export interface UseTableRowSelectionProps {
   deletedRows?: Set<number>;
   isNewRow?: (rowIndex: number) => boolean;
   containerRef?: { current: HTMLDivElement | null };
-  /** Number of selectable data rows on the current page (excludes viewport filler rows). */
+  /** Number of selectable data rows (excludes viewport filler rows). */
   totalRows?: number;
+  /** When set, Cmd/Ctrl+A selects these indices instead of 0..totalRows-1. */
+  selectableRowIndices?: number[];
+  /** Whether the table area is currently focused (see useTableFocusState). */
+  isTableFocused?: boolean;
 }
 
 export function useTableRowSelection({
@@ -15,17 +19,25 @@ export function useTableRowSelection({
   isNewRow,
   containerRef,
   totalRows = 0,
+  selectableRowIndices,
+  isTableFocused = true,
 }: UseTableRowSelectionProps) {
-  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null); // Kept for backwards compatibility
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [lastSelectedRow, setLastSelectedRow] = useState<number | null>(null);
-  
+
   const [selectedColIndex, setSelectedColIndex] = useState<number | null>(null);
   const keyboardContainerRef = useRef<HTMLDivElement>(null);
+  const isTableFocusedRef = useRef(isTableFocused);
+  isTableFocusedRef.current = isTableFocused;
 
-  // Handle keyboard events for row deletion
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isTableFocusedRef.current) return;
+
+      const container = containerRef?.current || keyboardContainerRef.current;
+      if (!container) return;
+
       const tag = document.activeElement?.tagName;
       const isEditingCell =
         tag === "INPUT" ||
@@ -36,25 +48,26 @@ export function useTableRowSelection({
       if (
         (e.metaKey || e.ctrlKey) &&
         e.key === "a" &&
-        !isEditingCell &&
-        totalRows > 0
+        !isEditingCell
       ) {
+        const indices =
+          selectableRowIndices && selectableRowIndices.length > 0
+            ? selectableRowIndices
+            : totalRows > 0
+              ? Array.from({ length: totalRows }, (_, i) => i)
+              : [];
+
+        if (indices.length === 0) return;
+
         e.preventDefault();
         e.stopPropagation();
-        const all = new Set<number>();
-        for (let i = 0; i < totalRows; i++) {
-          all.add(i);
-        }
-        setSelectedRows(all);
-        setSelectedRowIndex(0);
-        setLastSelectedRow(totalRows - 1);
+        setSelectedRows(new Set(indices));
+        setSelectedRowIndex(indices[0] ?? null);
+        setLastSelectedRow(indices[indices.length - 1] ?? null);
+        container.focus();
         return;
       }
 
-      // Only handle backspace if:
-      // 1. Backspace key is pressed
-      // 2. No input field is focused (user is not editing a cell)
-      // 3. At least one row is selected
       if (
         e.key === "Backspace" &&
         !isEditingCell &&
@@ -62,25 +75,23 @@ export function useTableRowSelection({
       ) {
         e.preventDefault();
         e.stopPropagation();
-        
-        const rowsToDelete = Array.from(selectedRows).filter(idx => 
-          !deletedRows.has(idx) && (!isNewRow || !isNewRow(idx))
+
+        const rowsToDelete = Array.from(selectedRows).filter(
+          (idx) =>
+            !deletedRows.has(idx) && (!isNewRow || !isNewRow(idx))
         );
-        
-        rowsToDelete.forEach(idx => onDeleteRow?.(idx));
-        
+
+        rowsToDelete.forEach((idx) => onDeleteRow?.(idx));
+
         setSelectedRows(new Set());
         setSelectedRowIndex(null);
       }
     };
 
-    const container = containerRef?.current || keyboardContainerRef.current;
-    if (container) {
-      container.addEventListener("keydown", handleKeyDown);
-      return () => {
-        container.removeEventListener("keydown", handleKeyDown);
-      };
-    }
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
   }, [
     selectedRows,
     deletedRows,
@@ -88,42 +99,39 @@ export function useTableRowSelection({
     isNewRow,
     containerRef,
     totalRows,
+    selectableRowIndices,
   ]);
 
   const handleRowSelect = useCallback(
     (rowIndex: number, multi?: boolean, range?: boolean) => {
       setSelectedRowIndex(rowIndex);
-      
+
       if (range && lastSelectedRow !== null) {
-        // Shift click
         const min = Math.min(lastSelectedRow, rowIndex);
         const max = Math.max(lastSelectedRow, rowIndex);
-        setSelectedRows(prev => {
-           const newSelection = new Set(prev);
-           for (let i = min; i <= max; i++) {
-              newSelection.add(i);
-           }
-           return newSelection;
+        setSelectedRows((prev) => {
+          const newSelection = new Set(prev);
+          for (let i = min; i <= max; i++) {
+            newSelection.add(i);
+          }
+          return newSelection;
         });
       } else if (multi) {
-        // Ctrl/Cmd click
-        setSelectedRows(prev => {
-           const newSelection = new Set(prev);
-           if (newSelection.has(rowIndex)) {
-             newSelection.delete(rowIndex);
-           } else {
-             newSelection.add(rowIndex);
-           }
-           return newSelection;
+        setSelectedRows((prev) => {
+          const newSelection = new Set(prev);
+          if (newSelection.has(rowIndex)) {
+            newSelection.delete(rowIndex);
+          } else {
+            newSelection.add(rowIndex);
+          }
+          return newSelection;
         });
         setLastSelectedRow(rowIndex);
       } else {
-        // Normal click
         setSelectedRows(new Set([rowIndex]));
         setLastSelectedRow(rowIndex);
       }
 
-      // Focus the container to enable keyboard events
       const container = containerRef?.current || keyboardContainerRef.current;
       container?.focus();
     },

@@ -13,9 +13,15 @@ import { cn } from "src/utils/cn";
 import { TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { isBlobColumnType, isJsonColumnType } from "src/utils/sqlDialect";
+import { useTableFocusState } from "src/hooks/useTableFocusState";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
+const SELECTED_BG_FOCUSED = "#bedbff";
+const SELECTED_BG_UNFOCUSED = "#dbdbdb";
+const ACTIVE_CELL_STROKE_FOCUSED = "#0000ff";
+const ACTIVE_CELL_STROKE_UNFOCUSED = "#9ca3af";
+const SELECTED_TEXT_UNFOCUSED = "#6b7280";
 
 type EditingCell = { rowIdx: number; colIdx: number };
 type HeaderMenuState = { x: number; y: number; colName: string };
@@ -244,7 +250,7 @@ export function CanvasTable({
   onCellActivate,
 }: Props) {
   // --- Refs for DOM elements ---
-  const rootRef = useRef<HTMLDivElement>(null);
+  const { ref: rootCallbackRef, rootRef, isFocused } = useTableFocusState();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -517,11 +523,15 @@ export function CanvasTable({
           selectedRows?.has(r) || (selected && selected.rowIdx === r);
 
         if (isRowSelected) {
-          ctx.fillStyle = "#bedbff";
+          ctx.fillStyle = isFocused
+            ? SELECTED_BG_FOCUSED
+            : SELECTED_BG_UNFOCUSED;
           ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
 
           if (selected && selected.colIdx === c && selected.rowIdx === r) {
-            ctx.strokeStyle = "#0000ff";
+            ctx.strokeStyle = isFocused
+              ? ACTIVE_CELL_STROKE_FOCUSED
+              : ACTIVE_CELL_STROKE_UNFOCUSED;
             ctx.strokeRect(x + 1, y + 1, w - 2, ROW_HEIGHT - 1);
           }
         }
@@ -540,7 +550,12 @@ export function CanvasTable({
             textCacheRef.current.set(cacheKey, displayText);
           }
 
-          const textColor = s === "NULL" ? "#9ca3af" : "#111827";
+          const textColor =
+            s === "NULL"
+              ? "#9ca3af"
+              : isRowSelected && !isFocused
+                ? SELECTED_TEXT_UNFOCUSED
+                : "#111827";
 
           // Draw FK arrow on the right side of the cell (thin right arrow)
           if (isFkCol && s !== "NULL") {
@@ -583,6 +598,7 @@ export function CanvasTable({
     deletedRows,
     isCellDirty,
     isNewRow,
+    isFocused,
   ]);
 
   useEffect(() => {
@@ -966,8 +982,8 @@ export function CanvasTable({
 
   return (
     <div
-      ref={rootRef}
-      class={`relative h-full min-h-0 w-full bg-white ${
+      ref={rootCallbackRef}
+      class={`table-focus-root relative h-full min-h-0 w-full bg-white outline-none ${
         isResizing ? "cursor-col-resize select-none" : ""
       }`}
       tabIndex={0}

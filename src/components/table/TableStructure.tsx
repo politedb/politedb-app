@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useRef, useEffect } from "preact/hooks";
+import { useMemo, useCallback, useEffect } from "preact/hooks";
 import type {
   DatabaseEngine,
   ForeignKeyInfo,
@@ -15,6 +15,8 @@ import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { getDbConfig, supportsForeignKeyEditing } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
+import { useTableFocusState } from "src/hooks/useTableFocusState";
+import { selectionRowClass } from "./selectionClasses";
 import { ArrowRightIcon } from "src/components/icons";
 import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 
@@ -73,7 +75,8 @@ export function TableStructure({
   tableList = [],
   searchQuery = "",
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
+    useTableFocusState();
 
   const {
     fkRowIndex,
@@ -96,33 +99,20 @@ export function TableStructure({
     onDeleteRecord,
   });
 
-  const {
-    selectedRowIndex,
-    selectedRows,
-    selectedColIndex,
-    handleRowSelect,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
-    deletedRows,
-    containerRef: containerRef,
-    totalRows: editedData.length,
-  });
-
-  const handleDoubleClickRow = useCallback(
-    (_row: any, index: number) => {
-      if (readOnly) return;
-      if (searchQuery.trim()) return;
-      if (index >= editedData.length) onAddNewRecord();
-    },
-    [readOnly, searchQuery, editedData.length, onAddNewRecord]
-  );
-
   const tableData = useMemo(() => {
     if (error) return [];
     if (editedData.length > 0) return editedData;
     return initData ?? [];
   }, [editedData, initData, error]);
+
+  const handleDoubleClickRow = useCallback(
+    (_row: any, index: number) => {
+      if (readOnly) return;
+      if (searchQuery.trim()) return;
+      if (index >= tableData.length) onAddNewRecord();
+    },
+    [readOnly, searchQuery, tableData.length, onAddNewRecord]
+  );
 
   const tableDataWithRowNumber = useMemo(
     () =>
@@ -160,6 +150,29 @@ export function TableStructure({
       )
     );
   }, [searchQuery, tableDataWithRowNumber, visibleColumns]);
+
+  const selectableRowIndices = useMemo(
+    () =>
+      filteredTableData
+        .map((row) => row._sourceIndex)
+        .filter((index): index is number => typeof index === "number" && index >= 0),
+    [filteredTableData]
+  );
+
+  const {
+    selectedRowIndex,
+    selectedRows,
+    selectedColIndex,
+    handleRowSelect,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
+    deletedRows,
+    containerRef: rootRef,
+    totalRows: tableData.length,
+    selectableRowIndices,
+    isTableFocused,
+  });
 
   useEffect(() => {
     if (!allowForeignKeyEditing && fkRowIndex !== null) {
@@ -258,7 +271,7 @@ export function TableStructure({
                   "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
                   isDirtyCell && !isNewRow && "bg-dirty",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                  isRowSelected && !isEmptyRow && "bg-selected!",
+                  selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
                   isFkColumn && !isEmptyRow && "pr-6"
                 )}
                 showSelect={!isEmptyRow && showSelect}
@@ -281,27 +294,45 @@ export function TableStructure({
                     : undefined
                 }
                 onMouseDown={(e) => {
-                  if (!isRowSelected && !isEmptyRow && !isDeleted) {
+                  if (!isEmptyRow && !isDeleted) {
                     e.preventDefault();
                   }
                 }}
                 onClick={(e) => {
                   if (readOnly) return;
-                  if (isRowSelected) {
+
+                  const multi = e.metaKey || e.ctrlKey;
+                  const range = e.shiftKey;
+                  if (
+                    !multi &&
+                    !range &&
+                    selectedRows.size > 1 &&
+                    isRowSelected
+                  ) {
+                    handleRowSelect(sourceIndex);
                     e.preventDefault();
                     e.stopPropagation();
-
-                    if (selectedColIndex !== colIndex) {
-                      const input = e.currentTarget as HTMLInputElement;
-                      if (isFkColumn) {
-                        openFkDialog(sourceIndex);
-                        input.blur();
-                        return;
-                      }
-                      input.select();
-                      handleColSelect(colIndex);
-                    }
                   }
+                }}
+                onDblClick={(e) => {
+                  if (readOnly || isEmptyRow || isDeleted) return;
+
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  if (!isRowSelected) {
+                    handleRowSelect(sourceIndex);
+                  }
+
+                  handleColSelect(colIndex);
+                  const input = e.currentTarget as HTMLInputElement;
+                  if (isFkColumn) {
+                    openFkDialog(sourceIndex);
+                    input.blur();
+                    return;
+                  }
+                  input.focus();
+                  input.select();
                 }}
                 disabled={busy || isDeleted || readOnly}
                 readOnly={isEmptyRow || isDeleted || readOnly}
@@ -341,6 +372,7 @@ export function TableStructure({
       selectedColIndex,
       handleDataChange,
       handleColSelect,
+      handleRowSelect,
       initData,
       columnInputOptions,
       foreignKeys,
@@ -350,20 +382,21 @@ export function TableStructure({
       readOnly,
       visibleColumns,
       allowForeignKeyEditing,
+      isTableFocused,
     ]
   );
 
   return (
     <div
       ref={containerRef}
-      class="h-full w-full"
+      class="table-focus-root h-full w-full outline-none"
       tabIndex={0}
       onMouseDown={(e) => {
         if (
           e.target === e.currentTarget ||
           (e.target as HTMLElement).closest("table")
         ) {
-          containerRef.current?.focus();
+          rootRef.current?.focus();
         }
       }}
     >
@@ -383,6 +416,7 @@ export function TableStructure({
           handleRowSelect(index, multi, range);
         }}
         onDoubleClickRow={handleDoubleClickRow}
+        selectionFocused={isTableFocused}
       />
 
       {allowForeignKeyEditing && fkRowIndex !== null && (
