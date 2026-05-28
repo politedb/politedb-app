@@ -11,12 +11,13 @@ import {
 } from "src/lib/updater/runtimeUpdater";
 
 export function useAppUpdater() {
+  const licenseState = useLicenseStore((s) => s.state);
+
   const [appVersion, setAppVersion] = useState<string>(packageJson.version);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [pendingUpdate, setPendingUpdate] = useState<RuntimeUpdate | null>(
     null
   );
-  const licenseState = useLicenseStore((s) => s.state);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -50,7 +51,9 @@ export function useAppUpdater() {
   }, [appVersion]);
 
   const canInstallUpdate = useMemo(() => {
-    const normalizedStatus = String(licenseState?.status ?? "").toLowerCase();
+    const normalizedStatus = String(licenseState?.status ?? "")
+      .trim()
+      .toLowerCase();
     if (normalizedStatus === "active") {
       return true;
     }
@@ -85,8 +88,8 @@ export function useAppUpdater() {
     appVersion,
     updateAvailable: !!pendingUpdate && canInstallUpdate,
     updateVersion: pendingUpdate?.version ?? null,
-    installUpdate,
     isInstallingUpdate: isUpdating,
     canInstallUpdate,
+    installUpdate,
   };
 }

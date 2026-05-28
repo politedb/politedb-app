@@ -43,7 +43,7 @@ export function MainLayout() {
   }, []);
 
   const isLicenseActive =
-    String(licenseState?.status ?? "").toLowerCase() === "active";
+    String(licenseState?.status ?? "").trim().toLowerCase() === "active";
   const isTrialExpired = useMemo(() => {
     const expiresAt = Number(licenseState?.trial_expires_at ?? 0);
     return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;

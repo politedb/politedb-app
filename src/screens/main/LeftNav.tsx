@@ -37,26 +37,21 @@ export function LeftNav(props: {
     onOpenKeyboardShortcuts,
   } = props;
 
-  const { appVersion, updateAvailable, installUpdate, isInstallingUpdate } =
+  const { appVersion, updateAvailable, isInstallingUpdate, installUpdate } =
     useAppUpdater();
   const licenseState = useLicenseStore((s) => s.state);
   const [openSettings, setOpenSettings] = useState(false);
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
-  const normalizedLicenseStatus = String(
-    licenseState?.status ?? ""
-  ).toLowerCase();
+  const normalizedLicenseStatus = String(licenseState?.status ?? "")
+    .trim()
+    .toLowerCase();
   const isLicenseActive = normalizedLicenseStatus === "active";
-  const isLicenseExpired = normalizedLicenseStatus === "expired";
   const trialExpiresAt =
     typeof licenseState?.trial_expires_at === "number"
       ? licenseState.trial_expires_at
       : null;
-  const isTrialExpired =
-    trialExpiresAt != null && Number.isFinite(trialExpiresAt)
-      ? trialExpiresAt <= Date.now()
-      : false;
-  const canInstallUpdate = !isLicenseExpired && !isTrialExpired;
+
   const licensePlanLabel = useMemo(() => {
     if (isLicenseActive) {
       return `${licenseState?.plan_name?.trim() || "Licensed"} plan`;
@@ -164,7 +159,7 @@ export function LeftNav(props: {
             </ul>
           </div>
         </div>
-        {updateAvailable && canInstallUpdate && (
+        {updateAvailable && (
           <Button
             onClick={() => void installUpdate()}
             disabled={isInstallingUpdate}
