@@ -35,6 +35,7 @@ import {
   type DataAction,
   type DataKey,
   type NewTableDataState,
+  type TableDataState,
   useConnectionStore,
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
@@ -135,6 +136,7 @@ type WindowPatchBuckets = Partial<
 >;
 
 type PatchMapEntry = {
+  tableData?: TableDataState;
   tableWindow: TableWindow;
   patches: WindowPatchBuckets;
 };
@@ -282,6 +284,29 @@ function getTabPatchMap(tabId: string): PatchMap | null {
   const s = useConnectionStore.getState();
   const tabPatchMap = (s.dataPatchMap[tabId] ?? {}) as unknown as PatchMap;
   return patchMapHasAnyChanges(tabPatchMap) ? tabPatchMap : null;
+}
+
+function hydratePatchMapWithLatestTableData(
+  tabId: string,
+  patchMap: PatchMap
+): PatchMap {
+  const s = useConnectionStore.getState();
+  const out: PatchMap = {};
+
+  for (const [windowId, entry] of Object.entries(patchMap)) {
+    const key = tableKey(
+      tabId,
+      entry.tableWindow.table.schema,
+      entry.tableWindow.table.name
+    );
+    const latestTableData = s.tableDataMap[key];
+    out[windowId] = {
+      ...entry,
+      tableData: latestTableData ?? entry.tableData,
+    };
+  }
+
+  return out;
 }
 
 function getOpenTableWindows(
@@ -440,7 +465,8 @@ export function useConnectionActions(
       await refreshRuntimeConnection();
     }
 
-    const tabDirty = tabHasChanges(activeProfileScreen);
+    const patchMap = getTabPatchMap(activeProfileScreen);
+    const tabDirty = !!patchMap || tabHasChanges(activeProfileScreen);
     if (tabDirty) {
       setWarningRefresh(true);
       return;
@@ -487,7 +513,9 @@ export function useConnectionActions(
   }, [activeProfileScreen, openWindows, engine]);
 
   const getPatchMap = useCallback((): PatchMap | null => {
-    return getTabPatchMap(activeProfileScreen);
+    const patchMap = getTabPatchMap(activeProfileScreen);
+    if (!patchMap) return null;
+    return hydratePatchMapWithLatestTableData(activeProfileScreen, patchMap);
   }, [activeProfileScreen]);
 
   const applyMongoPatchEntry = useCallback(
@@ -853,10 +881,15 @@ export function useConnectionActions(
 
   const applyPatchesForCurrentTab = useCallback(async () => {
     if (isActiveTabLocked) return;
-    if (!runtimeConnectionId) return;
 
-    const patchMap = getTabPatchMap(activeProfileScreen);
+    const patchMap = getPatchMap();
     if (!patchMap) return;
+    const connectionId =
+      runtimeConnectionId ?? (await refreshRuntimeConnection());
+    if (!connectionId) {
+      setError("No active connection.");
+      return;
+    }
 
     try {
       const changedEntries = Object.values(
@@ -893,9 +926,33 @@ export function useConnectionActions(
         return;
       }
 
+      // Ensure relational UPDATE/DELETE generation can detect primary keys even
+      // when structure metadata has not been opened in the UI yet.
+      await Promise.all(
+        changedEntries.map(async (entry) => {
+          const constraints = entry.tableData?.constraints;
+          if (Array.isArray(constraints) && constraints.length > 0) return;
+
+          await loadTableData(
+            entry.tableWindow.table.schema,
+            entry.tableWindow.table.name,
+            { limit, offset },
+            {
+              refreshRows: false,
+              refreshMeta: true,
+              refreshForeignKeys: false,
+              refreshStats: false,
+            }
+          );
+        })
+      );
+
+      const latestPatchMap = getPatchMap();
+      if (!latestPatchMap) return;
+
       const store = useConnectionStore.getState();
       const safetyIssues = analyzePatchIdentitySafety(
-        patchMap,
+        latestPatchMap,
         engine ?? "postgres"
       );
       store.setVirtualKeySafety(activeProfileScreen, safetyIssues);
@@ -908,7 +965,7 @@ export function useConnectionActions(
         return;
       }
 
-      const sql = generateSqlFromPatches(patchMap, engine ?? "postgres", {
+      const sql = generateSqlFromPatches(latestPatchMap, engine ?? "postgres", {
         activeScreen: activeProfileScreen,
         getRowAt: store.getRowAt,
         getOriginalRowAt: store.getOriginalRowAt,
@@ -925,7 +982,7 @@ export function useConnectionActions(
         statements: sql,
         runBatch: async (statements) => {
           await operationExecuteTransaction({
-            connectionId: runtimeConnectionId,
+            connectionId,
             statements,
           });
           for (const statement of statements) {
@@ -936,7 +993,7 @@ export function useConnectionActions(
         },
         run: async (stmt) => {
           await runSqlWithHistory({
-            connectionId: runtimeConnectionId,
+            connectionId,
             sql: stmt,
           });
         },
