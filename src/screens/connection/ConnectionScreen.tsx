@@ -37,7 +37,6 @@ import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection
 import { resolveTabRuntimeConnectionId } from "src/lib/runtimeConnection";
 
 import { SplitPane } from "src/components/SplitPane";
-import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
@@ -55,6 +54,8 @@ import { ConnectionActionsProvider } from "./ConnectionActionsContext";
 import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
+import { registerConnectionTabCloseBridge } from "./connectionTabCloseBridge";
+import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
@@ -192,11 +193,6 @@ export function ConnectionScreen() {
    * ============================================================================= */
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [offset, setOffset] = useState(DEFAULT_OFFSET);
-  const [warningRefresh, setWarningRefresh] = useState(false);
-  const [pendingAppQuit, setPendingAppQuit] = useState(false);
-  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
-    null
-  );
   const [pendingTableAction, setPendingTableAction] = useState<
     "export" | "import" | "clone" | "truncate" | "drop" | null
   >(null);
@@ -236,9 +232,7 @@ export function ConnectionScreen() {
           return;
         }
 
-        setPendingCloseTabId(null);
-        setPendingAppQuit(true);
-        setWarningRefresh(true);
+        useUnsavedChangesDialogStore.getState().openForAppQuit();
       })
       .then((off) => {
         if (disposed) {
@@ -258,9 +252,7 @@ export function ConnectionScreen() {
     discardAllConnectionChanges();
     await usePersistentStore.getState().saveNow();
 
-    setWarningRefresh(false);
-    setPendingCloseTabId(null);
-    setPendingAppQuit(false);
+    useUnsavedChangesDialogStore.getState().close();
 
     await quitApp();
   }, [quitApp]);
@@ -600,11 +592,8 @@ export function ConnectionScreen() {
     setLimit,
     setOffset,
 
-    setWarningRefresh,
-    setPendingCloseTabId,
     setError,
     setShowSaveDialog,
-    pendingCloseTabId,
 
     loadTableData,
     removeTableData,
@@ -631,6 +620,19 @@ export function ConnectionScreen() {
   const { isRefreshing, triggerRefresh } = useRefreshTrigger(() =>
     actionsRef.current.refresh()
   );
+
+  const discardAndQuitAppRef = useRef(discardAndQuitApp);
+  discardAndQuitAppRef.current = discardAndQuitApp;
+
+  useEffect(() => {
+    registerConnectionTabCloseBridge({
+      closeTab: (tabId, skipCheck) =>
+        actionsRef.current.closeTab(tabId, skipCheck),
+      discardChanges: () => actionsRef.current.discardChanges(),
+      discardAndQuitApp: () => discardAndQuitAppRef.current(),
+    });
+    return () => registerConnectionTabCloseBridge(null);
+  }, []);
 
   const sqlSafetyMode =
     activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
@@ -1032,23 +1034,6 @@ export function ConnectionScreen() {
               </div>
             )}
           </div>
-
-          <WarningRefreshDialog
-            open={warningRefresh}
-            onClose={() => {
-              setWarningRefresh(false);
-              setPendingCloseTabId(null);
-              setPendingAppQuit(false);
-            }}
-            onDiscard={() => {
-              if (pendingAppQuit) {
-                void discardAndQuitApp();
-                return;
-              }
-
-              void actions.discardChanges();
-            }}
-          />
 
           {error && (
             <ErrorDialog

@@ -5,9 +5,7 @@ import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
 import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
-import { connectionRemove } from "src/lib/tauri";
-import { tableKey, useLoadTableData } from "../hooks/useLoadTableData";
-import { useConnectionStore } from "../stores/connection";
+import { requestCloseConnectionTab } from "src/screens/connection/connectionTabClose";
 import { DbIcon } from "./icons/DbIcon";
 import { ContextMenu, type MenuItem } from "./common/ContextMenu";
 import { cn } from "../utils/cn";
@@ -49,16 +47,8 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
   const closeShortcut = useKeyboardShortcutsStore(
     (s) => s.shortcuts.closeCurrent
   );
-  const {
-    profileTabs,
-    removeTab,
-    activeProfileScreen,
-    setActiveProfileScreen,
-    openWindows,
-  } = useScreenStore();
-  const { tableDataMap } = useConnectionStore();
-  const { removeTableData } = useLoadTableData();
-
+  const { profileTabs, activeProfileScreen, setActiveProfileScreen } =
+    useScreenStore();
   // ✅ create window handle only in Tauri runtime
   const win = useMemo(() => {
     if (!isTauriRuntime()) return null;
@@ -117,64 +107,9 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     [setActiveProfileScreen]
   );
 
-  const handleTabClose = useCallback(
-    async (tabId: string) => {
-      const currentTab = profileTabs.find((tab) => tab.id === tabId);
-
-      const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
-
-      removeTab(tabId);
-
-      if (activeProfileScreen === tabId) {
-        setActiveProfileScreen(
-          newTabs.length > 0 ? newTabs[newTabs.length - 1].id : "main"
-        );
-      }
-
-      if (currentTab?.runtimeConnectionId) {
-        try {
-          await connectionRemove(currentTab.runtimeConnectionId);
-        } catch (err) {
-          console.error("Error removing runtime connection:", err);
-        }
-      }
-
-      const windows = openWindows[tabId] ?? [];
-      if (windows.length === 0) return;
-
-      const tableWindows = windows.filter((w) => w.type === "table");
-
-      await Promise.all(
-        tableWindows.map(async (w) => {
-          const { schema, name } = w.table;
-
-          const key = tableKey(tabId, schema, name);
-          const { connectionId } = tableDataMap[key] || { connectionId: null };
-
-          // ⚠️
-          // Recommend removeTableData signature: removeTableData(screenId, schema, name)
-          removeTableData(schema, name);
-
-          if (connectionId) {
-            try {
-              await connectionRemove(connectionId);
-            } catch (err) {
-              console.error("Error removing table connection:", err);
-            }
-          }
-        })
-      );
-    },
-    [
-      profileTabs,
-      removeTab,
-      activeProfileScreen,
-      setActiveProfileScreen,
-      openWindows,
-      tableDataMap,
-      removeTableData,
-    ]
-  );
+  const handleTabClose = useCallback((tabId: string) => {
+    void requestCloseConnectionTab(tabId);
+  }, []);
 
   const closeTabs = useCallback(
     async (tabIds: string[]) => {
@@ -210,9 +145,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
           disabled: ctx.tabIndex >= profileTabs.length - 1,
           onClick: () =>
             void closeTabs(
-              profileTabs
-                .slice(ctx.tabIndex + 1)
-                .map((tab) => tab.id)
+              profileTabs.slice(ctx.tabIndex + 1).map((tab) => tab.id)
             ),
         },
         { type: "sep" },

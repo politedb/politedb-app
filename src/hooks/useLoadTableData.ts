@@ -341,7 +341,8 @@ async function loadColumns(params: {
     .filter(isNonEmptyName);
 }
 
-function resolveEffectiveTableSort(
+/** Stable pagination ORDER BY only — not shown as a user sort in the table UI. */
+function resolveQueryTableSort(
   key: string,
   sortBy: TableSort | null | undefined,
   engine?: DatabaseEngine
@@ -1161,7 +1162,7 @@ async function startRowsStream(params: {
     sortBy,
   } = params;
 
-  const effectiveSort = resolveEffectiveTableSort(key, sortBy, engine);
+  const querySort = resolveQueryTableSort(key, sortBy, engine);
 
   const q = tableDataQuery(
     schema,
@@ -1169,7 +1170,7 @@ async function startRowsStream(params: {
     { limit, offset },
     filters,
     filterCombine,
-    effectiveSort,
+    querySort,
     engine
   );
 

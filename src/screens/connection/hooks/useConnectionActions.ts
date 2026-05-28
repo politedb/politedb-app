@@ -39,6 +39,8 @@ import {
   useConnectionStore,
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
+import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
+import { connectionTabHasChanges } from "src/screens/connection/tabDirty";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/hooks/queries";
 
@@ -83,12 +85,8 @@ export type UseConnectionActionsArgs = {
 
   refreshRuntimeConnection: () => Promise<string | null | undefined>;
 
-  setWarningRefresh: (v: boolean) => void;
-  setPendingCloseTabId: (v: string | null) => void;
   setError: (v: string | null) => void;
   setShowSaveDialog: (v: boolean) => void;
-
-  pendingCloseTabId: string | null;
 
   loadTableData: LoadTableDataFn;
   removeTableData: RemoveTableDataFn;
@@ -341,11 +339,8 @@ export function useConnectionActions(
     offset,
     setLimit,
     setOffset,
-    setWarningRefresh,
-    setPendingCloseTabId,
     setError,
     setShowSaveDialog,
-    pendingCloseTabId,
     loadTableData,
     removeTableData,
     refreshSchemaAndTables,
@@ -397,30 +392,10 @@ export function useConnectionActions(
     []
   );
 
-  const tabHasChanges = useCallback((tabId: string): boolean => {
-    const s = useConnectionStore.getState();
-
-    const derived = (
-      s as unknown as {
-        dirtyStateByScreen?: Record<string, { hasAnyChanges: boolean }>;
-      }
-    ).dirtyStateByScreen?.[tabId]?.hasAnyChanges;
-
-    if (typeof derived === "boolean") return derived;
-
-    const pm = s.dataPatchMap[tabId] as unknown as PatchMap | undefined;
-    if (patchMapHasAnyChanges(pm)) return true;
-
-    const nt = s.newTableData[tabId] as unknown as
-      | Record<string, unknown>
-      | undefined;
-    if (!nt) return false;
-
-    for (const winId of Object.keys(nt)) {
-      if (isValidNewTable(nt[winId])) return true;
-    }
-    return false;
-  }, []);
+  const tabHasChanges = useCallback(
+    (tabId: string) => connectionTabHasChanges(tabId),
+    []
+  );
 
   const openSql = useCallback(() => {
     openSqlEditor();
@@ -468,7 +443,7 @@ export function useConnectionActions(
     const patchMap = getTabPatchMap(activeProfileScreen);
     const tabDirty = !!patchMap || tabHasChanges(activeProfileScreen);
     if (tabDirty) {
-      setWarningRefresh(true);
+      useUnsavedChangesDialogStore.getState().openForRefresh();
       return;
     }
 
@@ -518,7 +493,6 @@ export function useConnectionActions(
   }, [
     tabHasChanges,
     activeProfileScreen,
-    setWarningRefresh,
     refreshSchemaAndTables,
     openWindows,
     loadTableData,
@@ -1199,7 +1173,9 @@ export function useConnectionActions(
     if (tabDirty) jobs.push(applyPatchesForCurrentTab());
 
     // keep old behavior: only save new table when not in "pending close tab" flow
-    if (pendingCloseTabId === null) jobs.push(saveNewTables());
+    if (useUnsavedChangesDialogStore.getState().pendingCloseTabId === null) {
+      jobs.push(saveNewTables());
+    }
 
     if (jobs.length) await Promise.all(jobs);
   }, [
@@ -1209,7 +1185,6 @@ export function useConnectionActions(
     activeProfileScreen,
     applyPatchesForCurrentTab,
     setError,
-    pendingCloseTabId,
     saveNewTables,
   ]);
 
@@ -1221,8 +1196,7 @@ export function useConnectionActions(
 
       try {
         if (!skipCheck && tabHasChanges(tabId)) {
-          setPendingCloseTabId(tabId);
-          setWarningRefresh(true);
+          useUnsavedChangesDialogStore.getState().openForTabClose(tabId);
           return;
         }
 
@@ -1272,8 +1246,6 @@ export function useConnectionActions(
     },
     [
       tabHasChanges,
-      setPendingCloseTabId,
-      setWarningRefresh,
       clearChanges,
       profileTabs,
       removeTab,
@@ -1304,6 +1276,9 @@ export function useConnectionActions(
   );
 
   const discardChanges = useCallback(async () => {
+    const pendingCloseTabId =
+      useUnsavedChangesDialogStore.getState().pendingCloseTabId;
+
     if (pendingCloseTabId) {
       clearChanges(pendingCloseTabId);
       await closeTab(pendingCloseTabId, true);
@@ -1312,8 +1287,7 @@ export function useConnectionActions(
       clearChanges(activeProfileScreen);
     }
 
-    setWarningRefresh(false);
-    setPendingCloseTabId(null);
+    useUnsavedChangesDialogStore.getState().close();
 
     if (!activeTableWindow) return;
 
@@ -1344,15 +1318,7 @@ export function useConnectionActions(
         filterCombine: activeTableFilter?.appliedFilterCombine ?? "AND",
       }
     );
-  }, [
-    pendingCloseTabId,
-    clearChanges,
-    closeTab,
-    activeProfileScreen,
-    setWarningRefresh,
-    setPendingCloseTabId,
-    activeTableWindow,
-  ]);
+  }, [clearChanges, closeTab, activeProfileScreen, activeTableWindow]);
 
   const renameRedisKey = useCallback(
     async (table: TableItem, nextName: string) => {

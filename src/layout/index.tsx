@@ -7,6 +7,7 @@ import { useLicenseStore } from "src/stores/license";
 import { TrialExpiredOverlay } from "src/screens/main/TrialExpiredOverlay";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { trackScreenView } from "src/lib/analytics";
+import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
 
 export function MainLayout() {
   const { activeProfileScreen, setActiveProfileScreen, profileTabs } =
@@ -43,7 +44,9 @@ export function MainLayout() {
   }, []);
 
   const isLicenseActive =
-    String(licenseState?.status ?? "").trim().toLowerCase() === "active";
+    String(licenseState?.status ?? "")
+      .trim()
+      .toLowerCase() === "active";
   const isTrialExpired = useMemo(() => {
     const expiresAt = Number(licenseState?.trial_expires_at ?? 0);
     return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
@@ -61,6 +64,8 @@ export function MainLayout() {
         {activeProfileScreen === "main" && <MainScreen />}
         {activeTab && <ConnectionScreen />}
       </div>
+      <UnsavedChangesDialogHost />
+
       {isAppLocked ? (
         <>
           <TrialExpiredOverlay

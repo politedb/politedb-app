@@ -50,7 +50,6 @@ import {
 } from "src/hooks/queries";
 import { TableForeignKey } from "src/types";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
-import { resolveDefaultTableSort } from "src/utils/tableSort";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 
 /* =============================================================================
@@ -184,24 +183,6 @@ export function MainTableDataPane(props: {
         activeTableWindow.table.name
       ),
     [profileId, activeTableWindow]
-  );
-
-  const catalogColumns = useConnectionStore(
-    (s) => s.tableDataMap[activeKey]?.columns ?? null
-  );
-  const catalogConstraints = useConnectionStore(
-    (s) => s.tableDataMap[activeKey]?.constraints ?? null
-  );
-
-  const effectiveSort = useMemo(
-    () =>
-      sortState ??
-      resolveDefaultTableSort({
-        columns: catalogColumns,
-        constraints: catalogConstraints,
-        engine,
-      }),
-    [sortState, catalogColumns, catalogConstraints, engine]
   );
 
   const {
@@ -372,7 +353,7 @@ export function MainTableDataPane(props: {
         refreshStats: false,
         filters: appliedFilters.length ? appliedFilters : undefined,
         filterCombine: appliedFilterCombine,
-        sortBy: effectiveSort,
+        sortBy: sortState,
       }
     )
       .then(() => {
@@ -395,7 +376,7 @@ export function MainTableDataPane(props: {
     activeQuerySignature,
     rowCountSignature,
     rowsDataSignature,
-    effectiveSort,
+    sortState,
     filterApplySeq,
   ]);
 
@@ -1247,7 +1228,7 @@ export function MainTableDataPane(props: {
                 appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
-                sortState={effectiveSort}
+                sortState={sortState}
                 setFilterVisible={setFilterBarVisible}
                 onFiltersChange={setFilters}
                 onFilterCombineChange={setFilterCombine}
@@ -1296,7 +1277,7 @@ export function MainTableDataPane(props: {
                 rowsVersion={hasError ? 0 : (rowsInfo?.version ?? 0)}
                 foreignKeyMap={foreignKeyMap}
                 onNavigateFk={handleNavigateFk}
-                sortState={effectiveSort}
+                sortState={sortState}
                 onChangeSort={(nextSort) => {
                   setSortState(nextSort);
                   if (renderOffset !== 0) {
