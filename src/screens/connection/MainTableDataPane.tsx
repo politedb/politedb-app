@@ -258,10 +258,9 @@ export function MainTableDataPane(props: {
 
   const rowsDataSignature = useMemo(
     () =>
-      `${activeKey}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
+      `${activeKey}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
     [
       activeKey,
-      offset,
       appliedFilterCombine,
       filterSignature,
       sortState,
@@ -489,9 +488,9 @@ export function MainTableDataPane(props: {
     rowsMatchRequestedOffset &&
     (rowsKnownEmpty ||
       (!rowsRunning &&
-      (hasAppliedFilters ||
-        typeof meta.rowCount !== "number" ||
-        loadedRowCount >= basePageTotal)));
+        (hasAppliedFilters ||
+          typeof meta.rowCount !== "number" ||
+          loadedRowCount >= basePageTotal)));
   const showingStalePage =
     !currentPageLoaded &&
     (settledPagination.limit !== limit || settledPagination.offset !== offset);

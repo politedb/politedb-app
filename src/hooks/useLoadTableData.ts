@@ -1301,7 +1301,7 @@ export function useLoadTableData() {
                   tableName,
                   limit,
                   offset,
-                  resetCache: !!flags.force,
+                  resetCache: !!flags.force || !!flags.forceRows,
                   forceRefresh: !!flags.forceRefresh,
                 });
 
@@ -1377,7 +1377,7 @@ export function useLoadTableData() {
                   tableName,
                   limit,
                   offset,
-                  resetCache: !!flags.force,
+                  resetCache: !!flags.force || !!flags.forceRows,
                   forceRefresh: !!flags.forceRefresh,
                 });
 
@@ -1533,7 +1533,7 @@ export function useLoadTableData() {
             void (async () => {
               try {
                 // Force rows refresh invalidates only the rows cache.
-                const shouldReset = !!flags.force;
+                const shouldReset = !!flags.force || !!flags.forceRows;
 
                 await startRowsStream({
                   key,

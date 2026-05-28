@@ -302,6 +302,8 @@ export function MenuBar({
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
+  const [progressVisible, setProgressVisible] = useState(false);
+  const [progressValue, setProgressValue] = useState(20);
   const safeModeRef = useRef<HTMLDivElement | null>(null);
   const savePersistentNow = usePersistentStore((s) => s.saveNow);
 
@@ -342,6 +344,23 @@ export function MenuBar({
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
   }, [safeModeOpen]);
+
+  useEffect(() => {
+    if (typeof tableRowsLoadPercent === "number") {
+      setProgressVisible(true);
+      setProgressValue(
+        Math.max(30, Math.min(99, Math.round(tableRowsLoadPercent)))
+      );
+      return;
+    }
+    if (!progressVisible) return;
+    setProgressValue(100);
+    const timer = window.setTimeout(() => {
+      setProgressVisible(false);
+      setProgressValue(0);
+    }, 320);
+    return () => window.clearTimeout(timer);
+  }, [tableRowsLoadPercent, progressVisible]);
 
   const setQuerySafetyMode = useCallback(
     async (mode: "default" | "lock" | "safe") => {
@@ -665,18 +684,18 @@ export function MenuBar({
                 </div>
               )}
 
-              {typeof tableRowsLoadPercent === "number" ? (
+              {progressVisible ? (
                 <div
                   class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[3px] bg-neutral-100"
                   role="progressbar"
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={tableRowsLoadPercent}
+                  aria-valuenow={progressValue}
                   aria-label="Loading table rows"
                 >
                   <div
                     class="h-full rounded-sm bg-blue-500 transition-[width] duration-200 ease-out"
-                    style={{ width: `${tableRowsLoadPercent}%` }}
+                    style={{ width: `${progressValue}%` }}
                   />
                 </div>
               ) : null}

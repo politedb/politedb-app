@@ -477,15 +477,46 @@ export function useConnectionActions(
     const tableWindows = getOpenTableWindows(openWindows, activeProfileScreen);
     if (tableWindows.length === 0) return;
 
+    const store = useConnectionStore.getState();
+    const uniqueTableWindows = Array.from(
+      new Map(
+        tableWindows.map((window) => [
+          tableKey(
+            activeProfileScreen,
+            window.table.schema,
+            window.table.name
+          ),
+          window,
+        ])
+      ).values()
+    );
+
     await Promise.all(
-      tableWindows.map((window) =>
-        loadTableData(
+      uniqueTableWindows.map((window) => {
+        const key = tableKey(
+          activeProfileScreen,
+          window.table.schema,
+          window.table.name
+        );
+        const applied = store.tableFilterByKey[key];
+        const hasAppliedFilters = Boolean(
+          applied?.appliedFilters?.some(
+            (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
+          )
+        );
+
+        return loadTableData(
           window.table.schema,
           window.table.name,
           { limit, offset },
-          { force: true, forceRefresh: true }
-        )
-      )
+          {
+            force: true,
+            forceRefresh: true,
+            filters: hasAppliedFilters ? applied.appliedFilters : undefined,
+            filterCombine: applied?.appliedFilterCombine ?? "AND",
+          }
+        );
+      })
     );
   }, [
     tabHasChanges,
@@ -1289,6 +1320,14 @@ export function useConnectionActions(
 
     if (!activeTableWindow) return;
 
+    const activeTableKey = tableKey(
+      activeProfileScreen,
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+    const activeTableFilter =
+      useConnectionStore.getState().tableFilterByKey[activeTableKey];
+
     // 🔥 Reload table data after discard so rows are restored from DB
     await loadTableData(
       activeTableWindow.table.schema,
@@ -1300,6 +1339,12 @@ export function useConnectionActions(
         refreshRows: true,
         refreshMeta: false,
         refreshStats: false,
+        filters:
+          activeTableFilter?.appliedFilters &&
+          activeTableFilter.appliedFilters.length > 0
+            ? activeTableFilter.appliedFilters
+            : undefined,
+        filterCombine: activeTableFilter?.appliedFilterCombine ?? "AND",
       }
     );
   }, [
