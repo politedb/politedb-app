@@ -139,8 +139,10 @@ export function useSchemaTablesPanel(args: {
     if (!connectionId) return false;
     if (meta.error && !meta.loading) return false;
     if (meta.loaded) return false;
+    // Background schema refresh keeps prior table list visible — don't block the data pane.
+    if (meta.loading && (meta.tables?.length ?? 0) > 0) return false;
     return meta.loading;
-  }, [connectionId, meta.loading, meta.loaded, meta.error]);
+  }, [connectionId, meta.loading, meta.loaded, meta.error, meta.tables]);
 
   return {
     meta,

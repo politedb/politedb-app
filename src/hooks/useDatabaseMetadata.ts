@@ -136,26 +136,50 @@ export function useDatabaseMetadata() {
       }
 
       const columnsOnly =
-        existing?.loaded &&
-        !force &&
-        includeColumns &&
-        !existing.columnsLoaded;
+        existing?.loaded && !force && includeColumns && !existing.columnsLoaded;
+
+      // Background schema refresh: keep sidebar + main pane visible while lists reload.
+      const softForce = force && !!existing?.loaded && !columnsOnly;
 
       // Start/restart load — keep loaded=true when only enriching columns (SQL editor)
       setCache(metaKey, {
         engine,
-        schemas: force ? [] : (existing?.schemas ?? []),
-        functions: force ? [] : (existing?.functions ?? []),
-        tables: force ? [] : (existing?.tables ?? []),
+        schemas: softForce
+          ? (existing?.schemas ?? [])
+          : force
+            ? []
+            : (existing?.schemas ?? []),
+        functions: softForce
+          ? (existing?.functions ?? [])
+          : force
+            ? []
+            : (existing?.functions ?? []),
+        tables: softForce
+          ? (existing?.tables ?? [])
+          : force
+            ? []
+            : (existing?.tables ?? []),
         columnsByTable:
-          force && includeColumns ? {} : (existing?.columnsByTable ?? {}),
+          force && includeColumns && !softForce
+            ? {}
+            : (existing?.columnsByTable ?? {}),
         columnsLoaded:
-          includeColumns && force ? false : (existing?.columnsLoaded ?? false),
-        version: force ? "" : (existing?.version ?? ""),
+          includeColumns && force && !softForce
+            ? false
+            : (existing?.columnsLoaded ?? false),
+        version: softForce
+          ? (existing?.version ?? "")
+          : force
+            ? ""
+            : (existing?.version ?? ""),
         loading: true,
-        loaded: columnsOnly ? true : false,
+        loaded: columnsOnly || softForce ? true : false,
         error: null,
-        progress: columnsOnly ? (existing?.progress ?? 35) : 0,
+        progress: columnsOnly
+          ? (existing?.progress ?? 35)
+          : softForce
+            ? (existing?.progress ?? 0)
+            : 0,
         stage: columnsOnly ? "columns" : "schemas",
       });
 
@@ -615,7 +639,6 @@ export function useDatabaseMetadata() {
         currentDatabase,
         includeColumns = false,
       } = args;
-      invalidate({ metaKey });
       return await load({
         metaKey,
         engine,

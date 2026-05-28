@@ -54,6 +54,7 @@ import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
 import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
+import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
@@ -626,6 +627,11 @@ export function ConnectionScreen() {
   useEffect(() => {
     actionsRef.current = actionsRaw;
   }, [actionsRaw]);
+
+  const { isRefreshing, triggerRefresh } = useRefreshTrigger(() =>
+    actionsRef.current.refresh()
+  );
+
   const sqlSafetyMode =
     activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
   const isProfileLocked = sqlSafetyMode === "lock";
@@ -633,7 +639,7 @@ export function ConnectionScreen() {
   const actions = useMemo(() => {
     return {
       openSql: () => actionsRef.current.openSql(),
-      refresh: () => actionsRef.current.refresh(),
+      refresh: triggerRefresh,
       getPatchMap: () => actionsRef.current.getPatchMap(),
       getNewTableSql: () => actionsRef.current.getNewTableSql(),
       beforeSaveChanges: () => actionsRef.current.beforeSaveChanges(),
@@ -681,7 +687,7 @@ export function ConnectionScreen() {
         actionsRef.current.deleteRedisKey(table),
       openSearch: () => setSearchDialogOpen(true),
     };
-  }, [isProfileLocked]);
+  }, [isProfileLocked, triggerRefresh]);
 
   const patchMap = useMemo(() => {
     return actions.getPatchMap() || ({} as PatchMap);
@@ -902,7 +908,8 @@ export function ConnectionScreen() {
             tableRowsLoadPercent={tableRowsLoadPercent}
             onViewModeChange={toggleViewMode}
             openSQLWindow={actions.openSql}
-            onRefresh={() => void actions.refresh()}
+            onRefresh={triggerRefresh}
+            isRefreshing={isRefreshing}
             onSearchOpen={() => setSearchDialogOpen(true)}
             onOpenAiAssistant={openAiAssistant}
             onOpenDiagram={openDiagram}

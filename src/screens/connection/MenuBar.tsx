@@ -57,6 +57,7 @@ interface Props {
   onViewModeChange?: (mode: TabViewMode) => void;
   openSQLWindow?: () => void;
   onRefresh?: () => void;
+  isRefreshing?: boolean;
   onSearchOpen?: () => void;
   onOpenAiAssistant?: () => void;
   onOpenDiagram?: () => void;
@@ -293,6 +294,7 @@ export function MenuBar({
   tableRowsLoadPercent = null,
   onViewModeChange,
   onRefresh,
+  isRefreshing = false,
   openSQLWindow,
   onSearchOpen,
   onOpenAiAssistant,
@@ -731,8 +733,19 @@ export function MenuBar({
 
           <ToolbarDivider />
 
-          <IconButton title="Refresh" onClick={onRefresh}>
-            <RefreshCwIcon className="size-4.5 text-neutral-700" />
+          <IconButton
+            title={isRefreshing ? "Refreshing..." : "Refresh"}
+            onClick={onRefresh}
+            disabled={isRefreshing}
+          >
+            <span
+              class={cn(
+                "inline-flex items-center justify-center",
+                isRefreshing && "animate-spin"
+              )}
+            >
+              <RefreshCwIcon className="size-4.5 text-neutral-700" />
+            </span>
           </IconButton>
 
           <IconButton title="Search" onClick={onSearchOpen}>

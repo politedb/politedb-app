@@ -50,6 +50,7 @@ import {
 } from "src/hooks/queries";
 import { TableForeignKey } from "src/types";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
+import { resolveDefaultTableSort } from "src/utils/tableSort";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 
 /* =============================================================================
@@ -185,6 +186,24 @@ export function MainTableDataPane(props: {
     [profileId, activeTableWindow]
   );
 
+  const catalogColumns = useConnectionStore(
+    (s) => s.tableDataMap[activeKey]?.columns ?? null
+  );
+  const catalogConstraints = useConnectionStore(
+    (s) => s.tableDataMap[activeKey]?.constraints ?? null
+  );
+
+  const effectiveSort = useMemo(
+    () =>
+      sortState ??
+      resolveDefaultTableSort({
+        columns: catalogColumns,
+        constraints: catalogConstraints,
+        engine,
+      }),
+    [sortState, catalogColumns, catalogConstraints, engine]
+  );
+
   const {
     filterBarVisible,
     filters,
@@ -198,6 +217,32 @@ export function MainTableDataPane(props: {
     handleApplyFilters,
     handleClearFilters,
   } = useTableFilter(startedRef, activeKey);
+
+  const applyFilters = useCallback(
+    (
+      newFilters: Parameters<typeof handleApplyFilters>[0],
+      combine: Parameters<typeof handleApplyFilters>[1],
+      tableKey: string
+    ) => {
+      if (offset !== 0) {
+        pageChange(limit, 0);
+        setSettledPagination({ limit, offset: 0 });
+      }
+      handleApplyFilters(newFilters, combine, tableKey);
+    },
+    [offset, limit, pageChange, handleApplyFilters]
+  );
+
+  const clearFilters = useCallback(
+    (visible: boolean = true) => {
+      if (offset !== 0) {
+        pageChange(limit, 0);
+        setSettledPagination({ limit, offset: 0 });
+      }
+      handleClearFilters(visible);
+    },
+    [offset, limit, pageChange, handleClearFilters]
+  );
 
   const setSelectedRowDetail = useConnectionStore(
     (s) => s.setSelectedRowDetail
@@ -236,6 +281,7 @@ export function MainTableDataPane(props: {
     [appliedFilters]
   );
 
+  // User sort only — default PK sort is applied inside loadTableData without re-fetch.
   const activeQuerySignature = useMemo(
     () =>
       `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
@@ -326,17 +372,20 @@ export function MainTableDataPane(props: {
         refreshStats: false,
         filters: appliedFilters.length ? appliedFilters : undefined,
         filterCombine: appliedFilterCombine,
-        sortBy: sortState,
+        sortBy: effectiveSort,
       }
-    ).catch(() => {
-      // Error state is already written into the store by loadTableData.
-      rerender();
-    });
-
-    if (shouldRefreshRowCount) {
-      loadedRowCountSignatureByTable.set(activeKey, rowCountSignature);
-    }
-    loadedRowsDataSignatureByTable.set(activeKey, rowsDataSignature);
+    )
+      .then(() => {
+        if (shouldRefreshRowCount) {
+          loadedRowCountSignatureByTable.set(activeKey, rowCountSignature);
+        }
+        loadedRowsDataSignatureByTable.set(activeKey, rowsDataSignature);
+        rerender();
+      })
+      .catch(() => {
+        // Error state is already written into the store by loadTableData.
+        rerender();
+      });
   }, [
     activeTableWindow,
     activeKey,
@@ -346,7 +395,7 @@ export function MainTableDataPane(props: {
     activeQuerySignature,
     rowCountSignature,
     rowsDataSignature,
-    sortState,
+    effectiveSort,
     filterApplySeq,
   ]);
 
@@ -475,7 +524,6 @@ export function MainTableDataPane(props: {
   const columnsLoaded =
     Array.isArray(meta.columns) &&
     (engine === "mongo" || engine === "cassandra" || meta.columns.length > 0);
-  const foreignKeysLoaded = Array.isArray(meta.foreignKeys);
   const rowsKnownEmpty =
     !!rowsInfo &&
     rowsMatchRequestedOffset &&
@@ -531,41 +579,6 @@ export function MainTableDataPane(props: {
       prev.limit === limit && prev.offset === offset ? prev : { limit, offset }
     );
   }, [currentPageLoaded, limit, offset]);
-
-  // Foreign key metadata powers cross-table navigation, but it can be loaded
-  // after the first page of rows is already visible.
-  useEffect(() => {
-    if (viewMode !== "data") return;
-    if (!activeTableWindow) return;
-    if (meta.busy) return;
-    if (meta.error || rowsInfo?.error) return;
-    if (foreignKeysLoaded) return;
-    if (!columnsLoaded) return;
-    if (!rowsInfo) return;
-    if (!currentPageLoaded) return;
-
-    void loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      { limit, offset },
-      {
-        refreshRows: false,
-        refreshForeignKeys: true,
-        refreshStats: false,
-      }
-    );
-  }, [
-    viewMode,
-    activeTableWindow,
-    meta.busy,
-    foreignKeysLoaded,
-    columnsLoaded,
-    rowsInfo,
-    currentPageLoaded,
-    loadTableData,
-    limit,
-    offset,
-  ]);
 
   /* ===========================================================================
    * Mutations
@@ -1234,12 +1247,12 @@ export function MainTableDataPane(props: {
                 appliedFilters={appliedFilters}
                 limit={limit}
                 offset={offset}
-                sortState={sortState}
+                sortState={effectiveSort}
                 setFilterVisible={setFilterBarVisible}
                 onFiltersChange={setFilters}
                 onFilterCombineChange={setFilterCombine}
-                onApply={handleApplyFilters}
-                onClear={handleClearFilters}
+                onApply={applyFilters}
+                onClear={clearFilters}
                 onExport={onExportOpen}
                 onImport={onImportOpen}
                 queryError={hasError}
@@ -1283,7 +1296,7 @@ export function MainTableDataPane(props: {
                 rowsVersion={hasError ? 0 : (rowsInfo?.version ?? 0)}
                 foreignKeyMap={foreignKeyMap}
                 onNavigateFk={handleNavigateFk}
-                sortState={sortState}
+                sortState={effectiveSort}
                 onChangeSort={(nextSort) => {
                   setSortState(nextSort);
                   if (renderOffset !== 0) {

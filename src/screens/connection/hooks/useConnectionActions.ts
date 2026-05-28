@@ -481,11 +481,7 @@ export function useConnectionActions(
     const uniqueTableWindows = Array.from(
       new Map(
         tableWindows.map((window) => [
-          tableKey(
-            activeProfileScreen,
-            window.table.schema,
-            window.table.name
-          ),
+          tableKey(activeProfileScreen, window.table.schema, window.table.name),
           window,
         ])
       ).values()
@@ -510,8 +506,9 @@ export function useConnectionActions(
           window.table.name,
           { limit, offset },
           {
-            force: true,
             forceRefresh: true,
+            refreshRows: true,
+            refreshRowCount: true,
             filters: hasAppliedFilters ? applied.appliedFilters : undefined,
             filterCombine: applied?.appliedFilterCombine ?? "AND",
           }

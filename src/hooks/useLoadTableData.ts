@@ -22,6 +22,7 @@ function resolveCassandraKeyspaceForLoad(
 }
 import { connectProfileOnce } from "src/lib/runtimeConnection";
 import {
+  diagramTableColumnsQuery,
   tableColumnsQuery,
   tableDataQuery,
   tableOidQuery,
@@ -53,6 +54,10 @@ import {
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
 import type { DatabaseEngine } from "src/types";
 import { retryAsync } from "src/utils/common";
+import {
+  cellIsTruthyPrimary,
+  resolveDefaultTableSort,
+} from "src/utils/tableSort";
 
 // =============================================================================
 // Types & Constants
@@ -72,7 +77,15 @@ export const DEFAULT_OFFSET = 0;
 
 const RETRY_ATTEMPTS = 8;
 const inflightLoadBySignature = new Map<string, Promise<void>>();
+const inflightLoadByTableKey = new Map<string, Promise<void>>();
 const latestLoadSignatureByKey = new Map<string, string>();
+const rowsInflightByQueryKey = new Map<string, Promise<void>>();
+const inflightRowCountByKey = new Map<
+  string,
+  Promise<{ value: number; estimated: boolean }>
+>();
+const inflightSizeInfoByKey = new Map<string, Promise<unknown>>();
+const inflightForeignKeysByKey = new Map<string, Promise<unknown[]>>();
 
 const EMPTY_META = {
   columns: null,
@@ -102,7 +115,11 @@ export type LoadFlags = {
   sortBy?: TableSort | null;
 };
 
-type ColumnRow = { name: string | null; db_type: string | null };
+type ColumnRow = {
+  name: string | null;
+  db_type: string | null;
+  is_primary?: boolean;
+};
 
 // =============================================================================
 // Helpers
@@ -182,14 +199,9 @@ function computeLoadPlan(params: {
   const hasRowCount = typeof prev.rowCount === "number" && prev.rowCount >= 0;
   const hasSizeInfo = !!prev.sizeInfo;
 
-  const hasStructure =
-    Array.isArray(prev.structure) && prev.structure.length > 0;
-  const hasConstraints =
-    Array.isArray(prev.constraints) && prev.constraints.length > 0;
   const hasForeignKeys = Array.isArray(prev.foreignKeys);
 
   const isFirstLoad = !hasColumns || !hasRowsWindow;
-  const metaMissing = !hasStructure || !hasConstraints;
 
   // Columns are blocking requirement for UI
   const needColumns = force || isFirstLoad || !hasColumns;
@@ -207,9 +219,11 @@ function computeLoadPlan(params: {
   const needRowCount =
     force ||
     refreshRowCount ||
+    (isFirstLoad && !hasRowCount) ||
     (!isFirstLoad && (!hasRowCount || refreshStats));
   const needSizeInfo = force || !hasSizeInfo || refreshStats;
-  const needMeta = force || refreshMeta || (!isFirstLoad && metaMissing);
+  // Structure/constraints load only on explicit refreshMeta (Structure tab).
+  const needMeta = force || refreshMeta;
   const needForeignKeys = force || refreshForeignKeys || !hasForeignKeys;
 
   const needAnyMetaWork =
@@ -309,7 +323,8 @@ async function loadColumns(params: {
   addLogQuery: (sql: string) => void;
 }): Promise<ColumnRow[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
-  const q = tableColumnsQuery(schema, tableName, engine);
+  const diagramQ = diagramTableColumnsQuery(schema, tableName, engine);
+  const q = diagramQ ?? tableColumnsQuery(schema, tableName, engine);
   const res = await runSqlQuery(connId, q);
   addLogQuery(q);
 
@@ -320,12 +335,75 @@ async function loadColumns(params: {
       if (engine === "clickhouse") {
         db_type = normalizeClickhouseDbType(db_type, cellToString(r?.[2]));
       }
-      return { name, db_type };
+      const is_primary = diagramQ ? cellIsTruthyPrimary(r?.[2]) : undefined;
+      return { name, db_type, is_primary };
     })
     .filter(isNonEmptyName);
 }
 
+function resolveEffectiveTableSort(
+  key: string,
+  sortBy: TableSort | null | undefined,
+  engine?: DatabaseEngine
+): TableSort | null {
+  if (sortBy) return sortBy;
+  const meta = useConnectionStore.getState().tableDataMap[key];
+  return resolveDefaultTableSort({
+    columns: meta?.columns as ColumnRow[] | null | undefined,
+    constraints: meta?.constraints ?? null,
+    engine,
+  });
+}
+
+function rowCountCacheKey(params: {
+  schema: string;
+  tableName: string;
+  engine?: DatabaseEngine;
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
+  exact?: boolean;
+}) {
+  return JSON.stringify({
+    schema: params.schema,
+    table: params.tableName,
+    engine: params.engine ?? "",
+    exact: !!params.exact,
+    combine: params.filterCombine ?? "AND",
+    filters: (params.filters ?? []).map((f) => ({
+      column: f.column ?? "",
+      operator: f.operator ?? "",
+      value: f.value ?? "",
+      enabled: !!f.enabled,
+    })),
+  });
+}
+
 async function loadRowCount(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+  engine?: DatabaseEngine;
+  addLogQuery: (sql: string) => void;
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
+  exact?: boolean;
+}): Promise<{ value: number; estimated: boolean }> {
+  const cacheKey = rowCountCacheKey(params);
+  const inflight = inflightRowCountByKey.get(cacheKey);
+  if (inflight) return inflight;
+
+  const task = loadRowCountOnce(params);
+  inflightRowCountByKey.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    if (inflightRowCountByKey.get(cacheKey) === task) {
+      inflightRowCountByKey.delete(cacheKey);
+    }
+  }
+}
+
+async function loadRowCountOnce(params: {
   connId: string;
   schema: string;
   tableName: string;
@@ -398,6 +476,34 @@ async function loadRowCount(params: {
 }
 
 async function loadSizeInfo(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+  engine?: DatabaseEngine;
+  addLogQuery: (sql: string) => void;
+}): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
+  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  const inflight = inflightSizeInfoByKey.get(cacheKey);
+  if (inflight) {
+    return inflight as Promise<{
+      totalSize: string;
+      dataSize: string;
+      indexSize: string;
+    }>;
+  }
+
+  const task = loadSizeInfoOnce(params);
+  inflightSizeInfoByKey.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    if (inflightSizeInfoByKey.get(cacheKey) === task) {
+      inflightSizeInfoByKey.delete(cacheKey);
+    }
+  }
+}
+
+async function loadSizeInfoOnce(params: {
   connId: string;
   schema: string;
   tableName: string;
@@ -973,6 +1079,28 @@ async function loadForeignKeys(params: {
   engine?: DatabaseEngine;
   addLogQuery: (sql: string) => void;
 }): Promise<any[]> {
+  const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
+  const inflight = inflightForeignKeysByKey.get(cacheKey);
+  if (inflight) return inflight;
+
+  const task = loadForeignKeysOnce(params);
+  inflightForeignKeysByKey.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    if (inflightForeignKeysByKey.get(cacheKey) === task) {
+      inflightForeignKeysByKey.delete(cacheKey);
+    }
+  }
+}
+
+async function loadForeignKeysOnce(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+  engine?: DatabaseEngine;
+  addLogQuery: (sql: string) => void;
+}): Promise<any[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (
@@ -1033,86 +1161,121 @@ async function startRowsStream(params: {
     sortBy,
   } = params;
 
+  const effectiveSort = resolveEffectiveTableSort(key, sortBy, engine);
+
   const q = tableDataQuery(
     schema,
     tableName,
     { limit, offset },
     filters,
     filterCombine,
-    sortBy,
+    effectiveSort,
     engine
   );
-  addLogQuery(q);
 
-  const store = useConnectionStore.getState();
-
-  store.initRows(key, DEFAULT_ROWS_CAP);
-
-  // Cancel previous stream for this table if any
-  const old = store.getRowsWindowInfo(key);
-  const oldOpId = old?.opId;
-  if (oldOpId) {
-    try {
-      await operationCancel(oldOpId);
-    } catch {}
+  if (!forceRefresh) {
+    const inflight = rowsInflightByQueryKey.get(q);
+    if (inflight) return inflight;
   }
 
-  const rowsOpId = await retryAsync(
-    () =>
-      startSqlQueryStream(connId, q, {
-        batchSize: 200,
-        maxRows: limit,
-      }),
-    {
-      attempts: RETRY_ATTEMPTS,
-      shouldRetry: (err) => Boolean(parseBusyOpId(err)),
-      onRetry: async (err) => {
-        const busyOpId = parseBusyOpId(err);
-        if (!busyOpId) return;
+  const streamTask = (async () => {
+    addLogQuery(q);
 
-        // Best effort: ask backend to cancel the stream currently holding the lock.
-        try {
-          await operationCancel(busyOpId);
-        } catch {}
-      },
-      delayMs: (attempt) => 40 * attempt,
+    const store = useConnectionStore.getState();
+
+    store.initRows(key, DEFAULT_ROWS_CAP);
+
+    // Cancel previous stream for this table if any
+    const old = store.getRowsWindowInfo(key);
+    const oldOpId = old?.opId;
+    if (oldOpId) {
+      try {
+        await operationCancel(oldOpId);
+      } catch {}
     }
-  );
 
-  const cap = Math.max(1000, limit * 4);
+    const rowsOpId = await retryAsync(
+      () =>
+        startSqlQueryStream(connId, q, {
+          batchSize: 200,
+          maxRows: limit,
+        }),
+      {
+        attempts: RETRY_ATTEMPTS,
+        shouldRetry: (err) => Boolean(parseBusyOpId(err)),
+        onRetry: async (err) => {
+          const busyOpId = parseBusyOpId(err);
+          if (!busyOpId) return;
 
-  // Begin stream in store (resets cache if requested)
-  store.beginRowsStream(key, rowsOpId, cap, offset, resetCache, forceRefresh);
+          // Best effort: ask backend to cancel the stream currently holding the lock.
+          try {
+            await operationCancel(busyOpId);
+          } catch {}
+        },
+        delayMs: (attempt) => 40 * attempt,
+      }
+    );
 
-  let unsub: (() => void) | null = null;
+    const cap = Math.max(1000, limit * 4);
 
-  unsub = await operationBus.subscribe(rowsOpId, {
-    onChunk: (chunk: TableChunk) => {
-      useConnectionStore.getState().applyRowsChunk(key, rowsOpId, chunk);
-    },
+    // Begin stream in store (resets cache if requested)
+    store.beginRowsStream(key, rowsOpId, cap, offset, resetCache, forceRefresh);
 
-    onDone: () => {
-      const cur = useConnectionStore.getState().getRowsWindowInfo(key);
-      if (!cur || cur.opId !== rowsOpId) return;
-      try {
-        unsub?.();
-      } catch {}
-      unsub = null;
-      useConnectionStore.getState().endRowsStream(key, rowsOpId);
-    },
+    let unsub: (() => void) | null = null;
 
-    onError: (err: any) => {
-      const cur = useConnectionStore.getState().getRowsWindowInfo(key);
-      if (!cur || cur.opId !== rowsOpId) return;
-      try {
-        unsub?.();
-      } catch {}
-      unsub = null;
-      useConnectionStore
-        .getState()
-        .failRowsStream(key, rowsOpId, getErrorMessage(err));
-    },
-  });
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        try {
+          unsub?.();
+        } catch {}
+        unsub = null;
+        fn();
+      };
+
+      void operationBus
+        .subscribe(rowsOpId, {
+          onChunk: (chunk: TableChunk) => {
+            useConnectionStore.getState().applyRowsChunk(key, rowsOpId, chunk);
+          },
+          onDone: () => {
+            const cur = useConnectionStore.getState().getRowsWindowInfo(key);
+            if (!cur || cur.opId !== rowsOpId) {
+              finish(resolve);
+              return;
+            }
+            useConnectionStore.getState().endRowsStream(key, rowsOpId);
+            finish(resolve);
+          },
+          onError: (err: unknown) => {
+            const cur = useConnectionStore.getState().getRowsWindowInfo(key);
+            if (!cur || cur.opId !== rowsOpId) {
+              finish(() => reject(err));
+              return;
+            }
+            useConnectionStore
+              .getState()
+              .failRowsStream(key, rowsOpId, getErrorMessage(err));
+            finish(() => reject(err));
+          },
+        })
+        .then((unsubFn) => {
+          unsub = unsubFn;
+        })
+        .catch((err) => finish(() => reject(err)));
+    });
+  })();
+
+  rowsInflightByQueryKey.set(q, streamTask);
+  try {
+    await streamTask;
+  } finally {
+    if (rowsInflightByQueryKey.get(q) === streamTask) {
+      rowsInflightByQueryKey.delete(q);
+    }
+  }
 }
 
 // =============================================================================
@@ -1175,6 +1338,16 @@ export function useLoadTableData() {
       const existingLoad = inflightLoadBySignature.get(loadSignature);
       if (existingLoad) {
         return existingLoad;
+      }
+
+      const existingTableLoad = inflightLoadByTableKey.get(key);
+      if (
+        existingTableLoad &&
+        !flags.force &&
+        !flags.forceRefresh &&
+        !flags.forceRows
+      ) {
+        return existingTableLoad;
       }
 
       const task = (async () => {
@@ -1527,38 +1700,33 @@ export function useLoadTableData() {
             }
           }
 
-          // --- 3. START ROWS STREAM (Fire & Forget) ---
-          // Runs independently of meta tasks.
+          // --- 3. ROWS STREAM (awaited so load lock covers the full query) ---
+          let rowsPromise: Promise<void> | undefined;
           if (plan.needRows) {
-            void (async () => {
-              try {
-                // Force rows refresh invalidates only the rows cache.
-                const shouldReset = !!flags.force || !!flags.forceRows;
-
-                await startRowsStream({
-                  key,
-                  connId,
-                  schema,
-                  tableName,
-                  engine: activeTab.engine,
-                  limit,
-                  offset,
-                  addLogQuery,
-                  resetCache: shouldReset,
-                  forceRefresh: !!flags.forceRefresh,
-                  filters: flags.filters,
-                  filterCombine: flags.filterCombine ?? "AND",
-                  sortBy: flags.sortBy ?? null,
-                });
-              } catch (e) {
-                const curMeta =
-                  useConnectionStore.getState().tableDataMap[key] ?? prev;
-                patchMeta(setMeta, key, curMeta, {
-                  busy: false,
-                  error: getErrorMessage(e),
-                });
-              }
-            })();
+            const shouldReset = !!flags.force || !!flags.forceRows;
+            rowsPromise = startRowsStream({
+              key,
+              connId,
+              schema,
+              tableName,
+              engine: activeTab.engine,
+              limit,
+              offset,
+              addLogQuery,
+              resetCache: shouldReset,
+              forceRefresh: !!flags.forceRefresh,
+              filters: flags.filters,
+              filterCombine: flags.filterCombine ?? "AND",
+              sortBy: flags.sortBy ?? null,
+            }).catch((e) => {
+              const curMeta =
+                useConnectionStore.getState().tableDataMap[key] ?? prev;
+              patchMeta(setMeta, key, curMeta, {
+                busy: false,
+                error: getErrorMessage(e),
+              });
+              throw e;
+            });
           }
 
           // --- 4. LOAD META (Parallel) ---
@@ -1646,8 +1814,12 @@ export function useLoadTableData() {
             patchMeta(setMeta, key, prev, { foreignKeys: [] });
           }
 
-          // If no meta tasks needed, we are done
-          if (metaTasks.length === 0) {
+          const settleTasks = rowsPromise
+            ? [...metaTasks, rowsPromise]
+            : metaTasks;
+
+          // If no meta/rows tasks needed, we are done
+          if (settleTasks.length === 0) {
             // Only clear busy if we set it earlier
             if (plan.needAnyMetaWork) {
               patchMeta(setMeta, key, prev, { busy: false });
@@ -1655,8 +1827,8 @@ export function useLoadTableData() {
             return;
           }
 
-          // Wait for all meta tasks to settle
-          const results = await Promise.allSettled(metaTasks);
+          // Wait for rows stream and meta tasks to settle
+          const results = await Promise.allSettled(settleTasks);
           const firstErr = results.find((r) => r.status === "rejected") as
             | PromiseRejectedResult
             | undefined;
@@ -1678,12 +1850,16 @@ export function useLoadTableData() {
       })();
 
       inflightLoadBySignature.set(loadSignature, task);
+      inflightLoadByTableKey.set(key, task);
       try {
         await task;
       } finally {
         const current = inflightLoadBySignature.get(loadSignature);
         if (current === task) {
           inflightLoadBySignature.delete(loadSignature);
+        }
+        if (inflightLoadByTableKey.get(key) === task) {
+          inflightLoadByTableKey.delete(key);
         }
       }
     },
