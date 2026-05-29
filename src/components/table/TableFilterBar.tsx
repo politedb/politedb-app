@@ -1,32 +1,21 @@
+import { Fragment } from "preact";
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { PlusIcon, ChevronDownIcon, MinusIcon } from "src/components/icons";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { TableFilterCondition, TableSort } from "src/hooks/queries";
-import { tableDataQuery } from "src/hooks/queries";
+import {
+  FILTER_OPERATORS,
+  normalizeFilterOperator,
+  isListFilterOperator,
+  isNullFilterOperator,
+  isRangeFilterOperator,
+  tableDataQuery,
+} from "src/hooks/queries";
 import { cn } from "src/utils/cn";
 import { Input } from "src/components/common/Input";
 import { Checkbox } from "src/components/common/Checkbox";
-
-const OPERATORS = [
-  "=",
-  "!=",
-  "<>",
-  "<",
-  ">",
-  "<=",
-  ">=",
-  "LIKE",
-  "ILIKE",
-  "IN",
-  "NOT IN",
-  "IS NULL",
-  "IS NOT NULL",
-];
-
-const NULL_OPS = ["IS NULL", "IS NOT NULL"];
-const LIST_OPS = ["IN", "NOT IN"];
 
 interface TableFilterBarProps {
   tableKey: string;
@@ -192,7 +181,7 @@ export function TableFilterBar({
                     column: (e.target as HTMLSelectElement).value,
                   })
                 }
-                class="h-7 w-32 border-neutral-300"
+                class="h-7 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
               >
                 {columnNames.map((name) => (
                   <option key={name} value={name}>
@@ -204,29 +193,39 @@ export function TableFilterBar({
                 value={row.operator}
                 onChange={(e) =>
                   updateRow(index, {
-                    operator: (e.target as HTMLSelectElement).value,
+                    operator: normalizeFilterOperator(
+                      (e.target as HTMLSelectElement).value
+                    ),
                   })
                 }
-                class="h-7 w-32 border-neutral-300 text-center"
+                class="h-7 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
               >
-                {OPERATORS.map((op) => (
-                  <option key={op} value={op}>
-                    {op}
-                  </option>
+                {FILTER_OPERATORS.map((op) => (
+                  <Fragment key={op.value}>
+                    <option
+                      key={op.value}
+                      value={op.value}
+                      disabled={op.type === "separator"}
+                    >
+                      {op.type === "separator" ? "────────" : op.value}
+                    </option>
+                  </Fragment>
                 ))}
               </Select>
               <div class="flex-1">
                 <Input
                   type="text"
                   placeholder={
-                    NULL_OPS.includes(row.operator)
+                    isNullFilterOperator(row.operator)
                       ? ""
-                      : LIST_OPS.includes(row.operator)
-                        ? "value1, value2, ..."
-                        : "EMPTY"
+                      : isRangeFilterOperator(row.operator)
+                        ? "min, max"
+                        : isListFilterOperator(row.operator)
+                          ? "value1, value2, ..."
+                          : "EMPTY"
                   }
-                  value={NULL_OPS.includes(row.operator) ? "" : row.value}
-                  disabled={NULL_OPS.includes(row.operator)}
+                  value={isNullFilterOperator(row.operator) ? "" : row.value}
+                  disabled={isNullFilterOperator(row.operator)}
                   onInput={(e) =>
                     updateRow(index, {
                       value: (e.target as HTMLInputElement).value,

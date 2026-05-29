@@ -52,7 +52,7 @@ export function TagSelect(props: Props) {
         {/* Selected tags display */}
         <div
           class={cn(
-            "flex min-h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs",
+            "flex h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs",
             !disabled &&
               "focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500",
             disabled && "cursor-not-allowed bg-neutral-100 text-neutral-400"
@@ -109,7 +109,7 @@ export function TagSelect(props: Props) {
                     value={searchQuery}
                     onInput={(e) => setSearchQuery(e.currentTarget.value)}
                     placeholder="Search columns..."
-                    class="w-full rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-500 focus:outline-2 focus:outline-blue-500"
+                    class="w-full rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-sm outline-none focus:border-blue-500 focus:outline-2 focus:outline-blue-500"
                     autoFocus
                   />
                 </div>

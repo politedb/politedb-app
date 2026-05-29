@@ -43,8 +43,11 @@ export function NewTablePane({
   onSuccess,
   onSaveRef,
 }: Props) {
-  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
-    useTableFocusState();
+  const {
+    ref: containerRef,
+    rootRef,
+    isFocused: isTableFocused,
+  } = useTableFocusState();
 
   const { busy } = useCreateSchemaTable();
   const setNewTableData = useConnectionStore((s) => s.setNewTableData);
@@ -218,7 +221,7 @@ export function NewTablePane({
               value={tableState.tableName}
               onInput={(e) => tableState.setTableName(e.currentTarget.value)}
               placeholder="table_name"
-              className="border border-neutral-200 bg-white text-xs"
+              className="h-8 border border-neutral-200 bg-white text-sm"
               disabled={busy || isProfileLocked}
             />
           </div>

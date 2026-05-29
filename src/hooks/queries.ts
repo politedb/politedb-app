@@ -442,9 +442,98 @@ export type TableSort = {
   direction: "asc" | "desc";
 };
 
-const VALUE_OPS = ["=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "ILIKE"];
-const IN_OPS = ["IN", "NOT IN"];
-const NULL_OPS = ["IS NULL", "IS NOT NULL"];
+export type FilterOperator = {
+  value: string;
+  type: "op" | "separator";
+  requiresValue?: boolean;
+  inputHint?: "single" | "list" | "range" | "like" | "none";
+};
+
+export const FILTER_OPERATORS: FilterOperator[] = [
+  { value: "=", type: "op", requiresValue: true, inputHint: "single" },
+  { value: "!=", type: "op", requiresValue: true, inputHint: "single" },
+  { value: "<>", type: "op", requiresValue: true, inputHint: "single" },
+  { value: "<", type: "op", requiresValue: true, inputHint: "single" },
+  { value: ">", type: "op", requiresValue: true, inputHint: "single" },
+  { value: "<=", type: "op", requiresValue: true, inputHint: "single" },
+  { value: ">=", type: "op", requiresValue: true, inputHint: "single" },
+  { value: "sep#1", type: "separator" },
+  { value: "BETWEEN", type: "op", requiresValue: true, inputHint: "range" },
+  { value: "NOT BETWEEN", type: "op", requiresValue: true, inputHint: "range" },
+  { value: "sep#2", type: "separator" },
+  { value: "LIKE", type: "op", requiresValue: true, inputHint: "like" },
+  { value: "ILIKE", type: "op", requiresValue: true, inputHint: "like" },
+  { value: "sep#3", type: "separator" },
+  { value: "IN", type: "op", requiresValue: true, inputHint: "list" },
+  { value: "NOT IN", type: "op", requiresValue: true, inputHint: "list" },
+  { value: "sep#4", type: "separator" },
+  { value: "IS NULL", type: "op", requiresValue: false, inputHint: "none" },
+  { value: "IS NOT NULL", type: "op", requiresValue: false, inputHint: "none" },
+  { value: "sep#5", type: "separator" },
+  { value: "Contains", type: "op", requiresValue: true, inputHint: "like" },
+  { value: "Not contains", type: "op", requiresValue: true, inputHint: "like" },
+  { value: "sep#6", type: "separator" },
+  { value: "Starts with", type: "op", requiresValue: true, inputHint: "like" },
+  { value: "Ends with", type: "op", requiresValue: true, inputHint: "like" },
+] as const;
+
+/** Case-insensitive lookup key; SQL branching uses this, UI keeps canonical `value` casing. */
+function filterOperatorKey(operator: string) {
+  return String(operator ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+const FILTER_OPERATOR_MAP: Map<string, FilterOperator> = new Map(
+  FILTER_OPERATORS.filter((op) => op.type === "op").map((op) => [
+    filterOperatorKey(String(op.value ?? "")),
+    op,
+  ])
+);
+
+const VALUE_OPS: string[] = FILTER_OPERATORS.filter(
+  (op) => op.type === "op" && op.requiresValue && op.inputHint === "single"
+).map((op) => op.value);
+const IN_OPS: string[] = FILTER_OPERATORS.filter(
+  (op) => op.type === "op" && op.requiresValue && op.inputHint === "list"
+).map((op) => op.value);
+const NULL_OPS: string[] = FILTER_OPERATORS.filter(
+  (op) => op.type === "op" && !op.requiresValue
+).map((op) => op.value);
+const RANGE_OPS: string[] = FILTER_OPERATORS.filter(
+  (op) => op.type === "op" && op.requiresValue && op.inputHint === "range"
+).map((op) => op.value);
+const LIKE_OPS: string[] = FILTER_OPERATORS.filter(
+  (op) => op.type === "op" && op.requiresValue && op.inputHint === "like"
+).map((op) => op.value);
+
+export function normalizeFilterOperator(operator: string) {
+  const entry = FILTER_OPERATOR_MAP.get(filterOperatorKey(operator));
+  if (entry?.value != null) return String(entry.value);
+  return "=";
+}
+
+export function filterOperatorRequiresValue(operator: string) {
+  return (
+    FILTER_OPERATOR_MAP.get(filterOperatorKey(operator))?.requiresValue ?? true
+  );
+}
+
+export function isNullFilterOperator(operator: string) {
+  return !filterOperatorRequiresValue(operator);
+}
+
+export function isListFilterOperator(operator: string) {
+  return (
+    FILTER_OPERATOR_MAP.get(filterOperatorKey(operator))?.inputHint === "list"
+  );
+}
+
+export function isRangeFilterOperator(operator: string) {
+  return (
+    FILTER_OPERATOR_MAP.get(filterOperatorKey(operator))?.inputHint === "range"
+  );
+}
 
 function buildWhereClause(
   filters: TableFilterCondition[],
@@ -455,11 +544,14 @@ function buildWhereClause(
     .filter((f) => f.enabled && (f.column ?? "").trim())
     .map((f) => {
       const col = qIdent(String(f.column).trim(), engine);
-      const op = String(f.operator).toUpperCase();
-      if (NULL_OPS.includes(op)) {
+      const op = normalizeFilterOperator(f.operator);
+      const opKey = filterOperatorKey(op);
+      if (
+        NULL_OPS.some((candidate) => filterOperatorKey(candidate) === opKey)
+      ) {
         return `${col} ${op}`;
       }
-      if (IN_OPS.includes(op)) {
+      if (IN_OPS.some((candidate) => filterOperatorKey(candidate) === opKey)) {
         const raw = (f.value ?? "").trim();
         const values = raw
           .split(",")
@@ -469,16 +561,52 @@ function buildWhereClause(
         if (values.length === 0) return "";
         return `${col} ${op} (${values.join(", ")})`;
       }
-      if (VALUE_OPS.includes(op)) {
+      if (
+        RANGE_OPS.some((candidate) => filterOperatorKey(candidate) === opKey)
+      ) {
+        const [startRaw = "", endRaw = ""] = String(f.value ?? "")
+          .split(",")
+          .map((s) => s.trim());
+        const bound = startRaw || endRaw;
+        if (!bound) return "";
+
+        const clause = `${col} ${op}`;
+        if (startRaw && !endRaw) {
+          return `${clause} ${qLiteral(startRaw, engine)}`;
+        }
+        if (!startRaw && endRaw) {
+          return `${clause} ${qLiteral(endRaw, engine)}`;
+        }
+        return `${col} ${op} ${qLiteral(startRaw, engine)} AND ${qLiteral(endRaw, engine)}`;
+      }
+      if (
+        LIKE_OPS.some((candidate) => filterOperatorKey(candidate) === opKey)
+      ) {
         const val = (f.value ?? "").trim();
-        if (op === "LIKE" || op === "ILIKE") {
-          const literal = qLiteral(`%${val}%`);
-          if (engine === "oracle" && op === "ILIKE") {
+        if (!val) return "";
+        const pattern =
+          opKey === "STARTS WITH"
+            ? `${val}%`
+            : opKey === "ENDS WITH"
+              ? `%${val}`
+              : `%${val}%`;
+        const literal = qLiteral(pattern, engine);
+        if (opKey === "NOT CONTAINS") {
+          return `${col} NOT LIKE ${literal}`;
+        }
+        if (opKey === "ILIKE") {
+          if (engine === "oracle") {
             return `LOWER(${col}) LIKE LOWER(${literal})`;
           }
-          return `${col} ${op} ${literal}`;
+          return `${col} ILIKE ${literal}`;
         }
-        return `${col} ${op} ${qLiteral(val)}`;
+        return `${col} LIKE ${literal}`;
+      }
+      if (
+        VALUE_OPS.some((candidate) => filterOperatorKey(candidate) === opKey)
+      ) {
+        const val = (f.value ?? "").trim();
+        return `${col} ${op} ${qLiteral(val, engine)}`;
       }
       return `${col} = ${qLiteral(String(f.value ?? "").trim())}`;
     })

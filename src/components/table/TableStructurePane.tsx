@@ -128,7 +128,7 @@ export function TableStructurePane(props: {
               value={tableName}
               onInput={(e) => changeTableName(e.currentTarget.value)}
               placeholder="table_name"
-              className="border border-neutral-200 bg-white text-xs"
+              className="h-8 border border-neutral-200 bg-white text-sm"
               disabled={activeTableMeta.busy || readOnly}
             />
           </div>
@@ -158,8 +158,8 @@ export function TableStructurePane(props: {
                 ? "Search constraints..."
                 : "Search columns..."
             }
-            left={<SearchIcon className="size-3.5 text-neutral-400" />}
-            className="flex-1 border border-neutral-200 bg-white text-xs"
+            left={<SearchIcon className="size-4 text-neutral-400" />}
+            className="h-8 flex-1 border border-neutral-200 bg-white text-sm"
             disabled={activeTableMeta.busy}
           />
         </div>
