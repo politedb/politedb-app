@@ -8,8 +8,7 @@ pub async fn updater_install_if_allowed(app: AppHandle) -> Result<(), String> {
     let license_state = license::license_state_load(&app)?;
     if license::blocks_app_update(&license_state) {
         return Err(
-            "App updates are disabled because the free trial or license has expired."
-                .to_string(),
+            "App updates are disabled because the free trial or license has expired.".to_string(),
         );
     }
 

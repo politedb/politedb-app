@@ -68,6 +68,23 @@ impl EngineDriver for TursoDriver {
         base.turso = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let turso = input.turso.as_mut().ok_or("TURSO_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Turso,
+            persist_secrets,
+            &mut turso.auth_token,
+        )?;
+        Ok(input)
+    }
 }
 
 /// Normalize user input to an HTTPS libSQL/Hrana endpoint (same rules as the libsql SDK).
@@ -84,9 +101,8 @@ pub fn normalize_turso_url(raw: &str) -> Result<String, String> {
         );
     }
 
-    let is_local_dev = lower.contains("localhost")
-        || lower.contains("127.0.0.1")
-        || lower.contains("[::1]");
+    let is_local_dev =
+        lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("[::1]");
 
     let mut normalized = if lower.starts_with("libsql://") {
         url.replacen("libsql://", "https://", 1)

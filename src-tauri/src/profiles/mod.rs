@@ -8,3 +8,4 @@ pub mod sharing;
 pub mod store;
 pub mod tableplus_crypt;
 pub mod types;
+pub mod validate;

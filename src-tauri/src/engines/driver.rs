@@ -28,4 +28,26 @@ pub trait EngineDriver: Send + Sync + 'static {
         ov: ConnectionCreateInput,
         secrets: Option<ConnectionTestSecrets>,
     ) -> Result<ConnectionCreateInput, String>;
+
+    /// Inline secrets → keychain refs when saving a profile (engine-specific fields).
+    fn persist_profile_secrets(
+        &self,
+        _app: &AppHandle,
+        _profile_id: Uuid,
+        _persist_secrets: bool,
+        input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        Ok(input)
+    }
+
+    /// Point connection config at a local SSH tunnel bind address.
+    fn rewrite_tunnel_endpoint(
+        &self,
+        input: ConnectionCreateInput,
+        host: &str,
+        port: u16,
+    ) -> Result<ConnectionCreateInput, String> {
+        let _ = self.kind();
+        crate::engines::tunnel_endpoint::rewrite_tunnel_endpoint(input, host, port)
+    }
 }

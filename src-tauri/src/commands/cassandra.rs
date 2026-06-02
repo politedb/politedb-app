@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use chrono::{NaiveDate, TimeZone, Utc};
-use serde::Deserialize;
 use num_bigint::BigInt;
 use scylla::value::{CqlDate, CqlDecimal, CqlTime, CqlTimestamp, CqlValue, CqlVarint, Row};
 use scylla::DeserializeRow;
+use serde::Deserialize;
 use tauri::State;
 use uuid::Uuid;
 
@@ -536,10 +536,7 @@ async fn load_column_type_map(
     table: &str,
 ) -> Result<HashMap<String, String>, String> {
     let columns = load_table_columns(session, keyspace, table).await?;
-    Ok(columns
-        .into_iter()
-        .map(|c| (c.name, c.db_type))
-        .collect())
+    Ok(columns.into_iter().map(|c| (c.name, c.db_type)).collect())
 }
 
 fn escape_cql_string(raw: &str) -> String {
@@ -661,9 +658,10 @@ pub async fn cassandra_update_rows(
         let where_clause = pk_cols
             .iter()
             .map(|col| {
-                let val = update.pk.get(col).ok_or_else(|| {
-                    format!("CASSANDRA_PK_VALUE_MISSING: {col}")
-                })?;
+                let val = update
+                    .pk
+                    .get(col)
+                    .ok_or_else(|| format!("CASSANDRA_PK_VALUE_MISSING: {col}"))?;
                 let cql_type = type_map.get(col).map(String::as_str).unwrap_or("text");
                 let lit = cql_literal_for_type(cql_type, val)?;
                 Ok(format!("{} = {lit}", quote_ident(col)))

@@ -94,6 +94,23 @@ impl EngineDriver for OracleDriver {
         base.oracle = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let oc = input.oracle.as_mut().ok_or("ORACLE_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Oracle,
+            persist_secrets,
+            &mut oc.password,
+        )?;
+        Ok(input)
+    }
 }
 
 pub async fn connect_oracle(
@@ -160,8 +177,8 @@ pub async fn test_oracle_direct(input: OracleConnectInput, password: String) -> 
     let user = input.user.trim().to_string();
 
     tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let conn =
-            oracle::Connection::connect(&user, &password, &connect_string).map_err(|e| e.to_string())?;
+        let conn = oracle::Connection::connect(&user, &password, &connect_string)
+            .map_err(|e| e.to_string())?;
         let _ = conn.query_row_as::<i32>("SELECT 1 FROM dual", &[]);
         Ok(())
     })

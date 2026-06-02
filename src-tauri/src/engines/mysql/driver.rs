@@ -80,6 +80,23 @@ impl EngineDriver for MySqlDriver {
         base.mysql = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            self.kind(),
+            persist_secrets,
+            &mut my.password,
+        )?;
+        Ok(input)
+    }
 }
 
 #[async_trait]
@@ -140,6 +157,23 @@ impl EngineDriver for MariaDbDriver {
 
         base.mysql = Some(b);
         Ok(base)
+    }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let my = input.mysql.as_mut().ok_or("MYSQL_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            self.kind(),
+            persist_secrets,
+            &mut my.password,
+        )?;
+        Ok(input)
     }
 }
 

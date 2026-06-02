@@ -78,6 +78,23 @@ impl EngineDriver for RedisDriver {
         base.redis = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let r = input.redis.as_mut().ok_or("REDIS_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Redis,
+            persist_secrets,
+            &mut r.password,
+        )?;
+        Ok(input)
+    }
 }
 
 /* =============================================================================

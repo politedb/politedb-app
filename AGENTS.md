@@ -40,6 +40,8 @@ Apply SOLID when designing or refactoring code. Prefer extending existing bounda
 - Keep UI rendering, state orchestration, and I/O separate in `src/` (components vs hooks vs `lib/` / API wrappers).
 - SQL query builders live in `src/lib/queries/sql/` (not hooks). Tauri `invoke` belongs in `src/lib/tauri/`.
 - In `src-tauri/`, keep Tauri command handlers thin: validate input, delegate to a focused service or adapter, return DTOs.
+- Backend layout: `engines/driver.rs` (`EngineDriver`: connect, test, merge, `persist_profile_secrets`, tunnel rewrite) + per-engine modules; `engines/profile_secrets.rs` for keychain helpers; `engines/runtime/connection_ops.rs` (`ConnectionOps` trait on `EngineConnection`); `engines/sql_classify.rs`, `engines/csv_import.rs`.
+- Tauri commands: thin handlers under `commands/connection/` (`lifecycle`, `version`) and `commands/profile/` (`connect`, `export`, `import`, `secrets`, `store_cmds`). Profile input validation lives in `profiles/validate.rs`. Profile secret persistence delegates to `EngineDriver::persist_profile_secrets`.
 - Split files when they mix unrelated concerns (e.g. connection UI + export crypto + query execution).
 
 ### Open/Closed (OCP)
