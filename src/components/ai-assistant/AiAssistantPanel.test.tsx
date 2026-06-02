@@ -32,9 +32,8 @@ const aiRuntimeStopMock = vi.fn();
 
 const runSqlQueryMock = vi.fn();
 
-vi.mock("@root/src/lib/ai-assistant", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@root/src/lib/ai-assistant")>();
+vi.mock("src/lib/ai-assistant", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("src/lib/ai-assistant")>();
 
   return {
     ...actual,
@@ -197,7 +196,8 @@ beforeEach(() => {
   });
   queryResultToObjectsMock.mockReturnValue([{ id: 1 }, { id: 2 }]);
   buildFastResultAnswerMock.mockReturnValue({
-    answer: "I ran the query and found 2 row(s). Here is a preview of the result.",
+    answer:
+      "I ran the query and found 2 row(s). Here is a preview of the result.",
     confidence: "high",
   });
   getFastChatReplyMock.mockReturnValue(null);
@@ -425,7 +425,9 @@ describe("AiAssistantPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
-    await screen.findByText("I can currently see 2 table(s) in public: issues, users.");
+    await screen.findByText(
+      "I can currently see 2 table(s) in public: issues, users."
+    );
     expect(planSqlFromQuestionMock).not.toHaveBeenCalled();
     expect(runSqlQueryMock).not.toHaveBeenCalled();
   });

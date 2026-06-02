@@ -1,6 +1,6 @@
 import { useCallback, useState } from "preact/hooks";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { openDialog } from "src/lib/system-dialog";
+import { readTextFile } from "src/lib/system-fs";
 import { parseCsv } from "src/utils/csv";
 import { operationImportCsvTransaction } from "src/lib/tauri";
 import type { ColumnMeta } from "src/lib/tauri/types";
@@ -152,7 +152,7 @@ export function useImportTableData() {
   } | null>(null);
 
   const loadDataImport = useCallback(async (): Promise<boolean> => {
-    const path = await open({
+    const path = await openDialog({
       title: "Import table data",
       multiple: false,
       directory: false,

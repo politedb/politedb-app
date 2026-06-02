@@ -7,18 +7,14 @@ import type {
   TableWindow,
 } from "src/types";
 import { connectionRemove, operationExecuteTransaction } from "src/lib/tauri";
-import {
-  mongoDeleteDocuments,
-  mongoInsertDocuments,
-  mongoUpdateDocuments,
-} from "src/lib/tauri/mongo";
-import {
-  cassandraPrimaryKeyColumns,
-  cassandraUpdateRows,
-} from "src/lib/tauri/cassandra";
 import { runRedisCommand } from "src/lib/tauri/redis";
-import type { LoadFlags, TablePagination } from "src/hooks/useLoadTableData";
-import { tableKey } from "src/hooks/useLoadTableData";
+import { tableKey } from "src/lib/table-data";
+import type { LoadFlags, TablePagination } from "src/lib/table-data";
+import {
+  applyNonSqlPatchEntry,
+  isNonSqlPatchEngine,
+  type PatchMapEntry,
+} from "src/lib/patches";
 import {
   clearTablePagination,
   setTablePagination,
@@ -32,17 +28,14 @@ import { runSqlTransaction } from "src/utils/sqlTransaction";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
-  type DataAction,
-  type DataKey,
   type NewTableDataState,
-  type TableDataState,
   useConnectionStore,
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import { connectionTabHasChanges } from "src/screens/connection/tabDirty";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
-import { createTableQuery } from "src/hooks/queries";
+import { createTableQuery } from "src/lib/queries/sql";
 
 /* =============================================================================
  * Types
@@ -127,16 +120,6 @@ type RefreshFlags = {
   refreshRows: boolean;
   refreshMeta: boolean;
   refreshStats: boolean;
-};
-
-type WindowPatchBuckets = Partial<
-  Record<DataAction, Partial<Record<DataKey, Record<string, unknown>>>>
->;
-
-type PatchMapEntry = {
-  tableData?: TableDataState;
-  tableWindow: TableWindow;
-  patches: WindowPatchBuckets;
 };
 
 function hasAnyRows(bucket?: Record<string, unknown>): boolean {
@@ -353,27 +336,6 @@ export function useConnectionActions(
     refreshRuntimeConnection,
   } = args;
 
-  const mongoCellToValue = useCallback((cell: unknown): unknown => {
-    if (cell == null) return null;
-    if (typeof cell !== "object") return cell;
-
-    const c = cell as { t?: string; v?: unknown };
-    switch (c.t) {
-      case "Null":
-        return null;
-      case "Str":
-      case "Json":
-      case "BytesB64":
-      case "I64":
-      case "F64":
-      case "Bool":
-        return c.v ?? null;
-      default:
-        if ("v" in c) return c.v ?? null;
-        return cell;
-    }
-  }, []);
-
   const clearChanges = useCallback((tabId: string, tableWindowId?: string) => {
     const s = useConnectionStore.getState();
     s.clearTableConstraints(tabId, tableWindowId);
@@ -520,367 +482,6 @@ export function useConnectionActions(
     return hydratePatchMapWithLatestTableData(activeProfileScreen, patchMap);
   }, [activeProfileScreen]);
 
-  const applyMongoPatchEntry = useCallback(
-    async (entry: PatchMapEntry) => {
-      const tableWindow = entry.tableWindow;
-      if (!runtimeConnectionId || !tableWindow) return;
-
-      const patches = entry.patches;
-      const createData = patches?.create?.data ?? {};
-      const updateData = patches?.update?.data ?? {};
-      const deleteData = patches?.delete?.data ?? {};
-
-      const hasUnsupportedPatches =
-        Object.keys(patches?.create?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.update?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.constraints ?? {}).length > 0;
-
-      if (hasUnsupportedPatches) {
-        throw new Error(
-          "Mongo does not support structure/constraint patches in table view."
-        );
-      }
-
-      const store = useConnectionStore.getState();
-      const key = tableKey(
-        activeProfileScreen,
-        tableWindow.table.schema,
-        tableWindow.table.name
-      );
-      const cols = store.tableDataMap[key]?.columns ?? [];
-      const idColIdx = cols.findIndex((c) => c.name === "_id");
-      if (idColIdx < 0) {
-        throw new Error("MONGO_ID_COLUMN_NOT_FOUND");
-      }
-      const cache = store.tableRowCacheByKey[key];
-
-      const documents = Object.values(createData).map((patch) => {
-        const raw = (patch ?? {}) as Record<string, unknown>;
-        const doc: Record<string, unknown> = {};
-
-        for (const [k, v] of Object.entries(raw)) {
-          if (k === "__rowKey") continue;
-          if (k === "_id" && (v === null || String(v ?? "").trim() === "")) {
-            continue;
-          }
-          doc[k] = v;
-        }
-
-        return doc;
-      });
-
-      const updates = Object.entries(updateData)
-        .map(([rowKey, patch]) => {
-          const rowIndex = Number(rowKey);
-          if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
-
-          const raw = (patch ?? {}) as Record<string, unknown>;
-          if ("_id" in raw) {
-            throw new Error("Mongo _id is immutable and cannot be updated.");
-          }
-
-          const candidateIndices = [rowIndex, rowIndex + offset];
-          const resolvedIndex =
-            candidateIndices.find(
-              (idx) =>
-                Boolean(cache?.map.get(idx)) ||
-                Boolean(store.getRowAt(key, idx))
-            ) ?? rowIndex;
-
-          const originalRow = cache?.map.get(resolvedIndex);
-          const fallbackRow = store.getRowAt(key, resolvedIndex);
-          const sourceRow = Array.isArray(originalRow)
-            ? originalRow
-            : fallbackRow;
-          if (!sourceRow || !Array.isArray(sourceRow)) return null;
-
-          const idValue = mongoCellToValue(sourceRow[idColIdx]);
-          if (idValue == null || String(idValue).trim() === "") {
-            return null;
-          }
-
-          const set: Record<string, unknown> = {};
-          for (const [k, v] of Object.entries(raw)) {
-            if (k === "__rowKey" || k === "_id") continue;
-            set[k] = v;
-          }
-
-          if (Object.keys(set).length === 0) return null;
-          return { id: idValue, set };
-        })
-        .filter(Boolean) as Array<{
-        id: unknown;
-        set: Record<string, unknown>;
-      }>;
-
-      const deleteIds = Object.keys(deleteData)
-        .map((rowKey) => {
-          const rowIndex = Number(rowKey);
-          if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
-
-          const candidateIndices = [rowIndex, rowIndex + offset];
-          const resolvedIndex =
-            candidateIndices.find(
-              (idx) =>
-                Boolean(cache?.map.get(idx)) ||
-                Boolean(store.getRowAt(key, idx))
-            ) ?? rowIndex;
-
-          const originalRow = cache?.map.get(resolvedIndex);
-          const fallbackRow = store.getRowAt(key, resolvedIndex);
-          const sourceRow = Array.isArray(originalRow)
-            ? originalRow
-            : fallbackRow;
-          if (!sourceRow || !Array.isArray(sourceRow)) return null;
-
-          const idValue = mongoCellToValue(sourceRow[idColIdx]);
-          if (idValue == null || String(idValue).trim() === "") {
-            return null;
-          }
-          return idValue;
-        })
-        .filter((v) => v !== null) as unknown[];
-
-      if (documents.length > 0) {
-        await mongoInsertDocuments({
-          connectionId: runtimeConnectionId,
-          database: tableWindow.table.schema,
-          collection: tableWindow.table.name,
-          documents,
-        });
-      }
-      if (updates.length > 0) {
-        await mongoUpdateDocuments({
-          connectionId: runtimeConnectionId,
-          database: tableWindow.table.schema,
-          collection: tableWindow.table.name,
-          updates,
-        });
-      }
-      if (deleteIds.length > 0) {
-        await mongoDeleteDocuments({
-          connectionId: runtimeConnectionId,
-          database: tableWindow.table.schema,
-          collection: tableWindow.table.name,
-          ids: deleteIds,
-        });
-      }
-    },
-    [activeProfileScreen, mongoCellToValue, offset, runtimeConnectionId]
-  );
-
-  const patchValueToString = useCallback(
-    (value: unknown): string => {
-      if (value == null) return "";
-      if (typeof value === "object" && value !== null && "t" in value) {
-        const plain = mongoCellToValue(value);
-        if (plain == null) return "";
-        return String(plain);
-      }
-      return String(value);
-    },
-    [mongoCellToValue]
-  );
-
-  const applyCassandraPatchEntry = useCallback(
-    async (entry: PatchMapEntry) => {
-      const tableWindow = entry.tableWindow;
-      if (!runtimeConnectionId || !tableWindow) return;
-
-      const patches = entry.patches;
-      const createData = patches?.create?.data ?? {};
-      const updateData = patches?.update?.data ?? {};
-      const deleteData = patches?.delete?.data ?? {};
-
-      const hasUnsupportedPatches =
-        Object.keys(createData).length > 0 ||
-        Object.keys(deleteData).length > 0 ||
-        Object.keys(patches?.create?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.update?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.constraints ?? {}).length > 0;
-
-      if (hasUnsupportedPatches) {
-        throw new Error(
-          "Cassandra table view currently supports updating existing rows only."
-        );
-      }
-
-      const pkCols = await cassandraPrimaryKeyColumns({
-        connectionId: runtimeConnectionId,
-        keyspace: tableWindow.table.schema,
-        table: tableWindow.table.name,
-      });
-
-      if (!pkCols.length) {
-        throw new Error("Cassandra primary key columns could not be resolved.");
-      }
-
-      const store = useConnectionStore.getState();
-      const key = tableKey(
-        activeProfileScreen,
-        tableWindow.table.schema,
-        tableWindow.table.name
-      );
-      const cols = store.tableDataMap[key]?.columns ?? [];
-      const cache = store.tableRowCacheByKey[key];
-      const colIndex = new Map(
-        cols.map((col, idx) => [col?.name ?? "", idx] as const)
-      );
-
-      const updates: Array<{
-        pk: Record<string, string>;
-        set: Record<string, string>;
-      }> = [];
-
-      for (const [rowKey, patch] of Object.entries(updateData)) {
-        const rowIndex = Number(rowKey);
-        if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
-
-        const raw = (patch ?? {}) as Record<string, unknown>;
-        const candidateIndices = [rowIndex, rowIndex + offset];
-        const resolvedIndex =
-          candidateIndices.find(
-            (idx) =>
-              Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
-          ) ?? rowIndex;
-
-        const sourceRow =
-          cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
-        if (!sourceRow || !Array.isArray(sourceRow)) continue;
-
-        const pk: Record<string, string> = {};
-        for (const colName of pkCols) {
-          const idx = colIndex.get(colName);
-          if (idx == null) {
-            throw new Error(
-              `Cassandra primary key column "${colName}" is missing from the loaded table.`
-            );
-          }
-          const v = patchValueToString(sourceRow[idx]);
-          if (!v.trim()) {
-            throw new Error(
-              `Cassandra primary key column "${colName}" cannot be empty.`
-            );
-          }
-          pk[colName] = v;
-        }
-
-        const set: Record<string, string> = {};
-        for (const [colName, value] of Object.entries(raw)) {
-          if (colName === "__rowKey" || pkCols.includes(colName)) continue;
-          const next = patchValueToString(value);
-          if (!next.trim()) continue;
-          set[colName] = next;
-        }
-
-        if (Object.keys(set).length > 0) {
-          updates.push({ pk, set });
-        }
-      }
-
-      if (updates.length > 0) {
-        await cassandraUpdateRows({
-          connectionId: runtimeConnectionId,
-          keyspace: tableWindow.table.schema,
-          table: tableWindow.table.name,
-          updates,
-        });
-      }
-    },
-    [activeProfileScreen, offset, patchValueToString, runtimeConnectionId]
-  );
-
-  const applyRedisPatchEntry = useCallback(
-    async (entry: PatchMapEntry) => {
-      const tableWindow = entry.tableWindow;
-      if (!runtimeConnectionId || !tableWindow) return;
-
-      const patches = entry.patches;
-      const createData = patches?.create?.data ?? {};
-      const updateData = patches?.update?.data ?? {};
-      const deleteData = patches?.delete?.data ?? {};
-
-      const hasUnsupportedPatches =
-        Object.keys(createData).length > 0 ||
-        Object.keys(deleteData).length > 0 ||
-        Object.keys(patches?.create?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.update?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.structure ?? {}).length > 0 ||
-        Object.keys(patches?.create?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.update?.constraints ?? {}).length > 0 ||
-        Object.keys(patches?.delete?.constraints ?? {}).length > 0;
-
-      if (hasUnsupportedPatches) {
-        throw new Error(
-          "Redis table view currently supports updating existing values only."
-        );
-      }
-
-      const store = useConnectionStore.getState();
-      const key = tableKey(
-        activeProfileScreen,
-        tableWindow.table.schema,
-        tableWindow.table.name
-      );
-      const cols = store.tableDataMap[key]?.columns ?? [];
-      const cache = store.tableRowCacheByKey[key];
-
-      for (const [rowKey, patch] of Object.entries(updateData)) {
-        const rowIndex = Number(rowKey);
-        if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
-
-        const raw = (patch ?? {}) as Record<string, unknown>;
-        const candidateIndices = [rowIndex, rowIndex + offset];
-        const resolvedIndex =
-          candidateIndices.find(
-            (idx) =>
-              Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
-          ) ?? rowIndex;
-        const sourceRow =
-          cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
-        if (!sourceRow || !Array.isArray(sourceRow)) continue;
-
-        if (cols.length === 1 && cols[0]?.name === "value") {
-          if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
-          await runRedisCommand(runtimeConnectionId, "SET", [
-            tableWindow.table.name,
-            String(raw.value ?? ""),
-          ]);
-          continue;
-        }
-
-        if (
-          cols.length >= 2 &&
-          cols[0]?.name === "field" &&
-          cols[1]?.name === "value"
-        ) {
-          if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
-          if (Object.prototype.hasOwnProperty.call(raw, "field")) {
-            throw new Error(
-              "Redis hash fields cannot be renamed from table view."
-            );
-          }
-          const fieldValue = String(sourceRow[0] ?? "");
-          await runRedisCommand(runtimeConnectionId, "HSET", [
-            tableWindow.table.name,
-            fieldValue,
-            String(raw.value ?? ""),
-          ]);
-          continue;
-        }
-
-        throw new Error("Redis edit is not supported for this key type yet.");
-      }
-    },
-    [activeProfileScreen, offset, runtimeConnectionId]
-  );
-
   const applyPatchesForCurrentTab = useCallback(async () => {
     if (isActiveTabLocked) return;
 
@@ -898,15 +499,14 @@ export function useConnectionActions(
         patchMap as unknown as Record<string, PatchMapEntry>
       );
 
-      if (engine === "mongo" || engine === "cassandra" || engine === "redis") {
+      if (isNonSqlPatchEngine(engine)) {
+        const patchCtx = {
+          activeProfileScreen,
+          runtimeConnectionId: connectionId,
+          offset,
+        };
         for (const entry of changedEntries) {
-          if (engine === "mongo") {
-            await applyMongoPatchEntry(entry);
-          } else if (engine === "cassandra") {
-            await applyCassandraPatchEntry(entry);
-          } else {
-            await applyRedisPatchEntry(entry);
-          }
+          await applyNonSqlPatchEntry(engine!, entry, patchCtx);
         }
 
         clearTablePatchChanges(activeProfileScreen);
@@ -1069,9 +669,6 @@ export function useConnectionActions(
     offset,
     setError,
     refreshSchemaAndTables,
-    applyMongoPatchEntry,
-    applyCassandraPatchEntry,
-    applyRedisPatchEntry,
   ]);
 
   const beforeSaveChanges = useCallback(() => {

@@ -4,7 +4,7 @@ import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { PlusIcon, ChevronDownIcon, MinusIcon } from "src/components/icons";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import type { TableFilterCondition, TableSort } from "src/hooks/queries";
+import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import {
   FILTER_OPERATORS,
   normalizeFilterOperator,
@@ -12,7 +12,7 @@ import {
   isNullFilterOperator,
   isRangeFilterOperator,
   tableDataQuery,
-} from "src/hooks/queries";
+} from "src/lib/queries/sql";
 import { cn } from "src/utils/cn";
 import { Input } from "src/components/common/Input";
 import { Checkbox } from "src/components/common/Checkbox";

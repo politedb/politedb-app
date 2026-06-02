@@ -15,7 +15,7 @@ import {
   buildResultAnswerPlainPrompt,
   buildResultAnswerPrompt,
   buildSqlPlanPrompt,
-} from "@root/src/lib/ai-assistant/prompts";
+} from "src/lib/ai-assistant/prompts";
 import {
   detectQuestionLanguageCode,
   formatReplyLanguageForPrompt,
@@ -24,7 +24,7 @@ import {
   supportsLocalizedFastPath,
   toReplyLanguageInfo,
   type ReplyLanguageInfo,
-} from "@root/src/lib/ai-assistant/language";
+} from "src/lib/ai-assistant/language";
 import type {
   AiAnswer,
   AiChatReply,
@@ -35,7 +35,7 @@ import type {
   DirectMetadataReply,
   GenerateOptions,
   LocalAiSettings,
-} from "@root/src/lib/ai-assistant/types";
+} from "src/lib/ai-assistant/types";
 
 export {
   detectLanguageFromText,
@@ -47,7 +47,7 @@ export {
   supportsLocalizedFastPath,
   toReplyLanguageInfo,
   type ReplyLanguageInfo,
-} from "@root/src/lib/ai-assistant/language";
+} from "src/lib/ai-assistant/language";
 
 export {
   extractTablesFromSql,
@@ -57,7 +57,7 @@ export {
   validateSqlAgainstMetadata,
   type SqlMetadataIssue,
   type SqlMetadataValidation,
-} from "@root/src/lib/ai-assistant/sqlMetadata";
+} from "src/lib/ai-assistant/sqlMetadata";
 
 function safeGetLocalStorage(key: string) {
   try {
@@ -491,7 +491,16 @@ function extractTableNameFromDataRequest(text: string) {
     /\b(?:show|display|hien thi|xem)\s+([a-z0-9_]+)\s+(?:table|bang)\b/,
   ];
 
-  const skip = new Set(["table", "tables", "data", "rows", "records", "bang", "du", "lieu"]);
+  const skip = new Set([
+    "table",
+    "tables",
+    "data",
+    "rows",
+    "records",
+    "bang",
+    "du",
+    "lieu",
+  ]);
 
   for (const pattern of patterns) {
     const match = pattern.exec(text);
@@ -681,7 +690,11 @@ export function getFastSqlReply(args: {
   if (wantsTableData(args.question)) {
     const tableName = extractTableNameFromDataRequest(text);
     if (tableName) {
-      const table = findTableInContext(args.tables, tableName, args.activeSchema);
+      const table = findTableInContext(
+        args.tables,
+        tableName,
+        args.activeSchema
+      );
       const schema = table?.schema ?? args.activeSchema ?? "public";
       const name = table?.name ?? tableName;
       const qualified = `${quoteIdentifier(args.engine, schema)}.${quoteIdentifier(args.engine, name)}`;
@@ -725,14 +738,13 @@ export function getFastSqlReply(args: {
 
     return {
       sql: `TRUNCATE TABLE ${qualified};`,
-      explanation:
-        vi
-          ? table
-            ? `Xóa toàn bộ dòng trong ${schema}.${name}. Hãy kiểm tra kỹ trước khi chạy lệnh này.`
-            : `Gợi ý TRUNCATE cho ${schema}.${name}. Hãy xác nhận bảng tồn tại trước khi chạy.`
-          : table
-            ? `Removes all rows from ${schema}.${name}. Review carefully before running this statement.`
-            : `Suggested TRUNCATE for ${schema}.${name}. Verify the table exists before running.`,
+      explanation: vi
+        ? table
+          ? `Xóa toàn bộ dòng trong ${schema}.${name}. Hãy kiểm tra kỹ trước khi chạy lệnh này.`
+          : `Gợi ý TRUNCATE cho ${schema}.${name}. Hãy xác nhận bảng tồn tại trước khi chạy.`
+        : table
+          ? `Removes all rows from ${schema}.${name}. Review carefully before running this statement.`
+          : `Suggested TRUNCATE for ${schema}.${name}. Verify the table exists before running.`,
     };
   }
 
@@ -836,14 +848,13 @@ export function getDirectMetadataReply(args: {
     (asksTables || asksAllDatabases || asksSchemas)
   ) {
     return {
-      answer:
-        vi
-          ? visibleNames.length
-            ? `Hiện có ${visibleNames.length} key trong db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
-            : `Chưa thấy key nào trong db ${args.activeSchema || "0"}.`
-          : visibleNames.length
-            ? `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
-            : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
+      answer: vi
+        ? visibleNames.length
+          ? `Hiện có ${visibleNames.length} key trong db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+          : `Chưa thấy key nào trong db ${args.activeSchema || "0"}.`
+        : visibleNames.length
+          ? `I can currently see ${visibleNames.length} key(s) in db ${args.activeSchema || "0"}: ${formatListPreview(visibleNames)}.`
+          : `I do not see any keys in db ${args.activeSchema || "0"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
@@ -852,24 +863,22 @@ export function getDirectMetadataReply(args: {
     (asksTables || asksAllDatabases || asksSchemas)
   ) {
     return {
-      answer:
-        vi
-          ? visibleNames.length
-            ? `Hiện có ${visibleNames.length} collection trong database ${args.activeSchema || "(hiện tại)"}: ${formatListPreview(visibleNames)}.`
-            : `Chưa thấy collection nào trong database ${args.activeSchema || "(hiện tại)"}.`
-          : visibleNames.length
-            ? `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
-            : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
+      answer: vi
+        ? visibleNames.length
+          ? `Hiện có ${visibleNames.length} collection trong database ${args.activeSchema || "(hiện tại)"}: ${formatListPreview(visibleNames)}.`
+          : `Chưa thấy collection nào trong database ${args.activeSchema || "(hiện tại)"}.`
+        : visibleNames.length
+          ? `I can currently see ${visibleNames.length} collection(s) in database ${args.activeSchema || "(current)"}: ${formatListPreview(visibleNames)}.`
+          : `I do not see any collections in database ${args.activeSchema || "(current)"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
   if (asksAllDatabases) {
     if (schemaNames.length > 1) {
       return {
-        answer:
-          vi
-            ? `Trong kết nối hiện tại có ${schemaNames.length} schema/database: ${formatListPreview(schemaNames)}.`
-            : `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
+        answer: vi
+          ? `Trong kết nối hiện tại có ${schemaNames.length} schema/database: ${formatListPreview(schemaNames)}.`
+          : `In the current connection I can see ${schemaNames.length} schema/database name(s): ${formatListPreview(schemaNames)}.`,
         followup:
           visibleNames.length > 0
             ? vi
@@ -880,10 +889,9 @@ export function getDirectMetadataReply(args: {
     }
 
     return {
-      answer:
-        vi
-          ? `Trong kết nối hiện tại chỉ có metadata cho ${args.activeSchema || schemaNames[0] || "schema/database hiện tại"}.`
-          : `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
+      answer: vi
+        ? `Trong kết nối hiện tại chỉ có metadata cho ${args.activeSchema || schemaNames[0] || "schema/database hiện tại"}.`
+        : `In the current connection I only have metadata for ${args.activeSchema || schemaNames[0] || "the current schema/database"}.`,
       followup: visibleNames.length
         ? vi
           ? `Hiện có ${visibleNames.length} bảng: ${formatListPreview(visibleNames)}.`
@@ -894,27 +902,25 @@ export function getDirectMetadataReply(args: {
 
   if (asksSchemas) {
     return {
-      answer:
-        vi
-          ? schemaNames.length
-            ? `Hiện có ${schemaNames.length} schema: ${formatListPreview(schemaNames)}.`
-            : "Chưa có metadata schema nào."
-          : schemaNames.length
-            ? `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
-            : "I do not have any schema metadata loaded yet.",
+      answer: vi
+        ? schemaNames.length
+          ? `Hiện có ${schemaNames.length} schema: ${formatListPreview(schemaNames)}.`
+          : "Chưa có metadata schema nào."
+        : schemaNames.length
+          ? `I can currently see ${schemaNames.length} schema(s): ${formatListPreview(schemaNames)}.`
+          : "I do not have any schema metadata loaded yet.",
     } satisfies DirectMetadataReply;
   }
 
   if (asksTables) {
     return {
-      answer:
-        vi
-          ? visibleNames.length
-            ? `Hiện có ${visibleNames.length} bảng trong ${args.activeSchema || "schema hiện tại"}: ${formatListPreview(visibleNames)}.`
-            : `Chưa thấy bảng nào trong ${args.activeSchema || "schema hiện tại"}.`
-          : visibleNames.length
-            ? `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
-            : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
+      answer: vi
+        ? visibleNames.length
+          ? `Hiện có ${visibleNames.length} bảng trong ${args.activeSchema || "schema hiện tại"}: ${formatListPreview(visibleNames)}.`
+          : `Chưa thấy bảng nào trong ${args.activeSchema || "schema hiện tại"}.`
+        : visibleNames.length
+          ? `I can currently see ${visibleNames.length} table(s) in ${args.activeSchema || "the current schema"}: ${formatListPreview(visibleNames)}.`
+          : `I do not see any tables in ${args.activeSchema || "the current schema"} yet.`,
     } satisfies DirectMetadataReply;
   }
 
@@ -1046,10 +1052,9 @@ export function buildFastResultAnswer(args: {
 
   if (rowCount === 0) {
     return {
-      answer:
-        vi
-          ? "Đã chạy truy vấn nhưng không có dòng nào."
-          : "I ran the query, but it returned no rows.",
+      answer: vi
+        ? "Đã chạy truy vấn nhưng không có dòng nào."
+        : "I ran the query, but it returned no rows.",
       confidence: "high" as const,
     };
   }
@@ -1058,8 +1063,7 @@ export function buildFastResultAnswer(args: {
     const onlyColumn = columns[0]!;
     const value = formatScalarForAnswer(args.preview[0]?.[onlyColumn]);
     return {
-      answer:
-        vi ? `Kết quả là ${value}.` : `The result is ${value}.`,
+      answer: vi ? `Kết quả là ${value}.` : `The result is ${value}.`,
       confidence: "high" as const,
     };
   }
@@ -1071,8 +1075,9 @@ export function buildFastResultAnswer(args: {
       .map((col) => `${col}: ${formatScalarForAnswer(row[col])}`)
       .join(", ");
     return {
-      answer:
-        vi ? `Tìm thấy 1 dòng: ${summary}.` : `I found 1 row: ${summary}.`,
+      answer: vi
+        ? `Tìm thấy 1 dòng: ${summary}.`
+        : `I found 1 row: ${summary}.`,
       confidence: "high" as const,
     };
   }
@@ -1084,19 +1089,17 @@ export function buildFastResultAnswer(args: {
       .map((row) => formatScalarForAnswer(row[col]))
       .join(", ");
     return {
-      answer:
-        vi
-          ? `Tìm thấy ${rowCount} dòng. ${col}: ${values}.`
-          : `I found ${rowCount} row(s). ${col}: ${values}.`,
+      answer: vi
+        ? `Tìm thấy ${rowCount} dòng. ${col}: ${values}.`
+        : `I found ${rowCount} row(s). ${col}: ${values}.`,
       confidence: "high" as const,
     };
   }
 
   return {
-    answer:
-      vi
-        ? `Đã chạy truy vấn và tìm thấy ${rowCount} dòng. Dưới đây là phần xem trước kết quả.`
-        : `I ran the query and found ${rowCount} row(s). Here is a preview of the result.`,
+    answer: vi
+      ? `Đã chạy truy vấn và tìm thấy ${rowCount} dòng. Dưới đây là phần xem trước kết quả.`
+      : `I ran the query and found ${rowCount} row(s). Here is a preview of the result.`,
     confidence:
       rowCount <= args.preview.length
         ? ("high" as const)
@@ -1132,7 +1135,9 @@ export async function planSqlFromQuestion(args: {
   const prompt = buildSqlPlanPrompt({
     engine: args.engine,
     activeSchema: args.activeSchema,
-    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
+    preferredReplyLanguage: formatReplyLanguageForPrompt(
+      preferredReplyLanguage
+    ),
     conversationSummary,
     schemaSummary,
     currentSql: args.currentSql,
@@ -1220,8 +1225,9 @@ export async function answerFromResult(args: {
         model: args.model,
         prompt: buildResultAnswerPlainPrompt({
           engine: args.engine,
-          preferredReplyLanguage:
-            formatReplyLanguageForPrompt(preferredReplyLanguage),
+          preferredReplyLanguage: formatReplyLanguageForPrompt(
+            preferredReplyLanguage
+          ),
           question: args.question,
           sql: args.sql,
           rowCount: Number(args.result.rowCount ?? rows.length),
@@ -1246,7 +1252,9 @@ export async function answerFromResult(args: {
 
   const prompt = buildResultAnswerPrompt({
     engine: args.engine,
-    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
+    preferredReplyLanguage: formatReplyLanguageForPrompt(
+      preferredReplyLanguage
+    ),
     question: args.question,
     sql: args.sql,
     rowCount: Number(args.result.rowCount ?? rows.length),
@@ -1414,8 +1422,9 @@ export async function chatReply(args: {
         prompt: buildChatReplyPlainPrompt({
           engine: args.engine,
           activeSchema: args.activeSchema,
-          preferredReplyLanguage:
-            formatReplyLanguageForPrompt(preferredReplyLanguage),
+          preferredReplyLanguage: formatReplyLanguageForPrompt(
+            preferredReplyLanguage
+          ),
           visibleTables,
           conversationSummary,
           question: args.question,
@@ -1436,7 +1445,9 @@ export async function chatReply(args: {
   const prompt = buildChatReplyPrompt({
     engine: args.engine,
     activeSchema: args.activeSchema,
-    preferredReplyLanguage: formatReplyLanguageForPrompt(preferredReplyLanguage),
+    preferredReplyLanguage: formatReplyLanguageForPrompt(
+      preferredReplyLanguage
+    ),
     visibleTables,
     conversationSummary,
     question: args.question,

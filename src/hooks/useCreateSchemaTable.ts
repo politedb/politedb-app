@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
 import { runSqlQuery } from "src/lib/tauri/query";
-import { createSchemaQuery, createTableQuery } from "./queries";
+import { createSchemaQuery, createTableQuery } from "src/lib/queries/sql";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { profileConnect } from "src/lib/tauri";

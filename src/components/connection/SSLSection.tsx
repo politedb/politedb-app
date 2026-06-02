@@ -2,7 +2,7 @@ import { Select } from "../common/Select";
 import { Tooltip } from "../common/Tooltip";
 import { Field } from "src/components/form";
 import { SslMode } from "src/lib/tauri";
-import { open } from "@tauri-apps/plugin-dialog";
+import { pickOpenFile } from "src/lib/system-dialog";
 import { FilePathPicker } from "src/components/common/FilePathPicker";
 
 const SSL_MODE_META: Record<SslMode, { label: string; hint: string }> = {
@@ -61,9 +61,7 @@ export function SSLSection(props: {
   const modeSupportsTls = sslMode !== "disable";
 
   async function pickCertPath(): Promise<string | null> {
-    const res = await open({
-      multiple: false,
-      directory: false,
+    const res = await pickOpenFile({
       filters: [
         { name: "Certificates", extensions: ["pem", "crt", "cer", "key"] },
       ],

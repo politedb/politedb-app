@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
-import { ConnectionFormDialog } from "./connection-form/ConnectionFormDialog.tsx";
-import { OverlayModal } from "./modal/OverlayModal";
-import { Button } from "./common/Button";
-import { DbIcon } from "./icons/DbIcon";
-import { SearchIcon, XIcon } from "./icons";
+import { ConnectionFormDialog } from "../connection/ConnectionFormDialog.tsx";
+import { OverlayModal } from "./OverlayModal.tsx";
+import { Button } from "../common/Button.tsx";
+import { DbIcon } from "../icons/DbIcon.tsx";
+import { SearchIcon, XIcon } from "../icons/index.tsx";
 
-import type { DatabaseEngine, DatabaseType } from "../types";
+import type { DatabaseEngine, DatabaseType } from "../../types.ts";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { SUPPORTED_DATABASES } from "../constant.ts";
+import { SUPPORTED_DATABASES } from "../../constant.ts";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();

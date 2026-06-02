@@ -1,8 +1,8 @@
 import { useCallback, useState } from "preact/hooks";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
-import { invoke } from "@tauri-apps/api/core";
-import { CMD } from "src/lib/tauri/commands";
+import { openDialog, saveDialog } from "src/lib/system-dialog";
+import { readTextFile } from "src/lib/system-fs";
+
+import { exportAppendToFile } from "src/lib/tauri/export";
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import {
@@ -10,7 +10,7 @@ import {
   tableExportQuery,
   qIdent,
   qLiteral,
-} from "src/hooks/queries";
+} from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
@@ -398,7 +398,7 @@ async function exportTableToSqlFile(args: {
         if (!content) return;
 
         writeQueue = writeQueue.then(() =>
-          invoke(CMD.exportAppendToFile, {
+          exportAppendToFile( {
             path,
             content,
             append: true,
@@ -643,7 +643,7 @@ export function useDatabaseBackup() {
           .slice(0, 19)
           .replace(/[:T]/g, "");
         const dbName = databaseName || "database";
-        const path = await save({
+        const path = await saveDialog({
           title: "Backup database",
           defaultPath: `${dbName}-backup-${stamp}.sql`,
           filters: [{ name: "SQL", extensions: ["sql"] }],
@@ -658,7 +658,7 @@ export function useDatabaseBackup() {
           "",
         ].join("\n");
 
-        await invoke(CMD.exportAppendToFile, {
+        await exportAppendToFile( {
           path,
           content: header,
           append: false,
@@ -669,7 +669,7 @@ export function useDatabaseBackup() {
         const columnsByTable = new Map<string, string[]>();
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await invoke(CMD.exportAppendToFile, {
+          await exportAppendToFile( {
             path,
             content: "\nSET FOREIGN_KEY_CHECKS = 0;\n",
             append: true,
@@ -728,7 +728,7 @@ export function useDatabaseBackup() {
           const key = `${table.schema}.${table.name}`;
           const structureSql = preDataByTable.get(key) ?? "";
           if (!structureSql) continue;
-          await invoke(CMD.exportAppendToFile, {
+          await exportAppendToFile( {
             path,
             content: `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`,
             append: true,
@@ -741,7 +741,7 @@ export function useDatabaseBackup() {
           const columns = columnsByTable.get(key) ?? [];
           if (!columns.length) continue;
 
-          await invoke(CMD.exportAppendToFile, {
+          await exportAppendToFile( {
             path,
             content: `\n-- Data ${table.schema}.${table.name}\n`,
             append: true,
@@ -758,7 +758,7 @@ export function useDatabaseBackup() {
         }
 
         if (postDataSqlChunks.length > 0) {
-          await invoke(CMD.exportAppendToFile, {
+          await exportAppendToFile( {
             path,
             content: `\n-- Post-data constraints/indexes\n${postDataSqlChunks.join("\n")}`,
             append: true,
@@ -766,7 +766,7 @@ export function useDatabaseBackup() {
         }
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await invoke(CMD.exportAppendToFile, {
+          await exportAppendToFile( {
             path,
             content: "\nSET FOREIGN_KEY_CHECKS = 1;\n",
             append: true,
@@ -789,7 +789,7 @@ export function useDatabaseBackup() {
 
       setOpError(null);
 
-      const path = await open({
+      const path = await openDialog({
         title: "Restore database from SQL",
         multiple: false,
         directory: false,

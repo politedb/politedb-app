@@ -30,6 +30,44 @@ PoliteDB is a Tauri v2 desktop database client with a Rust backend and a Preact/
 - When changing shared query, table editing, profile import/export, keychain, SSH, updater, or AI runtime flows, add or update focused tests where practical.
 - Use existing helpers and patterns before adding new abstractions.
 
+## SOLID Principles
+
+Apply SOLID when designing or refactoring code. Prefer extending existing boundaries over inventing parallel structures.
+
+### Single Responsibility (SRP)
+
+- Each module, function, or type should have one reason to change.
+- Keep UI rendering, state orchestration, and I/O separate in `src/` (components vs hooks vs `lib/` / API wrappers).
+- SQL query builders live in `src/lib/queries/sql/` (not hooks). Tauri `invoke` belongs in `src/lib/tauri/`.
+- In `src-tauri/`, keep Tauri command handlers thin: validate input, delegate to a focused service or adapter, return DTOs.
+- Split files when they mix unrelated concerns (e.g. connection UI + export crypto + query execution).
+
+### Open/Closed (OCP)
+
+- Extend behavior through new implementations or small hooks, not by editing many call sites.
+- Add database- or dialect-specific logic via adapters/traits (Rust) or strategy modules (TypeScript), not `if (engine === …)` scattered across the app.
+- Prefer composition and configuration over modifying shared core types for one feature.
+
+### Liskov Substitution (LSP)
+
+- Subtypes and implementations must honor the contracts of what they replace.
+- Rust: trait implementations must satisfy all documented invariants; do not weaken error handling or skip steps the trait implies.
+- TypeScript: if a function accepts a union or interface, every variant must behave consistently for callers (same shape, errors, and side-effect expectations).
+- Do not “special-case” a subtype in callers; fix the implementation or narrow the abstraction.
+
+### Interface Segregation (ISP)
+
+- Expose small, purpose-specific APIs instead of large “god” interfaces or command surfaces.
+- Split Tauri commands and frontend service types by use case (connect, query, edit row, export) rather than one mega-struct or mega-module.
+- Consumers should depend only on the methods or fields they need; avoid forcing unrelated callers to implement or pass unused options.
+
+### Dependency Inversion (DIP)
+
+- High-level modules depend on abstractions, not concrete drivers or UI details.
+- Frontend: call Tauri commands and typed wrappers in `lib/`, not ad hoc `invoke` scattered in components.
+- Backend: depend on traits or narrow ports for DB access, filesystem, keychain, and SSH; wire concrete adapters at the edges (`commands/`, `adapters/`).
+- Inject or pass dependencies in tests via the same abstractions; avoid hard-coding globals when a port already exists.
+
 ## Security And Privacy
 
 - Never log raw SQL, query text, passwords, tokens, connection strings, database names, file paths, or customer data unless the surrounding code already masks them.

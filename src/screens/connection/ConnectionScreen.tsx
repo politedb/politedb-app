@@ -1,32 +1,13 @@
-import {
-  useState,
-  useMemo,
-  useEffect,
-  useRef,
-  useCallback,
-} from "preact/hooks";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useMemo, useEffect, useRef, useCallback } from "preact/hooks";
 
-import {
-  DEFAULT_LIMIT,
-  DEFAULT_OFFSET,
-  tableKey,
-  useLoadTableData,
-} from "src/hooks/useLoadTableData";
+import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
-import { usePersistentStore } from "src/stores/persistentStore";
 import { getTablePagination } from "./tablePagination";
 
 import { MenuBar } from "./MenuBar";
-import { LeftNav } from "./LeftNav";
-import { NavigationTabs } from "./NavigationTabs";
-import { RightNav } from "./RightNav";
-import { QueryHistory } from "./QueryHistory";
 import { Box } from "src/components/common/Box";
-import { cn } from "src/utils/cn";
-import { ActiveWindowContent } from "./ActiveWindowContent";
+import { ConnectionWorkspaceLayout } from "./ConnectionWorkspaceLayout";
 
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useViewMode } from "./hooks/useViewMode";
@@ -35,19 +16,15 @@ import { useSchemaTablesPanel } from "./hooks/useSchemaTablesPanel";
 import { useDatabaseMetadata } from "src/hooks/useDatabaseMetadata";
 import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection";
 import { resolveTabRuntimeConnectionId } from "src/lib/runtimeConnection";
+import { resolveDefaultSchema } from "src/lib/engines";
 
-import { SplitPane } from "src/components/SplitPane";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
-import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";
-import {
-  appendSqlIntoLiveEditor,
-  getLiveSqlEditorContent,
-} from "src/components/editor/SqlEditorPane";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -55,7 +32,6 @@ import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
 import { registerConnectionTabCloseBridge } from "./connectionTabCloseBridge";
-import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
@@ -63,6 +39,9 @@ import { currentDatabaseFromInput } from "src/utils/connection";
 import type { PatchMap } from "src/utils/generateSql";
 import { pickHostDbUser } from "src/utils/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
+import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
+import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
+import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
 
 const EMPTY_TABLE_META = {
   columns: null,
@@ -79,103 +58,6 @@ const EMPTY_NEW_TABLE_DRAFTS = Object.freeze({}) as Record<
   { tableName?: string }
 >;
 
-function patchMapHasAnyChanges(patchMap: unknown): boolean {
-  if (!patchMap || typeof patchMap !== "object") return false;
-
-  for (const entry of Object.values(patchMap as Record<string, unknown>)) {
-    const patches = (entry as { patches?: unknown } | undefined)?.patches;
-    if (!patches || typeof patches !== "object") continue;
-
-    for (const actionPatches of Object.values(
-      patches as Record<string, unknown>
-    )) {
-      if (!actionPatches || typeof actionPatches !== "object") continue;
-
-      for (const rows of Object.values(
-        actionPatches as Record<string, unknown>
-      )) {
-        if (rows && typeof rows === "object" && Object.keys(rows).length > 0) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-function hasValidNewTableDraft(draft: unknown): boolean {
-  if (!draft || typeof draft !== "object") return false;
-  const data = draft as {
-    tableName?: unknown;
-    columns?: Array<{ column_name?: unknown }>;
-  };
-
-  return (
-    typeof data.tableName === "string" &&
-    data.tableName.trim().length > 0 &&
-    Array.isArray(data.columns) &&
-    data.columns.some(
-      (column) =>
-        typeof column?.column_name === "string" &&
-        column.column_name.trim().length > 0
-    )
-  );
-}
-
-function hasAnyUnsavedConnectionChanges(): boolean {
-  const s = useConnectionStore.getState();
-
-  for (const patchMap of Object.values(s.dataPatchMap)) {
-    if (patchMapHasAnyChanges(patchMap)) return true;
-  }
-
-  for (const tabDrafts of Object.values(s.newTableData)) {
-    for (const draft of Object.values(tabDrafts)) {
-      if (hasValidNewTableDraft(draft)) return true;
-    }
-  }
-
-  return false;
-}
-
-function discardAllConnectionChanges() {
-  const s = useConnectionStore.getState();
-  const screen = useScreenStore.getState();
-  const tabIds = new Set<string>([
-    ...Object.keys(s.dataPatchMap),
-    ...Object.keys(s.newTableData),
-    ...Object.keys(s.tableStructure),
-    ...Object.keys(s.tableConstraints),
-    ...Object.keys(screen.openWindows),
-  ]);
-
-  for (const tabId of tabIds) {
-    const newTableWindowIds = new Set(Object.keys(s.newTableData[tabId] ?? {}));
-
-    s.clearTableConstraints(tabId);
-    s.clearTableStructure(tabId);
-    s.clearDataPatchMap(tabId);
-    s.clearNewTableData(tabId);
-
-    const windows = screen.openWindows[tabId] ?? [];
-    const withoutNewTableWindows = windows.filter(
-      (window) =>
-        window.type !== "table" ||
-        (!window.table.new && !newTableWindowIds.has(window.id))
-    );
-    if (withoutNewTableWindows.length !== windows.length) {
-      screen.replaceWindows(tabId, withoutNewTableWindows);
-    }
-  }
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
 export function ConnectionScreen() {
   /* =============================================================================
    * Screen store (tab-level)
@@ -191,71 +73,27 @@ export function ConnectionScreen() {
   /* =============================================================================
    * Local UI state (screen-level)
    * ============================================================================= */
-  const [limit, setLimit] = useState(DEFAULT_LIMIT);
-  const [offset, setOffset] = useState(DEFAULT_OFFSET);
-  const [pendingTableAction, setPendingTableAction] = useState<
-    "export" | "import" | "clone" | "truncate" | "drop" | null
-  >(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
-  const [searchDialogOpen, setSearchDialogOpen] = useState(false);
-  const [diagramOpen, setDiagramOpen] = useState(false);
-  const [rightNavTab, setRightNavTab] = useState<"ai" | "table-size">(
-    "table-size"
-  );
-  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
-
-  const forceQuitRef = useRef(false);
-
-  const quitApp = useCallback(async () => {
-    forceQuitRef.current = true;
-
-    try {
-      await invoke("app_quit");
-    } catch {
-      await getCurrentWindow().destroy();
-    }
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-
-    void getCurrentWindow()
-      .onCloseRequested((event) => {
-        if (forceQuitRef.current) return;
-
-        event.preventDefault();
-
-        if (!hasAnyUnsavedConnectionChanges()) {
-          void quitApp();
-          return;
-        }
-
-        useUnsavedChangesDialogStore.getState().openForAppQuit();
-      })
-      .then((off) => {
-        if (disposed) {
-          off();
-          return;
-        }
-        unlisten = off;
-      });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [quitApp]);
-
-  const discardAndQuitApp = useCallback(async () => {
-    discardAllConnectionChanges();
-    await usePersistentStore.getState().saveNow();
-
-    useUnsavedChangesDialogStore.getState().close();
-
-    await quitApp();
-  }, [quitApp]);
+  const {
+    limit,
+    setLimit,
+    offset,
+    setOffset,
+    pendingTableAction,
+    setPendingTableAction,
+    error,
+    setError,
+    showSaveDialog,
+    setShowSaveDialog,
+    searchDialogOpen,
+    setSearchDialogOpen,
+    diagramOpen,
+    setDiagramOpen,
+    rightNavTab,
+    setRightNavTab,
+    errorDialogOpen,
+    setErrorDialogOpen,
+  } = useConnectionScreenState();
+  const { discardAndQuitApp } = useConnectionQuitGuard();
 
   const { viewMode, toggleViewMode, setViewMode } = useViewMode([
     "left",
@@ -453,16 +291,10 @@ export function ConnectionScreen() {
     engine,
     connectionId: runtimeConnectionId,
     currentDatabase,
-    defaultSchema:
-      engine === "postgres"
-        ? "public"
-        : engine === "redis"
-          ? `db ${profile?.input?.redis?.db ?? 0}`
-          : engine === "sqlite" || engine === "d1" || engine === "turso"
-            ? "main"
-            : engine === "clickhouse" || engine === "cassandra"
-              ? currentDatabase || "default"
-              : "",
+    defaultSchema: resolveDefaultSchema(engine, {
+      currentDatabase,
+      redisDb: profile?.input?.redis?.db ?? 0,
+    }),
   });
 
   const prevRuntimeConnectionIdRef = useRef<string | undefined>(undefined);
@@ -704,63 +536,11 @@ export function ConnectionScreen() {
     return pickHostDbUser(profile).database || "";
   }, [profile]);
 
-  const onInsertSqlIntoActiveEditor = useCallback(
-    async (sql: string) => {
-      const next = sql.trim();
-      if (!next) return;
-
-      let targetWindowId = activeSqlWindow?.id;
-      let current =
-        (targetWindowId
-          ? getLiveSqlEditorContent(targetWindowId)
-          : null
-        )?.trim() ??
-        activeSqlWindow?.content?.trim() ??
-        "";
-      let title = activeSqlWindow?.title ?? "SQL Query";
-
-      if (!targetWindowId) {
-        targetWindowId = openSqlEditor();
-      }
-
-      if (!activeSqlWindow && targetWindowId) {
-        const windows =
-          useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
-        const createdWindow = windows.find(
-          (window) => window.id === targetWindowId && window.type === "sql"
-        );
-        if (createdWindow?.type === "sql") {
-          current = createdWindow.content?.trim() ?? "";
-          title = createdWindow.title ?? "SQL Query";
-        }
-      }
-
-      if (!targetWindowId) return;
-
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
-          return;
-        }
-        await sleep(50);
-      }
-
-      const merged = current ? `${current}\n\n${next}` : next;
-      useScreenStore
-        .getState()
-        .updateSqlWindowContent(activeProfileScreen, targetWindowId, {
-          content: merged,
-          title,
-        });
-
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        if (await appendSqlIntoLiveEditor(targetWindowId, next)) {
-          return;
-        }
-        await sleep(50);
-      }
-    },
-    [activeProfileScreen, activeSqlWindow, openSqlEditor]
-  );
+  const onInsertSqlIntoActiveEditor = useInsertSqlIntoActiveEditor({
+    activeProfileScreen,
+    activeSqlWindow,
+    openSqlEditor,
+  });
 
   const openAiAssistant = useMemo(() => {
     return () => {
@@ -853,44 +633,6 @@ export function ConnectionScreen() {
     ]
   );
 
-  /* =============================================================================
-   * Main content layout (no heavy hooks inside)
-   * ============================================================================= */
-  const contentArea = (
-    <div class="transition-smooth flex flex-1 flex-col overflow-hidden">
-      {activeWindows.length > 0 && (
-        <NavigationTabs
-          openWindows={activeWindows}
-          setActiveWindowId={(id) => selectWindow(id)}
-          activeWindowId={activeWindowId}
-        />
-      )}
-
-      <div class={cn("flex-1 overflow-auto")}>
-        <ActiveWindowContent />
-      </div>
-    </div>
-  );
-
-  const mainContent = viewMode.includes("bottom") ? (
-    <SplitPane
-      direction="vertical"
-      initialRatio={0.7}
-      minFirstPx={200}
-      minSecondPx={150}
-      splitterPx={2}
-      fixedPaneOnResize="second"
-      first={contentArea}
-      second={
-        <div class="h-full overflow-hidden border-t border-neutral-200">
-          <QueryHistory activeProfileId={activeProfileScreen} />
-        </div>
-      }
-    />
-  ) : (
-    contentArea
-  );
-
   return (
     <ConnectionActionsProvider value={actions}>
       <ConnectionRuntimeProvider value={runtimeValue}>
@@ -917,123 +659,34 @@ export function ConnectionScreen() {
             onOpenDiagram={openDiagram}
           />
 
-          <div class="flex h-full flex-1 overflow-hidden">
-            {viewMode.includes("left") ? (
-              <SplitPane
-                direction="horizontal"
-                initialRatio={0.15}
-                minFirstPx={200}
-                minSecondPx={300}
-                splitterPx={2}
-                fixedPaneOnResize="first"
-                first={
-                  <div class="h-full overflow-hidden">
-                    <LeftNav
-                      engine={engine}
-                      profileId={activeProfileScreen}
-                      schemas={schemasForEditor}
-                      currSchema={activeSchema}
-                      onSchemaChange={onSchemaChange}
-                      schemaLabel={
-                        engine === "mongo" || engine === "redis"
-                          ? "Database"
-                          : "Schema"
-                      }
-                      tablesSectionTitle={
-                        engine === "mongo"
-                          ? "Collections"
-                          : engine === "cassandra"
-                            ? "Tables"
-                            : engine === "redis"
-                              ? "Keys"
-                              : "Tables"
-                      }
-                      tableSearchQuery={tableSearchQuery}
-                      setTableSearchQuery={setTableSearchQuery}
-                      expandedSections={expandedSections}
-                      setExpandedSections={setExpandedSections}
-                      filteredTables={sidebarTables}
-                      filteredFunctions={filteredFunctions}
-                      activeWindowId={activeWindowId}
-                    />
-                  </div>
-                }
-                second={
-                  <div class="flex h-full flex-1 flex-col overflow-hidden bg-neutral-100">
-                    {viewMode.includes("right") ? (
-                      <SplitPane
-                        direction="horizontal"
-                        initialRatio={0.75}
-                        minFirstPx={300}
-                        minSecondPx={200}
-                        splitterPx={2}
-                        fixedPaneOnResize="second"
-                        first={mainContent}
-                        second={
-                          <div class="h-full overflow-hidden border-l border-neutral-200">
-                            <RightNav
-                              chatSessionKey={activeProfileScreen}
-                              activeTab={rightNavTab}
-                              onTabChange={setRightNavTab}
-                              sizeInfo={activeTableData.sizeInfo}
-                              selectedRowDetail={selectedRowDetail}
-                              tableLoadKey={activeTableLoadKey}
-                              dataReadOnly={isProfileLocked}
-                              engine={engine || "postgres"}
-                              runtimeConnectionId={runtimeConnectionId}
-                              activeSchema={activeSchema}
-                              tables={meta.tables}
-                              columnsByTable={meta.columnsByTable}
-                              currentSql={activeSqlWindow?.content}
-                              onInsertSql={onInsertSqlIntoActiveEditor}
-                            />
-                          </div>
-                        }
-                      />
-                    ) : (
-                      mainContent
-                    )}
-                  </div>
-                }
-              />
-            ) : (
-              <div class="flex h-full flex-1 overflow-hidden bg-neutral-100">
-                {viewMode.includes("right") ? (
-                  <SplitPane
-                    direction="horizontal"
-                    initialRatio={0.75}
-                    minFirstPx={300}
-                    minSecondPx={200}
-                    splitterPx={2}
-                    fixedPaneOnResize="second"
-                    first={mainContent}
-                    second={
-                      <div class="h-full overflow-hidden border-l border-neutral-200">
-                        <RightNav
-                          chatSessionKey={activeProfileScreen}
-                          activeTab={rightNavTab}
-                          onTabChange={setRightNavTab}
-                          sizeInfo={activeTableData.sizeInfo}
-                          selectedRowDetail={selectedRowDetail}
-                          tableLoadKey={activeTableLoadKey}
-                          dataReadOnly={isProfileLocked}
-                          engine={engine || "postgres"}
-                          runtimeConnectionId={runtimeConnectionId}
-                          activeSchema={activeSchema}
-                          tables={meta.tables}
-                          columnsByTable={meta.columnsByTable}
-                          currentSql={activeSqlWindow?.content}
-                          onInsertSql={onInsertSqlIntoActiveEditor}
-                        />
-                      </div>
-                    }
-                  />
-                ) : (
-                  mainContent
-                )}
-              </div>
-            )}
-          </div>
+          <ConnectionWorkspaceLayout
+            viewMode={viewMode}
+            activeWindows={activeWindows}
+            activeWindowId={activeWindowId}
+            selectWindow={selectWindow}
+            activeProfileScreen={activeProfileScreen}
+            engine={engine}
+            schemasForEditor={schemasForEditor}
+            activeSchema={activeSchema}
+            onSchemaChange={onSchemaChange}
+            tableSearchQuery={tableSearchQuery}
+            setTableSearchQuery={setTableSearchQuery}
+            expandedSections={expandedSections}
+            setExpandedSections={setExpandedSections}
+            sidebarTables={sidebarTables}
+            filteredFunctions={filteredFunctions}
+            rightNavTab={rightNavTab}
+            setRightNavTab={setRightNavTab}
+            activeTableDataSizeInfo={activeTableData.sizeInfo}
+            selectedRowDetail={selectedRowDetail}
+            activeTableLoadKey={activeTableLoadKey}
+            isProfileLocked={isProfileLocked}
+            runtimeConnectionId={runtimeConnectionId}
+            tables={meta.tables}
+            columnsByTable={meta.columnsByTable}
+            activeSqlContent={activeSqlWindow?.content}
+            onInsertSqlIntoActiveEditor={onInsertSqlIntoActiveEditor}
+          />
 
           {error && (
             <ErrorDialog

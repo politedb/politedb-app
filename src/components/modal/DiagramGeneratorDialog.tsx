@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { writeFile } from "src/lib/system-fs";
 import { Button } from "src/components/common/Button";
 import { OverlayModal } from "src/components/modal/OverlayModal";
-import { DiagramCanvas } from "@root/src/components/DiagramCanvas";
+import { DiagramCanvas } from "src/components/DiagramCanvas";
 import { DownloadIcon, RefreshCwIcon, XIcon } from "src/components/icons";
 import {
   diagramTableColumnsQuery,
@@ -10,7 +10,7 @@ import {
   tableConstraintsMySqlQuery,
   tableConstraintsQuery,
   tableForeignKeysQuery,
-} from "src/hooks/queries";
+} from "src/lib/queries/sql";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { saveDialog, showMessage } from "src/lib/system-dialog";

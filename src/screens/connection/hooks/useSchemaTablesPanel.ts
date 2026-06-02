@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
+import { preferredSchemaFromList } from "src/lib/engines";
 
 export function useSchemaTablesPanel(args: {
   metadata: MetadataApi;
@@ -57,10 +58,7 @@ export function useSchemaTablesPanel(args: {
     if (activeSchema && schemas.includes(activeSchema)) return;
 
     const fallback =
-      (defaultSchema && schemas.includes(defaultSchema) && defaultSchema) ||
-      (engine === "postgres" && schemas.includes("public")
-        ? "public"
-        : schemas[0]!);
+      preferredSchemaFromList(engine, schemas, defaultSchema) ?? schemas[0]!;
 
     if (fallback !== activeSchema) setActiveSchema(fallback);
   }, [meta.schemas, activeSchema, engine, defaultSchema]);

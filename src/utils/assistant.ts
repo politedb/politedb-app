@@ -1,4 +1,4 @@
-import type { LocalAiSettings } from "@root/src/lib/ai-assistant/types";
+import type { LocalAiSettings } from "src/lib/ai-assistant/types";
 
 export const AI_ENDPOINT_KEY = "politedb.ai.endpoint";
 export const AI_MODEL_KEY = "politedb.ai.model";

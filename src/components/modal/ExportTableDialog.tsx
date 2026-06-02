@@ -10,7 +10,7 @@ import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Button } from "src/components/common/Button";
-import { type TableFilterCondition } from "src/hooks/queries";
+import { type TableFilterCondition } from "src/lib/queries/sql";
 import {
   type ExportConfig,
   type ExportFormat,
