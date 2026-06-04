@@ -158,7 +158,7 @@ export function TableFilterBar({
   }, [defaultFilter, filters.length, onFiltersChange]);
 
   return (
-    <div class="flex flex-col gap-2.5 border-t border-neutral-200 bg-neutral-50 px-4 py-3">
+    <div class="flex flex-col gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-3">
       {/* Filter row(s) */}
       <div class="flex flex-col gap-2">
         {filters.map((row, index) => {
@@ -181,7 +181,7 @@ export function TableFilterBar({
                     column: (e.target as HTMLSelectElement).value,
                   })
                 }
-                class="h-7 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
+                class="h-6 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
               >
                 {columnNames.map((name) => (
                   <option key={name} value={name}>
@@ -198,7 +198,7 @@ export function TableFilterBar({
                     ),
                   })
                 }
-                class="h-7 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
+                class="h-6 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
               >
                 {FILTER_OPERATORS.map((op) => (
                   <Fragment key={op.value}>
@@ -238,7 +238,7 @@ export function TableFilterBar({
                     (e.currentTarget as HTMLInputElement).blur();
                   }}
                   className={cn(
-                    "min-w-[140px] flex-1 px-3 py-[2.5px] text-sm outline-none",
+                    "min-w-[140px] flex-1 px-3 py-0.25 text-sm outline-none",
                     "border border-neutral-300 bg-white focus:border-blue-400",
                     queryError &&
                       "border-red-300 bg-red-100! focus:border-red-400",
@@ -247,32 +247,34 @@ export function TableFilterBar({
                 />
               </div>
 
-              <Button
-                variant="shadow"
-                className="px-3 py-[4.5px] text-xs"
-                onClick={() => handleApplyRow(row)}
-              >
-                Apply
-              </Button>
-              <Button
-                variant="shadow"
-                className="p-[6.5px] text-xs"
-                onClick={() => removeRow(index)}
-                aria-label="Remove filter"
-              >
-                <MinusIcon className="size-2.5" />
-              </Button>
-              <Button
-                variant="shadow"
-                className={cn(
-                  "invisible p-[6.5px] text-xs",
-                  index === 0 && "visible"
-                )}
-                onClick={addRow}
-                aria-label="Add filter"
-              >
-                <PlusIcon className="size-2.5" />
-              </Button>
+              <div class="flex items-center gap-1">
+                <Button
+                  variant="shadow"
+                  className="px-3 py-[3px] text-xs"
+                  onClick={() => handleApplyRow(row)}
+                >
+                  Apply
+                </Button>
+                <Button
+                  variant="shadow"
+                  className="p-[5px] text-xs"
+                  onClick={() => removeRow(index)}
+                  aria-label="Remove filter"
+                >
+                  <MinusIcon className="size-2.5" />
+                </Button>
+                <Button
+                  variant="shadow"
+                  className={cn(
+                    "invisible p-[5px] text-xs",
+                    index === 0 && "visible"
+                  )}
+                  onClick={addRow}
+                  aria-label="Add filter"
+                >
+                  <PlusIcon className="size-2.5" />
+                </Button>
+              </div>
             </div>
           );
         })}
@@ -284,7 +286,7 @@ export function TableFilterBar({
           {onExport && (
             <Button
               variant="shadow"
-              className="px-3 text-xs"
+              className="px-3 py-[3px] text-xs"
               onClick={onExport}
             >
               Export
@@ -293,7 +295,7 @@ export function TableFilterBar({
           {onShowSql && currentSql && (
             <Button
               variant="shadow"
-              className="px-3 text-xs"
+              className="px-3 py-[3px] text-xs"
               onClick={() => onShowSql(currentSql)}
             >
               SQL
@@ -304,7 +306,7 @@ export function TableFilterBar({
           <div class="flex items-center gap-2">
             <Button
               variant="shadow"
-              className="px-3 text-xs"
+              className="px-3 py-[3px] text-xs"
               onClick={() => onClear(true)}
             >
               Clear
@@ -312,7 +314,7 @@ export function TableFilterBar({
             <div class="relative">
               <Button variant="shadow" className="gap-0 p-0 text-xs">
                 <div
-                  class="py-1 pr-2 pl-3"
+                  class="py-[3px] pr-2 pl-3"
                   onClick={() => handleApplyAll("AND")}
                 >
                   Apply All

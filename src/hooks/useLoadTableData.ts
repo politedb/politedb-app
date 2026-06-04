@@ -23,11 +23,7 @@ import { getErrorMessage } from "src/lib/table-data/helpers";
 import { patchMeta } from "src/lib/table-data/metaPatch";
 import type { LoadFlags, TablePagination } from "src/lib/table-data";
 
-export {
-  tableKey,
-  DEFAULT_LIMIT,
-  DEFAULT_OFFSET,
-} from "src/lib/table-data";
+export { tableKey, DEFAULT_LIMIT, DEFAULT_OFFSET } from "src/lib/table-data";
 export type { LoadFlags, TablePagination } from "src/lib/table-data";
 
 export function useLoadTableData() {
@@ -224,6 +220,8 @@ export function useLoadTableData() {
         operationCancel(rowsInfo.opId).catch(() => {});
       }
       useConnectionStore.getState().clearRows(key);
+      useConnectionStore.getState().clearTableFilter(key, false);
+      useConnectionStore.getState().clearTableSort(key);
 
       removeMeta(key);
     },

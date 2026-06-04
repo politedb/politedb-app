@@ -52,7 +52,7 @@ export function TagSelect(props: Props) {
         {/* Selected tags display */}
         <div
           class={cn(
-            "flex h-8 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1.5 text-xs",
+            "flex h-7 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-1.25 py-0.75 text-xs",
             !disabled &&
               "focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500",
             disabled && "cursor-not-allowed bg-neutral-100 text-neutral-400"

@@ -1,5 +1,4 @@
 import { useState } from "preact/hooks";
-import type { TableSort } from "src/lib/queries/sql";
 import type { TableViewMode } from "src/components/table/TableViewToggle";
 
 export type StructPaneTab = "columns" | "constraints" | "foreignKeys";
@@ -16,7 +15,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
   const [dropDialogOpen, setDropDialogOpen] = useState(false);
-  const [sortState, setSortState] = useState<TableSort | null>(null);
   const [progressNow, setProgressNow] = useState(() => Date.now());
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [settledPagination, setSettledPagination] = useState(() => ({
@@ -43,8 +41,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
     setTruncateDialogOpen,
     dropDialogOpen,
     setDropDialogOpen,
-    sortState,
-    setSortState,
     progressNow,
     setProgressNow,
     errorDialogOpen,

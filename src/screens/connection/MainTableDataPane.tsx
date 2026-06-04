@@ -40,6 +40,7 @@ import {
   copyTableDataQuery,
   truncateTableQuery,
   dropTableQuery,
+  type TableSort,
 } from "src/lib/queries/sql";
 import { TableForeignKey } from "src/types";
 import { MainTableDialogs } from "./MainTableDialogs";
@@ -132,6 +133,23 @@ export function MainTableDataPane(props: {
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
+  const startedRef = useRef<string | null>(null);
+
+  const activeKey = useMemo(
+    () =>
+      tableKey(
+        profileId,
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name
+      ),
+    [profileId, activeTableWindow]
+  );
+
+  const sortState = useConnectionStore(
+    (s) => s.tableSortByKey[activeKey] ?? null
+  );
+  const setTableSort = useConnectionStore((s) => s.setTableSort);
+
   const {
     structPaneTab,
     setStructPaneTab,
@@ -149,8 +167,6 @@ export function MainTableDataPane(props: {
     setTruncateDialogOpen,
     dropDialogOpen,
     setDropDialogOpen,
-    sortState,
-    setSortState,
     progressNow,
     setProgressNow,
     errorDialogOpen,
@@ -160,18 +176,6 @@ export function MainTableDataPane(props: {
   } = useMainTablePaneState({ limit, offset });
 
   const rerender = () => forceUpdate((n) => n + 1);
-
-  const startedRef = useRef<string | null>(null);
-
-  const activeKey = useMemo(
-    () =>
-      tableKey(
-        profileId,
-        activeTableWindow.table.schema,
-        activeTableWindow.table.name
-      ),
-    [profileId, activeTableWindow]
-  );
 
   const {
     filterBarVisible,
@@ -224,7 +228,6 @@ export function MainTableDataPane(props: {
   );
 
   useEffect(() => {
-    setSortState(null);
     clearSelectedRowDetail(activeKey);
     setSettledPagination({ limit, offset });
   }, [activeKey, clearSelectedRowDetail]);
@@ -272,6 +275,16 @@ export function MainTableDataPane(props: {
     loadTableData,
     rerender,
   });
+
+  const handleChangeSort = useCallback(
+    (nextSort: TableSort | null) => {
+      setTableSort(activeKey, nextSort);
+      if (renderOffset !== 0) {
+        pageChange(limit, 0);
+      }
+    },
+    [activeKey, setTableSort, renderOffset, pageChange, limit]
+  );
 
   const patches =
     useConnectionStore.getState().dataPatchMap[profileId]?.[
@@ -1009,12 +1022,7 @@ export function MainTableDataPane(props: {
                 foreignKeyMap={foreignKeyMap}
                 onNavigateFk={handleNavigateFk}
                 sortState={sortState}
-                onChangeSort={(nextSort) => {
-                  setSortState(nextSort);
-                  if (renderOffset !== 0) {
-                    pageChange(limit, 0);
-                  }
-                }}
+                onChangeSort={handleChangeSort}
                 onSelectedRowDetailChange={handleSelectedRowDetailChange}
               />
             </div>

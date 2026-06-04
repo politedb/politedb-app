@@ -452,7 +452,7 @@ export function LeftNav({
 
       {/* Bottom: Toolbar — Database (Mongo) / Schema (SQL) selector */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1">
           <NewTableMenu
             disabled={
               isProfileLocked ||

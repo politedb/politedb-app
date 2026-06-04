@@ -83,6 +83,7 @@ export const useConnectionStore = create<ConnectionState>()(
       newTableData: {},
 
       tableFilterByKey: {},
+      tableSortByKey: {},
 
       tableRowsByKey: {},
       tableRowCacheByKey: {},
@@ -207,6 +208,37 @@ export const useConnectionStore = create<ConnectionState>()(
             [windowId]: [],
           },
         })),
+
+      setTableSort: (key, sort) =>
+        set((s) => {
+          if (!sort) {
+            if (!s.tableSortByKey[key]) return s;
+            const { [key]: _, ...rest } = s.tableSortByKey;
+            return { tableSortByKey: rest };
+          }
+
+          const previous = s.tableSortByKey[key];
+          if (
+            previous?.colName === sort.colName &&
+            previous.direction === sort.direction
+          ) {
+            return s;
+          }
+
+          return {
+            tableSortByKey: {
+              ...s.tableSortByKey,
+              [key]: sort,
+            },
+          };
+        }),
+
+      clearTableSort: (key) =>
+        set((s) => {
+          if (!s.tableSortByKey[key]) return s;
+          const { [key]: _, ...rest } = s.tableSortByKey;
+          return { tableSortByKey: rest };
+        }),
 
       setTableStructure: (tabId, tableWindowId, structure) =>
         set((s) => ({

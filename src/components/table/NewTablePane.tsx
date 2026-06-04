@@ -221,7 +221,7 @@ export function NewTablePane({
               value={tableState.tableName}
               onInput={(e) => tableState.setTableName(e.currentTarget.value)}
               placeholder="table_name"
-              className="h-8 border border-neutral-200 bg-white text-sm"
+              className="h-7 border border-neutral-200 bg-white py-1 text-sm"
               disabled={busy || isProfileLocked}
             />
           </div>

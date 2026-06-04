@@ -10,7 +10,7 @@ import type {
 } from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
 import type { PatchMap, VirtualKeySafetyIssue } from "src/lib/patches/generateSql";
-import type { TableFilterCondition } from "src/lib/queries/sql";
+import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 
 export type SchemaState = {
   data: string[];
@@ -132,6 +132,7 @@ export type ConnectionState = {
   virtualKeySafetyByKey: Record<string, VirtualKeySafetyIssue[]>;
   newTableData: Record<string, Record<string, NewTableDataState>>;
   tableFilterByKey: Record<string, TableFilterState>;
+  tableSortByKey: Record<string, TableSort | null>;
 
   tableRowsByKey: Record<string, TableRowState>;
   tableRowCacheByKey: Record<
@@ -189,6 +190,8 @@ export type ConnectionState = {
 
   setTableFilter: (key: string, filter: TableFilterState) => void;
   clearTableFilter: (key: string, visible?: boolean) => void;
+  setTableSort: (key: string, sort: TableSort | null) => void;
+  clearTableSort: (key: string) => void;
 
   setSelectedRowDetail: (key: string, detail: SelectedRowDetail | null) => void;
   clearSelectedRowDetail: (key: string) => void;
