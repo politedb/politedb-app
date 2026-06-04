@@ -9,8 +9,8 @@ import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
 import { SqlEditorToolbar } from "./SqlEditorToolbar";
 import { ensureSqlTheme } from "./registerSqlTheme";
 import { formatSql, minifySql } from "src/utils/sqlFormatter";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { saveDialog } from "src/lib/system-dialog";
+import { writeTextFile } from "src/lib/system-fs";
 import {
   matchesShortcut,
   useKeyboardShortcutsStore,
@@ -393,7 +393,7 @@ export function SqlEditorPane(props: Props) {
     // Always flush draft first so export matches latest editor content
     const full = await flushDraft();
 
-    const path = await save({
+    const path = await saveDialog({
       title: "Export SQL…",
       defaultPath: defaultSqlFilename(win),
       filters: [{ name: "SQL", extensions: ["sql"] }],

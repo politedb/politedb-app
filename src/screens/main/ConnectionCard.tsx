@@ -24,7 +24,7 @@ import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { cn } from "src/utils/cn";
 import { formatConnectionDatabaseDisplay } from "src/utils/connection";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { writeTextFile } from "src/lib/system-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
 import {
   ExportConnectionDialog,

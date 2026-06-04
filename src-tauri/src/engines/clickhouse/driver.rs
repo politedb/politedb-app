@@ -104,6 +104,26 @@ impl EngineDriver for ClickhouseDriver {
         base.clickhouse = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let ch = input
+            .clickhouse
+            .as_mut()
+            .ok_or("CLICKHOUSE_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Clickhouse,
+            persist_secrets,
+            &mut ch.password,
+        )?;
+        Ok(input)
+    }
 }
 
 pub async fn connect_clickhouse(
@@ -175,7 +195,9 @@ async fn ping_http(
     let timeout_ms = connect_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
     let timeout = Duration::from_millis(timeout_ms);
 
-    let fut = client.query("SELECT 1 AS result").fetch_one::<HttpPingRow>();
+    let fut = client
+        .query("SELECT 1 AS result")
+        .fetch_one::<HttpPingRow>();
     tokio::time::timeout(timeout, fut)
         .await
         .map_err(|_| format!("CLICKHOUSE_CONNECT_TIMEOUT after {timeout_ms}ms"))?

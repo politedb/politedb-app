@@ -35,6 +35,7 @@ import { TagChips } from "src/components/common/TagChips";
 import { formatDatabaseVersion, normalizeEngineName } from "src/utils/convert";
 import { DatabaseManagerDialog } from "src/components/modal/DatabaseManagerDialog";
 import { canOpenDatabases } from "src/hooks/useDatabases";
+import { formatTableBreadcrumbTarget } from "src/lib/engines";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { v4 as uuid } from "uuid";
@@ -437,9 +438,7 @@ export function MenuBar({
         : formatConnectionDatabaseDisplay(displayDb, engine),
       dbTitle: tableOnlyBreadcrumb ? "" : displayDb,
       target: table
-        ? engine === "postgres"
-          ? `${schema}.${table}`
-          : table
+        ? formatTableBreadcrumbTarget(engine, schema, table)
         : tableOnlyBreadcrumb
           ? schema || "main"
           : usesDbOnlyBreadcrumb || !schema || schema === displayDb

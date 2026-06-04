@@ -1,13 +1,15 @@
 import { useCallback, useState } from "preact/hooks";
 import { type CsvExportOptions, serializeCsvChunk } from "src/utils/csv";
 import { type ColumnMeta } from "src/lib/tauri/types";
-import { tableExportQuery, type TableFilterCondition } from "./queries";
+import {
+  tableExportQuery,
+  type TableFilterCondition,
+} from "src/lib/queries/sql";
 import { formatJsonChunk, formatSqlChunk } from "src/utils/exportFormats";
-import { invoke } from "@tauri-apps/api/core";
-import { CMD } from "src/lib/tauri/commands";
+import { exportAppendToFile } from "src/lib/tauri/export";
 import { startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
-import { save } from "@tauri-apps/plugin-dialog";
+import { saveDialog } from "src/lib/system-dialog";
 
 export type ExportFormat = "csv" | "json" | "sql";
 
@@ -154,7 +156,7 @@ export function useExportTableData() {
           }
 
           try {
-            await invoke(CMD.exportAppendToFile, {
+            await exportAppendToFile({
               path,
               content,
               append: false,
@@ -180,7 +182,7 @@ export function useExportTableData() {
           }
 
           try {
-            await invoke(CMD.exportAppendToFile, {
+            await exportAppendToFile({
               path,
               content,
               append: totalRows > 0,
@@ -214,7 +216,7 @@ export function useExportTableData() {
       };
 
       const ext = opts.format;
-      const path = await save({
+      const path = await saveDialog({
         title: "Export table data",
         defaultPath: `${opts.fileName || tableName}.${ext}`,
         filters: [{ name: ext.toUpperCase(), extensions: [ext] }],

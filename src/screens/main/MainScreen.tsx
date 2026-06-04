@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile } from "src/lib/system-fs";
 import { v4 as uuid } from "uuid";
 
-import { ConnectionModal } from "src/components/SelectConnEngineModal";
-import { ConnectionFormDialog } from "src/components/connection-form/ConnectionFormDialog";
+import { ConnectionModal } from "src/components/modal/ConnectionModal";
+import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import { KeyboardShortcutsDialog } from "src/components/modal/KeyboardShortcutsDialog";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";

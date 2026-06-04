@@ -7,7 +7,7 @@ import {
   dropDatabaseQuery,
   isMySqlLike,
   renameDatabaseQuery,
-} from "./queries";
+} from "src/lib/queries/sql";
 import { cellToString } from "src/utils/convert";
 import { mongoListDatabases } from "src/lib/tauri/mongo";
 import { cassandraListKeyspaces } from "src/lib/tauri/cassandra";

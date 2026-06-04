@@ -1,5 +1,5 @@
-use tauri::AppHandle;
 use std::process::Command;
+use tauri::AppHandle;
 
 use crate::license::{self, LicenseDeviceInfo, LicenseState};
 
@@ -14,10 +14,7 @@ pub fn license_state_load(app: AppHandle) -> Result<LicenseState, String> {
 }
 
 #[tauri::command]
-pub fn license_state_save(
-    app: AppHandle,
-    state: LicenseState,
-) -> Result<LicenseState, String> {
+pub fn license_state_save(app: AppHandle, state: LicenseState) -> Result<LicenseState, String> {
     license::license_state_save(&app, state)
 }
 

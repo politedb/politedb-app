@@ -1,5 +1,5 @@
 import { TargetedEvent } from "preact";
-import { open } from "@tauri-apps/plugin-dialog";
+import { pickOpenFile } from "src/lib/system-dialog";
 import { useController, useWatch } from "react-hook-form";
 import { Field, Input } from "src/components/form";
 import { Button } from "../common/Button";
@@ -89,7 +89,7 @@ export function SSHSection(props: SectionProps) {
   }
 
   async function pickSSHKeyPath(): Promise<string | null> {
-    const res = await open({ multiple: false, directory: false });
+    const res = await pickOpenFile();
     if (!res) return null;
     return Array.isArray(res) ? (res[0] ?? null) : res;
   }

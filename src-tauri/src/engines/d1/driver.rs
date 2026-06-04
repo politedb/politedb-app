@@ -68,6 +68,23 @@ impl EngineDriver for D1Driver {
         base.d1 = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let d1 = input.d1.as_mut().ok_or("D1_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::D1,
+            persist_secrets,
+            &mut d1.api_token,
+        )?;
+        Ok(input)
+    }
 }
 
 fn merge_secret_for_test(

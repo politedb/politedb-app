@@ -86,6 +86,23 @@ impl EngineDriver for SnowflakeDriver {
         base.snowflake = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let sf = input.snowflake.as_mut().ok_or("SNOWFLAKE_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Snowflake,
+            persist_secrets,
+            &mut sf.password,
+        )?;
+        Ok(input)
+    }
 }
 
 pub fn build_client_config(input: &SnowflakeConnectInput) -> SnowflakeClientConfig {

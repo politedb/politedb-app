@@ -81,6 +81,23 @@ impl EngineDriver for PostgresDriver {
         base.postgres = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let pg = input.postgres.as_mut().ok_or("POSTGRES_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Postgres,
+            persist_secrets,
+            &mut pg.password,
+        )?;
+        Ok(input)
+    }
 }
 
 /* =============================================================================

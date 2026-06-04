@@ -17,7 +17,7 @@ import {
   guessWidthByMeta,
   inferCellType,
 } from "./tableUtils";
-import { TableFilterCondition } from "src/hooks/queries";
+import { TableFilterCondition } from "src/lib/queries/sql";
 import { useConnectionStore } from "src/stores/connection";
 import { DEFAULT_FILTER_STATE } from "src/constant";
 

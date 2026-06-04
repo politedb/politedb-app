@@ -34,29 +34,23 @@ import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useTableFilter } from "src/components/table/tableHooks";
-import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
-import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
-import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { useImportTableData } from "src/hooks/useImportTableData";
-import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
-import { DropTableDialog } from "src/components/modal/DropTableDialog";
-import { SqlPreviewModal } from "src/components/modal/SqlPreviewModal";
 import {
   cloneTableQuery,
   copyTableDataQuery,
   truncateTableQuery,
   dropTableQuery,
-  type TableSort,
-} from "src/hooks/queries";
+} from "src/lib/queries/sql";
 import { TableForeignKey } from "src/types";
-import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { MainTableDialogs } from "./MainTableDialogs";
+import { useMainTablePaneState } from "./hooks/useMainTablePaneState";
+import { useMainTableDataLoading } from "./hooks/useMainTableDataLoading";
+
+export type { StructPaneTab } from "./hooks/useMainTablePaneState";
 
 /* =============================================================================
  * Patch helpers
  * ============================================================================= */
-
-export type StructPaneTab = "columns" | "constraints" | "foreignKeys";
 
 type RowPatch = Record<string, any>;
 type WindowPatches = Partial<
@@ -67,25 +61,8 @@ type ActiveTableWindow = {
   table: { schema: string; name: string };
 };
 
-const EMPTY_META = {
-  columns: null,
-  structure: null,
-  constraints: null,
-  foreignKeys: null,
-  sizeInfo: null,
-  rowCount: null,
-  rowCountIsEstimated: false,
-  busy: false,
-  error: null,
-};
-
 const EMPTY_ARRAY: any[] = [];
 const EMPTY_SET = new Set<number>();
-const loadedQuerySignatureByTable = new Map<string, string>();
-const loadedRowCountSignatureByTable = new Map<string, string>();
-const loadedRowsDataSignatureByTable = new Map<string, string>();
-/** User-dismissed execution errors survive pane remounts (e.g. toggling query history). */
-const dismissedTableErrorByKey = new Map<string, string>();
 
 function extractPatches(patches: WindowPatches | null) {
   if (!patches) return null;
@@ -154,22 +131,33 @@ export function MainTableDataPane(props: {
   } = useImportTableData();
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
-  const [structPaneTab, setStructPaneTab] = useState<StructPaneTab>("columns");
   const [, forceUpdate] = useState(0);
-  const [sqlPreview, setSqlPreview] = useState("");
-  const [sqlDialogOpen, setSqlDialogOpen] = useState(false);
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
-  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
-  const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
-  const [dropDialogOpen, setDropDialogOpen] = useState(false);
-  const [sortState, setSortState] = useState<TableSort | null>(null);
-  const [progressNow, setProgressNow] = useState(() => Date.now());
-  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
-  const [settledPagination, setSettledPagination] = useState(() => ({
-    limit,
-    offset,
-  }));
+  const {
+    structPaneTab,
+    setStructPaneTab,
+    sqlPreview,
+    setSqlPreview,
+    sqlDialogOpen,
+    setSqlDialogOpen,
+    importDialogOpen,
+    setImportDialogOpen,
+    exportDialogOpen,
+    setExportDialogOpen,
+    cloneDialogOpen,
+    setCloneDialogOpen,
+    truncateDialogOpen,
+    setTruncateDialogOpen,
+    dropDialogOpen,
+    setDropDialogOpen,
+    sortState,
+    setSortState,
+    progressNow,
+    setProgressNow,
+    errorDialogOpen,
+    setErrorDialogOpen,
+    settledPagination,
+    setSettledPagination,
+  } = useMainTablePaneState({ limit, offset });
 
   const rerender = () => forceUpdate((n) => n + 1);
 
@@ -248,177 +236,42 @@ export function MainTableDataPane(props: {
     [activeKey, setSelectedRowDetail]
   );
 
-  const filterSignature = useMemo(
-    () =>
-      JSON.stringify(
-        appliedFilters.map((filter) => ({
-          id: filter.id,
-          column: filter.column,
-          operator: filter.operator,
-          value: filter.value,
-          enabled: filter.enabled,
-        }))
-      ),
-    [appliedFilters]
-  );
-
-  // User sort only — default PK sort is applied inside loadTableData without re-fetch.
-  const activeQuerySignature = useMemo(
-    () =>
-      `${activeKey}:${limit}:${offset}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
-    [
-      activeKey,
-      limit,
-      offset,
-      appliedFilterCombine,
-      filterSignature,
-      sortState,
-      filterApplySeq,
-    ]
-  );
-
-  const rowCountSignature = useMemo(
-    () =>
-      `${activeKey}:${appliedFilterCombine}:${filterSignature}:${filterApplySeq}`,
-    [activeKey, appliedFilterCombine, filterSignature, filterApplySeq]
-  );
-
-  const rowsDataSignature = useMemo(
-    () =>
-      `${activeKey}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
-    [
-      activeKey,
-      appliedFilterCombine,
-      filterSignature,
-      sortState,
-      filterApplySeq,
-    ]
-  );
-
-  /* ===========================================================================
-   * Subscribe minimal state
-   * =========================================================================== */
-
-  const handleLoadRows = useCallback(async () => {
-    if (startedRef.current === activeQuerySignature) return;
-    startedRef.current = activeQuerySignature;
-
-    const isRedisTable = engine === "redis";
-    const shouldForceReload =
-      isRedisTable ||
-      loadedQuerySignatureByTable.get(activeKey) !== activeQuerySignature;
-    const currentMeta =
-      useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
-    const shouldRefreshRowCount =
-      isRedisTable ||
-      typeof currentMeta.rowCount !== "number" ||
-      loadedRowCountSignatureByTable.get(activeKey) !== rowCountSignature;
-    const shouldResetRowsCache =
-      isRedisTable ||
-      loadedRowsDataSignatureByTable.get(activeKey) !== rowsDataSignature;
-
-    useConnectionStore.getState().initRows(activeKey, 5000);
-
-    // Keep table-local error stable. Avoid auto-retrying the exact same query
-    // signature continuously, which causes error-state flicker.
-    if (
-      currentMeta.error &&
-      !shouldForceReload &&
-      !shouldRefreshRowCount &&
-      !shouldResetRowsCache
-    ) {
-      loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
-      return;
-    }
-
-    // Mark this query signature as the active render target immediately so
-    // slow auxiliary metadata work (COUNT, size info, FK/structure) does not
-    // keep the whole table pane in a blocking loading state.
-    loadedQuerySignatureByTable.set(activeKey, activeQuerySignature);
-    rerender();
-
-    // Reuse cached table state when switching back to a table with the same
-    // query signature. Force a reload only when the effective query changed.
-    void loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      { limit, offset },
-      {
-        forceRows: shouldResetRowsCache,
-        refreshRowCount: shouldRefreshRowCount,
-        refreshRows: shouldForceReload,
-        // Foreign keys are useful for cross-table navigation, but structure /
-        // constraints should stay lazy until the Structure tab is opened.
-        refreshForeignKeys: !Array.isArray(currentMeta.foreignKeys),
-        refreshStats: false,
-        filters: appliedFilters.length ? appliedFilters : undefined,
-        filterCombine: appliedFilterCombine,
-        sortBy: sortState,
-      }
-    )
-      .then(() => {
-        if (shouldRefreshRowCount) {
-          loadedRowCountSignatureByTable.set(activeKey, rowCountSignature);
-        }
-        loadedRowsDataSignatureByTable.set(activeKey, rowsDataSignature);
-        rerender();
-      })
-      .catch(() => {
-        // Error state is already written into the store by loadTableData.
-        rerender();
-      });
-  }, [
-    activeTableWindow,
+  const {
+    meta,
+    rowsInfo,
+    hasError,
+    errorText,
+    hasAppliedFilters,
+    basePageTotal,
+    loadedMax,
+    loadedRowCount,
+    showingStalePage,
+    renderLimit,
+    renderOffset,
+    shouldShowLoading,
+    rowsLoadProgress,
+    dismissCurrentError,
+    clearLoadedQuerySignature,
+  } = useMainTableDataLoading({
     activeKey,
+    activeTableWindow,
     engine,
+    limit,
+    offset,
+    startedRef,
     appliedFilters,
     appliedFilterCombine,
-    activeQuerySignature,
-    rowCountSignature,
-    rowsDataSignature,
-    sortState,
     filterApplySeq,
-  ]);
-
-  useEffect(() => {
-    if (!activeKey) return;
-
-    handleLoadRows();
-
-    let last = "";
-
-    const unsub = useConnectionStore.subscribe((s) => {
-      const meta = s.tableDataMap[activeKey];
-      const rows = s.getRowsWindowInfo(activeKey);
-      const sig = JSON.stringify([
-        meta?.error,
-        meta?.busy,
-        meta?.columns?.length,
-        meta?.rowCount,
-        meta?.foreignKeys?.length,
-        rows?.version,
-        rows?.running,
-        rows?.loadedMax,
-        rows?.streamOffset,
-      ]);
-
-      if (sig !== last) {
-        last = sig;
-        rerender();
-      }
-    });
-
-    return unsub;
-  }, [activeKey, handleLoadRows]);
-
-  /* ===========================================================================
-   * Snapshots
-   * =========================================================================== */
-
-  const meta =
-    useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
-  const rowsInfo =
-    useConnectionStore.getState().getRowsWindowInfo(activeKey) ?? null;
+    sortState,
+    settledPagination,
+    setSettledPagination,
+    progressNow,
+    setProgressNow,
+    viewMode: viewMode === "structure" ? "structure" : "data",
+    setErrorDialogOpen,
+    loadTableData,
+    rerender,
+  });
 
   const patches =
     useConnectionStore.getState().dataPatchMap[profileId]?.[
@@ -435,131 +288,9 @@ export function MainTableDataPane(props: {
     [patches]
   );
 
-  const hasError = !!(meta.error || rowsInfo?.error);
-  const errorText = String(meta.error || rowsInfo?.error || "");
-
-  useEffect(() => {
-    if (!hasError) {
-      dismissedTableErrorByKey.delete(activeKey);
-      setErrorDialogOpen(false);
-      return;
-    }
-    if (dismissedTableErrorByKey.get(activeKey) === errorText) return;
-    setErrorDialogOpen(true);
-  }, [hasError, errorText, activeKey]);
-
-  // Lazy-load structure/constraints when switching to Structure view.
-  useEffect(() => {
-    if (viewMode !== "structure") return;
-    if (!activeTableWindow) return;
-    if (meta.busy) return;
-    if (meta.error) return;
-
-    const hasStructure =
-      Array.isArray(meta.structure) && meta.structure.length > 0;
-    const hasConstraints =
-      Array.isArray(meta.constraints) && meta.constraints.length > 0;
-
-    if (hasStructure && hasConstraints) return;
-
-    void loadTableData(
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      { limit, offset },
-      {
-        refreshRows: false,
-        refreshMeta: true,
-        refreshForeignKeys: false,
-        refreshStats: false,
-      }
-    );
-  }, [
-    viewMode,
-    activeTableWindow,
-    meta.busy,
-    meta.structure,
-    meta.constraints,
-    loadTableData,
-    limit,
-    offset,
-  ]);
-
   /* ===========================================================================
    * Row state
    * =========================================================================== */
-
-  const rowsRunning = !!rowsInfo?.running;
-  const streamOffset = rowsInfo?.streamOffset ?? 0;
-  const loadedMax = rowsInfo?.loadedMax ?? -1;
-  const loadedRowCount =
-    loadedMax >= streamOffset ? loadedMax - streamOffset + 1 : 0;
-  const rowsMatchRequestedOffset = streamOffset === offset;
-
-  const basePageTotal = useMemo(() => {
-    if (typeof meta.rowCount === "number") {
-      return Math.min(limit, Math.max(0, meta.rowCount - offset));
-    }
-    return limit;
-  }, [meta.rowCount, limit, offset]);
-
-  const columnsLoaded =
-    Array.isArray(meta.columns) &&
-    (engine === "mongo" || engine === "cassandra" || meta.columns.length > 0);
-  const rowsKnownEmpty =
-    !!rowsInfo &&
-    rowsMatchRequestedOffset &&
-    !rowsRunning &&
-    loadedMax < streamOffset;
-  const hasAppliedFilters = appliedFilters.some(
-    (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
-  );
-  const currentPageLoaded =
-    rowsMatchRequestedOffset &&
-    (rowsKnownEmpty ||
-      (!rowsRunning &&
-        (hasAppliedFilters ||
-          typeof meta.rowCount !== "number" ||
-          loadedRowCount >= basePageTotal)));
-  const showingStalePage =
-    !currentPageLoaded &&
-    (settledPagination.limit !== limit || settledPagination.offset !== offset);
-  const renderLimit = showingStalePage ? settledPagination.limit : limit;
-  const renderOffset = showingStalePage ? settledPagination.offset : offset;
-  const hasRenderedTableBefore = loadedQuerySignatureByTable.has(activeKey);
-  const queryMatchesRenderedData =
-    loadedQuerySignatureByTable.get(activeKey) === activeQuerySignature;
-
-  // Only show full-page loading on initial load. During refresh keep the table visible with
-  // existing (stale) data so the screen state stays the same and data updates silently.
-  const shouldShowLoading =
-    !hasError &&
-    (!columnsLoaded ||
-      !rowsInfo ||
-      (!hasRenderedTableBefore &&
-        (!currentPageLoaded || !queryMatchesRenderedData)));
-
-  useEffect(() => {
-    if (!shouldShowLoading || !rowsInfo?.running) return;
-
-    const id = window.setInterval(() => setProgressNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, [shouldShowLoading, rowsInfo?.running]);
-
-  const rowsLoadProgress = useMemo(() => {
-    if (!rowsInfo?.running) return null;
-    return tableRowsStreamLoadPercent(
-      rowsInfo,
-      meta.rowCount as number | null | undefined,
-      progressNow
-    );
-  }, [rowsInfo, meta.rowCount, progressNow]);
-
-  useEffect(() => {
-    if (!currentPageLoaded) return;
-    setSettledPagination((prev) =>
-      prev.limit === limit && prev.offset === offset ? prev : { limit, offset }
-    );
-  }, [currentPageLoaded, limit, offset]);
 
   /* ===========================================================================
    * Mutations
@@ -915,14 +646,14 @@ export function MainTableDataPane(props: {
 
       // Force the destination table to reload with the new FK filter instead
       // of briefly reusing the previous query signature / stale rows.
-      loadedQuerySignatureByTable.delete(refKey);
+      clearLoadedQuerySignature(refKey);
 
       // Allow row load effect to run even when navigating within the same table.
       startedRef.current = null;
 
       await actions.selectTable({ schema: refSchema, name: refTable });
     },
-    [actions, profileId]
+    [actions, profileId, clearLoadedQuerySignature]
   );
 
   const reloadTableData = useCallback(
@@ -1316,85 +1047,43 @@ export function MainTableDataPane(props: {
         }
       />
 
-      {sqlDialogOpen && (
-        <SqlPreviewModal
-          open={sqlDialogOpen}
-          onClose={() => setSqlDialogOpen(false)}
-          sqlPreview={sqlPreview}
-        />
-      )}
-
-      {exportDialogOpen && (
-        <ExportTableDialog
-          open={exportDialogOpen}
-          handleClose={() => setExportDialogOpen(false)}
-          connectionId={meta.connectionId}
-          schema={activeTableWindow.table.schema}
-          tableName={activeTableWindow.table.name}
-          columns={meta.columns ?? []}
-          totalRows={totalRows}
-          appliedFilters={appliedFilters}
-          appliedFilterCombine={appliedFilterCombine}
-          engine={engine}
-        />
-      )}
-
-      {importDialogOpen && (
-        <ImportTableDialog
-          open={importDialogOpen}
-          handleClose={onImportClose}
-          schema={activeTableWindow.table.schema}
-          tableName={activeTableWindow.table.name}
-          columns={meta.columns ?? []}
-          dataPreview={dataImportPreview}
-          error={importError}
-          importing={importBusy}
-          progress={importProgressState}
-          onImport={handleImport}
-        />
-      )}
-
-      {cloneDialogOpen && (
-        <CloneTableDialog
-          open={cloneDialogOpen}
-          onClose={onCloneClose}
-          sourceTableName={activeTableWindow.table.name}
-          onConfirm={handleClone}
-        />
-      )}
-
-      {truncateDialogOpen && (
-        <TruncateTableDialog
-          open={truncateDialogOpen}
-          onClose={onTruncateClose}
-          tableName={activeTableWindow.table.name}
-          onConfirm={handleTruncate}
-        />
-      )}
-
-      {dropDialogOpen && (
-        <DropTableDialog
-          open={dropDialogOpen}
-          onClose={onDropClose}
-          tableName={activeTableWindow.table.name}
-          onConfirm={handleDrop}
-        />
-      )}
-
-      {errorDialogOpen && (
-        <ErrorDialog
-          open
-          variant="execution"
-          backdropClassName="bg-transparent"
-          error={errorText}
-          onClose={() => {
-            setErrorDialogOpen(false);
-            if (hasError) {
-              dismissedTableErrorByKey.set(activeKey, errorText);
-            }
-          }}
-        />
-      )}
+      <MainTableDialogs
+        sqlDialogOpen={sqlDialogOpen}
+        setSqlDialogOpen={setSqlDialogOpen}
+        sqlPreview={sqlPreview}
+        exportDialogOpen={exportDialogOpen}
+        setExportDialogOpen={setExportDialogOpen}
+        importDialogOpen={importDialogOpen}
+        onImportClose={onImportClose}
+        cloneDialogOpen={cloneDialogOpen}
+        onCloneClose={onCloneClose}
+        truncateDialogOpen={truncateDialogOpen}
+        onTruncateClose={onTruncateClose}
+        dropDialogOpen={dropDialogOpen}
+        onDropClose={onDropClose}
+        errorDialogOpen={errorDialogOpen}
+        setErrorDialogOpen={setErrorDialogOpen}
+        hasError={hasError}
+        activeKey={activeKey}
+        errorText={errorText}
+        onErrorDismissPersist={() => dismissCurrentError()}
+        connectionId={meta.connectionId}
+        schema={activeTableWindow.table.schema}
+        tableName={activeTableWindow.table.name}
+        columns={meta.columns ?? []}
+        totalRows={totalRows}
+        appliedFilters={appliedFilters}
+        appliedFilterCombine={appliedFilterCombine}
+        engine={engine}
+        dataImportPreview={dataImportPreview}
+        importError={importError}
+        importBusy={importBusy}
+        importProgressState={importProgressState}
+        handleImport={handleImport}
+        handleClone={handleClone}
+        handleTruncate={handleTruncate}
+        handleDrop={handleDrop}
+      />
     </div>
   );
 }

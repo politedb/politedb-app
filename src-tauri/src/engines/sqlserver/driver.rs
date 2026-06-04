@@ -84,6 +84,23 @@ impl EngineDriver for SqlServerDriver {
         base.sqlserver = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let ss = input.sqlserver.as_mut().ok_or("SQLSERVER_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Sqlserver,
+            persist_secrets,
+            &mut ss.password,
+        )?;
+        Ok(input)
+    }
 }
 
 async fn make_client(
@@ -105,7 +122,12 @@ async fn make_client(
     } else {
         config.encryption(tiberius::EncryptionLevel::NotSupported);
     }
-    let connect_timeout = Duration::from_millis(input.connect_timeout_ms.unwrap_or(15_000).clamp(100, 300_000));
+    let connect_timeout = Duration::from_millis(
+        input
+            .connect_timeout_ms
+            .unwrap_or(15_000)
+            .clamp(100, 300_000),
+    );
 
     let addr = config.get_addr();
     let tcp = tokio::time::timeout(connect_timeout, TcpStream::connect(addr))
@@ -114,10 +136,13 @@ async fn make_client(
         .map_err(|e| format!("SQLSERVER_TCP_CONNECT_FAILED: {e}"))?;
     tcp.set_nodelay(true)
         .map_err(|e| format!("SQLSERVER_TCP_NODELAY_FAILED: {e}"))?;
-    tokio::time::timeout(connect_timeout, tiberius::Client::connect(config, tcp.compat_write()))
-        .await
-        .map_err(|_| "SQLSERVER_CLIENT_CONNECT_TIMEOUT".to_string())?
-        .map_err(|e| format!("SQLSERVER_CLIENT_CONNECT_FAILED: {e}"))
+    tokio::time::timeout(
+        connect_timeout,
+        tiberius::Client::connect(config, tcp.compat_write()),
+    )
+    .await
+    .map_err(|_| "SQLSERVER_CLIENT_CONNECT_TIMEOUT".to_string())?
+    .map_err(|e| format!("SQLSERVER_CLIENT_CONNECT_FAILED: {e}"))
 }
 
 pub async fn connect_sqlserver(
@@ -154,7 +179,10 @@ pub async fn connect_sqlserver(
     })
 }
 
-pub async fn test_sqlserver_direct(input: SqlServerConnectInput, password: String) -> Result<(), String> {
+pub async fn test_sqlserver_direct(
+    input: SqlServerConnectInput,
+    password: String,
+) -> Result<(), String> {
     validate_input(&input)?;
     let mut client = make_client(&input, &password).await?;
     let _ = client

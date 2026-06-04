@@ -78,6 +78,23 @@ impl EngineDriver for MongoDriver {
         base.mongo = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let mongo = input.mongo.as_mut().ok_or("MONGO_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Mongo,
+            persist_secrets,
+            &mut mongo.password,
+        )?;
+        Ok(input)
+    }
 }
 
 fn sanitize_opt(v: &Option<String>) -> Option<String> {

@@ -16,6 +16,7 @@ import { DeleteRedisKeyDialog } from "src/components/modal/DeleteRedisKeyDialog"
 import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
+import { supportsNewSchema } from "src/lib/engines";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -458,7 +459,7 @@ export function LeftNav({
               !supportsTableMutations ||
               connectionChromeBlocked
             }
-            enableNewSchema={engine === "postgres"}
+            enableNewSchema={supportsNewSchema(engine)}
             onOpenNewTable={() => {
               const t: TableItem = {
                 schema: currSchema,

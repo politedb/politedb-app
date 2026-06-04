@@ -8,7 +8,7 @@ import type {
 } from "src/stores/connection";
 import { commitTableCellEdit } from "./commitTableCellEdit";
 import { buildSelectedRowDetail } from "./selectedRowDetail";
-import type { TableSort } from "src/hooks/queries";
+import type { TableSort } from "src/lib/queries/sql";
 
 import { EMPTY_ARRAY, EMPTY_SET, EMPTY_OBJECT } from "./tableUtils";
 

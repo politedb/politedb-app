@@ -1,4 +1,4 @@
-import type { TableSort } from "src/hooks/queries";
+import type { TableSort } from "src/lib/queries/sql";
 import type { DatabaseEngine, TableConstraint } from "src/types";
 
 export type TableColumnForSort = {

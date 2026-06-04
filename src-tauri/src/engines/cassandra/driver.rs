@@ -81,6 +81,23 @@ impl EngineDriver for CassandraDriver {
         base.cassandra = Some(b);
         Ok(base)
     }
+    fn persist_profile_secrets(
+        &self,
+        app: &AppHandle,
+        profile_id: uuid::Uuid,
+        persist_secrets: bool,
+        mut input: ConnectionCreateInput,
+    ) -> Result<ConnectionCreateInput, String> {
+        let c = input.cassandra.as_mut().ok_or("CASSANDRA_CONFIG_MISSING")?;
+        crate::engines::profile_secrets::persist_secret_ref(
+            app,
+            profile_id,
+            EngineKind::Cassandra,
+            persist_secrets,
+            &mut c.password,
+        )?;
+        Ok(input)
+    }
 }
 
 fn sanitize_opt(v: &Option<String>) -> Option<String> {
