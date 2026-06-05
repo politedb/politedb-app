@@ -42,7 +42,7 @@ import {
   dropTableQuery,
   type TableSort,
 } from "src/lib/queries/sql";
-import { TableForeignKey } from "src/types";
+import type { TableForeignKey, TableItem } from "src/types";
 import { MainTableDialogs } from "./MainTableDialogs";
 import { useMainTablePaneState } from "./hooks/useMainTablePaneState";
 import { useMainTableDataLoading } from "./hooks/useMainTableDataLoading";
@@ -59,7 +59,7 @@ type WindowPatches = Partial<
 >;
 type ActiveTableWindow = {
   id: string;
-  table: { schema: string; name: string };
+  table: TableItem;
 };
 
 const EMPTY_ARRAY: any[] = [];
@@ -115,6 +115,7 @@ export function MainTableDataPane(props: {
   const s = useConnectionStore.getState();
   const { profileId, engine, limit, offset } = rt;
   const isRedis = engine === "redis";
+  const isNewTable = !!activeTableWindow.table.new;
   const isDataReadOnly = isProfileLocked;
   const isStructureReadOnly =
     isProfileLocked || engine === "mongo" || engine === "cassandra" || isRedis;
@@ -724,15 +725,16 @@ export function MainTableDataPane(props: {
    * =========================================================================== */
 
   const onExportOpen = useCallback(() => {
+    if (isNewTable) return;
     setExportDialogOpen(true);
-  }, [setExportDialogOpen]);
+  }, [isNewTable, setExportDialogOpen]);
 
   const onImportOpen = useCallback(async () => {
-    if (isProfileLocked) return;
+    if (isNewTable || isProfileLocked) return;
     const loaded = await loadDataImport();
     if (!loaded) return;
     setImportDialogOpen(true);
-  }, [isProfileLocked, loadDataImport, setImportDialogOpen]);
+  }, [isNewTable, isProfileLocked, loadDataImport, setImportDialogOpen]);
 
   const onImportClose = useCallback(() => {
     resetImport();
@@ -746,9 +748,9 @@ export function MainTableDataPane(props: {
   const onCloneClose = useCallback(() => setCloneDialogOpen(false), []);
 
   const onTruncateOpen = useCallback(() => {
-    if (isProfileLocked) return;
+    if (isNewTable || isProfileLocked) return;
     setTruncateDialogOpen(true);
-  }, [isProfileLocked]);
+  }, [isNewTable, isProfileLocked]);
   const onTruncateClose = useCallback(() => setTruncateDialogOpen(false), []);
 
   const onDropOpen = useCallback(() => {
@@ -759,7 +761,7 @@ export function MainTableDataPane(props: {
 
   const handleTruncate = useCallback(
     async (opts: { restartIdentity: boolean; cascade: boolean }) => {
-      if (isProfileLocked) return;
+      if (isNewTable || isProfileLocked) return;
       if (!meta.connectionId) throw new Error("Not connected.");
 
       const { schema, name } = activeTableWindow.table;
@@ -772,6 +774,7 @@ export function MainTableDataPane(props: {
       await reloadTableData(schema, name);
     },
     [
+      isNewTable,
       isProfileLocked,
       meta.connectionId,
       activeTableWindow.table.schema,
@@ -978,7 +981,7 @@ export function MainTableDataPane(props: {
                 onFilterCombineChange={setFilterCombine}
                 onApply={applyFilters}
                 onClear={clearFilters}
-                onExport={onExportOpen}
+                onExport={isNewTable ? undefined : onExportOpen}
                 onImport={onImportOpen}
                 queryError={hasError}
                 onShowSql={(sql) => {

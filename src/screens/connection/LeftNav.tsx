@@ -14,6 +14,8 @@ import { NewTableMenu } from "src/components/table/NewTableMenu";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { DeleteRedisKeyDialog } from "src/components/modal/DeleteRedisKeyDialog";
 import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog";
+import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
+import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
@@ -48,6 +50,10 @@ interface Props {
   filteredTables: TableItem[];
   filteredFunctions: FunctionItem[];
   activeWindowId: string | null;
+}
+
+function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
+  return `table:${table.schema}.${table.name}`;
 }
 
 function SectionHeader(props: {
@@ -175,6 +181,16 @@ export function LeftNav({
     useState<TableItem | null>(null);
   const [renameRedisKeyTarget, setRenameRedisKeyTarget] =
     useState<TableItem | null>(null);
+  const [cloneNewTableTarget, setCloneNewTableTarget] =
+    useState<TableItem | null>(null);
+  const [dropNewTableTarget, setDropNewTableTarget] =
+    useState<TableItem | null>(null);
+
+  const getNewTableDraft = (table: TableItem) => {
+    return useConnectionStore.getState().newTableData[profileId]?.[
+      tableWindowId(table)
+    ];
+  };
 
   const tableMenuItems: MenuItem[] = tableMenu
     ? isRedis
@@ -216,12 +232,16 @@ export function LeftNav({
           {
             type: "item",
             label: "Export data...",
+            disabled: !!tableMenu.table.new,
             onClick: () => actions.exportTableData(tableMenu.table),
           },
           {
             type: "item",
             label: "Import data from CSV",
-            disabled: isProfileLocked || !supportsTableMutations,
+            disabled:
+              !!tableMenu.table.new ||
+              isProfileLocked ||
+              !supportsTableMutations,
             onClick: () => actions.importTableData(tableMenu.table),
           },
           { type: "sep" },
@@ -229,19 +249,34 @@ export function LeftNav({
             type: "item",
             label: "Clone...",
             disabled: isProfileLocked || !supportsTableMutations,
-            onClick: () => actions.cloneTable(tableMenu.table),
+            onClick: () => {
+              if (tableMenu.table.new) {
+                setCloneNewTableTarget(tableMenu.table);
+                return;
+              }
+              actions.cloneTable(tableMenu.table);
+            },
           },
           {
             type: "item",
             label: "Truncate...",
-            disabled: isProfileLocked || !supportsTableMutations,
+            disabled:
+              !!tableMenu.table.new ||
+              isProfileLocked ||
+              !supportsTableMutations,
             onClick: () => actions.truncateTable(tableMenu.table),
           },
           {
             type: "item",
             label: "Drop...",
             disabled: isProfileLocked || !supportsTableMutations,
-            onClick: () => actions.dropTable(tableMenu.table),
+            onClick: () => {
+              if (tableMenu.table.new) {
+                setDropNewTableTarget(tableMenu.table);
+                return;
+              }
+              actions.dropTable(tableMenu.table);
+            },
           },
         ]
     : [];
@@ -386,14 +421,14 @@ export function LeftNav({
                           <KeyIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-neutral-100" : "text-amber-500"
+                              isActive ? "text-blue-100" : "text-amber-500"
                             )}
                           />
                         ) : (
                           <TableIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-neutral-100" : "text-blue-500"
+                              isActive ? "text-blue-100" : "text-blue-500"
                             )}
                           />
                         )}
@@ -439,6 +474,54 @@ export function LeftNav({
           onConfirm={(nextName) =>
             actions.renameRedisKey(renameRedisKeyTarget, nextName)
           }
+        />
+      )}
+
+      {cloneNewTableTarget && (
+        <CloneTableDialog
+          open={true}
+          showCopyDataOption={false}
+          sourceTableName={
+            getNewTableDraft(cloneNewTableTarget)?.tableName ||
+            cloneNewTableTarget.name
+          }
+          onClose={() => setCloneNewTableTarget(null)}
+          onConfirm={async (newTableName) => {
+            const sourceDraft = getNewTableDraft(cloneNewTableTarget);
+            const nextTable: TableItem = {
+              schema: cloneNewTableTarget.schema,
+              name: newTableName,
+              new: true,
+            };
+            const nextWindowId = tableWindowId(nextTable);
+
+            await actions.selectTable(nextTable);
+            useConnectionStore
+              .getState()
+              .setNewTableData(profileId, nextWindowId, {
+                tableName: newTableName,
+                primaryKey: sourceDraft?.primaryKey ?? "",
+                columns: structuredClone(sourceDraft?.columns ?? []),
+              });
+          }}
+        />
+      )}
+
+      {dropNewTableTarget && (
+        <DropTableDialog
+          open={true}
+          tableName={
+            getNewTableDraft(dropNewTableTarget)?.tableName ||
+            dropNewTableTarget.name
+          }
+          onClose={() => setDropNewTableTarget(null)}
+          onConfirm={async () => {
+            const windowId = tableWindowId(dropNewTableTarget);
+            useConnectionStore
+              .getState()
+              .clearNewTableData(profileId, windowId);
+            await actions.closeWindow(windowId, new MouseEvent("click"));
+          }}
         />
       )}
 

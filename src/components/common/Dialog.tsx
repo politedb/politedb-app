@@ -78,7 +78,7 @@ export function Dialog({
   return (
     <div
       class={cn(
-        "fixed inset-0 z-50 flex items-center justify-center",
+        "fixed inset-0 z-1000 flex items-center justify-center",
         backdropClassName ?? "bg-neutral-500/50"
       )}
       onClick={handleBackdropClick}

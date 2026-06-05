@@ -15,6 +15,7 @@ import { Checkbox } from "src/components/common/Checkbox";
 interface Props {
   open: boolean;
   sourceTableName: string;
+  showCopyDataOption?: boolean;
   onClose: () => void;
   onConfirm: (newTableName: string, copyData: boolean) => Promise<void>;
 }
@@ -22,6 +23,7 @@ interface Props {
 export function CloneTableDialog({
   open,
   sourceTableName,
+  showCopyDataOption = true,
   onClose,
   onConfirm,
 }: Props) {
@@ -33,9 +35,9 @@ export function CloneTableDialog({
   useEffect(() => {
     if (!open) return;
     setNewTableName(`${sourceTableName}_copy`);
-    setCopyData(true);
+    setCopyData(showCopyDataOption);
     setError(null);
-  }, [open, sourceTableName]);
+  }, [open, sourceTableName, showCopyDataOption]);
 
   const handleConfirm = useCallback(async () => {
     const name = newTableName.trim();
@@ -50,14 +52,21 @@ export function CloneTableDialog({
     setError(null);
     setLoading(true);
     try {
-      await onConfirm(name, copyData);
+      await onConfirm(name, showCopyDataOption ? copyData : false);
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Clone failed.");
     } finally {
       setLoading(false);
     }
-  }, [newTableName, sourceTableName, copyData, onConfirm, onClose]);
+  }, [
+    newTableName,
+    sourceTableName,
+    showCopyDataOption,
+    copyData,
+    onConfirm,
+    onClose,
+  ]);
 
   return (
     <>
@@ -79,12 +88,14 @@ export function CloneTableDialog({
               className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
               disabled={loading}
             />
-            <Checkbox
-              checked={copyData}
-              onChange={(e) => setCopyData(e.currentTarget.checked)}
-              label="Copy table data"
-              disabled={loading}
-            />
+            {showCopyDataOption && (
+              <Checkbox
+                checked={copyData}
+                onChange={(e) => setCopyData(e.currentTarget.checked)}
+                label="Copy table data"
+                disabled={loading}
+              />
+            )}
           </div>
         </DialogContent>
         <DialogFooter>
