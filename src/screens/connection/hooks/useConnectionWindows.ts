@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "preact/hooks";
-import { v4 as uuid } from "uuid";
 import type {
   OpenWindow,
   SqlEditorWindow,
@@ -25,6 +24,11 @@ function makeTableWindowId(table: Pick<TableItem, "schema" | "name">) {
   return `table:${makeTableKeyLocal(table)}`;
 }
 
+function makeDefaultSqlWindowId(profileId: string) {
+  const safeProfileId = profileId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return `sql-${safeProfileId}-default`;
+}
+
 function isTableWindow(w: OpenWindow | undefined): w is TableWindow {
   return !!w && w.type === "table";
 }
@@ -34,6 +38,11 @@ function isSqlWindow(w: OpenWindow | undefined): w is SqlEditorWindow {
 }
 
 const lastClosedSqlByTab = new Map<
+  string,
+  Pick<SqlEditorWindow, "content" | "title">
+>();
+
+const lastClosedSqlByProfile = new Map<
   string,
   Pick<SqlEditorWindow, "content" | "title">
 >();
@@ -87,8 +96,17 @@ export function useConnectionWindows(activeProfileScreen: string) {
   );
 
   const openSqlEditor = useCallback(() => {
-    const lastClosed = lastClosedSqlByTab.get(activeProfileScreen);
-    const id = `sql:${uuid()}`;
+    const profileKey = activeTab?.profileId ?? activeProfileScreen;
+    const id = makeDefaultSqlWindowId(profileKey);
+    const existing = windows.find((w) => w.id === id && w.type === "sql");
+    if (existing) {
+      setActiveWindowId(activeProfileScreen, existing.id);
+      return existing.id;
+    }
+
+    const lastClosed =
+      lastClosedSqlByProfile.get(profileKey) ??
+      lastClosedSqlByTab.get(activeProfileScreen);
     const win: SqlEditorWindow = {
       id,
       type: "sql",
@@ -98,7 +116,13 @@ export function useConnectionWindows(activeProfileScreen: string) {
     addWindow(activeProfileScreen, win);
     setActiveWindowId(activeProfileScreen, win.id);
     return win.id;
-  }, [activeProfileScreen, addWindow, setActiveWindowId]);
+  }, [
+    activeProfileScreen,
+    activeTab?.profileId,
+    windows,
+    addWindow,
+    setActiveWindowId,
+  ]);
 
   const openTable = useCallback(
     async (table: TableItem) => {
@@ -161,10 +185,14 @@ export function useConnectionWindows(activeProfileScreen: string) {
       // If you still keep legacy sqlResults store, clear it here
       if (toClose?.type === "sql") {
         const liveContent = getLiveSqlEditorContent(windowId);
-        lastClosedSqlByTab.set(activeProfileScreen, {
+        const lastClosed = {
           content: liveContent ?? toClose.content ?? "",
           title: toClose.title ?? "SQL Query",
-        });
+        };
+        lastClosedSqlByTab.set(activeProfileScreen, lastClosed);
+        if (activeTab?.profileId) {
+          lastClosedSqlByProfile.set(activeTab.profileId, lastClosed);
+        }
         const clearSqlResult = useConnectionStore.getState().clearSqlResult;
         clearSqlResult?.(windowId);
       }
@@ -183,6 +211,7 @@ export function useConnectionWindows(activeProfileScreen: string) {
     [
       windows,
       activeProfileScreen,
+      activeTab?.profileId,
       removeTableData,
       removeWindow,
       activeWindowId,

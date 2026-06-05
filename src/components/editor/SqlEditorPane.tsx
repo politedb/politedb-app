@@ -245,13 +245,18 @@ export function SqlEditorPane(props: Props) {
 
   const flushDraft = async () => {
     const full = getFullSql();
-    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
 
     savingRef.current = true;
     try {
       await saveSqlDraft(win.id, full);
       callbacksRef.current.onCommitContent?.(win.id, full);
-      dirtyRef.current = false;
+
+      const isCurrent = getFullSql() === full;
+      dirtyRef.current = !isCurrent;
     } finally {
       savingRef.current = false;
     }
@@ -262,6 +267,7 @@ export function SqlEditorPane(props: Props) {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
 
     saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
       void (async () => {
         const mm = editorRef.current?.getModel();
         if (!mm) return;
@@ -272,6 +278,12 @@ export function SqlEditorPane(props: Props) {
         try {
           await saveSqlDraft(win.id, next);
           callbacksRef.current.onCommitContent?.(win.id, next);
+
+          const current = editorRef.current?.getModel()?.getValue() ?? "";
+          const isCurrent = current === next;
+          dirtyRef.current = !isCurrent;
+
+          if (!isCurrent) scheduleBackgroundSave();
         } finally {
           savingRef.current = false;
         }
@@ -307,8 +319,15 @@ export function SqlEditorPane(props: Props) {
     }
 
     clearRunHighlight();
-    await saveSqlDraft(win.id, merged);
-    callbacksRef.current.onCommitContent?.(win.id, merged);
+    savingRef.current = true;
+    try {
+      await saveSqlDraft(win.id, merged);
+      callbacksRef.current.onCommitContent?.(win.id, merged);
+    } catch (error) {
+      dirtyRef.current = true;
+    } finally {
+      savingRef.current = false;
+    }
     editor.focus();
   };
 
