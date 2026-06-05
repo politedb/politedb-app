@@ -225,6 +225,7 @@ export function ActiveWindowContent() {
         runtimeConnectionId={rt.runtimeConnectionId}
         isProfileLocked={isProfileLocked}
         sqlSafetyMode={rt.sqlSafetyMode}
+        sqlScopeKey={rt.sqlScopeKey}
         metaKey={rt.metaKey}
         metadata={rt.metadata}
         onRunSql={rt.runSqlWithHistory}

@@ -78,6 +78,18 @@ export function usesTableOnlyBreadcrumb(
   return engine === "turso";
 }
 
+export function inferDatabaseOverrideFromTabLabel(
+  profileLabel?: string | null,
+  tabLabel?: string | null
+): string {
+  const profile = (profileLabel ?? "").trim();
+  const tab = (tabLabel ?? "").trim();
+  if (!profile || !tab) return "";
+
+  const prefix = `${profile} · `;
+  return tab.startsWith(prefix) ? tab.slice(prefix.length).trim() : "";
+}
+
 /** Active database/keyspace from the connection profile (for sidebar when no SQL schemas). */
 export function currentDatabaseFromInput(
   engine?: DatabaseEngine,

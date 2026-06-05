@@ -1,11 +1,12 @@
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
-import { PlayIcon } from "src/components/icons";
+import { PlayIcon, XIcon } from "src/components/icons";
 
 type Props = {
   onExport?: () => void;
   onFormat?: () => void;
   onMinify?: () => void;
+  onExplain?: () => void;
 
   onRun: () => void;
   onCancel?: () => void;
@@ -18,6 +19,7 @@ export function SqlEditorToolbar(props: Props) {
     onExport,
     onFormat,
     onMinify,
+    onExplain,
     onRun,
     onCancel,
     isExecuting,
@@ -25,7 +27,7 @@ export function SqlEditorToolbar(props: Props) {
   } = props;
 
   const toolBtn = cn(
-    "h-8 px-2 rounded-md text-xs font-medium",
+    "px-2 py-1 rounded-md text-xs font-medium",
     "text-neutral-700",
     "hover:bg-neutral-100 active:bg-neutral-200",
     "disabled:opacity-40"
@@ -34,7 +36,7 @@ export function SqlEditorToolbar(props: Props) {
   const canCancel = isExecuting && !!onCancel;
 
   return (
-    <div class="flex h-10 items-center border-y border-neutral-200 bg-neutral-50 px-3">
+    <div class="flex h-9 items-center border-y border-neutral-200 bg-neutral-50 px-3">
       {/* Left actions */}
       <div class="flex items-center gap-1">
         <Button
@@ -63,12 +65,21 @@ export function SqlEditorToolbar(props: Props) {
         >
           Minify
         </Button>
+
+        <Button
+          variant="ghost"
+          onClick={onExplain}
+          disabled={!onExplain || isExecuting}
+          class={toolBtn}
+        >
+          Explain
+        </Button>
       </div>
 
       {/* Right: Run */}
       <div class="ml-auto flex items-center">
         <Button
-          variant="default"
+          variant={canCancel ? "primary" : "default"}
           onClick={canCancel ? onCancel : onRun}
           disabled={isExecuting && !canCancel}
           title={
@@ -78,9 +89,13 @@ export function SqlEditorToolbar(props: Props) {
                 ? "Run Selected (⌘⏎)"
                 : "Run Current (⌘⏎)"
           }
-          class={cn("py-1.5 disabled:opacity-60")}
+          class={cn("py-1 disabled:opacity-60")}
         >
-          <PlayIcon class="size-4" />
+          {canCancel ? (
+            <XIcon className="size-4" />
+          ) : (
+            <PlayIcon class="size-4" />
+          )}
           <span class="text-xs font-semibold">
             {canCancel
               ? "Cancel"

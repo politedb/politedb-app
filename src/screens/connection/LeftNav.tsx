@@ -298,7 +298,7 @@ export function LeftNav({
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
             className={cn(
-              "rounded-lg border border-neutral-200 bg-white! text-[11px]"
+              "rounded-lg border border-neutral-200 bg-white! py-1.5 text-[11px]"
             )}
           />
         </div>

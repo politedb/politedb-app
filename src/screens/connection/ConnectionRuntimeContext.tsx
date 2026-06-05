@@ -1,5 +1,6 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
+import type { QuerySafetyMode } from "src/lib/querySafety";
 import type { DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
@@ -13,13 +14,14 @@ export type SqlRunFn = (args: {
 export type ConnectionRuntime = {
   profileId: string;
   engine: DatabaseEngine;
+  sqlScopeKey: string;
   metaKey: string;
   metadata: MetadataApi;
 
   activeSchema: string;
   runtimeConnectionId?: string;
   isProfileLocked: boolean;
-  sqlSafetyMode: "default" | "lock" | "safe";
+  sqlSafetyMode: QuerySafetyMode;
 
   // pagination currently kept in screen
   limit: number;

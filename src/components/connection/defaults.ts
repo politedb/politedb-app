@@ -109,10 +109,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const snowflakeSchema = sf?.schema ?? "PUBLIC";
 
   const resolveInline = (
-    value:
-      | { kind?: string; value?: string | null }
-      | undefined
-      | null
+    value: { kind?: string; value?: string | null } | undefined | null
   ) => (value?.kind === "inline" ? (value.value ?? "") : "");
   const resolveStoreKeychain = (
     value: { kind?: string } | undefined | null,

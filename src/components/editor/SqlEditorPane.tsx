@@ -19,6 +19,7 @@ import { splitSqlStatements } from "./splitSqlStatements";
 
 type Props = {
   win: SqlEditorWindow;
+  storageId?: string;
 
   onCommitContent?: (windowId: string, next: string) => void;
 
@@ -26,6 +27,12 @@ type Props = {
     windowId: string;
     sql: string;
   }) => Promise<void> | void;
+  onExplainSql?: (payload: {
+    windowId: string;
+    sql: string;
+  }) => Promise<void> | void;
+  onCancelSql?: () => void;
+  isExecuting?: boolean;
 
   schemas: string[];
   activeSchema?: string;
@@ -152,14 +159,19 @@ export function SqlEditorPane(props: Props) {
   );
   const {
     win,
+    storageId,
     onCommitContent,
     onRunSql,
+    onExplainSql,
+    onCancelSql,
+    isExecuting: isExternallyExecuting = false,
     schemas,
     activeSchema,
     tables,
     columnsByTable,
     engine,
   } = props;
+  const draftId = storageId || win.id;
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ExtendedEditor | null>(null);
@@ -187,15 +199,16 @@ export function SqlEditorPane(props: Props) {
   const callbacksRef = useRef({
     onCommitContent,
     onRunSql,
+    onExplainSql,
   });
 
   useEffect(() => {
-    callbacksRef.current = { onCommitContent, onRunSql };
-  }, [onCommitContent, onRunSql]);
+    callbacksRef.current = { onCommitContent, onRunSql, onExplainSql };
+  }, [onCommitContent, onRunSql, onExplainSql]);
 
   const modelUri = useMemo(
-    () => monaco.Uri.parse(`inmemory://sql/${win.id}.sql`),
-    [win.id]
+    () => monaco.Uri.parse(`inmemory://sql/${draftId}.sql`),
+    [draftId]
   );
 
   const saveTimerRef = useRef<number | null>(null);
@@ -207,8 +220,9 @@ export function SqlEditorPane(props: Props) {
   const savingRef = useRef(false);
   const dirtyRef = useRef(false);
 
-  const [isExecuting, setIsExecuting] = useState(false);
+  const [isLocalExecuting, setIsLocalExecuting] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
+  const isExecuting = isLocalExecuting || isExternallyExecuting;
 
   const getFullSql = () => editorRef.current?.getModel()?.getValue() ?? "";
 
@@ -252,7 +266,7 @@ export function SqlEditorPane(props: Props) {
 
     savingRef.current = true;
     try {
-      await saveSqlDraft(win.id, full);
+      await saveSqlDraft(draftId, full);
       callbacksRef.current.onCommitContent?.(win.id, full);
 
       const isCurrent = getFullSql() === full;
@@ -276,7 +290,7 @@ export function SqlEditorPane(props: Props) {
 
         savingRef.current = true;
         try {
-          await saveSqlDraft(win.id, next);
+          await saveSqlDraft(draftId, next);
           callbacksRef.current.onCommitContent?.(win.id, next);
 
           const current = editorRef.current?.getModel()?.getValue() ?? "";
@@ -321,7 +335,7 @@ export function SqlEditorPane(props: Props) {
     clearRunHighlight();
     savingRef.current = true;
     try {
-      await saveSqlDraft(win.id, merged);
+      await saveSqlDraft(draftId, merged);
       callbacksRef.current.onCommitContent?.(win.id, merged);
     } catch (error) {
       dirtyRef.current = true;
@@ -388,7 +402,7 @@ export function SqlEditorPane(props: Props) {
     if (!picked.sql) return;
     applyRunHighlight(picked.range);
 
-    setIsExecuting(true);
+    setIsLocalExecuting(true);
     try {
       await flushDraft();
       await callbacksRef.current.onRunSql({
@@ -396,7 +410,27 @@ export function SqlEditorPane(props: Props) {
         sql: picked.sql,
       });
     } finally {
-      queueMicrotask(() => setIsExecuting(false));
+      queueMicrotask(() => setIsLocalExecuting(false));
+    }
+  };
+
+  const onExplain = async () => {
+    const ed = editorRef.current;
+    if (!ed || !callbacksRef.current.onExplainSql) return;
+
+    const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
+    if (!picked.sql) return;
+    applyRunHighlight(picked.range);
+
+    setIsLocalExecuting(true);
+    try {
+      await flushDraft();
+      await callbacksRef.current.onExplainSql({
+        windowId: win.id,
+        sql: picked.sql,
+      });
+    } finally {
+      queueMicrotask(() => setIsLocalExecuting(false));
     }
   };
 
@@ -614,7 +648,7 @@ export function SqlEditorPane(props: Props) {
       try {
         const draft = loadedDraftRef.current
           ? null
-          : await loadSqlDraft(win.id);
+          : await loadSqlDraft(draftId);
         if (disposed) return;
 
         loadedDraftRef.current = true;
@@ -634,7 +668,7 @@ export function SqlEditorPane(props: Props) {
       disposed = true;
       editorRef.current?.__disposeAll?.();
     };
-  }, [modelUri, win.id]);
+  }, [draftId, modelUri, win.id]);
 
   // External content sync (if parent pushes content)
   useEffect(() => {
@@ -672,7 +706,9 @@ export function SqlEditorPane(props: Props) {
         onExport={onExportClick}
         onFormat={onFormatSql}
         onMinify={onMinifySql}
+        onExplain={onExplain}
         onRun={onRun}
+        onCancel={onCancelSql}
         isExecuting={isExecuting}
         hasSelection={hasSelection}
       />

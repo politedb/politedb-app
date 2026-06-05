@@ -457,6 +457,15 @@ export type SqlResultSlot = {
   mode?: "direct" | "stream"; // To easily switch UI rendering
 };
 
+export type SqlResultRun = {
+  id: string;
+  kind: "query" | "explain";
+  title: string;
+  createdAt: number;
+  sql: string;
+  slots: SqlResultSlot[];
+};
+
 /* ============================================================================
  * UI-only types (never sent as-is to Rust)
  * ============================================================================

@@ -225,6 +225,7 @@ export function ConnectionFormDialog({
         connectedTab = {
           id: `tab-${uuid()}`,
           ...tabPatch,
+          profileTags: res.profile.input?.tags ?? [],
         } as ProfileTab;
 
         addTab(connectedTab);

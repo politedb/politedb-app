@@ -1,13 +1,14 @@
 import { create } from "zustand";
 
 import { useProfileStore } from "src/stores/profile";
-import {
-  ProfileTab,
-  QuerySafetyMode,
-  useScreenStore,
-} from "src/stores/screen";
+import { ProfileTab, QuerySafetyMode, useScreenStore } from "src/stores/screen";
+import { normalizeQuerySafetyMode } from "src/lib/querySafety";
 
-import type { ConnectionOpenLogEntry, OpenWindow, SqlEditorWindow } from "src/types";
+import type {
+  ConnectionOpenLogEntry,
+  OpenWindow,
+  SqlEditorWindow,
+} from "src/types";
 import { useConnectionLogStore } from "src/stores/connectionLog";
 import { debounce } from "../utils/common";
 import {
@@ -41,7 +42,13 @@ import {
 
 type PersistedProfileTab = Pick<
   ProfileTab,
-  "id" | "label" | "engine" | "profileId" | "isLocked" | "querySafetyMode"
+  | "id"
+  | "label"
+  | "engine"
+  | "profileId"
+  | "isLocked"
+  | "querySafetyMode"
+  | "databaseOverride"
 >;
 
 type PersistedWindow =
@@ -107,11 +114,6 @@ function clampSnapshotV1(
   return { ...snap, profileTabs, openWindows, activeWindowId };
 }
 
-function normalizeSafetyMode(v: unknown): QuerySafetyMode {
-  if (v === "lock" || v === "safe" || v === "default") return v;
-  return "default";
-}
-
 function buildSnapshotFromScreen(): PersistentSnapshotV1 {
   const s = useScreenStore.getState();
 
@@ -121,7 +123,7 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
   for (const t of s.profileTabs) {
     const mode =
       t.querySafetyMode ?? (t.isLocked ? "lock" : ("default" as const));
-    querySafetyByProfileId[t.profileId] = normalizeSafetyMode(mode);
+    querySafetyByProfileId[t.profileId] = normalizeQuerySafetyMode(mode);
   }
 
   const logSnap = useConnectionLogStore.getState().getPersistedSnapshot();
@@ -138,6 +140,7 @@ function buildSnapshotFromScreen(): PersistentSnapshotV1 {
       profileId: t.profileId,
       isLocked: t.isLocked,
       querySafetyMode: t.querySafetyMode,
+      databaseOverride: t.databaseOverride,
     })),
 
     querySafetyByProfileId,
@@ -292,7 +295,7 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       const profileTabs = snap.profileTabs
         .filter((t) => profileIdSet.has(t.profileId))
         .map((t) => {
-          const mode = normalizeSafetyMode(
+          const mode = normalizeQuerySafetyMode(
             t.querySafetyMode ?? (t.isLocked ? "lock" : "default")
           );
           return {
@@ -307,12 +310,12 @@ export const usePersistentStore = create<PersistentStoreState>((set, get) => ({
       if (rawMap && typeof rawMap === "object") {
         for (const [pid, v] of Object.entries(rawMap)) {
           if (profileIdSet.has(pid)) {
-            querySafetyByProfileId[pid] = normalizeSafetyMode(v);
+            querySafetyByProfileId[pid] = normalizeQuerySafetyMode(v);
           }
         }
       }
       for (const t of profileTabs) {
-        querySafetyByProfileId[t.profileId] = normalizeSafetyMode(
+        querySafetyByProfileId[t.profileId] = normalizeQuerySafetyMode(
           t.querySafetyMode ?? (t.isLocked ? "lock" : "default")
         );
       }

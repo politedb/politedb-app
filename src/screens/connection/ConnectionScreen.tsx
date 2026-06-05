@@ -35,7 +35,10 @@ import { registerConnectionTabCloseBridge } from "./connectionTabCloseBridge";
 import type { TableItem } from "src/types";
 import { ConnectingPanel } from "./ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
-import { currentDatabaseFromInput } from "src/utils/connection";
+import {
+  currentDatabaseFromInput,
+  inferDatabaseOverrideFromTabLabel,
+} from "src/utils/connection";
 import type { PatchMap } from "src/utils/generateSql";
 import { pickHostDbUser } from "src/utils/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
@@ -69,6 +72,51 @@ export function ConnectionScreen() {
     removeTab,
     setActiveProfileScreen,
   } = useScreenStore();
+
+  const {
+    getProfileById,
+    showEditProfile,
+    selectedProfileId,
+    closeEdit,
+    saveProfile,
+    loadProfiles,
+  } = useProfileStore();
+
+  const activeProfileTab = useMemo(
+    () => profileTabs.find((tab) => tab.id === activeProfileScreen) ?? null,
+    [profileTabs, activeProfileScreen]
+  );
+
+  const profile = useMemo(() => {
+    if (!activeProfileTab?.profileId) return null;
+    return getProfileById(activeProfileTab.profileId);
+  }, [activeProfileTab?.profileId, getProfileById]);
+
+  const engine = activeProfileTab?.engine;
+
+  const activeDatabaseOverride = useMemo(() => {
+    return (
+      activeProfileTab?.databaseOverride ??
+      inferDatabaseOverrideFromTabLabel(profile?.label, activeProfileTab?.label)
+    );
+  }, [
+    activeProfileTab?.databaseOverride,
+    activeProfileTab?.label,
+    profile?.label,
+  ]);
+
+  const sqlScopeKey = useMemo(() => {
+    if (!profile) return activeProfileScreen;
+    const { host, database, user } = pickHostDbUser(profile);
+    const activeDatabase = activeDatabaseOverride || database;
+    return [
+      profile.id,
+      profile.engine,
+      host.trim(),
+      activeDatabase.trim(),
+      user.trim(),
+    ].join(":");
+  }, [activeProfileScreen, activeDatabaseOverride, profile]);
 
   /* =============================================================================
    * Local UI state (screen-level)
@@ -113,7 +161,7 @@ export function ConnectionScreen() {
     openSqlEditor,
     openTable,
     closeWindow,
-  } = useConnectionWindows(activeProfileScreen);
+  } = useConnectionWindows(activeProfileScreen, sqlScopeKey);
 
   const activeTablePagination = useMemo(() => {
     if (!activeTableWindow) return null;
@@ -137,24 +185,11 @@ export function ConnectionScreen() {
    * Engine/metaKey (depends on activeTab)
    * ============================================================================= */
   const metadata = useDatabaseMetadata();
-  const engine = activeTab?.engine;
-  const {
-    getProfileById,
-    showEditProfile,
-    selectedProfileId,
-    closeEdit,
-    saveProfile,
-    loadProfiles,
-  } = useProfileStore();
-
-  const profile = useMemo(() => {
-    if (!activeTab?.profileId) return null;
-    return getProfileById(activeTab.profileId);
-  }, [activeTab, getProfileById]);
-
   const currentDatabase = useMemo(
-    () => currentDatabaseFromInput(engine, profile?.input),
-    [engine, profile?.input]
+    () =>
+      activeDatabaseOverride ||
+      currentDatabaseFromInput(engine, profile?.input),
+    [activeDatabaseOverride, engine, profile?.input]
   );
 
   const editProfile = useMemo(() => {
@@ -600,6 +635,7 @@ export function ConnectionScreen() {
     () => ({
       profileId: activeProfileScreen,
       engine: engine || "postgres",
+      sqlScopeKey,
       metaKey,
       metadata,
       activeSchema,
@@ -618,6 +654,7 @@ export function ConnectionScreen() {
     [
       activeProfileScreen,
       engine,
+      sqlScopeKey,
       metaKey,
       metadata,
       activeSchema,

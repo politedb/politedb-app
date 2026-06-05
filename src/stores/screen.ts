@@ -1,12 +1,21 @@
 import { create } from "zustand";
 import { DatabaseEngine, OpenWindow, SqlEditorWindow } from "../types";
+import {
+  hasProductionTag,
+  normalizeQuerySafetyMode,
+  type QuerySafetyMode,
+} from "src/lib/querySafety";
 
-export type QuerySafetyMode = "default" | "lock" | "safe";
+export type { QuerySafetyMode } from "src/lib/querySafety";
 
 function tabSafetyMode(
   t: Pick<ProfileTab, "querySafetyMode" | "isLocked">
 ): QuerySafetyMode {
-  if (t.querySafetyMode === "lock" || t.querySafetyMode === "safe") {
+  if (
+    t.querySafetyMode === "lock" ||
+    t.querySafetyMode === "safe" ||
+    t.querySafetyMode === "production"
+  ) {
     return t.querySafetyMode;
   }
   if (t.querySafetyMode === "default") return "default";
@@ -32,9 +41,11 @@ export type ProfileTab = {
 
   profileId: string; // Persistent identity (backend uuid or legacy mapped id)
   runtimeConnectionId?: string; // Runtime connection handle (created on connect)
+  databaseOverride?: string;
   /** True when query safety is Lock (mutations blocked); does not block closing the tab. */
   isLocked?: boolean;
   querySafetyMode?: QuerySafetyMode;
+  profileTags?: string[];
 };
 
 /**
@@ -204,7 +215,8 @@ export const useScreenStore = create<ScreenState>((set) => ({
         tab.querySafetyMode !== undefined || tab.isLocked !== undefined;
       const mode: QuerySafetyMode = explicitSafety
         ? tabSafetyMode(tab)
-        : (s.querySafetyByProfileId[tab.profileId] ?? "default");
+        : (s.querySafetyByProfileId[tab.profileId] ??
+          (hasProductionTag(tab.profileTags) ? "production" : "default"));
       const merged: ProfileTab = {
         ...tab,
         querySafetyMode: mode,
@@ -245,7 +257,7 @@ export const useScreenStore = create<ScreenState>((set) => ({
       let profileTabs = s.profileTabs.map((t) => (t.id === id ? updated : t));
 
       if ("querySafetyMode" in patch || "isLocked" in patch) {
-        const mode = tabSafetyMode(updated);
+        const mode = normalizeQuerySafetyMode(tabSafetyMode(updated));
         querySafetyByProfileId = {
           ...s.querySafetyByProfileId,
           [updated.profileId]: mode,
@@ -266,9 +278,11 @@ export const useScreenStore = create<ScreenState>((set) => ({
   removeTab: (id) =>
     set((s) => {
       queueMicrotask(() => {
-        void import("src/stores/connectionLog").then(({ useConnectionLogStore }) => {
-          useConnectionLogStore.getState().endSession(id);
-        });
+        void import("src/stores/connectionLog").then(
+          ({ useConnectionLogStore }) => {
+            useConnectionLogStore.getState().endSession(id);
+          }
+        );
       });
 
       const profileTabs = s.profileTabs.filter((t) => t.id !== id);

@@ -26,6 +26,7 @@ import {
 import { cn } from "src/utils/cn";
 import {
   formatConnectionDatabaseDisplay,
+  inferDatabaseOverrideFromTabLabel,
   pickHostDbUser,
   usesTableOnlyBreadcrumb,
 } from "src/utils/connection";
@@ -38,6 +39,7 @@ import { canOpenDatabases } from "src/hooks/useDatabases";
 import { formatTableBreadcrumbTarget } from "src/lib/engines";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";
+import { type QuerySafetyMode } from "src/lib/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
@@ -366,7 +368,7 @@ export function MenuBar({
   }, [tableRowsLoadPercent, progressVisible]);
 
   const setQuerySafetyMode = useCallback(
-    async (mode: "default" | "lock" | "safe") => {
+    async (mode: QuerySafetyMode) => {
       if (!activeTab) return;
       updateTab(activeTab.id, {
         querySafetyMode: mode,
@@ -386,19 +388,29 @@ export function MenuBar({
   const connectionInfo = useMemo(() => {
     if (!profile) return null;
     const { database, user } = pickHostDbUser(profile);
+    const activeDatabase =
+      activeTab?.databaseOverride ||
+      inferDatabaseOverrideFromTabLabel(profile.label, activeTab?.label) ||
+      database;
 
     const isSsh = Boolean(profile?.input?.ssh?.enabled);
 
     return {
       engine: profile.engine,
       version: databaseVersion,
-      database,
+      database: activeDatabase,
       user,
-      schema: activeSchema || database || "",
+      schema: activeSchema || activeDatabase || "",
       table: activeTable || "",
       isSsh,
     };
-  }, [profile, activeSchema, activeTable, databaseVersion]);
+  }, [
+    profile,
+    activeTab?.databaseOverride,
+    activeSchema,
+    activeTable,
+    databaseVersion,
+  ]);
 
   const connected = !!connectionInfo && !loadTableError;
   const runtimeConnectionId = rt.runtimeConnectionId ?? "";
@@ -480,7 +492,20 @@ export function MenuBar({
       value: "safe",
       color: "green",
     },
+    {
+      label: "Production mode",
+      description: "Touch ID for reads, block writes",
+      value: "production",
+      color: "amber",
+    },
   ];
+
+  const queryModeDotClass: Record<string, string> = {
+    gray: "bg-gray-500",
+    red: "bg-red-500",
+    green: "bg-green-500",
+    amber: "bg-amber-500",
+  };
 
   const onOpenDatabase = useCallback(
     async (nextDb: string) => {
@@ -500,6 +525,8 @@ export function MenuBar({
         engine: profile.engine,
         runtimeConnectionId: conn.id,
         profileId: profile.id,
+        databaseOverride: nextDb,
+        profileTags: profile.input?.tags ?? [],
       };
       addTab(nextTab);
       setActiveProfileScreen(nextTabId);
@@ -544,7 +571,9 @@ export function MenuBar({
                       "size-4",
                       querySafetyMode === "safe"
                         ? "text-green-600"
-                        : "text-red-600"
+                        : querySafetyMode === "production"
+                          ? "text-amber-600"
+                          : "text-red-600"
                     )}
                   />
                 )}
@@ -560,13 +589,14 @@ export function MenuBar({
                         querySafetyMode === mode.value && "bg-neutral-100"
                       )}
                       onClick={() =>
-                        void setQuerySafetyMode(
-                          mode.value as "default" | "lock" | "safe"
-                        )
+                        void setQuerySafetyMode(mode.value as QuerySafetyMode)
                       }
                     >
                       <div
-                        class={`size-1 rounded-full bg-${mode.color}-500 p-1`}
+                        class={cn(
+                          "size-1 rounded-full p-1",
+                          queryModeDotClass[mode.color] ?? "bg-gray-500"
+                        )}
                       />
                       <div class="flex items-center gap-2 text-sm">
                         <span class="font-semibold text-neutral-800">

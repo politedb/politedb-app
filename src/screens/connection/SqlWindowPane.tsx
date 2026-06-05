@@ -8,6 +8,11 @@ import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
+import type { QuerySafetyMode } from "src/lib/querySafety";
+
+function makeSqlWindowScopeId(metaKey: string, windowId: string) {
+  return `${metaKey || "sql"}:${windowId}`.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
 
 export function SqlWindowPane(props: {
   win: SqlEditorWindow;
@@ -16,7 +21,8 @@ export function SqlWindowPane(props: {
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
   isProfileLocked?: boolean;
-  sqlSafetyMode?: "default" | "lock" | "safe";
+  sqlSafetyMode?: QuerySafetyMode;
+  sqlScopeKey?: string;
   onRunSql: (args: {
     windowId: string;
     connectionId: string;
@@ -31,6 +37,7 @@ export function SqlWindowPane(props: {
     runtimeConnectionId,
     isProfileLocked = false,
     sqlSafetyMode = "default",
+    sqlScopeKey,
     onRunSql,
   } = props;
 
@@ -44,14 +51,38 @@ export function SqlWindowPane(props: {
     });
   }, [metadata, metaKey, engine, runtimeConnectionId]);
 
-  const { sqlSlots, activeResultIndex, setActiveResultIndex, startRun } =
-    useSqlRunner({
-      activeSqlWindowId: win.id,
-      runtimeConnectionId,
-      isProfileLocked,
-      sqlSafetyMode,
-      onRunSql,
-    });
+  const scopedWindowId = useMemo(
+    () => makeSqlWindowScopeId(sqlScopeKey ?? metaKey, win.id),
+    [metaKey, sqlScopeKey, win.id]
+  );
+
+  const {
+    sqlRuns,
+    activeRunId,
+    setActiveRunId,
+    activeResultIndex,
+    setActiveResultIndex,
+    startRun,
+    startExplain,
+    closeRun,
+    cancelRun,
+  } = useSqlRunner({
+    activeSqlWindowId: scopedWindowId,
+    runtimeConnectionId,
+    engine,
+    isProfileLocked,
+    sqlSafetyMode,
+    onRunSql,
+  });
+
+  const activeRun =
+    sqlRuns.find((run) => run.id === activeRunId) ??
+    sqlRuns[sqlRuns.length - 1] ??
+    null;
+  const isExecutingSql =
+    activeRun?.slots.some(
+      (slot) => slot.status === "queued" || slot.status === "running"
+    ) ?? false;
 
   return (
     <div class="h-full min-h-0 overflow-hidden">
@@ -70,7 +101,17 @@ export function SqlWindowPane(props: {
               tables={meta.tables}
               columnsByTable={meta.columnsByTable}
               engine={engine}
-              onRunSql={({ windowId, sql }) => startRun({ windowId, sql })}
+              storageId={scopedWindowId}
+              onRunSql={(payload) =>
+                startRun({ windowId: scopedWindowId, sql: payload.sql })
+              }
+              onExplainSql={(payload) =>
+                startExplain({ windowId: scopedWindowId, sql: payload.sql })
+              }
+              onCancelSql={() => {
+                if (activeRun?.id) cancelRun(activeRun.id);
+              }}
+              isExecuting={isExecutingSql}
             />
 
             {!runtimeConnectionId ? (
@@ -84,10 +125,13 @@ export function SqlWindowPane(props: {
         }
         second={
           <SqlResultsPane
-            windowId={win.id}
-            slots={sqlSlots}
+            windowId={scopedWindowId}
+            runs={sqlRuns}
+            activeRunId={activeRunId}
+            setActiveRunId={setActiveRunId}
             activeIndex={activeResultIndex}
             setActiveIndex={setActiveResultIndex}
+            onCloseRun={closeRun}
           />
         }
       />

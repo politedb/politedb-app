@@ -2,8 +2,11 @@ import { useEffect, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
 import { TableFooter } from "src/components/table/TableFooter";
-import type { SqlResultSlot } from "src/lib/tauri";
+import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import { useSqlStreamResult } from "src/screens/connection/hooks/useSqlStreamResult";
+import { XIcon } from "src/components/icons";
+import { Button } from "../common/Button";
+import { Spinner } from "../common/Spinner";
 
 /* =============================================================================
  * UI blocks
@@ -22,7 +25,7 @@ function SmallStateCard(props: { kind: "queued" | "running" | "empty" }) {
     return (
       <div class="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
         <span class="text-neutral-400">•</span>
-        <span>Queued…</span>
+        <span>Queued...</span>
       </div>
     );
   }
@@ -31,14 +34,14 @@ function SmallStateCard(props: { kind: "queued" | "running" | "empty" }) {
     return (
       <div class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
         <div class="h-4 w-4 animate-spin rounded-full border-b-2 border-blue-600" />
-        <span>Running…</span>
+        <span>Running...</span>
       </div>
     );
   }
 
   return (
     <div class="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-      <span class="text-neutral-400">—</span>
+      <span class="text-neutral-400">-</span>
       <span>No result.</span>
     </div>
   );
@@ -69,8 +72,8 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
 
 function statusMark(status: SqlResultSlot["status"]) {
   if (status === "queued") return "•";
-  if (status === "running") return "…";
-  if (status === "done") return "✓";
+  if (status === "running") return <Spinner className="size-3 text-blue-600" />;
+  if (status === "done") return "OK";
   return "!";
 }
 
@@ -81,30 +84,85 @@ function statusTone(status: SqlResultSlot["status"]) {
   return "text-neutral-400";
 }
 
-function ResultsTabs(props: {
+function runStatus(run: SqlResultRun): SqlResultSlot["status"] {
+  if (run.slots.some((slot) => slot.status === "error")) return "error";
+  if (run.slots.some((slot) => slot.status === "running")) return "running";
+  if (run.slots.some((slot) => slot.status === "queued")) return "queued";
+  return "done";
+}
+
+function RunTabs(props: {
+  runs: SqlResultRun[];
+  activeRunId: string;
+  onSelect: (runId: string) => void;
+  onClose: (runId: string) => void;
+}) {
+  const { runs, activeRunId, onSelect, onClose } = props;
+
+  return (
+    <div class="flex items-center gap-1 overflow-x-auto border-b border-neutral-200 bg-neutral-100 px-2 py-1">
+      {runs.map((run) => {
+        const status = runStatus(run);
+        const active = run.id === activeRunId;
+        return (
+          <div
+            key={run.id}
+            onClick={() => onSelect(run.id)}
+            class={cn(
+              "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
+              active
+                ? "bg-white text-neutral-800 ring-1 ring-neutral-200"
+                : "bg-neutral-200/60 text-neutral-600 hover:bg-neutral-200/40"
+            )}
+          >
+            <span class={cn("mr-0.5 text-xs", statusTone(status))}>
+              {statusMark(status)}
+            </span>
+            <span>{run.title}</span>
+            <Button
+              variant="ghost"
+              class="invisible justify-center rounded-full p-0.25 group-hover:visible"
+              aria-label={`Close ${run.title}`}
+              title={`Close ${run.title}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose(run.id);
+              }}
+            >
+              <XIcon className="size-3" />
+            </Button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatementTabs(props: {
   slots: SqlResultSlot[];
   activeIndex: number;
   onSelect: (idx: number) => void;
 }) {
   const { slots, activeIndex, onSelect } = props;
+  if (slots.length <= 1) return null;
 
   return (
-    <div class="flex items-center gap-1 border-b border-neutral-200 bg-neutral-50 px-2 py-1">
-      {slots.map((s, idx) => (
+    <div class="flex items-center gap-1 overflow-x-auto border-b border-neutral-200 bg-neutral-50 px-2 py-1">
+      {slots.map((slot, idx) => (
         <button
-          key={s.index}
+          key={slot.index}
           onClick={() => onSelect(idx)}
           class={cn(
-            "inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs",
+            "inline-flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs",
             idx === activeIndex
               ? "bg-white text-neutral-800 ring-1 ring-neutral-200"
               : "text-neutral-600 hover:bg-neutral-100"
           )}
-          title={s.sql.slice(0, 400)}
+          title={slot.sql.slice(0, 400)}
         >
-          <span>Results {idx + 1}</span>
-          <span class={cn("text-[10px]", statusTone(s.status))}>
-            {statusMark(s.status)}
+          <span>Statement {idx + 1}</span>
+          <span class={cn("text-[10px]", statusTone(slot.status))}>
+            {statusMark(slot.status)}
           </span>
         </button>
       ))}
@@ -118,46 +176,44 @@ function ResultsTabs(props: {
 
 function ResultsContent(props: {
   windowId: string;
+  runId: string;
   slot: SqlResultSlot;
   safeIndex: number;
   stream: ReturnType<typeof useSqlStreamResult> | null;
 }) {
-  const { windowId, slot, safeIndex, stream } = props;
+  const { windowId, runId, slot, safeIndex, stream } = props;
 
   const isDirect = slot.mode === "direct";
   const isStream = slot.mode === "stream" && !!slot.opId;
 
-  // slot error first
   if (slot.status === "error") {
     return (
       <div class="p-3">
         <ErrorCard
           title="Query error"
-          right={`Result ${safeIndex + 1}`}
+          right={`Statement ${safeIndex + 1}`}
           error={slot.error}
         />
       </div>
     );
   }
 
-  // stream error
   if (isStream && stream?.status === "error") {
     return (
       <div class="p-3">
         <ErrorCard
           title="Query error"
-          right={`Result ${safeIndex + 1}`}
+          right={`Statement ${safeIndex + 1}`}
           error={stream.error}
         />
       </div>
     );
   }
 
-  // direct data
   if (isDirect && slot.status === "done" && slot.result) {
     return (
       <TableData
-        key={`${windowId}:${slot.index}:direct`}
+        key={`${windowId}:${runId}:${slot.index}:direct`}
         columns={slot.result.columns}
         baseRows={slot.result.rows.length}
         totalRows={slot.result.rows.length}
@@ -168,13 +224,11 @@ function ResultsContent(props: {
     );
   }
 
-  // stream data
   if (isStream && stream) {
-    // ✅ show as soon as we have rows (do not wait for done)
     if (stream.totalRows > 0) {
       return (
         <TableData
-          key={`${windowId}:${slot.index}:stream`}
+          key={`${windowId}:${runId}:${slot.index}:stream`}
           columns={stream.columns}
           baseRows={stream.totalRows}
           totalRows={stream.totalRows}
@@ -185,7 +239,6 @@ function ResultsContent(props: {
       );
     }
 
-    // done + empty
     if (stream.status === "done") {
       return (
         <div class="p-3">
@@ -194,7 +247,6 @@ function ResultsContent(props: {
       );
     }
 
-    // running + no rows yet
     return (
       <div class="p-3">
         <SmallStateCard kind="running" />
@@ -202,7 +254,6 @@ function ResultsContent(props: {
     );
   }
 
-  // non-table terminal
   if (slot.status === "done") {
     return (
       <div class="p-3">
@@ -211,7 +262,6 @@ function ResultsContent(props: {
     );
   }
 
-  // queued/running fallback
   return (
     <div class="p-3">
       <SmallStateCard kind={slot.status === "queued" ? "queued" : "running"} />
@@ -225,13 +275,24 @@ function ResultsContent(props: {
 
 export function SqlResultsPane(props: {
   windowId: string;
-  slots: SqlResultSlot[] | null;
+  runs: SqlResultRun[];
+  activeRunId: string | null;
+  setActiveRunId: (runId: string) => void;
   activeIndex: number;
   setActiveIndex: (idx: number) => void;
+  onCloseRun: (runId: string) => void;
 }) {
-  const { windowId, slots, activeIndex, setActiveIndex } = props;
+  const {
+    windowId,
+    runs,
+    activeRunId,
+    setActiveRunId,
+    activeIndex,
+    setActiveIndex,
+    onCloseRun,
+  } = props;
 
-  if (!slots || slots.length === 0) {
+  if (!runs.length) {
     return (
       <div class="flex h-full min-h-0 flex-col bg-white">
         <EmptyResults />
@@ -239,10 +300,14 @@ export function SqlResultsPane(props: {
     );
   }
 
-  const safeIndex = Math.min(Math.max(activeIndex, 0), slots.length - 1);
-  const slot = slots[safeIndex];
+  const activeRun =
+    runs.find((run) => run.id === activeRunId) ?? runs[runs.length - 1];
+  const safeIndex = Math.min(
+    Math.max(activeIndex, 0),
+    activeRun.slots.length - 1
+  );
+  const slot = activeRun.slots[safeIndex];
 
-  // ✅ IMPORTANT: use STATE (not ref) so hook re-subscribes when opId appears
   const [streamOpId, setStreamOpId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -266,7 +331,6 @@ export function SqlResultsPane(props: {
   const footerLimit = Math.max(footerTotalRows, 50);
   const footerOffset = 0;
 
-  // Decide scroll mode: tables manage their own scrolling
   const isDirectTable =
     slot.mode === "direct" && slot.status === "done" && !!slot.result;
 
@@ -276,8 +340,18 @@ export function SqlResultsPane(props: {
 
   return (
     <div class="flex h-full min-h-0 flex-col bg-white">
-      <ResultsTabs
-        slots={slots}
+      <RunTabs
+        runs={runs}
+        activeRunId={activeRun.id}
+        onSelect={(runId) => {
+          setActiveRunId(runId);
+          setActiveIndex(0);
+        }}
+        onClose={onCloseRun}
+      />
+
+      <StatementTabs
+        slots={activeRun.slots}
         activeIndex={safeIndex}
         onSelect={setActiveIndex}
       />
@@ -290,6 +364,7 @@ export function SqlResultsPane(props: {
       >
         <ResultsContent
           windowId={windowId}
+          runId={activeRun.id}
           slot={slot}
           safeIndex={safeIndex}
           stream={slot.mode === "stream" ? stream : null}

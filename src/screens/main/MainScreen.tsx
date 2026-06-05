@@ -229,6 +229,7 @@ export function MainScreen() {
       profileId,
       engine: found.engine,
       runtimeConnectionId: undefined,
+      profileTags: found.input?.tags ?? [],
     };
 
     addTab(newTab);
@@ -383,6 +384,7 @@ export function MainScreen() {
         profileId: saved.profile.id,
         engine: saved.profile.engine,
         runtimeConnectionId: saved.connection.id,
+        profileTags: saved.profile.input?.tags ?? [],
       };
       addTab(newTab);
       setActiveProfileScreen(newTab.id);
