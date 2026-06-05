@@ -410,7 +410,12 @@ export type OperationExecuteInput =
       redis: RedisCommandPayload;
     };
 
-export type ColumnMeta = { name: string; db_type: string; readonly?: boolean };
+export type ColumnMeta = {
+  name: string;
+  db_type: string;
+  readonly?: boolean;
+  column_default?: string | null;
+};
 
 export type TableChunk = {
   op_id: string;

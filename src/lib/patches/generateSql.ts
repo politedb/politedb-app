@@ -7,6 +7,7 @@ import type {
   DatabaseEngine,
 } from "src/types";
 import { cellToString } from "src/utils/convert";
+import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { TableDataState } from "src/stores/connection";
 import { getDbConfig } from "src/utils/dbConfig";
 import {
@@ -45,6 +46,14 @@ export type PatchMap = {
 const qIdent = quoteIdentifier;
 const qLiteral = sqlStringLiteral;
 const formatValue = formatSqlValue;
+const formatPatchValue = (
+  value: unknown,
+  dbType: string | undefined,
+  engine?: DatabaseEngine
+) =>
+  isDefaultCellEditValue(value)
+    ? "DEFAULT"
+    : formatValue(value, dbType, engine);
 
 function isUnsafeFallbackWhereColumn(dbType: string | undefined) {
   if (!dbType) return false;
@@ -241,7 +250,7 @@ export function generateUpdateSqlFromPatches(
       if (!col) continue;
 
       setClauses.push(
-        `${qIdent(colName, engine)} = ${formatValue(newValue, col.db_type, engine)}`
+        `${qIdent(colName, engine)} = ${formatPatchValue(newValue, col.db_type, engine)}`
       );
     }
 
@@ -333,7 +342,7 @@ export function generateInsertSqlFromPatches(
       if (colName === "__rowKey") continue; // Skip internal row key
       const col = columns?.find((c) => c.name === colName);
       colNames.push(qIdent(colName, engine));
-      values.push(formatValue(value, col?.db_type, engine));
+      values.push(formatPatchValue(value, col?.db_type, engine));
     }
 
     if (colNames.length === 0) {

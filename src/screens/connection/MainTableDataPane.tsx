@@ -401,9 +401,28 @@ export function MainTableDataPane(props: {
     onDataChange,
   });
 
-  const tableColumns = meta.columns ?? [];
+  const tableColumns = useMemo(() => {
+    const defaultsByColumn = new Map(
+      (meta.structure ?? []).map((col) => [
+        col.column_name,
+        col.column_default ?? null,
+      ])
+    );
+    return (meta.columns ?? []).map((col) => ({
+      ...col,
+      column_default:
+        col.column_default ?? defaultsByColumn.get(col.name) ?? null,
+    }));
+  }, [meta.columns, meta.structure]);
   const columnsKey = useMemo(
     () => tableColumns.map((col) => col.name).join("\0"),
+    [tableColumns]
+  );
+  const columnDefaultsKey = useMemo(
+    () =>
+      tableColumns
+        .map((col) => `${col.name}:${col.column_default ?? ""}`)
+        .join("\0"),
     [tableColumns]
   );
 
@@ -524,6 +543,12 @@ export function MainTableDataPane(props: {
   };
 
   useEffect(() => {
+    const selected = useConnectionStore.getState().selectedRowByKey[activeKey];
+    if (!selected) return;
+    refreshSelectedRowDetailRef.current?.(selected.rowIndex);
+  }, [activeKey, columnDefaultsKey]);
+
+  useEffect(() => {
     if (isDataReadOnly || hasError || viewMode !== "data") {
       registerRowFieldEditHandler(activeKey, undefined);
       return;
@@ -532,7 +557,7 @@ export function MainTableDataPane(props: {
     const handler = (
       rowIndex: number,
       columnName: string,
-      newValue: string
+      newValue: unknown
     ) => {
       const ctx = rowFieldEditCtxRef.current;
       const changed = commitTableCellEdit({
@@ -969,7 +994,7 @@ export function MainTableDataPane(props: {
                 tableKey={activeKey}
                 schema={activeTableWindow.table.schema}
                 tableName={activeTableWindow.table.name}
-                columns={meta.columns ?? []}
+                columns={tableColumns}
                 filters={filters}
                 filterCombine={filterCombine}
                 appliedFilters={appliedFilters}
@@ -993,7 +1018,7 @@ export function MainTableDataPane(props: {
             <div class="min-h-0 flex-1">
               <TableData
                 key={activeKey}
-                columns={meta.columns ?? []}
+                columns={tableColumns}
                 baseRows={hasError ? 0 : renderBasePageTotal}
                 totalRows={hasError ? 0 : visiblePageTotal}
                 getRowAt={hasError ? getEmptyRowAt : getRowAt}
@@ -1007,7 +1032,7 @@ export function MainTableDataPane(props: {
                   !hasError && canAddDataRow
                     ? () => {
                         handleAddRow(
-                          meta.columns ?? [],
+                          tableColumns,
                           loadedRowCount,
                           onDataChange
                         );

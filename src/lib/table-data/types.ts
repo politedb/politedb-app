@@ -19,6 +19,7 @@ export type ColumnRow = {
   name: string | null;
   db_type: string | null;
   is_primary?: boolean;
+  column_default?: string | null;
 };
 
 export type LoadPlan = {

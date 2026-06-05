@@ -59,7 +59,9 @@ export async function loadColumns(params: {
         db_type = normalizeClickhouseDbType(db_type, cellToString(r?.[2]));
       }
       const is_primary = diagramQ ? cellIsTruthyPrimary(r?.[2]) : undefined;
-      return { name, db_type, is_primary };
+      const columnDefaultIndex = diagramQ ? 3 : engine === "clickhouse" ? 3 : 2;
+      const column_default = cellToString(r?.[columnDefaultIndex], true);
+      return { name, db_type, is_primary, column_default };
     })
     .filter(isNonEmptyName);
 }

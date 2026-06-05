@@ -9,7 +9,10 @@ import type {
   TableWindow,
 } from "src/types";
 import type { ColumnMeta, QueryResult } from "src/lib/tauri/types";
-import type { PatchMap, VirtualKeySafetyIssue } from "src/lib/patches/generateSql";
+import type {
+  PatchMap,
+  VirtualKeySafetyIssue,
+} from "src/lib/patches/generateSql";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 
 export type SchemaState = {
@@ -77,6 +80,7 @@ export type SelectedRowField = {
   name: string;
   value: string;
   dataType?: string;
+  columnDefault?: string | null;
   isNull?: boolean;
   readonly?: boolean;
 };
@@ -89,7 +93,7 @@ export type SelectedRowDetail = {
 export type RowFieldEditHandler = (
   rowIndex: number,
   columnName: string,
-  newValue: string
+  newValue: unknown
 ) => void;
 
 export type TableRowState = {

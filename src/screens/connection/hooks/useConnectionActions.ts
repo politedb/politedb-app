@@ -166,6 +166,28 @@ function inferRefreshFlagsFromEntry(
   return { refreshRows, refreshMeta, refreshStats };
 }
 
+function getTableReloadQueryFlags(
+  tabId: string,
+  schema: string,
+  tableName: string,
+  flags: LoadFlags
+): LoadFlags {
+  const key = tableKey(tabId, schema, tableName);
+  const store = useConnectionStore.getState();
+  const filterState = store.tableFilterByKey[key];
+  const appliedFilters = filterState?.appliedFilters ?? [];
+  const hasAppliedFilters = appliedFilters.some(
+    (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
+  );
+
+  return {
+    ...flags,
+    filters: hasAppliedFilters ? appliedFilters : undefined,
+    filterCombine: filterState?.appliedFilterCombine ?? "AND",
+    sortBy: store.tableSortByKey[key] ?? null,
+  };
+}
+
 type NewTableLike = {
   tableName: string;
   columns: Array<{ column_name: string }>;
@@ -516,12 +538,17 @@ export function useConnectionActions(
               entry.tableWindow.table.schema,
               entry.tableWindow.table.name,
               { limit, offset },
-              {
-                force: true,
-                refreshRows: true,
-                refreshMeta: true,
-                refreshStats: true,
-              }
+              getTableReloadQueryFlags(
+                activeProfileScreen,
+                entry.tableWindow.table.schema,
+                entry.tableWindow.table.name,
+                {
+                  force: true,
+                  refreshRows: true,
+                  refreshMeta: true,
+                  refreshStats: true,
+                }
+              )
             )
           )
         );
@@ -640,13 +667,18 @@ export function useConnectionActions(
             tableWindow.table.schema,
             targetTableName,
             { limit, offset },
-            {
-              force: true,
-              forceRefresh: refreshRows,
-              refreshRows,
-              refreshMeta,
-              refreshStats,
-            }
+            getTableReloadQueryFlags(
+              activeProfileScreen,
+              tableWindow.table.schema,
+              targetTableName,
+              {
+                force: true,
+                forceRefresh: refreshRows,
+                refreshRows,
+                refreshMeta,
+                refreshStats,
+              }
+            )
           );
         })
       );

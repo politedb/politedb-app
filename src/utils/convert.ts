@@ -1,4 +1,6 @@
 // types.ts (FE)
+import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
+
 export type CellValue =
   | { t: "Null" }
   | { t: "Str"; v: string }
@@ -37,7 +39,7 @@ export function cellToString(
   cell: any,
   allowNull: boolean = false
 ): string | null {
-  if (cell == null) return "";
+  if (cell == null) return allowNull ? null : "";
 
   if (
     typeof cell === "string" ||
@@ -48,6 +50,7 @@ export function cellToString(
   }
 
   if (typeof cell === "object") {
+    if (isDefaultCellEditValue(cell)) return "DEFAULT";
     // { t: "Null" }
     if ((cell as any).t === "Null") return allowNull ? null : "";
     // { t: "BytesB64", v: "..." } -> decode for display/use

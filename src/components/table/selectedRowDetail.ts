@@ -1,5 +1,8 @@
 import type { ColumnMeta } from "src/lib/tauri/types";
-import type { SelectedRowDetail, SelectedRowField } from "src/stores/connection";
+import type {
+  SelectedRowDetail,
+  SelectedRowField,
+} from "src/stores/connection";
 import { cellToString } from "src/utils/convert";
 
 type PatchHelpers = {
@@ -36,6 +39,7 @@ export function buildSelectedRowFields(
       name: col.name,
       value: isNull ? "" : (parsed ?? ""),
       dataType: col.db_type,
+      columnDefault: col.column_default,
       isNull,
       readonly: col.readonly,
     };

@@ -1,5 +1,10 @@
 import type { DatabaseEngine } from "src/types";
-import { isMySqlLike, isSqlitePragmaEngine, qLiteral, regexEscape } from "./shared";
+import {
+  isMySqlLike,
+  isSqlitePragmaEngine,
+  qLiteral,
+  regexEscape,
+} from "./shared";
 
 export const tableColumnsQuery = (
   schema: string,
@@ -8,7 +13,10 @@ export const tableColumnsQuery = (
 ) => {
   if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
-      SELECT name AS column_name, type AS data_type
+      SELECT
+        name AS column_name,
+        type AS data_type,
+        dflt_value AS column_default
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
     `;
@@ -17,7 +25,7 @@ export const tableColumnsQuery = (
 
   if (engine === "oracle") {
     const queryStr = `
-      SELECT column_name, data_type
+      SELECT column_name, data_type, data_default AS column_default
       FROM all_tab_columns
       WHERE owner = ${qLiteral(schema.toUpperCase())}
         AND table_name = ${qLiteral(tableName.toUpperCase())}
@@ -28,7 +36,7 @@ export const tableColumnsQuery = (
 
   if (engine === "clickhouse") {
     const queryStr = `
-      SELECT column_name, data_type, numeric_scale
+      SELECT column_name, data_type, numeric_scale, NULL AS column_default
       FROM information_schema.columns
       WHERE table_catalog = currentDatabase()
         AND table_schema = ${qLiteral(schema)}
@@ -39,7 +47,7 @@ export const tableColumnsQuery = (
   }
 
   const queryStr = `
-    SELECT column_name, data_type
+    SELECT column_name, data_type, column_default
     FROM information_schema.columns
     WHERE table_schema = ${qLiteral(schema)}
       AND table_name = ${qLiteral(tableName)}
@@ -57,7 +65,8 @@ export function diagramTableColumnsQuery(
   if (isSqlitePragmaEngine(engine)) {
     const queryStr = `
       SELECT name AS column_name, type AS data_type,
-        CASE WHEN IFNULL(pk, 0) != 0 THEN 1 ELSE 0 END AS is_primary
+        CASE WHEN IFNULL(pk, 0) != 0 THEN 1 ELSE 0 END AS is_primary,
+        dflt_value AS column_default
       FROM pragma_table_info(${qLiteral(tableName)})
       ORDER BY cid;
     `;
@@ -76,7 +85,8 @@ export function diagramTableColumnsQuery(
             AND dc.schema_name = ${qLiteral(schema)}
             AND dc.table_name = ${qLiteral(tableName)}
             AND list_contains(dc.constraint_column_names, c.column_name)
-        ) THEN 1 ELSE 0 END AS is_primary
+        ) THEN 1 ELSE 0 END AS is_primary,
+        c.column_default
       FROM information_schema.columns c
       WHERE c.table_schema = ${qLiteral(schema)}
         AND c.table_name = ${qLiteral(tableName)}
@@ -90,7 +100,8 @@ export function diagramTableColumnsQuery(
       SELECT
         c.column_name,
         c.data_type,
-        0 AS is_primary
+        0 AS is_primary,
+        c.column_default
       FROM information_schema.columns c
       WHERE c.table_schema = ${qLiteral(schema)}
         AND c.table_name = ${qLiteral(tableName)}
@@ -104,7 +115,8 @@ export function diagramTableColumnsQuery(
       SELECT
         c.column_name,
         c.data_type,
-        0 AS is_primary
+        0 AS is_primary,
+        NULL AS column_default
       FROM information_schema.columns AS c
       WHERE c.table_catalog = currentDatabase()
         AND c.table_schema = ${qLiteral(schema)}
@@ -129,7 +141,8 @@ export function diagramTableColumnsQuery(
             AND tc.table_schema = c.table_schema
             AND tc.table_name = c.table_name
             AND kcu.column_name = c.column_name
-        ) AS is_primary
+        ) AS is_primary,
+        c.column_default
       FROM information_schema.columns c
       WHERE c.table_schema = ${qLiteral(schema)}
         AND c.table_name = ${qLiteral(tableName)}
@@ -151,11 +164,14 @@ export function diagramTableColumnsQuery(
           WHERE ic.object_id = c.object_id
             AND ic.column_id = c.column_id
             AND i.is_primary_key = 1
-        ) AS bit) AS is_primary
+        ) AS bit) AS is_primary,
+        dc.definition AS column_default
       FROM sys.columns c
       INNER JOIN sys.tables t ON t.object_id = c.object_id
       INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
       INNER JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+      LEFT JOIN sys.default_constraints dc
+        ON dc.object_id = c.default_object_id
       WHERE s.name = ${qLiteral(schema)}
         AND t.name = ${qLiteral(tableName)}
       ORDER BY c.column_id;
@@ -170,7 +186,8 @@ export function diagramTableColumnsQuery(
       SELECT
         c.column_name,
         c.data_type,
-        CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_primary
+        CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END AS is_primary,
+        c.data_default AS column_default
       FROM all_tab_columns c
       LEFT JOIN (
         SELECT acc.column_name
