@@ -44,6 +44,7 @@ import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
+import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
 
 interface Props {
   activeSchema?: string;
@@ -141,24 +142,51 @@ function EnvBadge({ text }: { text: string }) {
   );
 }
 
+function MetaPillSkeleton({ className }: { className?: string }) {
+  return (
+    <div
+      class={cn(
+        "flex h-5 w-12 rounded-md border border-neutral-200 bg-neutral-100 p-0.75",
+        className
+      )}
+      role="status"
+      aria-label="Checking latency"
+    >
+      <span
+        class={cn(
+          "h-full w-full animate-pulse rounded-sm bg-neutral-200",
+          className
+        )}
+      />
+    </div>
+  );
+}
+
 function MetaPill({
   text,
   className,
+  title,
   tone = "neutral",
 }: {
   text: string;
   className?: string;
-  tone?: "neutral" | "blue";
+  title?: string;
+  tone?: "neutral" | "blue" | "green" | "amber";
 }) {
   if (!text) return null;
 
   const cls =
     tone === "blue"
       ? "bg-blue-50 text-blue-700 border-blue-200/70"
-      : "bg-neutral-50 text-neutral-600 border-neutral-200";
+      : tone === "green"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200/70"
+        : tone === "amber"
+          ? "bg-amber-50 text-amber-700 border-amber-200/70"
+          : "bg-neutral-50 text-neutral-600 border-neutral-200";
 
   return (
     <span
+      title={title}
       class={cn(
         "inline-flex h-5 items-center rounded-md border px-1.5 text-xs font-semibold",
         cls,
@@ -304,6 +332,11 @@ export function MenuBar({
   onOpenDiagram,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
+  const health = useConnectionHealthCheck({
+    runtimeConnectionId: rt.runtimeConnectionId,
+    engine: rt.engine,
+    loadError: loadTableError,
+  });
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
@@ -341,8 +374,8 @@ export function MenuBar({
     if (!safeModeOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      if (!safeModeRef.current || !target) return;
-      if (!safeModeRef.current.contains(target)) {
+      if (!target) return;
+      if (safeModeRef.current && !safeModeRef.current.contains(target)) {
         setSafeModeOpen(false);
       }
     };
@@ -546,7 +579,7 @@ export function MenuBar({
 
   return (
     <>
-      <div class="flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
+      <div class="group flex h-10 items-center gap-2 border-b border-neutral-200 bg-neutral-50/80 px-2 select-none">
         <div class="flex items-center">
           <div
             class={cn(
@@ -639,27 +672,16 @@ export function MenuBar({
         </div>
 
         <div class="flex min-w-0 flex-1 items-center justify-center">
-          <div class="w-full max-w-220 min-w-0">
+          <div class="relative w-full max-w-220 min-w-0">
             <div
               class={cn(
-                "relative flex h-7 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white px-2",
+                "relative flex h-7 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white pr-2 pl-8",
                 loadTableError
                   ? "border-red-300"
                   : "border-neutral-200 hover:border-neutral-300",
                 "shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               )}
             >
-              <div
-                class={cn(
-                  "h-2 w-2 rounded-full",
-                  connected
-                    ? "bg-emerald-500"
-                    : loadTableError
-                      ? "bg-red-500"
-                      : "bg-neutral-300"
-                )}
-              />
-
               {(tags.env || tags.rest.length > 0) && (
                 <div class="flex min-w-0 items-center gap-1">
                   {tags.env ? <EnvBadge text={tags.env} /> : null}
@@ -708,6 +730,21 @@ export function MenuBar({
               {connectionInfo && (
                 <div class="flex items-center gap-1">
                   <div class="mx-1 h-4 w-px bg-neutral-200" />
+                  {health.checking ? (
+                    <MetaPillSkeleton />
+                  ) : (
+                    <MetaPill
+                      text={`${health.latencyMs ?? 0} ms`}
+                      title="Connection latency"
+                      tone={
+                        health.latencyMs !== null && health.latencyMs > 1500
+                          ? "amber"
+                          : health.status === "down"
+                            ? "neutral"
+                            : "green"
+                      }
+                    />
+                  )}
                   <MetaPill text={engineLabel} />
                   {connectionInfo.isSsh ? (
                     <MetaPill text="SSH" tone="blue" />
@@ -730,6 +767,38 @@ export function MenuBar({
                   />
                 </div>
               ) : null}
+            </div>
+
+            <div class="absolute top-0 left-2 z-10 flex h-7 items-center">
+              <IconButton
+                className="size-4 active:bg-transparent"
+                title="Recheck connection latency"
+                onClick={() => void health.runCheck()}
+                disabled={health.checking || !rt.runtimeConnectionId}
+              >
+                <span class="relative flex size-2">
+                  <span
+                    class={cn(
+                      "absolute inline-flex h-full w-full rounded-full opacity-75 group-hover:animate-ping",
+                      connected
+                        ? "bg-emerald-500"
+                        : loadTableError
+                          ? "bg-red-500"
+                          : "bg-neutral-300"
+                    )}
+                  />
+                  <span
+                    class={cn(
+                      "relative inline-flex size-2 rounded-full",
+                      connected
+                        ? "bg-emerald-500"
+                        : loadTableError
+                          ? "bg-red-500"
+                          : "bg-neutral-300"
+                    )}
+                  />
+                </span>
+              </IconButton>
             </div>
           </div>
         </div>
