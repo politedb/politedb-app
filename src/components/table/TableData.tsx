@@ -16,7 +16,7 @@ import { useColumnSizing, useContainerWidth, useNewRows } from "./tableHooks";
 
 import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
 import { CanvasTable } from "./CanvasTable";
-import { TableForeignKey } from "src/types";
+import type { DatabaseEngine, TableForeignKey } from "src/types";
 
 // ============================================================================
 // Types
@@ -34,8 +34,14 @@ interface Props {
     rowIndex: number,
     data: Record<string, any>
   ) => void;
-  onDeleteRow?: (rowIndex: number) => void;
+  onDeleteRow?: (rowIndex: number, rowKey?: string) => void;
   onAddRow?: () => void;
+  onRefresh?: () => void;
+  onExportCurrentPage?: () => void;
+  onQuickFilter?: (colName: string, value: string) => void;
+  schema?: string;
+  tableName?: string;
+  engine?: DatabaseEngine;
   patches?: Record<string, Record<string, any>> | null;
   newRowKeys?: string[];
   deletedRows?: Set<number>;
@@ -70,6 +76,12 @@ export function TableData({
   onCellChange,
   onDeleteRow,
   onAddRow,
+  onRefresh,
+  onExportCurrentPage,
+  onQuickFilter,
+  schema,
+  tableName,
+  engine,
   newRowKeys = EMPTY_ARRAY,
   deletedRows = EMPTY_SET,
   rowsVersion = 0,
@@ -257,6 +269,78 @@ export function TableData({
     [columns, foreignKeyMap, getRowArray, onNavigateFk]
   );
 
+  const handleDuplicateRow = useCallback(
+    (rowIdx: number) => {
+      if (!onCellChange || readOnly) return;
+      const row = getRowArray(rowIdx);
+      if (!row) return;
+
+      const rowKey = `dup_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      const data: Record<string, unknown> = { __rowKey: rowKey };
+      for (let idx = 0; idx < columns.length; idx++) {
+        const col = columns[idx];
+        if (!col) continue;
+        data[col.name] = row[idx] ?? null;
+      }
+
+      onCellChange("create", DATA_KEY, -1, data);
+      setSelected({ rowIdx: totalDataLength, colIdx: 0 });
+      setSelectedRows(new Set([totalDataLength]));
+      setLastSelectedRow(totalDataLength);
+      publishSelectedRowDetail(totalDataLength);
+    },
+    [
+      columns,
+      getRowArray,
+      onCellChange,
+      publishSelectedRowDetail,
+      readOnly,
+      totalDataLength,
+    ]
+  );
+
+  const handlePasteRows = useCallback(
+    (rows: unknown[][], sourceColumns?: string[]) => {
+      if (!onCellChange || readOnly || rows.length === 0) return;
+
+      const sourceIndexByName = new Map<string, number>();
+      sourceColumns?.forEach((name, idx) => {
+        sourceIndexByName.set(name, idx);
+      });
+
+      rows.forEach((row, rowOffset) => {
+        const rowKey = `paste_${Date.now()}_${rowOffset}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const data: Record<string, unknown> = { __rowKey: rowKey };
+
+        for (let idx = 0; idx < columns.length; idx++) {
+          const col = columns[idx];
+          if (!col) continue;
+          const sourceIdx =
+            sourceIndexByName.size > 0 ? sourceIndexByName.get(col.name) : idx;
+          data[col.name] =
+            sourceIdx == null || sourceIdx < 0 ? null : (row[sourceIdx] ?? null);
+        }
+
+        onCellChange("create", DATA_KEY, -1, data);
+      });
+
+      const firstNewRow = totalDataLength;
+      const pastedSelection = new Set<number>();
+      for (let i = 0; i < rows.length; i++) {
+        pastedSelection.add(firstNewRow + i);
+      }
+      setSelected({ rowIdx: firstNewRow, colIdx: 0 });
+      setSelectedRows(pastedSelection);
+      setLastSelectedRow(firstNewRow + rows.length - 1);
+      publishSelectedRowDetail(firstNewRow);
+    },
+    [columns, onCellChange, publishSelectedRowDetail, readOnly, totalDataLength]
+  );
+
   // --------------------------------------------------------------------------
   // Render
   // --------------------------------------------------------------------------
@@ -320,11 +404,24 @@ export function TableData({
           publishSelectedRowDetail(cell.rowIdx);
         }}
         onAddRow={readOnly ? undefined : onAddRow}
+        onDuplicateRow={readOnly ? undefined : handleDuplicateRow}
+        onPasteRows={readOnly ? undefined : handlePasteRows}
+        onRefresh={onRefresh}
+        onExportCurrentPage={onExportCurrentPage}
+        onQuickFilter={onQuickFilter}
+        schema={schema}
+        tableName={tableName}
+        engine={engine}
         onDeleteRow={(visibleRowIdx) => {
           if (readOnly) return;
           const rowIdx = visibleRowIdx;
           if (rowIdx >= 0) {
-            onDeleteRow?.(rowIdx);
+            onDeleteRow?.(
+              rowIdx,
+              patchHelpers.isNewRow(rowIdx)
+                ? patchHelpers.getRowKey(rowIdx, newRows)
+                : undefined
+            );
           }
           setSelected(null);
           setSelectedRows(new Set());
@@ -336,7 +433,12 @@ export function TableData({
           visibleRowIndices.forEach((visibleIdx) => {
             const realIdx = visibleIdx;
             if (realIdx >= 0) {
-              onDeleteRow?.(realIdx);
+              onDeleteRow?.(
+                realIdx,
+                patchHelpers.isNewRow(realIdx)
+                  ? patchHelpers.getRowKey(realIdx, newRows)
+                  : undefined
+              );
             }
           });
           setSelected(null);

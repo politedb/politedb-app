@@ -10,10 +10,19 @@ import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
 import { ChevronDownIcon, ChevronUpIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
-import { TableForeignKey } from "src/types";
+import type { DatabaseEngine, TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import { isBlobColumnType, isJsonColumnType } from "src/utils/sqlDialect";
+import {
+  formatSqlValue,
+  isBlobColumnType,
+  isJsonColumnType,
+  quoteIdentifier,
+  quoteTableName,
+} from "src/utils/sqlDialect";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
+import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
+import { openDialog } from "src/lib/system-dialog";
+import { readFile } from "src/lib/system-fs";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -25,7 +34,15 @@ const SELECTED_TEXT_UNFOCUSED = "#6b7280";
 
 type EditingCell = { rowIdx: number; colIdx: number };
 type HeaderMenuState = { x: number; y: number; colName: string };
+type RowMenuState = {
+  x: number;
+  y: number;
+  rowIdx: number;
+  colIdx: number;
+  value: string;
+};
 type CellEditorKind = "text" | "json" | "date" | "datetime" | "bool" | "blob";
+const ROW_CLIPBOARD_PREFIX = "POLITEDB_ROWS:";
 
 type Props = {
   columns: ColumnMeta[];
@@ -69,6 +86,14 @@ type Props = {
   onDeleteRow?: (rowIdx: number) => void;
   onDeleteRows?: (rowIndices: number[]) => void;
   onAddRow?: () => void;
+  onDuplicateRow?: (rowIdx: number) => void;
+  onRefresh?: () => void;
+  onExportCurrentPage?: () => void;
+  onPasteRows?: (rows: unknown[][], sourceColumns?: string[]) => void;
+  onQuickFilter?: (colName: string, value: string) => void;
+  schema?: string;
+  tableName?: string;
+  engine?: DatabaseEngine;
   onClearSelection?: () => void;
   onSelectAllRows?: () => void;
 };
@@ -188,6 +213,161 @@ function hitTestCol(
   return -1;
 }
 
+function formatCellForClipboard(value: unknown): string {
+  const text = cellToString(value, true);
+  if (text === null) return "NULL";
+  if (text === "") return "EMPTY";
+  return text;
+}
+
+function formatCellForCsv(value: unknown): string {
+  const text = cellToString(value, true);
+  if (text === null) return "NULL";
+  if (text === "") return '""';
+  return escapeCsvCell(text);
+}
+
+function escapeCsvCell(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function escapeMarkdownCell(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, "<br>");
+}
+
+function getRowObjects(columns: ColumnMeta[], rows: unknown[][]) {
+  return rows.map((row) => {
+    const obj: Record<string, string | null> = {};
+    columns.forEach((col, idx) => {
+      obj[col.name] = cellToString(row[idx], true);
+    });
+    return obj;
+  });
+}
+
+function serializeRowsForInternalClipboard(
+  columns: ColumnMeta[],
+  rows: unknown[][]
+): string {
+  return `${ROW_CLIPBOARD_PREFIX}${JSON.stringify({
+    version: 1,
+    columns: columns.map((col) => col.name),
+    rows,
+  })}`;
+}
+
+function parseRowsFromInternalClipboard(text: string):
+  | {
+      columns?: string[];
+      rows: unknown[][];
+    }
+  | null {
+  if (!text.startsWith(ROW_CLIPBOARD_PREFIX)) return null;
+  try {
+    const payload = JSON.parse(text.slice(ROW_CLIPBOARD_PREFIX.length));
+    if (!payload || !Array.isArray(payload.rows)) return null;
+    const rows = payload.rows.filter((row: unknown): row is unknown[] =>
+      Array.isArray(row)
+    );
+    if (!rows.length) return null;
+    const sourceColumns = Array.isArray(payload.columns)
+      ? payload.columns.filter((name: unknown): name is string =>
+          typeof name === "string"
+        )
+      : undefined;
+    return { columns: sourceColumns, rows };
+  } catch {
+    return null;
+  }
+}
+
+function formatRowsForClipboard(args: {
+  format:
+    | "plain"
+    | "json"
+    | "html"
+    | "markdown"
+    | "csv"
+    | "csv-header"
+    | "insert";
+  columns: ColumnMeta[];
+  rows: unknown[][];
+  schema?: string;
+  tableName?: string;
+  engine?: DatabaseEngine;
+}) {
+  const { format, columns, rows, schema = "", tableName = "", engine } = args;
+  const names = columns.map((col) => col.name);
+  const values = rows.map((row) =>
+    columns.map((_col, idx) => formatCellForClipboard(row[idx]))
+  );
+  const csvValues = rows.map((row) =>
+    columns.map((_col, idx) => formatCellForCsv(row[idx]))
+  );
+
+  if (format === "plain") {
+    return values.map((row) => row.join("\t")).join("\n");
+  }
+
+  if (format === "json") {
+    return JSON.stringify(getRowObjects(columns, rows), null, 2);
+  }
+
+  if (format === "html") {
+    const head = names.map((name) => `<th>${escapeHtml(name)}</th>`).join("");
+    const body = values
+      .map(
+        (row) =>
+          `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`
+      )
+      .join("");
+    return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  if (format === "markdown") {
+    const header = `| ${names.map(escapeMarkdownCell).join(" | ")} |`;
+    const divider = `| ${names.map(() => "---").join(" | ")} |`;
+    const body = values.map(
+      (row) => `| ${row.map(escapeMarkdownCell).join(" | ")} |`
+    );
+    return [header, divider, ...body].join("\n");
+  }
+
+  if (format === "csv" || format === "csv-header") {
+    const lines = csvValues.map((row) => row.join(","));
+    if (format === "csv-header") {
+      lines.unshift(names.map(escapeCsvCell).join(","));
+    }
+    return lines.join("\n");
+  }
+
+  const table = tableName
+    ? quoteTableName(schema, tableName, engine)
+    : quoteIdentifier("table_name", engine);
+  const colList = names.map((name) => quoteIdentifier(name, engine)).join(", ");
+  const rowValues = rows
+    .map(
+      (row) =>
+        `  (${columns
+          .map((col, idx) => formatSqlValue(row[idx], col.db_type, engine))
+          .join(", ")})`
+    )
+    .join(",\n");
+  return `INSERT INTO ${table} (${colList}) VALUES\n${rowValues};`;
+}
+
 function getCellEditorKind(column?: ColumnMeta): CellEditorKind {
   const type = column?.db_type?.toLowerCase() ?? "";
   if (isBlobColumnType(type)) return "blob";
@@ -242,6 +422,14 @@ export function CanvasTable({
   onDeleteRow,
   onDeleteRows,
   onAddRow,
+  onDuplicateRow,
+  onRefresh,
+  onExportCurrentPage,
+  onPasteRows,
+  onQuickFilter,
+  schema,
+  tableName,
+  engine,
   onClearSelection,
   onSelectAllRows,
   isCellDirty,
@@ -295,6 +483,7 @@ export function CanvasTable({
     h: number;
   } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<HeaderMenuState | null>(null);
+  const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null);
   const editorKind = editing
     ? getCellEditorKind(columns[editing.colIdx])
     : "text";
@@ -832,6 +1021,307 @@ export function CanvasTable({
     ];
   }, [headerMenu?.colName, onChangeSort, sortState]);
 
+  const copyCellValue = useCallback(
+    (rowIdx: number, colIdx: number) => {
+      const row = getRowAt(rowIdx);
+      void navigator.clipboard.writeText(formatCellForClipboard(row?.[colIdx]));
+    },
+    [getRowAt]
+  );
+
+  const copyRowsAs = useCallback(
+    (
+      rowIndices: number[],
+      format:
+        | "plain"
+        | "json"
+        | "html"
+        | "markdown"
+        | "csv"
+        | "csv-header"
+        | "insert"
+    ) => {
+      const rows = rowIndices
+        .filter((rowIdx) => rowIdx >= 0 && rowIdx < totalRows)
+        .map((rowIdx) => getRowAt(rowIdx))
+        .filter((row): row is unknown[] => Array.isArray(row));
+      if (!rows.length) return;
+      const text = formatRowsForClipboard({
+        format,
+        columns,
+        rows,
+        schema,
+        tableName,
+        engine,
+      });
+      void navigator.clipboard.writeText(text);
+    },
+    [columns, engine, getRowAt, schema, tableName, totalRows]
+  );
+
+  const getSelectedRowIndices = useCallback(() => {
+    if (selectedRows && selectedRows.size > 0) {
+      return Array.from(selectedRows)
+        .filter((rowIdx) => rowIdx >= 0 && rowIdx < totalRows)
+        .sort((a, b) => a - b);
+    }
+    if (selected && selected.rowIdx >= 0 && selected.rowIdx < totalRows) {
+      return [selected.rowIdx];
+    }
+    return [];
+  }, [selected, selectedRows, totalRows]);
+
+  const copySelectedRowsToClipboard = useCallback(() => {
+    const rowIndices = getSelectedRowIndices();
+    if (!rowIndices.length) return false;
+    const rows = rowIndices
+      .map((rowIdx) => getRowAt(rowIdx))
+      .filter((row): row is unknown[] => Array.isArray(row));
+    if (!rows.length) return false;
+    void navigator.clipboard.writeText(
+      serializeRowsForInternalClipboard(columns, rows)
+    );
+    return true;
+  }, [columns, getRowAt, getSelectedRowIndices]);
+
+  const pasteRowsFromClipboard = useCallback(() => {
+    if (!onPasteRows) return false;
+    void navigator.clipboard.readText().then((text) => {
+      const parsed = parseRowsFromInternalClipboard(text);
+      if (!parsed) return;
+      onPasteRows(parsed.rows, parsed.columns);
+    });
+    return true;
+  }, [onPasteRows]);
+
+  const startEditingFromMenu = useCallback(
+    (rowIdx: number, colIdx: number) => {
+      const row = getRowAt(rowIdx);
+      const s = cellToString(row?.[colIdx] ?? null);
+      const kind = getCellEditorKind(columns[colIdx]);
+      onStartEdit?.({ rowIdx, colIdx });
+      setEditorError(null);
+      if (kind === "bool") {
+        const normalized = String(s ?? "").toLowerCase();
+        setEditorValue(
+          normalized === "true" || normalized === "1"
+            ? "true"
+            : normalized === "false" || normalized === "0"
+              ? "false"
+              : "__NULL__"
+        );
+      } else if (kind === "date" || kind === "datetime") {
+        setEditorValue(toDateInputValue(s ?? "", kind));
+      } else {
+        setEditorValue(s ?? "");
+      }
+      const { left, top } = scrollRef.current;
+      const r = getRect(rowIdx, colIdx, left, top);
+      if (r) setEditorRect(r);
+      queueMicrotask(() => editorRef.current?.focus());
+    },
+    [columns, getRect, getRowAt, onStartEdit]
+  );
+
+  const commitMenuValue = useCallback(
+    (rowIdx: number, colIdx: number, value: unknown) => {
+      if (rowIdx < 0 || colIdx < 0) return;
+      onCommitEdit?.({ rowIdx, colIdx }, value);
+    },
+    [onCommitEdit]
+  );
+
+  const addFileValue = useCallback(
+    async (rowIdx: number, colIdx: number) => {
+      const path = await openDialog({
+        title: "Set cell value from file",
+        multiple: false,
+        directory: false,
+      });
+      if (!path || typeof path !== "string") return;
+      const bytes = await readFile(path);
+      commitMenuValue(rowIdx, colIdx, bytes);
+    },
+    [commitMenuValue]
+  );
+
+  const rowMenuItems = useMemo<MenuItem[]>(() => {
+    const rowIdx = rowMenu?.rowIdx ?? -1;
+    const colIdx = rowMenu?.colIdx ?? -1;
+    const col = columns[colIdx];
+    const colType = col?.db_type ?? "";
+    const isBlob = isBlobColumnType(colType);
+    const hasDefault = col?.column_default != null && col.column_default !== "";
+    const rowIsInSelection = rowIdx >= 0 && !!selectedRows?.has(rowIdx);
+    const selectedRowIndices =
+      rowIsInSelection && selectedRows && selectedRows.size > 0
+        ? Array.from(selectedRows).sort((a, b) => a - b)
+        : rowIdx >= 0
+          ? [rowIdx]
+          : [];
+    const deleteLabel =
+      selectedRowIndices.length > 1
+        ? `Delete ${selectedRowIndices.length} rows`
+        : "Delete";
+
+    return [
+      {
+        type: "item",
+        label: "Refresh",
+        disabled: !onRefresh,
+        onClick: () => onRefresh?.(),
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Add Row",
+        disabled: !onAddRow,
+        onClick: () => onAddRow?.(),
+      },
+      {
+        type: "item",
+        label: "Duplicate",
+        disabled: !onDuplicateRow || rowIdx < 0,
+        onClick: () => onDuplicateRow?.(rowIdx),
+      },
+      {
+        type: "item",
+        label: "Set Value",
+        disabled: rowIdx < 0 || colIdx < 0,
+        submenu: [
+          {
+            type: "item",
+            label: "EMPTY",
+            disabled: rowIdx < 0 || colIdx < 0 || !onCommitEdit || isBlob,
+            onClick: () => commitMenuValue(rowIdx, colIdx, ""),
+          },
+          {
+            type: "item",
+            label: "NULL",
+            disabled: rowIdx < 0 || colIdx < 0 || !onCommitEdit,
+            onClick: () => commitMenuValue(rowIdx, colIdx, null),
+          },
+          {
+            type: "item",
+            label: "DEFAULT",
+            disabled: rowIdx < 0 || colIdx < 0 || !onCommitEdit || !hasDefault,
+            onClick: () =>
+              commitMenuValue(rowIdx, colIdx, defaultCellEditValue()),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "Add a file...",
+            disabled: rowIdx < 0 || colIdx < 0 || !onCommitEdit || !isBlob,
+            onClick: () => {
+              void addFileValue(rowIdx, colIdx);
+            },
+          },
+        ],
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Copy Cell Value",
+        disabled: rowIdx < 0 || colIdx < 0,
+        onClick: () => copyCellValue(rowIdx, colIdx),
+      },
+      {
+        type: "item",
+        label: "Copy Rows As",
+        disabled: selectedRowIndices.length === 0,
+        submenu: [
+          {
+            type: "item",
+            label: "Plain Text",
+            onClick: () => copyRowsAs(selectedRowIndices, "plain"),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "JSON",
+            onClick: () => copyRowsAs(selectedRowIndices, "json"),
+          },
+          {
+            type: "item",
+            label: "HTML",
+            onClick: () => copyRowsAs(selectedRowIndices, "html"),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "Markdown Table",
+            onClick: () => copyRowsAs(selectedRowIndices, "markdown"),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "CSV",
+            onClick: () => copyRowsAs(selectedRowIndices, "csv"),
+          },
+          {
+            type: "item",
+            label: "CSV with Header",
+            onClick: () => copyRowsAs(selectedRowIndices, "csv-header"),
+          },
+          { type: "sep" },
+          {
+            type: "item",
+            label: "INSERT Statement",
+            onClick: () => copyRowsAs(selectedRowIndices, "insert"),
+          },
+        ],
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: "Quick Filter",
+        disabled: !onQuickFilter || !col,
+        onClick: () => {
+          if (!col || !rowMenu) return;
+          onQuickFilter?.(col.name, rowMenu.value);
+        },
+      },
+      {
+        type: "item",
+        label: "Export current page...",
+        disabled: !onExportCurrentPage,
+        onClick: () => onExportCurrentPage?.(),
+      },
+      { type: "sep" },
+      {
+        type: "item",
+        label: deleteLabel,
+        color: "red",
+        disabled:
+          selectedRowIndices.length === 0 || (!onDeleteRows && !onDeleteRow),
+        onClick: () => {
+          if (onDeleteRows) onDeleteRows(selectedRowIndices);
+          else if (rowIdx >= 0) onDeleteRow?.(rowIdx);
+        },
+      },
+    ];
+  }, [
+    columns,
+    rowMenu,
+    selectedRows,
+    totalRows,
+    getRowAt,
+    onRefresh,
+    onAddRow,
+    onDuplicateRow,
+    onCommitEdit,
+    onDeleteRow,
+    onDeleteRows,
+    onExportCurrentPage,
+    onQuickFilter,
+    copyCellValue,
+    copyRowsAs,
+    startEditingFromMenu,
+    commitMenuValue,
+    addFileValue,
+  ]);
+
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
   // --------------------------------------------------------------------------
@@ -902,6 +1392,55 @@ export function CanvasTable({
       commitAndExit,
       onClearSelection,
     ]
+  );
+
+  const handleContextMenu = useCallback(
+    (e: MouseEvent) => {
+      const host = scrollerRef.current;
+      if (!host) return;
+
+      const rect = host.getBoundingClientRect();
+      const x0 = e.clientX - rect.left;
+      const y0 = e.clientY - rect.top;
+      if (y0 < HEADER_HEIGHT) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const { left, top } = scrollRef.current;
+      const x = x0 + left;
+      const y = y0 - HEADER_HEIGHT + top;
+      const rowIdx = Math.floor(y / ROW_HEIGHT);
+      const colIdx = hitTestCol(x, columns, colLefts, colWidths);
+
+      if (rowIdx < 0 || rowIdx >= totalRows || colIdx < 0) {
+        setHeaderMenu(null);
+        setRowMenu({
+          x: e.clientX,
+          y: e.clientY,
+          rowIdx: -1,
+          colIdx: -1,
+          value: "",
+        });
+        return;
+      }
+
+      if (!selectedRows?.has(rowIdx)) {
+        onSelect?.(rowIdx, colIdx);
+      }
+
+      const row = getRowAt(rowIdx);
+      const value = formatCellForClipboard(row?.[colIdx]);
+      setHeaderMenu(null);
+      setRowMenu({
+        x: e.clientX,
+        y: e.clientY,
+        rowIdx,
+        colIdx,
+        value,
+      });
+    },
+    [columns, colLefts, colWidths, totalRows, selectedRows, getRowAt, onSelect]
   );
 
   const handleDblClick = useCallback(
@@ -998,6 +1537,20 @@ export function CanvasTable({
           return;
         }
 
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") {
+          if (copySelectedRowsToClipboard()) {
+            e.preventDefault();
+          }
+          return;
+        }
+
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v") {
+          if (pasteRowsFromClipboard()) {
+            e.preventDefault();
+          }
+          return;
+        }
+
         const hasSelection =
           (selectedRows && selectedRows.size > 0) || selected;
         if (!hasSelection) return;
@@ -1022,6 +1575,7 @@ export function CanvasTable({
         class="relative h-full min-h-0 w-full overflow-auto overscroll-none border-t border-neutral-200"
         style={{ overscrollBehavior: "none" }}
         onMouseDown={handleMouseDown}
+        onContextMenu={handleContextMenu}
         onDblClick={handleDblClick}
       >
         {/* Sticky Header Container */}
@@ -1234,6 +1788,13 @@ export function CanvasTable({
         y={headerMenu?.y ?? 0}
         items={headerMenuItems}
         onClose={() => setHeaderMenu(null)}
+      />
+      <ContextMenu
+        open={rowMenu !== null}
+        x={rowMenu?.x ?? 0}
+        y={rowMenu?.y ?? 0}
+        items={rowMenuItems}
+        onClose={() => setRowMenu(null)}
       />
     </div>
   );

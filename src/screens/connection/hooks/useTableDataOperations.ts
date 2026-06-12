@@ -45,9 +45,9 @@ export function useTableDataOperations({
   );
 
   const handleDeleteRow = useCallback(
-    (rowIndex: number, offset: number) => {
+    (rowIndex: number, offset: number, rowKeyOverride?: string) => {
       if (isLocked) return;
-      const rowKey = String(rowIndex);
+      const rowKey = rowKeyOverride ?? String(rowIndex);
       const store = useConnectionStore.getState();
       const windowPatches =
         store.dataPatchMap[profileId]?.[activeTableWindowId]?.patches ?? null;
@@ -69,7 +69,7 @@ export function useTableDataOperations({
 
       onDataChange?.(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
     },
-    [isLocked, activeKey, onDataChange]
+    [isLocked, activeKey, activeTableWindowId, onDataChange, profileId]
   );
 
   const handleAddRow = useCallback(

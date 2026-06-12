@@ -509,6 +509,24 @@ export function formatSqlValue(
   const raw = unwrapCellValue(value);
   if (raw === null || raw === undefined) return "NULL";
 
+  if (isBlobColumnType(dbType)) {
+    const bytes =
+      raw instanceof Uint8Array
+        ? raw
+        : raw instanceof ArrayBuffer
+          ? new Uint8Array(raw)
+          : null;
+    if (bytes) {
+      const hex = Array.from(bytes, (byte) =>
+        byte.toString(16).padStart(2, "0")
+      ).join("");
+      if (engine === "postgres") return `decode('${hex}', 'hex')`;
+      if (engine === "sqlserver") return `0x${hex}`;
+      if (engine === "oracle") return `HEXTORAW('${hex}')`;
+      return `X'${hex}'`;
+    }
+  }
+
   if (isJsonColumnType(dbType)) {
     const jsonText = normalizeJsonValue(raw);
     if (jsonText.trim() === "" || jsonText.trim().toLowerCase() === "null") {

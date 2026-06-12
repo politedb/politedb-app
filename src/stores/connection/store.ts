@@ -65,6 +65,40 @@ export const useConnectionStore = create<ConnectionState>()(
       rafByKey.set(key, raf);
     }
 
+    function dataPatchMapWithWindowPatches(
+      s: ConnectionState,
+      tabId: string,
+      tableWindowId: string,
+      windowData: NonNullable<ConnectionState["dataPatchMap"][string]>[string],
+      patches: NonNullable<
+        ConnectionState["dataPatchMap"][string]
+      >[string]["patches"]
+    ) {
+      if (Object.keys(patches).length > 0) {
+        return {
+          ...s.dataPatchMap,
+          [tabId]: {
+            ...(s.dataPatchMap[tabId] ?? {}),
+            [tableWindowId]: {
+              ...windowData,
+              patches,
+            },
+          },
+        };
+      }
+
+      const tabPatchMap = s.dataPatchMap[tabId] ?? {};
+      const { [tableWindowId]: _, ...restWindows } = tabPatchMap;
+      if (Object.keys(restWindows).length === 0) {
+        const { [tabId]: _, ...restTabs } = s.dataPatchMap;
+        return restTabs;
+      }
+      return {
+        ...s.dataPatchMap,
+        [tabId]: restWindows,
+      };
+    }
+
     return {
       tables: {},
       schemas: {},
@@ -482,16 +516,13 @@ export const useConnectionStore = create<ConnectionState>()(
             const cleanedPatches =
               Object.keys(nextPatches).length > 0 ? nextPatches : {};
             return {
-              dataPatchMap: {
-                ...s.dataPatchMap,
-                [tabId]: {
-                  ...(s.dataPatchMap[tabId] ?? {}),
-                  [tableWindowId]: {
-                    ...windowData!,
-                    patches: cleanedPatches,
-                  },
-                },
-              },
+              dataPatchMap: dataPatchMapWithWindowPatches(
+                s,
+                tabId,
+                tableWindowId,
+                windowData!,
+                cleanedPatches
+              ),
             };
           }
 
@@ -549,16 +580,13 @@ export const useConnectionStore = create<ConnectionState>()(
             Object.keys(finalPatches).length > 0 ? finalPatches : {};
 
           return {
-            dataPatchMap: {
-              ...s.dataPatchMap,
-              [tabId]: {
-                ...s.dataPatchMap[tabId],
-                [tableWindowId]: {
-                  ...windowData,
-                  patches: cleanedPatches,
-                },
-              },
-            },
+            dataPatchMap: dataPatchMapWithWindowPatches(
+              s,
+              tabId,
+              tableWindowId,
+              windowData,
+              cleanedPatches
+            ),
           };
         }),
 

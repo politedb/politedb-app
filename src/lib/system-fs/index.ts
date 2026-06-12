@@ -3,6 +3,7 @@
  * directly so behavior is consistent and browser/dev without Tauri degrades safely.
  */
 import {
+  readFile as tauriReadFile,
   readTextFile as tauriReadTextFile,
   writeFile as tauriWriteFile,
   writeTextFile as tauriWriteTextFile,
@@ -21,6 +22,13 @@ export async function readTextFile(path: string): Promise<string> {
     throw new Error("Filesystem access requires the desktop app.");
   }
   return tauriReadTextFile(path);
+}
+
+export async function readFile(path: string): Promise<Uint8Array> {
+  if (!isTauriRuntime()) {
+    throw new Error("Filesystem access requires the desktop app.");
+  }
+  return tauriReadFile(path);
 }
 
 export async function writeTextFile(

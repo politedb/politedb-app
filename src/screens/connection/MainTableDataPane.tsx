@@ -708,10 +708,50 @@ export function MainTableDataPane(props: {
           refreshRows: true,
           refreshMeta: false,
           refreshStats: false,
+          filters: appliedFilters.length ? appliedFilters : undefined,
+          filterCombine: appliedFilterCombine,
+          sortBy: sortState,
         }
       );
     },
-    [limit, offset, loadTableData]
+    [
+      limit,
+      offset,
+      loadTableData,
+      appliedFilters,
+      appliedFilterCombine,
+      sortState,
+    ]
+  );
+
+  const handleContextRefresh = useCallback(() => {
+    void reloadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+  }, [
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name,
+    reloadTableData,
+  ]);
+
+  const handleQuickFilter = useCallback(
+    (colName: string, value: string) => {
+      const nextFilters = [
+        {
+          id: Date.now(),
+          column: colName,
+          operator: "=",
+          value,
+          enabled: true,
+        },
+      ];
+      setFilterBarVisible(true, activeKey);
+      setFilters(nextFilters);
+      setFilterCombine("AND");
+      applyFilters(nextFilters, "AND", activeKey);
+    },
+    [activeKey, setFilterBarVisible, setFilters, setFilterCombine, applyFilters]
   );
 
   const handleCountExact = useCallback(
@@ -1039,10 +1079,16 @@ export function MainTableDataPane(props: {
                       }
                     : undefined
                 }
-                onDeleteRow={(rowIndex) => {
+                onDeleteRow={(rowIndex, rowKey) => {
                   if (hasError || isDataReadOnly) return;
-                  handleDeleteRow(rowIndex, renderOffset);
+                  handleDeleteRow(rowIndex, renderOffset, rowKey);
                 }}
+                onRefresh={handleContextRefresh}
+                onExportCurrentPage={isNewTable ? undefined : onExportOpen}
+                onQuickFilter={handleQuickFilter}
+                schema={activeTableWindow.table.schema}
+                tableName={activeTableWindow.table.name}
+                engine={engine}
                 deletedRows={
                   hasError ? EMPTY_SET : extractDeleted(patches, DATA_KEYS.data)
                 }
