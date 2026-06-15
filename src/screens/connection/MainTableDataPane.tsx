@@ -61,6 +61,7 @@ type ActiveTableWindow = {
   id: string;
   table: TableItem;
 };
+type ExportScope = "all" | "page";
 
 const EMPTY_ARRAY: any[] = [];
 const EMPTY_SET = new Set<number>();
@@ -134,6 +135,7 @@ export function MainTableDataPane(props: {
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
+  const [exportScope, setExportScope] = useState<ExportScope>("all");
   const startedRef = useRef<string | null>(null);
 
   const activeKey = useMemo(
@@ -789,10 +791,14 @@ export function MainTableDataPane(props: {
    * Export / Import / Clone / Truncate / Drop
    * =========================================================================== */
 
-  const onExportOpen = useCallback(() => {
-    if (isNewTable) return;
-    setExportDialogOpen(true);
-  }, [isNewTable, setExportDialogOpen]);
+  const onExportOpen = useCallback(
+    (scope: ExportScope = "all") => {
+      if (isNewTable) return;
+      setExportScope(scope);
+      setExportDialogOpen(true);
+    },
+    [isNewTable, setExportDialogOpen]
+  );
 
   const onImportOpen = useCallback(async () => {
     if (isNewTable || isProfileLocked) return;
@@ -1084,7 +1090,12 @@ export function MainTableDataPane(props: {
                   handleDeleteRow(rowIndex, renderOffset, rowKey);
                 }}
                 onRefresh={handleContextRefresh}
-                onExportCurrentPage={isNewTable ? undefined : onExportOpen}
+                onExportCurrentPage={
+                  isNewTable ? undefined : () => onExportOpen("page")
+                }
+                onImportData={
+                  !hasError && !isDataReadOnly ? onImportOpen : undefined
+                }
                 onQuickFilter={handleQuickFilter}
                 schema={activeTableWindow.table.schema}
                 tableName={activeTableWindow.table.name}
@@ -1153,9 +1164,16 @@ export function MainTableDataPane(props: {
         schema={activeTableWindow.table.schema}
         tableName={activeTableWindow.table.name}
         columns={meta.columns ?? []}
-        totalRows={totalRows}
+        constraints={meta.constraints ?? null}
+        totalRows={exportScope === "page" ? visiblePageTotal : totalRows}
         appliedFilters={appliedFilters}
         appliedFilterCombine={appliedFilterCombine}
+        exportPagination={
+          exportScope === "page"
+            ? { limit: renderLimit, offset: renderOffset }
+            : undefined
+        }
+        exportSortState={sortState}
         engine={engine}
         dataImportPreview={dataImportPreview}
         importError={importError}

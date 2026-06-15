@@ -89,6 +89,7 @@ type Props = {
   onDuplicateRow?: (rowIdx: number) => void;
   onRefresh?: () => void;
   onExportCurrentPage?: () => void;
+  onImportData?: () => void;
   onPasteRows?: (rows: unknown[][], sourceColumns?: string[]) => void;
   onQuickFilter?: (colName: string, value: string) => void;
   schema?: string;
@@ -425,6 +426,7 @@ export function CanvasTable({
   onDuplicateRow,
   onRefresh,
   onExportCurrentPage,
+  onImportData,
   onPasteRows,
   onQuickFilter,
   schema,
@@ -1288,6 +1290,12 @@ export function CanvasTable({
         disabled: !onExportCurrentPage,
         onClick: () => onExportCurrentPage?.(),
       },
+      {
+        type: "item",
+        label: "Import data...",
+        disabled: !onImportData,
+        onClick: () => onImportData?.(),
+      },
       { type: "sep" },
       {
         type: "item",
@@ -1314,6 +1322,7 @@ export function CanvasTable({
     onDeleteRow,
     onDeleteRows,
     onExportCurrentPage,
+    onImportData,
     onQuickFilter,
     copyCellValue,
     copyRowsAs,

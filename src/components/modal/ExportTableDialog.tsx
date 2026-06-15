@@ -10,7 +10,7 @@ import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Button } from "src/components/common/Button";
-import { type TableFilterCondition } from "src/lib/queries/sql";
+import { type TableFilterCondition, type TableSort } from "src/lib/queries/sql";
 import {
   type ExportConfig,
   type ExportFormat,
@@ -18,7 +18,7 @@ import {
 } from "src/hooks/useExportTableData";
 import { ErrorDialog } from "./ErrorDialog";
 import { Checkbox } from "src/components/common/Checkbox";
-import type { DatabaseEngine } from "src/types";
+import type { DatabaseEngine, TableConstraint } from "src/types";
 
 interface Props {
   open: boolean;
@@ -27,8 +27,11 @@ interface Props {
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
+  constraints?: TableConstraint[] | null;
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
+  pagination?: { limit: number; offset: number };
+  sortState?: TableSort | null;
   totalRows: number;
   engine?: DatabaseEngine;
 }
@@ -40,8 +43,11 @@ export function ExportTableDialog({
   schema,
   tableName,
   columns,
+  constraints,
   appliedFilters,
   appliedFilterCombine,
+  pagination,
+  sortState,
   totalRows,
   engine,
 }: Props) {
@@ -124,6 +130,9 @@ export function ExportTableDialog({
       engine,
       appliedFilters,
       appliedFilterCombine,
+      pagination,
+      sortState,
+      constraints,
       columns,
     };
     await handleExport(tableName, totalRows, exportConfig);
@@ -135,6 +144,9 @@ export function ExportTableDialog({
     totalRows,
     appliedFilters,
     appliedFilterCombine,
+    pagination,
+    sortState,
+    constraints,
     columns,
     engine,
     handleExport,
@@ -145,7 +157,7 @@ export function ExportTableDialog({
       <Dialog open={open} onClose={onClose} size="sm">
         <DialogHeader>
           <DialogTitle className="text-base">
-            Export table '{tableName}'
+            {pagination ? "Export current page" : `Export table '${tableName}'`}
           </DialogTitle>
         </DialogHeader>
         <DialogContent className="py-0">
@@ -258,8 +270,12 @@ export function ExportTableDialog({
           </div>
         </DialogContent>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={exporting}>
-            Cancel
+          <Button
+            variant={progress?.exported === totalRows ? "default" : "outline"}
+            onClick={onClose}
+            disabled={exporting}
+          >
+            {progress?.exported === totalRows ? "Close" : "Cancel"}
           </Button>
           {!progress && (
             <Button

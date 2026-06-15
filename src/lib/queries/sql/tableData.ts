@@ -1,7 +1,11 @@
 import type { DatabaseEngine } from "src/types";
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { quoteTableName } from "src/utils/sqlDialect";
-import { buildWhereClause, type TableFilterCondition, type TableSort } from "./filters";
+import {
+  buildWhereClause,
+  type TableFilterCondition,
+  type TableSort,
+} from "./filters";
 import { isMySqlLike, qIdent, qLiteral, regexEscape } from "./shared";
 
 export const tableDataQuery = (
@@ -38,7 +42,9 @@ export const tableExportQuery = (
   columns?: string[],
   filters?: TableFilterCondition[],
   combineWith: "AND" | "OR" = "AND",
-  engine?: DatabaseEngine
+  engine?: DatabaseEngine,
+  pagination?: { limit: number; offset: number },
+  sortBy?: TableSort | null
 ) => {
   const tableIdent = quoteTableName(schema, tableName, engine);
   const colList =
@@ -48,7 +54,20 @@ export const tableExportQuery = (
   const where = filters?.length
     ? buildWhereClause(filters, combineWith, engine)
     : "";
-  const queryStr = `SELECT ${colList} FROM ${tableIdent}${where};`;
+  const orderBy = sortBy
+    ? ` ORDER BY ${qIdent(sortBy.colName, engine)} ${sortBy.direction.toUpperCase()}`
+    : "";
+  let queryStr = `SELECT ${colList} FROM ${tableIdent}${where}${orderBy}`;
+  if (pagination) {
+    const { limit, offset } = pagination;
+    queryStr =
+      engine === "oracle"
+        ? `${queryStr} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`
+        : engine === "sqlserver"
+          ? `SELECT ${colList} FROM ${tableIdent}${where}${orderBy || " ORDER BY (SELECT NULL)"} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`
+          : `${queryStr} LIMIT ${limit} OFFSET ${offset}`;
+  }
+  queryStr += ";";
   return regexEscape(queryStr);
 };
 

@@ -6,7 +6,8 @@ import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { SqlPreviewModal } from "src/components/modal/SqlPreviewModal";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import type { DatabaseEngine } from "src/types";
-import type { TableFilterCondition } from "src/lib/queries/sql";
+import type { TableConstraint } from "src/types";
+import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type {
   DataImportPreview,
@@ -38,9 +39,12 @@ export function MainTableDialogs(props: {
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
+  constraints?: TableConstraint[] | null;
   totalRows: number;
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
+  exportPagination?: { limit: number; offset: number };
+  exportSortState?: TableSort | null;
   engine: DatabaseEngine;
   importError: string | null;
   importBusy: boolean;
@@ -83,9 +87,12 @@ export function MainTableDialogs(props: {
     schema,
     tableName,
     columns,
+    constraints,
     totalRows,
     appliedFilters,
     appliedFilterCombine,
+    exportPagination,
+    exportSortState,
     engine,
     dataImportPreview,
     importError,
@@ -115,9 +122,12 @@ export function MainTableDialogs(props: {
           schema={schema}
           tableName={tableName}
           columns={columns}
+          constraints={constraints}
           totalRows={totalRows}
           appliedFilters={appliedFilters}
           appliedFilterCombine={appliedFilterCombine}
+          pagination={exportPagination}
+          sortState={exportSortState}
           engine={engine}
         />
       )}

@@ -4,12 +4,15 @@ import { type ColumnMeta } from "src/lib/tauri/types";
 import {
   tableExportQuery,
   type TableFilterCondition,
+  type TableSort,
 } from "src/lib/queries/sql";
 import { formatJsonChunk, formatSqlChunk } from "src/utils/exportFormats";
 import { exportAppendToFile } from "src/lib/tauri/export";
 import { startSqlQueryStream } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { saveDialog } from "src/lib/system-dialog";
+import type { TableConstraint } from "src/types";
+import { resolveDefaultTableSort } from "src/utils/tableSort";
 
 export type ExportFormat = "csv" | "json" | "sql";
 
@@ -34,6 +37,9 @@ export type ExportConfig = {
   engine?: import("src/types").DatabaseEngine;
   appliedFilters: TableFilterCondition[];
   appliedFilterCombine: "AND" | "OR";
+  pagination?: { limit: number; offset: number };
+  sortState?: TableSort | null;
+  constraints?: TableConstraint[] | null;
 };
 
 export function useExportTableData() {
@@ -99,6 +105,9 @@ export function useExportTableData() {
         appliedFilters,
         appliedFilterCombine,
         columns,
+        pagination,
+        sortState,
+        constraints,
       } = config;
 
       if (!connId) {
@@ -114,17 +123,26 @@ export function useExportTableData() {
         return;
       }
       const format = opts.format as ExportFormat;
+      const querySort =
+        sortState ??
+        resolveDefaultTableSort({
+          columns,
+          constraints,
+          engine,
+        });
       const q = tableExportQuery(
         schema,
         tableName,
         columnNames,
         appliedFilters.length ? appliedFilters : undefined,
         appliedFilterCombine,
-        engine
+        engine,
+        pagination,
+        querySort
       );
       const opId = await startSqlQueryStream(connId, q, {
         batchSize: 50,
-        maxRows: 10_000_000,
+        maxRows: pagination ? pagination.limit : 10_000_000,
       });
       let totalExported = 0;
       let isFirstChunk = true;

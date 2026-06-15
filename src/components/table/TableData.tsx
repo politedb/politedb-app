@@ -38,6 +38,7 @@ interface Props {
   onAddRow?: () => void;
   onRefresh?: () => void;
   onExportCurrentPage?: () => void;
+  onImportData?: () => void;
   onQuickFilter?: (colName: string, value: string) => void;
   schema?: string;
   tableName?: string;
@@ -78,6 +79,7 @@ export function TableData({
   onAddRow,
   onRefresh,
   onExportCurrentPage,
+  onImportData,
   onQuickFilter,
   schema,
   tableName,
@@ -408,6 +410,7 @@ export function TableData({
         onPasteRows={readOnly ? undefined : handlePasteRows}
         onRefresh={onRefresh}
         onExportCurrentPage={onExportCurrentPage}
+        onImportData={readOnly ? undefined : onImportData}
         onQuickFilter={onQuickFilter}
         schema={schema}
         tableName={tableName}
