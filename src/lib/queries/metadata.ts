@@ -2,7 +2,8 @@ import type { DatabaseEngine } from "src/types";
 
 export type MetadataQueries = {
   schemasQuery: string;
-  functionsQuery: string;
+  routinesQuery: string;
+  triggersQuery: string;
   tablesQuery: string;
   columnsQuery: string;
 };
@@ -14,22 +15,60 @@ const PG: MetadataQueries = {
     WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
     ORDER BY schema_name;
   `,
-  functionsQuery: `
+  routinesQuery: `
     SELECT
-      n.nspname AS function_schema,
-      p.proname AS function_name,
-      pg_get_function_identity_arguments(p.oid) AS function_args
+      n.nspname AS object_schema,
+      p.proname AS object_name,
+      CASE
+        WHEN p.prokind = 'p' THEN 'procedure'
+        ELSE 'function'
+      END AS object_kind,
+      pg_get_function_identity_arguments(p.oid) AS object_signature,
+      '' AS table_name,
+      '' AS enabled
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND p.prokind IN ('f', 'p')
     ORDER BY n.nspname, p.proname;
   `,
+  triggersQuery: `
+    SELECT
+      n.nspname AS object_schema,
+      t.tgname AS object_name,
+      'trigger' AS object_kind,
+      '' AS object_signature,
+      c.relname AS table_name,
+      CASE
+        WHEN t.tgenabled IN ('O', 'A') THEN 'true'
+        ELSE 'false'
+      END AS enabled
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE NOT t.tgisinternal
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    ORDER BY n.nspname, c.relname, t.tgname;
+  `,
   tablesQuery: `
-    SELECT table_schema, table_name, table_type
-    FROM information_schema.tables
-    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-      AND table_type IN ('BASE TABLE', 'VIEW')
-    ORDER BY table_schema, table_type, table_name;
+    SELECT
+      n.nspname AS table_schema,
+      c.relname AS table_name,
+      CASE
+        WHEN c.relkind = 'v' THEN 'VIEW'
+        ELSE 'BASE TABLE'
+      END AS table_type,
+      pg_catalog.pg_get_userbyid(c.relowner) AS owner,
+      c.reltuples::bigint AS estimated_row,
+      pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+      pg_size_pretty(pg_relation_size(c.oid)) AS data_size,
+      pg_size_pretty(pg_indexes_size(c.oid)) AS index_size,
+      COALESCE(obj_description(c.oid, 'pg_class'), '') AS comment
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND c.relkind IN ('r', 'p', 'v')
+    ORDER BY n.nspname, c.relkind, c.relname;
   `,
   columnsQuery: `
     SELECT table_schema, table_name, column_name
@@ -46,18 +85,60 @@ const MYSQL: MetadataQueries = {
     WHERE schema_name = DATABASE()
     ORDER BY schema_name;
   `,
-  functionsQuery: `
+  routinesQuery: `
     SELECT
-      routine_schema AS function_schema,
-      routine_name AS function_name,
-      '' AS function_args
+      routine_schema AS object_schema,
+      routine_name AS object_name,
+      LOWER(routine_type) AS object_kind,
+      '' AS object_signature,
+      '' AS table_name,
+      '' AS enabled
     FROM information_schema.routines
     WHERE routine_schema = DATABASE()
-      AND routine_type = 'FUNCTION'
+      AND routine_type IN ('FUNCTION', 'PROCEDURE')
     ORDER BY routine_schema, routine_name;
   `,
+  triggersQuery: `
+    SELECT
+      trigger_schema AS object_schema,
+      trigger_name AS object_name,
+      'trigger' AS object_kind,
+      '' AS object_signature,
+      event_object_table AS table_name,
+      '' AS enabled
+    FROM information_schema.triggers
+    WHERE trigger_schema = DATABASE()
+    ORDER BY trigger_schema, event_object_table, trigger_name;
+  `,
   tablesQuery: `
-    SELECT table_schema, table_name, table_type
+    SELECT
+      table_schema,
+      table_name,
+      table_type,
+      '' AS owner,
+      table_rows AS estimated_row,
+      CASE
+        WHEN data_length + index_length IS NULL THEN ''
+        WHEN data_length + index_length < 1024 THEN CONCAT(data_length + index_length, ' B')
+        WHEN data_length + index_length < 1048576 THEN CONCAT(ROUND((data_length + index_length) / 1024, 1), ' KB')
+        WHEN data_length + index_length < 1073741824 THEN CONCAT(ROUND((data_length + index_length) / 1048576, 1), ' MB')
+        ELSE CONCAT(ROUND((data_length + index_length) / 1073741824, 1), ' GB')
+      END AS total_size,
+      CASE
+        WHEN data_length IS NULL THEN ''
+        WHEN data_length < 1024 THEN CONCAT(data_length, ' B')
+        WHEN data_length < 1048576 THEN CONCAT(ROUND(data_length / 1024, 1), ' KB')
+        WHEN data_length < 1073741824 THEN CONCAT(ROUND(data_length / 1048576, 1), ' MB')
+        ELSE CONCAT(ROUND(data_length / 1073741824, 1), ' GB')
+      END AS data_size,
+      CASE
+        WHEN index_length IS NULL THEN ''
+        WHEN index_length < 1024 THEN CONCAT(index_length, ' B')
+        WHEN index_length < 1048576 THEN CONCAT(ROUND(index_length / 1024, 1), ' KB')
+        WHEN index_length < 1073741824 THEN CONCAT(ROUND(index_length / 1048576, 1), ' MB')
+        ELSE CONCAT(ROUND(index_length / 1073741824, 1), ' GB')
+      END AS index_size,
+      COALESCE(table_comment, '') AS comment
     FROM information_schema.tables
     WHERE table_schema = DATABASE()
       AND table_type IN ('BASE TABLE', 'VIEW')
@@ -76,8 +157,20 @@ const SQLITE: MetadataQueries = {
   schemasQuery: `
     SELECT 'main' AS schema_name;
   `,
-  functionsQuery: `
+  routinesQuery: `
     SELECT '' WHERE 1=0;
+  `,
+  triggersQuery: `
+    SELECT
+      'main' AS object_schema,
+      name AS object_name,
+      'trigger' AS object_kind,
+      '' AS object_signature,
+      tbl_name AS table_name,
+      'true' AS enabled
+    FROM sqlite_master
+    WHERE type='trigger'
+    ORDER BY tbl_name, name;
   `,
   tablesQuery: `
     SELECT
@@ -120,16 +213,20 @@ const ORACLE: MetadataQueries = {
     SELECT SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA') AS schema_name
     FROM dual;
   `,
-  functionsQuery: `
+  routinesQuery: `
     SELECT
-      owner AS function_schema,
-      object_name AS function_name,
-      '' AS function_args
+      owner AS object_schema,
+      object_name AS object_name,
+      'function' AS object_kind,
+      '' AS object_signature,
+      '' AS table_name,
+      '' AS enabled
     FROM all_procedures
     WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
       AND object_type = 'FUNCTION'
     ORDER BY owner, object_name;
   `,
+  triggersQuery: `SELECT '' WHERE 1=0;`,
   tablesQuery: `
     SELECT
       owner AS table_schema,
@@ -157,7 +254,8 @@ const CLICKHOUSE: MetadataQueries = {
     WHERE catalog_name = currentDatabase()
     ORDER BY schema_name
   `,
-  functionsQuery: `SELECT '' WHERE 1=0`,
+  routinesQuery: `SELECT '' WHERE 1=0`,
+  triggersQuery: `SELECT '' WHERE 1=0`,
   tablesQuery: `
     SELECT table_schema, table_name, table_type
     FROM information_schema.tables
@@ -180,7 +278,8 @@ const SNOWFLAKE: MetadataQueries = {
     WHERE catalog_name = CURRENT_DATABASE()
     ORDER BY schema_name;
   `,
-  functionsQuery: `SELECT '' WHERE 1=0;`,
+  routinesQuery: `SELECT '' WHERE 1=0;`,
+  triggersQuery: `SELECT '' WHERE 1=0;`,
   tablesQuery: `
     SELECT table_schema, table_name, table_type
     FROM information_schema.tables
@@ -203,15 +302,19 @@ const SQLSERVER: MetadataQueries = {
     WHERE name NOT IN ('sys', 'INFORMATION_SCHEMA')
     ORDER BY name;
   `,
-  functionsQuery: `
+  routinesQuery: `
     SELECT
-      ROUTINE_SCHEMA AS function_schema,
-      ROUTINE_NAME AS function_name,
-      '' AS function_args
+      ROUTINE_SCHEMA AS object_schema,
+      ROUTINE_NAME AS object_name,
+      'function' AS object_kind,
+      '' AS object_signature,
+      '' AS table_name,
+      '' AS enabled
     FROM INFORMATION_SCHEMA.ROUTINES
     WHERE ROUTINE_TYPE = 'FUNCTION'
     ORDER BY ROUTINE_SCHEMA, ROUTINE_NAME;
   `,
+  triggersQuery: `SELECT '' WHERE 1=0;`,
   tablesQuery: `
     SELECT
       TABLE_SCHEMA AS table_schema,
@@ -234,7 +337,8 @@ const SQLSERVER: MetadataQueries = {
 // Engines without relational schema/tables
 const EMPTY: MetadataQueries = {
   schemasQuery: `SELECT '' WHERE 1=0;`,
-  functionsQuery: `SELECT '' WHERE 1=0;`,
+  routinesQuery: `SELECT '' WHERE 1=0;`,
+  triggersQuery: `SELECT '' WHERE 1=0;`,
   tablesQuery: `SELECT '' WHERE 1=0;`,
   columnsQuery: `SELECT '' WHERE 1=0;`,
 };

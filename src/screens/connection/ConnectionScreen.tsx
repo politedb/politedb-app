@@ -160,6 +160,7 @@ export function ConnectionScreen() {
     selectWindow,
     openSqlEditor,
     openTable,
+    openDatabaseObjectsManager,
     closeWindow,
   } = useConnectionWindows(activeProfileScreen, sqlScopeKey);
 
@@ -595,6 +596,12 @@ export function ConnectionScreen() {
     return () => setDiagramOpen(true);
   }, []);
 
+  const openDatabaseObjects = useMemo(() => {
+    return () => {
+      openDatabaseObjectsManager();
+    };
+  }, [openDatabaseObjectsManager]);
+
   /* =============================================================================
    * Keyboard shortcuts (uses stable actions)
    * ============================================================================= */
@@ -694,6 +701,7 @@ export function ConnectionScreen() {
             onSearchOpen={() => setSearchDialogOpen(true)}
             onOpenAiAssistant={openAiAssistant}
             onOpenDiagram={openDiagram}
+            onOpenDatabaseObjects={openDatabaseObjects}
           />
 
           <ConnectionWorkspaceLayout

@@ -72,6 +72,11 @@ type ScreenState = {
 
   // Window lifecycle (per tab)
   addWindow: (tabId: string, window: OpenWindow) => void;
+  updateWindow: (
+    tabId: string,
+    windowId: string,
+    patch: Partial<OpenWindow>
+  ) => void;
   removeWindow: (tabId: string, windowId: string) => void;
   replaceWindows: (tabId: string, windows: OpenWindow[]) => void;
   clearWindows: (tabId: string) => void;
@@ -134,6 +139,25 @@ export const useScreenStore = create<ScreenState>((set) => ({
         openWindows: {
           ...s.openWindows,
           [tabId]: [...prev, window],
+        },
+      };
+    }),
+
+  updateWindow: (tabId, windowId, patch) =>
+    set((s) => {
+      const prev = s.openWindows[tabId] ?? [];
+      let changed = false;
+      const next = prev.map((window) => {
+        if (window.id !== windowId) return window;
+        changed = true;
+        return { ...window, ...patch } as OpenWindow;
+      });
+      if (!changed) return s;
+      schedulePersistentSave();
+      return {
+        openWindows: {
+          ...s.openWindows,
+          [tabId]: next,
         },
       };
     }),

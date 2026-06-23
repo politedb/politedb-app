@@ -5,6 +5,7 @@ import {
   XIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  SquareFunctionIcon,
 } from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
@@ -23,11 +24,15 @@ interface Props {
 
 function getWindowTitle(w: OpenWindow) {
   if (w.type === "table") return w.table.name;
+  if (w.type === "db-catalog") return w.title?.trim() || "Catalog";
+  if (w.type === "db-object-manager") return w.title?.trim() || "Objects";
   return w.title?.trim() ? w.title : "SQL Query";
 }
 
 function getWindowSubtitle(w: OpenWindow) {
   if (w.type === "table") return `${w.table.schema}.${w.table.name}`;
+  if (w.type === "db-catalog") return "Database metadata overview";
+  if (w.type === "db-object-manager") return "Functions, procedures, triggers";
   return "SQL Editor";
 }
 
@@ -90,9 +95,7 @@ export function NavigationTabs({
           label: "Close to the Right",
           disabled: ctx.tabIndex >= openWindows.length - 1,
           onClick: () =>
-            openWindows
-              .slice(ctx.tabIndex + 1)
-              .forEach((w) => closeNow(w.id)),
+            openWindows.slice(ctx.tabIndex + 1).forEach((w) => closeNow(w.id)),
         },
         { type: "sep" },
         {
@@ -157,10 +160,21 @@ export function NavigationTabs({
                   <TableIcon className="size-4 text-neutral-500" />
                 )}
 
+                {w.type === "db-catalog" &&
+                  (w.catalogKind === "functions" ? (
+                    <SquareFunctionIcon className="size-4 text-blue-500" />
+                  ) : (
+                    <TableIcon className="size-4 text-blue-500" />
+                  ))}
+
                 {w.type === "sql" && (
                   <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
                     SQL
                   </span>
+                )}
+
+                {w.type === "db-object-manager" && (
+                  <SquareFunctionIcon className="size-4 text-blue-500" />
                 )}
 
                 <span

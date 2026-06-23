@@ -1,5 +1,10 @@
 import { useCallback, useMemo } from "preact/hooks";
 import type {
+  DatabaseCatalogKind,
+  DatabaseCatalogWindow,
+  DatabaseObjectItem,
+  DatabaseObjectKind,
+  DatabaseObjectManagerWindow,
   OpenWindow,
   SqlEditorWindow,
   TableItem,
@@ -38,6 +43,18 @@ function isSqlWindow(w: OpenWindow | undefined): w is SqlEditorWindow {
   return !!w && w.type === "sql";
 }
 
+function isObjectManagerWindow(
+  w: OpenWindow | undefined
+): w is DatabaseObjectManagerWindow {
+  return !!w && w.type === "db-object-manager";
+}
+
+function isCatalogWindow(
+  w: OpenWindow | undefined
+): w is DatabaseCatalogWindow {
+  return !!w && w.type === "db-catalog";
+}
+
 const lastClosedSqlByTab = new Map<
   string,
   Pick<SqlEditorWindow, "content" | "title">
@@ -65,6 +82,7 @@ export function useConnectionWindows(
     profileTabs,
     openWindows,
     addWindow,
+    updateWindow,
     removeWindow,
     activeWindowId,
     setActiveWindowId,
@@ -95,6 +113,16 @@ export function useConnectionWindows(
 
   const activeSqlWindow = useMemo<SqlEditorWindow | undefined>(() => {
     return isSqlWindow(activeWindow) ? activeWindow : undefined;
+  }, [activeWindow]);
+
+  const activeObjectManagerWindow = useMemo<
+    DatabaseObjectManagerWindow | undefined
+  >(() => {
+    return isObjectManagerWindow(activeWindow) ? activeWindow : undefined;
+  }, [activeWindow]);
+
+  const activeCatalogWindow = useMemo<DatabaseCatalogWindow | undefined>(() => {
+    return isCatalogWindow(activeWindow) ? activeWindow : undefined;
   }, [activeWindow]);
 
   const selectWindow = useCallback(
@@ -175,6 +203,78 @@ export function useConnectionWindows(
       return win.id;
     },
     [activeProfileScreen, windows, addWindow, setActiveWindowId]
+  );
+
+  const openDatabaseObjectsManager = useCallback(
+    (opts?: {
+      kind?: DatabaseObjectKind;
+      object?: DatabaseObjectItem;
+    }) => {
+      const id = "db-object-manager";
+      const existing = windows.find((w) => w.type === "db-object-manager");
+      const patch = {
+        initialKind: opts?.kind,
+        initialObjectId: opts?.object?.id,
+        title: "Database Objects",
+      } satisfies Partial<DatabaseObjectManagerWindow>;
+
+      if (existing && existing.type === "db-object-manager") {
+        updateWindow(activeProfileScreen, existing.id, patch);
+        setActiveWindowId(activeProfileScreen, existing.id);
+        return existing.id;
+      }
+
+      const win: DatabaseObjectManagerWindow = {
+        id,
+        type: "db-object-manager",
+        title: "Database Objects",
+        initialKind: opts?.kind,
+        initialObjectId: opts?.object?.id,
+      };
+      addWindow(activeProfileScreen, win);
+      setActiveWindowId(activeProfileScreen, win.id);
+      return win.id;
+    },
+    [activeProfileScreen, windows, addWindow, updateWindow, setActiveWindowId]
+  );
+
+  const openDatabaseCatalog = useCallback(
+    (catalogKind: DatabaseCatalogKind, schema?: string) => {
+      const schemaName = schema?.trim() || undefined;
+      const id = schemaName
+        ? `db-catalog:${catalogKind}:${schemaName}`
+        : `db-catalog:${catalogKind}`;
+      const baseTitle = catalogKind === "tables" ? "Tables" : "Functions";
+      const title = schemaName ? `${baseTitle}.${schemaName}` : baseTitle;
+      const existing = windows.find(
+        (w) =>
+          w.type === "db-catalog" &&
+          w.catalogKind === catalogKind &&
+          (w.schema ?? "") === (schemaName ?? "")
+      );
+
+      if (existing && existing.type === "db-catalog") {
+        updateWindow(activeProfileScreen, existing.id, {
+          title,
+          catalogKind,
+          schema: schemaName,
+        });
+        setActiveWindowId(activeProfileScreen, existing.id);
+        return existing.id;
+      }
+
+      const win: DatabaseCatalogWindow = {
+        id,
+        type: "db-catalog",
+        title,
+        catalogKind,
+        schema: schemaName,
+      };
+      addWindow(activeProfileScreen, win);
+      setActiveWindowId(activeProfileScreen, win.id);
+      return win.id;
+    },
+    [activeProfileScreen, windows, addWindow, updateWindow, setActiveWindowId]
   );
 
   const closeWindow = useCallback(
@@ -275,10 +375,14 @@ export function useConnectionWindows(
     activeWindow,
     activeTableWindow,
     activeSqlWindow,
+    activeObjectManagerWindow,
+    activeCatalogWindow,
 
     selectWindow,
     openSqlEditor,
     openTable,
+    openDatabaseObjectsManager,
+    openDatabaseCatalog,
     closeWindow,
     makeTableWindowId,
     windowHasPatchChanges,

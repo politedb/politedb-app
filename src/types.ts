@@ -25,7 +25,13 @@ export type ConnectionSortMode =
   | "created-asc";
 export type KeychainSortMode = "label-asc" | "label-desc";
 export type TabViewMode = "left" | "right" | "bottom";
-export type WindowType = "table" | "sql" | "explain" | "erd";
+export type WindowType =
+  | "table"
+  | "sql"
+  | "explain"
+  | "erd"
+  | "db-catalog"
+  | "db-object-manager";
 
 export type SqlQuery = {
   sql: string;
@@ -43,6 +49,12 @@ export type TableItem = {
   name: string;
   new?: boolean;
   kind?: "table" | "view";
+  owner?: string;
+  estimatedRow?: number | string;
+  totalSize?: string;
+  dataSize?: string;
+  indexSize?: string;
+  comment?: string;
 };
 
 export type OpenTable = {
@@ -54,6 +66,34 @@ export type OpenWindowBase = {
   id: string;
   type: WindowType;
   connectionId?: string;
+};
+
+export type DatabaseObjectKind = "function" | "procedure" | "trigger";
+
+export type DatabaseObjectCapability = {
+  canList: boolean;
+  canReadDefinition: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  reason?: string;
+};
+
+export type DatabaseObjectItem = {
+  id: string;
+  kind: DatabaseObjectKind;
+  schema: string;
+  name: string;
+  signature?: string;
+  tableName?: string;
+  enabled?: boolean;
+  engine: DatabaseEngine;
+  capability: DatabaseObjectCapability;
+};
+
+export type DatabaseObjectDefinition = {
+  item: DatabaseObjectItem;
+  sql: string;
 };
 
 export type TableWindow = OpenWindowBase & {
@@ -68,7 +108,27 @@ export type SqlEditorWindow = OpenWindowBase & {
   lastRunAt?: number;
 };
 
-export type OpenWindow = TableWindow | SqlEditorWindow;
+export type DatabaseObjectManagerWindow = OpenWindowBase & {
+  type: "db-object-manager";
+  title?: string;
+  initialKind?: DatabaseObjectKind;
+  initialObjectId?: string;
+};
+
+export type DatabaseCatalogKind = "tables" | "functions";
+
+export type DatabaseCatalogWindow = OpenWindowBase & {
+  type: "db-catalog";
+  title?: string;
+  catalogKind: DatabaseCatalogKind;
+  schema?: string;
+};
+
+export type OpenWindow =
+  | TableWindow
+  | SqlEditorWindow
+  | DatabaseCatalogWindow
+  | DatabaseObjectManagerWindow;
 
 export type TableData = {
   columns: ColumnMeta[];

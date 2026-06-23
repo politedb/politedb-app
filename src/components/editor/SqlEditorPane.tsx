@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { ComponentChildren } from "preact";
 import * as monaco from "monaco-editor";
 import type { DatabaseEngine, SqlEditorWindow, TableItem } from "src/types";
 import {
@@ -23,7 +24,7 @@ type Props = {
 
   onCommitContent?: (windowId: string, next: string) => void;
 
-  onRunSql: (payload: {
+  onRunSql?: (payload: {
     windowId: string;
     sql: string;
   }) => Promise<void> | void;
@@ -40,6 +41,7 @@ type Props = {
   columnsByTable?: Record<string, string[]>;
 
   engine: DatabaseEngine;
+  toolbar?: ComponentChildren | null;
 };
 
 interface ExtendedEditor extends monaco.editor.IStandaloneCodeEditor {
@@ -170,6 +172,7 @@ export function SqlEditorPane(props: Props) {
     tables,
     columnsByTable,
     engine,
+    toolbar,
   } = props;
   const draftId = storageId || win.id;
 
@@ -396,7 +399,7 @@ export function SqlEditorPane(props: Props) {
 
   const onRun = async () => {
     const ed = editorRef.current;
-    if (!ed) return;
+    if (!ed || !callbacksRef.current.onRunSql) return;
 
     const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
     if (!picked.sql) return;
@@ -571,13 +574,15 @@ export function SqlEditorPane(props: Props) {
         run: () => void onRun(),
       });
 
-      editor.addAction({
-        id: "run-sql-selection",
-        label: "Run Selection",
-        contextMenuGroupId: "navigation",
-        contextMenuOrder: 2,
-        run: () => void onRun(),
-      });
+      if (callbacksRef.current.onRunSql) {
+        editor.addAction({
+          id: "run-sql-selection",
+          label: "Run Selection",
+          contextMenuGroupId: "navigation",
+          contextMenuOrder: 2,
+          run: () => void onRun(),
+        });
+      }
 
       const changeSub = editor.onDidChangeModelContent(() => {
         if (applyingExternalCounterRef.current > 0) return;
@@ -702,16 +707,20 @@ export function SqlEditorPane(props: Props) {
 
   return (
     <div class="flex h-full min-h-0 w-full flex-col bg-white">
-      <SqlEditorToolbar
-        onExport={onExportClick}
-        onFormat={onFormatSql}
-        onMinify={onMinifySql}
-        onExplain={onExplain}
-        onRun={onRun}
-        onCancel={onCancelSql}
-        isExecuting={isExecuting}
-        hasSelection={hasSelection}
-      />
+      {toolbar !== undefined ? (
+        toolbar
+      ) : (
+        <SqlEditorToolbar
+          onExport={onExportClick}
+          onFormat={onFormatSql}
+          onMinify={onMinifySql}
+          onExplain={onExplain}
+          onRun={onRun}
+          onCancel={onCancelSql}
+          isExecuting={isExecuting}
+          hasSelection={hasSelection}
+        />
+      )}
 
       <div class="min-h-0 flex-1">
         <div ref={rootRef} class="h-full w-full" />

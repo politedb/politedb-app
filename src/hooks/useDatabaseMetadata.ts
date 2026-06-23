@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "preact/hooks";
-import type { DatabaseEngine, TableItem } from "src/types";
+import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
 import { runSqlQuery } from "src/lib/tauri/query";
 import {
   cassandraListKeyspaces,
@@ -11,6 +11,7 @@ import {
   mongoListDatabases,
   runRedisCommand,
 } from "src/lib/tauri";
+import { parseDatabaseObjectsFromRows } from "src/lib/databaseObjects";
 import { getMetadataQueries } from "src/lib/queries/metadata";
 import { cellToString } from "src/utils/convert";
 
@@ -24,18 +25,12 @@ const CASSANDRA_SYSTEM_KEYSPACES = new Set([
   "system_virtual_schema",
 ]);
 
-export type FunctionItem = {
-  schema: string;
-  name: string;
-  args?: string;
-};
-
 export type DbMetadata = {
   engine?: DatabaseEngine;
   version: string;
 
   schemas: string[];
-  functions: FunctionItem[];
+  objects: DatabaseObjectItem[];
   tables: TableItem[];
   columnsByTable: Record<string, string[]>;
   columnsLoaded: boolean;
@@ -48,7 +43,7 @@ export type DbMetadata = {
   stage:
     | "idle"
     | "schemas"
-    | "functions"
+    | "objects"
     | "tables"
     | "columns"
     | "done"
@@ -59,7 +54,7 @@ function emptyMeta(engine?: DatabaseEngine): DbMetadata {
   return {
     engine,
     schemas: [],
-    functions: [],
+    objects: [],
     tables: [],
     columnsByTable: {},
     columnsLoaded: false,
@@ -149,11 +144,11 @@ export function useDatabaseMetadata() {
           : force
             ? []
             : (existing?.schemas ?? []),
-        functions: softForce
-          ? (existing?.functions ?? [])
+        objects: softForce
+          ? (existing?.objects ?? [])
           : force
             ? []
-            : (existing?.functions ?? []),
+            : (existing?.objects ?? []),
         tables: softForce
           ? (existing?.tables ?? [])
           : force
@@ -329,7 +324,7 @@ export function useDatabaseMetadata() {
             }
 
             setCache(metaKey, {
-              functions: [],
+              objects: [],
               tables,
               columnsByTable,
               columnsLoaded: includeColumns,
@@ -357,7 +352,7 @@ export function useDatabaseMetadata() {
             if (!keyspace) {
               setCache(metaKey, {
                 schemas: [],
-                functions: [],
+                objects: [],
                 tables: [],
                 columnsByTable: {},
                 columnsLoaded: includeColumns,
@@ -405,7 +400,7 @@ export function useDatabaseMetadata() {
             }
 
             setCache(metaKey, {
-              functions: [],
+              objects: [],
               tables,
               columnsByTable,
               columnsLoaded: includeColumns,
@@ -424,7 +419,7 @@ export function useDatabaseMetadata() {
             const schema = "db 0";
             setCache(metaKey, {
               schemas: [schema],
-              functions: [],
+              objects: [],
               progress: 20,
               stage: "tables",
             });
@@ -450,7 +445,7 @@ export function useDatabaseMetadata() {
             );
 
             setCache(metaKey, {
-              functions: [],
+              objects: [],
               tables,
               columnsByTable,
               columnsLoaded: true,
@@ -467,10 +462,11 @@ export function useDatabaseMetadata() {
 
           const q = getMetadataQueries(engine);
 
-          const [schemasRes, functionsRes, tablesRes, colsRes] =
+          const [schemasRes, routinesRes, triggersRes, tablesRes, colsRes] =
             await Promise.all([
               runMetadataQuery(connectionId, q.schemasQuery),
-              runMetadataQuery(connectionId, q.functionsQuery),
+              runMetadataQuery(connectionId, q.routinesQuery),
+              runMetadataQuery(connectionId, q.triggersQuery),
               runMetadataQuery(connectionId, q.tablesQuery),
               includeColumns
                 ? runMetadataQuery(connectionId, q.columnsQuery)
@@ -485,17 +481,13 @@ export function useDatabaseMetadata() {
           } else if (engine === "clickhouse" && schemas.length === 0) {
             schemas = ["default"];
           }
-          setCache(metaKey, { schemas, progress: 10, stage: "functions" });
+          setCache(metaKey, { schemas, progress: 10, stage: "objects" });
 
-          const functions: FunctionItem[] = (functionsRes.rows ?? [])
-            .map((r: any): FunctionItem => {
-              const schema = cellToString(r?.[0]) ?? "";
-              const name = cellToString(r?.[1]) ?? "";
-              const args = cellToString(r?.[2]) ?? "";
-              return { schema, name, args };
-            })
-            .filter((f: FunctionItem) => Boolean(f.schema && f.name));
-          setCache(metaKey, { functions, progress: 20, stage: "tables" });
+          const objects = parseDatabaseObjectsFromRows({
+            engine: engine ?? "postgres",
+            rows: [...(routinesRes.rows ?? []), ...(triggersRes.rows ?? [])],
+          });
+          setCache(metaKey, { objects, progress: 20, stage: "tables" });
 
           const tables: TableItem[] = (tablesRes.rows ?? [])
             .map((r: any): TableItem => {
@@ -507,6 +499,12 @@ export function useDatabaseMetadata() {
                 schema: cellToString(r?.[0]) ?? "",
                 name: cellToString(r?.[1]) ?? "",
                 kind,
+                owner: cellToString(r?.[3]) || undefined,
+                estimatedRow: cellToString(r?.[4]) || undefined,
+                totalSize: cellToString(r?.[5]) || undefined,
+                dataSize: cellToString(r?.[6]) || undefined,
+                indexSize: cellToString(r?.[7]) || undefined,
+                comment: cellToString(r?.[8]) || undefined,
               };
             })
             .filter((t: TableItem) => Boolean(t.schema && t.name));

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import type { DatabaseEngine, TableItem } from "src/types";
+import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { preferredSchemaFromList } from "src/lib/engines";
 
@@ -106,7 +106,9 @@ export function useSchemaTablesPanel(args: {
     // MongoDB has no SQL-style functions; keep empty for Mongo.
     if (isMongo) return [];
 
-    const list = meta.functions ?? [];
+    const list = (meta.objects ?? []).filter(
+      (item): item is DatabaseObjectItem => item.kind === "function"
+    );
     const q = tableSearchQuery.trim().toLowerCase();
 
     const bySchema = activeSchema
@@ -118,10 +120,10 @@ export function useSchemaTablesPanel(args: {
     return bySchema.filter(
       (f) =>
         f.name.toLowerCase().includes(q) ||
-        (f.args ?? "").toLowerCase().includes(q) ||
+        (f.signature ?? "").toLowerCase().includes(q) ||
         f.schema.toLowerCase().includes(q)
     );
-  }, [meta.functions, activeSchema, tableSearchQuery, isMongo]);
+  }, [meta.objects, activeSchema, tableSearchQuery, isMongo]);
 
   // For editor autocomplete: use full metadata (not filtered).
   // For Mongo, schemas = databases (used for Database dropdown).

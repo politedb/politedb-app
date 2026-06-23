@@ -12,8 +12,8 @@ import { Button } from "src/components/common/Button";
 
 interface Props {
   chatSessionKey: string;
-  activeTab: "ai" | "table-size";
-  onTabChange: (tab: "ai" | "table-size") => void;
+  activeTab: "ai" | "table-size" | "analytics";
+  onTabChange: (tab: "ai" | "table-size" | "analytics") => void;
   sizeInfo: TableSizeInfo | null;
   selectedRowDetail: SelectedRowDetail | null;
   tableLoadKey: string | null;

@@ -12,6 +12,8 @@ import { SqlWindowPane } from "./SqlWindowPane";
 import { MainTableDataPane } from "./MainTableDataPane";
 import { NewTableRoute } from "./NewTableRoute";
 import { EmptyWindow, ConnectionFailedPlaceholder } from "./EmptyWindow";
+import { DatabaseCatalogPane } from "./DatabaseCatalogPane";
+import { DatabaseObjectsManagerPane } from "./DatabaseObjectsManagerPane";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -51,6 +53,8 @@ export function ActiveWindowContent() {
     activeTab,
     activeSqlWindow,
     activeTableWindow,
+    activeObjectManagerWindow,
+    activeCatalogWindow,
   } = useConnectionWindows(profileId);
 
   const openEditConnection = useCallback(() => {
@@ -231,6 +235,14 @@ export function ActiveWindowContent() {
         onRunSql={rt.runSqlWithHistory}
       />
     );
+  }
+
+  if (activeObjectManagerWindow) {
+    return <DatabaseObjectsManagerPane win={activeObjectManagerWindow} />;
+  }
+
+  if (activeCatalogWindow) {
+    return <DatabaseCatalogPane win={activeCatalogWindow} />;
   }
 
   if (activeTableWindow?.table?.new) {

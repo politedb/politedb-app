@@ -22,6 +22,7 @@ import {
   LockIcon,
   ChatIcon,
   SchemaIcon,
+  SquareFunctionIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import {
@@ -49,7 +50,7 @@ import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
 interface Props {
   activeSchema?: string;
   activeTable?: string;
-  activeRightPanelTab?: "ai" | "table-size";
+  activeRightPanelTab?: "ai" | "table-size" | "analytics";
   isRightPanelOpen?: boolean;
   connectionVersion?: string;
   schemas?: string[];
@@ -65,6 +66,7 @@ interface Props {
   onSearchOpen?: () => void;
   onOpenAiAssistant?: () => void;
   onOpenDiagram?: () => void;
+  onOpenDatabaseObjects?: () => void;
 }
 
 function ToolbarDivider() {
@@ -330,6 +332,7 @@ export function MenuBar({
   onSearchOpen,
   onOpenAiAssistant,
   onOpenDiagram,
+  onOpenDatabaseObjects,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
   const health = useConnectionHealthCheck({
@@ -851,6 +854,19 @@ export function MenuBar({
           </IconButton>
 
           <ToolbarDivider />
+
+          <IconButton
+            title="Database Objects"
+            onClick={onOpenDatabaseObjects}
+            disabled={
+              !rt.runtimeConnectionId ||
+              rt.engine === "mongo" ||
+              rt.engine === "redis" ||
+              rt.engine === "cassandra"
+            }
+          >
+            <SquareFunctionIcon className="size-4 text-neutral-700" />
+          </IconButton>
 
           <IconButton
             title="Generate Diagram"

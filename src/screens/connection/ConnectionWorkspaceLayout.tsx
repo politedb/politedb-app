@@ -5,8 +5,13 @@ import { RightNav } from "./RightNav";
 import { QueryHistory } from "./QueryHistory";
 import { ActiveWindowContent } from "./ActiveWindowContent";
 import type { Dispatch, StateUpdater } from "preact/hooks";
-import type { DatabaseEngine, OpenWindow, TableItem, TableSizeInfo } from "src/types";
-import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
+import type {
+  DatabaseEngine,
+  DatabaseObjectItem,
+  OpenWindow,
+  TableItem,
+  TableSizeInfo,
+} from "src/types";
 import type { SelectedRowDetail } from "src/stores/connection";
 
 type ViewMode = Array<"left" | "right" | "bottom">;
@@ -28,9 +33,9 @@ export function ConnectionWorkspaceLayout(props: {
     StateUpdater<{ functions: boolean; tables: boolean }>
   >;
   sidebarTables: TableItem[];
-  filteredFunctions: FunctionItem[];
-  rightNavTab: "ai" | "table-size";
-  setRightNavTab: (tab: "ai" | "table-size") => void;
+  filteredFunctions: DatabaseObjectItem[];
+  rightNavTab: "ai" | "table-size" | "analytics";
+  setRightNavTab: (tab: "ai" | "table-size" | "analytics") => void;
   activeTableDataSizeInfo: TableSizeInfo | null;
   selectedRowDetail: SelectedRowDetail | null;
   activeTableLoadKey: string | null;

@@ -17,10 +17,9 @@ import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog"
 import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { cn } from "src/utils/cn";
-import type { DatabaseEngine, TableItem } from "src/types";
+import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
-import type { FunctionItem } from "src/hooks/useDatabaseMetadata";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionStore } from "src/stores/connection";
@@ -48,7 +47,7 @@ interface Props {
   >;
 
   filteredTables: TableItem[];
-  filteredFunctions: FunctionItem[];
+  filteredFunctions: DatabaseObjectItem[];
   activeWindowId: string | null;
 }
 
@@ -60,27 +59,34 @@ function SectionHeader(props: {
   title: string;
   expanded: boolean;
   onToggle: () => void;
+  onOpen?: () => void;
 }) {
-  const { title, expanded, onToggle } = props;
+  const { title, expanded, onToggle, onOpen } = props;
 
   return (
     <Button
       variant="ghost"
-      onClick={onToggle}
-      className={cn("w-full px-2 py-1.5 hover:bg-neutral-200/60")}
-      title={title}
+      class="w-full justify-start rounded-md border-none px-2 py-1.5 hover:bg-neutral-200/60 active:bg-neutral-200/80"
+      onClick={onOpen ?? onToggle}
     >
-      <div class="flex w-full items-center justify-start gap-1">
+      <div
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggle();
+        }}
+        className="shrink-0"
+        title={expanded ? `Collapse ${title}` : `Expand ${title}`}
+      >
         {expanded ? (
-          <ChevronDownIcon className="size-3.5 shrink-0 text-neutral-500" />
+          <ChevronDownIcon className="size-3.5 text-neutral-500" />
         ) : (
-          <ChevronRightIcon className="size-3.5 shrink-0 text-neutral-500" />
+          <ChevronRightIcon className="size-3.5 text-neutral-500" />
         )}
-
-        <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
-          {title}
-        </span>
       </div>
+      <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
+        {title}
+      </span>
     </Button>
   );
 }
@@ -167,7 +173,11 @@ export function LeftNav({
   const isProfileLocked = useScreenStore(
     (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
   );
-  const { windowHasPatchChanges } = useConnectionWindows(profileId);
+  const {
+    windowHasPatchChanges,
+    openDatabaseObjectsManager,
+    openDatabaseCatalog,
+  } = useConnectionWindows(profileId);
   const isMongo = engine === "mongo";
   const isRedis = engine === "redis";
   const supportsTableMutations = !isMongo && !isRedis;
@@ -312,6 +322,7 @@ export function LeftNav({
             <SectionHeader
               title="Functions"
               expanded={expandedSections.functions}
+              onOpen={() => openDatabaseCatalog("functions", currSchema)}
               onToggle={() =>
                 setExpandedSections((prev) => ({
                   ...prev,
@@ -334,20 +345,27 @@ export function LeftNav({
                 ) : (
                   <div class="space-y-1 pl-3">
                     {filteredFunctions.map((fn) => {
-                      const key = `${fn.schema}.${fn.name}(${fn.args ?? ""})`;
+                      const key = `${fn.schema}.${fn.name}(${fn.signature ?? ""})`;
 
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={key}
+                          onClick={() =>
+                            openDatabaseObjectsManager({
+                              kind: "function",
+                              object: fn,
+                            })
+                          }
                           class={cn(
-                            "flex items-center gap-2 rounded-md px-2.5 py-1.5",
-                            "text-left text-sm text-neutral-700"
+                            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5",
+                            "text-left text-sm text-neutral-700 hover:bg-neutral-200/60"
                           )}
                           title={key}
                         >
                           <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
                           <TableName name={fn.name} />
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -362,6 +380,10 @@ export function LeftNav({
           <SectionHeader
             title={tablesSectionTitle}
             expanded={expandedSections.tables}
+            onOpen={() => {
+              if (!isRedis && !isMongo)
+                openDatabaseCatalog("tables", currSchema);
+            }}
             onToggle={() =>
               setExpandedSections((prev) => ({
                 ...prev,
