@@ -10,6 +10,8 @@ const PERSISTENT_DIR: &str = "persistent";
 const PERSISTENT_UI_FILE: &str = "ui.json";
 const LICENSE_DIR: &str = "license";
 const LICENSE_FILE: &str = "state.json";
+const AI_DIR: &str = "ai";
+const AI_PROVIDERS_FILE: &str = "providers.json";
 
 const PROFILES_DIR: &str = "profiles";
 const PROFILES_FILE: &str = "profiles.json";
@@ -87,6 +89,10 @@ pub fn path_profiles(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 pub fn path_license_state(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_root(app)?.join(LICENSE_DIR).join(LICENSE_FILE))
+}
+
+pub fn path_ai_providers(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join(AI_DIR).join(AI_PROVIDERS_FILE))
 }
 
 pub fn dir_sql_drafts(app: &tauri::AppHandle) -> Result<PathBuf, String> {

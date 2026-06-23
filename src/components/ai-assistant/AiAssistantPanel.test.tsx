@@ -23,6 +23,7 @@ const queryResultToObjectsMock = vi.fn();
 const buildFastResultAnswerMock = vi.fn();
 const getFastChatReplyMock = vi.fn();
 const getAmbiguousPromptReplyMock = vi.fn();
+const setSelectedAiProviderIdMock = vi.fn();
 
 const aiRuntimeStatusMock = vi.fn();
 const aiRuntimeDownloadDefaultModelMock = vi.fn();
@@ -72,6 +73,100 @@ vi.mock("src/lib/tauri/query", () => ({
   runSqlQuery: (...args: any[]) => runSqlQueryMock(...args),
 }));
 
+vi.mock("src/lib/aiProviders", () => ({
+  DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
+  normalizeAiProviderConfig: (provider: any) => provider,
+  ensureLocalAiProvider: vi.fn().mockResolvedValue({
+    id: "local",
+    kind: "local_openai_compatible",
+    label: "Local API",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    defaultModel: "qwen2.5-coder:7b",
+    apiKeyRef: null,
+    enabled: true,
+  }),
+  getSelectedAiProviderId: vi.fn(() => "local"),
+  setSelectedAiProviderId: (...args: any[]) =>
+    setSelectedAiProviderIdMock(...args),
+  providerNeedsApiKey: (kind: string) => kind !== "local_openai_compatible",
+  makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
+    id: overrides.id ?? kind,
+    kind,
+    label: overrides.label ?? kind,
+    defaultModel: overrides.defaultModel ?? "model",
+    enabled: true,
+    ...overrides,
+  }),
+  saveAiProviderWithOptionalKey: vi.fn(async ({ config }: any) => config),
+  aiProviderTest: vi.fn(),
+  aiProviderDelete: vi.fn(),
+  buildBaseUrl: (host: string, subPath: string) => `${host}${subPath}`,
+  AI_PROVIDER_LABELS: {
+    openai: "OpenAI",
+    anthropic: "Anthropic",
+    gemini: "Google AI",
+    openrouter: "OpenRouter",
+    grok: "Grok",
+    deepseek: "DeepSeek",
+    github_copilot: "GitHub Copilot",
+    ollama: "Ollama",
+    local_openai_compatible: "Local API",
+  },
+  DEFAULT_HOSTS: {
+    openai: "https://api.openai.com",
+    anthropic: "https://api.anthropic.com",
+    gemini: "https://generativelanguage.googleapis.com",
+    openrouter: "https://openrouter.ai/api",
+    grok: "https://api.x.ai",
+    deepseek: "https://api.deepseek.com",
+    github_copilot: "https://api.githubcopilot.com",
+    ollama: "http://127.0.0.1:11434",
+    local_openai_compatible: "http://127.0.0.1:11434",
+  },
+  DEFAULT_SUB_PATHS: {
+    openai: "/v1",
+    anthropic: "/v1",
+    gemini: "/v1beta",
+    openrouter: "/v1",
+    grok: "/v1",
+    deepseek: "",
+    github_copilot: "/v1",
+    ollama: "/v1",
+    local_openai_compatible: "/v1",
+  },
+  DEFAULT_MODELS: {
+    openai: "gpt-4o",
+    anthropic: "claude-3-5-sonnet-latest",
+    gemini: "gemini-1.5-pro",
+    openrouter: "openai/gpt-4o",
+    grok: "grok-2-latest",
+    deepseek: "deepseek-chat",
+    github_copilot: "gpt-4o",
+    ollama: "qwen2.5-coder:7b",
+    local_openai_compatible: "qwen2.5-coder:7b",
+  },
+  aiProviderList: vi.fn().mockResolvedValue([
+    {
+      id: "local",
+      kind: "local_openai_compatible",
+      label: "Local API",
+      baseUrl: "http://127.0.0.1:8080/v1",
+      defaultModel: "qwen2.5-coder:7b",
+      apiKeyRef: null,
+      enabled: true,
+    },
+    {
+      id: "openai-1",
+      kind: "openai",
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      defaultModel: "gpt-4o",
+      apiKeyRef: "keychain-ref",
+      enabled: true,
+    },
+  ]),
+}));
+
 vi.mock("src/components/ai-assistant/AiAssistantMessageCard", () => ({
   AiAssistantMessageCard: ({ message }: any) => (
     <div data-testid={`message-${message.role}`}>
@@ -100,9 +195,17 @@ vi.mock("src/components/common/Button", () => ({
 
 vi.mock("src/components/icons", () => ({
   ArrowDown: () => <span>arrow-down</span>,
+  BackupIcon: () => <span>backup</span>,
   ChevronDownIcon: () => <span>chevron-down</span>,
+  MoreVerticalIcon: () => <span>more</span>,
+  VaultIcon: () => <span>vault</span>,
+  PlayIcon: () => <span>play</span>,
+  RefreshCwIcon: () => <span>refresh</span>,
+  StopIcon: () => <span>stop</span>,
   Settings: () => <span>settings</span>,
   SettingsIcon: () => <span>settings</span>,
+  SparklesIcon: () => <span>sparkles</span>,
+  XIcon: () => <span>x</span>,
 }));
 
 function status(overrides: Record<string, unknown> = {}) {
@@ -348,14 +451,9 @@ describe("AiAssistantPanel", () => {
   it("sends a general chat message and renders the assistant reply", async () => {
     renderPanel();
 
-    const textarea = await screen.findByPlaceholderText(
-      "Ask AI about data, or ask it to write SQL for you..."
-    );
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "hello" } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     await screen.findByText("hello");
     await screen.findByText(/Hello! How can I help\?/);
@@ -365,7 +463,23 @@ describe("AiAssistantPanel", () => {
     });
   });
 
-  it("runs a read-only SQL plan and renders the answer from real data", async () => {
+  it("opens the model picker and switches the selected provider model", async () => {
+    renderPanel();
+
+    await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
+
+    await screen.findByText("Select a model");
+    expect(screen.getAllByText("qwen2.5-coder:7b").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /gpt-4o/ }));
+
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("openai-1");
+    await waitFor(() =>
+      expect(screen.getAllByText("gpt-4o").length).toBeGreaterThan(0)
+    );
+  });
+
+  it("previews a read-only SQL plan without running it automatically", async () => {
     isGeneralChatPromptMock.mockReturnValue(false);
     planSqlFromQuestionMock.mockResolvedValue({
       sql: "SELECT id FROM users;",
@@ -377,28 +491,13 @@ describe("AiAssistantPanel", () => {
 
     renderPanel({ runtimeConnectionId: "conn_1" });
 
-    const textarea = await screen.findByPlaceholderText(
-      "Ask AI about data, or ask it to write SQL for you..."
-    );
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "list users" } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await waitFor(() =>
-      expect(runSqlQueryMock).toHaveBeenCalledWith(
-        "conn_1",
-        "SELECT id FROM users;",
-        {
-          maxRows: 200,
-          batchSize: 200,
-          timeoutMs: 45_000,
-        }
-      )
-    );
-
-    await screen.findByText("There are 2 rows.");
+    await screen.findByText("Use a simple query.");
+    await screen.findByText("SELECT id FROM users;");
+    expect(runSqlQueryMock).not.toHaveBeenCalled();
   });
 
   it("answers metadata listing questions directly without generating SQL", async () => {
@@ -416,19 +515,54 @@ describe("AiAssistantPanel", () => {
       runtimeConnectionId: "conn_1",
     });
 
-    const textarea = await screen.findByPlaceholderText(
-      "Ask AI about data, or ask it to write SQL for you..."
-    );
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "list all tables for me" } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled()
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     await screen.findByText(
       "I can currently see 2 table(s) in public: issues, users."
     );
     expect(planSqlFromQuestionMock).not.toHaveBeenCalled();
     expect(runSqlQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("supports chat menu actions for rename, delete, history, and settings", async () => {
+    renderPanel({ chatSessionKey: "menu-actions-test" });
+
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "first chat" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await screen.findByText("first chat");
+    await screen.findByText(/Hello! How can I help\?/);
+
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    expect(
+      screen.queryByRole("button", { name: "New Chat" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Clear Chat" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Delete Chat" })
+    ).toBeInTheDocument();
+
+    const promptSpy = vi
+      .spyOn(window, "prompt")
+      .mockReturnValue("Renamed chat");
+    fireEvent.click(screen.getByRole("button", { name: "Rename Chat" }));
+    expect(promptSpy).toHaveBeenCalledWith("Rename chat", "first chat");
+    promptSpy.mockRestore();
+
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+    await screen.findByText("Chat History");
+    expect(screen.getByText("Renamed chat")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings.." }));
+
+    await screen.findByText("AI Provider Settings");
   });
 });

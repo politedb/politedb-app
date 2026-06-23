@@ -1,41 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { Box } from "src/components/common/Box";
 import { Input } from "src/components/common/Input";
-import { TableSizeInfo, DatabaseEngine, TableItem } from "src/types";
+import { TableSizeInfo } from "src/types";
 import type { SelectedRowDetail } from "src/stores/connection";
 import { useConnectionStore } from "src/stores/connection";
-import { AiAssistantPanel } from "src/components/ai-assistant/AiAssistantPanel";
 import { cn } from "src/utils/cn";
 import { ChevronDownIcon, SearchIcon } from "src/components/icons";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { Button } from "src/components/common/Button";
 
 interface Props {
-  chatSessionKey: string;
-  activeTab: "ai" | "table-size" | "analytics";
-  onTabChange: (tab: "ai" | "table-size" | "analytics") => void;
   sizeInfo: TableSizeInfo | null;
   selectedRowDetail: SelectedRowDetail | null;
   tableLoadKey: string | null;
   dataReadOnly?: boolean;
-  engine: DatabaseEngine;
-  runtimeConnectionId?: string;
-  activeSchema?: string;
-  tables: TableItem[];
-  columnsByTable?: Record<string, string[]>;
-  currentSql?: string;
-  onInsertSql?: (sql: string) => Promise<void> | void;
 }
 
 function TabButton(props: {
   active: boolean;
-  onClick: () => void;
   children: preact.ComponentChildren;
 }) {
   return (
     <button
       type="button"
-      onClick={props.onClick}
+      disabled
       class={cn(
         "rounded-md px-2 py-1 text-xs font-medium transition-colors",
         props.active
@@ -409,60 +397,26 @@ function DataInfoPane({
 }
 
 export function RightNav({
-  chatSessionKey,
-  activeTab,
-  onTabChange,
   sizeInfo,
   selectedRowDetail,
   tableLoadKey,
   dataReadOnly,
-  engine,
-  runtimeConnectionId,
-  activeSchema,
-  tables,
-  columnsByTable,
-  currentSql,
-  onInsertSql,
 }: Props) {
   return (
     <div class="flex h-full min-h-0 flex-col bg-neutral-100">
       <div class="shrink-0 border-b border-neutral-200 px-2 py-2">
         <div class="flex items-center justify-center gap-1">
-          <TabButton
-            active={activeTab === "table-size"}
-            onClick={() => onTabChange("table-size")}
-          >
-            Data Info
-          </TabButton>
-          <TabButton
-            active={activeTab === "ai"}
-            onClick={() => onTabChange("ai")}
-          >
-            AI Assistant
-          </TabButton>
+          <TabButton active={true}>Data Info</TabButton>
         </div>
       </div>
 
       <div class="min-h-0 flex-1 overflow-hidden">
-        {activeTab === "ai" ? (
-          <AiAssistantPanel
-            chatSessionKey={chatSessionKey}
-            engine={engine}
-            runtimeConnectionId={runtimeConnectionId}
-            activeSchema={activeSchema}
-            tables={tables}
-            columnsByTable={columnsByTable}
-            currentSql={currentSql}
-            onInsertSql={onInsertSql}
-          />
-        ) : (
-          <DataInfoPane
-            sizeInfo={sizeInfo}
-            selectedRowDetail={selectedRowDetail}
-            tableLoadKey={tableLoadKey}
-            dataReadOnly={dataReadOnly}
-          />
-        )}
+        <DataInfoPane
+          sizeInfo={sizeInfo}
+          selectedRowDetail={selectedRowDetail}
+          tableLoadKey={tableLoadKey}
+          dataReadOnly={dataReadOnly}
+        />
       </div>
     </div>
   );

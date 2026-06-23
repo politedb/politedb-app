@@ -46,6 +46,7 @@ export type AiIntentDecision = {
 };
 
 export type GenerateOptions = {
+  providerId?: string;
   endpoint: string;
   model: string;
   prompt: string;

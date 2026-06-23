@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { CMD } from "./commands";
+import type { AiProviderConfig } from "src/types";
 
 export type AiRuntimePhase = "missing" | "stopped" | "starting" | "ready" | "error";
 
@@ -35,4 +36,41 @@ export async function aiRuntimeDownloadDefaultModel() {
 
 export async function aiRuntimeCancelModelDownload() {
   return invoke<AiRuntimeStatus>(CMD.aiRuntimeCancelModelDownload);
+}
+
+export type AiChatCompleteMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+export type AiChatCompleteRequest = {
+  providerId: string;
+  model?: string | null;
+  messages: AiChatCompleteMessage[];
+  temperature?: number | null;
+  maxTokens?: number | null;
+};
+
+export async function aiProviderList() {
+  return invoke<AiProviderConfig[]>(CMD.aiProviderList);
+}
+
+export async function aiProviderSaveConfig(config: AiProviderConfig) {
+  return invoke<AiProviderConfig>(CMD.aiProviderSaveConfig, { config });
+}
+
+export async function aiProviderDelete(providerId: string) {
+  await invoke(CMD.aiProviderDelete, { providerId });
+}
+
+export async function aiProviderSetKey(providerId: string, apiKey: string) {
+  return invoke<string>(CMD.aiProviderSetKey, { providerId, apiKey });
+}
+
+export async function aiProviderTest(providerId: string) {
+  return invoke<string>(CMD.aiProviderTest, { providerId });
+}
+
+export async function aiChatComplete(request: AiChatCompleteRequest) {
+  return invoke<string>(CMD.aiChatComplete, { request });
 }

@@ -11,11 +11,6 @@ export function useConnectionScreenState() {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [diagramOpen, setDiagramOpen] = useState(false);
-  const [rightNavTab, setRightNavTab] = useState<
-    "ai" | "table-size" | "analytics"
-  >(
-    "table-size"
-  );
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
 
   return {
@@ -33,8 +28,6 @@ export function useConnectionScreenState() {
     setSearchDialogOpen,
     diagramOpen,
     setDiagramOpen,
-    rightNavTab,
-    setRightNavTab,
     errorDialogOpen,
     setErrorDialogOpen,
   };

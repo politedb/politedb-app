@@ -8,6 +8,7 @@ import { TrialExpiredOverlay } from "src/screens/main/TrialExpiredOverlay";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { trackScreenView } from "src/lib/analytics";
 import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
+import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
 
 export function MainLayout() {
   const { activeProfileScreen, setActiveProfileScreen, profileTabs } =
@@ -64,6 +65,7 @@ export function MainLayout() {
         {activeProfileScreen === "main" && <MainScreen />}
         {activeTab && <ConnectionScreen />}
       </div>
+      <FloatingAssistantLauncher disabled={isAppLocked} />
       <UnsavedChangesDialogHost />
 
       {isAppLocked ? (

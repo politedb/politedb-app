@@ -240,6 +240,7 @@ export function TopBar(props: TopBarProps) {
 
   const isConnections = mode === "connections";
   const isLogs = mode === "logs";
+  const isUtilityMode = !isLogs;
   const searchPlaceholder = getTopBarSearchPlaceholder(mode);
   const createLabel = getTopBarCreateLabel(mode);
   const createTitle = getTopBarCreateTitle(mode);
@@ -281,7 +282,7 @@ export function TopBar(props: TopBarProps) {
         onChange={onSearchChange}
       />
 
-      {!isLogs ? (
+      {isUtilityMode ? (
         isConnections ? (
           <CreateConnectionButtonGroup
             label={createLabel}
@@ -298,7 +299,7 @@ export function TopBar(props: TopBarProps) {
         )
       ) : null}
 
-      {!isLogs ? (
+      {isUtilityMode ? (
         <>
           <UtilityActions
             sortTitle={

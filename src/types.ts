@@ -232,6 +232,7 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  parts?: ChatMessagePart[];
   /** True while the assistant message is still being streamed from the model. */
   streaming?: boolean;
   createdAt?: number;
@@ -243,3 +244,62 @@ export type ChatMessage = {
   rowCount?: number | null;
   confidence?: "high" | "medium" | "low";
 };
+
+export type AiProviderKind =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "openrouter"
+  | "grok"
+  | "deepseek"
+  | "github_copilot"
+  | "ollama"
+  | "local_openai_compatible";
+
+export type AiProviderConfig = {
+  id: string;
+  kind: AiProviderKind;
+  label: string;
+  baseUrl?: string | null;
+  host?: string | null;
+  subPath?: string | null;
+  defaultModel: string;
+  apiKeyRef?: string | null;
+  enabled: boolean;
+  isDefault?: boolean;
+};
+
+export type AiChatSession = {
+  id: string;
+  scopeKey: string;
+  title?: string;
+  providerId?: string | null;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ChatMessagePart =
+  | { type: "text"; text: string }
+  | {
+      type: "sqlPreview";
+      sql: string;
+      safety?: "read_only" | "mutating" | "ddl" | "unknown";
+      confirmationState?: "pending" | "inserted" | "running" | "ran" | "canceled" | "error";
+      error?: string;
+    }
+  | {
+      type: "actionPreview";
+      action: string;
+      label: string;
+      payload?: Record<string, unknown>;
+      confirmationState?: "pending" | "confirmed" | "canceled" | "error";
+      error?: string;
+    }
+  | {
+      type: "resultPreview";
+      rows: Record<string, unknown>[];
+      rowCount?: number | null;
+      confidence?: "high" | "medium" | "low";
+    }
+  | { type: "error"; message: string };
