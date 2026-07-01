@@ -34,17 +34,10 @@ export function ConnectionWorkspaceLayout(props: {
   >;
   sidebarTables: TableItem[];
   filteredFunctions: DatabaseObjectItem[];
-  rightNavTab: "ai" | "table-size" | "analytics";
-  setRightNavTab: (tab: "ai" | "table-size" | "analytics") => void;
   activeTableDataSizeInfo: TableSizeInfo | null;
   selectedRowDetail: SelectedRowDetail | null;
   activeTableLoadKey: string | null;
   isProfileLocked: boolean;
-  runtimeConnectionId: string | undefined;
-  tables: TableItem[];
-  columnsByTable: Record<string, string[]>;
-  activeSqlContent: string | undefined;
-  onInsertSqlIntoActiveEditor: (sql: string) => void | Promise<void>;
 }) {
   const {
     viewMode,
@@ -62,17 +55,10 @@ export function ConnectionWorkspaceLayout(props: {
     setExpandedSections,
     sidebarTables,
     filteredFunctions,
-    rightNavTab,
-    setRightNavTab,
     activeTableDataSizeInfo,
     selectedRowDetail,
     activeTableLoadKey,
     isProfileLocked,
-    runtimeConnectionId,
-    tables,
-    columnsByTable,
-    activeSqlContent,
-    onInsertSqlIntoActiveEditor,
   } = props;
 
   const schemaLabel =
@@ -105,20 +91,10 @@ export function ConnectionWorkspaceLayout(props: {
   const rightPane = (
     <div class="h-full overflow-hidden border-l border-neutral-200">
       <RightNav
-        chatSessionKey={activeProfileScreen}
-        activeTab={rightNavTab}
-        onTabChange={setRightNavTab}
         sizeInfo={activeTableDataSizeInfo}
         selectedRowDetail={selectedRowDetail}
         tableLoadKey={activeTableLoadKey}
         dataReadOnly={isProfileLocked}
-        engine={engine || "postgres"}
-        runtimeConnectionId={runtimeConnectionId}
-        activeSchema={activeSchema}
-        tables={tables}
-        columnsByTable={columnsByTable}
-        currentSql={activeSqlContent}
-        onInsertSql={onInsertSqlIntoActiveEditor}
       />
     </div>
   );

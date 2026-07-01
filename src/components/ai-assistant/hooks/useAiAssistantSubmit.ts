@@ -1,33 +1,52 @@
 import { useMemo, useRef } from "preact/hooks";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import {
-  answerFromResult,
-  buildFastResultAnswer,
   chatReply,
-  getFastChatReply,
-  getFastSqlReply,
   getAmbiguousPromptReply,
   getDirectMetadataReply,
   looksLikeMetadataQuestion,
   wantsSqlGeneration,
   isGeneralChatPrompt,
-  isReadOnlySql,
   planSqlFromQuestion,
-  queryResultToObjects,
   resolveReplyLanguage,
   saveLocalAiSettings,
   formatSqlExecutionError,
-  formatSqlValidationIssues,
-  validateSqlAgainstMetadata,
 } from "src/lib/ai-assistant";
-import { runSqlQuery } from "src/lib/tauri/query";
 import type { ChatMessage, DatabaseEngine, TableItem } from "src/types";
-import { sleep } from "src/utils/common";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
 function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function formatAssistantRequestError(args: {
+  error: unknown;
+  lang: ReturnType<typeof resolveReplyLanguage>;
+}) {
+  const raw = args.error instanceof Error ? args.error.message : String(args.error ?? "");
+  const vi = args.lang.code === "vie";
+  const isProviderRequest =
+    raw.includes("AI_CHAT_REQUEST_FAILED") ||
+    raw.includes("AI_PROVIDER") ||
+    raw.includes("/chat/completions");
+
+  if (!isProviderRequest) return null;
+
+  const isLocalEndpoint =
+    raw.includes("127.0.0.1") ||
+    raw.includes("localhost") ||
+    raw.includes(":11434");
+
+  if (vi) {
+    return isLocalEndpoint
+      ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama/local OpenAI-compatible server đã chạy chưa, hoặc đổi provider trong AI settings."
+      : "Không kết nối được tới AI provider đã chọn. Hãy kiểm tra API key, model, base URL hoặc đổi provider trong AI settings.";
+  }
+
+  return isLocalEndpoint
+    ? "I could not reach the local AI provider. Check that Ollama or your OpenAI-compatible local server is running, or choose another provider in AI settings."
+    : "I could not reach the selected AI provider. Check the API key, model, base URL, or choose another provider in AI settings.";
 }
 
 export function useAiAssistantSubmit(args: {
@@ -49,10 +68,10 @@ export function useAiAssistantSubmit(args: {
   clearStreamingMessages: () => void;
   setSubmitting: Dispatch<StateUpdater<boolean>>;
   setAssistantStatus: Dispatch<StateUpdater<AssistantStatus>>;
+  providerId?: string;
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
-  runtimeConnectionId?: string;
   activeSchema?: string;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
@@ -70,10 +89,10 @@ export function useAiAssistantSubmit(args: {
     clearStreamingMessages,
     setSubmitting,
     setAssistantStatus,
+    providerId,
     endpoint,
     model,
     engine,
-    runtimeConnectionId,
     activeSchema,
     tables,
     columnsByTable,
@@ -116,20 +135,6 @@ export function useAiAssistantSubmit(args: {
     appendUserMessage(question);
 
     try {
-      const fastChatReply = getFastChatReply(question);
-      if (fastChatReply) {
-        await sleep(500);
-        appendAssistantMessage(
-          {
-            text: [fastChatReply.answer, fastChatReply.followup]
-              .filter(Boolean)
-              .join("\n\n"),
-          },
-          requestStartedAt
-        );
-        return;
-      }
-
       let intentKind: "chat" | "metadata" | "sql" | "clarify";
 
       if (isGeneralChatPrompt(question)) {
@@ -153,6 +158,7 @@ export function useAiAssistantSubmit(args: {
       if (intentKind === "chat") {
         const streamId = beginStreamingAssistantMessage();
         const reply = await chatReply({
+          providerId,
           endpoint,
           model,
           engine,
@@ -181,7 +187,6 @@ export function useAiAssistantSubmit(args: {
       }
 
       if (intentKind === "clarify") {
-        await sleep(500);
         const ambiguousReply = getAmbiguousPromptReply({
           question,
           history: messages,
@@ -210,7 +215,6 @@ export function useAiAssistantSubmit(args: {
         });
 
         if (directReply) {
-          await sleep(500);
           appendAssistantMessage(
             {
               text: [directReply.answer, directReply.followup]
@@ -224,6 +228,7 @@ export function useAiAssistantSubmit(args: {
 
         const streamId = beginStreamingAssistantMessage();
         const reply = await chatReply({
+          providerId,
           endpoint,
           model,
           engine,
@@ -251,26 +256,9 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      const fastSql = getFastSqlReply({
-        engine,
-        question,
-        activeSchema,
-        tables,
-      });
-      if (fastSql) {
-        await sleep(300);
-        appendAssistantMessage(
-          {
-            text: fastSql.explanation,
-            sql: fastSql.sql,
-          },
-          requestStartedAt
-        );
-        return;
-      }
-
       const streamId = beginStreamingAssistantMessage();
       const plan = await planSqlFromQuestion({
+        providerId,
         endpoint,
         model,
         engine,
@@ -305,135 +293,37 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      if (runtimeConnectionId && plan.sql && isReadOnlySql(plan.sql)) {
-        const replyLang = resolveReplyLanguage(question, messages);
-        const metadataValidation = validateSqlAgainstMetadata({
-          sql: plan.sql,
-          tables,
-          columnsByTable,
-          activeSchema,
-        });
-
-        if (!metadataValidation.ok) {
-          finalizeStreamingAssistantMessage(
-            streamId,
-            {
-              text: formatSqlValidationIssues(
-                metadataValidation.issues,
-                replyLang
-              ),
-              sql: plan.sql,
-              assumptions: plan.assumptions,
-              clarification: plan.clarification,
-            },
-            requestStartedAt
-          );
-          return;
-        }
-
-        let result;
-        try {
-          result = await runSqlQuery(runtimeConnectionId, plan.sql, {
-            maxRows: 200,
-            batchSize: 200,
-            timeoutMs: 45_000,
-          });
-        } catch (queryErr) {
-          if (requestSeqRef.current !== requestId) return;
-          finalizeStreamingAssistantMessage(
-            streamId,
-            {
-              text: formatSqlExecutionError({
-                error: queryErr,
-                lang: replyLang,
-                sql: plan.sql,
-                tables,
-                columnsByTable,
-                activeSchema,
-                engine,
-              }),
-              sql: plan.sql,
-              assumptions: plan.assumptions,
-            },
-            requestStartedAt
-          );
-          return;
-        }
-
-        if (requestSeqRef.current !== requestId) return;
-
-        const preview = queryResultToObjects(result, 20);
-        const fastAnswer = buildFastResultAnswer({
-          result,
-          preview,
-          language: resolveReplyLanguage(question, messages),
-        });
-
-        let answer: {
-          answer: string;
-          confidence: "high" | "medium" | "low";
-        } | null = fastAnswer
-          ? {
-              answer: fastAnswer.answer,
-              confidence: fastAnswer.confidence,
-            }
-          : null;
-
-        const shouldUseLlmSummary =
-          !fastAnswer ||
-          (preview.length > 0 &&
-            preview.length <= 3 &&
-            (result.columns ?? []).length <= 6 &&
-            Number(result.rowCount ?? preview.length) <= 3);
-
-        if (shouldUseLlmSummary) {
-          answer = await answerFromResult({
-            endpoint,
-            model,
-            engine,
-            question,
-            sql: plan.sql,
-            result,
-            history: messages,
-            onStatusChange: onAssistantStatus,
-            onDelta: (text) => {
-              if (requestSeqRef.current !== requestId) return;
-              updateStreamingAssistantText(streamId, text);
-            },
-            signal: abortController.signal,
-          });
-        }
-
-        if (requestSeqRef.current !== requestId) return;
-
-        finalizeStreamingAssistantMessage(
-          streamId,
-          {
-            text:
-              answer?.answer ||
-              plan.explanation ||
-              "I have run the query and got the result.",
-            sql: plan.sql,
-            assumptions: plan.assumptions,
-            clarification: plan.needsClarification
-              ? plan.clarification
-              : undefined,
-            resultPreview: preview,
-            rowCount: Number(result.rowCount ?? preview.length),
-            confidence: answer?.confidence,
-          },
-          requestStartedAt
-        );
-        return;
-      }
-
       finalizeStreamingAssistantMessage(
         streamId,
         {
           text:
             plan.explanation ||
-            "I haven't run the query yet, but here is the SQL that matches your request.",
+            "I prepared the SQL below. Review it before running.",
           sql: plan.sql || undefined,
+          parts: [
+            {
+              type: "text",
+              text:
+                plan.explanation ||
+                "I prepared the SQL below. Review it before running.",
+            },
+            ...(plan.sql
+              ? [
+                  {
+                    type: "sqlPreview" as const,
+                    sql: plan.sql,
+                    safety: ((
+                      plan.safety === "read_only"
+                        ? "read_only"
+                        : plan.safety === "mutating"
+                          ? "mutating"
+                          : "unknown"
+                    ) as "read_only" | "mutating" | "unknown"),
+                    confirmationState: "pending" as const,
+                  },
+                ]
+              : []),
+          ],
           assumptions: plan.assumptions,
           clarification: plan.needsClarification
             ? plan.clarification
@@ -445,16 +335,24 @@ export function useAiAssistantSubmit(args: {
       if (isAbortError(err) || requestSeqRef.current !== requestId) {
         return;
       }
+      clearStreamingMessages();
+      const lang = resolveReplyLanguage(question, messages);
+      const assistantError = formatAssistantRequestError({
+        error: err,
+        lang,
+      });
       appendAssistantMessage(
         {
-          text: formatSqlExecutionError({
-            error: err,
-            lang: resolveReplyLanguage(question, messages),
-            tables,
-            columnsByTable,
-            activeSchema,
-            engine,
-          }),
+          text:
+            assistantError ??
+            formatSqlExecutionError({
+              error: err,
+              lang,
+              tables,
+              columnsByTable,
+              activeSchema,
+              engine,
+            }),
         },
         requestStartedAt
       );

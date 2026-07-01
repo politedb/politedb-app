@@ -1,10 +1,187 @@
 import type { Ref } from "preact";
+import { useRef, useState } from "preact/hooks";
 import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantMessageCard";
 import { AiAssistantThinkingCard } from "src/components/ai-assistant/AiAssistantThinkingCard";
-import { Button } from "src/components/common/Button";
-import { ChevronDownIcon } from "src/components/icons";
+import { Dropdown } from "src/components/common/Dropdown";
+import { Popover } from "src/components/common/Popover";
+import {
+  ArrowRightIcon,
+  ChatPlusIcon,
+  ChevronDownIcon,
+  MinusIcon,
+  MoreVerticalIcon,
+  PlusIcon,
+  ShareIcon,
+  SparklesIcon,
+  VaultIcon,
+} from "src/components/icons";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "src/components/common/Dialog";
 import type { AssistantStatus } from "src/components/ai-assistant/hooks/useAiAssistantSubmit";
-import type { ChatMessage } from "src/types";
+import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
+import { cn } from "src/utils/cn";
+import { Button } from "../common/Button";
+import { MicIcon } from "../icons/Mic";
+import { CheckMarkIcon } from "../icons/CheckMark";
+
+export type AiContextKind = "connection" | "sql" | "metadata";
+
+export type AiContextOption = {
+  id: AiContextKind;
+  label: string;
+  detail?: string;
+  available: boolean;
+  active: boolean;
+};
+
+function ProviderMark(props: { provider: AiProviderConfig }) {
+  const { provider } = props;
+  const color =
+    provider.kind === "anthropic"
+      ? "text-orange-500"
+      : provider.kind === "gemini"
+        ? "text-blue-500"
+        : provider.kind === "grok"
+          ? "text-neutral-900"
+          : provider.kind === "ollama"
+            ? "text-emerald-600"
+            : "text-neutral-700";
+
+  return (
+    <span class={cn("flex size-5 items-center justify-center", color)}>
+      {provider.kind === "gemini" ? (
+        <SparklesIcon className="size-4" />
+      ) : (
+        <VaultIcon className="size-4" />
+      )}
+    </span>
+  );
+}
+
+function messageText(message: ChatMessage) {
+  if (message.parts?.length) {
+    return message.parts
+      .map((part) => {
+        if (part.type === "text") return part.text;
+        if (part.type === "sqlPreview") return part.sql;
+        if (part.type === "error") return part.message;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return message.text ?? "";
+}
+
+function AiModelPicker(props: {
+  providerLabel: string;
+  providerModel: string;
+  providerOptions: AiProviderConfig[];
+  activeProviderId: string;
+  onSelectProvider: (providerId: string) => void;
+}) {
+  const {
+    providerLabel,
+    providerModel,
+    providerOptions,
+    activeProviderId,
+    onSelectProvider,
+  } = props;
+  const [open, setOpen] = useState(false);
+  const enabledProviders = providerOptions.filter(
+    (provider) => provider.enabled
+  );
+  const activeProvider = enabledProviders.find(
+    (provider) => provider.id === activeProviderId
+  );
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      positions={["top"]}
+      align="end"
+      padding={12}
+      showArrow={false}
+      contentClassName="rounded-2xl"
+      content={
+        <div class="w-80 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-2 shadow-2xl">
+          <button
+            type="button"
+            class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold text-neutral-900 hover:bg-neutral-100"
+            onClick={() => setOpen(false)}
+          >
+            <SparklesIcon className="size-4 text-neutral-700" />
+            <span class="min-w-0 flex-1">Auto</span>
+            {!activeProvider ? (
+              <CheckMarkIcon className="size-4 text-neutral-900" />
+            ) : null}
+          </button>
+
+          <div class="px-3 pt-3 pb-1 text-xs font-semibold text-neutral-500">
+            Select a model{" "}
+            <span class="rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 uppercase">
+              Beta
+            </span>
+          </div>
+
+          <div class="max-h-80 overflow-y-auto">
+            {enabledProviders.length ? (
+              enabledProviders.map((provider) => {
+                const active = provider.id === activeProviderId;
+                return (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    class={cn(
+                      "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-neutral-900",
+                      active ? "bg-neutral-100" : "hover:bg-neutral-50"
+                    )}
+                    onClick={() => {
+                      onSelectProvider(provider.id);
+                      setOpen(false);
+                    }}
+                  >
+                    <ProviderMark provider={provider} />
+                    <span class="min-w-0 flex-1 truncate">
+                      {provider.defaultModel}
+                    </span>
+                    {active ? (
+                      <CheckMarkIcon className="size-4 text-neutral-900" />
+                    ) : null}
+                  </button>
+                );
+              })
+            ) : (
+              <div class="px-3 py-4 text-sm text-neutral-500">
+                Add a provider in Settings to choose models.
+              </div>
+            )}
+          </div>
+        </div>
+      }
+    >
+      <button
+        type="button"
+        title={`${providerLabel}: ${providerModel}`}
+        aria-label="Select AI model"
+        onClick={() => setOpen((next) => !next)}
+        class={cn(
+          "inline-flex max-w-50 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+          open
+            ? "bg-neutral-200 text-neutral-900"
+            : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+        )}
+      >
+        <span class="truncate">{activeProvider ? providerModel : "Auto"}</span>
+      </button>
+    </Popover>
+  );
+}
 
 export function AiAssistantChatArea(props: {
   messages: ChatMessage[];
@@ -21,6 +198,22 @@ export function AiAssistantChatArea(props: {
   canSubmit: boolean;
   assistantStatus: AssistantStatus;
   runtimeConnectionId?: string;
+  providerLabel: string;
+  providerModel: string;
+  providerOptions: AiProviderConfig[];
+  activeProviderId: string;
+  onSelectProvider: (providerId: string) => void;
+  contextOptions: AiContextOption[];
+  onToggleContext: (contextId: AiContextKind) => void;
+  presentation?: "panel" | "floating";
+  onClose?: () => void;
+  chatSessions: AiChatSession[];
+  activeSessionId: string;
+  onNewChat: () => void;
+  onRenameSession: (sessionId: string, title: string) => void;
+  onSwitchSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+  onOpenSettings: () => void;
 }) {
   const {
     messages,
@@ -37,28 +230,335 @@ export function AiAssistantChatArea(props: {
     canSubmit,
     assistantStatus,
     runtimeConnectionId,
+    providerLabel,
+    providerModel,
+    providerOptions,
+    activeProviderId,
+    onSelectProvider,
+    contextOptions,
+    onToggleContext,
+    presentation = "panel",
+    onClose,
+    chatSessions,
+    activeSessionId,
+    onNewChat,
+    onRenameSession,
+    onSwitchSession,
+    onDeleteSession,
+    onOpenSettings,
   } = props;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextTriggerStart, setContextTriggerStart] = useState<number | null>(
+    null
+  );
+  const [titleOpen, setTitleOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const floating = presentation === "floating";
+  const activeSession = chatSessions.find(
+    (session) => session.id === activeSessionId
+  );
+  const activeTitle = activeSession?.title || "New Chat";
+  const handleRenameActiveChat = () => {
+    if (!activeSessionId) return;
+    const title = window.prompt("Rename chat", activeTitle);
+    if (title === null) return;
+    onRenameSession(activeSessionId, title);
+  };
+  const handleDeleteActiveChat = () => {
+    if (!activeSessionId) return;
+    if (!window.confirm(`Delete chat "${activeTitle}"?`)) return;
+    onDeleteSession(activeSessionId);
+  };
+
+  const menuItems = [
+    {
+      label: "Rename Chat",
+      onSelect: handleRenameActiveChat,
+    },
+    {
+      label: "Delete Chat",
+      className: "text-red-600 hover:bg-red-50",
+      onSelect: handleDeleteActiveChat,
+    },
+    {
+      label: "History",
+      separatorBefore: true,
+      onSelect: () => setHistoryOpen(true),
+    },
+    {
+      label: "Settings..",
+      separatorBefore: true,
+      onSelect: onOpenSettings,
+    },
+  ];
+
+  const selectedContexts = contextOptions.filter(
+    (item) => item.active && item.available
+  );
+  const contextItems = contextOptions.map((item) => ({
+    key: item.id,
+    label: item.label,
+    disabled: !item.available,
+    rightSlot: item.detail ? (
+      <span class="max-w-20 truncate text-xs text-neutral-400">
+        {item.detail}
+      </span>
+    ) : undefined,
+    onSelect: () => {
+      onToggleContext(item.id);
+      if (contextTriggerStart !== null) {
+        onPromptChange(
+          `${prompt.slice(0, contextTriggerStart)}${prompt.slice(
+            contextTriggerStart + 1
+          )}`
+        );
+        setContextTriggerStart(null);
+      }
+    },
+  }));
+
+  const handleShare = async () => {
+    const transcript = messages
+      .map((message) => {
+        const speaker = message.role === "user" ? "You" : "PoliteDB AI";
+        const text = messageText(message).trim();
+        return text ? `${speaker}: ${text}` : "";
+      })
+      .filter(Boolean)
+      .join("\n\n");
+
+    await navigator.clipboard.writeText(
+      transcript || "PoliteDB AI chat is empty."
+    );
+    setShareCopied(true);
+    window.setTimeout(() => setShareCopied(false), 1200);
+  };
+
+  const handleToggleMic = () => {
+    if (listening) {
+      recognitionRef.current?.stop?.();
+      setListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      onPromptChange(
+        prompt
+          ? `${prompt}\nVoice input is not supported in this environment.`
+          : "Voice input is not supported in this environment."
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = navigator.language || "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
+
+    let finalText = "";
+    recognition.onresult = (event: any) => {
+      let interimText = "";
+      for (
+        let index = event.resultIndex;
+        index < event.results.length;
+        index += 1
+      ) {
+        const result = event.results[index];
+        const text = result?.[0]?.transcript ?? "";
+        if (result?.isFinal) {
+          finalText += text;
+        } else {
+          interimText += text;
+        }
+      }
+      const next = [prompt, finalText || interimText]
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join(prompt ? " " : "");
+      onPromptChange(next);
+    };
+    recognition.onend = () => setListening(false);
+    recognition.onerror = () => setListening(false);
+    setListening(true);
+    recognition.start();
+  };
+
+  const handleUploadFile = async (file: File) => {
+    const maxChars = 200_000;
+    const text = await file.text();
+    const clipped = text.length > maxChars;
+    const content = clipped ? text.slice(0, maxChars) : text;
+    const attachment = [
+      `Attached file: ${file.name}`,
+      clipped ? `Only the first ${maxChars} characters are included.` : "",
+      "```",
+      content,
+      "```",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    onPromptChange(
+      prompt.trim() ? `${prompt.trim()}\n\n${attachment}` : attachment
+    );
+  };
+
+  const handlePromptInput = (value: string, cursorPosition: number | null) => {
+    onPromptChange(value);
+    const cursor = cursorPosition ?? value.length;
+    const triggerIndex = cursor - 1;
+    const justTypedAt = value[triggerIndex] === "@";
+    const startsContextToken =
+      justTypedAt && (triggerIndex === 0 || /\s/.test(value[triggerIndex - 1]));
+
+    if (startsContextToken) {
+      setContextTriggerStart(triggerIndex);
+      setContextOpen(true);
+      return;
+    }
+
+    if (contextTriggerStart !== null && value[contextTriggerStart] !== "@") {
+      setContextTriggerStart(null);
+      setContextOpen(false);
+    }
+  };
 
   return (
     <>
+      {floating ? (
+        <div class="flex shrink-0 items-center justify-between p-2">
+          <div class="flex min-w-0 items-center gap-2">
+            <Popover
+              open={titleOpen}
+              onOpenChange={setTitleOpen}
+              positions={["bottom"]}
+              align="start"
+              padding={2}
+              showArrow={false}
+              content={
+                <div class="w-[280px] rounded-2xl border border-neutral-200 bg-white px-2 py-3 shadow-2xl">
+                  <div class="mb-2 px-2 text-sm font-semibold text-neutral-500">
+                    Today
+                  </div>
+                  {chatSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      class="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-base text-neutral-900 hover:bg-neutral-50"
+                      onClick={() => {
+                        onSwitchSession(session.id);
+                        setTitleOpen(false);
+                      }}
+                    >
+                      <span class="min-w-0 flex-1 truncate">
+                        {session.title || "New Chat"}
+                      </span>
+                      {session.id === activeSessionId ? (
+                        <CheckMarkIcon className="size-4" />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              }
+            >
+              <div>
+                <Button
+                  variant="ghost"
+                  onClick={() => setTitleOpen((open) => !open)}
+                  class="max-w-[260px] rounded-full px-2 py-0.5 text-base"
+                >
+                  <span class="truncate">{activeTitle}</span>
+                  <ChevronDownIcon className="size-4 shrink-0 text-neutral-500" />
+                </Button>
+              </div>
+            </Popover>
+          </div>
+
+          <div class="flex items-center gap-1 text-neutral-800">
+            <button
+              type="button"
+              class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+              title={shareCopied ? "Copied chat" : "Share chat"}
+              aria-label={shareCopied ? "Copied chat" : "Share chat"}
+              onClick={() => void handleShare()}
+            >
+              <ShareIcon className="size-5" />
+            </button>
+            <button
+              type="button"
+              class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+              title="New chat"
+              aria-label="New chat"
+              onClick={onNewChat}
+            >
+              <ChatPlusIcon className="size-5" />
+            </button>
+            <Dropdown
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              positions={["bottom"]}
+              align="end"
+              widthClassName="w-44"
+              items={menuItems}
+              trigger={
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen((open) => !open)}
+                    title="Chat menu"
+                    aria-label="Chat menu"
+                    class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+                  >
+                    <MoreVerticalIcon className="size-5 rotate-90" />
+                  </button>
+                </div>
+              }
+            />
+            <Button
+              variant="ghost"
+              class="rounded-full border-0 p-1.5 hover:bg-neutral-100"
+              title="Minimize"
+              onClick={onClose}
+            >
+              <MinusIcon className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div
         ref={messagesContainerRef}
-        class="min-h-0 flex-1 overflow-y-auto px-3 py-3"
+        class={cn(
+          "min-h-0 flex-1 overflow-y-auto",
+          floating ? "px-6 py-4" : "px-3 py-3"
+        )}
       >
-        <div class="space-y-3">
-          <div class="space-y-3">
+        <div class={cn(floating ? "space-y-6" : "space-y-3")}>
+          <div class={cn(floating ? "space-y-6" : "space-y-3")}>
             {messages.length === 0 ? (
-              <div class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-500">
-                Ask about data, get SQL suggestions, or describe the insight you
-                want to see.
-              </div>
+              floating ? null : (
+                <div class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-500">
+                  Ask about data, get SQL suggestions, or describe the insight
+                  you want to see.
+                </div>
+              )
             ) : null}
 
             {messages.map((message) => (
               <AiAssistantMessageCard
                 key={message.id}
                 message={message}
+                presentation={presentation}
                 onInsertSql={onInsertSql}
+                runtimeConnectionId={runtimeConnectionId}
               />
             ))}
 
@@ -76,50 +576,240 @@ export function AiAssistantChatArea(props: {
           type="button"
           onClick={onScrollToBottom}
           title="Scroll to latest message"
-          class="absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200 bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+          class={cn(
+            "absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200",
+            "bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+          )}
         >
           <ChevronDownIcon className="size-4" />
         </button>
       ) : null}
 
-      <div class="shrink-0 border-t border-neutral-200 px-3 py-3">
-        <div class="space-y-2">
-          <textarea
-            value={prompt}
-            onInput={(e) => onPromptChange(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void onSubmit();
-              }
+      <div class="shrink-0 p-3">
+        <div
+          class={cn(
+            "rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm"
+          )}
+        >
+          <div class={cn("mb-2 flex items-center justify-end gap-2")}>
+            <div class="text-xs text-neutral-400">
+              {submitting
+                ? assistantStatus === "loading_model"
+                  ? "Loading model..."
+                  : "Generating..."
+                : ""}
+            </div>
+          </div>
+
+          {selectedContexts.length ? (
+            <div class="mb-2 flex flex-wrap items-center gap-1.5">
+              {selectedContexts.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  class="inline-flex max-w-full items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-200"
+                  title={`Remove ${item.label}`}
+                  onClick={() => onToggleContext(item.id)}
+                >
+                  <span class="truncate">{item.label}</span>
+                  <span class="text-neutral-400">x</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <Dropdown
+            open={contextOpen}
+            onOpenChange={(open) => {
+              setContextOpen(open);
+              if (!open) setContextTriggerStart(null);
             }}
-            placeholder="Ask AI about data, or ask it to write SQL for you..."
-            disabled={submitting}
-            class="min-h-24 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            positions={["top"]}
+            align="start"
+            widthClassName="w-72"
+            items={contextItems}
+            itemClassName="whitespace-nowrap"
+            trigger={
+              <textarea
+                value={prompt}
+                onInput={(e) =>
+                  handlePromptInput(
+                    e.currentTarget.value,
+                    e.currentTarget.selectionStart
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (submitting) {
+                      onCancelSubmit();
+                      return;
+                    }
+                    if (canSubmit) void onSubmit();
+                  }
+                }}
+                placeholder="Ask anything..."
+                disabled={submitting}
+                class={cn(
+                  "w-full resize-none border-none bg-transparent px-1 py-1 text-neutral-900 outline-none placeholder:text-neutral-400",
+                  floating ? "min-h-20 text-base" : "min-h-14 text-sm"
+                )}
+              />
+            }
           />
 
-          <div class="flex items-center justify-between gap-2">
-            <div class="text-xs text-neutral-500">
-              {runtimeConnectionId
-                ? "Assistant will try to answer with real data when possible."
-                : "No runtime connection: Assistant will return SQL or suggestions first."}
+          <div class="mt-2 flex items-center justify-between gap-2">
+            <div class="flex min-w-0 items-center gap-2">
+              {floating ? (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    class="hidden"
+                    accept=".csv,.json,.log,.md,.sql,.txt,.ts,.tsx,.js,.jsx,.py,.rs,.toml,.yaml,.yml,.xml"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) void handleUploadFile(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    class="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+                    title="Upload file"
+                    aria-label="Upload file"
+                  >
+                    <PlusIcon className="size-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span class="inline-flex max-w-34 items-center gap-1 truncate rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
+                    <VaultIcon className="size-3.5 shrink-0" />
+                    <span class="truncate">{providerLabel}</span>
+                  </span>
+                  <span class="truncate text-xs font-medium text-neutral-500">
+                    {providerModel}
+                  </span>
+                </>
+              )}
             </div>
-            <Button
-              class="py-1.5"
-              onClick={submitting ? onCancelSubmit : onSubmit}
-              loading={false}
-              disabled={!canSubmit && !submitting}
-              variant={submitting ? "primary" : "default"}
-            >
-              {submitting
-                ? "Cancel"
-                : assistantStatus === "loading_model"
-                  ? "Loading model..."
-                  : "Send"}
-            </Button>
+
+            <div class="flex shrink-0 items-center gap-2">
+              <AiModelPicker
+                providerLabel={providerLabel}
+                providerModel={providerModel}
+                providerOptions={providerOptions}
+                activeProviderId={activeProviderId}
+                onSelectProvider={onSelectProvider}
+              />
+
+              {floating ? (
+                <button
+                  type="button"
+                  class={cn(
+                    "rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900",
+                    listening && "bg-red-50 text-red-600 hover:bg-red-100"
+                  )}
+                  title={listening ? "Stop voice input" : "Voice input"}
+                  aria-label={listening ? "Stop voice input" : "Voice input"}
+                  onClick={handleToggleMic}
+                >
+                  <MicIcon className="size-4" />
+                </button>
+              ) : null}
+
+              {floating ? (
+                <button
+                  type="button"
+                  class="rounded-full bg-neutral-100 p-2 text-neutral-300"
+                  title={submitting ? "Stop" : "Send"}
+                  aria-label={submitting ? "Stop" : "Send"}
+                  onClick={() => {
+                    if (submitting) {
+                      onCancelSubmit();
+                      return;
+                    }
+                    if (canSubmit) void onSubmit();
+                  }}
+                >
+                  <ArrowRightIcon className="size-3.5 -rotate-90" />
+                </button>
+              ) : (
+                <Dropdown
+                  open={menuOpen}
+                  onOpenChange={setMenuOpen}
+                  positions={["top"]}
+                  align="end"
+                  widthClassName="w-44"
+                  items={menuItems}
+                  trigger={
+                    <button
+                      type="button"
+                      onClick={() => setMenuOpen((open) => !open)}
+                      title="Chat menu"
+                      aria-label="Chat menu"
+                      class={cn(
+                        "rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
+                        menuOpen && "bg-neutral-100 text-neutral-900"
+                      )}
+                    >
+                      <MoreVerticalIcon className="size-5" />
+                    </button>
+                  }
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        size="sm"
+      >
+        <DialogHeader>
+          <DialogTitle>Chat History</DialogTitle>
+        </DialogHeader>
+        <DialogContent className="gap-2 pt-0">
+          {chatSessions.map((session) => (
+            <div
+              key={session.id}
+              class={cn(
+                "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                session.id === activeSessionId
+                  ? "border-blue-200 bg-blue-50"
+                  : "border-neutral-200 bg-white"
+              )}
+            >
+              <button
+                type="button"
+                class="min-w-0 flex-1 text-left"
+                onClick={() => {
+                  onSwitchSession(session.id);
+                  setHistoryOpen(false);
+                }}
+              >
+                <div class="truncate text-sm font-semibold text-neutral-900">
+                  {session.title || "New Chat"}
+                </div>
+                <div class="text-xs text-neutral-500">
+                  {new Date(session.updatedAt).toLocaleString()}
+                </div>
+              </button>
+              <button
+                type="button"
+                class="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                onClick={() => onDeleteSession(session.id)}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

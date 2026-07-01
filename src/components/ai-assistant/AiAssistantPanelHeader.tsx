@@ -1,5 +1,4 @@
-import { AiAssistantSettingsPopover } from "src/components/ai-assistant/AiAssistantSettingsPopover";
-import { Popover } from "src/components/common/Popover";
+import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
 import { SettingsIcon } from "src/components/icons";
 import { type AiRuntimeStatus } from "src/lib/tauri";
 import { cn } from "src/utils/cn";
@@ -33,30 +32,12 @@ export function AiAssistantPanelHeader(props: {
         <div>
           <div class="text-sm font-semibold text-neutral-900">AI Assistant</div>
           <div class="mt-1 text-xs text-neutral-500">
-            Chat with local model to ask data or get SQL suggestions.
+            Ask questions, draft SQL, and review database actions.
           </div>
         </div>
 
         {showSettings ? (
-          <Popover
-            open={settingsOpen}
-            onOpenChange={onSettingsOpenChange}
-            positions={["bottom"]}
-            align="end"
-            padding={10}
-            contentClassName="rounded-2xl"
-            showArrow={false}
-            content={
-              <AiAssistantSettingsPopover
-                loadingModels={loadingModels}
-                runtimeBusy={runtimeBusy}
-                runtimeStatus={runtimeStatus}
-                onLoadModels={onLoadModels}
-                onStartRuntime={onStartRuntime}
-                onStopRuntime={onStopRuntime}
-              />
-            }
-          >
+          <>
             <button
               type="button"
               title="AI settings"
@@ -69,7 +50,17 @@ export function AiAssistantPanelHeader(props: {
             >
               <SettingsIcon className="size-4" />
             </button>
-          </Popover>
+            <AiAssistantSettingsDialog
+            open={settingsOpen}
+            onClose={() => onSettingsOpenChange(false)}
+            loadingModels={loadingModels}
+            runtimeBusy={runtimeBusy}
+            runtimeStatus={runtimeStatus}
+            onLoadModels={onLoadModels}
+            onStartRuntime={onStartRuntime}
+            onStopRuntime={onStopRuntime}
+          />
+          </>
         ) : null}
       </div>
     </div>

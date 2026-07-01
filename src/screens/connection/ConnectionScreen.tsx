@@ -45,6 +45,8 @@ import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
+import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
+import { OPEN_FLOATING_ASSISTANT_EVENT } from "src/components/ai-assistant/FloatingAssistantLauncher";
 
 const EMPTY_TABLE_META = {
   columns: null,
@@ -136,14 +138,12 @@ export function ConnectionScreen() {
     setSearchDialogOpen,
     diagramOpen,
     setDiagramOpen,
-    rightNavTab,
-    setRightNavTab,
     errorDialogOpen,
     setErrorDialogOpen,
   } = useConnectionScreenState();
   const { discardAndQuitApp } = useConnectionQuitGuard();
 
-  const { viewMode, toggleViewMode, setViewMode } = useViewMode([
+  const { viewMode, toggleViewMode } = useViewMode([
     "left",
     "bottom",
   ]);
@@ -578,19 +578,38 @@ export function ConnectionScreen() {
     openSqlEditor,
   });
 
-  const openAiAssistant = useMemo(() => {
-    return () => {
-      setViewMode((prev) => {
-        const isAiOpen = prev.includes("right") && rightNavTab === "ai";
-        if (isAiOpen) {
-          return prev.filter((mode) => mode !== "right");
-        }
+  useEffect(() => {
+    if (!activeTab || !engine) return;
 
-        setRightNavTab("ai");
-        return prev.includes("right") ? prev : [...prev, "right"];
-      });
+    useFloatingAssistantStore.getState().setContext({
+      scopeKey: activeProfileScreen,
+      engine,
+      runtimeConnectionId,
+      activeSchema,
+      tables: meta.tables,
+      columnsByTable: meta.columnsByTable,
+      currentSql: activeSqlWindow?.content,
+      onInsertSql: onInsertSqlIntoActiveEditor,
+    });
+
+    return () => {
+      useFloatingAssistantStore.getState().clearContext(activeProfileScreen);
     };
-  }, [rightNavTab, setViewMode]);
+  }, [
+    activeProfileScreen,
+    activeTab,
+    engine,
+    runtimeConnectionId,
+    activeSchema,
+    meta.tables,
+    meta.columnsByTable,
+    activeSqlWindow?.content,
+    onInsertSqlIntoActiveEditor,
+  ]);
+
+  const openAiAssistant = useCallback(() => {
+    window.dispatchEvent(new Event(OPEN_FLOATING_ASSISTANT_EVENT));
+  }, []);
 
   const openDiagram = useMemo(() => {
     return () => setDiagramOpen(true);
@@ -688,8 +707,6 @@ export function ConnectionScreen() {
                 : activeSchema
             }
             activeTable={activeTableWindow?.table.name}
-            activeRightPanelTab={rightNavTab}
-            isRightPanelOpen={viewMode.includes("right")}
             connectionVersion={meta.version}
             viewMode={viewMode}
             loadTableError={loadError}
@@ -720,17 +737,10 @@ export function ConnectionScreen() {
             setExpandedSections={setExpandedSections}
             sidebarTables={sidebarTables}
             filteredFunctions={filteredFunctions}
-            rightNavTab={rightNavTab}
-            setRightNavTab={setRightNavTab}
             activeTableDataSizeInfo={activeTableData.sizeInfo}
             selectedRowDetail={selectedRowDetail}
             activeTableLoadKey={activeTableLoadKey}
             isProfileLocked={isProfileLocked}
-            runtimeConnectionId={runtimeConnectionId}
-            tables={meta.tables}
-            columnsByTable={meta.columnsByTable}
-            activeSqlContent={activeSqlWindow?.content}
-            onInsertSqlIntoActiveEditor={onInsertSqlIntoActiveEditor}
           />
 
           {error && (

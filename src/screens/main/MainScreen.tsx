@@ -435,6 +435,9 @@ export function MainScreen() {
   }
 
   function handleTopBarCreate() {
+    if (activeNav === "logs") {
+      return;
+    }
     if (activeNav === "connections") {
       openNew();
       return;

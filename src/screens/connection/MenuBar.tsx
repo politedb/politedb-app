@@ -20,7 +20,6 @@ import {
   BackupIcon,
   RestoreIcon,
   LockIcon,
-  ChatIcon,
   SchemaIcon,
   SquareFunctionIcon,
 } from "src/components/icons";
@@ -50,8 +49,6 @@ import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
 interface Props {
   activeSchema?: string;
   activeTable?: string;
-  activeRightPanelTab?: "ai" | "table-size" | "analytics";
-  isRightPanelOpen?: boolean;
   connectionVersion?: string;
   schemas?: string[];
   viewMode?: TabViewMode[];
@@ -319,8 +316,6 @@ function withDatabaseInput(
 export function MenuBar({
   activeSchema,
   activeTable,
-  activeRightPanelTab,
-  isRightPanelOpen = false,
   connectionVersion: databaseVersion = "",
   viewMode = ["left"],
   loadTableError,
@@ -330,7 +325,6 @@ export function MenuBar({
   isRefreshing = false,
   openSQLWindow,
   onSearchOpen,
-  onOpenAiAssistant,
   onOpenDiagram,
   onOpenDatabaseObjects,
 }: Props) {
@@ -874,17 +868,6 @@ export function MenuBar({
             disabled={!rt.runtimeConnectionId || rt.engine === "redis"}
           >
             <SchemaIcon className="size-4 text-neutral-700" />
-          </IconButton>
-
-          <IconButton title="AI Assistant" onClick={onOpenAiAssistant}>
-            <ChatIcon
-              className={cn(
-                "size-4 transition-colors",
-                isRightPanelOpen && activeRightPanelTab === "ai"
-                  ? "text-blue-600"
-                  : "text-neutral-700"
-              )}
-            />
           </IconButton>
 
           <div class="flex h-7 items-center rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">

@@ -78,7 +78,10 @@ export function Popover({
       align={align}
       padding={padding}
       onClickOutside={() => onOpenChange(false)}
-      containerClassName={cn("z-[1000]", containerClassName)}
+      containerClassName={cn(
+        "politedb-popover-container z-[1000]",
+        containerClassName
+      )}
       content={({ position }: PopoverState) => {
         return (
           <div class="relative">

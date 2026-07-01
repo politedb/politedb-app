@@ -36,6 +36,7 @@ import type {
   GenerateOptions,
   LocalAiSettings,
 } from "src/lib/ai-assistant/types";
+import { aiChatComplete } from "src/lib/tauri/ai";
 
 export {
   detectLanguageFromText,
@@ -266,6 +267,20 @@ async function readStreamingCompletion(
 }
 
 async function generateText(opts: GenerateOptions): Promise<string> {
+  if (opts.providerId?.trim()) {
+    throwIfAborted(opts.signal);
+    opts.onStatusChange?.("generating");
+    const content = await aiChatComplete({
+      providerId: opts.providerId.trim(),
+      model: opts.model.trim(),
+      messages: [{ role: "user", content: opts.prompt }],
+      temperature: 0.1,
+      maxTokens: Math.max(32, Math.min(opts.maxTokens ?? 256, 1024)),
+    });
+    opts.onDelta?.(content);
+    return content.trim();
+  }
+
   const endpoint = trimTrailingSlash(opts.endpoint.trim());
   const maxTokens = Math.max(32, Math.min(opts.maxTokens ?? 256, 1024));
   const useStream = Boolean(opts.onDelta);
@@ -584,6 +599,7 @@ export function getAmbiguousPromptReply(args: {
 }
 
 export async function classifyAssistantIntent(args: {
+  providerId?: string;
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
@@ -610,6 +626,7 @@ export async function classifyAssistantIntent(args: {
   });
 
   const raw = await generateJson<Partial<AiIntentDecision>>({
+    providerId: args.providerId,
     endpoint: args.endpoint,
     model: args.model,
     prompt,
@@ -1108,6 +1125,7 @@ export function buildFastResultAnswer(args: {
 }
 
 export async function planSqlFromQuestion(args: {
+  providerId?: string;
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
@@ -1148,6 +1166,7 @@ export async function planSqlFromQuestion(args: {
   if (args.onDelta) {
     let lastExplanation = "";
     const content = await generateText({
+      providerId: args.providerId,
       endpoint: args.endpoint,
       model: args.model,
       prompt,
@@ -1173,6 +1192,7 @@ export async function planSqlFromQuestion(args: {
     raw = extractJsonObject(content) as Partial<AiPlan>;
   } else {
     raw = await generateJson<Partial<AiPlan>>({
+      providerId: args.providerId,
       endpoint: args.endpoint,
       model: args.model,
       prompt,
@@ -1202,6 +1222,7 @@ export async function planSqlFromQuestion(args: {
 }
 
 export async function answerFromResult(args: {
+  providerId?: string;
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
@@ -1221,6 +1242,7 @@ export async function answerFromResult(args: {
   if (args.onDelta) {
     const answer = sanitizeAiText(
       await generateText({
+        providerId: args.providerId,
         endpoint: args.endpoint,
         model: args.model,
         prompt: buildResultAnswerPlainPrompt({
@@ -1263,6 +1285,7 @@ export async function answerFromResult(args: {
   });
 
   const raw = await generateJson<Partial<AiAnswer>>({
+    providerId: args.providerId,
     endpoint: args.endpoint,
     model: args.model,
     prompt,
@@ -1392,6 +1415,7 @@ export function getFastChatReply(question: string): AiChatReply | null {
 }
 
 export async function chatReply(args: {
+  providerId?: string;
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
@@ -1417,6 +1441,7 @@ export async function chatReply(args: {
   if (args.onDelta) {
     const answer = sanitizeAiText(
       await generateText({
+        providerId: args.providerId,
         endpoint: args.endpoint,
         model: args.model,
         prompt: buildChatReplyPlainPrompt({
@@ -1453,6 +1478,7 @@ export async function chatReply(args: {
     question: args.question,
   });
   const raw = await generateJson<Partial<AiChatReply>>({
+    providerId: args.providerId,
     endpoint: args.endpoint,
     model: args.model,
     prompt,
