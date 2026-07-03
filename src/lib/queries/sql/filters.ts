@@ -1,5 +1,16 @@
 import type { DatabaseEngine } from "src/types";
+import {
+  isMysqlFamilyEngine,
+  mysqlStringCompareExpr,
+} from "src/utils/sqlDialect";
 import { qIdent, qLiteral } from "./shared";
+
+function filterColumnExpr(col: string, engine?: DatabaseEngine) {
+  if (isMysqlFamilyEngine(engine)) {
+    return mysqlStringCompareExpr(col);
+  }
+  return col;
+}
 
 // Filter condition for table data (WHERE clause)
 export type TableFilterCondition = {
@@ -116,7 +127,8 @@ export function buildWhereClause(
   const parts = filters
     .filter((f) => f.enabled && (f.column ?? "").trim())
     .map((f) => {
-      const col = qIdent(String(f.column).trim(), engine);
+      const colIdent = qIdent(String(f.column).trim(), engine);
+      const col = filterColumnExpr(colIdent, engine);
       const op = normalizeFilterOperator(f.operator);
       const opKey = filterOperatorKey(op);
       if (

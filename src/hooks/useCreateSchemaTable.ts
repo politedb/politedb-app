@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { createSchemaQuery, createTableQuery } from "src/lib/queries/sql";
+import { sqlForDisplay } from "src/utils/sqlDialect";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { profileConnect } from "src/lib/tauri";
@@ -57,7 +58,7 @@ export function useCreateSchemaTable() {
         if (!connId) return;
 
         const query = createSchemaQuery(schema);
-        addQueryHistory(activeTab.id, query);
+        addQueryHistory(activeTab.id, sqlForDisplay(query, activeTab.engine));
 
         await runSqlQuery(connId, query);
 
@@ -102,7 +103,7 @@ export function useCreateSchemaTable() {
           primaryKey,
           activeTab.engine
         );
-        addQueryHistory(activeTab.id, query);
+        addQueryHistory(activeTab.id, sqlForDisplay(query, activeTab.engine));
 
         await runSqlQuery(connId, query);
 

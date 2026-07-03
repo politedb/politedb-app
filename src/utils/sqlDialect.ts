@@ -453,15 +453,130 @@ function toHexUtf8(value: string) {
     .join("");
 }
 
-export function sqlStringLiteral(value: unknown, engine?: DatabaseEngine) {
-  const text = String(value);
-  if (isMysqlFamilyEngine(engine)) {
-    return `CONVERT(UNHEX('${toHexUtf8(text)}') USING utf8mb4)`;
+function decodeUtf8Hex(hex: string) {
+  if (!hex) return "";
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
+  return new TextDecoder().decode(bytes);
+}
+
+/** Shared collation for MySQL string literals and comparisons (avoids 8.0 default vs legacy column mix). */
+export const MYSQL_UTF8MB4_COLLATION = "utf8mb4_unicode_ci";
+
+export function mysqlStringCompareExpr(expr: string) {
+  return `CONVERT(${expr} USING utf8mb4) COLLATE ${MYSQL_UTF8MB4_COLLATION}`;
+}
+
+const MYSQL_HEX_LITERAL_RE =
+  /CONVERT\s*\(\s*UNHEX\s*\(\s*'([0-9a-fA-F]*)'\s*\)\s+USING\s+utf8mb4\s*\)(?:\s+COLLATE\s+[\w_]+)?/gi;
+const POSTGRES_DECODE_HEX_RE =
+  /decode\s*\(\s*'([0-9a-fA-F]*)'\s*,\s*'hex'\s*\)/gi;
+const ORACLE_HEX_TO_RAW_RE = /HEXTORAW\s*\(\s*'([0-9a-fA-F]*)'\s*\)/gi;
+const MYSQL_BLOB_LITERAL_RE = /\bX'([0-9a-fA-F]*)'/gi;
+const SQLSERVER_HEX_LITERAL_RE = /\b0x([0-9a-fA-F]+)\b/g;
+const SQLSERVER_UNICODE_LITERAL_RE = /\bN'((?:''|[^'])*)'/g;
+
+/** Human-readable quoted literal for UI preview and SQL history. */
+export function sqlQuotedStringLiteral(
+  value: unknown,
+  engine?: DatabaseEngine
+) {
+  const text = String(value);
   if (isSqlServerEngine(engine)) {
     return `N'${text.replace(/'/g, "''")}'`;
   }
   return `'${text.replace(/'/g, "''")}'`;
+}
+
+function sqlDisplayQuotedLiteral(value: unknown) {
+  const text = String(value);
+  return `'${text.replace(/'/g, "''")}'`;
+}
+
+function hexBytesToDisplayLiteral(hex: string) {
+  if (!hex) return "''";
+  const text = decodeUtf8Hex(hex);
+  if (text && /^[\t\n\r\x20-\x7E\u0080-\uFFFF]*$/.test(text)) {
+    return sqlDisplayQuotedLiteral(text);
+  }
+  return `'${hex.toLowerCase()}'`;
+}
+
+function replaceMysqlStringCompareExprs(sql: string) {
+  return sql.replace(
+    new RegExp(
+      `CONVERT\\s*\\(\\s*(\`(?:[^\`]|\\\\\`)*\`)\\s+USING\\s+utf8mb4\\s*\\)\\s+COLLATE\\s+${MYSQL_UTF8MB4_COLLATION}`,
+      "gi"
+    ),
+    "$1"
+  );
+}
+
+function replaceMysqlHexLiterals(sql: string) {
+  return sql.replace(MYSQL_HEX_LITERAL_RE, (_, hex: string) =>
+    sqlDisplayQuotedLiteral(decodeUtf8Hex(hex))
+  );
+}
+
+function replacePostgresHexLiterals(sql: string) {
+  return sql.replace(POSTGRES_DECODE_HEX_RE, (_, hex: string) =>
+    hexBytesToDisplayLiteral(hex)
+  );
+}
+
+function replaceOracleHexLiterals(sql: string) {
+  return sql.replace(ORACLE_HEX_TO_RAW_RE, (_, hex: string) =>
+    hexBytesToDisplayLiteral(hex)
+  );
+}
+
+function replaceMysqlBlobLiterals(sql: string) {
+  return sql.replace(MYSQL_BLOB_LITERAL_RE, (_, hex: string) =>
+    hexBytesToDisplayLiteral(hex)
+  );
+}
+
+function replaceSqlServerLiterals(sql: string) {
+  return sql
+    .replace(SQLSERVER_UNICODE_LITERAL_RE, (_, inner: string) => `'${inner}'`)
+    .replace(SQLSERVER_HEX_LITERAL_RE, (_, hex: string) =>
+      hexBytesToDisplayLiteral(hex)
+    );
+}
+
+/** Rewrites engine-specific encoded literals into normal quoted strings for display. */
+export function sqlForDisplay(sql: string, engine?: DatabaseEngine) {
+  let out = sql;
+
+  if (!engine || isMysqlFamilyEngine(engine)) {
+    out = replaceMysqlHexLiterals(out);
+    out = replaceMysqlBlobLiterals(out);
+    out = replaceMysqlStringCompareExprs(out);
+  }
+
+  if (!engine || engine === "postgres") {
+    out = replacePostgresHexLiterals(out);
+  }
+
+  if (!engine || engine === "oracle") {
+    out = replaceOracleHexLiterals(out);
+  }
+
+  if (!engine || isSqlServerEngine(engine)) {
+    out = replaceSqlServerLiterals(out);
+  }
+
+  return out;
+}
+
+export function sqlStringLiteral(value: unknown, engine?: DatabaseEngine) {
+  const text = String(value);
+  if (isMysqlFamilyEngine(engine)) {
+    return `CONVERT(UNHEX('${toHexUtf8(text)}') USING utf8mb4) COLLATE ${MYSQL_UTF8MB4_COLLATION}`;
+  }
+  return sqlQuotedStringLiteral(text, engine);
 }
 
 export function normalizeJsonValue(value: unknown): string {

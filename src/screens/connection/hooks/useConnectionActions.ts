@@ -25,6 +25,7 @@ import {
   type PatchMap,
 } from "src/utils/generateSql";
 import { runSqlTransaction } from "src/utils/sqlTransaction";
+import { sqlForDisplay } from "src/utils/sqlDialect";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
@@ -617,7 +618,10 @@ export function useConnectionActions(
           for (const statement of statements) {
             useConnectionStore
               .getState()
-              .addQueryHistory(activeProfileScreen, statement);
+              .addQueryHistory(
+                activeProfileScreen,
+                sqlForDisplay(statement, engine ?? undefined)
+              );
           }
         },
         run: async (stmt) => {

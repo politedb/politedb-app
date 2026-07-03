@@ -22,6 +22,8 @@ import {
 import { getErrorMessage } from "src/lib/table-data/helpers";
 import { patchMeta } from "src/lib/table-data/metaPatch";
 import type { LoadFlags, TablePagination } from "src/lib/table-data";
+import { sqlForDisplay } from "src/utils/sqlDialect";
+import type { DatabaseEngine } from "src/types";
 
 export { tableKey, DEFAULT_LIMIT, DEFAULT_OFFSET } from "src/lib/table-data";
 export type { LoadFlags, TablePagination } from "src/lib/table-data";
@@ -49,9 +51,9 @@ export function useLoadTableData() {
   }, [profileTabs, activeProfileScreen]);
 
   const addLogQuery = useCallback(
-    (sql: string) => {
+    (sql: string, engine?: DatabaseEngine) => {
       if (!activeTab) return;
-      addQueryHistory(activeTab.id, sql);
+      addQueryHistory(activeTab.id, sqlForDisplay(sql, engine));
     },
     [activeTab, addQueryHistory]
   );

@@ -1040,6 +1040,7 @@ export function MainTableDataPane(props: {
                 tableKey={activeKey}
                 schema={activeTableWindow.table.schema}
                 tableName={activeTableWindow.table.name}
+                engine={engine}
                 columns={tableColumns}
                 filters={filters}
                 filterCombine={filterCombine}

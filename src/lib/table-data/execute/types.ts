@@ -21,7 +21,7 @@ export type LoadExecutionContext = {
   setMeta: (key: string, patch: any) => void;
   setColumnsCache: (key: string, cols: any) => void;
   setSizeInfoCache: (key: string, info: any) => void;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 };
 
 export type LoadExecutionResult = "done" | "continue_sql";

@@ -19,6 +19,7 @@ import { highlightSql } from "src/screens/connection/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
 import { buildPatchDiffs } from "src/utils/patchDiff";
+import { sqlForDisplay } from "src/utils/sqlDialect";
 import { cn } from "src/utils/cn";
 
 type ChangeSummary = {
@@ -184,6 +185,11 @@ export function SaveChangesDialog({
     const patchSql = summary.sqlStatements;
     return [...(newTableSql || []), ...patchSql];
   }, [summary.sqlStatements, newTableSql]);
+
+  const displaySqlStatements = useMemo(
+    () => allSqlStatements.map((sql) => sqlForDisplay(sql, engine)),
+    [allSqlStatements, engine]
+  );
 
   const rowDiffs = useMemo(
     () =>
@@ -352,7 +358,7 @@ export function SaveChangesDialog({
               </div>
             ) : (
               <div class="space-y-3">
-                {allSqlStatements.map((sql, index) => {
+                {displaySqlStatements.map((sql, index) => {
                   const sqlType = getSqlType(sql);
                   const borderColor = SQL_BORDER_COLORS[sqlType];
                   const copied = copiedIndex === index;

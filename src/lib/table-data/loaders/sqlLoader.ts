@@ -43,13 +43,13 @@ export async function loadColumns(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<ColumnRow[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
   const diagramQ = diagramTableColumnsQuery(schema, tableName, engine);
   const q = diagramQ ?? tableColumnsQuery(schema, tableName, engine);
   const res = await runSqlQuery(connId, q);
-  addLogQuery(q);
+  addLogQuery(q, engine);
 
   return (res.rows as unknown[][])
     .map((r) => {
@@ -108,7 +108,7 @@ export async function loadRowCount(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   exact?: boolean;
@@ -133,7 +133,7 @@ async function loadRowCountOnce(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   exact?: boolean;
@@ -160,7 +160,7 @@ async function loadRowCountOnce(params: {
     const estQ = estimatedQ;
     try {
       const estRes = await runSqlQuery(connId, estQ);
-      addLogQuery(estQ);
+      addLogQuery(estQ, engine);
       const estimatedValue = Number(
         cellToString((estRes.rows as unknown[][])?.[0]?.[0])
       );
@@ -173,7 +173,7 @@ async function loadRowCountOnce(params: {
           engine
         );
         const exactRes = await runSqlQuery(connId, exactQ);
-        addLogQuery(exactQ);
+        addLogQuery(exactQ, engine);
         return {
           value: Number(cellToString((exactRes.rows as unknown[][])?.[0]?.[0])),
           estimated: false,
@@ -193,7 +193,7 @@ async function loadRowCountOnce(params: {
     engine
   );
   const res = await runSqlQuery(connId, q);
-  addLogQuery(q);
+  addLogQuery(q, engine);
   return {
     value: Number(cellToString((res.rows as unknown[][])?.[0]?.[0])),
     estimated: false,
@@ -205,7 +205,7 @@ export async function loadSizeInfo(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = inflightSizeInfoByKey.get(cacheKey);
@@ -233,7 +233,7 @@ async function loadSizeInfoOnce(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
   const q = tableSizeInfoQuery(schema, tableName, engine);
@@ -250,7 +250,7 @@ async function loadSizeInfoOnce(params: {
     }
     throw e;
   }
-  addLogQuery(q);
+  addLogQuery(q, engine);
 
   const r0 = (res.rows as unknown[][])?.[0] ?? [];
   const useByteFormatter = engine !== "postgres";
@@ -272,7 +272,7 @@ export async function loadMeta(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<{ structure: any[]; constraints: any[] }> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
@@ -285,8 +285,8 @@ export async function loadMeta(params: {
       runSqlQuery(connId, qConstraints),
     ]);
 
-    addLogQuery(qStructure);
-    addLogQuery(qConstraints);
+    addLogQuery(qStructure, engine);
+    addLogQuery(qConstraints, engine);
 
     const structure = (structureRes.rows as unknown[][]).map((row) => ({
       column_name: cellToString(row?.[1]),
@@ -325,8 +325,8 @@ export async function loadMeta(params: {
       runSqlQuery(connId, qConstraints),
     ]);
 
-    addLogQuery(qStructure);
-    addLogQuery(qConstraints);
+    addLogQuery(qStructure, engine);
+    addLogQuery(qConstraints, engine);
 
     const structure = (structureRes.rows as unknown[][]).map((row) => ({
       column_name: cellToString(row?.[1]),
@@ -361,8 +361,8 @@ export async function loadMeta(params: {
       runSqlQuery(connId, qConstraints),
     ]);
 
-    addLogQuery(qStructure);
-    addLogQuery(qConstraints);
+    addLogQuery(qStructure, engine);
+    addLogQuery(qConstraints, engine);
 
     const structure = (structureRes.rows as unknown[][]).map((row) => ({
       column_name: cellToString(row?.[1]),
@@ -390,7 +390,7 @@ export async function loadMeta(params: {
 
   const qOid = tableOidQuery(schema, tableName, engine);
   const oidRes = await runSqlQuery(connId, qOid);
-  addLogQuery(qOid);
+  addLogQuery(qOid, engine);
   const oid = Number(cellToString((oidRes.rows as unknown[][])?.[0]?.[0]));
 
   const qStructure = tableStructuresQuery(schema, tableName, oid, engine);
@@ -401,8 +401,8 @@ export async function loadMeta(params: {
     runSqlQuery(connId, qConstraints),
   ]);
 
-  addLogQuery(qStructure);
-  addLogQuery(qConstraints);
+  addLogQuery(qStructure, engine);
+  addLogQuery(qConstraints, engine);
 
   const structure = (structureRes.rows as unknown[][]).map((row) => ({
     column_name: cellToString(row?.[1]),
@@ -433,7 +433,7 @@ export async function loadForeignKeys(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<any[]> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
   const inflight = inflightForeignKeysByKey.get(cacheKey);
@@ -455,7 +455,7 @@ async function loadForeignKeysOnce(params: {
   schema: string;
   tableName: string;
   engine?: DatabaseEngine;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
 }): Promise<any[]> {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
@@ -471,7 +471,7 @@ async function loadForeignKeysOnce(params: {
 
   const qFk = tableForeignKeysQuery(schema, tableName, engine);
   const fkRes = await runSqlQuery(connId, qFk);
-  addLogQuery(qFk);
+  addLogQuery(qFk, engine);
 
   return (fkRes.rows as unknown[][]).map((row) => ({
     constraint_name: cellToString(row?.[0]),
@@ -494,7 +494,7 @@ export async function startRowsStream(params: {
   engine?: DatabaseEngine;
   limit: number;
   offset: number;
-  addLogQuery: (sql: string) => void;
+  addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
   resetCache?: boolean;
   forceRefresh?: boolean;
   filters?: TableFilterCondition[];
@@ -535,7 +535,7 @@ export async function startRowsStream(params: {
   }
 
   const streamTask = (async () => {
-    addLogQuery(q);
+    addLogQuery(q, engine);
 
     const store = useConnectionStore.getState();
 

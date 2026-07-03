@@ -4,6 +4,7 @@ import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { PlusIcon, ChevronDownIcon, MinusIcon } from "src/components/icons";
 import type { ColumnMeta } from "src/lib/tauri/types";
+import type { DatabaseEngine } from "src/types";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import {
   FILTER_OPERATORS,
@@ -14,6 +15,7 @@ import {
   tableDataQuery,
 } from "src/lib/queries/sql";
 import { cn } from "src/utils/cn";
+import { sqlForDisplay } from "src/utils/sqlDialect";
 import { Input } from "src/components/common/Input";
 import { Checkbox } from "src/components/common/Checkbox";
 
@@ -21,6 +23,7 @@ interface TableFilterBarProps {
   tableKey: string;
   schema: string;
   tableName: string;
+  engine?: DatabaseEngine;
   columns: ColumnMeta[];
   filters: TableFilterCondition[];
   filterCombine: "AND" | "OR";
@@ -51,6 +54,7 @@ export function TableFilterBar({
   tableKey,
   schema,
   tableName,
+  engine,
   columns,
   filters,
   filterCombine,
@@ -142,15 +146,28 @@ export function TableFilterBar({
   const currentSql = useMemo(() => {
     const enabled = filters.filter((f) => f.enabled && (f.column ?? "").trim());
     if (enabled.length === 0) return null;
-    return tableDataQuery(
-      schema,
-      tableName,
-      { limit, offset },
-      filters,
-      filterCombine,
-      sortState
+    return sqlForDisplay(
+      tableDataQuery(
+        schema,
+        tableName,
+        { limit, offset },
+        filters,
+        filterCombine,
+        sortState,
+        engine
+      ),
+      engine
     );
-  }, [schema, tableName, limit, offset, filters, filterCombine, sortState]);
+  }, [
+    schema,
+    tableName,
+    engine,
+    limit,
+    offset,
+    filters,
+    filterCombine,
+    sortState,
+  ]);
 
   useEffect(() => {
     if (filters.length > 0) return;
