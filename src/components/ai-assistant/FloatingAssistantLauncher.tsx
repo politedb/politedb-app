@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { AiAssistantPanel } from "src/components/ai-assistant/AiAssistantPanel";
 import { SparklesIcon } from "src/components/icons";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
@@ -7,11 +7,22 @@ import { Button } from "../common/Button";
 
 export const OPEN_FLOATING_ASSISTANT_EVENT = "politedb-open-floating-assistant";
 
-export function FloatingAssistantLauncher(props: { disabled?: boolean }) {
-  const { disabled = false } = props;
+export function FloatingAssistantLauncher(props: {
+  aiLocked?: boolean;
+  onOpenLicense?: () => void;
+}) {
+  const { aiLocked = false, onOpenLicense } = props;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const context = useFloatingAssistantStore((state) => state.context);
+
+  const openAssistant = useCallback(() => {
+    if (aiLocked) {
+      onOpenLicense?.();
+      return;
+    }
+    setOpen(true);
+  }, [aiLocked, onOpenLicense]);
 
   useEffect(() => {
     if (!open) return;
@@ -41,17 +52,15 @@ export function FloatingAssistantLauncher(props: { disabled?: boolean }) {
   }, [open]);
 
   useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+    if (aiLocked) setOpen(false);
+  }, [aiLocked]);
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
+    const onOpen = () => openAssistant();
     window.addEventListener(OPEN_FLOATING_ASSISTANT_EVENT, onOpen);
     return () =>
       window.removeEventListener(OPEN_FLOATING_ASSISTANT_EVENT, onOpen);
-  }, []);
-
-  if (disabled) return null;
+  }, [openAssistant]);
 
   const chatSessionKey = context?.scopeKey ?? "global-ai-assistant";
 
@@ -61,7 +70,7 @@ export function FloatingAssistantLauncher(props: { disabled?: boolean }) {
         <div
           class={cn(
             "flex overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl",
-            "h-[min(680px,calc(100vh-48px))] w-[560px]",
+            "h-[min(680px,calc(100vh-48px))] w-140",
             "max-sm:fixed max-sm:inset-3 max-sm:h-auto max-sm:w-auto"
           )}
           role="dialog"
@@ -90,9 +99,13 @@ export function FloatingAssistantLauncher(props: { disabled?: boolean }) {
         <Button
           variant="default"
           class="ml-auto rounded-full bg-blue-600 p-3 text-sm font-semibold shadow-xl transition-all hover:scale-105"
-          title="Open AI assistant"
-          aria-label="Open AI assistant"
-          onClick={() => setOpen(true)}
+          title={
+            aiLocked ? "Activate a license to use AI" : "Open AI assistant"
+          }
+          aria-label={
+            aiLocked ? "Activate a license to use AI" : "Open AI assistant"
+          }
+          onClick={openAssistant}
         >
           <SparklesIcon className="size-5" />
         </Button>

@@ -4,7 +4,6 @@ import { AppHeader } from "src/components/AppHeader";
 import { ConnectionScreen } from "src/screens/connection/ConnectionScreen";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
-import { TrialExpiredOverlay } from "src/screens/main/TrialExpiredOverlay";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { trackScreenView } from "src/lib/analytics";
 import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
@@ -52,7 +51,7 @@ export function MainLayout() {
     const expiresAt = Number(licenseState?.trial_expires_at ?? 0);
     return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
   }, [licenseState?.trial_expires_at, now]);
-  const isAppLocked = licenseLoaded && !isLicenseActive && isTrialExpired;
+  const isAiLocked = licenseLoaded && !isLicenseActive && isTrialExpired;
 
   return (
     <div class="app-header flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50 select-none">
@@ -65,21 +64,12 @@ export function MainLayout() {
         {activeProfileScreen === "main" && <MainScreen />}
         {activeTab && <ConnectionScreen />}
       </div>
-      <FloatingAssistantLauncher disabled={isAppLocked} />
+      <FloatingAssistantLauncher
+        aiLocked={isAiLocked}
+        onOpenLicense={() => setLicenseOpen(true)}
+      />
       <UnsavedChangesDialogHost />
-
-      {isAppLocked ? (
-        <>
-          <TrialExpiredOverlay
-            state={licenseState}
-            onOpenLicense={() => setLicenseOpen(true)}
-          />
-          <LicenseDialog
-            open={licenseOpen}
-            onClose={() => setLicenseOpen(false)}
-          />
-        </>
-      ) : null}
+      <LicenseDialog open={licenseOpen} onClose={() => setLicenseOpen(false)} />
     </div>
   );
 }

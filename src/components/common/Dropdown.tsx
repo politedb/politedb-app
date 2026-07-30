@@ -3,10 +3,11 @@ import { useState } from "preact/hooks";
 import type { PopoverPosition } from "react-tiny-popover";
 import { Popover } from "./Popover";
 import { cn } from "src/utils/cn";
+import { ReactNode } from "preact/compat";
 
 export type DropdownItemConfig = {
   key?: string;
-  label: string;
+  label: ReactNode;
   icon?: JSX.Element;
   disabled?: boolean;
   rightSlot?: JSX.Element;
@@ -85,7 +86,7 @@ export function Dropdown(props: {
                   "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
                   item.className,
                   item.disabled
-                    ? "cursor-not-allowed opacity-50"
+                    ? "cursor-not-allowed opacity-58"
                     : "hover:bg-slate-50",
                   itemClassName
                 )}

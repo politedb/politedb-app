@@ -16,26 +16,6 @@ interface Props {
   dataReadOnly?: boolean;
 }
 
-function TabButton(props: {
-  active: boolean;
-  children: preact.ComponentChildren;
-}) {
-  return (
-    <button
-      type="button"
-      disabled
-      class={cn(
-        "rounded-md px-2 py-1 text-xs font-medium transition-colors",
-        props.active
-          ? "bg-blue-600 text-white"
-          : "text-neutral-600 hover:bg-neutral-100"
-      )}
-    >
-      {props.children}
-    </button>
-  );
-}
-
 function isJsonDataType(dataType?: string | null) {
   return /\bjsonb?\b/i.test(dataType ?? "");
 }
@@ -404,12 +384,6 @@ export function RightNav({
 }: Props) {
   return (
     <div class="flex h-full min-h-0 flex-col bg-neutral-100">
-      <div class="shrink-0 border-b border-neutral-200 px-2 py-2">
-        <div class="flex items-center justify-center gap-1">
-          <TabButton active={true}>Data Info</TabButton>
-        </div>
-      </div>
-
       <div class="min-h-0 flex-1 overflow-hidden">
         <DataInfoPane
           sizeInfo={sizeInfo}

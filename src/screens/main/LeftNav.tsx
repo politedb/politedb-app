@@ -1,16 +1,20 @@
 import {
   ClockIcon,
   DatabaseIcon,
+  HeartIcon,
   KeyIcon,
   SettingsIcon,
 } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
 import { useLicenseStore } from "src/stores/license";
+import { licenseOpenExternalUrl } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "../../components/common/Dropdown";
 import { useMemo, useState } from "preact/hooks";
 import { TagChips } from "../../components/common/TagChips";
+
+const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -74,6 +78,14 @@ export function LeftNav(props: {
       : `Free trial (${daysLeft} days left)`;
   }, [isLicenseActive, licenseState?.plan_name, trialExpiresAt]);
 
+  async function handleSponsor() {
+    try {
+      await licenseOpenExternalUrl(SPONSOR_URL);
+    } catch {
+      window.open(SPONSOR_URL, "_blank", "noopener,noreferrer");
+    }
+  }
+
   return (
     <aside
       class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50"
@@ -104,7 +116,7 @@ export function LeftNav(props: {
                   "transition-colors",
                   isActive
                     ? "bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-slate-200"
-                    : "text-slate-700 hover:bg-white/60 hover:text-slate-900",
+                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
                 ].join(" ")}
                 aria-current={isActive ? "page" : undefined}
               >
@@ -170,6 +182,7 @@ export function LeftNav(props: {
         )}
 
         <Dropdown
+          widthClassName="w-64"
           open={openSettings}
           onOpenChange={setOpenSettings}
           positions={["top", "left"]}
@@ -178,7 +191,7 @@ export function LeftNav(props: {
             <div className="flex items-center justify-between gap-2">
               <Button
                 variant="ghost"
-                className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm"
+                className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:border-slate-100 hover:bg-slate-100"
                 title="Settings"
                 onClick={() => setOpenSettings((v) => !v)}
               >
@@ -215,18 +228,31 @@ export function LeftNav(props: {
               className: "font-semibold",
             },
             {
+              label: (
+                <div className="flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-xs text-rose-500">
+                  <HeartIcon className="size-5 text-rose-400" />
+                  Sponsor
+                </div>
+              ),
+              onSelect: handleSponsor,
+              className: "font-semibold hover:bg-transparent! pb-1.5!",
+            },
+            {
               separatorBefore: true,
               label: "Privacy & Analytics",
               onSelect: onOpenPrivacy,
+              className: "py-1.5!",
             },
             {
               label: "License key",
               onSelect: onOpenLicense,
+              className: "py-1.5!",
             },
             {
               separatorBefore: true,
               label: "Keyboard shortcuts",
               onSelect: onOpenKeyboardShortcuts,
+              className: "py-1.5!",
             },
           ]}
         />
