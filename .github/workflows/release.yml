@@ -623,6 +623,53 @@ jobs:
           set -euo pipefail
           find src-tauri/target/release/bundle -maxdepth 5 -type f -print
 
+      - name: Build updater platform metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.os_label }}" in
+            linux) PLATFORM_KEY="linux-x86_64" ;;
+            windows) PLATFORM_KEY="windows-x86_64" ;;
+            *)
+              echo "Unsupported platform for updater metadata: ${{ matrix.os_label }}"
+              exit 1
+              ;;
+          esac
+
+          SIG_FILE="$(find "src-tauri/target/release/bundle" -type f -name '*.sig' -print | head -n 1)"
+          if [ -z "${SIG_FILE}" ] || [ ! -f "${SIG_FILE}" ]; then
+            echo "Missing updater signature under src-tauri/target/release/bundle"
+            exit 1
+          fi
+
+          UPDATE_FILE="${SIG_FILE%.sig}"
+          if [ ! -f "${UPDATE_FILE}" ]; then
+            echo "Missing updater artifact for signature: ${SIG_FILE}"
+            exit 1
+          fi
+
+          BASENAME="$(basename "${UPDATE_FILE}")"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          URL="https://github.com/${RELEASE_REPOSITORY}/releases/download/${TAG_NAME}/${BASENAME}"
+          SIGNATURE="$(tr -d '\n' < "${SIG_FILE}")"
+
+          cat > "updater-${{ matrix.os_label }}.json" <<EOF
+          {
+            "platforms": {
+              "${PLATFORM_KEY}": {
+                "url": "${URL}",
+                "signature": "${SIGNATURE}"
+              }
+            }
+          }
+          EOF
+
+      - name: Upload updater metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-${{ matrix.os_label }}
+          path: updater-${{ matrix.os_label }}.json
+
       - name: Upload Linux installers
         if: matrix.os_label == 'linux'
         uses: softprops/action-gh-release@v2
