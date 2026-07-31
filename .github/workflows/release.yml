@@ -1,12 +1,21 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, for example v0.18.0"
+        required: true
+        type: string
   push:
     tags:
       - "v*"
 
+env:
+  RELEASE_REPOSITORY: politedb/PoliteDB
+
 jobs:
-  release:
+  build-macos-installers:
     permissions:
       contents: write
     env:
@@ -14,7 +23,7 @@ jobs:
       VITE_ANALYTICS_DEBUG: "false"
       VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
       VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
-      VITE_LICENSE_API_BASE: ${{ vars.VITE_LICENSE_API_BASE }}
+      VITE_POLITEDB_API_BASE: ${{ vars.VITE_POLITEDB_API_BASE }}
       VITE_LICENSE_PRODUCT: ${{ vars.VITE_LICENSE_PRODUCT || 'politedb' }}
       BUNDLE_AI_ASSISTANT: ${{ vars.BUNDLE_AI_ASSISTANT || 'true' }}
       BUNDLE_AI_MODEL: ${{ vars.BUNDLE_AI_MODEL || 'false' }}
@@ -41,6 +50,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
 
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -74,7 +85,7 @@ jobs:
           echo "Analytics enabled: ${VITE_ANALYTICS_ENABLED:-<unset>}"
           echo "PostHog host set: $([ -n "${VITE_POSTHOG_HOST:-}" ] && echo yes || echo no)"
           echo "PostHog key set: $([ -n "${VITE_POSTHOG_KEY:-}" ] && echo yes || echo no)"
-          echo "License API base set: $([ -n "${VITE_LICENSE_API_BASE:-}" ] && echo yes || echo no)"
+          echo "PoliteDB API base set: $([ -n "${VITE_POLITEDB_API_BASE:-}" ] && echo yes || echo no)"
           echo "License product: ${VITE_LICENSE_PRODUCT:-<unset>}"
           echo "Bundle AI assistant: ${BUNDLE_AI_ASSISTANT:-false}"
           echo "Bundle AI model: ${BUNDLE_AI_MODEL:-false}"
@@ -85,6 +96,17 @@ jobs:
           echo "Apple API issuer set: $([ -n "${APPLE_API_ISSUER:-}" ] && echo yes || echo no)"
           echo "Apple team id set: $([ -n "${APPLE_TEAM_ID:-}" ] && echo yes || echo no)"
           echo "Apple API key content set: $([ -n "${APPLE_API_KEY_CONTENT:-}" ] && echo yes || echo no)"
+
+      - name: Validate distribution release token
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
 
       - name: Prepare Apple API key env
         if: env.APPLE_API_KEY_CONTENT != ''
@@ -406,7 +428,8 @@ jobs:
           fi
 
           BASENAME="$(basename "${UPDATE_FILE}")"
-          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${BASENAME}"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          URL="https://github.com/${RELEASE_REPOSITORY}/releases/download/${TAG_NAME}/${BASENAME}"
           SIGNATURE="$(tr -d '\n' < "${SIG_FILE}")"
 
           cat > "updater-${{ matrix.target }}.json" <<EOF
@@ -426,20 +449,226 @@ jobs:
           name: updater-${{ matrix.target }}
           path: updater-${{ matrix.target }}.json
 
-      - name: Upload Release
+      - name: Upload macOS installers
         uses: softprops/action-gh-release@v2
         with:
+          repository: ${{ env.RELEASE_REPOSITORY }}
+          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
           files: |
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz
             src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
 
+  build-linux-windows-installers:
+    permissions:
+      contents: write
+    env:
+      VITE_ANALYTICS_ENABLED: ${{ vars.VITE_ANALYTICS_ENABLED }}
+      VITE_ANALYTICS_DEBUG: "false"
+      VITE_POSTHOG_HOST: ${{ vars.VITE_POSTHOG_HOST }}
+      VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
+      VITE_POLITEDB_API_BASE: ${{ vars.VITE_POLITEDB_API_BASE }}
+      VITE_LICENSE_PRODUCT: ${{ vars.VITE_LICENSE_PRODUCT || 'politedb' }}
+      BUNDLE_AI_ASSISTANT: ${{ vars.BUNDLE_AI_ASSISTANT || 'true' }}
+      BUNDLE_AI_MODEL: ${{ vars.BUNDLE_AI_MODEL || 'false' }}
+      AI_MODEL_REPO: ${{ vars.AI_MODEL_REPO || 'Qwen/Qwen2.5-Coder-7B-Instruct-GGUF' }}
+      AI_MODEL_PATTERN: ${{ vars.AI_MODEL_PATTERN || 'qwen2.5-coder-7b-instruct-q4_k_m*.gguf' }}
+      AI_LLAMA_REF: ${{ vars.AI_LLAMA_REF || 'master' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            os_label: linux
+          - platform: windows-latest
+            os_label: windows
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref }}
+
+      - name: Install Linux dependencies
+        if: matrix.os_label == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Setup Python
+        if: env.BUNDLE_AI_ASSISTANT == 'true' && env.BUNDLE_AI_MODEL == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install AI build dependencies
+        if: env.BUNDLE_AI_ASSISTANT == 'true' && env.BUNDLE_AI_MODEL == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip huggingface_hub[cli]
+
+      - name: Validate updater signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "Missing required secret: TAURI_SIGNING_PRIVATE_KEY"
+            exit 1
+          fi
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Validate distribution release token
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+
+      - name: Print build env summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Platform: ${{ matrix.os_label }}"
+          echo "Analytics enabled: ${VITE_ANALYTICS_ENABLED:-<unset>}"
+          echo "PostHog host set: $([ -n "${VITE_POSTHOG_HOST:-}" ] && echo yes || echo no)"
+          echo "PostHog key set: $([ -n "${VITE_POSTHOG_KEY:-}" ] && echo yes || echo no)"
+          echo "PoliteDB API base set: $([ -n "${VITE_POLITEDB_API_BASE:-}" ] && echo yes || echo no)"
+          echo "License product: ${VITE_LICENSE_PRODUCT:-<unset>}"
+          echo "Bundle AI assistant: ${BUNDLE_AI_ASSISTANT:-false}"
+          echo "Bundle AI model: ${BUNDLE_AI_MODEL:-false}"
+          echo "AI model repo: ${AI_MODEL_REPO:-<unset>}"
+          echo "AI model pattern: ${AI_MODEL_PATTERN:-<unset>}"
+          echo "AI llama ref: ${AI_LLAMA_REF:-<unset>}"
+          echo "Tauri updater signing key set: $([ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && echo yes || echo no)"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Download bundled AI runtime
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MODEL_REPO: ${{ env.AI_MODEL_REPO }}
+          MODEL_PATTERN: ${{ env.AI_MODEL_PATTERN }}
+          LLAMA_REF: ${{ env.AI_LLAMA_REF }}
+          DOWNLOAD_MODEL: ${{ env.BUNDLE_AI_MODEL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/setup_llama_runtime.sh
+          chmod +x ./scripts/download_default_ai_runtime.sh
+          ./scripts/download_default_ai_runtime.sh
+
+      - name: Verify bundled AI assets
+        if: env.BUNDLE_AI_ASSISTANT == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.os_label }}" in
+            linux)
+              test -f src-tauri/resources/ai/bin/linux/llama-server
+              ls -lh src-tauri/resources/ai/bin/linux/llama-server
+              find src-tauri/resources/ai/bin/linux -type f \( -name '*.so' -o -name '*.dll' \) -print
+              ;;
+            windows)
+              test -f src-tauri/resources/ai/bin/windows/llama-server.exe
+              ls -lh src-tauri/resources/ai/bin/windows/llama-server.exe
+              find src-tauri/resources/ai/bin/windows -type f \( -name '*.dll' -o -name '*.so' \) -print
+              ;;
+          esac
+          if [ "${BUNDLE_AI_MODEL}" = "true" ]; then
+            test -f src-tauri/resources/ai/models/default.gguf
+            ls -lh src-tauri/resources/ai/models/default.gguf
+          else
+            echo "Skipping bundled model verification"
+          fi
+
+      - name: Build Tauri installers
+        env:
+          NODE_ENV: production
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build
+
+      - name: List bundle artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          find src-tauri/target/release/bundle -maxdepth 5 -type f -print
+
+      - name: Upload Linux installers
+        if: matrix.os_label == 'linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASE_REPOSITORY }}
+          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.tar.gz
+            src-tauri/target/release/bundle/**/*.sig
+
+      - name: Upload Windows installers
+        if: matrix.os_label == 'windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASE_REPOSITORY }}
+          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.zip
+            src-tauri/target/release/bundle/**/*.sig
+
   publish-latest-json:
-    needs: release
+    needs:
+      - build-macos-installers
+      - build-linux-windows-installers
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Validate distribution release token
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+
       - name: Download updater metadata artifacts
         uses: actions/download-artifact@v4
         with:
@@ -451,7 +680,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          VERSION="${TAG_NAME#v}"
           PUB_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
           jq -s --arg version "${VERSION}" --arg pub_date "${PUB_DATE}" '
@@ -468,5 +698,7 @@ jobs:
       - name: Upload latest.json to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          repository: ${{ env.RELEASE_REPOSITORY }}
+          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
           files: latest.json
