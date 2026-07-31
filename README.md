@@ -200,7 +200,7 @@ Common hosts:
 The desktop app includes an app-side license flow for per-device activation.
 
 ```bash
-VITE_LICENSE_API_BASE=https://your-license-api.example.com
+VITE_POLITEDB_API_BASE=https://your-backend-api.example.com
 VITE_LICENSE_PRODUCT=politedb
 ```
 

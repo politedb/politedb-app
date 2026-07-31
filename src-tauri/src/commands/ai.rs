@@ -1,8 +1,8 @@
-use tauri::AppHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tauri::AppHandle;
 
-use crate::{ai_runtime, file_storage, security::secrets, state::AppState};
+use crate::{ai_runtime, file_storage, license, security::secrets, state::AppState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,7 +110,11 @@ fn normalize_provider(mut config: AiProviderConfig) -> Result<AiProviderConfig, 
     if config.base_url.is_none() {
         if let Some(host) = config.host.as_deref() {
             let sub_path = config.sub_path.as_deref().unwrap_or("");
-            config.base_url = Some(format!("{host}{sub_path}").trim_end_matches('/').to_string());
+            config.base_url = Some(
+                format!("{host}{sub_path}")
+                    .trim_end_matches('/')
+                    .to_string(),
+            );
         }
     }
     if config.id.is_empty() {
@@ -123,7 +127,10 @@ fn normalize_provider(mut config: AiProviderConfig) -> Result<AiProviderConfig, 
         return Err("AI_PROVIDER_MODEL_REQUIRED".into());
     }
     if config.api_key_ref.is_none()
-        && !matches!(config.kind, AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama)
+        && !matches!(
+            config.kind,
+            AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama
+        )
     {
         config.api_key_ref = Some(provider_key(&config.id));
     }
@@ -139,14 +146,13 @@ fn find_provider(app: &AppHandle, provider_id: &str) -> Result<AiProviderConfig,
 }
 
 fn api_key_for(app: &AppHandle, provider: &AiProviderConfig) -> Result<Option<String>, String> {
-    if matches!(provider.kind, AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama) {
+    if matches!(
+        provider.kind,
+        AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama
+    ) {
         return Ok(None);
     }
-    let key = provider
-        .api_key_ref
-        .as_deref()
-        .unwrap_or("")
-        .trim();
+    let key = provider.api_key_ref.as_deref().unwrap_or("").trim();
     if key.is_empty() {
         return Err("AI_PROVIDER_API_KEY_REF_MISSING".into());
     }
@@ -267,13 +273,17 @@ async fn complete_gemini(
     let contents: Vec<_> = request
         .messages
         .iter()
-        .map(|m| json!({
-            "role": if m.role == "assistant" { "model" } else { "user" },
-            "parts": [{ "text": m.content }]
-        }))
+        .map(|m| {
+            json!({
+                "role": if m.role == "assistant" { "model" } else { "user" },
+                "parts": [{ "text": m.content }]
+            })
+        })
         .collect();
     let res = http
-        .post(format!("{base}/models/{model}:generateContent?key={api_key}"))
+        .post(format!(
+            "{base}/models/{model}:generateContent?key={api_key}"
+        ))
         .json(&json!({
             "contents": contents,
             "generationConfig": {
@@ -350,7 +360,10 @@ pub fn ai_provider_list(app: AppHandle) -> Result<Vec<AiProviderConfig>, String>
 }
 
 #[tauri::command]
-pub fn ai_provider_save_config(app: AppHandle, config: AiProviderConfig) -> Result<AiProviderConfig, String> {
+pub fn ai_provider_save_config(
+    app: AppHandle,
+    config: AiProviderConfig,
+) -> Result<AiProviderConfig, String> {
     let config = normalize_provider(config)?;
     let mut file = load_provider_file(&app)?;
     file.providers.retain(|p| p.id != config.id);
@@ -368,14 +381,25 @@ pub fn ai_provider_delete(app: AppHandle, provider_id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn ai_provider_set_key(app: AppHandle, provider_id: String, api_key: String) -> Result<String, String> {
+pub fn ai_provider_set_key(
+    app: AppHandle,
+    provider_id: String,
+    api_key: String,
+) -> Result<String, String> {
     let key = provider_key(provider_id.trim());
     secrets::keychain_set(&app, &key, api_key.trim())?;
     Ok(key)
 }
 
 #[tauri::command]
-pub async fn ai_chat_complete(app: AppHandle, request: AiChatCompleteRequest) -> Result<String, String> {
+pub async fn ai_chat_complete(
+    app: AppHandle,
+    request: AiChatCompleteRequest,
+) -> Result<String, String> {
+    let license_state = license::license_state_load(&app)?;
+    if license::blocks_ai_feature(&license_state) {
+        return Err("AI_LICENSE_REQUIRED".into());
+    }
     let provider = find_provider(&app, &request.provider_id)?;
     if !provider.enabled {
         return Err("AI_PROVIDER_DISABLED".into());
@@ -384,10 +408,22 @@ pub async fn ai_chat_complete(app: AppHandle, request: AiChatCompleteRequest) ->
     let http = reqwest::Client::new();
     let text = match provider.kind {
         AiProviderKind::Anthropic => {
-            complete_anthropic(&http, &provider, api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?, &request).await?
+            complete_anthropic(
+                &http,
+                &provider,
+                api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?,
+                &request,
+            )
+            .await?
         }
         AiProviderKind::Gemini => {
-            complete_gemini(&http, &provider, api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?, &request).await?
+            complete_gemini(
+                &http,
+                &provider,
+                api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?,
+                &request,
+            )
+            .await?
         }
         AiProviderKind::Openai
         | AiProviderKind::Openrouter

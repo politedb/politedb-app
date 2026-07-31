@@ -85,9 +85,10 @@ function normalizeSession(scopeKey: string, raw: any): AiChatSession {
 function loadPersistedSessions(chatSessionKey: string) {
   const memory = aiChatSessionMap.get(chatSessionKey);
   if (memory) {
+    const fallbackId = memory[0]?.id ?? null;
     return {
       sessions: memory,
-      activeSessionId: memory[0]?.id ?? null,
+      activeSessionId: fallbackId,
     };
   }
 
@@ -109,12 +110,18 @@ function loadPersistedSessions(chatSessionKey: string) {
       .sort((a: AiChatSession, b: AiChatSession) => b.updatedAt - a.updatedAt)
       .slice(0, MAX_SESSIONS_PER_SCOPE);
     const fallback = sessions[0] ?? makeEmptySession(chatSessionKey);
+    const parsedActiveSessionId =
+      typeof parsed?.activeSessionId === "string"
+        ? parsed.activeSessionId
+        : null;
+    const activeSessionId = sessions.some(
+      (session: AiChatSession) => session.id === parsedActiveSessionId
+    )
+      ? parsedActiveSessionId
+      : fallback.id;
     return {
       sessions: sessions.length ? sessions : [fallback],
-      activeSessionId:
-        typeof parsed?.activeSessionId === "string"
-          ? parsed.activeSessionId
-          : fallback.id,
+      activeSessionId,
     };
   } catch {
     const session = makeEmptySession(chatSessionKey);
@@ -122,7 +129,11 @@ function loadPersistedSessions(chatSessionKey: string) {
   }
 }
 
-function persistSessions(chatSessionKey: string, sessions: AiChatSession[], activeSessionId: string) {
+function persistSessions(
+  chatSessionKey: string,
+  sessions: AiChatSession[],
+  activeSessionId: string
+) {
   const compact = sessions
     .map((session) => ({
       ...session,
@@ -272,7 +283,9 @@ export function useAiChatSession(chatSessionKey: string) {
 
   const updateStreamingAssistantText = (id: string, text: string) => {
     setActiveMessages((prev) =>
-      prev.map((message) => (message.id === id ? { ...message, text } : message))
+      prev.map((message) =>
+        message.id === id ? { ...message, text } : message
+      )
     );
   };
 

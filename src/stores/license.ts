@@ -8,7 +8,7 @@ import {
   licenseRefresh,
 } from "src/lib/tauri";
 
-const LICENSE_API_BASE = (import.meta.env.VITE_LICENSE_API_BASE ?? "").trim();
+const POLITEDB_API_BASE = (import.meta.env.VITE_POLITEDB_API_BASE ?? "").trim();
 const LICENSE_PRODUCT = (
   import.meta.env.VITE_LICENSE_PRODUCT ?? "politedb"
 ).trim();
@@ -37,9 +37,9 @@ function hasActivationData(state?: LicenseState | null) {
 }
 
 async function refreshLicenseSilently() {
-  if (!LICENSE_API_BASE) return null;
+  if (!POLITEDB_API_BASE) return null;
   return licenseRefresh({
-    apiBase: LICENSE_API_BASE,
+    apiBase: POLITEDB_API_BASE,
     product: LICENSE_PRODUCT,
   });
 }
@@ -57,7 +57,7 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
       const state = await licenseStateLoad();
       set({ state, busy: false, loaded: true });
 
-      if (hasActivationData(state) && LICENSE_API_BASE) {
+      if (hasActivationData(state) && POLITEDB_API_BASE) {
         void refreshLicenseSilently()
           .then((next) => {
             if (!next) return;
@@ -76,7 +76,7 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const next = await licenseActivate({
-        apiBase: LICENSE_API_BASE,
+        apiBase: POLITEDB_API_BASE,
         product: LICENSE_PRODUCT,
         licenseKey,
       });
@@ -93,7 +93,7 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       const next = await licenseRefresh({
-        apiBase: LICENSE_API_BASE,
+        apiBase: POLITEDB_API_BASE,
         product: LICENSE_PRODUCT,
       });
       set({ state: next, busy: false, loaded: true });
@@ -112,7 +112,7 @@ export const useLicenseStore = create<LicenseStoreState>((set, get) => ({
       const cleared =
         current.license_key || current.activation_token
           ? await licenseDeactivate({
-              apiBase: LICENSE_API_BASE,
+              apiBase: POLITEDB_API_BASE,
               product: LICENSE_PRODUCT,
             })
           : await licenseStateClear();

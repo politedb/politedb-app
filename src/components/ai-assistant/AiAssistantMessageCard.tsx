@@ -1,7 +1,6 @@
 import { useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { CopyIcon, CopyCheckIcon } from "src/components/icons";
-import { runSqlQuery } from "src/lib/tauri/query";
 import type { ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 
@@ -86,12 +85,11 @@ export function AiAssistantMessageCard({
   message,
   presentation = "panel",
   onInsertSql,
-  runtimeConnectionId,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
   const [sqlRunState, setSqlRunState] = useState<
-    "idle" | "running" | "success" | "error" | "canceled"
+    "idle" | "inserted" | "canceled" | "error"
   >("idle");
   const [sqlRunMessage, setSqlRunMessage] = useState("");
   const previewColumns = getPreviewColumns(message.resultPreview);
@@ -127,19 +125,13 @@ export function AiAssistantMessageCard({
     window.setTimeout(() => setMessageCopied(false), 1500);
   };
 
-  const handleRunSql = async (sql: string) => {
-    if (!runtimeConnectionId) return;
-    setSqlRunState("running");
-    setSqlRunMessage("");
+  const handleInsertSql = async (sql: string) => {
+    if (!onInsertSql) return;
     try {
-      const result = await runSqlQuery(runtimeConnectionId, sql, {
-        maxRows: 200,
-        batchSize: 200,
-        timeoutMs: 45_000,
-      });
-      setSqlRunState("success");
+      await onInsertSql(sql);
+      setSqlRunState("inserted");
       setSqlRunMessage(
-        `Ran successfully. Returned ${Number(result.rowCount ?? result.rows?.length ?? 0)} row(s).`
+        "Inserted into SQL editor. Run it from the editor to apply the current safety policy."
       );
     } catch (error) {
       setSqlRunState("error");
@@ -277,19 +269,9 @@ export function AiAssistantMessageCard({
                           <Button
                             variant="default"
                             class="px-2 py-1"
-                            onClick={() => void onInsertSql(part.sql)}
+                            onClick={() => void handleInsertSql(part.sql)}
                           >
                             Insert
-                          </Button>
-                        ) : null}
-                        {runtimeConnectionId ? (
-                          <Button
-                            variant="outline"
-                            class="px-2 py-1"
-                            loading={sqlRunState === "running"}
-                            onClick={() => void handleRunSql(part.sql)}
-                          >
-                            Run
                           </Button>
                         ) : null}
                         <Button
@@ -332,7 +314,7 @@ export function AiAssistantMessageCard({
                             class={`mt-2 rounded-md border px-2 py-1 text-xs ${
                               sqlRunState === "error"
                                 ? "border-red-200 bg-red-50 text-red-700"
-                                : "border-green-200 bg-green-50 text-green-700"
+                                : "border-blue-200 bg-blue-50 text-blue-700"
                             }`}
                           >
                             {sqlRunMessage}

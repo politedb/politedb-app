@@ -9,6 +9,7 @@ import {
 import { formatJsonChunk, formatSqlChunk } from "src/utils/exportFormats";
 import { exportAppendToFile } from "src/lib/tauri/export";
 import { startSqlQueryStream } from "src/lib/tauri/query";
+import { operationCancel } from "src/lib/tauri";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { saveDialog } from "src/lib/system-dialog";
 import type { TableConstraint } from "src/types";
@@ -91,12 +92,7 @@ export function useExportTableData() {
   );
 
   const runStreamingExport = useCallback(
-    async (
-      path: string,
-      totalRows: number,
-      config: ExportConfig,
-      opts: ExportOptions
-    ) => {
+    async (path: string, config: ExportConfig, opts: ExportOptions) => {
       const {
         connectionId: connId,
         schema,
@@ -146,10 +142,13 @@ export function useExportTableData() {
       });
       let totalExported = 0;
       let isFirstChunk = true;
+      let fatalWriteError: string | null = null;
+      let unsub: (() => void) | null = null;
       setProgress({ exported: 0 });
 
-      await operationBus.subscribe(opId, {
+      unsub = await operationBus.subscribe(opId, {
         onChunk: async (chunk) => {
+          if (fatalWriteError) return;
           const rows = chunk.rows ?? [];
           if (rows.length === 0) return;
           const cols = chunk.columns?.map((c) => c.name) ?? columnNames;
@@ -177,13 +176,18 @@ export function useExportTableData() {
             await exportAppendToFile({
               path,
               content,
-              append: false,
+              append: !isFirstChunk,
             });
           } catch (e) {
-            setProgress((p) => ({
-              ...p!,
-              error: e instanceof Error ? e.message : "Write failed",
-            }));
+            fatalWriteError = e instanceof Error ? e.message : "Write failed";
+            setExporting(false);
+            setProgress({ exported: totalExported, error: fatalWriteError });
+            try {
+              unsub?.();
+            } catch {}
+            try {
+              await operationCancel(opId);
+            } catch {}
             return;
           }
 
@@ -192,10 +196,17 @@ export function useExportTableData() {
           isFirstChunk = false;
         },
         onDone: async () => {
+          if (fatalWriteError) {
+            setExporting(false);
+            setProgress({ exported: totalExported, error: fatalWriteError });
+            return;
+          }
           let content = "";
-          if (totalRows > 0 && format === "json") {
+          if (totalExported > 0 && format === "json") {
             content = "]";
-          } else if (format === "csv" && totalRows === 0) {
+          } else if (format === "json") {
+            content = "[]";
+          } else if (format === "csv" && totalExported === 0) {
             content = serializeCsvChunk(columnNames, [], opts.csvOptions, true);
           }
 
@@ -203,9 +214,16 @@ export function useExportTableData() {
             await exportAppendToFile({
               path,
               content,
-              append: totalRows > 0,
+              append: totalExported > 0,
             });
-          } catch {}
+          } catch (e) {
+            setExporting(false);
+            setProgress({
+              exported: totalExported,
+              error: e instanceof Error ? e.message : "Write failed",
+            });
+            return;
+          }
 
           setExporting(false);
           setProgress((p) =>
@@ -226,7 +244,7 @@ export function useExportTableData() {
   );
 
   const handleExport = useCallback(
-    async (tableName: string, totalRows: number, config: ExportConfig) => {
+    async (tableName: string, _totalRows: number, config: ExportConfig) => {
       const opts = {
         ...exportOptions,
         format,
@@ -244,7 +262,7 @@ export function useExportTableData() {
       setProgress({ exported: 0 });
 
       try {
-        await runStreamingExport(path, totalRows, config, opts);
+        await runStreamingExport(path, config, opts);
       } catch (err) {
         setProgress({
           exported: 0,
