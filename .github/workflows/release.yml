@@ -103,10 +103,12 @@ jobs:
           POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "${CLEAN_TOKEN}" ]; then
             echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
             exit 1
           fi
+          GH_TOKEN="${CLEAN_TOKEN}" gh api "repos/${RELEASE_REPOSITORY}" >/dev/null
 
       - name: Prepare Apple API key env
         if: env.APPLE_API_KEY_CONTENT != ''
@@ -450,15 +452,32 @@ jobs:
           path: updater-${{ matrix.target }}.json
 
       - name: Upload macOS installers
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASE_REPOSITORY }}
-          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
-          files: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
-            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.tar.gz
-            src-tauri/target/${{ matrix.target }}/release/bundle/**/*.sig
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          files=()
+          while IFS= read -r -d '' file; do
+            files+=("${file}")
+          done < <(find "src-tauri/target/${{ matrix.target }}/release/bundle" -type f \( -name '*.dmg' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
+
+          if [ -z "${CLEAN_TOKEN}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No macOS installers found to upload."
+            exit 1
+          fi
+
+          if ! GH_TOKEN="${CLEAN_TOKEN}" gh release view "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
+            GH_TOKEN="${CLEAN_TOKEN}" gh release create "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" --title "${TAG_NAME}" --generate-notes
+          fi
+
+          GH_TOKEN="${CLEAN_TOKEN}" gh release upload "${TAG_NAME}" "${files[@]}" --repo "${RELEASE_REPOSITORY}" --clobber
 
   build-linux-windows-installers:
     permissions:
@@ -482,7 +501,7 @@ jobs:
         include:
           - platform: ubuntu-22.04
             os_label: linux
-          - platform: windows-latest
+          - platform: windows-2022
             os_label: windows
 
     runs-on: ${{ matrix.platform }}
@@ -547,10 +566,12 @@ jobs:
           POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "${CLEAN_TOKEN}" ]; then
             echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
             exit 1
           fi
+          GH_TOKEN="${CLEAN_TOKEN}" gh api "repos/${RELEASE_REPOSITORY}" >/dev/null
 
       - name: Print build env summary
         shell: bash
@@ -672,30 +693,61 @@ jobs:
 
       - name: Upload Linux installers
         if: matrix.os_label == 'linux'
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASE_REPOSITORY }}
-          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
-          files: |
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.rpm
-            src-tauri/target/release/bundle/**/*.tar.gz
-            src-tauri/target/release/bundle/**/*.sig
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          files=()
+          while IFS= read -r -d '' file; do
+            files+=("${file}")
+          done < <(find "src-tauri/target/release/bundle" -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.sig' \) -print0)
+
+          if [ -z "${CLEAN_TOKEN}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Linux installers found to upload."
+            exit 1
+          fi
+
+          if ! GH_TOKEN="${CLEAN_TOKEN}" gh release view "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
+            GH_TOKEN="${CLEAN_TOKEN}" gh release create "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" --title "${TAG_NAME}" --generate-notes
+          fi
+
+          GH_TOKEN="${CLEAN_TOKEN}" gh release upload "${TAG_NAME}" "${files[@]}" --repo "${RELEASE_REPOSITORY}" --clobber
 
       - name: Upload Windows installers
         if: matrix.os_label == 'windows'
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASE_REPOSITORY }}
-          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
-          files: |
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.zip
-            src-tauri/target/release/bundle/**/*.sig
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+          files=()
+          while IFS= read -r -d '' file; do
+            files+=("${file}")
+          done < <(find "src-tauri/target/release/bundle" -type f \( -name '*.msi' -o -name '*.exe' -o -name '*.zip' -o -name '*.sig' \) -print0)
+
+          if [ -z "${CLEAN_TOKEN}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Windows installers found to upload."
+            exit 1
+          fi
+
+          if ! GH_TOKEN="${CLEAN_TOKEN}" gh release view "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
+            GH_TOKEN="${CLEAN_TOKEN}" gh release create "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" --title "${TAG_NAME}" --generate-notes
+          fi
+
+          GH_TOKEN="${CLEAN_TOKEN}" gh release upload "${TAG_NAME}" "${files[@]}" --repo "${RELEASE_REPOSITORY}" --clobber
 
   publish-latest-json:
     needs:
@@ -711,10 +763,12 @@ jobs:
           POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${POLITEDB_RELEASE_TOKEN:-}" ]; then
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -z "${CLEAN_TOKEN}" ]; then
             echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
             exit 1
           fi
+          GH_TOKEN="${CLEAN_TOKEN}" gh api "repos/${RELEASE_REPOSITORY}" >/dev/null
 
       - name: Download updater metadata artifacts
         uses: actions/download-artifact@v4
@@ -743,9 +797,22 @@ jobs:
           ' updater-metadata/*.json > latest.json
 
       - name: Upload latest.json to release
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: ${{ env.RELEASE_REPOSITORY }}
-          token: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
-          files: latest.json
+        shell: bash
+        env:
+          POLITEDB_RELEASE_TOKEN: ${{ secrets.POLITEDB_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          CLEAN_TOKEN="$(printf '%s' "${POLITEDB_RELEASE_TOKEN:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TAG_NAME="${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}"
+
+          if [ -z "${CLEAN_TOKEN}" ]; then
+            echo "Missing required secret: POLITEDB_RELEASE_TOKEN"
+            exit 1
+          fi
+          test -f latest.json
+
+          if ! GH_TOKEN="${CLEAN_TOKEN}" gh release view "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
+            GH_TOKEN="${CLEAN_TOKEN}" gh release create "${TAG_NAME}" --repo "${RELEASE_REPOSITORY}" --title "${TAG_NAME}" --generate-notes
+          fi
+
+          GH_TOKEN="${CLEAN_TOKEN}" gh release upload "${TAG_NAME}" latest.json --repo "${RELEASE_REPOSITORY}" --clobber
