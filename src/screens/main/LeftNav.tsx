@@ -7,12 +7,11 @@ import {
 } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
-import { useLicenseStore } from "src/stores/license";
 import { licenseOpenExternalUrl } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
-import { Dropdown } from "../../components/common/Dropdown";
-import { useMemo, useState } from "preact/hooks";
-import { TagChips } from "../../components/common/TagChips";
+import { Dropdown } from "src/components/common/Dropdown";
+import { useState } from "preact/hooks";
+// import { TagChips } from "src/components/common/TagChips";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 
@@ -43,40 +42,9 @@ export function LeftNav(props: {
 
   const { appVersion, updateAvailable, isInstallingUpdate, installUpdate } =
     useAppUpdater();
-  const licenseState = useLicenseStore((s) => s.state);
   const [openSettings, setOpenSettings] = useState(false);
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
-  const normalizedLicenseStatus = String(licenseState?.status ?? "")
-    .trim()
-    .toLowerCase();
-  const isLicenseActive = normalizedLicenseStatus === "active";
-  const trialExpiresAt =
-    typeof licenseState?.trial_expires_at === "number"
-      ? licenseState.trial_expires_at
-      : null;
-
-  const licensePlanLabel = useMemo(() => {
-    if (isLicenseActive) {
-      return `${licenseState?.plan_name?.trim() || "Licensed"} plan`;
-    }
-
-    if (!trialExpiresAt) {
-      return "Free trial";
-    }
-
-    const remainingMs = trialExpiresAt - Date.now();
-    if (remainingMs <= 0) {
-      return "Free trial expired";
-    }
-
-    const dayMs = 24 * 60 * 60 * 1000;
-    const daysLeft = Math.ceil(remainingMs / dayMs);
-
-    return daysLeft <= 1
-      ? "Free trial (1 days left)"
-      : `Free trial (${daysLeft} days left)`;
-  }, [isLicenseActive, licenseState?.plan_name, trialExpiresAt]);
 
   async function handleSponsor() {
     try {
@@ -199,7 +167,7 @@ export function LeftNav(props: {
                   <SettingsIcon className="size-4.5" />
                   Settings
                 </div>
-                {!isLicenseActive && (
+                {/* {!isLicenseActive && (
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
@@ -212,7 +180,7 @@ export function LeftNav(props: {
                       size="md"
                     />
                   </div>
-                )}
+                )} */}
               </Button>
             </div>
           }
@@ -222,11 +190,11 @@ export function LeftNav(props: {
               label: `About PoliteDB (v${appVersion}${envSuffix})`,
               disabled: true,
             },
-            {
-              label: licensePlanLabel,
-              disabled: true,
-              className: "font-semibold",
-            },
+            // {
+            //   label: licensePlanLabel,
+            //   disabled: true,
+            //   className: "font-semibold",
+            // },
             {
               label: (
                 <div className="flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-xs text-rose-500">

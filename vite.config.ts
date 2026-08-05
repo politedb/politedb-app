@@ -11,6 +11,7 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [preact(), tailwindcss()],
+  base: "./",
   test: {
     globals: true,
     environment: "jsdom",
@@ -18,12 +19,7 @@ export default defineConfig(async () => ({
     alias: {
       "monaco-editor": resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
     },
-    exclude: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/.tmp/**",
-      ".tmp/**",
-    ],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/.tmp/**", ".tmp/**"],
   },
   resolve: {
     alias: {

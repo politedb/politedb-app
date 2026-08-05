@@ -6,9 +6,9 @@ import { Button } from "../common/Button.tsx";
 import { DbIcon } from "../icons/DbIcon.tsx";
 import { SearchIcon, XIcon } from "../icons/index.tsx";
 
-import type { DatabaseEngine, DatabaseType } from "../../types.ts";
+import type { DatabaseEngine, DatabaseType } from "src/types.ts";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { SUPPORTED_DATABASES } from "../../constant.ts";
+import { SUPPORTED_DATABASES } from "src/constant.ts";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
