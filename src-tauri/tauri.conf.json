@@ -59,6 +59,9 @@
         }
       }
     },
+    "windows": {
+      "signCommand": "powershell -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 %1"
+    },
     "resources": ["resources/ai"],
     "category": "DeveloperTool"
   },
