@@ -376,8 +376,8 @@ export function KeychainSection(props: {
               Get
             </Button>
             <Button
-              variant="destructive"
-              className="py-1.5"
+              variant="outline"
+              className="border-rose-300 py-1.5 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
               onClick={() => void handleDelete()}
               loading={busy}
               disabled={!canSubmit}

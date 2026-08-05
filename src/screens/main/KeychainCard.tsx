@@ -78,10 +78,8 @@ export function KeychainCard(props: {
       <div
         role="button"
         tabIndex={0}
-        onClick={() => {
-          onSelect();
-          onOpen();
-        }}
+        onClick={onSelect}
+        onDblClick={onOpen}
         onContextMenu={(e) => {
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });

@@ -4,7 +4,6 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/modal/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
-import { KeyboardShortcutsDialog } from "src/components/modal/KeyboardShortcutsDialog";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { ImportConnectionPasswordDialog } from "src/components/modal/ImportConnectionPasswordDialog";
@@ -109,7 +108,6 @@ export function MainScreen() {
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [licenseOpen, setLicenseOpen] = useState(false);
-  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [importSourceDialogOpen, setImportSourceDialogOpen] = useState(false);
@@ -456,13 +454,7 @@ export function MainScreen() {
   return (
     <div class="flex h-full flex-col bg-neutral-50">
       <div class="flex min-h-0 flex-1 overflow-hidden">
-        <LeftNav
-          active={activeNav}
-          onChange={setActiveNav}
-          onOpenLicense={() => setLicenseOpen(true)}
-          onOpenPrivacy={() => setPrivacyOpen(true)}
-          onOpenKeyboardShortcuts={() => setKeyboardShortcutsOpen(true)}
-        />
+        <LeftNav active={activeNav} onChange={setActiveNav} />
 
         {/* Main column */}
         <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -580,10 +572,6 @@ export function MainScreen() {
         <LicenseDialog
           open={licenseOpen}
           onClose={() => setLicenseOpen(false)}
-        />
-        <KeyboardShortcutsDialog
-          open={keyboardShortcutsOpen}
-          onClose={() => setKeyboardShortcutsOpen(false)}
         />
         <NewConnectionGroupDialog
           open={newGroupOpen}
