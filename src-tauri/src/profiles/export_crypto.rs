@@ -4,7 +4,7 @@ use aes_gcm::{
 };
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use rand::RngCore;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
 pub const EXPORT_FORMAT: &str = "politedb_encrypted_export_v1";
@@ -32,13 +32,13 @@ pub fn encrypt_export_payload(plaintext: &str, password: &str) -> Result<String,
     validate_password(password)?;
 
     let mut salt = [0u8; SALT_LEN];
-    rand::thread_rng().fill_bytes(&mut salt);
+    rand::rng().fill(&mut salt);
 
     let key = derive_key(password, &salt)?;
     let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("EXPORT_CIPHER_INIT: {e}"))?;
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
