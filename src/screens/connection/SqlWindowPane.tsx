@@ -8,7 +8,7 @@ import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
-import type { QuerySafetyMode } from "src/lib/querySafety";
+import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 function makeSqlWindowScopeId(metaKey: string, windowId: string) {
   return `${metaKey || "sql"}:${windowId}`.replace(/[^a-zA-Z0-9._-]/g, "_");

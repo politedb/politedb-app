@@ -13,6 +13,7 @@ export function AiAssistantPanelHeader(props: {
   onLoadModels: () => void;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
+  onDownloadModel: () => void;
 }) {
   const {
     showSettings,
@@ -24,6 +25,7 @@ export function AiAssistantPanelHeader(props: {
     onLoadModels,
     onStartRuntime,
     onStopRuntime,
+    onDownloadModel,
   } = props;
 
   return (
@@ -59,6 +61,7 @@ export function AiAssistantPanelHeader(props: {
               onLoadModels={onLoadModels}
               onStartRuntime={onStartRuntime}
               onStopRuntime={onStopRuntime}
+              onDownloadModel={onDownloadModel}
             />
           </>
         ) : null}

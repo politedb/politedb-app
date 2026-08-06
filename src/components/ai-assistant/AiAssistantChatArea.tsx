@@ -1,5 +1,5 @@
 import type { Ref } from "preact";
-import { useRef, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantMessageCard";
 import { AiAssistantThinkingCard } from "src/components/ai-assistant/AiAssistantThinkingCard";
 import { Dropdown } from "src/components/common/Dropdown";
@@ -10,7 +10,6 @@ import {
   ChevronDownIcon,
   MinusIcon,
   MoreVerticalIcon,
-  PlusIcon,
   ShareIcon,
   SparklesIcon,
   VaultIcon,
@@ -23,12 +22,13 @@ import {
 } from "src/components/common/Dialog";
 import type { AssistantStatus } from "src/components/ai-assistant/hooks/useAiAssistantSubmit";
 import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
+import { normalizeLocalAiModelName } from "src/utils/assistant";
 import { cn } from "src/utils/cn";
 import { Button } from "../common/Button";
-import { MicIcon } from "../icons/Mic";
 import { CheckMarkIcon } from "../icons/CheckMark";
 
 export type AiContextKind = "connection" | "sql" | "metadata";
+export type AiModelSelectionMode = "auto" | "manual";
 
 export type AiContextOption = {
   id: AiContextKind;
@@ -48,6 +48,10 @@ function ProviderMark(props: { provider: AiProviderConfig }) {
       <VaultIcon className="size-4" />
     </span>
   );
+}
+
+function formatModelNameForDisplay(model: string) {
+  return normalizeLocalAiModelName(model);
 }
 
 function messageText(message: ChatMessage) {
@@ -70,6 +74,8 @@ function AiModelPicker(props: {
   providerModel: string;
   providerOptions: AiProviderConfig[];
   activeProviderId: string;
+  modelSelectionMode: AiModelSelectionMode;
+  onSelectAutoModel: () => void;
   onSelectProvider: (providerId: string) => void;
 }) {
   const {
@@ -77,6 +83,8 @@ function AiModelPicker(props: {
     providerModel,
     providerOptions,
     activeProviderId,
+    modelSelectionMode,
+    onSelectAutoModel,
     onSelectProvider,
   } = props;
   const [open, setOpen] = useState(false);
@@ -86,6 +94,8 @@ function AiModelPicker(props: {
   const activeProvider = enabledProviders.find(
     (provider) => provider.id === activeProviderId
   );
+  const activeModelLabel = formatModelNameForDisplay(providerModel);
+  const autoSelected = modelSelectionMode === "auto" || !activeProvider;
 
   return (
     <Popover
@@ -101,11 +111,14 @@ function AiModelPicker(props: {
           <button
             type="button"
             class="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-semibold text-neutral-900 hover:bg-neutral-100"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              onSelectAutoModel();
+              setOpen(false);
+            }}
           >
             <SparklesIcon className="size-4 text-neutral-700" />
             <span class="min-w-0 flex-1">Auto</span>
-            {!activeProvider ? (
+            {autoSelected ? (
               <CheckMarkIcon className="size-4 text-neutral-900" />
             ) : null}
           </button>
@@ -120,7 +133,9 @@ function AiModelPicker(props: {
           <div class="max-h-80 overflow-y-auto">
             {enabledProviders.length ? (
               enabledProviders.map((provider) => {
-                const active = provider.id === activeProviderId;
+                const active =
+                  modelSelectionMode === "manual" &&
+                  provider.id === activeProviderId;
                 return (
                   <button
                     key={provider.id}
@@ -137,7 +152,7 @@ function AiModelPicker(props: {
                     <ProviderMark provider={provider} />
                     <span class="min-w-0 flex-1">
                       <span class="block truncate">
-                        {provider.defaultModel}
+                        {formatModelNameForDisplay(provider.defaultModel)}
                       </span>
                       <span class="block truncate text-xs text-neutral-400">
                         {provider.label}
@@ -160,7 +175,7 @@ function AiModelPicker(props: {
     >
       <button
         type="button"
-        title={`${providerLabel}: ${providerModel}`}
+        title={`${providerLabel}: ${activeModelLabel}`}
         aria-label="Select AI model"
         onClick={() => setOpen((next) => !next)}
         class={cn(
@@ -170,7 +185,7 @@ function AiModelPicker(props: {
             : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
         )}
       >
-        <span class="truncate">{activeProvider ? providerModel : "Auto"}</span>
+        <span class="truncate">{autoSelected ? "Auto" : activeModelLabel}</span>
       </button>
     </Popover>
   );
@@ -195,6 +210,8 @@ export function AiAssistantChatArea(props: {
   providerModel: string;
   providerOptions: AiProviderConfig[];
   activeProviderId: string;
+  modelSelectionMode: AiModelSelectionMode;
+  onSelectAutoModel: () => void;
   onSelectProvider: (providerId: string) => void;
   contextOptions: AiContextOption[];
   onToggleContext: (contextId: AiContextKind) => void;
@@ -227,6 +244,8 @@ export function AiAssistantChatArea(props: {
     providerModel,
     providerOptions,
     activeProviderId,
+    modelSelectionMode,
+    onSelectAutoModel,
     onSelectProvider,
     contextOptions,
     onToggleContext,
@@ -248,9 +267,6 @@ export function AiAssistantChatArea(props: {
   const [titleOpen, setTitleOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
-  const [listening, setListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const floating = presentation === "floating";
   const activeSession = chatSessions.find(
     (session) => session.id === activeSessionId
@@ -332,78 +348,6 @@ export function AiAssistantChatArea(props: {
     window.setTimeout(() => setShareCopied(false), 1200);
   };
 
-  const handleToggleMic = () => {
-    if (listening) {
-      recognitionRef.current?.stop?.();
-      setListening(false);
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      onPromptChange(
-        prompt
-          ? `${prompt}\nVoice input is not supported in this environment.`
-          : "Voice input is not supported in this environment."
-      );
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = navigator.language || "en-US";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognitionRef.current = recognition;
-
-    let finalText = "";
-    recognition.onresult = (event: any) => {
-      let interimText = "";
-      for (
-        let index = event.resultIndex;
-        index < event.results.length;
-        index += 1
-      ) {
-        const result = event.results[index];
-        const text = result?.[0]?.transcript ?? "";
-        if (result?.isFinal) {
-          finalText += text;
-        } else {
-          interimText += text;
-        }
-      }
-      const next = [prompt, finalText || interimText]
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .join(prompt ? " " : "");
-      onPromptChange(next);
-    };
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
-    setListening(true);
-    recognition.start();
-  };
-
-  const handleUploadFile = async (file: File) => {
-    const maxChars = 200_000;
-    const text = await file.text();
-    const clipped = text.length > maxChars;
-    const content = clipped ? text.slice(0, maxChars) : text;
-    const attachment = [
-      `Attached file: ${file.name}`,
-      clipped ? `Only the first ${maxChars} characters are included.` : "",
-      "```",
-      content,
-      "```",
-    ]
-      .filter(Boolean)
-      .join("\n");
-    onPromptChange(
-      prompt.trim() ? `${prompt.trim()}\n\n${attachment}` : attachment
-    );
-  };
-
   const handlePromptInput = (value: string, cursorPosition: number | null) => {
     onPromptChange(value);
     const cursor = cursorPosition ?? value.length;
@@ -427,7 +371,7 @@ export function AiAssistantChatArea(props: {
   return (
     <>
       {floating ? (
-        <div class="flex shrink-0 items-center justify-between p-2">
+        <div class="relative flex shrink-0 items-center justify-between p-2">
           <div class="flex min-w-0 items-center gap-2">
             <Popover
               open={titleOpen}
@@ -485,6 +429,17 @@ export function AiAssistantChatArea(props: {
             >
               <ShareIcon className="size-5" />
             </button>
+            {shareCopied ? (
+              <div
+                class={cn(
+                  "absolute top-10 right-3 z-20 rounded-lg border border-neutral-200 bg-white px-3 py-1.5",
+                  "flex items-center gap-2 text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-lg"
+                )}
+              >
+                <CheckMarkIcon class="size-4 rounded-full border border-neutral-300 p-px" />
+                <span>Chat copied to clipboard</span>
+              </div>
+            ) : null}
             <button
               type="button"
               class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
@@ -535,14 +490,12 @@ export function AiAssistantChatArea(props: {
         )}
       >
         <div class={cn(floating ? "space-y-6" : "space-y-3")}>
-          <div class={cn(floating ? "space-y-6" : "space-y-3")}>
+          <div class="space-y-1">
             {messages.length === 0 ? (
-              floating ? null : (
-                <div class="rounded-xl border border-dashed border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-500">
-                  Ask about data, get SQL suggestions, or describe the insight
-                  you want to see.
-                </div>
-              )
+              <div class="rounded-xl border border-dashed border-neutral-200 bg-slate-50 p-4 text-[13px] text-neutral-500">
+                Ask about data, get SQL suggestions, or describe the insight you
+                want to see.
+              </div>
             ) : null}
 
             {messages.map((message) => (
@@ -654,28 +607,7 @@ export function AiAssistantChatArea(props: {
           <div class="mt-2 flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-2">
               {floating ? (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    class="hidden"
-                    accept=".csv,.json,.log,.md,.sql,.txt,.ts,.tsx,.js,.jsx,.py,.rs,.toml,.yaml,.yml,.xml"
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      event.currentTarget.value = "";
-                      if (file) void handleUploadFile(file);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    class="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                    title="Upload file"
-                    aria-label="Upload file"
-                  >
-                    <PlusIcon className="size-4" />
-                  </button>
-                </>
+                <div />
               ) : (
                 <>
                   <span class="inline-flex max-w-34 items-center gap-1 truncate rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
@@ -683,7 +615,7 @@ export function AiAssistantChatArea(props: {
                     <span class="truncate">{providerLabel}</span>
                   </span>
                   <span class="truncate text-xs font-medium text-neutral-500">
-                    {providerModel}
+                    {formatModelNameForDisplay(providerModel)}
                   </span>
                 </>
               )}
@@ -695,23 +627,10 @@ export function AiAssistantChatArea(props: {
                 providerModel={providerModel}
                 providerOptions={providerOptions}
                 activeProviderId={activeProviderId}
+                modelSelectionMode={modelSelectionMode}
+                onSelectAutoModel={onSelectAutoModel}
                 onSelectProvider={onSelectProvider}
               />
-
-              {floating ? (
-                <button
-                  type="button"
-                  class={cn(
-                    "rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900",
-                    listening && "bg-red-50 text-red-600 hover:bg-red-100"
-                  )}
-                  title={listening ? "Stop voice input" : "Voice input"}
-                  aria-label={listening ? "Stop voice input" : "Voice input"}
-                  onClick={handleToggleMic}
-                >
-                  <MicIcon className="size-4" />
-                </button>
-              ) : null}
 
               {floating ? (
                 <button
@@ -766,7 +685,7 @@ export function AiAssistantChatArea(props: {
         <DialogHeader>
           <DialogTitle>Chat History</DialogTitle>
         </DialogHeader>
-        <DialogContent className="gap-2 pt-0">
+        <DialogContent className="gap-2 pt-0 pb-6">
           {chatSessions.map((session) => (
             <div
               key={session.id}

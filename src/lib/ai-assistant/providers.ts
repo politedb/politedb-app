@@ -5,6 +5,10 @@ import {
   aiProviderSaveConfig,
   aiProviderTest,
 } from "src/lib/tauri/ai";
+import {
+  DEFAULT_AI_MODEL_NAME,
+  normalizeLocalAiModelName,
+} from "src/utils/assistant";
 
 const AI_SELECTED_PROVIDER_KEY = "politedb.ai.provider.selected";
 
@@ -20,8 +24,8 @@ export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
 };
 
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
-  ollama: "qwen2.5-coder:7b",
-  local_openai_compatible: "qwen2.5-coder:7b",
+  ollama: DEFAULT_AI_MODEL_NAME,
+  local_openai_compatible: DEFAULT_AI_MODEL_NAME,
 };
 
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
@@ -104,7 +108,7 @@ export function normalizeAiProviderConfig(
     host,
     subPath,
     baseUrl: buildBaseUrl(host, subPath),
-    defaultModel: provider.defaultModel || DEFAULT_MODELS[kind],
+    defaultModel: normalizeLocalAiModelName(provider.defaultModel),
   };
 }
 
@@ -139,11 +143,11 @@ export async function ensureLocalAiProvider(args: {
   const next: AiProviderConfig = {
     id: DEFAULT_LOCAL_AI_PROVIDER_ID,
     kind: "ollama",
-    label: "Ollama",
+    label: "PoliteDB AI",
     host: parts.host,
     subPath: parts.subPath,
     baseUrl: args.endpoint.trim().replace(/\/+$/, ""),
-    defaultModel: args.model.trim() || DEFAULT_MODELS.ollama,
+    defaultModel: DEFAULT_MODELS.ollama,
     enabled: true,
   };
 
@@ -177,5 +181,9 @@ export { aiProviderDelete, aiProviderSaveConfig, aiProviderTest };
 
 export async function aiProviderList() {
   const providers = await tauriAiProviderList();
-  return providers.filter((provider) => isLocalAiProviderKind(provider.kind));
+  return providers.filter(
+    (provider) =>
+      provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID &&
+      isLocalAiProviderKind(provider.kind)
+  );
 }

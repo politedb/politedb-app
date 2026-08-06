@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_SETTINGS,
   MODEL_LOADING_MAX_RETRIES,
   MODEL_LOADING_RETRY_MS,
+  normalizeLocalAiModelName,
 } from "src/utils/assistant";
 import {
   buildChatReplyPlainPrompt,
@@ -142,14 +143,13 @@ export function getLocalAiSettings(): LocalAiSettings {
     endpoint:
       safeGetLocalStorage(AI_ENDPOINT_KEY)?.trim() ||
       DEFAULT_AI_SETTINGS.endpoint,
-    model:
-      safeGetLocalStorage(AI_MODEL_KEY)?.trim() || DEFAULT_AI_SETTINGS.model,
+    model: normalizeLocalAiModelName(safeGetLocalStorage(AI_MODEL_KEY)),
   };
 }
 
 export function saveLocalAiSettings(settings: LocalAiSettings) {
   safeSetLocalStorage(AI_ENDPOINT_KEY, settings.endpoint.trim());
-  safeSetLocalStorage(AI_MODEL_KEY, settings.model.trim());
+  safeSetLocalStorage(AI_MODEL_KEY, normalizeLocalAiModelName(settings.model));
 }
 
 export function hasSeenLocalAiModel() {

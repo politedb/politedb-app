@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   AiAssistantChatArea,
   type AiContextKind,
+  type AiModelSelectionMode,
   type AiContextOption,
 } from "src/components/ai-assistant/AiAssistantChatArea";
 import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
@@ -20,7 +21,7 @@ import {
   getSelectedAiProviderId,
   normalizeAiProviderConfig,
   setSelectedAiProviderId,
-} from "src/lib/aiProviders";
+} from "@root/src/lib/ai-assistant/providers";
 import { useAiChatSession } from "./hooks/useAiChatSession";
 import { useAiRuntimeManager } from "./hooks/useAiRuntimeManager";
 import {
@@ -40,6 +41,24 @@ type Props = {
   currentSql?: string;
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
+
+const AI_MODEL_SELECTION_MODE_KEY = "politedb.ai.model.selectionMode";
+
+function getStoredModelSelectionMode(): AiModelSelectionMode {
+  try {
+    return window.localStorage.getItem(AI_MODEL_SELECTION_MODE_KEY) === "manual"
+      ? "manual"
+      : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function storeModelSelectionMode(mode: AiModelSelectionMode) {
+  try {
+    window.localStorage.setItem(AI_MODEL_SELECTION_MODE_KEY, mode);
+  } catch {}
+}
 
 export function AiAssistantPanel(props: Props) {
   const {
@@ -88,6 +107,8 @@ export function AiAssistantPanel(props: Props) {
   const [assistantStatus, setAssistantStatus] =
     useState<AssistantStatus>("idle");
   const [providerId, setProviderId] = useState(() => getSelectedAiProviderId());
+  const [modelSelectionMode, setModelSelectionMode] =
+    useState<AiModelSelectionMode>(() => getStoredModelSelectionMode());
   const [providerKind, setProviderKind] = useState<AiProviderKind | null>(null);
   const [providerModel, setProviderModel] = useState(initialSettings.model);
   const [providerLabel, setProviderLabel] = useState("Local API");
@@ -163,6 +184,23 @@ export function AiAssistantPanel(props: Props) {
 
   const handleSelectProvider = (nextProviderId: string) => {
     const selected = providerOptions.find((item) => item.id === nextProviderId);
+    if (!selected) return;
+    storeModelSelectionMode("manual");
+    setModelSelectionMode("manual");
+    setSelectedAiProviderId(selected.id);
+    setProviderId(selected.id);
+    setProviderKind(selected.kind);
+    setProviderLabel(selected.label);
+    setProviderModel(selected.defaultModel);
+  };
+
+  const handleSelectAutoModel = () => {
+    storeModelSelectionMode("auto");
+    setModelSelectionMode("auto");
+    const selected =
+      providerOptions.find(
+        (item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID
+      ) ?? providerOptions[0];
     if (!selected) return;
     setSelectedAiProviderId(selected.id);
     setProviderId(selected.id);
@@ -282,6 +320,7 @@ export function AiAssistantPanel(props: Props) {
           onLoadModels={() => void handleRefreshRuntimeSetup()}
           onStartRuntime={handleStartBundledRuntime}
           onStopRuntime={handleStopBundledRuntime}
+          onDownloadModel={() => void handleDownloadModel()}
         />
       ) : null}
 
@@ -295,6 +334,7 @@ export function AiAssistantPanel(props: Props) {
           onLoadModels={() => void handleRefreshRuntimeSetup()}
           onStartRuntime={handleStartBundledRuntime}
           onStopRuntime={handleStopBundledRuntime}
+          onDownloadModel={() => void handleDownloadModel()}
         />
       ) : null}
 
@@ -340,6 +380,8 @@ export function AiAssistantPanel(props: Props) {
           providerModel={providerModel || model}
           providerOptions={providerOptions}
           activeProviderId={providerId}
+          modelSelectionMode={modelSelectionMode}
+          onSelectAutoModel={handleSelectAutoModel}
           onSelectProvider={handleSelectProvider}
           contextOptions={contextOptions}
           onToggleContext={handleToggleContext}

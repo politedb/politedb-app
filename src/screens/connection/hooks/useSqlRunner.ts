@@ -17,7 +17,7 @@ import { operationCancel } from "src/lib/tauri/operation";
 import { isMutatingStatement } from "src/utils/detect";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import { buildExplainSql } from "src/lib/queries/sql/explain";
-import type { QuerySafetyMode } from "src/lib/querySafety";
+import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);

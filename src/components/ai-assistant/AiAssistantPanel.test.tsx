@@ -73,15 +73,15 @@ vi.mock("src/lib/tauri/query", () => ({
   runSqlQuery: (...args: any[]) => runSqlQueryMock(...args),
 }));
 
-vi.mock("src/lib/aiProviders", () => ({
+vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
   normalizeAiProviderConfig: (provider: any) => provider,
   ensureLocalAiProvider: vi.fn().mockResolvedValue({
     id: "local",
     kind: "local_openai_compatible",
-    label: "Local API",
+    label: "PoliteDB AI",
     baseUrl: "http://127.0.0.1:8080/v1",
-    defaultModel: "qwen2.5-coder:7b",
+    defaultModel: "Qwen2.5-Coder-7B",
     enabled: true,
   }),
   getSelectedAiProviderId: vi.fn(() => "local"),
@@ -112,16 +112,16 @@ vi.mock("src/lib/aiProviders", () => ({
     local_openai_compatible: "/v1",
   },
   DEFAULT_MODELS: {
-    ollama: "qwen2.5-coder:7b",
-    local_openai_compatible: "qwen2.5-coder:7b",
+    ollama: "Qwen2.5-Coder-7B",
+    local_openai_compatible: "Qwen2.5-Coder-7B",
   },
   aiProviderList: vi.fn().mockResolvedValue([
     {
       id: "local",
       kind: "local_openai_compatible",
-      label: "Local API",
+      label: "PoliteDB AI",
       baseUrl: "http://127.0.0.1:8080/v1",
-      defaultModel: "qwen2.5-coder:7b",
+      defaultModel: "Qwen2.5-Coder-7B",
       enabled: true,
     },
   ]),
@@ -157,6 +157,7 @@ vi.mock("src/components/icons", () => ({
   ArrowDown: () => <span>arrow-down</span>,
   BackupIcon: () => <span>backup</span>,
   ChevronDownIcon: () => <span>chevron-down</span>,
+  DownloadIcon: () => <span>download</span>,
   MoreVerticalIcon: () => <span>more</span>,
   VaultIcon: () => <span>vault</span>,
   PlayIcon: () => <span>play</span>,
@@ -234,10 +235,10 @@ beforeEach(() => {
 
   getLocalAiSettingsMock.mockReturnValue({
     endpoint: "http://127.0.0.1:8080/v1",
-    model: "qwen2.5-coder:7b",
+    model: "Qwen2.5-Coder-7B",
   });
   hasSeenLocalAiModelMock.mockReturnValue(false);
-  listLocalAiModelsMock.mockResolvedValue(["qwen2.5-coder:7b"]);
+  listLocalAiModelsMock.mockResolvedValue(["Qwen2.5-Coder-7B"]);
   isGeneralChatPromptMock.mockReturnValue(true);
   chatReplyMock.mockResolvedValue({
     answer: "Hello! How can I help?",
@@ -419,7 +420,7 @@ describe("AiAssistantPanel", () => {
     await screen.findByText(/Hello! How can I help\?/);
     expect(saveLocalAiSettingsMock).toHaveBeenCalledWith({
       endpoint: "http://127.0.0.1:8080/v1",
-      model: "qwen2.5-coder:7b",
+      model: "Qwen2.5-Coder-7B",
     });
   });
 
@@ -430,8 +431,8 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
 
     await screen.findByText("Select a model");
-    expect(screen.getAllByText("qwen2.5-coder:7b").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /qwen2\.5-coder:7b/ }));
+    expect(screen.getAllByText("Qwen2.5-Coder-7B").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Qwen2\.5-Coder-7B/ }));
 
     expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("local");
   });
@@ -520,6 +521,6 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "Settings.." }));
 
-    await screen.findByText("AI Provider Settings");
+    await screen.findByText("AI Assistant Settings");
   });
 });

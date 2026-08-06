@@ -228,7 +228,7 @@ pub fn ai_provider_list(app: AppHandle) -> Result<Vec<AiProviderConfig>, String>
     Ok(load_provider_file(&app)?
         .providers
         .into_iter()
-        .filter(|provider| is_local_provider(&provider.kind))
+        .filter(|provider| provider.id == "local" && is_local_provider(&provider.kind))
         .collect())
 }
 
@@ -239,7 +239,7 @@ pub fn ai_provider_save_config(
 ) -> Result<AiProviderConfig, String> {
     let config = normalize_provider(config)?;
     let mut file = load_provider_file(&app)?;
-    file.providers.retain(|p| p.id != config.id);
+    file.providers.clear();
     file.providers.push(config.clone());
     save_provider_file(&app, &file)?;
     Ok(config)

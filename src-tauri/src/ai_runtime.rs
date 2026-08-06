@@ -24,6 +24,8 @@ const MIN_BATCH_SIZE: u32 = 32;
 const MAX_BATCH_SIZE: u32 = 8192;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const START_TIMEOUT: Duration = Duration::from_secs(90);
+const DEFAULT_MODEL_API_NAME: &str = "Qwen2.5-Coder-7B";
+const DEFAULT_MODEL_DISPLAY_NAME: &str = "Qwen2.5-Coder 7B Instruct (Q4_K_M)";
 const DEFAULT_MODEL_URL: &str = "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf?download=true";
 
 #[derive(Debug, Clone, Serialize)]
@@ -384,6 +386,13 @@ async fn ensure_child_not_exited(handle: &mut AiRuntimeHandle) -> Result<bool, S
 }
 
 fn model_name_from_path(path: &Path) -> String {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    if file_name == "default.gguf" {
+        return DEFAULT_MODEL_DISPLAY_NAME.to_string();
+    }
     path.file_stem()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "local-model".to_string())
@@ -472,6 +481,8 @@ pub async fn ai_runtime_start(
     command
         .arg("-m")
         .arg(&model_path)
+        .arg("--alias")
+        .arg(DEFAULT_MODEL_API_NAME)
         .arg("--host")
         .arg(DEFAULT_HOST)
         .arg("--port")
@@ -598,6 +609,7 @@ pub async fn ai_runtime_download_default_model(
         runtime.phase = AiRuntimePhase::Starting;
         runtime.last_error = Some("Downloading AI model...".to_string());
         runtime.model_path = Some(destination.clone());
+        runtime.model_name = Some(DEFAULT_MODEL_DISPLAY_NAME.to_string());
         runtime.model_downloaded_bytes = Some(0);
         runtime.model_total_bytes = None;
         runtime.cancel_model_download = false;
