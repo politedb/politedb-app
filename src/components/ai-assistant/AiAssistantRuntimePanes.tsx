@@ -28,7 +28,7 @@ export function AiAssistantRuntimeLoadingPane(props: {
     total > 0 ? Math.max(0, Math.min(100, (downloaded / total) * 100)) : null;
 
   return (
-    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+    <div class="mt-10 flex h-full min-h-0 items-start justify-center px-6 py-8">
       <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50">
           <Spinner className="size-5 text-blue-500" />
@@ -100,7 +100,7 @@ export function AiAssistantMissingModelPane(props: {
   busy: boolean;
 }) {
   return (
-    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+    <div class="mt-10 flex h-full min-h-0 items-start justify-center px-6 py-8">
       <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-600">
           <span class="flex size-6 items-center justify-center rounded-full border-2 border-blue-600/70 font-bold select-none">

@@ -437,7 +437,7 @@ export function AiAssistantChatArea(props: {
               padding={2}
               showArrow={false}
               content={
-                <div class="w-[280px] rounded-2xl border border-neutral-200 bg-white px-2 py-3 shadow-2xl">
+                <div class="w-70 rounded-2xl border border-neutral-200 bg-white px-2 py-3 shadow-2xl">
                   <div class="mb-2 px-2 text-sm font-semibold text-neutral-500">
                     Today
                   </div>
@@ -466,7 +466,7 @@ export function AiAssistantChatArea(props: {
                 <Button
                   variant="ghost"
                   onClick={() => setTitleOpen((open) => !open)}
-                  class="max-w-[260px] rounded-full px-2 py-0.5 text-base"
+                  class="max-w-65 rounded-full px-2 py-0.5 text-base"
                 >
                   <span class="truncate">{activeTitle}</span>
                   <ChevronDownIcon className="size-4 shrink-0 text-neutral-500" />
