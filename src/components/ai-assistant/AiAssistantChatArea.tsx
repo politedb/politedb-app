@@ -41,23 +41,11 @@ export type AiContextOption = {
 function ProviderMark(props: { provider: AiProviderConfig }) {
   const { provider } = props;
   const color =
-    provider.kind === "anthropic"
-      ? "text-orange-500"
-      : provider.kind === "gemini"
-        ? "text-blue-500"
-        : provider.kind === "grok"
-          ? "text-neutral-900"
-          : provider.kind === "ollama"
-            ? "text-emerald-600"
-            : "text-neutral-700";
+    provider.kind === "ollama" ? "text-emerald-600" : "text-neutral-700";
 
   return (
     <span class={cn("flex size-5 items-center justify-center", color)}>
-      {provider.kind === "gemini" ? (
-        <SparklesIcon className="size-4" />
-      ) : (
-        <VaultIcon className="size-4" />
-      )}
+      <VaultIcon className="size-4" />
     </span>
   );
 }
@@ -147,8 +135,13 @@ function AiModelPicker(props: {
                     }}
                   >
                     <ProviderMark provider={provider} />
-                    <span class="min-w-0 flex-1 truncate">
-                      {provider.defaultModel}
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate">
+                        {provider.defaultModel}
+                      </span>
+                      <span class="block truncate text-xs text-neutral-400">
+                        {provider.label}
+                      </span>
                     </span>
                     {active ? (
                       <CheckMarkIcon className="size-4 text-neutral-900" />

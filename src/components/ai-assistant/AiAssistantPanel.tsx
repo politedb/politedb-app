@@ -257,6 +257,8 @@ export function AiAssistantPanel(props: Props) {
     endpoint,
     model: providerModel || model,
     engine,
+    workspaceId: chatSessionKey,
+    runtimeConnectionId,
     activeSchema: effectiveActiveSchema,
     tables: effectiveTables,
     columnsByTable: effectiveColumnsByTable,

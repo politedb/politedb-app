@@ -82,13 +82,11 @@ vi.mock("src/lib/aiProviders", () => ({
     label: "Local API",
     baseUrl: "http://127.0.0.1:8080/v1",
     defaultModel: "qwen2.5-coder:7b",
-    apiKeyRef: null,
     enabled: true,
   }),
   getSelectedAiProviderId: vi.fn(() => "local"),
   setSelectedAiProviderId: (...args: any[]) =>
     setSelectedAiProviderIdMock(...args),
-  providerNeedsApiKey: (kind: string) => kind !== "local_openai_compatible",
   makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
     id: overrides.id ?? kind,
     kind,
@@ -102,46 +100,18 @@ vi.mock("src/lib/aiProviders", () => ({
   aiProviderDelete: vi.fn(),
   buildBaseUrl: (host: string, subPath: string) => `${host}${subPath}`,
   AI_PROVIDER_LABELS: {
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    gemini: "Google AI",
-    openrouter: "OpenRouter",
-    grok: "Grok",
-    deepseek: "DeepSeek",
-    github_copilot: "GitHub Copilot",
     ollama: "Ollama",
     local_openai_compatible: "Local API",
   },
   DEFAULT_HOSTS: {
-    openai: "https://api.openai.com",
-    anthropic: "https://api.anthropic.com",
-    gemini: "https://generativelanguage.googleapis.com",
-    openrouter: "https://openrouter.ai/api",
-    grok: "https://api.x.ai",
-    deepseek: "https://api.deepseek.com",
-    github_copilot: "https://api.githubcopilot.com",
     ollama: "http://127.0.0.1:11434",
     local_openai_compatible: "http://127.0.0.1:11434",
   },
   DEFAULT_SUB_PATHS: {
-    openai: "/v1",
-    anthropic: "/v1",
-    gemini: "/v1beta",
-    openrouter: "/v1",
-    grok: "/v1",
-    deepseek: "",
-    github_copilot: "/v1",
     ollama: "/v1",
     local_openai_compatible: "/v1",
   },
   DEFAULT_MODELS: {
-    openai: "gpt-4o",
-    anthropic: "claude-3-5-sonnet-latest",
-    gemini: "gemini-1.5-pro",
-    openrouter: "openai/gpt-4o",
-    grok: "grok-2-latest",
-    deepseek: "deepseek-chat",
-    github_copilot: "gpt-4o",
     ollama: "qwen2.5-coder:7b",
     local_openai_compatible: "qwen2.5-coder:7b",
   },
@@ -152,16 +122,6 @@ vi.mock("src/lib/aiProviders", () => ({
       label: "Local API",
       baseUrl: "http://127.0.0.1:8080/v1",
       defaultModel: "qwen2.5-coder:7b",
-      apiKeyRef: null,
-      enabled: true,
-    },
-    {
-      id: "openai-1",
-      kind: "openai",
-      label: "OpenAI",
-      baseUrl: "https://api.openai.com/v1",
-      defaultModel: "gpt-4o",
-      apiKeyRef: "keychain-ref",
       enabled: true,
     },
   ]),
@@ -463,7 +423,7 @@ describe("AiAssistantPanel", () => {
     });
   });
 
-  it("opens the model picker and switches the selected provider model", async () => {
+  it("opens the model picker and selects the local model", async () => {
     renderPanel();
 
     await screen.findByPlaceholderText("Ask anything...");
@@ -471,12 +431,9 @@ describe("AiAssistantPanel", () => {
 
     await screen.findByText("Select a model");
     expect(screen.getAllByText("qwen2.5-coder:7b").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /gpt-4o/ }));
+    fireEvent.click(screen.getByRole("button", { name: /qwen2\.5-coder:7b/ }));
 
-    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("openai-1");
-    await waitFor(() =>
-      expect(screen.getAllByText("gpt-4o").length).toBeGreaterThan(0)
-    );
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("local");
   });
 
   it("previews a read-only SQL plan without running it automatically", async () => {

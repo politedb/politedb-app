@@ -26,7 +26,6 @@ import {
   buildBaseUrl,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
-  providerNeedsApiKey,
   saveAiProviderWithOptionalKey,
   setSelectedAiProviderId,
 } from "src/lib/aiProviders";
@@ -43,16 +42,7 @@ type Props = {
   onStopRuntime: () => void;
 };
 
-const VENDOR_ORDER: AiProviderKind[] = [
-  "openai",
-  "anthropic",
-  "gemini",
-  "openrouter",
-  "deepseek",
-  "github_copilot",
-  "ollama",
-  "grok",
-];
+const VENDOR_ORDER: AiProviderKind[] = ["ollama"];
 
 function providerForKind(providers: AiProviderConfig[], kind: AiProviderKind) {
   return providers.find((provider) => provider.kind === kind);
@@ -79,9 +69,8 @@ export function AiAssistantSettingsDialog(props: Props) {
   } = props;
 
   const [providers, setProviders] = useState<AiProviderConfig[]>([]);
-  const [selectedKind, setSelectedKind] = useState<AiProviderKind>("openai");
+  const [selectedKind, setSelectedKind] = useState<AiProviderKind>("ollama");
   const [label, setLabel] = useState("");
-  const [apiKey, setApiKey] = useState("");
   const [host, setHost] = useState("");
   const [subPath, setSubPath] = useState("");
   const [model, setModel] = useState("");
@@ -94,9 +83,6 @@ export function AiAssistantSettingsDialog(props: Props) {
     [providers]
   );
   const selectedProvider = providerForKind(normalizedProviders, selectedKind);
-  const isLocalVendor =
-    selectedKind === "ollama" || selectedKind === "local_openai_compatible";
-
   const loadProviders = async () => {
     const next = await aiProviderList().catch(() => []);
     setProviders(next.map(normalizeAiProviderConfig));
@@ -113,7 +99,6 @@ export function AiAssistantSettingsDialog(props: Props) {
     setSubPath(provider?.subPath ?? DEFAULT_SUB_PATHS[selectedKind]);
     setModel(provider?.defaultModel ?? DEFAULT_MODELS[selectedKind]);
     setIsDefault(!!provider?.isDefault);
-    setApiKey("");
     setStatus("");
   }, [normalizedProviders, selectedKind]);
 
@@ -128,11 +113,10 @@ export function AiAssistantSettingsDialog(props: Props) {
         subPath,
         baseUrl: buildBaseUrl(host, subPath),
         defaultModel: model,
-        apiKeyRef: selectedProvider?.apiKeyRef,
         enabled: true,
         isDefault,
       });
-      const saved = await saveAiProviderWithOptionalKey({ config, apiKey });
+      const saved = await saveAiProviderWithOptionalKey({ config });
       if (isDefault) setSelectedAiProviderId(saved.id);
       await loadProviders();
       setStatus(`Saved ${saved.label}.`);
@@ -222,21 +206,6 @@ export function AiAssistantSettingsDialog(props: Props) {
               className="h-10 border border-neutral-300 px-3 text-sm focus:border-blue-500"
             />
 
-            {providerNeedsApiKey(selectedKind) ? (
-              <Input
-                label="API Key"
-                value={apiKey}
-                onValueChange={setApiKey}
-                type="password"
-                placeholder={
-                  selectedProvider?.apiKeyRef
-                    ? "saved in keychain"
-                    : "secret key"
-                }
-                className="h-10 border border-neutral-300 px-3 text-sm focus:border-blue-500"
-              />
-            ) : null}
-
             <Input
               label="Host"
               value={host}
@@ -268,55 +237,51 @@ export function AiAssistantSettingsDialog(props: Props) {
               Default Vendor
             </label>
 
-            {isLocalVendor ? (
-              <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                <div class="mb-2 flex items-center justify-between gap-2">
-                  <div class="text-sm font-semibold text-neutral-900">
-                    Local Runtime
-                  </div>
-                  <div class="rounded-full border border-neutral-200 bg-white px-2 py-1 text-xs font-semibold text-neutral-700">
-                    {runtimeLabel(runtimeStatus?.phase)}
-                  </div>
+            <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <div class="text-sm font-semibold text-neutral-900">
+                  Local Runtime
                 </div>
-                <div class="flex items-center gap-2">
-                  <Button
-                    variant={
-                      runtimeStatus?.phase === "ready"
-                        ? "destructive"
-                        : "default"
-                    }
-                    class="px-3 py-1"
-                    onClick={
-                      runtimeStatus?.phase === "ready"
-                        ? onStopRuntime
-                        : onStartRuntime
-                    }
-                    loading={runtimeBusy}
-                  >
-                    {runtimeStatus?.phase === "ready" ? (
-                      <>
-                        <StopIcon className="size-3.5" />
-                        Stop
-                      </>
-                    ) : (
-                      <>
-                        <PlayIcon className="size-3.5" />
-                        Start
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    class="px-3 py-1"
-                    onClick={onLoadModels}
-                    loading={loadingModels}
-                  >
-                    <RefreshCwIcon className="size-3.5" />
-                    Refresh
-                  </Button>
+                <div class="rounded-full border border-neutral-200 bg-white px-2 py-1 text-xs font-semibold text-neutral-700">
+                  {runtimeLabel(runtimeStatus?.phase)}
                 </div>
               </div>
-            ) : null}
+              <div class="flex items-center gap-2">
+                <Button
+                  variant={
+                    runtimeStatus?.phase === "ready" ? "destructive" : "default"
+                  }
+                  class="px-3 py-1"
+                  onClick={
+                    runtimeStatus?.phase === "ready"
+                      ? onStopRuntime
+                      : onStartRuntime
+                  }
+                  loading={runtimeBusy}
+                >
+                  {runtimeStatus?.phase === "ready" ? (
+                    <>
+                      <StopIcon className="size-3.5" />
+                      Stop
+                    </>
+                  ) : (
+                    <>
+                      <PlayIcon className="size-3.5" />
+                      Start
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  class="px-3 py-1"
+                  onClick={onLoadModels}
+                  loading={loadingModels}
+                >
+                  <RefreshCwIcon className="size-3.5" />
+                  Refresh
+                </Button>
+              </div>
+            </div>
 
             {status ? (
               <div class="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">

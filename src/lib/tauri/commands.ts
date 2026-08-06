@@ -8,7 +8,6 @@ export const CMD = {
   aiProviderList: "ai_provider_list",
   aiProviderSaveConfig: "ai_provider_save_config",
   aiProviderDelete: "ai_provider_delete",
-  aiProviderSetKey: "ai_provider_set_key",
   aiProviderTest: "ai_provider_test",
   aiChatComplete: "ai_chat_complete",
   licenseDeviceInfo: "license_device_info",

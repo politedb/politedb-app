@@ -39,9 +39,7 @@ fn block_to_matrix(block: &Block) -> (Vec<ChJsonMeta>, Vec<Vec<CellValue>>) {
                     .column_data
                     .get(*name)
                     .and_then(|col: &Vec<ChValue>| col.get(i).cloned())
-                    .map(|v| {
-                        klick_value_to_cell(v, block.column_types.get(*name))
-                    })
+                    .map(|v| klick_value_to_cell(v, block.column_types.get(*name)))
                     .unwrap_or(CellValue::Null)
             })
             .collect();

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::AppHandle;
 
-use crate::{ai_runtime, file_storage, license, security::secrets, state::AppState};
+use crate::{ai_runtime, file_storage, license, state::AppState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -58,20 +58,17 @@ pub struct AiChatCompleteRequest {
 
 fn default_base_url(kind: &AiProviderKind) -> &'static str {
     match kind {
-        AiProviderKind::Openai => "https://api.openai.com/v1",
-        AiProviderKind::Anthropic => "https://api.anthropic.com/v1",
-        AiProviderKind::Gemini => "https://generativelanguage.googleapis.com/v1beta",
-        AiProviderKind::Openrouter => "https://openrouter.ai/api/v1",
-        AiProviderKind::Grok => "https://api.x.ai/v1",
-        AiProviderKind::Deepseek => "https://api.deepseek.com",
-        AiProviderKind::GithubCopilot => "https://api.githubcopilot.com/v1",
         AiProviderKind::Ollama => "http://127.0.0.1:11434/v1",
         AiProviderKind::LocalOpenaiCompatible => "http://127.0.0.1:11434/v1",
+        _ => "",
     }
 }
 
-fn provider_key(provider_id: &str) -> String {
-    format!("politedb:ai:{provider_id}:api_key")
+fn is_local_provider(kind: &AiProviderKind) -> bool {
+    matches!(
+        kind,
+        AiProviderKind::Ollama | AiProviderKind::LocalOpenaiCompatible
+    )
 }
 
 fn load_provider_file(app: &AppHandle) -> Result<AiProviderFile, String> {
@@ -85,6 +82,9 @@ fn save_provider_file(app: &AppHandle, file: &AiProviderFile) -> Result<(), Stri
 }
 
 fn normalize_provider(mut config: AiProviderConfig) -> Result<AiProviderConfig, String> {
+    if !is_local_provider(&config.kind) {
+        return Err("AI_ONLY_LOCAL_PROVIDER_SUPPORTED".into());
+    }
     config.id = config.id.trim().to_string();
     config.label = config.label.trim().to_string();
     config.default_model = config.default_model.trim().to_string();
@@ -126,14 +126,6 @@ fn normalize_provider(mut config: AiProviderConfig) -> Result<AiProviderConfig, 
     if config.default_model.is_empty() {
         return Err("AI_PROVIDER_MODEL_REQUIRED".into());
     }
-    if config.api_key_ref.is_none()
-        && !matches!(
-            config.kind,
-            AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama
-        )
-    {
-        config.api_key_ref = Some(provider_key(&config.id));
-    }
     Ok(config)
 }
 
@@ -143,20 +135,6 @@ fn find_provider(app: &AppHandle, provider_id: &str) -> Result<AiProviderConfig,
         .into_iter()
         .find(|p| p.id == provider_id)
         .ok_or_else(|| "AI_PROVIDER_NOT_FOUND".to_string())
-}
-
-fn api_key_for(app: &AppHandle, provider: &AiProviderConfig) -> Result<Option<String>, String> {
-    if matches!(
-        provider.kind,
-        AiProviderKind::LocalOpenaiCompatible | AiProviderKind::Ollama
-    ) {
-        return Ok(None);
-    }
-    let key = provider.api_key_ref.as_deref().unwrap_or("").trim();
-    if key.is_empty() {
-        return Err("AI_PROVIDER_API_KEY_REF_MISSING".into());
-    }
-    secrets::keychain_get(app, key).map(Some)
 }
 
 fn first_text_from_openai_like(value: serde_json::Value) -> String {
@@ -174,7 +152,6 @@ fn first_text_from_openai_like(value: serde_json::Value) -> String {
 async fn complete_openai_like(
     http: &reqwest::Client,
     provider: &AiProviderConfig,
-    api_key: Option<String>,
     request: &AiChatCompleteRequest,
 ) -> Result<String, String> {
     let base = provider
@@ -184,17 +161,15 @@ async fn complete_openai_like(
         .trim_end_matches('/');
     let model = request.model.as_deref().unwrap_or(&provider.default_model);
     let url = format!("{base}/chat/completions");
-    let mut builder = http.post(url).json(&json!({
-        "model": model,
-        "messages": request.messages,
-        "temperature": request.temperature.unwrap_or(0.2),
-        "max_tokens": request.max_tokens.unwrap_or(512),
-        "stream": false
-    }));
-    if let Some(key) = api_key {
-        builder = builder.bearer_auth(key);
-    }
-    let res = builder
+    let res = http
+        .post(url)
+        .json(&json!({
+            "model": model,
+            "messages": request.messages,
+            "temperature": request.temperature.unwrap_or(0.2),
+            "max_tokens": request.max_tokens.unwrap_or(512),
+            "stream": false
+        }))
         .send()
         .await
         .map_err(|e| format!("AI_CHAT_REQUEST_FAILED: {e}"))?;
@@ -207,112 +182,6 @@ async fn complete_openai_like(
         return Err(format!("AI_CHAT_FAILED: {status} {value}"));
     }
     Ok(first_text_from_openai_like(value))
-}
-
-async fn complete_anthropic(
-    http: &reqwest::Client,
-    provider: &AiProviderConfig,
-    api_key: String,
-    request: &AiChatCompleteRequest,
-) -> Result<String, String> {
-    let base = provider
-        .base_url
-        .as_deref()
-        .unwrap_or(default_base_url(&provider.kind))
-        .trim_end_matches('/');
-    let model = request.model.as_deref().unwrap_or(&provider.default_model);
-    let messages: Vec<_> = request
-        .messages
-        .iter()
-        .filter(|m| m.role != "system")
-        .map(|m| json!({ "role": if m.role == "assistant" { "assistant" } else { "user" }, "content": m.content }))
-        .collect();
-    let res = http
-        .post(format!("{base}/messages"))
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .json(&json!({
-            "model": model,
-            "messages": messages,
-            "max_tokens": request.max_tokens.unwrap_or(512),
-            "temperature": request.temperature.unwrap_or(0.2)
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("AI_CHAT_REQUEST_FAILED: {e}"))?;
-    let status = res.status();
-    let value = res
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| format!("AI_CHAT_RESPONSE_JSON_FAILED: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("AI_CHAT_FAILED: {status} {value}"));
-    }
-    Ok(value
-        .get("content")
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.get("text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string())
-}
-
-async fn complete_gemini(
-    http: &reqwest::Client,
-    provider: &AiProviderConfig,
-    api_key: String,
-    request: &AiChatCompleteRequest,
-) -> Result<String, String> {
-    let base = provider
-        .base_url
-        .as_deref()
-        .unwrap_or(default_base_url(&provider.kind))
-        .trim_end_matches('/');
-    let model = request.model.as_deref().unwrap_or(&provider.default_model);
-    let contents: Vec<_> = request
-        .messages
-        .iter()
-        .map(|m| {
-            json!({
-                "role": if m.role == "assistant" { "model" } else { "user" },
-                "parts": [{ "text": m.content }]
-            })
-        })
-        .collect();
-    let res = http
-        .post(format!(
-            "{base}/models/{model}:generateContent?key={api_key}"
-        ))
-        .json(&json!({
-            "contents": contents,
-            "generationConfig": {
-                "temperature": request.temperature.unwrap_or(0.2),
-                "maxOutputTokens": request.max_tokens.unwrap_or(512)
-            }
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("AI_CHAT_REQUEST_FAILED: {e}"))?;
-    let status = res.status();
-    let value = res
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|e| format!("AI_CHAT_RESPONSE_JSON_FAILED: {e}"))?;
-    if !status.is_success() {
-        return Err(format!("AI_CHAT_FAILED: {status} {value}"));
-    }
-    Ok(value
-        .get("candidates")
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.get("content"))
-        .and_then(|v| v.get("parts"))
-        .and_then(|v| v.get(0))
-        .and_then(|v| v.get("text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string())
 }
 
 #[tauri::command]
@@ -356,7 +225,11 @@ pub async fn ai_runtime_cancel_model_download(
 
 #[tauri::command]
 pub fn ai_provider_list(app: AppHandle) -> Result<Vec<AiProviderConfig>, String> {
-    Ok(load_provider_file(&app)?.providers)
+    Ok(load_provider_file(&app)?
+        .providers
+        .into_iter()
+        .filter(|provider| is_local_provider(&provider.kind))
+        .collect())
 }
 
 #[tauri::command]
@@ -376,19 +249,7 @@ pub fn ai_provider_save_config(
 pub fn ai_provider_delete(app: AppHandle, provider_id: String) -> Result<(), String> {
     let mut file = load_provider_file(&app)?;
     file.providers.retain(|p| p.id != provider_id);
-    let _ = secrets::keychain_delete(&app, &provider_key(&provider_id));
     save_provider_file(&app, &file)
-}
-
-#[tauri::command]
-pub fn ai_provider_set_key(
-    app: AppHandle,
-    provider_id: String,
-    api_key: String,
-) -> Result<String, String> {
-    let key = provider_key(provider_id.trim());
-    secrets::keychain_set(&app, &key, api_key.trim())?;
-    Ok(key)
 }
 
 #[tauri::command]
@@ -401,40 +262,14 @@ pub async fn ai_chat_complete(
         return Err("AI_LICENSE_REQUIRED".into());
     }
     let provider = find_provider(&app, &request.provider_id)?;
+    if !is_local_provider(&provider.kind) {
+        return Err("AI_ONLY_LOCAL_PROVIDER_SUPPORTED".into());
+    }
     if !provider.enabled {
         return Err("AI_PROVIDER_DISABLED".into());
     }
-    let api_key = api_key_for(&app, &provider)?;
     let http = reqwest::Client::new();
-    let text = match provider.kind {
-        AiProviderKind::Anthropic => {
-            complete_anthropic(
-                &http,
-                &provider,
-                api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?,
-                &request,
-            )
-            .await?
-        }
-        AiProviderKind::Gemini => {
-            complete_gemini(
-                &http,
-                &provider,
-                api_key.ok_or("AI_PROVIDER_API_KEY_MISSING")?,
-                &request,
-            )
-            .await?
-        }
-        AiProviderKind::Openai
-        | AiProviderKind::Openrouter
-        | AiProviderKind::Grok
-        | AiProviderKind::Deepseek
-        | AiProviderKind::GithubCopilot
-        | AiProviderKind::Ollama
-        | AiProviderKind::LocalOpenaiCompatible => {
-            complete_openai_like(&http, &provider, api_key, &request).await?
-        }
-    };
+    let text = complete_openai_like(&http, &provider, &request).await?;
     if text.is_empty() {
         return Err("AI_CHAT_EMPTY_RESPONSE".into());
     }

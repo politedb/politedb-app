@@ -11,11 +11,7 @@ use crate::operations::ctx::{ActiveGuard, OperationCtx, RunningGuard};
 use crate::operations::emit::{emit_done, emit_error};
 use crate::types::{SqlQueryInput, TableChunk};
 
-pub async fn run_d1_sql_query(
-    ctx: OperationCtx,
-    conn: D1Conn,
-    sql_input: SqlQueryInput,
-) {
+pub async fn run_d1_sql_query(ctx: OperationCtx, conn: D1Conn, sql_input: SqlQueryInput) {
     let op_id = ctx.op_id;
     let started_at = Instant::now();
 
@@ -45,7 +41,12 @@ pub async fn run_d1_sql_query(
     let sql = sql_input.sql.trim().to_string();
     if validate_only {
         if sql.is_empty() {
-            emit_error(&ctx.app, op_id, "D1_SQL_EMPTY", started_at.elapsed().as_millis());
+            emit_error(
+                &ctx.app,
+                op_id,
+                "D1_SQL_EMPTY",
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
         emit_done(
@@ -80,11 +81,12 @@ pub async fn run_d1_sql_query(
     );
 
     let result = match timeout_ms {
-        Some(ms) => match tokio::time::timeout(std::time::Duration::from_millis(ms), query_fut).await
-        {
-            Ok(r) => r,
-            Err(_) => Err("D1_QUERY_TIMEOUT".into()),
-        },
+        Some(ms) => {
+            match tokio::time::timeout(std::time::Duration::from_millis(ms), query_fut).await {
+                Ok(r) => r,
+                Err(_) => Err("D1_QUERY_TIMEOUT".into()),
+            }
+        }
         None => query_fut.await,
     };
 

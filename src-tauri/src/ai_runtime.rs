@@ -549,7 +549,10 @@ pub async fn ai_runtime_autostart_if_available(
     }
 
     let runtime = ai_runtime_status(app, state).await;
-    if matches!(runtime.phase, AiRuntimePhase::Ready | AiRuntimePhase::Starting) {
+    if matches!(
+        runtime.phase,
+        AiRuntimePhase::Ready | AiRuntimePhase::Starting
+    ) {
         return Ok(());
     }
 

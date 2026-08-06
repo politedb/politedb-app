@@ -65,7 +65,8 @@ pub(crate) async fn make_client(
     } else {
         config.encryption(tiberius::EncryptionLevel::NotSupported);
     }
-    let connect_timeout = Duration::from_millis(connect_timeout_ms.unwrap_or(15_000).clamp(100, 300_000));
+    let connect_timeout =
+        Duration::from_millis(connect_timeout_ms.unwrap_or(15_000).clamp(100, 300_000));
 
     let addr = config.get_addr();
     let tcp = tokio::time::timeout(connect_timeout, TcpStream::connect(addr))
@@ -74,10 +75,13 @@ pub(crate) async fn make_client(
         .map_err(|e| format!("SQLSERVER_TCP_CONNECT_FAILED: {e}"))?;
     tcp.set_nodelay(true)
         .map_err(|e| format!("SQLSERVER_TCP_NODELAY_FAILED: {e}"))?;
-    tokio::time::timeout(connect_timeout, tiberius::Client::connect(config, tcp.compat_write()))
-        .await
-        .map_err(|_| "SQLSERVER_CLIENT_CONNECT_TIMEOUT".to_string())?
-        .map_err(|e| format!("SQLSERVER_CLIENT_CONNECT_FAILED: {e}"))
+    tokio::time::timeout(
+        connect_timeout,
+        tiberius::Client::connect(config, tcp.compat_write()),
+    )
+    .await
+    .map_err(|_| "SQLSERVER_CLIENT_CONNECT_TIMEOUT".to_string())?
+    .map_err(|e| format!("SQLSERVER_CLIENT_CONNECT_FAILED: {e}"))
 }
 
 #[allow(clippy::too_many_arguments)]
