@@ -155,7 +155,7 @@ function SortMenu(props: {
           <Button
             variant="outline"
             onClick={() => setOpen((v) => !v)}
-            class="h-9 rounded-lg border border-slate-300 px-[8px]"
+            class="h-9 rounded-lg border border-slate-300 px-2"
             title={title}
           >
             <SortIcon className="size-4" />
@@ -275,7 +275,7 @@ export function TopBar(props: TopBarProps) {
   );
 
   return (
-    <div class="flex h-[64px] w-full shrink-0 items-center gap-2 bg-white p-4">
+    <div class="flex h-16 w-full shrink-0 items-center gap-2 bg-white p-4">
       <SearchField
         value={searchQuery}
         placeholder={searchPlaceholder}

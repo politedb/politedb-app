@@ -143,10 +143,7 @@ export function ConnectionScreen() {
   } = useConnectionScreenState();
   const { discardAndQuitApp } = useConnectionQuitGuard();
 
-  const { viewMode, toggleViewMode } = useViewMode([
-    "left",
-    "bottom",
-  ]);
+  const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
 
   /* =============================================================================
    * Windows orchestration (depends on activeProfileScreen)

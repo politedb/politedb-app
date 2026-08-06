@@ -24,7 +24,7 @@ describe("sqlDialect", () => {
 
   it("serializes MySQL JSON values without raw quote/backslash syntax hazards", () => {
     const sql = formatSqlValue(
-      { text: "token\"]}}", password: "p'ass\\word" },
+      { text: 'token"]}}', password: "p'ass\\word" },
       "json",
       "mysql"
     );
@@ -111,8 +111,8 @@ describe("sqlDialect", () => {
   });
 
   it("throws for unsupported table actions instead of generating unsafe SQL", () => {
-    expect(() => cloneTableSql("dbo", "Users", "UsersCopy", "sqlserver")).toThrow(
-      "Clone table is not supported"
-    );
+    expect(() =>
+      cloneTableSql("dbo", "Users", "UsersCopy", "sqlserver")
+    ).toThrow("Clone table is not supported");
   });
 });

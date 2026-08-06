@@ -111,7 +111,14 @@ export function ImportTableDialog({
       nullMode,
       fullValidation,
     });
-  }, [dataPreview, columns, firstIsHeaders, columnMapping, nullMode, fullValidation]);
+  }, [
+    dataPreview,
+    columns,
+    firstIsHeaders,
+    columnMapping,
+    nullMode,
+    fullValidation,
+  ]);
 
   const mappedColumnCount = useMemo(
     () =>

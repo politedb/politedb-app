@@ -30,10 +30,9 @@ export function computeLoadPlan(params: {
   const offset = pagination?.offset ?? DEFAULT_OFFSET;
 
   const hasColumnsArray = Array.isArray(prev.columns);
-  const hasColumns =
-    allowsEmptyColumnList(engine)
-      ? hasColumnsArray
-      : hasColumnsArray && prev.columns.length > 0;
+  const hasColumns = allowsEmptyColumnList(engine)
+    ? hasColumnsArray
+    : hasColumnsArray && prev.columns.length > 0;
 
   const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(key);
   const hasRowsWindow = !!rowsInfo;

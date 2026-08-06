@@ -24,7 +24,8 @@ function formatAssistantRequestError(args: {
   error: unknown;
   lang: ReturnType<typeof resolveReplyLanguage>;
 }) {
-  const raw = args.error instanceof Error ? args.error.message : String(args.error ?? "");
+  const raw =
+    args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
   const isProviderRequest =
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
@@ -312,13 +313,11 @@ export function useAiAssistantSubmit(args: {
                   {
                     type: "sqlPreview" as const,
                     sql: plan.sql,
-                    safety: ((
-                      plan.safety === "read_only"
-                        ? "read_only"
-                        : plan.safety === "mutating"
-                          ? "mutating"
-                          : "unknown"
-                    ) as "read_only" | "mutating" | "unknown"),
+                    safety: (plan.safety === "read_only"
+                      ? "read_only"
+                      : plan.safety === "mutating"
+                        ? "mutating"
+                        : "unknown") as "read_only" | "mutating" | "unknown",
                     confirmationState: "pending" as const,
                   },
                 ]

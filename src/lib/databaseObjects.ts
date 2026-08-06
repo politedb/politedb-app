@@ -12,94 +12,96 @@ import { cellToString } from "src/utils/convert";
 
 type CapabilityKey = `${DatabaseEngine}:${DatabaseObjectKind}`;
 
-const UNSUPPORTED_REASON = "This object type is not supported for this engine yet.";
+const UNSUPPORTED_REASON =
+  "This object type is not supported for this engine yet.";
 
-const capabilityMap: Partial<Record<CapabilityKey, DatabaseObjectCapability>> = {
-  "postgres:function": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "postgres:procedure": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "postgres:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mysql:function": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mysql:procedure": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mysql:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mariadb:function": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mariadb:procedure": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "mariadb:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "sqlite:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "d1:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-  "turso:trigger": {
-    canList: true,
-    canReadDefinition: true,
-    canCreate: true,
-    canEdit: true,
-    canDelete: true,
-  },
-};
+const capabilityMap: Partial<Record<CapabilityKey, DatabaseObjectCapability>> =
+  {
+    "postgres:function": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "postgres:procedure": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "postgres:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mysql:function": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mysql:procedure": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mysql:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mariadb:function": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mariadb:procedure": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "mariadb:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "sqlite:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "d1:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+    "turso:trigger": {
+      canList: true,
+      canReadDefinition: true,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    },
+  };
 
 function defaultCapability(
   engine: DatabaseEngine,
@@ -413,14 +415,20 @@ export function buildSaveStatements(args: {
   if (!args.item) return [body];
 
   if (args.item.kind === "trigger") {
-    return [buildDropDatabaseObjectSql({ engine: args.engine, item: args.item }), body];
+    return [
+      buildDropDatabaseObjectSql({ engine: args.engine, item: args.item }),
+      body,
+    ];
   }
 
   if (
     (args.engine === "mysql" || args.engine === "mariadb") &&
     !/\bcreate\s+(or\s+replace\s+)?(function|procedure)\b/i.test(body)
   ) {
-    return [buildDropDatabaseObjectSql({ engine: args.engine, item: args.item }), body];
+    return [
+      buildDropDatabaseObjectSql({ engine: args.engine, item: args.item }),
+      body,
+    ];
   }
 
   return [body];

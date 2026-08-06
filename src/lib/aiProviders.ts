@@ -136,7 +136,10 @@ export function normalizeAiProviderConfig(
 
 export function getSelectedAiProviderId() {
   try {
-    return localStorage.getItem(AI_SELECTED_PROVIDER_KEY) || DEFAULT_LOCAL_AI_PROVIDER_ID;
+    return (
+      localStorage.getItem(AI_SELECTED_PROVIDER_KEY) ||
+      DEFAULT_LOCAL_AI_PROVIDER_ID
+    );
   } catch {
     return DEFAULT_LOCAL_AI_PROVIDER_ID;
   }
@@ -158,7 +161,9 @@ export async function ensureLocalAiProvider(args: {
   model: string;
 }) {
   const providers = await aiProviderList().catch(() => []);
-  const existing = providers.find((item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID);
+  const existing = providers.find(
+    (item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID
+  );
   const parts = splitBaseUrl(args.endpoint, "ollama");
   const next: AiProviderConfig = {
     id: DEFAULT_LOCAL_AI_PROVIDER_ID,
@@ -190,7 +195,8 @@ export async function saveAiProviderWithOptionalKey(args: {
   let config = {
     ...args.config,
     baseUrl:
-      args.config.baseUrl ?? buildBaseUrl(args.config.host, args.config.subPath),
+      args.config.baseUrl ??
+      buildBaseUrl(args.config.host, args.config.subPath),
   };
   if (providerNeedsApiKey(config.kind) && args.apiKey?.trim()) {
     const apiKeyRef = await aiProviderSetKey(config.id, args.apiKey.trim());

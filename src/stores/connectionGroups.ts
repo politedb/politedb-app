@@ -43,9 +43,11 @@ function safeRead(): ConnectionGroupsSnapshot {
     for (const [profileId, value] of Object.entries(rawAssignments)) {
       if (Array.isArray(value)) {
         const groupIds = value.filter(
-          (groupId): groupId is string => typeof groupId === "string" && !!groupId
+          (groupId): groupId is string =>
+            typeof groupId === "string" && !!groupId
         );
-        if (groupIds.length) assignments[profileId] = Array.from(new Set(groupIds));
+        if (groupIds.length)
+          assignments[profileId] = Array.from(new Set(groupIds));
       } else if (typeof value === "string" && value) {
         // Backward compatible migration from v1 single-group assignments.
         assignments[profileId] = [value];
@@ -81,7 +83,10 @@ function normalizeGroupIds(value: string | string[] | undefined): string[] {
   if (Array.isArray(value)) {
     return Array.from(
       new Set(
-        value.filter((groupId): groupId is string => typeof groupId === "string" && !!groupId)
+        value.filter(
+          (groupId): groupId is string =>
+            typeof groupId === "string" && !!groupId
+        )
       )
     );
   }
@@ -145,7 +150,9 @@ export const useConnectionGroupsStore = create<ConnectionGroupsState>(
       const nextGroups = get().groups.filter((group) => group.id !== groupId);
       const nextAssignments = { ...get().assignments };
 
-      for (const [profileId, assignedGroupIds] of Object.entries(nextAssignments)) {
+      for (const [profileId, assignedGroupIds] of Object.entries(
+        nextAssignments
+      )) {
         const nextGroupIds = normalizeGroupIds(assignedGroupIds).filter(
           (id) => id !== groupId
         );

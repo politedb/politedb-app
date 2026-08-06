@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import {
   aiRuntimeCancelModelDownload,
   aiRuntimeDownloadDefaultModel,
@@ -413,7 +419,9 @@ export function useAiRuntimeManager(args: {
 
   useEffect(() => {
     if (!runtimeStatus) return;
-    if (runtimeStatus.missing.some((item) => item.toLowerCase().includes("gguf"))) {
+    if (
+      runtimeStatus.missing.some((item) => item.toLowerCase().includes("gguf"))
+    ) {
       return;
     }
     if (runtimeStatus.model_path) {

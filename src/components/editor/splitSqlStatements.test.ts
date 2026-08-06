@@ -121,7 +121,7 @@ describe("splitSqlStatements", () => {
   it("does not split on semicolon inside MySQL escaped JSON string", () => {
     const sql = [
       "UPDATE `t`",
-      "SET `json_value` = '{\\\"decorators\\\":{\\\"load\\\":[\\\"SELECT hostname AS hostname FROM system_info;\\\"]}}';",
+      'SET `json_value` = \'{\\"decorators\\":{\\"load\\":[\\"SELECT hostname AS hostname FROM system_info;\\"]}}\';',
       "select * from `t`;",
     ].join("\n");
 

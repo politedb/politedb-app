@@ -80,7 +80,7 @@ function normalizeEngineNameForCompare(engine: string): string {
 function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   const stmt = sql.trim().toUpperCase();
   const msg = String(
-    err instanceof Error ? err.message : err ?? ""
+    err instanceof Error ? err.message : (err ?? "")
   ).toLowerCase();
 
   const isDdl =
@@ -95,7 +95,7 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
     msg.includes("already exists") ||
     msg.includes("already a primary key") ||
     msg.includes("multiple primary keys") ||
-    msg.includes("constraint") && msg.includes("already") ||
+    (msg.includes("constraint") && msg.includes("already")) ||
     msg.includes("duplicate key name") ||
     msg.includes("duplicate object")
   );
@@ -298,7 +298,9 @@ async function sortTablesByForeignKeys(args: {
     orderedKeys.push(node);
 
     const nexts = Array.from(outgoing.get(node) ?? []);
-    nexts.sort((a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0));
+    nexts.sort(
+      (a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0)
+    );
     for (const next of nexts) {
       const d = (indegree.get(next) ?? 0) - 1;
       indegree.set(next, d);
@@ -310,14 +312,14 @@ async function sortTablesByForeignKeys(args: {
     const missing = tables
       .map((t) => tableNodeKey(t))
       .filter((k) => !orderedKeys.includes(k));
-    missing.sort((a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0));
+    missing.sort(
+      (a, b) => (originalOrder.get(a) ?? 0) - (originalOrder.get(b) ?? 0)
+    );
     orderedKeys.push(...missing);
   }
 
   const byKey = new Map(tables.map((t) => [tableNodeKey(t), t] as const));
-  return orderedKeys
-    .map((k) => byKey.get(k))
-    .filter(Boolean) as BackupTable[];
+  return orderedKeys.map((k) => byKey.get(k)).filter(Boolean) as BackupTable[];
 }
 
 function formatSqlInsertChunk(args: {
@@ -398,7 +400,7 @@ async function exportTableToSqlFile(args: {
         if (!content) return;
 
         writeQueue = writeQueue.then(() =>
-          exportAppendToFile( {
+          exportAppendToFile({
             path,
             content,
             append: true,
@@ -658,7 +660,7 @@ export function useDatabaseBackup() {
           "",
         ].join("\n");
 
-        await exportAppendToFile( {
+        await exportAppendToFile({
           path,
           content: header,
           append: false,
@@ -669,7 +671,7 @@ export function useDatabaseBackup() {
         const columnsByTable = new Map<string, string[]>();
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await exportAppendToFile( {
+          await exportAppendToFile({
             path,
             content: "\nSET FOREIGN_KEY_CHECKS = 0;\n",
             append: true,
@@ -728,7 +730,7 @@ export function useDatabaseBackup() {
           const key = `${table.schema}.${table.name}`;
           const structureSql = preDataByTable.get(key) ?? "";
           if (!structureSql) continue;
-          await exportAppendToFile( {
+          await exportAppendToFile({
             path,
             content: `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`,
             append: true,
@@ -741,7 +743,7 @@ export function useDatabaseBackup() {
           const columns = columnsByTable.get(key) ?? [];
           if (!columns.length) continue;
 
-          await exportAppendToFile( {
+          await exportAppendToFile({
             path,
             content: `\n-- Data ${table.schema}.${table.name}\n`,
             append: true,
@@ -758,7 +760,7 @@ export function useDatabaseBackup() {
         }
 
         if (postDataSqlChunks.length > 0) {
-          await exportAppendToFile( {
+          await exportAppendToFile({
             path,
             content: `\n-- Post-data constraints/indexes\n${postDataSqlChunks.join("\n")}`,
             append: true,
@@ -766,7 +768,7 @@ export function useDatabaseBackup() {
         }
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await exportAppendToFile( {
+          await exportAppendToFile({
             path,
             content: "\nSET FOREIGN_KEY_CHECKS = 1;\n",
             append: true,

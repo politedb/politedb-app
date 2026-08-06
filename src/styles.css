@@ -10,7 +10,6 @@
   --color-selected-unfocused: #dbdbdb;
 }
 
-
 @theme {
   --color-new: var(--color-new);
   --color-dirty: var(--color-dirty);
@@ -318,7 +317,6 @@ table {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .diagram-rel-flow,
   .diagram-rel-flow-particle {
     animation: none;

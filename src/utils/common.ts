@@ -35,7 +35,9 @@ export async function retryAsync<TResult, TError = unknown>(
 
       if (attempt >= attempts) break;
 
-      const canRetry = shouldRetry ? await shouldRetry(lastError, attempt) : true;
+      const canRetry = shouldRetry
+        ? await shouldRetry(lastError, attempt)
+        : true;
       if (!canRetry) throw lastError;
 
       if (onRetry) {

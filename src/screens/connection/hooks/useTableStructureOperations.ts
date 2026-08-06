@@ -162,9 +162,7 @@ export function useTableStructureOperations({
     if (!match) return null;
 
     const tablePart = (match[1] ?? "").trim();
-    const refColumn = (match[2] ?? "")
-      .split(",")[0]
-      ?.trim();
+    const refColumn = (match[2] ?? "").split(",")[0]?.trim();
     if (!tablePart || !refColumn) return null;
 
     let refSchema = "";
@@ -212,7 +210,8 @@ export function useTableStructureOperations({
         table_schema: existing?.table_schema ?? "",
         table_name: existing?.table_name ?? "",
         column_names: existing?.column_names ?? columnName,
-        ref_table_schema: parsed.ref_table_schema || existing?.ref_table_schema || "",
+        ref_table_schema:
+          parsed.ref_table_schema || existing?.ref_table_schema || "",
         ref_table_name: parsed.ref_table_name,
         ref_column_names: parsed.ref_column_names,
         on_update: existing?.on_update ?? "NO ACTION",
@@ -234,10 +233,13 @@ export function useTableStructureOperations({
     return editedData[fkRowIndex]?.column_name ?? "";
   }, [fkRowIndex, editedData]);
 
-  const openFkDialog = useCallback((rowIndex: number) => {
-    if (isLocked) return;
-    setFkRowIndex(rowIndex);
-  }, [isLocked]);
+  const openFkDialog = useCallback(
+    (rowIndex: number) => {
+      if (isLocked) return;
+      setFkRowIndex(rowIndex);
+    },
+    [isLocked]
+  );
 
   const closeFkDialog = useCallback(() => {
     setFkRowIndex(null);

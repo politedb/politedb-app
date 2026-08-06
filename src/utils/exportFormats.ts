@@ -38,7 +38,9 @@ export function formatSqlChunk(
 ): string {
   if (rows.length === 0) return "";
   const tableIdent = quoteTableName(schema, tableName, engine);
-  const colList = columnNames.map((name) => quoteIdentifier(name, engine)).join(", ");
+  const colList = columnNames
+    .map((name) => quoteIdentifier(name, engine))
+    .join(", ");
   const values = rows
     .map(
       (row) =>

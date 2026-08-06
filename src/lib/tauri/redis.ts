@@ -1,8 +1,4 @@
-import {
-  ColumnMeta,
-  QueryResult,
-  TableChunk,
-} from "./types";
+import { ColumnMeta, QueryResult, TableChunk } from "./types";
 import { operationCancel, operationExecute } from "./operation";
 import { operationBus } from "./operationBus";
 import { toErrorMessage } from "./queryValidate";

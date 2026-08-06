@@ -51,15 +51,15 @@ export function AiAssistantPanelHeader(props: {
               <SettingsIcon className="size-4" />
             </button>
             <AiAssistantSettingsDialog
-            open={settingsOpen}
-            onClose={() => onSettingsOpenChange(false)}
-            loadingModels={loadingModels}
-            runtimeBusy={runtimeBusy}
-            runtimeStatus={runtimeStatus}
-            onLoadModels={onLoadModels}
-            onStartRuntime={onStartRuntime}
-            onStopRuntime={onStopRuntime}
-          />
+              open={settingsOpen}
+              onClose={() => onSettingsOpenChange(false)}
+              loadingModels={loadingModels}
+              runtimeBusy={runtimeBusy}
+              runtimeStatus={runtimeStatus}
+              onLoadModels={onLoadModels}
+              onStartRuntime={onStartRuntime}
+              onStopRuntime={onStopRuntime}
+            />
           </>
         ) : null}
       </div>

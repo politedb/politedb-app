@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 
 const DEFAULT_PAGE_SIZE = 40;
 
@@ -24,9 +30,7 @@ export function useInfiniteScroll<T>(
   const hasMore = visibleCount < items.length;
 
   const loadMore = useCallback(() => {
-    setVisibleCount((current) =>
-      Math.min(current + pageSize, items.length)
-    );
+    setVisibleCount((current) => Math.min(current + pageSize, items.length));
   }, [items.length, pageSize]);
 
   useEffect(() => {
@@ -34,8 +38,7 @@ export function useInfiniteScroll<T>(
     if (!sentinel || !hasMore) return;
 
     const scrollRoot =
-      (sentinel.closest("[data-scroll-root]") as HTMLElement | null) ??
-      null;
+      (sentinel.closest("[data-scroll-root]") as HTMLElement | null) ?? null;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -48,5 +51,11 @@ export function useInfiniteScroll<T>(
     return () => observer.disconnect();
   }, [hasMore, loadMore, visibleCount]);
 
-  return { visibleItems, sentinelRef, hasMore, visibleCount, totalCount: items.length };
+  return {
+    visibleItems,
+    sentinelRef,
+    hasMore,
+    visibleCount,
+    totalCount: items.length,
+  };
 }

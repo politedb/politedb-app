@@ -2,7 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { CMD } from "./commands";
 import type { AiProviderConfig } from "src/types";
 
-export type AiRuntimePhase = "missing" | "stopped" | "starting" | "ready" | "error";
+export type AiRuntimePhase =
+  | "missing"
+  | "stopped"
+  | "starting"
+  | "ready"
+  | "error";
 
 export type AiRuntimeStatus = {
   phase: AiRuntimePhase;

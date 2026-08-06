@@ -285,7 +285,13 @@ export type ChatMessagePart =
       type: "sqlPreview";
       sql: string;
       safety?: "read_only" | "mutating" | "ddl" | "unknown";
-      confirmationState?: "pending" | "inserted" | "running" | "ran" | "canceled" | "error";
+      confirmationState?:
+        | "pending"
+        | "inserted"
+        | "running"
+        | "ran"
+        | "canceled"
+        | "error";
       error?: string;
     }
   | {

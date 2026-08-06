@@ -41,7 +41,10 @@ export async function writeTextFile(
   await tauriWriteTextFile(path, contents);
 }
 
-export async function writeFile(path: string, contents: Uint8Array): Promise<void> {
+export async function writeFile(
+  path: string,
+  contents: Uint8Array
+): Promise<void> {
   if (!isTauriRuntime()) {
     throw new Error("Filesystem access requires the desktop app.");
   }

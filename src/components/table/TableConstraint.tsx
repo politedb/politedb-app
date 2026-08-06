@@ -76,8 +76,11 @@ export function TableConstraints({
   engine,
   searchQuery = "",
 }: Props) {
-  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
-    useTableFocusState();
+  const {
+    ref: containerRef,
+    rootRef,
+    isFocused: isTableFocused,
+  } = useTableFocusState();
 
   // Use constraint operations hook
   const { handleDataChange, handleDeleteRecord } = useTableConstraintOperations(
@@ -126,7 +129,9 @@ export function TableConstraints({
     () =>
       filteredTableData
         .map((row) => row._sourceIndex)
-        .filter((index): index is number => typeof index === "number" && index >= 0),
+        .filter(
+          (index): index is number => typeof index === "number" && index >= 0
+        ),
     [filteredTableData]
   );
 
@@ -207,7 +212,7 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
+                "h-8 cursor-default! rounded-xs text-sm text-ellipsis focus:bg-white!",
                 isDirtyCell && !isNewRow && "bg-dirty",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
                 selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)

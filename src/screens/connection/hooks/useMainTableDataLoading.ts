@@ -121,7 +121,13 @@ export function useMainTableDataLoading(args: {
   const rowsDataSignature = useMemo(
     () =>
       `${activeKey}:${appliedFilterCombine}:${filterSignature}:${sortState?.colName ?? ""}:${sortState?.direction ?? ""}:${filterApplySeq}`,
-    [activeKey, appliedFilterCombine, filterSignature, sortState, filterApplySeq]
+    [
+      activeKey,
+      appliedFilterCombine,
+      filterSignature,
+      sortState,
+      filterApplySeq,
+    ]
   );
 
   const handleLoadRows = useCallback(async () => {
@@ -227,8 +233,10 @@ export function useMainTableDataLoading(args: {
     return unsub;
   }, [activeKey, handleLoadRows, rerender]);
 
-  const meta = useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
-  const rowsInfo = useConnectionStore.getState().getRowsWindowInfo(activeKey) ?? null;
+  const meta =
+    useConnectionStore.getState().tableDataMap[activeKey] ?? EMPTY_META;
+  const rowsInfo =
+    useConnectionStore.getState().getRowsWindowInfo(activeKey) ?? null;
   const hasError = !!(meta.error || rowsInfo?.error);
   const errorText = String(meta.error || rowsInfo?.error || "");
 
@@ -294,7 +302,10 @@ export function useMainTableDataLoading(args: {
     Array.isArray(meta.columns) &&
     (engine === "mongo" || engine === "cassandra" || meta.columns.length > 0);
   const rowsKnownEmpty =
-    !!rowsInfo && rowsMatchRequestedOffset && !rowsRunning && loadedMax < streamOffset;
+    !!rowsInfo &&
+    rowsMatchRequestedOffset &&
+    !rowsRunning &&
+    loadedMax < streamOffset;
   const hasAppliedFilters = appliedFilters.some(
     (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
   );
@@ -318,7 +329,8 @@ export function useMainTableDataLoading(args: {
     !hasError &&
     (!columnsLoaded ||
       !rowsInfo ||
-      (!hasRenderedTableBefore && (!currentPageLoaded || !queryMatchesRenderedData)));
+      (!hasRenderedTableBefore &&
+        (!currentPageLoaded || !queryMatchesRenderedData)));
 
   useEffect(() => {
     if (!shouldShowLoading || !rowsInfo?.running) return;
@@ -364,6 +376,7 @@ export function useMainTableDataLoading(args: {
     shouldShowLoading,
     rowsLoadProgress,
     dismissCurrentError,
-    clearLoadedQuerySignature: (key: string) => loadedQuerySignatureByTable.delete(key),
+    clearLoadedQuerySignature: (key: string) =>
+      loadedQuerySignatureByTable.delete(key),
   };
 }

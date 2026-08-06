@@ -26,7 +26,9 @@ export function isEncryptedExportFile(json: string) {
   }
 }
 
-export function parseProfileExportMeta(json: string): ProfileExportFileMeta | null {
+export function parseProfileExportMeta(
+  json: string
+): ProfileExportFileMeta | null {
   try {
     const parsed = JSON.parse(json) as ProfileExportFileMeta;
     return parsed && typeof parsed === "object" ? parsed : null;
@@ -39,7 +41,9 @@ export function isSharingExport(meta: ProfileExportFileMeta | null) {
   return !!meta?.secrets_redacted || meta?.export_mode === "sharing";
 }
 
-export function formatSharingExportSuccessMessage(flags: SharingSecretFlags = {}) {
+export function formatSharingExportSuccessMessage(
+  flags: SharingSecretFlags = {}
+) {
   const lines = [
     "Connection exported for sharing. The file is encrypted.",
     "",
@@ -113,7 +117,10 @@ export function formatSharingImportSuccessMessage(
   ];
 
   if (needsCredentials) {
-    lines.push("", "Open each imported connection and complete any missing credentials.");
+    lines.push(
+      "",
+      "Open each imported connection and complete any missing credentials."
+    );
   }
 
   if (meta?.sharing_checklist?.length) {

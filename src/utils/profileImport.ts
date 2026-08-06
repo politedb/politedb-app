@@ -32,8 +32,7 @@ export function isLikelyTablePlusPlistPath(path: string) {
 export function formatExternalImportSuccessMessage(
   result: ExternalImportResult
 ) {
-  const sourceLabel =
-    result.source === "dbeaver" ? "DBeaver" : "TablePlus";
+  const sourceLabel = result.source === "dbeaver" ? "DBeaver" : "TablePlus";
 
   const lines = [
     `Imported ${result.created} connection(s) from ${sourceLabel}.`,
@@ -47,7 +46,9 @@ export function formatExternalImportSuccessMessage(
       lines.push(`• ${reason}`);
     }
     if (result.skipped_reasons.length > preview.length) {
-      lines.push(`• …and ${result.skipped_reasons.length - preview.length} more`);
+      lines.push(
+        `• …and ${result.skipped_reasons.length - preview.length} more`
+      );
     }
   }
 
@@ -74,7 +75,10 @@ export function formatExternalImportError(err: unknown) {
   if (msg.includes("TABLEPLUS_DECRYPT_FAILED")) {
     return "Wrong TablePlus export password, or the file is corrupted.";
   }
-  if (msg.includes("DBEAVER_IMPORT_EMPTY") || msg.includes("TABLEPLUS_IMPORT_EMPTY")) {
+  if (
+    msg.includes("DBEAVER_IMPORT_EMPTY") ||
+    msg.includes("TABLEPLUS_IMPORT_EMPTY")
+  ) {
     return "No supported connections were found in this file.";
   }
   return msg;

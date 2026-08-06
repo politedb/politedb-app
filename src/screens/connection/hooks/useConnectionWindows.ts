@@ -206,10 +206,7 @@ export function useConnectionWindows(
   );
 
   const openDatabaseObjectsManager = useCallback(
-    (opts?: {
-      kind?: DatabaseObjectKind;
-      object?: DatabaseObjectItem;
-    }) => {
+    (opts?: { kind?: DatabaseObjectKind; object?: DatabaseObjectItem }) => {
       const id = "db-object-manager";
       const existing = windows.find((w) => w.type === "db-object-manager");
       const patch = {

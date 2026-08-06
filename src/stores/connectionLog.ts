@@ -32,7 +32,11 @@ type ConnectionLogState = {
     error: string,
     profile?: ConnectionProfile | null
   ) => Promise<void>;
-  endSession: (tabId: string, status?: "closed" | "failed", error?: string) => void;
+  endSession: (
+    tabId: string,
+    status?: "closed" | "failed",
+    error?: string
+  ) => void;
   closeOrphanedActiveSessions: (closedAt?: number) => void;
   clearLog: () => void;
   getPersistedSnapshot: () => {
@@ -101,8 +105,7 @@ export const useConnectionLogStore = create<ConnectionLogState>((set, get) => ({
       id: uuid(),
       tabId: tab.id,
       profileId: tab.profileId || resolved?.id || "",
-      profileLabel:
-        tab.label || resolved?.label || "Unnamed Connection",
+      profileLabel: tab.label || resolved?.label || "Unnamed Connection",
       engine: (tab.engine || resolved?.engine || "postgres") as DatabaseEngine,
       host: resolved ? profileConnectionHost(resolved) : tab.label,
       dbUser: resolved ? profileDbUser(resolved) : undefined,

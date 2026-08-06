@@ -61,7 +61,10 @@ const EXPLICIT_LANGUAGE_ALIASES: Array<{ pattern: RegExp; code: string }> = [
   { pattern: /\b(italian|italiano|tieng y)\b/i, code: "ita" },
   { pattern: /\b(russian|tieng nga)\b/i, code: "rus" },
   { pattern: /\b(thai|tieng thai)\b/i, code: "tha" },
-  { pattern: /\b(indonesian|bahasa indonesia|tieng indonesia)\b/i, code: "ind" },
+  {
+    pattern: /\b(indonesian|bahasa indonesia|tieng indonesia)\b/i,
+    code: "ind",
+  },
   { pattern: /\b(arabic|tieng arab)\b/i, code: "arb" },
   { pattern: /\b(dutch|nederlands|tieng ha lan)\b/i, code: "nld" },
   { pattern: /\b(polish|tieng ba lan)\b/i, code: "pol" },
@@ -165,7 +168,10 @@ function detectFromScript(text: string): ReplyLanguageInfo | null {
   if (/[\u0400-\u04ff]/.test(text)) {
     return toReplyLanguageInfo("rus");
   }
-  if (/[đĐ]/.test(text) || /[ươă](?:̀|́|̣|̉|̃)|\b(?:xin chao|cam on|cho toi|liet ke|hien thi)\b/i.test(text)) {
+  if (
+    /[đĐ]/.test(text) ||
+    /[ươă](?:̀|́|̣|̉|̃)|\b(?:xin chao|cam on|cho toi|liet ke|hien thi)\b/i.test(text)
+  ) {
     return toReplyLanguageInfo("vie");
   }
   return null;

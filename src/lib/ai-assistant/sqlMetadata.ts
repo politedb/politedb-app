@@ -254,7 +254,7 @@ export function validateSqlAgainstMetadata(args: {
       ref,
       key: resolveTableKey(ref, args.tables, args.activeSchema),
     }))
-    .filter((item): item is { ref: typeof tableRefs[0]; key: string } =>
+    .filter((item): item is { ref: (typeof tableRefs)[0]; key: string } =>
       Boolean(item.key)
     );
 
@@ -386,7 +386,8 @@ export function formatSqlExecutionError(args: {
   activeSchema?: string;
   engine?: DatabaseEngine;
 }) {
-  const raw = args.error instanceof Error ? args.error.message : String(args.error ?? "");
+  const raw =
+    args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
   const useLocalized = supportsLocalizedFastPath(args.lang);
   const parsed = parseDatabaseExecutionError(raw);

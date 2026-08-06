@@ -45,11 +45,7 @@ export function useTableRowSelection({
         tag === "SELECT" ||
         (document.activeElement as HTMLElement | null)?.isContentEditable;
 
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        e.key === "a" &&
-        !isEditingCell
-      ) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "a" && !isEditingCell) {
         const indices =
           selectableRowIndices && selectableRowIndices.length > 0
             ? selectableRowIndices
@@ -68,17 +64,12 @@ export function useTableRowSelection({
         return;
       }
 
-      if (
-        e.key === "Backspace" &&
-        !isEditingCell &&
-        selectedRows.size > 0
-      ) {
+      if (e.key === "Backspace" && !isEditingCell && selectedRows.size > 0) {
         e.preventDefault();
         e.stopPropagation();
 
         const rowsToDelete = Array.from(selectedRows).filter(
-          (idx) =>
-            !deletedRows.has(idx) && (!isNewRow || !isNewRow(idx))
+          (idx) => !deletedRows.has(idx) && (!isNewRow || !isNewRow(idx))
         );
 
         rowsToDelete.forEach((idx) => onDeleteRow?.(idx));

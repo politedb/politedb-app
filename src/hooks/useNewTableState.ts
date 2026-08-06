@@ -53,12 +53,15 @@ export function useNewTableState({
     [columns]
   );
 
-  const togglePrimaryKey = useCallback((name: string) => {
-    if (isProfileLocked) return;
-    setPrimaryKey((prev) =>
-      prev.includes(name) ? prev.filter((k) => k !== name) : [...prev, name]
-    );
-  }, [isProfileLocked]);
+  const togglePrimaryKey = useCallback(
+    (name: string) => {
+      if (isProfileLocked) return;
+      setPrimaryKey((prev) =>
+        prev.includes(name) ? prev.filter((k) => k !== name) : [...prev, name]
+      );
+    },
+    [isProfileLocked]
+  );
 
   const addColumn = useCallback(
     (_row: any, index: number) => {
@@ -78,24 +81,27 @@ export function useNewTableState({
     [columns.length, isProfileLocked]
   );
 
-  const removeColumn = useCallback((index: number) => {
-    if (isProfileLocked) return;
-    setColumns((prev) => {
-      const removed = prev[index]?.column_name;
-      const next = prev.filter((_, i) => i !== index);
+  const removeColumn = useCallback(
+    (index: number) => {
+      if (isProfileLocked) return;
+      setColumns((prev) => {
+        const removed = prev[index]?.column_name;
+        const next = prev.filter((_, i) => i !== index);
 
-      if (removed) {
-        setPrimaryKey((pk) => {
-          const nextPk = pk.filter((k) => k !== removed);
-          return nextPk.length === 0 && next[0]?.column_name
-            ? [next[0].column_name]
-            : nextPk;
-        });
-      }
+        if (removed) {
+          setPrimaryKey((pk) => {
+            const nextPk = pk.filter((k) => k !== removed);
+            return nextPk.length === 0 && next[0]?.column_name
+              ? [next[0].column_name]
+              : nextPk;
+          });
+        }
 
-      return next;
-    });
-  }, [isProfileLocked]);
+        return next;
+      });
+    },
+    [isProfileLocked]
+  );
 
   const updateColumn = useCallback(
     (index: number, field: keyof TableColumn, value: string) => {

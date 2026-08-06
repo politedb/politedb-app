@@ -33,9 +33,9 @@ function isSqlBusyError(err: unknown): boolean {
   return msg.includes("ERR_SQL_BUSY");
 }
 
-async function operationExecuteWithBusyRetry(payload: Parameters<
-  typeof operationExecute
->[0]) {
+async function operationExecuteWithBusyRetry(
+  payload: Parameters<typeof operationExecute>[0]
+) {
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= SQL_BUSY_RETRY_MAX; attempt++) {

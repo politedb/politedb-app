@@ -71,9 +71,7 @@ export async function applyRedisPatchEntry(
     ) {
       if (!Object.prototype.hasOwnProperty.call(raw, "value")) continue;
       if (Object.prototype.hasOwnProperty.call(raw, "field")) {
-        throw new Error(
-          "Redis hash fields cannot be renamed from table view."
-        );
+        throw new Error("Redis hash fields cannot be renamed from table view.");
       }
       const fieldValue = String(sourceRow[0] ?? "");
       await runRedisCommand(ctx.runtimeConnectionId, "HSET", [

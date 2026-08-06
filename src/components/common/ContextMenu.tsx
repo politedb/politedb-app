@@ -142,7 +142,9 @@ export function ContextMenu(props: {
                       {it.shortcut}
                     </span>
                   ) : null}
-                  {hasSubmenu ? <span class="text-[15px] leading-none">›</span> : null}
+                  {hasSubmenu ? (
+                    <span class="text-[15px] leading-none">›</span>
+                  ) : null}
                 </span>
               </button>
 
@@ -157,10 +159,7 @@ export function ContextMenu(props: {
                   {it.submenu!.map((sub, subIdx) => {
                     if (sub.type === "sep") {
                       return (
-                        <div
-                          key={subIdx}
-                          class="my-1 h-px bg-neutral-200/80"
-                        />
+                        <div key={subIdx} class="my-1 h-px bg-neutral-200/80" />
                       );
                     }
                     const subDisabled = !!sub.disabled;

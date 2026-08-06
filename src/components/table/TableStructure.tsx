@@ -75,8 +75,11 @@ export function TableStructure({
   tableList = [],
   searchQuery = "",
 }: Props) {
-  const { ref: containerRef, rootRef, isFocused: isTableFocused } =
-    useTableFocusState();
+  const {
+    ref: containerRef,
+    rootRef,
+    isFocused: isTableFocused,
+  } = useTableFocusState();
 
   const {
     fkRowIndex,
@@ -155,7 +158,9 @@ export function TableStructure({
     () =>
       filteredTableData
         .map((row) => row._sourceIndex)
-        .filter((index): index is number => typeof index === "number" && index >= 0),
+        .filter(
+          (index): index is number => typeof index === "number" && index >= 0
+        ),
     [filteredTableData]
   );
 
@@ -268,10 +273,13 @@ export function TableStructure({
             <div class="relative">
               <Input
                 className={cn(
-                  "h-8 cursor-default! rounded-[2px] text-sm text-ellipsis focus:bg-white!",
+                  "h-8 cursor-default! rounded-xs text-sm text-ellipsis focus:bg-white!",
                   isDirtyCell && !isNewRow && "bg-dirty",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                  selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
+                  selectionRowClass(
+                    isRowSelected && !isEmptyRow,
+                    isTableFocused
+                  ),
                   isFkColumn && !isEmptyRow && "pr-6"
                 )}
                 showSelect={!isEmptyRow && showSelect}

@@ -269,12 +269,10 @@ function serializeRowsForInternalClipboard(
   })}`;
 }
 
-function parseRowsFromInternalClipboard(text: string):
-  | {
-      columns?: string[];
-      rows: unknown[][];
-    }
-  | null {
+function parseRowsFromInternalClipboard(text: string): {
+  columns?: string[];
+  rows: unknown[][];
+} | null {
   if (!text.startsWith(ROW_CLIPBOARD_PREFIX)) return null;
   try {
     const payload = JSON.parse(text.slice(ROW_CLIPBOARD_PREFIX.length));
@@ -284,8 +282,8 @@ function parseRowsFromInternalClipboard(text: string):
     );
     if (!rows.length) return null;
     const sourceColumns = Array.isArray(payload.columns)
-      ? payload.columns.filter((name: unknown): name is string =>
-          typeof name === "string"
+      ? payload.columns.filter(
+          (name: unknown): name is string => typeof name === "string"
         )
       : undefined;
     return { columns: sourceColumns, rows };

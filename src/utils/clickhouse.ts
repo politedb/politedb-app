@@ -18,7 +18,9 @@ export function unwrapClickhouseType(typeName: string): string {
 }
 
 /** Fractional digits from `Decimal(P, S)` / `Decimal64(S)` (after unwrap). */
-export function clickhouseDecimalScale(dbType: string | undefined): number | null {
+export function clickhouseDecimalScale(
+  dbType: string | undefined
+): number | null {
   if (!dbType) return null;
   const inner = unwrapClickhouseType(dbType).toLowerCase();
   if (!inner.startsWith("decimal") && !inner.startsWith("fixedpoint")) {
@@ -38,7 +40,10 @@ export function clickhouseDecimalScale(dbType: string | undefined): number | nul
 }
 
 /** Human-readable decimal literal for ClickHouse SQL (not the scaled Int storage). */
-export function formatClickhouseDecimalForSql(value: number, scale: number): string {
+export function formatClickhouseDecimalForSql(
+  value: number,
+  scale: number
+): string {
   if (!Number.isFinite(value)) return String(value);
   if (scale <= 0) return String(value);
   return value.toFixed(scale);

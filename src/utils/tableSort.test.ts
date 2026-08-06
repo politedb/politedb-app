@@ -24,10 +24,7 @@ describe("resolveDefaultTableSort", () => {
     expect(
       resolveDefaultTableSort({
         engine: "postgres",
-        columns: [
-          { name: "name" },
-          { name: "id", is_primary: true },
-        ],
+        columns: [{ name: "name" }, { name: "id", is_primary: true }],
       })
     ).toEqual({ colName: "id", direction: "asc" });
   });

@@ -20,10 +20,7 @@ const NON_SQL_PATCH_ENGINES = new Set<DatabaseEngine>([
   "redis",
 ]);
 
-const EMPTY_COLUMN_OK_ENGINES = new Set<DatabaseEngine>([
-  "mongo",
-  "cassandra",
-]);
+const EMPTY_COLUMN_OK_ENGINES = new Set<DatabaseEngine>(["mongo", "cassandra"]);
 
 export function resolveDefaultSchema(
   engine: DatabaseEngine | undefined,
@@ -47,9 +44,7 @@ export function resolveDefaultSchema(
 }
 
 export function supportsTableMeta(engine: DatabaseEngine | undefined): boolean {
-  return (
-    engine !== "redis" && engine !== "mongo" && engine !== "cassandra"
-  );
+  return engine !== "redis" && engine !== "mongo" && engine !== "cassandra";
 }
 
 export function isNonSqlPatchEngine(

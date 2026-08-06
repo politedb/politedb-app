@@ -7,9 +7,7 @@ import {
 
 describe("resolveReplyLanguage", () => {
   it("detects Vietnamese from diacritics", () => {
-    expect(resolveReplyLanguage("xin chào, liệt kê các bảng").code).toBe(
-      "vie"
-    );
+    expect(resolveReplyLanguage("xin chào, liệt kê các bảng").code).toBe("vie");
   });
 
   it("does not misdetect short Vietnamese as French", () => {

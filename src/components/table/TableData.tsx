@@ -324,7 +324,9 @@ export function TableData({
           const sourceIdx =
             sourceIndexByName.size > 0 ? sourceIndexByName.get(col.name) : idx;
           data[col.name] =
-            sourceIdx == null || sourceIdx < 0 ? null : (row[sourceIdx] ?? null);
+            sourceIdx == null || sourceIdx < 0
+              ? null
+              : (row[sourceIdx] ?? null);
         }
 
         onCellChange("create", DATA_KEY, -1, data);

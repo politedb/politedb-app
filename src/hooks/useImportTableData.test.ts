@@ -85,5 +85,4 @@ describe("CSV import helpers", () => {
       )
     ).toMatchObject([{ row: 101, column: "id", value: "bad" }]);
   });
-
 });

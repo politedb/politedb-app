@@ -1,4 +1,8 @@
-import type { DataAction, DataKey, TableDataState } from "src/stores/connection";
+import type {
+  DataAction,
+  DataKey,
+  TableDataState,
+} from "src/stores/connection";
 import type { TableWindow } from "src/types";
 
 export type WindowPatchBuckets = Partial<
@@ -66,8 +70,7 @@ function resolveRowIndex(
   const candidateIndices = [rowIndex, rowIndex + offset];
   const resolvedIndex =
     candidateIndices.find(
-      (idx) =>
-        Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
+      (idx) => Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
     ) ?? rowIndex;
 
   const originalRow = cache?.map.get(resolvedIndex);
