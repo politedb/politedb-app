@@ -75,9 +75,7 @@ pub fn clickhouse_decimal_to_cell_i128(raw: i128, scale: usize) -> CellValue {
 fn decimal_scale_for_column(col_type: Option<&Type>) -> Option<usize> {
     col_type
         .and_then(decimal_scale_from_klick_type)
-        .or_else(|| {
-            col_type.and_then(|t| clickhouse_decimal_scale(&t.to_string()))
-        })
+        .or_else(|| col_type.and_then(|t| clickhouse_decimal_scale(&t.to_string())))
 }
 
 pub fn klick_value_to_cell(v: ChValue, col_type: Option<&Type>) -> CellValue {
@@ -107,9 +105,7 @@ pub fn klick_value_to_cell(v: ChValue, col_type: Option<&Type>) -> CellValue {
     }
 
     match v {
-        ChValue::Decimal32(_, x) => {
-            clickhouse_decimal_to_cell_i64(i64::from(x), 0)
-        }
+        ChValue::Decimal32(_, x) => clickhouse_decimal_to_cell_i64(i64::from(x), 0),
         ChValue::Decimal64(_, x) => clickhouse_decimal_to_cell_i64(x, 0),
         ChValue::Decimal128(_, x) => clickhouse_decimal_to_cell_i128(x, 0),
         ChValue::Decimal256(_, x) => CellValue::Str(x.to_string()),

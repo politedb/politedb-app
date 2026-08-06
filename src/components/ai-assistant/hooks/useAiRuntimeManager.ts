@@ -18,6 +18,10 @@ import {
   listLocalAiModels,
   markLocalAiModelSeen,
 } from "src/lib/ai-assistant";
+import {
+  DEFAULT_AI_MODEL_NAME,
+  normalizeLocalAiModelName,
+} from "src/utils/assistant";
 import { sleep } from "src/utils/common";
 
 function formatError(error: unknown) {
@@ -81,7 +85,9 @@ export function useAiRuntimeManager(args: {
   const { initialEndpoint, initialModel, submitting } = args;
 
   const [endpoint, setEndpoint] = useState(initialEndpoint);
-  const [model, setModel] = useState(initialModel);
+  const [model, setModel] = useState(() =>
+    normalizeLocalAiModelName(initialModel)
+  );
   const [loadingModels, setLoadingModels] = useState(false);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<AiRuntimeStatus | null>(
@@ -97,7 +103,7 @@ export function useAiRuntimeManager(args: {
 
   const autoStartAttemptedRef = useRef(false);
   const suppressAutoStartRef = useRef(false);
-  const preferredModelRef = useRef(initialModel.trim());
+  const preferredModelRef = useRef(normalizeLocalAiModelName(initialModel));
 
   const handleLoadModels = useCallback(
     async (endpointOverride?: string) => {
@@ -112,16 +118,11 @@ export function useAiRuntimeManager(args: {
         );
         const selectableOptions =
           realOptions.length > 0 ? realOptions : normalizedNext;
-        const nextModel =
-          [
-            model.trim(),
-            preferredModelRef.current.trim(),
-            runtimeStatus?.model_name?.trim() ?? "",
-          ].find(
-            (candidate) => candidate && selectableOptions.includes(candidate)
-          ) ??
-          selectableOptions[0] ??
-          "";
+        const qwenOption = selectableOptions.find(
+          (candidate) =>
+            normalizeLocalAiModelName(candidate) === DEFAULT_AI_MODEL_NAME
+        );
+        const nextModel = qwenOption ?? DEFAULT_AI_MODEL_NAME;
 
         if (nextModel && nextModel !== model) {
           preferredModelRef.current = nextModel;

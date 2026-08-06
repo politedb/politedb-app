@@ -1,6 +1,6 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
-import type { QuerySafetyMode } from "src/lib/querySafety";
+import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import type { DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";

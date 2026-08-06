@@ -92,8 +92,8 @@ pub async fn run_oracle_sql_query(
             return Err("ORACLE_SQL_EMPTY".into());
         }
 
-        let conn =
-            oracle::Connection::connect(&user, &password, &connect_string).map_err(|e| e.to_string())?;
+        let conn = oracle::Connection::connect(&user, &password, &connect_string)
+            .map_err(|e| e.to_string())?;
 
         if validate_only {
             conn.statement(&sql).build().map_err(|e| e.to_string())?;
@@ -153,7 +153,12 @@ pub async fn run_oracle_sql_query(
     let result = match blocking.await {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => {
-            emit_error(&ctx.app, op_id, format!("ORACLE_QUERY_FAILED: {e}"), started_at.elapsed().as_millis());
+            emit_error(
+                &ctx.app,
+                op_id,
+                format!("ORACLE_QUERY_FAILED: {e}"),
+                started_at.elapsed().as_millis(),
+            );
             return;
         }
         Err(e) => {

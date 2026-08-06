@@ -68,10 +68,6 @@ export async function aiProviderDelete(providerId: string) {
   await invoke(CMD.aiProviderDelete, { providerId });
 }
 
-export async function aiProviderSetKey(providerId: string, apiKey: string) {
-  return invoke<string>(CMD.aiProviderSetKey, { providerId, apiKey });
-}
-
 export async function aiProviderTest(providerId: string) {
   return invoke<string>(CMD.aiProviderTest, { providerId });
 }

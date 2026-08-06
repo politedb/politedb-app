@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import { useProfileStore } from "src/stores/profile";
 import { ProfileTab, QuerySafetyMode, useScreenStore } from "src/stores/screen";
-import { normalizeQuerySafetyMode } from "src/lib/querySafety";
+import { normalizeQuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 import type {
   ConnectionOpenLogEntry,

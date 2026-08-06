@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildExplainSql } from "./explain";
 
 describe("buildExplainSql", () => {
-  it("uses EXPLAIN for standard SQL engines", () => {
+  it("uses JSON explain for Postgres and EXPLAIN for other standard SQL engines", () => {
     expect(buildExplainSql("postgres", "select 1;")).toEqual({
-      sql: "EXPLAIN select 1",
+      sql: "EXPLAIN (FORMAT JSON) select 1",
     });
     expect(buildExplainSql("mysql", "select 1")).toEqual({
       sql: "EXPLAIN select 1",

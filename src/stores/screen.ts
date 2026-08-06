@@ -4,9 +4,9 @@ import {
   hasProductionTag,
   normalizeQuerySafetyMode,
   type QuerySafetyMode,
-} from "src/lib/querySafety";
+} from "@root/src/lib/queries/querySafety";
 
-export type { QuerySafetyMode } from "src/lib/querySafety";
+export type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 function tabSafetyMode(
   t: Pick<ProfileTab, "querySafetyMode" | "isLocked">

@@ -54,8 +54,7 @@ pub fn encrypt_export_payload(plaintext: &str, password: &str) -> Result<String,
         ciphertext: B64.encode(ciphertext),
     };
 
-    serde_json::to_string_pretty(&envelope)
-        .map_err(|e| format!("EXPORT_ENCRYPT_SERIALIZE: {e}"))
+    serde_json::to_string_pretty(&envelope).map_err(|e| format!("EXPORT_ENCRYPT_SERIALIZE: {e}"))
 }
 
 pub fn decrypt_export_payload(json: &str, password: &str) -> Result<String, String> {
@@ -101,8 +100,8 @@ fn validate_password(password: &str) -> Result<(), String> {
 }
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; KEY_LEN], String> {
-    let params = Params::new(19_456, 2, 1, Some(KEY_LEN))
-        .map_err(|e| format!("EXPORT_KDF_PARAMS: {e}"))?;
+    let params =
+        Params::new(19_456, 2, 1, Some(KEY_LEN)).map_err(|e| format!("EXPORT_KDF_PARAMS: {e}"))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = [0u8; KEY_LEN];
     argon2
@@ -126,8 +125,7 @@ mod tests {
 
     #[test]
     fn wrong_password_fails() {
-        let encrypted =
-            encrypt_export_payload("secret payload", "correct-password-12").unwrap();
+        let encrypted = encrypt_export_payload("secret payload", "correct-password-12").unwrap();
         let err = decrypt_export_payload(&encrypted, "wrong-password-12").unwrap_err();
         assert!(err.contains("WRONG_PASSWORD"));
     }

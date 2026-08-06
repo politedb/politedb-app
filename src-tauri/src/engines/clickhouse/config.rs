@@ -83,7 +83,10 @@ pub async fn connect_native(
 ) -> Result<NativeClient, String> {
     let address = build_native_address(input);
     let options = build_native_options(input, password);
-    let timeout_ms = input.connect_timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
+    let timeout_ms = input
+        .connect_timeout_ms
+        .unwrap_or(15_000)
+        .clamp(500, 60_000);
     let timeout = Duration::from_millis(timeout_ms);
 
     let fut = NativeClient::connect(&address, options);

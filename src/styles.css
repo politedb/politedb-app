@@ -317,6 +317,7 @@ table {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .diagram-rel-flow,
   .diagram-rel-flow-particle {
     animation: none;
@@ -326,5 +327,15 @@ table {
   .diagram-rel-flow-particle {
     stroke-dasharray: none;
     stroke-width: 0;
+  }
+}
+
+@keyframes ai-guide-fade {
+  from {
+    opacity: 0.18;
+  }
+
+  to {
+    opacity: 1;
   }
 }

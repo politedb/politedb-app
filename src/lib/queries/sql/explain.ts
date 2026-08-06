@@ -1,7 +1,7 @@
 import type { DatabaseEngine } from "src/types";
 
 const EXPLAIN_PREFIX_BY_ENGINE: Partial<Record<DatabaseEngine, string>> = {
-  postgres: "EXPLAIN",
+  postgres: "EXPLAIN (FORMAT JSON)",
   mysql: "EXPLAIN",
   mariadb: "EXPLAIN",
   duckdb: "EXPLAIN",

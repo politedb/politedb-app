@@ -6,14 +6,16 @@ use serde_json::Value;
 use urlencoding::encode;
 
 use crate::engines::clickhouse::config::build_http_url;
+use crate::engines::clickhouse::connection::ClickhouseConn;
 use crate::engines::clickhouse::convert::{
     clickhouse_decimal_scale, clickhouse_decimal_to_cell_i64, unwrap_clickhouse_type_str,
 };
-use crate::engines::clickhouse::connection::ClickhouseConn;
 use crate::engines::clickhouse::response::{ChJsonMeta, ChJsonResponse};
-use crate::engines::clickhouse::sql::{looks_like_query, normalize_clickhouse_statement, split_clickhouse_statements};
-use crate::types::{CellValue, ClickhouseConnectInput};
+use crate::engines::clickhouse::sql::{
+    looks_like_query, normalize_clickhouse_statement, split_clickhouse_statements,
+};
 use crate::types::secret::{SecretRef, SecretRefKind};
+use crate::types::{CellValue, ClickhouseConnectInput};
 
 #[derive(Debug, Deserialize)]
 struct ChJsonMetaRaw {
@@ -73,8 +75,12 @@ fn json_value_to_cell(v: &Value, db_type: Option<&str>) -> CellValue {
             }
         }
         Value::String(s) => CellValue::Str(s.clone()),
-        Value::Array(arr) => CellValue::Str(serde_json::to_string(arr).unwrap_or_else(|_| "[]".to_string())),
-        Value::Object(obj) => CellValue::Str(serde_json::to_string(obj).unwrap_or_else(|_| "{}".to_string())),
+        Value::Array(arr) => {
+            CellValue::Str(serde_json::to_string(arr).unwrap_or_else(|_| "[]".to_string()))
+        }
+        Value::Object(obj) => {
+            CellValue::Str(serde_json::to_string(obj).unwrap_or_else(|_| "{}".to_string()))
+        }
     }
 }
 

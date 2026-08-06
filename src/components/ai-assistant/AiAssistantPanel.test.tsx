@@ -73,22 +73,20 @@ vi.mock("src/lib/tauri/query", () => ({
   runSqlQuery: (...args: any[]) => runSqlQueryMock(...args),
 }));
 
-vi.mock("src/lib/aiProviders", () => ({
+vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
   normalizeAiProviderConfig: (provider: any) => provider,
   ensureLocalAiProvider: vi.fn().mockResolvedValue({
     id: "local",
     kind: "local_openai_compatible",
-    label: "Local API",
+    label: "PoliteDB AI",
     baseUrl: "http://127.0.0.1:8080/v1",
-    defaultModel: "qwen2.5-coder:7b",
-    apiKeyRef: null,
+    defaultModel: "Qwen2.5-Coder-7B",
     enabled: true,
   }),
   getSelectedAiProviderId: vi.fn(() => "local"),
   setSelectedAiProviderId: (...args: any[]) =>
     setSelectedAiProviderIdMock(...args),
-  providerNeedsApiKey: (kind: string) => kind !== "local_openai_compatible",
   makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
     id: overrides.id ?? kind,
     kind,
@@ -102,66 +100,28 @@ vi.mock("src/lib/aiProviders", () => ({
   aiProviderDelete: vi.fn(),
   buildBaseUrl: (host: string, subPath: string) => `${host}${subPath}`,
   AI_PROVIDER_LABELS: {
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    gemini: "Google AI",
-    openrouter: "OpenRouter",
-    grok: "Grok",
-    deepseek: "DeepSeek",
-    github_copilot: "GitHub Copilot",
     ollama: "Ollama",
     local_openai_compatible: "Local API",
   },
   DEFAULT_HOSTS: {
-    openai: "https://api.openai.com",
-    anthropic: "https://api.anthropic.com",
-    gemini: "https://generativelanguage.googleapis.com",
-    openrouter: "https://openrouter.ai/api",
-    grok: "https://api.x.ai",
-    deepseek: "https://api.deepseek.com",
-    github_copilot: "https://api.githubcopilot.com",
     ollama: "http://127.0.0.1:11434",
     local_openai_compatible: "http://127.0.0.1:11434",
   },
   DEFAULT_SUB_PATHS: {
-    openai: "/v1",
-    anthropic: "/v1",
-    gemini: "/v1beta",
-    openrouter: "/v1",
-    grok: "/v1",
-    deepseek: "",
-    github_copilot: "/v1",
     ollama: "/v1",
     local_openai_compatible: "/v1",
   },
   DEFAULT_MODELS: {
-    openai: "gpt-4o",
-    anthropic: "claude-3-5-sonnet-latest",
-    gemini: "gemini-1.5-pro",
-    openrouter: "openai/gpt-4o",
-    grok: "grok-2-latest",
-    deepseek: "deepseek-chat",
-    github_copilot: "gpt-4o",
-    ollama: "qwen2.5-coder:7b",
-    local_openai_compatible: "qwen2.5-coder:7b",
+    ollama: "Qwen2.5-Coder-7B",
+    local_openai_compatible: "Qwen2.5-Coder-7B",
   },
   aiProviderList: vi.fn().mockResolvedValue([
     {
       id: "local",
       kind: "local_openai_compatible",
-      label: "Local API",
+      label: "PoliteDB AI",
       baseUrl: "http://127.0.0.1:8080/v1",
-      defaultModel: "qwen2.5-coder:7b",
-      apiKeyRef: null,
-      enabled: true,
-    },
-    {
-      id: "openai-1",
-      kind: "openai",
-      label: "OpenAI",
-      baseUrl: "https://api.openai.com/v1",
-      defaultModel: "gpt-4o",
-      apiKeyRef: "keychain-ref",
+      defaultModel: "Qwen2.5-Coder-7B",
       enabled: true,
     },
   ]),
@@ -197,6 +157,7 @@ vi.mock("src/components/icons", () => ({
   ArrowDown: () => <span>arrow-down</span>,
   BackupIcon: () => <span>backup</span>,
   ChevronDownIcon: () => <span>chevron-down</span>,
+  DownloadIcon: () => <span>download</span>,
   MoreVerticalIcon: () => <span>more</span>,
   VaultIcon: () => <span>vault</span>,
   PlayIcon: () => <span>play</span>,
@@ -274,10 +235,10 @@ beforeEach(() => {
 
   getLocalAiSettingsMock.mockReturnValue({
     endpoint: "http://127.0.0.1:8080/v1",
-    model: "qwen2.5-coder:7b",
+    model: "Qwen2.5-Coder-7B",
   });
   hasSeenLocalAiModelMock.mockReturnValue(false);
-  listLocalAiModelsMock.mockResolvedValue(["qwen2.5-coder:7b"]);
+  listLocalAiModelsMock.mockResolvedValue(["Qwen2.5-Coder-7B"]);
   isGeneralChatPromptMock.mockReturnValue(true);
   chatReplyMock.mockResolvedValue({
     answer: "Hello! How can I help?",
@@ -459,24 +420,21 @@ describe("AiAssistantPanel", () => {
     await screen.findByText(/Hello! How can I help\?/);
     expect(saveLocalAiSettingsMock).toHaveBeenCalledWith({
       endpoint: "http://127.0.0.1:8080/v1",
-      model: "qwen2.5-coder:7b",
+      model: "Qwen2.5-Coder-7B",
     });
   });
 
-  it("opens the model picker and switches the selected provider model", async () => {
+  it("opens the model picker and selects the local model", async () => {
     renderPanel();
 
     await screen.findByPlaceholderText("Ask anything...");
     fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
 
     await screen.findByText("Select a model");
-    expect(screen.getAllByText("qwen2.5-coder:7b").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /gpt-4o/ }));
+    expect(screen.getAllByText("Qwen2.5-Coder-7B").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Qwen2\.5-Coder-7B/ }));
 
-    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("openai-1");
-    await waitFor(() =>
-      expect(screen.getAllByText("gpt-4o").length).toBeGreaterThan(0)
-    );
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("local");
   });
 
   it("previews a read-only SQL plan without running it automatically", async () => {
@@ -563,6 +521,6 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "Settings.." }));
 
-    await screen.findByText("AI Provider Settings");
+    await screen.findByText("AI Assistant Settings");
   });
 });

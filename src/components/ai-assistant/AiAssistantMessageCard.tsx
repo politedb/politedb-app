@@ -145,7 +145,7 @@ export function AiAssistantMessageCard({
         floatingUser
           ? "group flex flex-col items-end"
           : floatingAssistant
-            ? "group space-y-4"
+            ? "group space-y-3"
             : `group rounded-xl border p-3 ${
                 message.role === "user"
                   ? "border-blue-200 bg-blue-50"
@@ -206,9 +206,9 @@ export function AiAssistantMessageCard({
             onClick={() => void handleCopyMessage()}
           >
             {messageCopied ? (
-              <CopyCheckIcon className="size-4 text-green-600" />
+              <CopyCheckIcon className="size-5" />
             ) : (
-              <CopyIcon className="size-4" />
+              <CopyIcon className="size-5" />
             )}
           </button>
         </div>
@@ -467,7 +467,7 @@ export function AiAssistantMessageCard({
             onClick={() => void handleCopyMessage()}
           >
             {messageCopied ? (
-              <CopyCheckIcon className="size-5 text-green-600" />
+              <CopyCheckIcon className="size-5" />
             ) : (
               <CopyIcon className="size-5" />
             )}

@@ -4,10 +4,10 @@ use dashmap::DashMap;
 use futures_util::lock::Mutex;
 use uuid::Uuid;
 
+use crate::ai_runtime::AiRuntimeHandle;
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
 use crate::operations::ctx::{FlowCtrl, SqlBusyRegistry};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
-use crate::ai_runtime::AiRuntimeHandle;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TunnelKey {

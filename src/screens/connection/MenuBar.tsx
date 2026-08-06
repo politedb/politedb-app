@@ -39,7 +39,7 @@ import { canOpenDatabases } from "src/hooks/useDatabases";
 import { formatTableBreadcrumbTarget } from "src/lib/engines";
 import { connectionCreate } from "src/lib/tauri";
 import type { ConnectionCreateInput } from "src/lib/tauri";
-import { type QuerySafetyMode } from "src/lib/querySafety";
+import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";

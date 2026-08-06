@@ -1,7 +1,27 @@
+import { useEffect, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Spinner } from "src/components/common/Spinner";
 import { type AiRuntimeStatus } from "src/lib/tauri";
 import { formatBytesSize } from "src/utils/convert";
+
+const DEFAULT_AI_MODEL_DISPLAY_NAME = "Qwen2.5-Coder 7B Instruct (Q4_K_M)";
+const AI_USAGE_BANNERS = [
+  {
+    title: "Ask for SQL in plain language",
+    description:
+      "Try: “show 100 latest users” or “find orders with missing payments”. AI drafts SQL first, then you decide what to do.",
+  },
+  {
+    title: "Use @ to add database context",
+    description:
+      "Mention current connection, SQL editor, or visible schema metadata so AI uses the right tables and columns.",
+  },
+  {
+    title: "Review before running",
+    description:
+      "Generated SQL is preview-only. Insert or run it only after checking the query and safety label.",
+  },
+];
 
 function isModelDownloading(status?: AiRuntimeStatus | null) {
   const details = status?.last_error?.trim() ?? "";
@@ -19,6 +39,7 @@ export function AiAssistantRuntimeLoadingPane(props: {
   showRetry?: boolean;
   forceDownloading?: boolean;
 }) {
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const details = props.status?.last_error?.trim() || "Please wait...";
   const isDownloading =
     props.forceDownloading || isModelDownloading(props.status);
@@ -26,9 +47,29 @@ export function AiAssistantRuntimeLoadingPane(props: {
   const total = Number(props.status?.model_total_bytes ?? 0);
   const progressPct =
     total > 0 ? Math.max(0, Math.min(100, (downloaded / total) * 100)) : null;
+  const modelName = props.status?.model_name || DEFAULT_AI_MODEL_DISPLAY_NAME;
+  const activeBanner = AI_USAGE_BANNERS[activeBannerIndex];
+
+  const showBanner = (nextIndex: number) => {
+    if (nextIndex === activeBannerIndex) return;
+    setActiveBannerIndex(nextIndex);
+  };
+
+  useEffect(() => {
+    if (!isDownloading) {
+      setActiveBannerIndex(0);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setActiveBannerIndex(
+        (current) => (current + 1) % AI_USAGE_BANNERS.length
+      );
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isDownloading]);
 
   return (
-    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+    <div class="mt-10 flex h-full min-h-0 items-start justify-center px-6 py-8">
       <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50">
           <Spinner className="size-5 text-blue-500" />
@@ -90,6 +131,48 @@ export function AiAssistantRuntimeLoadingPane(props: {
             </Button>
           </div>
         ) : null}
+
+        {isDownloading ? (
+          <div class="mt-7 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-left shadow-sm">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <div class="text-xs font-semibold tracking-wide text-blue-700 uppercase">
+                AI guide
+              </div>
+              <div
+                class="max-w-60 truncate text-[11px] font-medium text-blue-500"
+                title={modelName}
+              >
+                {modelName}
+              </div>
+            </div>
+            <div
+              key={activeBannerIndex}
+              class="min-h-20 animate-[ai-guide-fade_820ms_ease-out]"
+            >
+              <div class="text-sm font-semibold text-neutral-900">
+                {activeBanner.title}
+              </div>
+              <div class="mt-1 text-xs leading-5 text-neutral-600">
+                {activeBanner.description}
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-center gap-1.5">
+              {AI_USAGE_BANNERS.map((banner, index) => (
+                <button
+                  key={banner.title}
+                  type="button"
+                  aria-label={`Show AI guide ${index + 1}`}
+                  onClick={() => showBanner(index)}
+                  class={
+                    index === activeBannerIndex
+                      ? "h-1.5 w-5 rounded-full bg-blue-600"
+                      : "size-1.5 rounded-full bg-blue-200"
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -100,7 +183,7 @@ export function AiAssistantMissingModelPane(props: {
   busy: boolean;
 }) {
   return (
-    <div class="flex h-full min-h-0 items-start justify-center px-6 py-8">
+    <div class="mt-10 flex h-full min-h-0 items-start justify-center px-6 py-8">
       <div class="w-full max-w-sm text-center">
         <div class="mx-auto flex size-12 items-center justify-center rounded-full bg-blue-50 text-sm font-semibold text-blue-600">
           <span class="flex size-6 items-center justify-center rounded-full border-2 border-blue-600/70 font-bold select-none">
