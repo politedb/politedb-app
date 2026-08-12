@@ -1,11 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { AiAssistantPanel } from "src/components/ai-assistant/AiAssistantPanel";
 import { SparklesIcon } from "src/components/icons";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
+import { useProfileStore } from "src/stores/profile";
+import { useScreenStore } from "src/stores/screen";
 import { cn } from "src/utils/cn";
+import { pickHostDbUser } from "src/utils/connection";
+import { profileConnectionHost } from "src/utils/connectionLog";
 import { Button } from "../common/Button";
 
 export const OPEN_FLOATING_ASSISTANT_EVENT = "politedb-open-floating-assistant";
+export const FLOATING_ASSISTANT_CHAT_SESSION_KEY = "global-ai-assistant";
+
+export function normalizeSavedConnectionTags(tags: unknown[] = [], label = "") {
+  const normalized = new Set<string>();
+  for (const tag of tags) {
+    const trimmed = String(tag ?? "").trim();
+    if (!trimmed) continue;
+    normalized.add(trimmed);
+    if (trimmed.toLowerCase() === "production") normalized.add("prod");
+  }
+  if (/\bprod(uction)?\b/i.test(label)) normalized.add("prod");
+  return Array.from(normalized);
+}
 
 export function FloatingAssistantLauncher(props: {
   aiLocked?: boolean;
@@ -14,7 +37,34 @@ export function FloatingAssistantLauncher(props: {
   const { aiLocked = false, onOpenLicense } = props;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const context = useFloatingAssistantStore((state) => state.context);
+  const activeProfileScreen = useScreenStore(
+    (state) => state.activeProfileScreen
+  );
+  const storedContext = useFloatingAssistantStore((state) => state.context);
+  const profiles = useProfileStore((state) => state.profiles);
+  const savedConnections = useMemo(
+    () =>
+      profiles.map((profile) => {
+        const { user } = pickHostDbUser(profile);
+        return {
+          id: profile.id,
+          label: profile.label,
+          engine: profile.engine,
+          tags: normalizeSavedConnectionTags(
+            [...(profile.tags ?? []), ...(profile.input?.tags ?? [])],
+            profile.label
+          ),
+          target: profileConnectionHost(profile),
+          user: user || undefined,
+        };
+      }),
+    [profiles]
+  );
+  const context =
+    activeProfileScreen !== "main" &&
+    storedContext?.scopeKey === activeProfileScreen
+      ? storedContext
+      : null;
 
   const openAssistant = useCallback(() => {
     setOpen(true);
@@ -54,7 +104,8 @@ export function FloatingAssistantLauncher(props: {
       window.removeEventListener(OPEN_FLOATING_ASSISTANT_EVENT, onOpen);
   }, [openAssistant]);
 
-  const chatSessionKey = context?.scopeKey ?? "global-ai-assistant";
+  const chatSessionKey =
+    context?.scopeKey ?? FLOATING_ASSISTANT_CHAT_SESSION_KEY;
 
   return (
     <div ref={rootRef} class="fixed right-4 bottom-4 z-50">
@@ -68,8 +119,8 @@ export function FloatingAssistantLauncher(props: {
           role="dialog"
           aria-label="AI assistant"
         >
-          <div class="relative flex min-h-0 flex-1 flex-col">
-            <div class="min-h-0 flex-1">
+          <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
               {aiLocked ? (
                 <div class="h-full bg-white dark:bg-slate-900" />
               ) : (
@@ -80,9 +131,13 @@ export function FloatingAssistantLauncher(props: {
                   engine={context?.engine ?? "postgres"}
                   runtimeConnectionId={context?.runtimeConnectionId}
                   activeSchema={context?.activeSchema}
+                  activeTable={context?.activeTable}
                   tables={context?.tables ?? []}
                   columnsByTable={context?.columnsByTable}
+                  columnDetailsByTable={context?.columnDetailsByTable}
                   currentSql={context?.currentSql}
+                  querySafetyMode={context?.querySafetyMode}
+                  savedConnections={savedConnections}
                   onInsertSql={context?.onInsertSql}
                 />
               )}

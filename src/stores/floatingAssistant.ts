@@ -1,14 +1,18 @@
 import { create } from "zustand";
-import type { DatabaseEngine, TableItem } from "src/types";
+import type { QuerySafetyMode } from "src/lib/queries/querySafety";
+import type { AiColumnMetadata, DatabaseEngine, TableItem } from "src/types";
 
 export type FloatingAssistantContext = {
   scopeKey: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
   activeSchema?: string;
+  activeTable?: TableItem;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
+  columnDetailsByTable?: Record<string, AiColumnMetadata[]>;
   currentSql?: string;
+  querySafetyMode?: QuerySafetyMode;
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
 

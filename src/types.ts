@@ -209,6 +209,15 @@ export type TableColumn = {
   column_default: string;
 };
 
+export type AiColumnMetadata = {
+  name: string;
+  dataType?: string;
+  nullable?: string;
+  defaultValue?: string;
+  primaryKey?: boolean;
+  comment?: string;
+};
+
 export type Pagination = {
   startIndex: number;
   endIndex: number;
@@ -264,6 +273,8 @@ export type AiChatSession = {
   scopeKey: string;
   title?: string;
   providerId?: string | null;
+  replyLanguageCode?: string | null;
+  targetTable?: string | null;
   messages: ChatMessage[];
   createdAt: number;
   updatedAt: number;

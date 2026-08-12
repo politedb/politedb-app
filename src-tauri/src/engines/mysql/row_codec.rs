@@ -1,11 +1,16 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use mysql_async::{consts::ColumnType, Row, Value};
+use mysql_async::{
+    consts::{ColumnFlags, ColumnType},
+    Row, Value,
+};
 
 use crate::types::{CellValue, ColumnMeta};
 
 #[derive(Clone)]
 pub struct ColDecoder {
     pub ty: ColumnType,
+    pub character_set: u16,
+    pub flags: ColumnFlags,
 }
 
 pub fn build_meta_and_decoders_from_columns(
@@ -15,7 +20,7 @@ pub fn build_meta_and_decoders_from_columns(
         .iter()
         .map(|c| ColumnMeta {
             name: c.name_str().to_string(),
-            db_type: format!("{:?}", c.column_type()),
+            db_type: mysql_column_type_label(c),
         })
         .collect::<Vec<_>>();
 
@@ -23,6 +28,8 @@ pub fn build_meta_and_decoders_from_columns(
         .iter()
         .map(|c| ColDecoder {
             ty: c.column_type(),
+            character_set: c.character_set(),
+            flags: c.flags(),
         })
         .collect::<Vec<_>>();
 
@@ -33,15 +40,16 @@ pub fn row_to_cells(row: &Row, decoders: &[ColDecoder]) -> Vec<CellValue> {
     let mut out = Vec::with_capacity(decoders.len());
     for (idx, d) in decoders.iter().enumerate() {
         let v = row.as_ref(idx);
-        out.push(decode_value(v, d.ty));
+        out.push(decode_value(v, d));
     }
     out
 }
 
-fn decode_value(v: Option<&Value>, ty: ColumnType) -> CellValue {
+fn decode_value(v: Option<&Value>, decoder: &ColDecoder) -> CellValue {
     let Some(v) = v else {
         return CellValue::Null;
     };
+    let ty = decoder.ty;
 
     match v {
         Value::NULL => CellValue::Null,
@@ -100,11 +108,13 @@ fn decode_value(v: Option<&Value>, ty: ColumnType) -> CellValue {
         }
 
         // Everything byte-based (includes strings, decimals, json, blobs, geometry, bit, enum/set, etc.)
-        Value::Bytes(b) => decode_bytes(b, ty),
+        Value::Bytes(b) => decode_bytes(b, decoder),
     }
 }
 
-fn decode_bytes(b: &[u8], ty: ColumnType) -> CellValue {
+fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
+    let ty = decoder.ty;
+
     // 1) JSON: keep as JSON string when UTF-8, else base64
     if ty == ColumnType::MYSQL_TYPE_JSON {
         return match std::str::from_utf8(b) {
@@ -131,8 +141,10 @@ fn decode_bytes(b: &[u8], ty: ColumnType) -> CellValue {
         return CellValue::BytesB64(B64.encode(b));
     }
 
-    // 4) BLOB family: always base64 (avoid corrupting arbitrary binary)
-    if is_blob_type(ty) {
+    // 4) Binary BLOB/VARBINARY/BINARY: always base64 (avoid corrupting arbitrary binary).
+    // MySQL reports TEXT and VARCHAR-like values through byte variants too; only binary
+    // charset means opaque bytes.
+    if is_binary_bytes(decoder) {
         return CellValue::BytesB64(B64.encode(b));
     }
 
@@ -172,6 +184,14 @@ fn decode_bytes(b: &[u8], ty: ColumnType) -> CellValue {
 }
 
 #[inline]
+fn is_binary_bytes(decoder: &ColDecoder) -> bool {
+    const MYSQL_BINARY_CHARSET: u16 = 63;
+
+    decoder.character_set == MYSQL_BINARY_CHARSET
+        || (is_blob_type(decoder.ty) && decoder.flags.contains(ColumnFlags::BINARY_FLAG))
+}
+
+#[inline]
 fn is_blob_type(ty: ColumnType) -> bool {
     matches!(
         ty,
@@ -180,4 +200,24 @@ fn is_blob_type(ty: ColumnType) -> bool {
             | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
             | ColumnType::MYSQL_TYPE_TINY_BLOB
     )
+}
+
+fn mysql_column_type_label(c: &mysql_async::Column) -> String {
+    let ty = c.column_type();
+    let raw = format!("{ty:?}");
+    let label = raw
+        .strip_prefix("MYSQL_TYPE_")
+        .unwrap_or(raw.as_str())
+        .to_ascii_lowercase();
+
+    if is_blob_type(ty) {
+        const MYSQL_BINARY_CHARSET: u16 = 63;
+        if c.character_set() == MYSQL_BINARY_CHARSET || c.flags().contains(ColumnFlags::BINARY_FLAG)
+        {
+            return "blob".to_string();
+        }
+        return "text".to_string();
+    }
+
+    label
 }

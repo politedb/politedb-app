@@ -8,6 +8,7 @@ import { cn } from "src/utils/cn";
 import { ChevronDownIcon, SearchIcon } from "src/components/icons";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { Button } from "src/components/common/Button";
+import { isBlobColumnType } from "src/utils/sqlDialect";
 
 interface Props {
   sizeInfo: TableSizeInfo | null;
@@ -18,6 +19,21 @@ interface Props {
 
 function isJsonDataType(dataType?: string | null) {
   return /\bjsonb?\b/i.test(dataType ?? "");
+}
+
+function isTextareaDataType(dataType?: string | null) {
+  return isJsonDataType(dataType) || isBlobColumnType(dataType ?? undefined);
+}
+
+function rowsForTextareaValue(value: string, dataType?: string | null) {
+  const charsPerLine = isBlobColumnType(dataType ?? undefined) ? 42 : 48;
+  const visualLines = value
+    .split("\n")
+    .reduce(
+      (sum, line) => sum + Math.max(1, Math.ceil(line.length / charsPerLine)),
+      0
+    );
+  return Math.max(2, Math.min(22, visualLines));
 }
 
 function hasColumnDefault(field: SelectedRowDetail["fields"][number]) {
@@ -178,7 +194,7 @@ function EditableRowFieldList({
       {fields.map((field) => {
         const fieldReadOnly = readOnly || field.readonly;
         const draft = drafts[field.name] ?? "";
-        const isJsonField = isJsonDataType(field.dataType);
+        const isTextareaField = isTextareaDataType(field.dataType);
         const specialOpen = openSpecialField === field.name;
 
         return (
@@ -203,10 +219,11 @@ function EditableRowFieldList({
               </div>
             ) : (
               <div class="relative flex items-start gap-1">
-                {isJsonField ? (
+                {isTextareaField ? (
                   <textarea
+                    rows={rowsForTextareaValue(draft, field.dataType)}
                     class={cn(
-                      "min-h-26 min-w-0 flex-1 resize-y rounded-md border border-slate-300 px-2 py-1.5 pr-6 font-mono text-xs leading-5",
+                      "max-h-100 min-w-0 flex-1 resize-none overflow-y-auto rounded-md border border-slate-300 px-2 py-1.5 pr-6 font-mono text-xs leading-5",
                       "bg-white text-neutral-900 focus:bg-white focus:outline-2 focus:outline-blue-500"
                     )}
                     value={draft}

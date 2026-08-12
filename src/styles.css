@@ -138,6 +138,26 @@ table {
   background-color: rgba(0, 0, 0, 0.3);
 }
 
+.ai-result-scrollbar {
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(82, 82, 91, 0.7) rgba(228, 228, 231, 0.8);
+}
+
+.ai-result-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.ai-result-scrollbar::-webkit-scrollbar-track {
+  background: rgba(228, 228, 231, 0.8);
+}
+
+.ai-result-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.7);
+  border: 2px solid rgba(228, 228, 231, 0.8);
+  border-radius: 999px;
+}
+
 /* Hide scrollbar while preserving scroll behavior (mouse wheel / trackpad). */
 .no-scrollbar {
   -ms-overflow-style: none;
@@ -317,7 +337,6 @@ table {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .diagram-rel-flow,
   .diagram-rel-flow-particle {
     animation: none;

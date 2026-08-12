@@ -1,18 +1,22 @@
-import { useMemo, useRef } from "preact/hooks";
+import { useCallback, useMemo, useRef } from "preact/hooks";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import {
   chatReply,
-  getAmbiguousPromptReply,
-  getDirectMetadataReply,
-  looksLikeMetadataQuestion,
-  wantsSqlGeneration,
-  isGeneralChatPrompt,
-  planSqlFromQuestion,
+  buildAssistantContext,
+  getDirectAppContextReply,
+  hasConcreteDatabaseContext,
+  planAssistantTurn,
   resolveReplyLanguage,
   saveLocalAiSettings,
   formatSqlExecutionError,
 } from "src/lib/ai-assistant";
-import type { ChatMessage, DatabaseEngine, TableItem } from "src/types";
+import type {
+  AiColumnMetadata,
+  ChatMessage,
+  DatabaseEngine,
+  TableItem,
+} from "src/types";
+import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
@@ -28,8 +32,10 @@ function formatAssistantRequestError(args: {
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
   const isProviderRequest =
+    raw.includes("AI_CHAT_FAILED") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
     raw.includes("AI_PROVIDER") ||
+    raw.includes("OLLAMA_GENERATE_FAILED") ||
     raw.includes("/chat/completions");
 
   if (!isProviderRequest) return null;
@@ -38,6 +44,16 @@ function formatAssistantRequestError(args: {
     raw.includes("127.0.0.1") ||
     raw.includes("localhost") ||
     raw.includes(":11434");
+
+  if (
+    /exceed(?:s|ed)? the available context size|exceed_context_size_error/i.test(
+      raw
+    )
+  ) {
+    return vi
+      ? "Nội dung cuộc trò chuyện vượt giới hạn context của model local. PoliteDB đã rút gọn context; hãy thử gửi lại."
+      : "This conversation exceeded the local model context limit. PoliteDB has reduced the context; try sending it again.";
+  }
 
   if (vi) {
     return isLocalEndpoint
@@ -76,9 +92,20 @@ export function useAiAssistantSubmit(args: {
   workspaceId?: string;
   runtimeConnectionId?: string;
   activeSchema?: string;
+  activeTable?: TableItem;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
+  columnDetailsByTable?: Record<string, AiColumnMetadata[]>;
   currentSql?: string;
+  savedConnections?: SavedConnectionSummary[];
+  conversationState: {
+    replyLanguageCode?: string | null;
+    targetTable?: string | null;
+  };
+  updateConversationState: (patch: {
+    replyLanguageCode?: string | null;
+    targetTable?: string | null;
+  }) => void;
 }) {
   const {
     prompt,
@@ -99,7 +126,13 @@ export function useAiAssistantSubmit(args: {
     activeSchema,
     tables,
     columnsByTable,
+    columnDetailsByTable,
     currentSql,
+    runtimeConnectionId,
+    activeTable,
+    savedConnections,
+    conversationState,
+    updateConversationState,
   } = args;
 
   const requestAbortRef = useRef<AbortController | null>(null);
@@ -109,14 +142,14 @@ export function useAiAssistantSubmit(args: {
     return Boolean(prompt.trim() && endpoint.trim() && model.trim());
   }, [prompt, endpoint, model]);
 
-  const handleCancelSubmit = () => {
+  const handleCancelSubmit = useCallback(() => {
     requestSeqRef.current += 1;
     requestAbortRef.current?.abort();
     requestAbortRef.current = null;
     clearStreamingMessages();
     setAssistantStatus("idle");
     setSubmitting(false);
-  };
+  }, [clearStreamingMessages, setAssistantStatus, setSubmitting]);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -136,21 +169,23 @@ export function useAiAssistantSubmit(args: {
     saveLocalAiSettings({ endpoint, model });
 
     appendUserMessage(question);
+    if (!conversationState.replyLanguageCode) {
+      updateConversationState({
+        replyLanguageCode: resolveReplyLanguage(question, messages).code,
+      });
+    }
+    const streamId = beginStreamingAssistantMessage();
 
     try {
-      let intentKind: "chat" | "metadata" | "sql" | "clarify";
-
-      if (isGeneralChatPrompt(question)) {
-        intentKind = "chat";
-      } else if (wantsSqlGeneration(question)) {
-        intentKind = "sql";
-      } else if (looksLikeMetadataQuestion(question)) {
-        intentKind = "metadata";
-      } else if (getAmbiguousPromptReply({ question, history: messages })) {
-        intentKind = "clarify";
-      } else {
-        intentKind = "sql";
-      }
+      const assistantContext = buildAssistantContext({
+        engine,
+        runtimeConnectionId,
+        activeSchema,
+        activeTable,
+        tables,
+        currentSql,
+      });
+      const hasDbContext = hasConcreteDatabaseContext(assistantContext);
 
       const onAssistantStatus = (status: "loading_model" | "generating") => {
         setAssistantStatus(
@@ -158,49 +193,17 @@ export function useAiAssistantSubmit(args: {
         );
       };
 
-      if (intentKind === "chat") {
-        const streamId = beginStreamingAssistantMessage();
-        const reply = await chatReply({
-          providerId,
-          endpoint,
-          model,
-          engine,
-          question,
-          activeSchema,
-          tables,
-          history: messages,
-          onStatusChange: onAssistantStatus,
-          onDelta: (text) => {
-            if (requestSeqRef.current !== requestId) return;
-            updateStreamingAssistantText(streamId, text);
-          },
-          signal: abortController.signal,
-        });
-
+      const directAppReply = getDirectAppContextReply({
+        question,
+        history: messages,
+        savedConnections,
+      });
+      if (directAppReply) {
         if (requestSeqRef.current !== requestId) return;
-
         finalizeStreamingAssistantMessage(
           streamId,
           {
-            text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
-          },
-          requestStartedAt
-        );
-        return;
-      }
-
-      if (intentKind === "clarify") {
-        const ambiguousReply = getAmbiguousPromptReply({
-          question,
-          history: messages,
-        }) ?? {
-          answer:
-            "I need a clearer request before I decide whether to answer normally or generate a query.",
-        };
-
-        appendAssistantMessage(
-          {
-            text: [ambiguousReply.answer, ambiguousReply.followup]
+            text: [directAppReply.answer, directAppReply.followup]
               .filter(Boolean)
               .join("\n\n"),
           },
@@ -209,35 +212,18 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      if (intentKind === "metadata") {
-        const directReply = getDirectMetadataReply({
-          engine,
-          question,
-          activeSchema,
-          tables,
-        });
-
-        if (directReply) {
-          appendAssistantMessage(
-            {
-              text: [directReply.answer, directReply.followup]
-                .filter(Boolean)
-                .join("\n\n"),
-            },
-            requestStartedAt
-          );
-          return;
-        }
-
-        const streamId = beginStreamingAssistantMessage();
+      if (!hasDbContext) {
         const reply = await chatReply({
           providerId,
           endpoint,
           model,
           engine,
-          question: `The user asked: "${question}". Using only the visible tables/schemas in this connection, answer directly. Do not generate SQL.`,
+          question,
           activeSchema,
           tables,
+          columnsByTable,
+          activeTable,
+          savedConnections,
           history: messages,
           onStatusChange: onAssistantStatus,
           onDelta: (text) => {
@@ -259,17 +245,21 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      const streamId = beginStreamingAssistantMessage();
-      const plan = await planSqlFromQuestion({
+      const plan = await planAssistantTurn({
         providerId,
         endpoint,
         model,
         engine,
         question,
         activeSchema,
+        activeTable,
         tables,
         columnsByTable,
+        columnDetailsByTable,
         currentSql,
+        targetTable: conversationState.targetTable ?? undefined,
+        replyLanguageCode: conversationState.replyLanguageCode ?? undefined,
+        savedConnections,
         history: messages,
         onStatusChange: onAssistantStatus,
         onDelta: (text) => {
@@ -281,14 +271,21 @@ export function useAiAssistantSubmit(args: {
 
       if (requestSeqRef.current !== requestId) return;
 
-      if (plan.needsClarification && !plan.sql) {
+      if (plan.targetTable) {
+        updateConversationState({ targetTable: plan.targetTable });
+      }
+
+      if (plan.kind !== "sql" || !plan.sql) {
         finalizeStreamingAssistantMessage(
           streamId,
           {
             text:
-              plan.explanation ||
-              "I need more information to answer accurately.",
-            clarification: plan.clarification,
+              plan.answer ||
+              plan.clarification ||
+              (resolveReplyLanguage(question, messages).code === "vie"
+                ? "Tôi cần thêm thông tin để trả lời chính xác."
+                : "I need more information to answer accurately."),
+            clarification: plan.clarification || undefined,
             assumptions: plan.assumptions,
           },
           requestStartedAt
@@ -300,15 +297,21 @@ export function useAiAssistantSubmit(args: {
         streamId,
         {
           text:
+            plan.answer ||
             plan.explanation ||
-            "I prepared the SQL below. Review it before running.",
+            (resolveReplyLanguage(question, messages).code === "vie"
+              ? "Tôi đã chuẩn bị SQL bên dưới. Hãy kiểm tra trước khi chạy."
+              : "I prepared the SQL below. Review it before running."),
           sql: plan.sql || undefined,
           parts: [
             {
               type: "text",
               text:
+                plan.answer ||
                 plan.explanation ||
-                "I prepared the SQL below. Review it before running.",
+                (resolveReplyLanguage(question, messages).code === "vie"
+                  ? "Tôi đã chuẩn bị SQL bên dưới. Hãy kiểm tra trước khi chạy."
+                  : "I prepared the SQL below. Review it before running."),
             },
             ...(plan.sql
               ? [

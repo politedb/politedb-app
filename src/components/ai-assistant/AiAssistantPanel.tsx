@@ -13,7 +13,14 @@ import {
   AiAssistantRuntimeLoadingPane,
 } from "src/components/ai-assistant/AiAssistantRuntimePanes";
 import { getLocalAiSettings } from "src/lib/ai-assistant";
-import type { AiProviderKind, DatabaseEngine, TableItem } from "src/types";
+import type {
+  AiColumnMetadata,
+  AiProviderKind,
+  DatabaseEngine,
+  TableItem,
+} from "src/types";
+import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
+import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import {
   DEFAULT_LOCAL_AI_PROVIDER_ID,
   aiProviderList,
@@ -36,9 +43,13 @@ type Props = {
   onClose?: () => void;
   runtimeConnectionId?: string;
   activeSchema?: string;
+  activeTable?: TableItem;
   tables: TableItem[];
   columnsByTable?: Record<string, string[]>;
+  columnDetailsByTable?: Record<string, AiColumnMetadata[]>;
   currentSql?: string;
+  querySafetyMode?: QuerySafetyMode;
+  savedConnections?: SavedConnectionSummary[];
   onInsertSql?: (sql: string) => Promise<void> | void;
 };
 
@@ -68,9 +79,13 @@ export function AiAssistantPanel(props: Props) {
     onClose,
     runtimeConnectionId,
     activeSchema,
+    activeTable,
     tables,
     columnsByTable,
+    columnDetailsByTable,
     currentSql,
+    querySafetyMode = "default",
+    savedConnections,
     onInsertSql,
   } = props;
 
@@ -84,6 +99,7 @@ export function AiAssistantPanel(props: Props) {
     prompt,
     setPrompt,
     messages,
+    conversationState,
     chatSessions,
     activeSessionId,
     newChat,
@@ -96,6 +112,8 @@ export function AiAssistantPanel(props: Props) {
     updateStreamingAssistantText,
     finalizeStreamingAssistantMessage,
     clearStreamingMessages,
+    updateMessage,
+    updateConversationState,
     messagesContainerRef,
     messagesEndRef,
     showScrollToBottom,
@@ -216,13 +234,16 @@ export function AiAssistantPanel(props: Props) {
           trimmedSql.split(/\s+/).length > 4 ? "..." : ""
         }`
       : undefined;
+    const hasConnectionContext = Boolean(
+      runtimeConnectionId || activeSchema || tables.length > 0
+    );
 
     return [
       {
         id: "connection",
         label: "Current connection",
-        detail: activeSchema || engine,
-        available: Boolean(runtimeConnectionId || activeSchema || engine),
+        detail: activeSchema || (runtimeConnectionId ? engine : undefined),
+        available: hasConnectionContext,
         active: selectedContextIds.includes("connection"),
       },
       {
@@ -275,8 +296,15 @@ export function AiAssistantPanel(props: Props) {
     includeConnectionContext || includeMetadataContext
       ? activeSchema
       : undefined;
+  const effectiveActiveTable =
+    includeConnectionContext || includeMetadataContext
+      ? activeTable
+      : undefined;
   const effectiveTables = includeMetadataContext ? tables : [];
   const effectiveColumnsByTable = includeMetadataContext ? columnsByTable : {};
+  const effectiveColumnDetailsByTable = includeMetadataContext
+    ? columnDetailsByTable
+    : {};
   const effectiveCurrentSql = includeSqlContext ? currentSql : undefined;
 
   const { canSubmit, handleSubmit, handleCancelSubmit } = useAiAssistantSubmit({
@@ -298,17 +326,38 @@ export function AiAssistantPanel(props: Props) {
     workspaceId: chatSessionKey,
     runtimeConnectionId,
     activeSchema: effectiveActiveSchema,
+    activeTable: effectiveActiveTable,
     tables: effectiveTables,
     columnsByTable: effectiveColumnsByTable,
+    columnDetailsByTable: effectiveColumnDetailsByTable,
     currentSql: effectiveCurrentSql,
+    savedConnections,
+    conversationState,
+    updateConversationState,
   });
+  const cancelSubmitRef = useRef(handleCancelSubmit);
+  useEffect(() => {
+    cancelSubmitRef.current = handleCancelSubmit;
+  }, [handleCancelSubmit]);
+
+  useEffect(() => {
+    return () => {
+      cancelSubmitRef.current();
+    };
+  }, []);
+
+  const handleClose = () => {
+    handleCancelSubmit();
+    onClose?.();
+  };
+
   const shouldGateOnLocalRuntime =
     providerKind === "ollama" ||
     providerKind === "local_openai_compatible" ||
     (!providerKind && providerId === DEFAULT_LOCAL_AI_PROVIDER_ID);
 
   return (
-    <div class="flex h-full min-h-0 flex-col bg-white">
+    <div class="flex h-full min-h-0 max-w-full min-w-0 flex-col overflow-hidden bg-white">
       {presentation === "panel" ? (
         <AiAssistantPanelHeader
           showSettings={showSettings}
@@ -376,6 +425,8 @@ export function AiAssistantPanel(props: Props) {
           canSubmit={canSubmit}
           assistantStatus={assistantStatus}
           runtimeConnectionId={runtimeConnectionId}
+          querySafetyMode={querySafetyMode}
+          onUpdateMessage={updateMessage}
           providerLabel={providerLabel}
           providerModel={providerModel || model}
           providerOptions={providerOptions}
@@ -386,7 +437,7 @@ export function AiAssistantPanel(props: Props) {
           contextOptions={contextOptions}
           onToggleContext={handleToggleContext}
           presentation={presentation}
-          onClose={onClose}
+          onClose={handleClose}
           chatSessions={chatSessions}
           activeSessionId={activeSessionId}
           onNewChat={newChat}

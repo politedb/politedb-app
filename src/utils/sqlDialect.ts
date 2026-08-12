@@ -1,4 +1,5 @@
 import type { DatabaseEngine } from "src/types";
+import { decodeBytesB64 } from "src/utils/convert";
 import { isSqliteLike } from "src/utils/sqliteLike";
 
 export function isSqlServerEngine(engine?: DatabaseEngine) {
@@ -16,7 +17,7 @@ export function isJsonColumnType(dbType: string | undefined): boolean {
 
 export function isBlobColumnType(dbType: string | undefined): boolean {
   if (!dbType || typeof dbType !== "string") return false;
-  return /\b(blob|binary|varbinary|bytea|raw|long raw|image)\b/i.test(
+  return /\b(tinyblob|mediumblob|longblob|blob|binary|varbinary|bytea|raw|long raw|image)\b/i.test(
     dbType.trim()
   );
 }
@@ -611,6 +612,9 @@ function unwrapCellValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     const cell = value as Record<string, unknown>;
     if (cell.t === "Null") return null;
+    if (cell.t === "BytesB64" && typeof cell.v === "string") {
+      return decodeBytesB64(cell.v) ?? cell.v;
+    }
     if ("v" in cell) return cell.v;
   }
   return value;
@@ -631,6 +635,15 @@ export function formatSqlValue(
         : raw instanceof ArrayBuffer
           ? new Uint8Array(raw)
           : null;
+    const hexText =
+      typeof raw === "string" ? raw.trim().replace(/^0x/i, "") : "";
+    if (!bytes && hexText && /^[0-9a-f]+$/i.test(hexText)) {
+      const normalizedHex = hexText.length % 2 === 0 ? hexText : `0${hexText}`;
+      if (engine === "postgres") return `decode('${normalizedHex}', 'hex')`;
+      if (engine === "sqlserver") return `0x${normalizedHex}`;
+      if (engine === "oracle") return `HEXTORAW('${normalizedHex}')`;
+      return `X'${normalizedHex}'`;
+    }
     if (bytes) {
       const hex = Array.from(bytes, (byte) =>
         byte.toString(16).padStart(2, "0")

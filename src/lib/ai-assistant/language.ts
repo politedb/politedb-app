@@ -139,7 +139,7 @@ function looksLikeAsciiDbPhrase(text: string) {
 }
 
 const VIETNAMESE_HINT_WORDS =
-  /\b(lay|cho|cac|bang|cot|dem|tim|hien thi|truy van|liet ke|du lieu|co so du lieu|voi|tu|den|trong|ngoai|khi|khong|duoc|hay|neu|thi|roi|nay|do|da|se|mot|bao nhieu|moi nhat|tat ca|toan bo|xin chao|cam on|cho toi|cau lenh|lenh sql|giup|ban ghi|ket qua|thong ke|loc|sap xep|so sanh|tong|trung binh)\b/;
+  /\b(lay|cho|cac|bang|cot|dem|tim|hien thi|truy van|liet ke|du lieu|co so du lieu|voi|tu|den|trong|ngoai|khi|khong|duoc|hay|neu|thi|roi|nay|do|da|se|mot|bao nhieu|moi nhat|tat ca|toan bo|xin chao\w*|cam on|cho toi|y la|cau lenh|lenh sql|giup|ban ghi|ket qua|thong ke|loc|sap xep|so sanh|tong|trung binh)\b/;
 
 /** Horned vowels and đ are strong Vietnamese signals (rare in French/English). */
 function hasVietnameseLatinMarks(text: string) {
@@ -221,6 +221,9 @@ export function resolveReplyLanguage(
   const explicit = parseExplicitLanguageRequest(question);
   if (explicit) return explicit;
 
+  const firstUserLanguage = resolveFirstUserLanguage(history);
+  if (firstUserLanguage) return firstUserLanguage;
+
   const fromQuestion = detectLanguageFromText(question);
   if (fromQuestion.code !== "eng" || question.trim().length >= 8) {
     if (question.trim().length >= 3) {
@@ -241,6 +244,24 @@ export function resolveReplyLanguage(
   }
 
   return fromQuestion;
+}
+
+function resolveFirstUserLanguage(
+  history: Array<{ role: string; text?: string }> = []
+): ReplyLanguageInfo | null {
+  for (const item of history) {
+    if (item.role !== "user") continue;
+    const text = item.text?.trim() ?? "";
+    if (!text) continue;
+    const explicit = parseExplicitLanguageRequest(text);
+    if (explicit) return explicit;
+    const detected = detectLanguageFromText(text);
+    if (detected.code !== "eng" || text.length >= 2) {
+      return detected;
+    }
+  }
+
+  return null;
 }
 
 export function formatReplyLanguageForPrompt(lang: ReplyLanguageInfo) {

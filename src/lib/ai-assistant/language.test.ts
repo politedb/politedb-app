@@ -13,6 +13,7 @@ describe("resolveReplyLanguage", () => {
   it("does not misdetect short Vietnamese as French", () => {
     expect(resolveReplyLanguage("lấy max connection").code).toBe("vie");
     expect(resolveReplyLanguage("lay max connection").code).toBe("vie");
+    expect(resolveReplyLanguage("xin chaof").code).toBe("vie");
   });
 
   it("detects French from text", () => {
@@ -25,6 +26,32 @@ describe("resolveReplyLanguage", () => {
 
   it("detects Japanese from script", () => {
     expect(resolveReplyLanguage("テーブル一覧を表示して").code).toBe("jpn");
+  });
+
+  it("keeps the first user language for the chat session", () => {
+    expect(
+      resolveReplyLanguage("media asset", [
+        {
+          role: "user",
+          text: "bạn lấy được data các bảng không",
+        },
+        {
+          role: "assistant",
+          text: "Bạn muốn truy vấn dữ liệu từ bảng nào?",
+        },
+      ]).code
+    ).toBe("vie");
+  });
+
+  it("allows an explicit language switch in the latest message", () => {
+    expect(
+      resolveReplyLanguage("please reply in English", [
+        {
+          role: "user",
+          text: "bạn lấy được data các bảng không",
+        },
+      ]).code
+    ).toBe("eng");
   });
 
   it("parses explicit language switch requests", () => {

@@ -16,7 +16,7 @@ const listLocalAiModelsMock = vi.fn();
 const isGeneralChatPromptMock = vi.fn();
 const chatReplyMock = vi.fn();
 const getDirectMetadataReplyMock = vi.fn();
-const planSqlFromQuestionMock = vi.fn();
+const planAssistantTurnMock = vi.fn();
 const isReadOnlySqlMock = vi.fn();
 const answerFromResultMock = vi.fn();
 const queryResultToObjectsMock = vi.fn();
@@ -47,7 +47,7 @@ vi.mock("src/lib/ai-assistant", async (importOriginal) => {
     chatReply: (...args: any[]) => chatReplyMock(...args),
     getDirectMetadataReply: (...args: any[]) =>
       getDirectMetadataReplyMock(...args),
-    planSqlFromQuestion: (...args: any[]) => planSqlFromQuestionMock(...args),
+    planAssistantTurn: (...args: any[]) => planAssistantTurnMock(...args),
     isReadOnlySql: (...args: any[]) => isReadOnlySqlMock(...args),
     answerFromResult: (...args: any[]) => answerFromResultMock(...args),
     queryResultToObjects: (...args: any[]) => queryResultToObjectsMock(...args),
@@ -245,10 +245,13 @@ beforeEach(() => {
     followup: "Ask me about your data.",
   });
   getDirectMetadataReplyMock.mockReturnValue(null);
-  planSqlFromQuestionMock.mockResolvedValue({
+  planAssistantTurnMock.mockResolvedValue({
+    kind: "chat",
+    answer: "Hello! How can I help?",
     sql: "",
     explanation: "",
     assumptions: [],
+    safety: "unknown",
     needsClarification: false,
     clarification: "",
   });
@@ -439,7 +442,9 @@ describe("AiAssistantPanel", () => {
 
   it("previews a read-only SQL plan without running it automatically", async () => {
     isGeneralChatPromptMock.mockReturnValue(false);
-    planSqlFromQuestionMock.mockResolvedValue({
+    planAssistantTurnMock.mockResolvedValue({
+      kind: "sql",
+      answer: "Use a simple query.",
       sql: "SELECT id FROM users;",
       explanation: "Use a simple query.",
       assumptions: [],
@@ -456,14 +461,38 @@ describe("AiAssistantPanel", () => {
     await screen.findByText("Use a simple query.");
     await screen.findByText("SELECT id FROM users;");
     expect(runSqlQueryMock).not.toHaveBeenCalled();
+    expect(planAssistantTurnMock).toHaveBeenCalledTimes(1);
   });
 
-  it("answers metadata listing questions directly without generating SQL", async () => {
-    isGeneralChatPromptMock.mockReturnValue(false);
-    getDirectMetadataReplyMock.mockReturnValue({
-      answer: "I can currently see 2 table(s) in public: issues, users.",
+  it("uses model chat outside a connection instead of generating SQL", async () => {
+    renderPanel();
+
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "list users" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await screen.findByText(/Hello! How can I help\?/);
+    expect(planAssistantTurnMock).not.toHaveBeenCalled();
+    expect(chatReplyMock).toHaveBeenCalled();
+    expect(runSqlQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("does not offer stale connection context outside a connection", async () => {
+    renderPanel();
+
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, {
+      target: { value: "@", selectionStart: 1 },
     });
 
+    await screen.findByText("Open a connection to add context");
+    expect(screen.queryByText("Current connection")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Visible schema metadata")
+    ).not.toBeInTheDocument();
+  });
+
+  it("answers metadata listing questions through model chat", async () => {
     renderPanel({
       activeSchema: "public",
       tables: [
@@ -477,11 +506,57 @@ describe("AiAssistantPanel", () => {
     fireEvent.input(textarea, { target: { value: "list all tables for me" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await screen.findByText(
-      "I can currently see 2 table(s) in public: issues, users."
-    );
-    expect(planSqlFromQuestionMock).not.toHaveBeenCalled();
+    await screen.findByText(/Hello! How can I help\?/);
+    expect(planAssistantTurnMock).toHaveBeenCalledTimes(1);
+    expect(chatReplyMock).not.toHaveBeenCalled();
     expect(runSqlQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the resolved target table for a follow-up turn", async () => {
+    planAssistantTurnMock
+      .mockResolvedValueOnce({
+        kind: "metadata",
+        answer: "Users table selected.",
+        targetTable: "public.users",
+        sql: "",
+        explanation: "",
+        assumptions: [],
+        safety: "unknown",
+        needsClarification: false,
+        clarification: "",
+      })
+      .mockResolvedValueOnce({
+        kind: "metadata",
+        answer: "The table has id and email columns.",
+        targetTable: "public.users",
+        sql: "",
+        explanation: "",
+        assumptions: [],
+        safety: "unknown",
+        needsClarification: false,
+        clarification: "",
+      });
+
+    renderPanel({
+      runtimeConnectionId: "conn_1",
+      activeSchema: "public",
+      tables: [{ schema: "public", name: "users" }],
+      columnsByTable: { "public.users": ["id", "email"] },
+    });
+
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "tell me about users" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByText("Users table selected.");
+
+    fireEvent.input(textarea, { target: { value: "show its structure" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByText("The table has id and email columns.");
+
+    expect(planAssistantTurnMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ targetTable: "public.users" })
+    );
   });
 
   it("supports chat menu actions for rename, delete, history, and settings", async () => {
@@ -505,12 +580,10 @@ describe("AiAssistantPanel", () => {
       screen.getByRole("button", { name: "Delete Chat" })
     ).toBeInTheDocument();
 
-    const promptSpy = vi
-      .spyOn(window, "prompt")
-      .mockReturnValue("Renamed chat");
     fireEvent.click(screen.getByRole("button", { name: "Rename Chat" }));
-    expect(promptSpy).toHaveBeenCalledWith("Rename chat", "first chat");
-    promptSpy.mockRestore();
+    const renameInput = screen.getByRole("textbox", { name: "Chat name" });
+    fireEvent.change(renameInput, { target: { value: "Renamed chat" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "History" }));

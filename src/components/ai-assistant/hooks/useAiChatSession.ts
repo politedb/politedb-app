@@ -63,7 +63,9 @@ function migrateMessage(message: ChatMessage): ChatMessage {
 function normalizeSession(scopeKey: string, raw: any): AiChatSession {
   const now = Date.now();
   const messages = Array.isArray(raw?.messages)
-    ? (raw.messages as ChatMessage[]).map(migrateMessage)
+    ? (raw.messages as ChatMessage[])
+        .filter((message) => !message.streaming)
+        .map(migrateMessage)
     : [];
   const firstUser = messages.find((message) => message.role === "user");
   return {
@@ -76,6 +78,9 @@ function normalizeSession(scopeKey: string, raw: any): AiChatSession {
           ? titleFromText(firstUser.text)
           : "New Chat",
     providerId: raw?.providerId ?? null,
+    replyLanguageCode:
+      typeof raw?.replyLanguageCode === "string" ? raw.replyLanguageCode : null,
+    targetTable: typeof raw?.targetTable === "string" ? raw.targetTable : null,
     messages,
     createdAt: Number(raw?.createdAt) || now,
     updatedAt: Number(raw?.updatedAt) || now,
@@ -85,9 +90,13 @@ function normalizeSession(scopeKey: string, raw: any): AiChatSession {
 function loadPersistedSessions(chatSessionKey: string) {
   const memory = aiChatSessionMap.get(chatSessionKey);
   if (memory) {
-    const fallbackId = memory[0]?.id ?? null;
+    const sessions = memory.map((session) => ({
+      ...session,
+      messages: session.messages.filter((message) => !message.streaming),
+    }));
+    const fallbackId = sessions[0]?.id ?? null;
     return {
-      sessions: memory,
+      sessions,
       activeSessionId: fallbackId,
     };
   }
@@ -137,7 +146,9 @@ function persistSessions(
   const compact = sessions
     .map((session) => ({
       ...session,
-      messages: session.messages.slice(-MAX_PERSISTED_MESSAGES),
+      messages: session.messages
+        .filter((message) => !message.streaming)
+        .slice(-MAX_PERSISTED_MESSAGES),
     }))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, MAX_SESSIONS_PER_SCOPE);
@@ -168,10 +179,19 @@ export function useAiChatSession(chatSessionKey: string) {
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const userAwayFromBottomRef = useRef(false);
+  const streamingFrameRef = useRef<number | null>(null);
+  const pendingStreamingTextRef = useRef<{ id: string; text: string } | null>(
+    null
+  );
 
   const activeSession =
     sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
-  const messages = activeSession?.messages ?? [];
+
+  const messages = useMemo(
+    () => activeSession?.messages ?? [],
+    [activeSession?.messages]
+  );
 
   useEffect(() => {
     const next = loadPersistedSessions(chatSessionKey);
@@ -181,10 +201,27 @@ export function useAiChatSession(chatSessionKey: string) {
 
   useEffect(() => {
     if (!sessions.length || !activeSessionId) return;
+    if (
+      sessions.some((session) =>
+        session.messages.some((message) => message.streaming)
+      )
+    ) {
+      return;
+    }
     persistSessions(chatSessionKey, sessions, activeSessionId);
   }, [chatSessionKey, sessions, activeSessionId]);
 
+  useEffect(
+    () => () => {
+      if (streamingFrameRef.current != null) {
+        cancelAnimationFrame(streamingFrameRef.current);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
+    if (userAwayFromBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({
       block: "end",
       behavior: "smooth",
@@ -197,7 +234,9 @@ export function useAiChatSession(chatSessionKey: string) {
 
     const updateScrollState = () => {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollToBottom(distanceToBottom > 40);
+      const awayFromBottom = distanceToBottom > 40;
+      userAwayFromBottomRef.current = awayFromBottom;
+      setShowScrollToBottom(awayFromBottom);
     };
 
     updateScrollState();
@@ -226,6 +265,8 @@ export function useAiChatSession(chatSessionKey: string) {
   };
 
   const scrollToBottom = () => {
+    userAwayFromBottomRef.current = false;
+    setShowScrollToBottom(false);
     messagesEndRef.current?.scrollIntoView({
       block: "end",
       behavior: "smooth",
@@ -282,11 +323,21 @@ export function useAiChatSession(chatSessionKey: string) {
   };
 
   const updateStreamingAssistantText = (id: string, text: string) => {
-    setActiveMessages((prev) =>
-      prev.map((message) =>
-        message.id === id ? { ...message, text } : message
-      )
-    );
+    pendingStreamingTextRef.current = { id, text };
+    if (streamingFrameRef.current != null) return;
+    streamingFrameRef.current = requestAnimationFrame(() => {
+      streamingFrameRef.current = null;
+      const pending = pendingStreamingTextRef.current;
+      pendingStreamingTextRef.current = null;
+      if (!pending) return;
+      setActiveMessages((prev) =>
+        prev.map((message) =>
+          message.id === pending.id
+            ? { ...message, text: pending.text }
+            : message
+        )
+      );
+    });
   };
 
   const finalizeStreamingAssistantMessage = (
@@ -310,6 +361,25 @@ export function useAiChatSession(chatSessionKey: string) {
 
   const clearStreamingMessages = () => {
     setActiveMessages((prev) => prev.filter((message) => !message.streaming));
+  };
+
+  const updateMessage = (id: string, patch: Partial<ChatMessage>) => {
+    setActiveMessages((prev) =>
+      prev.map((message) =>
+        message.id === id ? { ...message, ...patch } : message
+      )
+    );
+  };
+
+  const updateConversationState = (patch: {
+    replyLanguageCode?: string | null;
+    targetTable?: string | null;
+  }) => {
+    updateActiveSession((session) => ({
+      ...session,
+      ...patch,
+      updatedAt: Date.now(),
+    }));
   };
 
   const newChat = () => {
@@ -368,6 +438,10 @@ export function useAiChatSession(chatSessionKey: string) {
     prompt,
     setPrompt,
     messages,
+    conversationState: {
+      replyLanguageCode: activeSession?.replyLanguageCode ?? null,
+      targetTable: activeSession?.targetTable ?? null,
+    },
     chatSessions: sessions,
     activeSessionId,
     newChat,
@@ -381,6 +455,8 @@ export function useAiChatSession(chatSessionKey: string) {
     updateStreamingAssistantText,
     finalizeStreamingAssistantMessage,
     clearStreamingMessages,
+    updateMessage,
+    updateConversationState,
     messagesContainerRef,
     messagesEndRef,
     showScrollToBottom,

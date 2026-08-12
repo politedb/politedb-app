@@ -583,9 +583,12 @@ export function ConnectionScreen() {
       engine,
       runtimeConnectionId,
       activeSchema,
+      activeTable: activeTableWindow?.table,
       tables: meta.tables,
       columnsByTable: meta.columnsByTable,
+      columnDetailsByTable: meta.columnDetailsByTable,
       currentSql: activeSqlWindow?.content,
+      querySafetyMode: sqlSafetyMode,
       onInsertSql: onInsertSqlIntoActiveEditor,
     });
 
@@ -598,9 +601,12 @@ export function ConnectionScreen() {
     engine,
     runtimeConnectionId,
     activeSchema,
+    activeTableWindow?.table,
     meta.tables,
     meta.columnsByTable,
+    meta.columnDetailsByTable,
     activeSqlWindow?.content,
+    sqlSafetyMode,
     onInsertSqlIntoActiveEditor,
   ]);
 

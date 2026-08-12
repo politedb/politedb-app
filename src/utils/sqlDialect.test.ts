@@ -36,6 +36,16 @@ describe("sqlDialect", () => {
     expect(sql).not.toContain('"]}}');
   });
 
+  it("serializes base64 byte cells as MySQL binary literals", () => {
+    expect(
+      formatSqlValue({ t: "BytesB64", v: "AQID/w==" }, "blob", "mysql")
+    ).toBe("X'010203ff'");
+  });
+
+  it("serializes edited blob hex text as MySQL binary literals", () => {
+    expect(formatSqlValue("A1761FA5", "longblob", "mysql")).toBe("X'A1761FA5'");
+  });
+
   it("renders MySQL hex literals as quoted strings for display", () => {
     const executed = `SELECT * FROM \`fleet\`.\`software\` WHERE CONVERT(\`name\` USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE CONVERT(UNHEX('2566697265666f7825') USING utf8mb4) COLLATE utf8mb4_unicode_ci LIMIT 300 OFFSET 0;`;
     expect(sqlForDisplay(executed, "mysql")).toBe(

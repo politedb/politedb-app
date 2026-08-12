@@ -161,15 +161,18 @@ async fn complete_openai_like(
         .trim_end_matches('/');
     let model = request.model.as_deref().unwrap_or(&provider.default_model);
     let url = format!("{base}/chat/completions");
+    let mut payload = json!({
+        "model": model,
+        "messages": request.messages,
+        "temperature": request.temperature.unwrap_or(0.2),
+        "stream": false
+    });
+    if let Some(max_tokens) = request.max_tokens {
+        payload["max_tokens"] = json!(max_tokens);
+    }
     let res = http
         .post(url)
-        .json(&json!({
-            "model": model,
-            "messages": request.messages,
-            "temperature": request.temperature.unwrap_or(0.2),
-            "max_tokens": request.max_tokens.unwrap_or(512),
-            "stream": false
-        }))
+        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("AI_CHAT_REQUEST_FAILED: {e}"))?;

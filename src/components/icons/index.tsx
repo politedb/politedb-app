@@ -58,3 +58,4 @@ export * from "./ChatPlus";
 export * from "./Heart";
 export * from "./Keyboard";
 export * from "./ShieldAnalytics";
+export * from "./CheckMark";

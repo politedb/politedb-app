@@ -71,7 +71,8 @@ const PG: MetadataQueries = {
     ORDER BY n.nspname, c.relkind, c.relname;
   `,
   columnsQuery: `
-    SELECT table_schema, table_name, column_name
+    SELECT table_schema, table_name, column_name, data_type, is_nullable,
+           COALESCE(column_default, ''), '' AS column_comment
     FROM information_schema.columns
     WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
     ORDER BY table_schema, table_name, ordinal_position;
@@ -145,7 +146,8 @@ const MYSQL: MetadataQueries = {
     ORDER BY table_schema, table_type, table_name;
   `,
   columnsQuery: `
-    SELECT table_schema, table_name, column_name
+    SELECT table_schema, table_name, column_name, column_type, is_nullable,
+           COALESCE(column_default, ''), COALESCE(column_comment, '')
     FROM information_schema.columns
     WHERE table_schema = DATABASE()
     ORDER BY table_schema, table_name, ordinal_position;
@@ -184,7 +186,11 @@ const SQLITE: MetadataQueries = {
     SELECT
       'main' AS table_schema,
       m.name AS table_name,
-      p.name AS column_name
+      p.name AS column_name,
+      p.type AS data_type,
+      CASE WHEN p."notnull" = 0 THEN 'YES' ELSE 'NO' END AS is_nullable,
+      COALESCE(p.dflt_value, '') AS column_default,
+      '' AS column_comment
     FROM sqlite_master m
     JOIN pragma_table_info(m.name) p
     WHERE m.type='table' AND m.name NOT LIKE 'sqlite_%'
@@ -240,8 +246,13 @@ const ORACLE: MetadataQueries = {
     SELECT
       owner AS table_schema,
       table_name,
-      column_name
+      column_name,
+      data_type,
+      nullable AS is_nullable,
+      COALESCE(data_default, '') AS column_default,
+      COALESCE(comments, '') AS column_comment
     FROM all_tab_columns
+    LEFT JOIN all_col_comments USING (owner, table_name, column_name)
     WHERE owner = SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')
     ORDER BY owner, table_name, column_id;
   `,
@@ -264,7 +275,8 @@ const CLICKHOUSE: MetadataQueries = {
     ORDER BY table_schema, table_name
   `,
   columnsQuery: `
-    SELECT table_schema, table_name, column_name
+    SELECT table_schema, table_name, column_name, data_type, is_nullable,
+           COALESCE(column_default, ''), '' AS column_comment
     FROM information_schema.columns
     WHERE table_catalog = currentDatabase()
     ORDER BY table_schema, table_name, ordinal_position
@@ -288,7 +300,8 @@ const SNOWFLAKE: MetadataQueries = {
     ORDER BY table_schema, table_type, table_name;
   `,
   columnsQuery: `
-    SELECT table_schema, table_name, column_name
+    SELECT table_schema, table_name, column_name, data_type, is_nullable,
+           COALESCE(column_default, ''), COALESCE(comment, '')
     FROM information_schema.columns
     WHERE table_catalog = CURRENT_DATABASE()
     ORDER BY table_schema, table_name, ordinal_position;
@@ -328,7 +341,11 @@ const SQLSERVER: MetadataQueries = {
     SELECT
       TABLE_SCHEMA AS table_schema,
       TABLE_NAME AS table_name,
-      COLUMN_NAME AS column_name
+      COLUMN_NAME AS column_name,
+      DATA_TYPE AS data_type,
+      IS_NULLABLE AS is_nullable,
+      COALESCE(COLUMN_DEFAULT, '') AS column_default,
+      '' AS column_comment
     FROM INFORMATION_SCHEMA.COLUMNS
     ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
   `,

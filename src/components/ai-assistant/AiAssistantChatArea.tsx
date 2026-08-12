@@ -1,7 +1,9 @@
 import type { Ref } from "preact";
-import { useState } from "preact/hooks";
-import { AiAssistantMessageCard } from "src/components/ai-assistant/AiAssistantMessageCard";
-import { AiAssistantThinkingCard } from "src/components/ai-assistant/AiAssistantThinkingCard";
+import { useLayoutEffect, useState } from "preact/hooks";
+import {
+  AiAssistantMessageCard,
+  AssistantStreamingPlaceholder,
+} from "src/components/ai-assistant/AiAssistantMessageCard";
 import { Dropdown } from "src/components/common/Dropdown";
 import { Popover } from "src/components/common/Popover";
 import {
@@ -17,10 +19,13 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
+import { Input } from "src/components/common/Input";
 import type { AssistantStatus } from "src/components/ai-assistant/hooks/useAiAssistantSubmit";
+import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
 import { normalizeLocalAiModelName } from "src/utils/assistant";
 import { cn } from "src/utils/cn";
@@ -206,6 +211,8 @@ export function AiAssistantChatArea(props: {
   canSubmit: boolean;
   assistantStatus: AssistantStatus;
   runtimeConnectionId?: string;
+  querySafetyMode?: QuerySafetyMode;
+  onUpdateMessage: (id: string, patch: Partial<ChatMessage>) => void;
   providerLabel: string;
   providerModel: string;
   providerOptions: AiProviderConfig[];
@@ -240,6 +247,8 @@ export function AiAssistantChatArea(props: {
     canSubmit,
     assistantStatus,
     runtimeConnectionId,
+    querySafetyMode = "default",
+    onUpdateMessage,
     providerLabel,
     providerModel,
     providerOptions,
@@ -266,17 +275,31 @@ export function AiAssistantChatArea(props: {
   );
   const [titleOpen, setTitleOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameTitle, setRenameTitle] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const floating = presentation === "floating";
   const activeSession = chatSessions.find(
     (session) => session.id === activeSessionId
   );
   const activeTitle = activeSession?.title || "New Chat";
+
+  useLayoutEffect(() => {
+    if (typeof messagesContainerRef === "function") return;
+    const container = messagesContainerRef?.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+  }, [activeSessionId, messagesContainerRef]);
   const handleRenameActiveChat = () => {
     if (!activeSessionId) return;
-    const title = window.prompt("Rename chat", activeTitle);
-    if (title === null) return;
+    setRenameTitle(activeTitle);
+    setRenameOpen(true);
+  };
+  const submitRename = () => {
+    const title = renameTitle.trim();
+    if (!activeSessionId || !title) return;
     onRenameSession(activeSessionId, title);
+    setRenameOpen(false);
   };
   const handleDeleteActiveChat = () => {
     if (!activeSessionId) return;
@@ -309,27 +332,37 @@ export function AiAssistantChatArea(props: {
   const selectedContexts = contextOptions.filter(
     (item) => item.active && item.available
   );
-  const contextItems = contextOptions.map((item) => ({
-    key: item.id,
-    label: item.label,
-    disabled: !item.available,
-    rightSlot: item.detail ? (
-      <span class="max-w-20 truncate text-xs text-neutral-400">
-        {item.detail}
-      </span>
-    ) : undefined,
-    onSelect: () => {
-      onToggleContext(item.id);
-      if (contextTriggerStart !== null) {
-        onPromptChange(
-          `${prompt.slice(0, contextTriggerStart)}${prompt.slice(
-            contextTriggerStart + 1
-          )}`
-        );
-        setContextTriggerStart(null);
-      }
-    },
-  }));
+  const availableContextOptions = contextOptions.filter(
+    (item) => item.available
+  );
+  const contextItems = availableContextOptions.length
+    ? availableContextOptions.map((item) => ({
+        key: item.id,
+        label: item.label,
+        rightSlot: item.detail ? (
+          <span class="max-w-20 truncate text-xs text-neutral-400">
+            {item.detail}
+          </span>
+        ) : undefined,
+        onSelect: () => {
+          onToggleContext(item.id);
+          if (contextTriggerStart !== null) {
+            onPromptChange(
+              `${prompt.slice(0, contextTriggerStart)}${prompt.slice(
+                contextTriggerStart + 1
+              )}`
+            );
+            setContextTriggerStart(null);
+          }
+        },
+      }))
+    : [
+        {
+          key: "no-context",
+          label: "Open a connection to add context",
+          disabled: true,
+        },
+      ];
 
   const handleShare = async () => {
     const transcript = messages
@@ -485,12 +518,17 @@ export function AiAssistantChatArea(props: {
       <div
         ref={messagesContainerRef}
         class={cn(
-          "min-h-0 flex-1 overflow-y-auto",
+          "no-scrollbar min-h-0 max-w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto",
           floating ? "px-6 py-4" : "px-3 py-3"
         )}
       >
-        <div class={cn(floating ? "space-y-6" : "space-y-3")}>
-          <div class="space-y-1">
+        <div
+          class={cn(
+            "w-full max-w-full min-w-0 overflow-hidden",
+            floating ? "space-y-6" : "space-y-3"
+          )}
+        >
+          <div class="w-full max-w-full min-w-0 space-y-1 overflow-hidden">
             {messages.length === 0 ? (
               <div class="rounded-xl border border-dashed border-neutral-200 bg-slate-50 p-4 text-[13px] text-neutral-500">
                 Ask about data, get SQL suggestions, or describe the insight you
@@ -505,11 +543,13 @@ export function AiAssistantChatArea(props: {
                 presentation={presentation}
                 onInsertSql={onInsertSql}
                 runtimeConnectionId={runtimeConnectionId}
+                querySafetyMode={querySafetyMode}
+                onUpdateMessage={onUpdateMessage}
               />
             ))}
 
             {submitting && !messages.some((message) => message.streaming) ? (
-              <AiAssistantThinkingCard />
+              <AssistantStreamingPlaceholder />
             ) : null}
 
             <div ref={messagesEndRef} />
@@ -522,12 +562,21 @@ export function AiAssistantChatArea(props: {
           type="button"
           onClick={onScrollToBottom}
           title="Scroll to latest message"
+          aria-label="Scroll to latest message"
           class={cn(
-            "absolute right-4 bottom-42 z-10 rounded-full border border-neutral-200",
-            "bg-white p-2 text-neutral-600 shadow-md transition-colors hover:bg-neutral-50 hover:text-neutral-900"
+            "absolute bottom-42 left-1/2 z-10 -translate-x-1/2 rounded-full border border-neutral-200",
+            "flex size-9 items-center justify-center bg-neutral-700 text-white shadow-md",
+            "transition-colors hover:bg-neutral-700",
+            submitting
+              ? "px-3 py-1 text-sm leading-none tracking-widest"
+              : "p-1.5"
           )}
         >
-          <ChevronDownIcon className="size-4" />
+          {submitting ? (
+            <span aria-hidden="true">•••</span>
+          ) : (
+            <ChevronDownIcon className="size-4" aria-hidden="true" />
+          )}
         </button>
       ) : null}
 
@@ -542,7 +591,7 @@ export function AiAssistantChatArea(props: {
               {submitting
                 ? assistantStatus === "loading_model"
                   ? "Loading model..."
-                  : "Generating..."
+                  : ""
                 : ""}
             </div>
           </div>
@@ -635,9 +684,17 @@ export function AiAssistantChatArea(props: {
               {floating ? (
                 <button
                   type="button"
-                  class="rounded-full bg-neutral-100 p-2 text-neutral-300"
+                  class={cn(
+                    "rounded-full p-2.5 transition-colors",
+                    submitting
+                      ? "bg-blue-600 text-white hover:bg-blue-700"
+                      : canSubmit
+                        ? "bg-blue-600 text-white hover:bg-blue-700"
+                        : "bg-neutral-100 text-neutral-300"
+                  )}
                   title={submitting ? "Stop" : "Send"}
                   aria-label={submitting ? "Stop" : "Send"}
+                  disabled={!submitting && !canSubmit}
                   onClick={() => {
                     if (submitting) {
                       onCancelSubmit();
@@ -646,7 +703,11 @@ export function AiAssistantChatArea(props: {
                     if (canSubmit) void onSubmit();
                   }}
                 >
-                  <ArrowRightIcon className="size-3.5 -rotate-90" />
+                  {submitting ? (
+                    <span class="block size-2 rounded-xs bg-current" />
+                  ) : (
+                    <ArrowRightIcon className="size-3 -rotate-90" />
+                  )}
                 </button>
               ) : (
                 <Dropdown
@@ -676,6 +737,41 @@ export function AiAssistantChatArea(props: {
           </div>
         </div>
       </div>
+
+      <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} size="sm">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitRename();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>Rename Chat</DialogTitle>
+          </DialogHeader>
+          <DialogContent className="pt-0">
+            <Input
+              value={renameTitle}
+              onValueChange={setRenameTitle}
+              placeholder="Chat name"
+              aria-label="Chat name"
+              autofocus
+              className="border border-neutral-200 bg-white text-sm"
+            />
+          </DialogContent>
+          <DialogFooter className="pt-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRenameOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!renameTitle.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
 
       <Dialog
         open={historyOpen}

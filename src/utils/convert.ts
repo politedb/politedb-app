@@ -11,28 +11,47 @@ export type CellValue =
   | { t: "BytesB64"; v: string };
 
 // utils
-function decodeBytesB64ToUtf8(b64: string): string {
+export function decodeBytesB64(b64: string): Uint8Array | null {
   try {
-    if (!b64) return "";
+    if (!b64) return new Uint8Array();
 
     // Browser-safe base64 decode
     const atobFn = globalThis.atob;
-    if (typeof atobFn !== "function") return b64;
+    if (typeof atobFn !== "function") return null;
 
     const bin = atobFn(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-
-    if (typeof TextDecoder === "function") {
-      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-    }
-
-    // Fallback: latin1-style string
-    return bin;
+    return bytes;
   } catch {
-    // Keep original encoded value if decode fails
-    return b64;
+    return null;
   }
+}
+
+export function formatBytesB64AsHex(b64: string): string {
+  const bytes = decodeBytesB64(b64);
+  if (!bytes) return "";
+
+  return Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0").toUpperCase()
+  ).join("");
+}
+
+export function cellToUtf8String(
+  cell: any,
+  allowNull: boolean = false
+): string | null {
+  if (cell && typeof cell === "object" && (cell as any).t === "BytesB64") {
+    const bytes = decodeBytesB64(String((cell as any).v ?? ""));
+    if (bytes && typeof TextDecoder === "function") {
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        return cellToString(cell, allowNull);
+      }
+    }
+  }
+  return cellToString(cell, allowNull);
 }
 
 export function cellToString(
@@ -53,9 +72,9 @@ export function cellToString(
     if (isDefaultCellEditValue(cell)) return "DEFAULT";
     // { t: "Null" }
     if ((cell as any).t === "Null") return allowNull ? null : "";
-    // { t: "BytesB64", v: "..." } -> decode for display/use
+    // { t: "BytesB64", v: "..." } -> uppercase hex for display/use
     if ((cell as any).t === "BytesB64") {
-      return decodeBytesB64ToUtf8(String((cell as any).v ?? ""));
+      return formatBytesB64AsHex(String((cell as any).v ?? ""));
     }
     // { t: "Str", v: "public" } and other scalar wrappers
     if ("v" in cell) return String((cell as any).v ?? "");

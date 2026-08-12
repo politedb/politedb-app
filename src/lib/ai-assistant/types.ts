@@ -14,6 +14,12 @@ export type AiPlan = {
   clarification: string;
 };
 
+export type AiAssistantTurn = AiPlan & {
+  kind: "chat" | "metadata" | "sql" | "clarify";
+  answer: string;
+  targetTable?: string;
+};
+
 export type AiAnswer = {
   answer: string;
   highlights: string[];
@@ -26,6 +32,20 @@ export type AiChatReply = {
 };
 
 export type DirectMetadataReply = {
+  answer: string;
+  followup?: string;
+};
+
+export type SavedConnectionSummary = {
+  id: string;
+  label: string;
+  engine: string;
+  tags?: string[];
+  target?: string;
+  user?: string;
+};
+
+export type DirectAppContextReply = {
   answer: string;
   followup?: string;
 };

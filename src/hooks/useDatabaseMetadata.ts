@@ -1,5 +1,10 @@
 import { useCallback, useRef, useState } from "preact/hooks";
-import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
+import type {
+  AiColumnMetadata,
+  DatabaseEngine,
+  DatabaseObjectItem,
+  TableItem,
+} from "src/types";
 import { runSqlQuery } from "src/lib/tauri/query";
 import {
   cassandraListKeyspaces,
@@ -33,6 +38,7 @@ export type DbMetadata = {
   objects: DatabaseObjectItem[];
   tables: TableItem[];
   columnsByTable: Record<string, string[]>;
+  columnDetailsByTable: Record<string, AiColumnMetadata[]>;
   columnsLoaded: boolean;
 
   loading: boolean;
@@ -57,6 +63,7 @@ function emptyMeta(engine?: DatabaseEngine): DbMetadata {
     objects: [],
     tables: [],
     columnsByTable: {},
+    columnDetailsByTable: {},
     columnsLoaded: false,
     version: "",
     loading: false,
@@ -158,6 +165,10 @@ export function useDatabaseMetadata() {
           force && includeColumns && !softForce
             ? {}
             : (existing?.columnsByTable ?? {}),
+        columnDetailsByTable:
+          force && includeColumns && !softForce
+            ? {}
+            : (existing?.columnDetailsByTable ?? {}),
         columnsLoaded:
           includeColumns && force && !softForce
             ? false
@@ -255,6 +266,7 @@ export function useDatabaseMetadata() {
             );
             const rows = colsRes.rows ?? [];
             const columnsByTable: Record<string, string[]> = {};
+            const columnDetailsByTable: Record<string, AiColumnMetadata[]> = {};
             const total = rows.length || 1;
 
             for (let i = 0; i < rows.length; i++) {
@@ -267,6 +279,14 @@ export function useDatabaseMetadata() {
               const k = `${schema}.${table}`;
               if (!columnsByTable[k]) columnsByTable[k] = [];
               columnsByTable[k].push(col);
+              if (!columnDetailsByTable[k]) columnDetailsByTable[k] = [];
+              columnDetailsByTable[k].push({
+                name: col,
+                dataType: cellToString(r?.[3]) || undefined,
+                nullable: cellToString(r?.[4]) || undefined,
+                defaultValue: cellToString(r?.[5]) || undefined,
+                comment: cellToString(r?.[6]) || undefined,
+              });
 
               if (i % 250 === 0) {
                 const prog = 35 + Math.floor((i / total) * 65);
@@ -276,6 +296,7 @@ export function useDatabaseMetadata() {
 
             setCache(metaKey, {
               columnsByTable,
+              columnDetailsByTable,
               columnsLoaded: true,
               loading: false,
               loaded: true,
@@ -511,11 +532,13 @@ export function useDatabaseMetadata() {
           setCache(metaKey, { tables, progress: 35, stage: "columns" });
 
           let columnsByTable = existing?.columnsByTable ?? {};
+          let columnDetailsByTable = existing?.columnDetailsByTable ?? {};
           let columnsLoaded = existing?.columnsLoaded ?? false;
 
           if (includeColumns && colsRes) {
             const rows = colsRes.rows ?? [];
             columnsByTable = {};
+            columnDetailsByTable = {};
             const total = rows.length || 1;
 
             for (let i = 0; i < rows.length; i++) {
@@ -528,6 +551,14 @@ export function useDatabaseMetadata() {
               const k = `${schema}.${table}`;
               if (!columnsByTable[k]) columnsByTable[k] = [];
               columnsByTable[k].push(col);
+              if (!columnDetailsByTable[k]) columnDetailsByTable[k] = [];
+              columnDetailsByTable[k].push({
+                name: col,
+                dataType: cellToString(r?.[3]) || undefined,
+                nullable: cellToString(r?.[4]) || undefined,
+                defaultValue: cellToString(r?.[5]) || undefined,
+                comment: cellToString(r?.[6]) || undefined,
+              });
 
               // throttle progress updates
               if (i % 250 === 0) {
@@ -541,6 +572,7 @@ export function useDatabaseMetadata() {
 
           setCache(metaKey, {
             columnsByTable,
+            columnDetailsByTable,
             columnsLoaded,
             version: (version ?? "").trim(),
             loading: false,

@@ -12,9 +12,9 @@ use tokio::time::sleep;
 
 use crate::state::AppState;
 
-/// Default context window for bundled `llama-server`. Kept small so KV cache + weights fit RAM;
-/// SIGKILL (signal 9) during startup is often OOM.
-const DEFAULT_CONTEXT_SIZE: u32 = 1024;
+/// Default context window for bundled `llama-server`. Large enough for app context and short
+/// conversation history while keeping KV cache bounded on lower-memory devices.
+const DEFAULT_CONTEXT_SIZE: u32 = 4096;
 const MIN_CONTEXT_SIZE: u32 = 512;
 const MAX_CONTEXT_SIZE: u32 = 131_072;
 /// `llama-server` defaults `-b` to a large value; that pre-allocates buffers and commonly causes OOM
