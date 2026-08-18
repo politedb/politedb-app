@@ -483,12 +483,6 @@ export function AiAssistantMessageBody(props: {
         />
       ) : null}
 
-      {message.clarification ? (
-        <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
-          {message.clarification}
-        </div>
-      ) : null}
-
       {!hasParts ? (
         <LegacySqlBlock
           message={message}

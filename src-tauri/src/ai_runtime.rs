@@ -531,6 +531,16 @@ pub async fn ai_runtime_start(
 
 pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String> {
     let mut runtime = state.ai_runtime.lock().await;
+    stop_runtime_handle(&mut runtime).await?;
+    Ok(runtime.to_status(Vec::new()))
+}
+
+fn is_model_download_in_progress(runtime: &AiRuntimeHandle) -> bool {
+    matches!(runtime.phase, AiRuntimePhase::Starting)
+        && (runtime.model_downloaded_bytes.is_some() || runtime.model_total_bytes.is_some())
+}
+
+async fn stop_runtime_handle(runtime: &mut AiRuntimeHandle) -> Result<(), String> {
     if let Some(child) = runtime.child.as_mut() {
         child
             .kill()
@@ -546,8 +556,7 @@ pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String
     runtime.managed_by_app = false;
     runtime.model_downloaded_bytes = None;
     runtime.model_total_bytes = None;
-
-    Ok(runtime.to_status(Vec::new()))
+    Ok(())
 }
 
 pub async fn ai_runtime_autostart_if_available(
@@ -713,25 +722,23 @@ pub async fn ai_runtime_delete_default_model(
     app: &tauri::AppHandle,
     state: &AppState,
 ) -> Result<AiRuntimeStatus, String> {
-    {
-        let runtime = state.ai_runtime.lock().await;
-        if matches!(runtime.phase, AiRuntimePhase::Starting)
-            && (runtime.model_downloaded_bytes.is_some() || runtime.model_total_bytes.is_some())
-        {
-            return Err("AI_MODEL_DELETE_BUSY: model download is in progress".to_string());
-        }
-    }
-
-    ai_runtime_stop(state).await?;
-
     let model_path = app_data_model_path(app)?;
     let partial_path = model_path.with_extension("gguf.part");
-    if model_path.exists() {
-        fs::remove_file(&model_path).map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
-    }
-    if partial_path.exists() {
-        fs::remove_file(&partial_path)
-            .map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
+
+    {
+        let mut runtime = state.ai_runtime.lock().await;
+        if is_model_download_in_progress(&runtime) {
+            return Err("AI_MODEL_DELETE_BUSY: model download is in progress".to_string());
+        }
+        stop_runtime_handle(&mut runtime).await?;
+        if model_path.exists() {
+            fs::remove_file(&model_path)
+                .map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
+        }
+        if partial_path.exists() {
+            fs::remove_file(&partial_path)
+                .map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
+        }
     }
 
     Ok(ai_runtime_status(app, state).await)

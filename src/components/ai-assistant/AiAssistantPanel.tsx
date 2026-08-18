@@ -7,6 +7,7 @@ import {
 } from "src/components/ai-assistant/AiAssistantChatArea";
 import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
 import { AiAssistantPanelHeader } from "src/components/ai-assistant/AiAssistantPanelHeader";
+import { AiAssistantRuntimeNotice } from "src/components/ai-assistant/AiAssistantRuntimePanes";
 import { getLocalAiSettings } from "src/lib/ai-assistant";
 import type { AiColumnMetadata, DatabaseEngine, TableItem } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
@@ -16,7 +17,9 @@ import {
   aiProviderList,
   ensureLocalAiProvider,
   getSelectedAiProviderId,
+  isLocalAiProviderKind,
   normalizeAiProviderConfig,
+  resolveSelectedAiProvider,
   setSelectedAiProviderId,
 } from "@root/src/lib/ai-assistant/providers";
 import { useAiChatSession } from "./hooks/useAiChatSession";
@@ -161,17 +164,34 @@ export function AiAssistantPanel(props: Props) {
     loadingModels,
     runtimeBusy,
     runtimeStatus,
-    showSettings,
+    modelDownloadFailed,
+    runtimeStartFailed,
+    modelDownloadInProgress,
+    showRuntimeLoadingScreen,
+    showMissingModelScreen,
+    showMissingRuntimeScreen,
     handleStartBundledRuntime,
     handleStopBundledRuntime,
     handleDownloadModel,
+    handleCancelModelDownload,
     handleDeleteModel,
     handleRefreshRuntimeSetup,
+    handleRetryRuntimeSetup,
   } = useAiRuntimeManager({
     initialEndpoint: initialSettings.endpoint,
     initialModel: initialSettings.model,
     submitting,
   });
+
+  const selectableProviderOptions = useMemo(
+    () =>
+      providerOptions.filter(
+        (provider) =>
+          provider.id !== DEFAULT_LOCAL_AI_PROVIDER_ID ||
+          Boolean(runtimeStatus?.model_path)
+      ),
+    [providerOptions, runtimeStatus?.model_path]
+  );
 
   useEffect(() => {
     if (!endpoint.trim() || !model.trim()) return;
@@ -184,29 +204,52 @@ export function AiAssistantPanel(props: Props) {
     });
   }, [endpoint, model, providerId]);
 
+  const applyProviderList = (
+    providers: ReturnType<typeof normalizeAiProviderConfig>[],
+    currentId: string
+  ) => {
+    setProviderOptions(providers);
+    const selected = resolveSelectedAiProvider(providers, currentId);
+    if (!selected) return;
+    if (selected.id !== currentId) {
+      setSelectedAiProviderId(selected.id);
+      setProviderId(selected.id);
+    }
+    setProviderModel(selectedModelForProvider(selected));
+    setProviderLabel(selected.label);
+  };
+
   useEffect(() => {
     void aiProviderList().then((providers) => {
-      const normalized = providers.map(normalizeAiProviderConfig);
-      setProviderOptions(normalized);
-      const selected = normalized.find((item) => item.id === providerId);
-      if (selected?.defaultModel) {
-        setProviderModel(selectedModelForProvider(selected));
-      }
-      if (selected?.label) {
-        setProviderLabel(selected.label);
-      }
+      applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
     });
   }, [providerId]);
 
   useEffect(() => {
+    if (!runtimeStatus || runtimeStatus.model_path) return;
+    const selected = providerOptions.find(
+      (provider) => provider.id === providerId
+    );
+    if (
+      selected?.id !== DEFAULT_LOCAL_AI_PROVIDER_ID ||
+      !isLocalAiProviderKind(selected.kind)
+    ) {
+      return;
+    }
+    const fallback = selectableProviderOptions.find(
+      (provider) => provider.enabled
+    );
+    if (!fallback) return;
+    setSelectedAiProviderId(fallback.id);
+    setProviderId(fallback.id);
+    setProviderLabel(fallback.label);
+    setProviderModel(selectedModelForProvider(fallback));
+  }, [providerId, providerOptions, runtimeStatus, selectableProviderOptions]);
+
+  useEffect(() => {
     const refreshProviders = () => {
       void aiProviderList().then((providers) => {
-        const normalized = providers.map(normalizeAiProviderConfig);
-        setProviderOptions(normalized);
-        const selected = normalized.find((item) => item.id === providerId);
-        if (!selected) return;
-        setProviderModel(selectedModelForProvider(selected));
-        setProviderLabel(selected.label);
+        applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
       });
     };
     window.addEventListener("politedb-ai-providers-changed", refreshProviders);
@@ -232,7 +275,9 @@ export function AiAssistantPanel(props: Props) {
     nextProviderId: string,
     nextModel: string
   ) => {
-    const selected = providerOptions.find((item) => item.id === nextProviderId);
+    const selected = selectableProviderOptions.find(
+      (item) => item.id === nextProviderId
+    );
     if (!selected) return;
     storeModelSelectionMode("manual");
     setModelSelectionMode("manual");
@@ -247,8 +292,9 @@ export function AiAssistantPanel(props: Props) {
     storeModelSelectionMode("auto");
     setModelSelectionMode("auto");
     const selected =
-      providerOptions.find((item) => item.isDefault && item.enabled) ??
-      providerOptions.find((item) => item.enabled);
+      selectableProviderOptions.find(
+        (item) => item.isDefault && item.enabled
+      ) ?? selectableProviderOptions.find((item) => item.enabled);
     if (!selected) return;
     setSelectedAiProviderId(selected.id);
     setProviderId(selected.id);
@@ -383,7 +429,6 @@ export function AiAssistantPanel(props: Props) {
     <div class="flex h-full min-h-0 max-w-full min-w-0 flex-col overflow-hidden bg-white">
       {presentation === "panel" ? (
         <AiAssistantPanelHeader
-          showSettings={showSettings}
           settingsOpen={settingsOpen}
           onSettingsOpenChange={setSettingsOpen}
           loadingModels={loadingModels}
@@ -412,6 +457,21 @@ export function AiAssistantPanel(props: Props) {
         />
       ) : null}
 
+      {presentation === "panel" ? (
+        <AiAssistantRuntimeNotice
+          status={runtimeStatus}
+          downloading={modelDownloadInProgress}
+          loading={showRuntimeLoadingScreen}
+          missingModel={showMissingModelScreen}
+          missingRuntime={showMissingRuntimeScreen}
+          failed={modelDownloadFailed || runtimeStartFailed}
+          busy={runtimeBusy}
+          onDownload={() => void handleDownloadModel()}
+          onCancelDownload={handleCancelModelDownload}
+          onRetry={handleRetryRuntimeSetup}
+        />
+      ) : null}
+
       <div class="flex min-h-0 flex-1 flex-col">
         <AiAssistantChatArea
           messages={messages}
@@ -432,7 +492,7 @@ export function AiAssistantPanel(props: Props) {
           onUpdateMessage={updateMessage}
           providerLabel={providerLabel}
           providerModel={providerModel || model}
-          providerOptions={providerOptions}
+          providerOptions={selectableProviderOptions}
           activeProviderId={providerId}
           modelSelectionMode={modelSelectionMode}
           onSelectAutoModel={handleSelectAutoModel}

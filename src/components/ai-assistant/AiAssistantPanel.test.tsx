@@ -92,6 +92,10 @@ vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   getSelectedAiProviderId: vi.fn(() => "local"),
   setSelectedAiProviderId: (...args: any[]) =>
     setSelectedAiProviderIdMock(...args),
+  resolveSelectedAiProvider: (providers: any[], selectedId?: string) =>
+    providers.find((provider) => provider.id === selectedId) ??
+    providers.find((provider) => provider.isDefault) ??
+    providers[0],
   makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
     id: overrides.id ?? kind,
     kind,
@@ -279,6 +283,7 @@ beforeEach(() => {
       phase: "ready",
       endpoint: "http://127.0.0.1:8080/v1",
       model_name: "qwen2.5-coder:7b",
+      model_path: "/tmp/default.gguf",
     })
   );
   aiRuntimeDownloadDefaultModelMock.mockResolvedValue(
@@ -328,6 +333,26 @@ describe("AiAssistantPanel", () => {
       screen.queryByRole("button", { name: "Download model" })
     ).not.toBeInTheDocument();
     expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
+    await screen.findByText("Add a provider in Settings to choose models.");
+    expect(
+      screen.queryByRole("button", { name: /Qwen2\.5-Coder-7B/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps settings available when the local model is missing", async () => {
+    mockMissingModelStatus();
+
+    renderPanel({ presentation: "panel" });
+
+    expect(await screen.findByTitle("AI settings")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Download model" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("AI settings"));
+    await screen.findByText("AI Provider Settings");
   });
 
   it("starts runtime automatically when runtime assets are available", async () => {

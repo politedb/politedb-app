@@ -149,7 +149,31 @@ fn normalize_provider(mut config: AiProviderConfig) -> Result<AiProviderConfig, 
     if !config.models.contains(&config.default_model) {
         config.models.insert(0, config.default_model.clone());
     }
+    require_https_cloud_url(&config)?;
     Ok(config)
+}
+
+fn require_https_cloud_url(config: &AiProviderConfig) -> Result<(), String> {
+    if is_local_provider(&config.kind) {
+        return Ok(());
+    }
+    let url = config.base_url.as_deref().unwrap_or("");
+    if url.to_ascii_lowercase().starts_with("https://") {
+        return Ok(());
+    }
+    Err("AI_PROVIDER_HTTPS_REQUIRED".into())
+}
+
+fn persistable_api_key_ref(
+    kind: &AiProviderKind,
+    provider_id: &str,
+    existing: Option<String>,
+) -> Option<String> {
+    if is_local_provider(kind) {
+        return None;
+    }
+    let canonical = provider_key_ref(provider_id);
+    existing.filter(|value| value == &canonical)
 }
 
 fn provider_key_ref(provider_id: &str) -> String {
@@ -163,13 +187,32 @@ fn provider_api_key(
     if is_local_provider(&provider.kind) {
         return Ok(None);
     }
-    let key_ref = provider
-        .api_key_ref
-        .as_deref()
-        .ok_or_else(|| "AI_PROVIDER_API_KEY_REQUIRED".to_string())?;
-    secrets::keychain_get(app, key_ref)
+    secrets::keychain_get(app, &provider_key_ref(&provider.id))
         .map(Some)
         .map_err(|_| "AI_PROVIDER_API_KEY_MISSING".to_string())
+}
+
+fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
+    let code = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .pointer("/error/code")
+                .or_else(|| value.pointer("/error/type"))
+                .or_else(|| value.pointer("/error/status"))
+                .and_then(|item| item.as_str())
+                .map(|item| {
+                    item.chars()
+                        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+                        .take(48)
+                        .collect::<String>()
+                })
+                .filter(|item| !item.is_empty())
+        });
+    match code {
+        Some(code) => format!("AI_CHAT_FAILED: {status} {code}"),
+        None => format!("AI_CHAT_FAILED: {status}"),
+    }
 }
 
 fn find_provider(app: &AppHandle, provider_id: &str) -> Result<AiProviderConfig, String> {
@@ -252,7 +295,7 @@ async fn complete_openai_like(
         .await
         .map_err(|e| format!("AI_CHAT_RESPONSE_READ_FAILED: {e}"))?;
     if !status.is_success() {
-        return Err(format!("AI_CHAT_FAILED: {status} {body}"));
+        return Err(provider_http_error(status, &body));
     }
     let value = serde_json::from_str::<serde_json::Value>(&body)
         .map_err(|e| format!("AI_CHAT_RESPONSE_JSON_FAILED: {e}"))?;
@@ -402,7 +445,7 @@ async fn parse_text_response(
         .await
         .map_err(|e| format!("AI_CHAT_RESPONSE_READ_FAILED: {e}"))?;
     if !status.is_success() {
-        return Err(format!("AI_CHAT_FAILED: {status} {body}"));
+        return Err(provider_http_error(status, &body));
     }
     let value = serde_json::from_str::<serde_json::Value>(&body)
         .map_err(|e| format!("AI_CHAT_RESPONSE_JSON_FAILED: {e}"))?;
@@ -490,9 +533,7 @@ pub fn ai_provider_save_config(
         .find(|provider| provider.id == config.id)
         .and_then(|provider| provider.api_key_ref.clone());
     let mut config = normalize_provider(config)?;
-    if config.api_key_ref.is_none() {
-        config.api_key_ref = existing_key_ref;
-    }
+    config.api_key_ref = persistable_api_key_ref(&config.kind, &config.id, existing_key_ref);
     if config.is_default == Some(true) {
         for provider in &mut file.providers {
             provider.is_default = Some(false);
@@ -525,17 +566,20 @@ pub fn ai_provider_set_key(
     if api_key.is_empty() {
         return Err("AI_PROVIDER_API_KEY_REQUIRED".into());
     }
-    let key_ref = provider_key_ref(provider_id);
-    secrets::keychain_set(&app, &key_ref, api_key)?;
     let mut file = load_provider_file(&app)?;
     let provider = file
         .providers
         .iter_mut()
         .find(|provider| provider.id == provider_id)
         .ok_or_else(|| "AI_PROVIDER_NOT_FOUND".to_string())?;
-    provider.api_key_ref = Some(key_ref);
+    let key_ref = provider_key_ref(provider_id);
+    secrets::keychain_set(&app, &key_ref, api_key)?;
+    provider.api_key_ref = Some(key_ref.clone());
     let saved = provider.clone();
-    save_provider_file(&app, &file)?;
+    if let Err(error) = save_provider_file(&app, &file) {
+        let _ = secrets::keychain_delete(&app, &key_ref);
+        return Err(error);
+    }
     Ok(saved)
 }
 
@@ -545,6 +589,10 @@ pub async fn ai_provider_validate_config(
     config: AiProviderConfig,
     api_key: Option<String>,
 ) -> Result<(), String> {
+    let license_state = license::license_state_load(&app)?;
+    if license::blocks_ai_feature(&license_state) {
+        return Err("AI_LICENSE_REQUIRED".into());
+    }
     let config = normalize_provider(config)?;
     let supplied_key = api_key
         .as_deref()
@@ -576,14 +624,8 @@ pub async fn ai_provider_validate_config(
 #[tauri::command]
 pub fn ai_provider_delete(app: AppHandle, provider_id: String) -> Result<(), String> {
     let mut file = load_provider_file(&app)?;
-    if let Some(key_ref) = file
-        .providers
-        .iter()
-        .find(|provider| provider.id == provider_id)
-        .and_then(|provider| provider.api_key_ref.as_deref())
-    {
-        let _ = secrets::keychain_delete(&app, key_ref);
-    }
+    let canonical = provider_key_ref(&provider_id);
+    let _ = secrets::keychain_delete(&app, &canonical);
     file.providers.retain(|p| p.id != provider_id);
     save_provider_file(&app, &file)
 }
@@ -625,4 +667,76 @@ pub async fn ai_provider_test(app: AppHandle, provider_id: String) -> Result<Str
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cloud_provider(host: &str) -> AiProviderConfig {
+        AiProviderConfig {
+            id: "openai-1".into(),
+            kind: AiProviderKind::Openai,
+            label: "OpenAI".into(),
+            base_url: None,
+            host: Some(host.into()),
+            sub_path: Some("/v1".into()),
+            default_model: "gpt-4.1-mini".into(),
+            models: vec!["gpt-4.1-mini".into()],
+            api_key_ref: Some("politedb:profile:db:password".into()),
+            enabled: true,
+            is_default: Some(false),
+        }
+    }
+
+    #[test]
+    fn rejects_http_cloud_host() {
+        let error = normalize_provider(cloud_provider("http://example.com")).unwrap_err();
+        assert_eq!(error, "AI_PROVIDER_HTTPS_REQUIRED");
+    }
+
+    #[test]
+    fn accepts_https_cloud_host() {
+        let config = normalize_provider(cloud_provider("https://api.openai.com")).unwrap();
+        assert_eq!(
+            config.base_url.as_deref(),
+            Some("https://api.openai.com/v1")
+        );
+    }
+
+    #[test]
+    fn allows_http_local_host() {
+        let mut config = cloud_provider("http://127.0.0.1:11434");
+        config.kind = AiProviderKind::Ollama;
+        config.id = "local".into();
+        assert!(normalize_provider(config).is_ok());
+    }
+
+    #[test]
+    fn ignores_non_canonical_api_key_ref() {
+        let canonical = persistable_api_key_ref(
+            &AiProviderKind::Openai,
+            "openai-1",
+            Some("politedb:profile:db:password".into()),
+        );
+        assert_eq!(canonical, None);
+        let kept = persistable_api_key_ref(
+            &AiProviderKind::Openai,
+            "openai-1",
+            Some("politedb:ai:openai-1:api_key".into()),
+        );
+        assert_eq!(kept.as_deref(), Some("politedb:ai:openai-1:api_key"));
+    }
+
+    #[test]
+    fn redacts_provider_error_body() {
+        let status = reqwest::StatusCode::UNAUTHORIZED;
+        let message = provider_http_error(
+            status,
+            r#"{"error":{"message":"prompt: SELECT * FROM secrets","code":"invalid_api_key"}}"#,
+        );
+        assert_eq!(message, "AI_CHAT_FAILED: 401 Unauthorized invalid_api_key");
+        assert!(!message.contains("SELECT"));
+        assert!(!message.contains("secrets"));
+    }
 }

@@ -3,6 +3,7 @@ import {
   buildBaseUrl,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
+  resolveSelectedAiProvider,
   splitBaseUrl,
 } from "./providers";
 
@@ -84,5 +85,20 @@ describe("AI provider configuration", () => {
 
     expect(provider.kind).toBe("ollama");
     expect(provider.label).toBe("PoliteDB Local");
+  });
+
+  it("falls back from a deleted provider id to the default enabled provider", () => {
+    const local = makeDefaultAiProvider("ollama", {
+      id: "local",
+      isDefault: true,
+    });
+    const openai = makeDefaultAiProvider("openai", { id: "openai-1" });
+
+    expect(resolveSelectedAiProvider([local, openai], "gone")?.id).toBe(
+      "local"
+    );
+    expect(resolveSelectedAiProvider([local, openai], "openai-1")?.id).toBe(
+      "openai-1"
+    );
   });
 });

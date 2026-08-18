@@ -69,12 +69,12 @@ function formatAssistantRequestError(args: {
   if (vi) {
     return isLocalEndpoint
       ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama/local OpenAI-compatible server đã chạy chưa."
-      : "Không kết nối được tới local AI provider. Hãy kiểm tra host, model hoặc local runtime trong AI settings.";
+      : "Không kết nối được tới AI provider. Hãy kiểm tra API key, host, hoặc model trong AI settings.";
   }
 
   return isLocalEndpoint
     ? "I could not reach the local AI provider. Check that Ollama or your OpenAI-compatible local server is running."
-    : "I could not reach the local AI provider. Check the host, model, or local runtime in AI settings.";
+    : "I could not reach the AI provider. Check the API key, host, or model in AI settings.";
 }
 
 export function useAiAssistantSubmit(args: {

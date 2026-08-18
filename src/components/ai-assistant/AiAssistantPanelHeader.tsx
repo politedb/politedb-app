@@ -4,7 +4,6 @@ import { type AiRuntimeStatus } from "src/lib/tauri";
 import { cn } from "src/utils/cn";
 
 export function AiAssistantPanelHeader(props: {
-  showSettings: boolean;
   settingsOpen: boolean;
   onSettingsOpenChange: (open: boolean) => void;
   loadingModels: boolean;
@@ -17,7 +16,6 @@ export function AiAssistantPanelHeader(props: {
   onDeleteLocalModel: () => Promise<void> | void;
 }) {
   const {
-    showSettings,
     settingsOpen,
     onSettingsOpenChange,
     loadingModels,
@@ -40,34 +38,30 @@ export function AiAssistantPanelHeader(props: {
           </div>
         </div>
 
-        {showSettings ? (
-          <>
-            <button
-              type="button"
-              title="AI settings"
-              onClick={() => onSettingsOpenChange(!settingsOpen)}
-              class={cn(
-                "rounded-md border border-neutral-200 p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
-                settingsOpen && "border-blue-200 bg-blue-50 text-blue-700"
-              )}
-              aria-haspopup="dialog"
-            >
-              <SettingsIcon className="size-4" />
-            </button>
-            <AiAssistantSettingsDialog
-              open={settingsOpen}
-              onClose={() => onSettingsOpenChange(false)}
-              loadingModels={loadingModels}
-              runtimeBusy={runtimeBusy}
-              runtimeStatus={runtimeStatus}
-              onLoadModels={onLoadModels}
-              onStartRuntime={onStartRuntime}
-              onStopRuntime={onStopRuntime}
-              onDownloadModel={onDownloadModel}
-              onDeleteLocalModel={onDeleteLocalModel}
-            />
-          </>
-        ) : null}
+        <button
+          type="button"
+          title="AI settings"
+          onClick={() => onSettingsOpenChange(!settingsOpen)}
+          class={cn(
+            "rounded-md border border-neutral-200 p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
+            settingsOpen && "border-blue-200 bg-blue-50 text-blue-700"
+          )}
+          aria-haspopup="dialog"
+        >
+          <SettingsIcon className="size-4" />
+        </button>
+        <AiAssistantSettingsDialog
+          open={settingsOpen}
+          onClose={() => onSettingsOpenChange(false)}
+          loadingModels={loadingModels}
+          runtimeBusy={runtimeBusy}
+          runtimeStatus={runtimeStatus}
+          onLoadModels={onLoadModels}
+          onStartRuntime={onStartRuntime}
+          onStopRuntime={onStopRuntime}
+          onDownloadModel={onDownloadModel}
+          onDeleteLocalModel={onDeleteLocalModel}
+        />
       </div>
     </div>
   );

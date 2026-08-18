@@ -493,18 +493,6 @@ export function useAiRuntimeManager(args: {
     return !runtimeBusy && isMissingServer(runtimeStatus);
   }, [runtimeBusy, runtimeStatus]);
 
-  const showSettings = useMemo(() => {
-    return (
-      !showRuntimeLoadingScreen &&
-      !showMissingRuntimeScreen &&
-      !showMissingModelScreen
-    );
-  }, [
-    showRuntimeLoadingScreen,
-    showMissingRuntimeScreen,
-    showMissingModelScreen,
-  ]);
-
   return {
     endpoint,
     setEndpoint,
@@ -519,7 +507,6 @@ export function useAiRuntimeManager(args: {
     showRuntimeLoadingScreen,
     showMissingModelScreen,
     showMissingRuntimeScreen,
-    showSettings,
     handleStartBundledRuntime,
     handleStopBundledRuntime,
     handleRetryRuntimeSetup,

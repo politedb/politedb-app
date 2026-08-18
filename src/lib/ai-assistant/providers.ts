@@ -166,6 +166,22 @@ export function normalizeAiProviderConfig(
   };
 }
 
+export function resolveSelectedAiProvider(
+  providers: AiProviderConfig[],
+  selectedId?: string | null
+): AiProviderConfig | undefined {
+  const enabled = providers.filter((provider) => provider.enabled);
+  const selected = selectedId?.trim();
+  return (
+    (selected
+      ? enabled.find((provider) => provider.id === selected)
+      : undefined) ??
+    enabled.find((provider) => provider.isDefault) ??
+    enabled[0] ??
+    providers[0]
+  );
+}
+
 export function getSelectedAiProviderId() {
   try {
     return (

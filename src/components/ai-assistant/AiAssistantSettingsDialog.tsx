@@ -23,9 +23,11 @@ import {
   aiProviderList,
   aiProviderTest,
   buildBaseUrl,
+  getSelectedAiProviderId,
   isLocalAiProviderKind,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
+  resolveSelectedAiProvider,
   saveAiProviderWithOptionalKey,
   setSelectedAiProviderId,
 } from "src/lib/ai-assistant/providers";
@@ -223,10 +225,14 @@ export function AiAssistantSettingsDialog(props: Props) {
     if (!window.confirm(`Delete ${selectedProvider.label}?`)) return;
     setBusy(true);
     try {
-      await aiProviderDelete(selectedProvider.id);
+      const deletedId = selectedProvider.id;
+      await aiProviderDelete(deletedId);
       const next = await loadProviders();
-      const fallback = next.find((item) => item.isDefault) ?? next[0];
+      const fallback = resolveSelectedAiProvider(next, deletedId);
       chooseProvider(fallback?.kind ?? "openai", fallback);
+      if (getSelectedAiProviderId() === deletedId) {
+        setSelectedAiProviderId(fallback?.id ?? DEFAULT_LOCAL_AI_PROVIDER_ID);
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -252,6 +258,10 @@ export function AiAssistantSettingsDialog(props: Props) {
                 (provider) => provider.kind === kind
               );
               const active = selectedKind === kind;
+              const available =
+                configured.length > 0 &&
+                (!isLocalAiProviderKind(kind) ||
+                  Boolean(props.runtimeStatus?.model_path));
               return (
                 <div key={kind}>
                   <button
@@ -268,7 +278,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                     <span class="min-w-0 flex-1 truncate">
                       {AI_PROVIDER_LABELS[kind]}
                     </span>
-                    {configured.length > 0 ? (
+                    {available ? (
                       <span class="size-1.5 rounded-full bg-emerald-400" />
                     ) : null}
                   </button>
