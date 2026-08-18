@@ -33,6 +33,8 @@ function formatAssistantRequestError(args: {
   const vi = args.lang.code === "vie";
   const isProviderRequest =
     raw.includes("AI_CHAT_FAILED") ||
+    raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
+    raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
     raw.includes("AI_PROVIDER") ||
     raw.includes("OLLAMA_GENERATE_FAILED") ||
@@ -53,6 +55,15 @@ function formatAssistantRequestError(args: {
     return vi
       ? "Nội dung cuộc trò chuyện vượt giới hạn context của model local. PoliteDB đã rút gọn context; hãy thử gửi lại."
       : "This conversation exceeded the local model context limit. PoliteDB has reduced the context; try sending it again.";
+  }
+
+  if (
+    raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
+    raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT")
+  ) {
+    return vi
+      ? "Model không tạo được nội dung trả lời. Hãy thử lại hoặc chọn model khác."
+      : "The model did not produce a final response. Try again or choose another model.";
   }
 
   if (vi) {
@@ -89,7 +100,6 @@ export function useAiAssistantSubmit(args: {
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
-  workspaceId?: string;
   runtimeConnectionId?: string;
   activeSchema?: string;
   activeTable?: TableItem;
@@ -123,12 +133,12 @@ export function useAiAssistantSubmit(args: {
     endpoint,
     model,
     engine,
+    runtimeConnectionId,
     activeSchema,
     tables,
     columnsByTable,
     columnDetailsByTable,
     currentSql,
-    runtimeConnectionId,
     activeTable,
     savedConnections,
     conversationState,
@@ -139,8 +149,10 @@ export function useAiAssistantSubmit(args: {
   const requestSeqRef = useRef(0);
 
   const canSubmit = useMemo(() => {
-    return Boolean(prompt.trim() && endpoint.trim() && model.trim());
-  }, [prompt, endpoint, model]);
+    return Boolean(
+      prompt.trim() && model.trim() && (providerId?.trim() || endpoint.trim())
+    );
+  }, [prompt, endpoint, model, providerId]);
 
   const handleCancelSubmit = useCallback(() => {
     requestSeqRef.current += 1;

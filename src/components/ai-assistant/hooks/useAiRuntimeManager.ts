@@ -7,6 +7,7 @@ import {
 } from "preact/hooks";
 import {
   aiRuntimeCancelModelDownload,
+  aiRuntimeDeleteDefaultModel,
   aiRuntimeDownloadDefaultModel,
   aiRuntimeStart,
   aiRuntimeStatus,
@@ -132,7 +133,7 @@ export function useAiRuntimeManager(args: {
         setLoadingModels(false);
       }
     },
-    [endpoint, model, runtimeStatus?.model_name]
+    [endpoint, model]
   );
 
   const applyRuntimeStatus = useCallback((status: AiRuntimeStatus) => {
@@ -339,6 +340,21 @@ export function useAiRuntimeManager(args: {
     }
   }, []);
 
+  const handleDeleteModel = useCallback(async () => {
+    suppressAutoStartRef.current = true;
+    autoStartAttemptedRef.current = true;
+    setRuntimeBusy(true);
+    try {
+      const status = await aiRuntimeDeleteDefaultModel();
+      setEndpoint("");
+      setRuntimeStatus(status);
+      setModelDownloadFailed(false);
+      setRuntimeStartFailed(false);
+    } finally {
+      setRuntimeBusy(false);
+    }
+  }, []);
+
   const handleRefreshRuntimeSetup = useCallback(async () => {
     suppressAutoStartRef.current = false;
     setRuntimeStartFailed(false);
@@ -509,6 +525,7 @@ export function useAiRuntimeManager(args: {
     handleRetryRuntimeSetup,
     handleDownloadModel,
     handleCancelModelDownload,
+    handleDeleteModel,
     handleRefreshRuntimeSetup,
   };
 }

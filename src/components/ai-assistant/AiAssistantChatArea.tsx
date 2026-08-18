@@ -81,7 +81,7 @@ function AiModelPicker(props: {
   activeProviderId: string;
   modelSelectionMode: AiModelSelectionMode;
   onSelectAutoModel: () => void;
-  onSelectProvider: (providerId: string) => void;
+  onSelectProviderModel: (providerId: string, model: string) => void;
 }) {
   const {
     providerLabel,
@@ -90,7 +90,7 @@ function AiModelPicker(props: {
     activeProviderId,
     modelSelectionMode,
     onSelectAutoModel,
-    onSelectProvider,
+    onSelectProviderModel,
   } = props;
   const [open, setOpen] = useState(false);
   const enabledProviders = providerOptions.filter(
@@ -137,38 +137,44 @@ function AiModelPicker(props: {
 
           <div class="max-h-80 overflow-y-auto">
             {enabledProviders.length ? (
-              enabledProviders.map((provider) => {
-                const active =
-                  modelSelectionMode === "manual" &&
-                  provider.id === activeProviderId;
-                return (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    class={cn(
-                      "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-neutral-900",
-                      active ? "bg-neutral-100" : "hover:bg-neutral-50"
-                    )}
-                    onClick={() => {
-                      onSelectProvider(provider.id);
-                      setOpen(false);
-                    }}
-                  >
-                    <ProviderMark provider={provider} />
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate">
-                        {formatModelNameForDisplay(provider.defaultModel)}
+              enabledProviders.flatMap((provider) =>
+                (provider.models?.length
+                  ? provider.models
+                  : [provider.defaultModel]
+                ).map((model) => {
+                  const active =
+                    modelSelectionMode === "manual" &&
+                    provider.id === activeProviderId &&
+                    model === providerModel;
+                  return (
+                    <button
+                      key={`${provider.id}:${model}`}
+                      type="button"
+                      class={cn(
+                        "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-neutral-900",
+                        active ? "bg-neutral-100" : "hover:bg-neutral-50"
+                      )}
+                      onClick={() => {
+                        onSelectProviderModel(provider.id, model);
+                        setOpen(false);
+                      }}
+                    >
+                      <ProviderMark provider={provider} />
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate">
+                          {formatModelNameForDisplay(model)}
+                        </span>
+                        <span class="block truncate text-xs text-neutral-400">
+                          {provider.label}
+                        </span>
                       </span>
-                      <span class="block truncate text-xs text-neutral-400">
-                        {provider.label}
-                      </span>
-                    </span>
-                    {active ? (
-                      <CheckMarkIcon className="size-4 text-neutral-900" />
-                    ) : null}
-                  </button>
-                );
-              })
+                      {active ? (
+                        <CheckMarkIcon className="size-4 text-neutral-900" />
+                      ) : null}
+                    </button>
+                  );
+                })
+              )
             ) : (
               <div class="px-3 py-4 text-sm text-neutral-500">
                 Add a provider in Settings to choose models.
@@ -219,7 +225,7 @@ export function AiAssistantChatArea(props: {
   activeProviderId: string;
   modelSelectionMode: AiModelSelectionMode;
   onSelectAutoModel: () => void;
-  onSelectProvider: (providerId: string) => void;
+  onSelectProviderModel: (providerId: string, model: string) => void;
   contextOptions: AiContextOption[];
   onToggleContext: (contextId: AiContextKind) => void;
   presentation?: "panel" | "floating";
@@ -255,7 +261,7 @@ export function AiAssistantChatArea(props: {
     activeProviderId,
     modelSelectionMode,
     onSelectAutoModel,
-    onSelectProvider,
+    onSelectProviderModel,
     contextOptions,
     onToggleContext,
     presentation = "panel",
@@ -678,7 +684,7 @@ export function AiAssistantChatArea(props: {
                 activeProviderId={activeProviderId}
                 modelSelectionMode={modelSelectionMode}
                 onSelectAutoModel={onSelectAutoModel}
-                onSelectProvider={onSelectProvider}
+                onSelectProviderModel={onSelectProviderModel}
               />
 
               {floating ? (

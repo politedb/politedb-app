@@ -709,6 +709,34 @@ pub async fn ai_runtime_cancel_model_download(
     runtime.to_status(missing_items(server_bin.as_deref(), None))
 }
 
+pub async fn ai_runtime_delete_default_model(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<AiRuntimeStatus, String> {
+    {
+        let runtime = state.ai_runtime.lock().await;
+        if matches!(runtime.phase, AiRuntimePhase::Starting)
+            && (runtime.model_downloaded_bytes.is_some() || runtime.model_total_bytes.is_some())
+        {
+            return Err("AI_MODEL_DELETE_BUSY: model download is in progress".to_string());
+        }
+    }
+
+    ai_runtime_stop(state).await?;
+
+    let model_path = app_data_model_path(app)?;
+    let partial_path = model_path.with_extension("gguf.part");
+    if model_path.exists() {
+        fs::remove_file(&model_path).map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
+    }
+    if partial_path.exists() {
+        fs::remove_file(&partial_path)
+            .map_err(|error| format!("AI_MODEL_DELETE_FAILED: {error}"))?;
+    }
+
+    Ok(ai_runtime_status(app, state).await)
+}
+
 trait Pipe: Sized {
     fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
         f(self)

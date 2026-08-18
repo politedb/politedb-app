@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { Button } from "src/components/common/Button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
-import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import {
   DownloadIcon,
@@ -13,21 +13,25 @@ import {
   RefreshCwIcon,
   StopIcon,
   VaultIcon,
+  XIcon,
 } from "src/components/icons";
-import type { AiRuntimeStatus } from "src/lib/tauri";
-import type { AiProviderConfig } from "src/types";
 import {
+  AI_PROVIDER_LABELS,
   DEFAULT_LOCAL_AI_PROVIDER_ID,
   DEFAULT_MODELS,
+  aiProviderDelete,
   aiProviderList,
   aiProviderTest,
   buildBaseUrl,
+  isLocalAiProviderKind,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
   saveAiProviderWithOptionalKey,
   setSelectedAiProviderId,
-} from "@root/src/lib/ai-assistant/providers";
-import { normalizeLocalAiModelName } from "src/utils/assistant";
+} from "src/lib/ai-assistant/providers";
+import type { AiRuntimeStatus } from "src/lib/tauri";
+import type { AiProviderConfig, AiProviderKind } from "src/types";
+import { cn } from "src/utils/cn";
 
 type Props = {
   open: boolean;
@@ -39,10 +43,20 @@ type Props = {
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onDownloadModel: () => void;
+  onDeleteLocalModel: () => Promise<void> | void;
 };
 
-const LOCAL_PROVIDER_KIND = "ollama";
-const MODEL_VARIANT = "PoliteDB AI • Q4_K_M";
+const PROVIDER_KINDS: AiProviderKind[] = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "grok",
+  "groq",
+  "deepseek",
+  "openrouter",
+  "github_copilot",
+  "ollama",
+];
 
 function runtimeLabel(phase?: string) {
   if (phase === "ready") return "Ready";
@@ -52,68 +66,13 @@ function runtimeLabel(phase?: string) {
   return "Stopped";
 }
 
-function modelInstallLabel(status: AiRuntimeStatus | null) {
-  if (status?.model_path) return "Installed";
-  if (status?.missing?.some((item) => item.toLowerCase().includes("gguf"))) {
-    return "Missing";
-  }
-  return "Unknown";
-}
-
-function formatBytes(value?: number | null) {
-  if (value == null || Number.isNaN(value)) return "Unknown";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let next = value;
-  let unitIndex = 0;
-  while (next >= 1024 && unitIndex < units.length - 1) {
-    next /= 1024;
-    unitIndex += 1;
-  }
-  return `${next.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
-}
-
-function shortPath(path?: string | null) {
-  if (!path) return "Not installed";
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length > 4 ? `${parts.slice(-4).join("/")}` : path;
-}
-
-function splitEndpoint(endpoint?: string | null) {
-  const fallback = {
-    host: "http://127.0.0.1:11434",
-    subPath: "/v1",
-  };
-  if (!endpoint?.trim()) return fallback;
-
-  try {
-    const url = new URL(endpoint);
-    return {
-      host: `${url.protocol}//${url.host}`,
-      subPath: url.pathname && url.pathname !== "/" ? url.pathname : "/v1",
-    };
-  } catch {
-    return fallback;
-  }
-}
-
 export function AiAssistantSettingsDialog(props: Props) {
-  const {
-    open,
-    onClose,
-    loadingModels,
-    runtimeBusy,
-    runtimeStatus,
-    onLoadModels,
-    onStartRuntime,
-    onStopRuntime,
-    onDownloadModel,
-  } = props;
-
   const [providers, setProviders] = useState<AiProviderConfig[]>([]);
-  const [label, setLabel] = useState("PoliteDB AI");
-  const [host, setHost] = useState("http://127.0.0.1:11434");
-  const [subPath, setSubPath] = useState("/v1");
-  const [model, setModel] = useState(DEFAULT_MODELS.ollama);
+  const [selectedKind, setSelectedKind] = useState<AiProviderKind>("openai");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
+  const [apiKey, setApiKey] = useState("");
+  const [modelInput, setModelInput] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -121,51 +80,107 @@ export function AiAssistantSettingsDialog(props: Props) {
     () => providers.map(normalizeAiProviderConfig),
     [providers]
   );
+  const selectedProvider = normalizedProviders.find(
+    (provider) => provider.id === selectedId
+  );
   const localProvider = normalizedProviders.find(
     (provider) => provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID
   );
+  const isLocal = isLocalAiProviderKind(selectedKind);
 
   const loadProviders = async () => {
-    const next = await aiProviderList().catch(() => []);
-    setProviders(next.map(normalizeAiProviderConfig));
+    const normalized = (await aiProviderList()).map(normalizeAiProviderConfig);
+    const next = normalized.some((provider) => provider.isDefault)
+      ? normalized
+      : normalized.map((provider) => ({
+          ...provider,
+          isDefault: provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID,
+        }));
+    setProviders(next);
+    return next;
+  };
+
+  const chooseProvider = (
+    kind: AiProviderKind,
+    provider?: AiProviderConfig
+  ) => {
+    const next =
+      provider ??
+      makeDefaultAiProvider(kind, {
+        id: kind === "ollama" ? DEFAULT_LOCAL_AI_PROVIDER_ID : undefined,
+      });
+    setSelectedKind(kind);
+    setSelectedId(provider?.id ?? null);
+    setDraft(normalizeAiProviderConfig(next));
+    setApiKey("");
+    setModelInput("");
+    setStatus("");
   };
 
   useEffect(() => {
-    if (open) void loadProviders();
-  }, [open]);
+    if (!props.open) return;
+    void loadProviders()
+      .then((next) => {
+        const provider =
+          next.find((item) => item.isDefault) ??
+          next.find((item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID) ??
+          next[0];
+        chooseProvider(provider?.kind ?? "openai", provider);
+      })
+      .catch((error) => setStatus(String(error)));
+  }, [props.open]);
 
-  useEffect(() => {
-    const endpointParts = splitEndpoint(runtimeStatus?.endpoint);
-    setLabel(localProvider?.label ?? "PoliteDB AI");
-    setHost(localProvider?.host ?? endpointParts.host);
-    setSubPath(localProvider?.subPath ?? endpointParts.subPath);
-    setModel(normalizeLocalAiModelName(localProvider?.defaultModel));
-    setStatus("");
-  }, [localProvider, runtimeStatus?.endpoint]);
+  const updateDraft = (patch: Partial<AiProviderConfig>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
 
-  const saveProvider = async (
-    message = "Saved local AI settings.",
-    overrides: { label?: string; model?: string } = {}
-  ) => {
+  const addModel = () => {
+    const model = modelInput.trim();
+    if (!model) return;
+    const models = Array.from(new Set([...(draft.models ?? []), model]));
+    updateDraft({
+      models,
+      defaultModel: draft.defaultModel.trim() || model,
+    });
+    setModelInput("");
+  };
+
+  const removeModel = (model: string) => {
+    const models = (draft.models ?? []).filter((item) => item !== model);
+    updateDraft({
+      models,
+      defaultModel:
+        draft.defaultModel === model ? (models[0] ?? "") : draft.defaultModel,
+    });
+  };
+
+  const saveProvider = async () => {
+    if (!(draft.models ?? []).length) {
+      setStatus("Add at least one model before saving.");
+      return;
+    }
     setBusy(true);
-    setStatus("");
+    setStatus("Validating provider and model...");
     try {
-      const nextLabel = overrides.label ?? label;
-      const nextModel = overrides.model ?? model;
-      const config = makeDefaultAiProvider(LOCAL_PROVIDER_KIND, {
-        id: localProvider?.id ?? DEFAULT_LOCAL_AI_PROVIDER_ID,
-        label: nextLabel.trim() || "PoliteDB AI",
-        host,
-        subPath,
-        baseUrl: buildBaseUrl(host, subPath),
-        defaultModel: normalizeLocalAiModelName(nextModel),
-        enabled: true,
-        isDefault: true,
+      const config = normalizeAiProviderConfig({
+        ...draft,
+        id:
+          selectedProvider?.id ??
+          (selectedKind === "ollama" ? DEFAULT_LOCAL_AI_PROVIDER_ID : draft.id),
+        kind: selectedKind,
+        label: draft.label.trim() || AI_PROVIDER_LABELS[selectedKind],
+        defaultModel: draft.defaultModel.trim() || DEFAULT_MODELS[selectedKind],
+        models: draft.models,
+        baseUrl: buildBaseUrl(draft.host, draft.subPath),
       });
-      const saved = await saveAiProviderWithOptionalKey({ config });
-      setSelectedAiProviderId(saved.id);
-      await loadProviders();
-      setStatus(message);
+      const saved = await saveAiProviderWithOptionalKey({ config, apiKey });
+      if (saved.isDefault) setSelectedAiProviderId(saved.id);
+      const next = await loadProviders();
+      const normalized = next.find((item) => item.id === saved.id) ?? saved;
+      setSelectedId(saved.id);
+      setDraft(normalizeAiProviderConfig(normalized));
+      setApiKey("");
+      setStatus("Provider saved. API key is stored in OS keychain.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -174,19 +189,15 @@ export function AiAssistantSettingsDialog(props: Props) {
   };
 
   const testProvider = async () => {
-    const provider = localProvider;
-    if (!provider) {
-      await saveProvider("Saved local AI settings. Run test again.");
+    if (!selectedProvider) {
+      setStatus("Save provider before testing.");
       return;
     }
     setBusy(true);
-    setStatus("Testing local model...");
+    setStatus("Testing provider...");
     try {
-      const startedAt = performance.now();
-      await aiProviderTest(provider.id);
-      setSelectedAiProviderId(provider.id);
-      const latency = Math.max(1, Math.round(performance.now() - startedAt));
-      setStatus(`Local model test succeeded in ${latency} ms.`);
+      await aiProviderTest(selectedProvider.id);
+      setStatus("Provider connection succeeded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -194,213 +205,303 @@ export function AiAssistantSettingsDialog(props: Props) {
     }
   };
 
-  const resetLocalSettings = async () => {
-    const ok = window.confirm(
-      "Reset local AI settings to the bundled Qwen model?"
-    );
-    if (!ok) return;
-    setLabel("PoliteDB AI");
-    setModel(DEFAULT_MODELS.ollama);
-    await saveProvider("Reset local AI settings.", {
-      label: "PoliteDB AI",
-      model: DEFAULT_MODELS.ollama,
-    });
+  const deleteProvider = async () => {
+    if (!selectedProvider) return;
+    if (selectedProvider.id === localProvider?.id) {
+      if (!window.confirm("Delete downloaded local AI model?")) return;
+      setBusy(true);
+      try {
+        await props.onDeleteLocalModel();
+        setStatus("Local AI model deleted.");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    if (!window.confirm(`Delete ${selectedProvider.label}?`)) return;
+    setBusy(true);
+    try {
+      await aiProviderDelete(selectedProvider.id);
+      const next = await loadProviders();
+      const fallback = next.find((item) => item.isDefault) ?? next[0];
+      chooseProvider(fallback?.kind ?? "openai", fallback);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const handleDownloadModel = () => {
-    const installed = Boolean(runtimeStatus?.model_path);
-    const ok = window.confirm(
-      installed
-        ? "Re-download the local AI model? This may take a while."
-        : "Download the local AI model? This may take a while."
-    );
-    if (ok) onDownloadModel();
-  };
-
-  const runtimePhase = runtimeStatus?.phase;
-  const runtimeReady = runtimePhase === "ready";
-  const modelInstalled = Boolean(runtimeStatus?.model_path);
-  const modelSize =
-    runtimeStatus?.model_total_bytes ??
-    (modelInstalled ? 4.33 * 1024 ** 3 : null);
 
   return (
     <Dialog
-      open={open}
-      onClose={onClose}
+      open={props.open}
+      onClose={props.onClose}
       size="xl"
-      className="max-w-3xl overflow-hidden"
+      className="max-w-4xl overflow-hidden"
     >
       <DialogHeader className="border-b border-neutral-200">
-        <DialogTitle>AI Assistant Settings</DialogTitle>
+        <DialogTitle>AI Provider Settings</DialogTitle>
       </DialogHeader>
-      <DialogContent className="min-h-0 overflow-y-auto p-5">
-        <div class="space-y-5">
-          <section class="rounded-xl border border-neutral-200 bg-white p-4">
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex min-w-0 items-start gap-3">
-                <div class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-                  <VaultIcon className="size-5" />
+      <DialogContent className="grid min-h-140 min-w-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden p-0">
+        <aside class="overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3">
+          <div class="space-y-1">
+            {PROVIDER_KINDS.map((kind) => {
+              const configured = normalizedProviders.filter(
+                (provider) => provider.kind === kind
+              );
+              const active = selectedKind === kind;
+              return (
+                <div key={kind}>
+                  <button
+                    type="button"
+                    class={cn(
+                      "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium",
+                      active
+                        ? "bg-blue-600 text-white"
+                        : "text-neutral-700 hover:bg-neutral-200"
+                    )}
+                    onClick={() => chooseProvider(kind, configured[0])}
+                  >
+                    <VaultIcon className="size-4 shrink-0" />
+                    <span class="min-w-0 flex-1 truncate">
+                      {AI_PROVIDER_LABELS[kind]}
+                    </span>
+                    {configured.length > 0 ? (
+                      <span class="size-1.5 rounded-full bg-emerald-400" />
+                    ) : null}
+                  </button>
+                  {active && configured.length > 1 ? (
+                    <div class="mt-1 ml-6 space-y-1">
+                      {configured.map((provider) => (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          class={cn(
+                            "block w-full truncate rounded px-2 py-1 text-left text-xs",
+                            selectedId === provider.id
+                              ? "bg-neutral-200 font-semibold"
+                              : "text-neutral-500 hover:bg-neutral-100"
+                          )}
+                          onClick={() => chooseProvider(kind, provider)}
+                        >
+                          {provider.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                <div class="min-w-0">
-                  <div class="text-sm font-semibold text-neutral-950">
-                    Qwen2.5-Coder-7B
-                  </div>
-                  <div class="mt-1 text-xs text-neutral-500">
-                    {MODEL_VARIANT}
-                  </div>
-                </div>
-              </div>
-              <span class="rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700">
-                {modelInstallLabel(runtimeStatus)}
-              </span>
-            </div>
+              );
+            })}
+          </div>
+        </aside>
 
-            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <main class="min-w-0 overflow-y-auto p-5">
+          <div class="space-y-4">
+            <Input
+              label="Name"
+              value={draft.label}
+              onValueChange={(value) => updateDraft({ label: value })}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            {!isLocal ? (
               <Input
-                label="Name"
-                value={label}
-                onValueChange={setLabel}
-                className="h-10 border border-neutral-300 px-3 text-sm focus:border-blue-500"
+                label="API Key"
+                type="password"
+                value={apiKey}
+                placeholder={
+                  draft.apiKeyRef ? "Stored in OS keychain" : "Secret key"
+                }
+                onValueChange={setApiKey}
+                className="h-10 border border-neutral-300 px-3 text-sm"
+              />
+            ) : null}
+            <div class="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Host"
+                value={draft.host ?? ""}
+                onValueChange={(value) => updateDraft({ host: value })}
+                className="h-10 border border-neutral-300 px-3 text-sm"
               />
               <Input
-                label="Model"
-                value={normalizeLocalAiModelName(model)}
-                readOnly
-                className="h-10 border border-neutral-300 bg-neutral-50 px-3 text-sm text-neutral-700"
+                label="Sub Path"
+                value={draft.subPath ?? ""}
+                onValueChange={(value) => updateDraft({ subPath: value })}
+                className="h-10 border border-neutral-300 px-3 text-sm"
               />
             </div>
-          </section>
-
-          <section class="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-            <div class="mb-3 flex items-center justify-between gap-2">
-              <div>
-                <div class="text-sm font-semibold text-neutral-950">
-                  Local Runtime
+            <section class="space-y-2">
+              <label class="block text-sm font-medium text-neutral-900">
+                Models
+              </label>
+              {!isLocal ? (
+                <div class="flex gap-2">
+                  <div class="min-w-0 flex-1">
+                    <Input
+                      value={modelInput}
+                      placeholder="Model ID"
+                      onValueChange={setModelInput}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addModel();
+                      }}
+                      className="h-10 w-full border border-neutral-300 px-3 text-sm"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!modelInput.trim()}
+                    onClick={addModel}
+                  >
+                    Add
+                  </Button>
                 </div>
-                <div class="mt-1 text-xs text-neutral-500">
-                  Bundled llama-server running on this device.
-                </div>
-              </div>
-              <div class="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs font-semibold text-neutral-700">
-                {runtimeLabel(runtimePhase)}
-              </div>
-            </div>
-
-            <div class="grid gap-2 rounded-lg border border-neutral-200 bg-white p-3 text-xs">
-              <InfoRow
-                label="Endpoint"
-                value={runtimeStatus?.endpoint ?? "-"}
-              />
-              <InfoRow label="PID" value={runtimeStatus?.pid ?? "-"} />
-              <InfoRow label="Model size" value={formatBytes(modelSize)} />
-              <InfoRow
-                label="Model path"
-                value={shortPath(runtimeStatus?.model_path)}
-                title={runtimeStatus?.model_path ?? undefined}
-              />
-              {runtimeStatus?.last_error ? (
-                <InfoRow
-                  label="Status detail"
-                  value={runtimeStatus.last_error}
-                />
               ) : null}
-            </div>
-
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-              <Button
-                variant={runtimeReady ? "destructive" : "default"}
-                class="px-3 py-1"
-                onClick={runtimeReady ? onStopRuntime : onStartRuntime}
-                loading={runtimeBusy}
-              >
-                {runtimeReady ? (
-                  <>
-                    <StopIcon className="size-3.5" />
-                    Stop
-                  </>
+              <div class="overflow-hidden rounded-lg border border-neutral-200">
+                {(draft.models ?? []).length ? (
+                  (draft.models ?? []).map((model) => (
+                    <div
+                      key={model}
+                      class="flex min-w-0 items-center gap-2 border-b border-neutral-100 px-3 py-2 last:border-b-0"
+                    >
+                      <span
+                        class="min-w-0 flex-1 truncate text-sm"
+                        title={model}
+                      >
+                        {model}
+                      </span>
+                      {!isLocal ? (
+                        <button
+                          type="button"
+                          class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-red-600"
+                          title={`Remove ${model}`}
+                          aria-label={`Remove ${model}`}
+                          onClick={() => removeModel(model)}
+                        >
+                          <XIcon className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))
                 ) : (
-                  <>
-                    <PlayIcon className="size-3.5" />
-                    Start
-                  </>
+                  <div class="px-3 py-3 text-sm text-neutral-400">
+                    No models selected.
+                  </div>
                 )}
-              </Button>
-              <Button
-                variant="outline"
-                class="px-3 py-1"
-                onClick={onLoadModels}
-                loading={loadingModels}
-              >
-                <RefreshCwIcon className="size-3.5" />
-                Refresh
-              </Button>
-              <Button
-                variant="outline"
-                class="px-3 py-1"
-                onClick={handleDownloadModel}
-                disabled={runtimeBusy || runtimeReady}
-              >
-                <DownloadIcon className="size-3.5" />
-                {modelInstalled ? "Re-download model" : "Download model"}
-              </Button>
-            </div>
-          </section>
+              </div>
+            </section>
+            <label class="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={Boolean(draft.isDefault)}
+                onChange={(event) =>
+                  updateDraft({ isDefault: event.currentTarget.checked })
+                }
+              />
+              Default provider
+            </label>
 
-          {status ? (
-            <div class="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-              {status}
-            </div>
-          ) : null}
+            {isLocal ? (
+              <section class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-neutral-900">
+                      Local Runtime
+                    </div>
+                    <div class="text-xs text-neutral-500">
+                      Bundled Qwen2.5-Coder-7B on this device.
+                    </div>
+                  </div>
+                  <span class="rounded-full border border-neutral-200 bg-white px-2 py-1 text-xs">
+                    {runtimeLabel(props.runtimeStatus?.phase)}
+                  </span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    variant={
+                      props.runtimeStatus?.phase === "ready"
+                        ? "destructive"
+                        : "default"
+                    }
+                    onClick={
+                      props.runtimeStatus?.phase === "ready"
+                        ? props.onStopRuntime
+                        : props.onStartRuntime
+                    }
+                    loading={props.runtimeBusy}
+                  >
+                    {props.runtimeStatus?.phase === "ready" ? (
+                      <>
+                        <StopIcon className="size-3.5" /> Stop
+                      </>
+                    ) : (
+                      <>
+                        <PlayIcon className="size-3.5" /> Start
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={props.onLoadModels}
+                    loading={props.loadingModels}
+                  >
+                    <RefreshCwIcon className="size-3.5" /> Refresh
+                  </Button>
+                  {!props.runtimeStatus?.model_path ? (
+                    <Button
+                      variant="outline"
+                      onClick={props.onDownloadModel}
+                      disabled={props.runtimeBusy}
+                    >
+                      <DownloadIcon className="size-3.5" /> Download model
+                    </Button>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
-          <div class="flex items-center justify-between gap-2 border-t border-neutral-200 pt-4">
-            <Button
-              variant="outline"
-              class="px-3 py-1"
-              onClick={() => void resetLocalSettings()}
-              disabled={busy}
-            >
-              Reset settings
-            </Button>
-            <div class="flex items-center gap-2">
+            {status ? (
+              <div class="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm wrap-break-word text-neutral-700">
+                {status}
+              </div>
+            ) : null}
+
+            <div class="flex items-center justify-between gap-2 border-t border-neutral-200 pt-4">
               <Button
-                variant="outline"
-                class="px-3 py-1"
-                onClick={() => void testProvider()}
-                disabled={busy || runtimePhase !== "ready"}
+                variant="destructive"
+                onClick={() => void deleteProvider()}
+                disabled={
+                  !selectedProvider ||
+                  busy ||
+                  (selectedProvider.id === localProvider?.id &&
+                    !props.runtimeStatus?.model_path)
+                }
               >
-                Test model
+                Delete
               </Button>
-              <Button
-                variant="default"
-                class="px-4 py-1"
-                loading={busy}
-                onClick={() => void saveProvider()}
-              >
-                Save
-              </Button>
+              <div class="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void testProvider()}
+                  disabled={!selectedProvider || busy}
+                >
+                  Test
+                </Button>
+                <Button
+                  loading={busy}
+                  disabled={!(draft.models ?? []).length}
+                  onClick={() => void saveProvider()}
+                >
+                  Save
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        </main>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function InfoRow(props: {
-  label: string;
-  value: string | number;
-  title?: string;
-}) {
-  return (
-    <div class="grid grid-cols-[120px_1fr] gap-3">
-      <div class="text-neutral-400">{props.label}</div>
-      <div
-        class="min-w-0 truncate font-medium text-neutral-700"
-        title={props.title}
-      >
-        {props.value}
-      </div>
-    </div>
   );
 }

@@ -14,6 +14,7 @@ export function AiAssistantPanelHeader(props: {
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onDownloadModel: () => void;
+  onDeleteLocalModel: () => Promise<void> | void;
 }) {
   const {
     showSettings,
@@ -26,6 +27,7 @@ export function AiAssistantPanelHeader(props: {
     onStartRuntime,
     onStopRuntime,
     onDownloadModel,
+    onDeleteLocalModel,
   } = props;
 
   return (
@@ -62,6 +64,7 @@ export function AiAssistantPanelHeader(props: {
               onStartRuntime={onStartRuntime}
               onStopRuntime={onStopRuntime}
               onDownloadModel={onDownloadModel}
+              onDeleteLocalModel={onDeleteLocalModel}
             />
           </>
         ) : null}

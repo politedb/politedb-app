@@ -250,3 +250,95 @@ export function AiAssistantMissingRuntimePane(props: {
     </div>
   );
 }
+
+export function AiAssistantRuntimeNotice(props: {
+  status: AiRuntimeStatus | null;
+  downloading: boolean;
+  loading: boolean;
+  missingModel: boolean;
+  missingRuntime: boolean;
+  failed: boolean;
+  busy: boolean;
+  onDownload: () => void;
+  onCancelDownload: () => void;
+  onRetry: () => void;
+}) {
+  if (!props.loading && !props.missingModel && !props.missingRuntime) {
+    return null;
+  }
+
+  const downloaded = Number(props.status?.model_downloaded_bytes ?? 0);
+  const total = Number(props.status?.model_total_bytes ?? 0);
+  const progressPct =
+    total > 0 ? Math.max(0, Math.min(100, (downloaded / total) * 100)) : null;
+  const title = props.downloading
+    ? "Downloading local AI model"
+    : props.missingModel
+      ? "Local AI model is missing"
+      : props.missingRuntime
+        ? "Local AI runtime is unavailable"
+        : "Preparing local AI";
+  const description = props.missingModel
+    ? "Download the model or choose another provider to continue chatting."
+    : props.missingRuntime
+      ? "Choose another provider or retry the bundled runtime."
+      : "You can keep browsing chat while PoliteDB prepares the local model.";
+
+  return (
+    <div class="mx-3 mt-1 shrink-0 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+      <div class="flex min-w-0 items-center gap-3">
+        {props.loading && !props.failed ? (
+          <Spinner className="size-4 shrink-0 text-blue-600" />
+        ) : (
+          <span class="flex size-5 shrink-0 items-center justify-center rounded-full border border-blue-400 text-xs font-bold text-blue-600">
+            !
+          </span>
+        )}
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-neutral-900">{title}</div>
+          <div class="mt-0.5 text-[11px] leading-4 text-neutral-600">
+            {description}
+          </div>
+          {props.downloading && progressPct !== null ? (
+            <div class="mt-2 flex items-center gap-2">
+              <div class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-blue-100">
+                <div
+                  class="h-full rounded-full bg-blue-600"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <span class="shrink-0 text-[10px] text-blue-700">
+                {progressPct.toFixed(1)}%
+              </span>
+            </div>
+          ) : null}
+        </div>
+        {props.downloading ? (
+          <Button
+            variant="outline"
+            class="shrink-0 px-2.5 py-1 text-xs"
+            onClick={props.onCancelDownload}
+          >
+            Cancel
+          </Button>
+        ) : props.missingModel ? (
+          <Button
+            class="shrink-0 px-2.5 py-1 text-xs"
+            loading={props.busy}
+            onClick={props.onDownload}
+          >
+            Download model
+          </Button>
+        ) : props.missingRuntime || props.failed ? (
+          <Button
+            variant="outline"
+            class="shrink-0 px-2.5 py-1 text-xs"
+            onClick={props.onRetry}
+          >
+            Retry
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}

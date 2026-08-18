@@ -43,6 +43,10 @@ export async function aiRuntimeCancelModelDownload() {
   return invoke<AiRuntimeStatus>(CMD.aiRuntimeCancelModelDownload);
 }
 
+export async function aiRuntimeDeleteDefaultModel() {
+  return invoke<AiRuntimeStatus>(CMD.aiRuntimeDeleteDefaultModel);
+}
+
 export type AiChatCompleteMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -62,6 +66,23 @@ export async function aiProviderList() {
 
 export async function aiProviderSaveConfig(config: AiProviderConfig) {
   return invoke<AiProviderConfig>(CMD.aiProviderSaveConfig, { config });
+}
+
+export async function aiProviderSetKey(providerId: string, apiKey: string) {
+  return invoke<AiProviderConfig>(CMD.aiProviderSetKey, {
+    providerId,
+    apiKey,
+  });
+}
+
+export async function aiProviderValidateConfig(
+  config: AiProviderConfig,
+  apiKey?: string
+) {
+  await invoke(CMD.aiProviderValidateConfig, {
+    config,
+    apiKey: apiKey?.trim() || null,
+  });
 }
 
 export async function aiProviderDelete(providerId: string) {
