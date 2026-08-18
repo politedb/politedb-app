@@ -131,7 +131,7 @@ function AiModelPicker(props: {
           <div class="px-3 pt-3 pb-1 text-xs font-semibold text-neutral-500">
             Select a model{" "}
             <span class="rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 uppercase">
-              Beta
+              New
             </span>
           </div>
 

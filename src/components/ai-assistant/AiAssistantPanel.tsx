@@ -433,11 +433,13 @@ export function AiAssistantPanel(props: Props) {
           onSettingsOpenChange={setSettingsOpen}
           loadingModels={loadingModels}
           runtimeBusy={runtimeBusy}
+          modelDownloadInProgress={modelDownloadInProgress}
           runtimeStatus={runtimeStatus}
           onLoadModels={() => void handleRefreshRuntimeSetup()}
           onStartRuntime={handleStartBundledRuntime}
           onStopRuntime={handleStopBundledRuntime}
           onDownloadModel={() => void handleDownloadModel()}
+          onCancelModelDownload={handleCancelModelDownload}
           onDeleteLocalModel={handleDeleteModel}
         />
       ) : null}
@@ -448,11 +450,13 @@ export function AiAssistantPanel(props: Props) {
           onClose={() => setSettingsOpen(false)}
           loadingModels={loadingModels}
           runtimeBusy={runtimeBusy}
+          modelDownloadInProgress={modelDownloadInProgress}
           runtimeStatus={runtimeStatus}
           onLoadModels={() => void handleRefreshRuntimeSetup()}
           onStartRuntime={handleStartBundledRuntime}
           onStopRuntime={handleStopBundledRuntime}
           onDownloadModel={() => void handleDownloadModel()}
+          onCancelModelDownload={handleCancelModelDownload}
           onDeleteLocalModel={handleDeleteModel}
         />
       ) : null}

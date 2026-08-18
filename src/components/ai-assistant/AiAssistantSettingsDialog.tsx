@@ -34,17 +34,20 @@ import {
 import type { AiRuntimeStatus } from "src/lib/tauri";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
+import { formatBytesSize } from "src/utils/convert";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   loadingModels: boolean;
   runtimeBusy: boolean;
+  modelDownloadInProgress: boolean;
   runtimeStatus: AiRuntimeStatus | null;
   onLoadModels: () => void;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onDownloadModel: () => void;
+  onCancelModelDownload: () => void;
   onDeleteLocalModel: () => Promise<void> | void;
 };
 
@@ -89,6 +92,14 @@ export function AiAssistantSettingsDialog(props: Props) {
     (provider) => provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID
   );
   const isLocal = isLocalAiProviderKind(selectedKind);
+  const downloadedBytes = Number(
+    props.runtimeStatus?.model_downloaded_bytes ?? 0
+  );
+  const totalBytes = Number(props.runtimeStatus?.model_total_bytes ?? 0);
+  const downloadProgress =
+    totalBytes > 0
+      ? Math.max(0, Math.min(100, (downloadedBytes / totalBytes) * 100))
+      : null;
 
   const loadProviders = async () => {
     const normalized = (await aiProviderList()).map(normalizeAiProviderConfig);
@@ -426,33 +437,70 @@ export function AiAssistantSettingsDialog(props: Props) {
                     </div>
                   </div>
                   <span class="rounded-full border border-neutral-200 bg-white px-2 py-1 text-xs">
-                    {runtimeLabel(props.runtimeStatus?.phase)}
+                    {props.modelDownloadInProgress
+                      ? "Downloading"
+                      : runtimeLabel(props.runtimeStatus?.phase)}
                   </span>
                 </div>
+
+                {props.modelDownloadInProgress ? (
+                  <div class="mt-3">
+                    <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
+                      <div
+                        class="h-full rounded-full bg-blue-600 transition-[width] duration-200"
+                        style={{ width: `${downloadProgress ?? 0}%` }}
+                      />
+                    </div>
+                    <div class="mt-2 text-xs text-neutral-500">
+                      {downloadProgress !== null
+                        ? `${downloadProgress.toFixed(1)}%`
+                        : "Preparing download..."}
+                      {" · "}
+                      {formatBytesSize(downloadedBytes, {
+                        fractionDigits: 2,
+                      })}
+                      {totalBytes > 0
+                        ? ` / ${formatBytesSize(totalBytes, {
+                            fractionDigits: 2,
+                          })}`
+                        : ""}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div class="mt-3 flex flex-wrap gap-2">
-                  <Button
-                    variant={
-                      props.runtimeStatus?.phase === "ready"
-                        ? "destructive"
-                        : "default"
-                    }
-                    onClick={
-                      props.runtimeStatus?.phase === "ready"
-                        ? props.onStopRuntime
-                        : props.onStartRuntime
-                    }
-                    loading={props.runtimeBusy}
-                  >
-                    {props.runtimeStatus?.phase === "ready" ? (
-                      <>
-                        <StopIcon className="size-3.5" /> Stop
-                      </>
-                    ) : (
-                      <>
-                        <PlayIcon className="size-3.5" /> Start
-                      </>
-                    )}
-                  </Button>
+                  {props.modelDownloadInProgress ? (
+                    <Button
+                      variant="outline"
+                      onClick={props.onCancelModelDownload}
+                    >
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      variant={
+                        props.runtimeStatus?.phase === "ready"
+                          ? "destructive"
+                          : "default"
+                      }
+                      onClick={
+                        props.runtimeStatus?.phase === "ready"
+                          ? props.onStopRuntime
+                          : props.onStartRuntime
+                      }
+                      loading={props.runtimeBusy}
+                    >
+                      {props.runtimeStatus?.phase === "ready" ? (
+                        <>
+                          <StopIcon className="size-3.5" /> Stop
+                        </>
+                      ) : (
+                        <>
+                          <PlayIcon className="size-3.5" /> Start
+                        </>
+                      )}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     onClick={props.onLoadModels}
@@ -460,7 +508,8 @@ export function AiAssistantSettingsDialog(props: Props) {
                   >
                     <RefreshCwIcon className="size-3.5" /> Refresh
                   </Button>
-                  {!props.runtimeStatus?.model_path ? (
+                  {!props.runtimeStatus?.model_path &&
+                  !props.modelDownloadInProgress ? (
                     <Button
                       variant="outline"
                       onClick={props.onDownloadModel}

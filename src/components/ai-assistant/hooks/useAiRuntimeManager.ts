@@ -105,6 +105,7 @@ export function useAiRuntimeManager(args: {
   const autoStartAttemptedRef = useRef(false);
   const suppressAutoStartRef = useRef(false);
   const preferredModelRef = useRef(normalizeLocalAiModelName(initialModel));
+  const downloadInFlightRef = useRef<Promise<unknown> | null>(null);
 
   const handleLoadModels = useCallback(
     async (endpointOverride?: string) => {
@@ -203,6 +204,7 @@ export function useAiRuntimeManager(args: {
   }, [applyRuntimeStatus, handleLoadModels]);
 
   const handleStartBundledRuntime = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = false;
     setRuntimeBusy(true);
     try {
@@ -223,6 +225,7 @@ export function useAiRuntimeManager(args: {
   }, [handleLoadModels]);
 
   const handleStopBundledRuntime = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = true;
     setRuntimeBusy(true);
     try {
@@ -234,6 +237,7 @@ export function useAiRuntimeManager(args: {
   }, []);
 
   const handleRetryRuntimeSetup = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = false;
     setRuntimeStartFailed(false);
     setModelDownloadFailed(false);
@@ -246,101 +250,112 @@ export function useAiRuntimeManager(args: {
   }, [ensureBundledRuntimeReady]);
 
   const handleDownloadModel = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = false;
     setModelDownloadFailed(false);
     setRuntimeStartFailed(false);
     setModelDownloadInProgress(true);
     setRuntimeBusy(true);
-    try {
-      const downloaded = await aiRuntimeDownloadDefaultModel();
-      applyRuntimeStatus(downloaded);
+    const run = (async () => {
+      try {
+        const downloaded = await aiRuntimeDownloadDefaultModel();
+        applyRuntimeStatus(downloaded);
 
-      if (isMissingModelOnly(downloaded)) {
+        if (isMissingModelOnly(downloaded)) {
+          await sleep(300);
+          const refreshed = await aiRuntimeStatus();
+          applyRuntimeStatus(refreshed);
+          if (isMissingModelOnly(refreshed)) {
+            setModelDownloadFailed(true);
+            return;
+          }
+        }
+
+        markLocalAiModelSeen();
+        setHasSeenModelBefore(true);
+
         await sleep(300);
-        const refreshed = await aiRuntimeStatus();
-        applyRuntimeStatus(refreshed);
-        if (isMissingModelOnly(refreshed)) {
-          setModelDownloadFailed(true);
+        await ensureBundledRuntimeReady();
+      } catch (error) {
+        const message = formatError(error);
+        const latest = await aiRuntimeStatus().catch(() => null);
+        if (latest) applyRuntimeStatus(latest);
+
+        if (latest && isRuntimeReady(latest) && latest.endpoint) {
+          await handleLoadModels(latest.endpoint);
           return;
         }
-      }
 
-      markLocalAiModelSeen();
-      setHasSeenModelBefore(true);
-      setModelDownloadInProgress(false);
+        const modelOnDisk =
+          Boolean(latest?.model_path?.trim()) && !isMissingModelOnly(latest);
 
-      await sleep(300);
-      await ensureBundledRuntimeReady();
-    } catch (error) {
-      const message = formatError(error);
-      const latest = await aiRuntimeStatus().catch(() => null);
-      if (latest) applyRuntimeStatus(latest);
+        if (modelOnDisk) {
+          setRuntimeStartFailed(true);
+          setRuntimeStatus((prev) => ({
+            ...(latest ??
+              prev ?? {
+                endpoint: null,
+                model_name: null,
+                server_bin: null,
+                model_path: null,
+                pid: null,
+                managed_by_app: true,
+                missing: [],
+                phase: "error",
+              }),
+            phase: "error",
+            last_error: message,
+            model_downloaded_bytes: null,
+            model_total_bytes: null,
+          }));
+          return;
+        }
 
-      if (latest && isRuntimeReady(latest) && latest.endpoint) {
-        await handleLoadModels(latest.endpoint);
-        return;
-      }
-
-      const modelOnDisk =
-        Boolean(latest?.model_path?.trim()) && !isMissingModelOnly(latest);
-
-      if (modelOnDisk) {
-        setRuntimeStartFailed(true);
+        setModelDownloadFailed(true);
         setRuntimeStatus((prev) => ({
-          ...(latest ??
-            prev ?? {
-              endpoint: null,
-              model_name: null,
-              server_bin: null,
-              model_path: null,
-              pid: null,
-              managed_by_app: true,
-              missing: [],
-              phase: "error",
-            }),
+          ...(prev ?? {
+            endpoint: null,
+            model_name: null,
+            server_bin: null,
+            model_path: null,
+            pid: null,
+            managed_by_app: true,
+            missing: [],
+          }),
           phase: "error",
           last_error: message,
           model_downloaded_bytes: null,
           model_total_bytes: null,
         }));
-        return;
+      } finally {
+        setModelDownloadInProgress(false);
+        setRuntimeBusy(false);
       }
-
-      setModelDownloadFailed(true);
-      setRuntimeStatus((prev) => ({
-        ...(prev ?? {
-          endpoint: null,
-          model_name: null,
-          server_bin: null,
-          model_path: null,
-          pid: null,
-          managed_by_app: true,
-          missing: [],
-        }),
-        phase: "error",
-        last_error: message,
-        model_downloaded_bytes: null,
-        model_total_bytes: null,
-      }));
+    })();
+    downloadInFlightRef.current = run;
+    try {
+      await run;
     } finally {
-      setModelDownloadInProgress(false);
-      setRuntimeBusy(false);
+      if (downloadInFlightRef.current === run) {
+        downloadInFlightRef.current = null;
+      }
     }
   }, [applyRuntimeStatus, ensureBundledRuntimeReady, handleLoadModels]);
 
   const handleCancelModelDownload = useCallback(async () => {
     setModelDownloadFailed(false);
-    setModelDownloadInProgress(false);
     try {
       const status = await aiRuntimeCancelModelDownload();
       setRuntimeStatus(status);
       if (status.endpoint) setEndpoint(status.endpoint);
-    } finally {
-      setRuntimeBusy(false);
+      await downloadInFlightRef.current;
+    } catch {
+      // Download task still owns busy/inProgress flags until it settles.
     }
   }, []);
 
   const handleDeleteModel = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = true;
     autoStartAttemptedRef.current = true;
     setRuntimeBusy(true);
@@ -356,6 +371,7 @@ export function useAiRuntimeManager(args: {
   }, []);
 
   const handleRefreshRuntimeSetup = useCallback(async () => {
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = false;
     setRuntimeStartFailed(false);
     setModelDownloadFailed(false);

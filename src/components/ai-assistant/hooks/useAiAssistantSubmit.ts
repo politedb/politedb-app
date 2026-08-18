@@ -17,6 +17,7 @@ import type {
   TableItem,
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
+import { DEFAULT_LOCAL_AI_PROVIDER_ID } from "src/lib/ai-assistant/providers";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
@@ -27,6 +28,8 @@ function isAbortError(error: unknown) {
 function formatAssistantRequestError(args: {
   error: unknown;
   lang: ReturnType<typeof resolveReplyLanguage>;
+  endpoint?: string;
+  providerId?: string;
 }) {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
@@ -42,7 +45,12 @@ function formatAssistantRequestError(args: {
 
   if (!isProviderRequest) return null;
 
+  const endpoint = (args.endpoint ?? "").toLowerCase();
   const isLocalEndpoint =
+    args.providerId === DEFAULT_LOCAL_AI_PROVIDER_ID ||
+    endpoint.includes("127.0.0.1") ||
+    endpoint.includes("localhost") ||
+    endpoint.includes(":11434") ||
     raw.includes("127.0.0.1") ||
     raw.includes("localhost") ||
     raw.includes(":11434");
@@ -356,6 +364,8 @@ export function useAiAssistantSubmit(args: {
       const assistantError = formatAssistantRequestError({
         error: err,
         lang,
+        endpoint,
+        providerId,
       });
       appendAssistantMessage(
         {

@@ -157,7 +157,11 @@ fn require_https_cloud_url(config: &AiProviderConfig) -> Result<(), String> {
     if is_local_provider(&config.kind) {
         return Ok(());
     }
-    let url = config.base_url.as_deref().unwrap_or("");
+    let url = config
+        .base_url
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| default_base_url(&config.kind));
     if url.to_ascii_lowercase().starts_with("https://") {
         return Ok(());
     }
@@ -573,11 +577,17 @@ pub fn ai_provider_set_key(
         .find(|provider| provider.id == provider_id)
         .ok_or_else(|| "AI_PROVIDER_NOT_FOUND".to_string())?;
     let key_ref = provider_key_ref(provider_id);
+    let previous_key = secrets::keychain_get(&app, &key_ref).ok();
+    let created_new_key = provider.api_key_ref.is_none();
     secrets::keychain_set(&app, &key_ref, api_key)?;
     provider.api_key_ref = Some(key_ref.clone());
     let saved = provider.clone();
     if let Err(error) = save_provider_file(&app, &file) {
-        let _ = secrets::keychain_delete(&app, &key_ref);
+        if let Some(previous_key) = previous_key {
+            let _ = secrets::keychain_set(&app, &key_ref, &previous_key);
+        } else if created_new_key {
+            let _ = secrets::keychain_delete(&app, &key_ref);
+        }
         return Err(error);
     }
     Ok(saved)
@@ -625,9 +635,10 @@ pub async fn ai_provider_validate_config(
 pub fn ai_provider_delete(app: AppHandle, provider_id: String) -> Result<(), String> {
     let mut file = load_provider_file(&app)?;
     let canonical = provider_key_ref(&provider_id);
-    let _ = secrets::keychain_delete(&app, &canonical);
     file.providers.retain(|p| p.id != provider_id);
-    save_provider_file(&app, &file)
+    save_provider_file(&app, &file)?;
+    let _ = secrets::keychain_delete(&app, &canonical);
+    Ok(())
 }
 
 #[tauri::command]
@@ -643,6 +654,7 @@ pub async fn ai_chat_complete(
     if !provider.enabled {
         return Err("AI_PROVIDER_DISABLED".into());
     }
+    require_https_cloud_url(&provider)?;
     let api_key = provider_api_key(&app, &provider)?;
     let text = complete_with_provider(&provider, &request, api_key.as_deref()).await?;
     if text.is_empty() {
@@ -687,6 +699,21 @@ mod tests {
             enabled: true,
             is_default: Some(false),
         }
+    }
+
+    #[test]
+    fn accepts_missing_cloud_base_url_when_default_is_https() {
+        let mut config = cloud_provider("https://api.openai.com");
+        config.base_url = None;
+        assert!(require_https_cloud_url(&config).is_ok());
+    }
+
+    #[test]
+    fn rejects_saved_http_cloud_base_url() {
+        let mut config = cloud_provider("https://api.openai.com");
+        config.base_url = Some("http://evil.example/v1".into());
+        let error = require_https_cloud_url(&config).unwrap_err();
+        assert_eq!(error, "AI_PROVIDER_HTTPS_REQUIRED");
     }
 
     #[test]

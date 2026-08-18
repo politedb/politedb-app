@@ -8,11 +8,13 @@ export function AiAssistantPanelHeader(props: {
   onSettingsOpenChange: (open: boolean) => void;
   loadingModels: boolean;
   runtimeBusy: boolean;
+  modelDownloadInProgress: boolean;
   runtimeStatus: AiRuntimeStatus | null;
   onLoadModels: () => void;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onDownloadModel: () => void;
+  onCancelModelDownload: () => void;
   onDeleteLocalModel: () => Promise<void> | void;
 }) {
   const {
@@ -20,11 +22,13 @@ export function AiAssistantPanelHeader(props: {
     onSettingsOpenChange,
     loadingModels,
     runtimeBusy,
+    modelDownloadInProgress,
     runtimeStatus,
     onLoadModels,
     onStartRuntime,
     onStopRuntime,
     onDownloadModel,
+    onCancelModelDownload,
     onDeleteLocalModel,
   } = props;
 
@@ -55,11 +59,13 @@ export function AiAssistantPanelHeader(props: {
           onClose={() => onSettingsOpenChange(false)}
           loadingModels={loadingModels}
           runtimeBusy={runtimeBusy}
+          modelDownloadInProgress={modelDownloadInProgress}
           runtimeStatus={runtimeStatus}
           onLoadModels={onLoadModels}
           onStartRuntime={onStartRuntime}
           onStopRuntime={onStopRuntime}
           onDownloadModel={onDownloadModel}
+          onCancelModelDownload={onCancelModelDownload}
           onDeleteLocalModel={onDeleteLocalModel}
         />
       </div>
