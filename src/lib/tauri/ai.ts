@@ -96,3 +96,11 @@ export async function aiProviderTest(providerId: string) {
 export async function aiChatComplete(request: AiChatCompleteRequest) {
   return invoke<string>(CMD.aiChatComplete, { request });
 }
+
+export async function aiChatCancel() {
+  try {
+    await invoke<void>(CMD.aiChatCancel);
+  } catch {
+    // Ignore when the desktop backend is unavailable (tests / web preview).
+  }
+}

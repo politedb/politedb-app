@@ -159,6 +159,7 @@ fn main() {
             commands::ai::ai_provider_delete,
             commands::ai::ai_provider_test,
             commands::ai::ai_chat_complete,
+            commands::ai::ai_chat_cancel,
             commands::license::license_device_info,
             commands::license::license_state_load,
             commands::license::license_state_save,

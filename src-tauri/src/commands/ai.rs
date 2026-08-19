@@ -644,6 +644,7 @@ pub fn ai_provider_delete(app: AppHandle, provider_id: String) -> Result<(), Str
 #[tauri::command]
 pub async fn ai_chat_complete(
     app: AppHandle,
+    state: tauri::State<'_, AppState>,
     request: AiChatCompleteRequest,
 ) -> Result<String, String> {
     let license_state = license::license_state_load(&app)?;
@@ -656,7 +657,17 @@ pub async fn ai_chat_complete(
     }
     require_https_cloud_url(&provider)?;
     let api_key = provider_api_key(&app, &provider)?;
-    let text = complete_with_provider(&provider, &request, api_key.as_deref()).await?;
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+    {
+        let mut slot = state.ai_chat_cancel.lock().await;
+        if let Some(previous) = slot.replace(cancel_tx) {
+            let _ = previous.send(());
+        }
+    }
+    let text = tokio::select! {
+        _ = cancel_rx => return Err("AI_CHAT_CANCELED".into()),
+        result = complete_with_provider(&provider, &request, api_key.as_deref()) => result?,
+    };
     if text.is_empty() {
         return Err("AI_CHAT_EMPTY_RESPONSE".into());
     }
@@ -664,9 +675,23 @@ pub async fn ai_chat_complete(
 }
 
 #[tauri::command]
-pub async fn ai_provider_test(app: AppHandle, provider_id: String) -> Result<String, String> {
+pub async fn ai_chat_cancel(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut slot = state.ai_chat_cancel.lock().await;
+    if let Some(tx) = slot.take() {
+        let _ = tx.send(());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_provider_test(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    provider_id: String,
+) -> Result<String, String> {
     ai_chat_complete(
         app,
+        state,
         AiChatCompleteRequest {
             provider_id,
             model: None,

@@ -51,6 +51,7 @@ pub struct AppState {
 
     pub sql_busy: SqlBusyRegistry,
     pub ai_runtime: Arc<tokio::sync::Mutex<AiRuntimeHandle>>,
+    pub ai_chat_cancel: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 impl AppState {
@@ -68,6 +69,7 @@ impl AppState {
             op_tasks: Arc::new(DashMap::new()),
             sql_busy: SqlBusyRegistry::new(),
             ai_runtime: Arc::new(tokio::sync::Mutex::new(AiRuntimeHandle::default())),
+            ai_chat_cancel: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 }

@@ -46,7 +46,7 @@ import type {
   LocalAiSettings,
   SavedConnectionSummary,
 } from "src/lib/ai-assistant/types";
-import { aiChatComplete } from "src/lib/tauri/ai";
+import { aiChatCancel, aiChatComplete } from "src/lib/tauri/ai";
 
 export {
   detectLanguageFromText,
@@ -263,6 +263,7 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       signal.removeEventListener("abort", onAbort);
+      void aiChatCancel();
       reject(new DOMException("The operation was aborted.", "AbortError"));
     };
     signal.addEventListener("abort", onAbort, { once: true });

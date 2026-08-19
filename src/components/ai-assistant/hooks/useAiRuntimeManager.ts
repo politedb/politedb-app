@@ -202,7 +202,7 @@ export function useAiRuntimeManager(args: {
     }
 
     const ready = await pollRuntimeUntilReady(apply, { maxWaitMs: 120_000 });
-    if (ready?.endpoint) {
+    if (isRuntimeReady(ready) && ready?.endpoint) {
       await handleLoadModels(ready.endpoint);
       return;
     }
@@ -231,7 +231,9 @@ export function useAiRuntimeManager(args: {
       const status = await aiRuntimeStart();
       setRuntimeStatus(status);
       if (status.endpoint) setEndpoint(status.endpoint);
-      await handleLoadModels(status.endpoint ?? undefined);
+      if (isRuntimeReady(status) && status.endpoint) {
+        await handleLoadModels(status.endpoint);
+      }
     } catch {
       suppressAutoStartRef.current = true;
       const nextStatus = await aiRuntimeStatus().catch(() => null);
@@ -245,13 +247,15 @@ export function useAiRuntimeManager(args: {
   }, [handleLoadModels]);
 
   const handleStopBundledRuntime = useCallback(async () => {
-    if (!beginRuntimeOp()) return;
+    if (downloadInFlightRef.current) return;
     suppressAutoStartRef.current = true;
+    const interrupting = runtimeBusyRef.current;
+    if (!interrupting && !beginRuntimeOp()) return;
     try {
       const status = await aiRuntimeStop();
       setRuntimeStatus(status);
     } finally {
-      endRuntimeOp();
+      if (!interrupting) endRuntimeOp();
     }
   }, []);
 
@@ -501,11 +505,7 @@ export function useAiRuntimeManager(args: {
     if (runtimeBusy) return true;
     if (modelDownloadInProgress) return true;
     if (modelDownloadFailed || runtimeStartFailed) return true;
-    return (
-      runtimeStatus?.phase === "starting" &&
-      !runtimeStatus?.endpoint &&
-      !submitting
-    );
+    return runtimeStatus?.phase === "starting" && !submitting;
   }, [
     modelDownloadFailed,
     runtimeStartFailed,

@@ -13,6 +13,7 @@ export const CMD = {
   aiProviderDelete: "ai_provider_delete",
   aiProviderTest: "ai_provider_test",
   aiChatComplete: "ai_chat_complete",
+  aiChatCancel: "ai_chat_cancel",
   licenseDeviceInfo: "license_device_info",
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",

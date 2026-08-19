@@ -18,11 +18,15 @@ import type {
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { DEFAULT_LOCAL_AI_PROVIDER_ID } from "src/lib/ai-assistant/providers";
+import { aiChatCancel } from "src/lib/tauri/ai";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
 function isAbortError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  const message =
+    error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("AI_CHAT_CANCELED");
 }
 
 function formatAssistantRequestError(args: {
@@ -166,6 +170,7 @@ export function useAiAssistantSubmit(args: {
     requestSeqRef.current += 1;
     requestAbortRef.current?.abort();
     requestAbortRef.current = null;
+    void aiChatCancel();
     clearStreamingMessages();
     setAssistantStatus("idle");
     setSubmitting(false);
