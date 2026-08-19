@@ -254,7 +254,17 @@ export type ChatMessage = {
   confidence?: "high" | "medium" | "low";
 };
 
-export type AiProviderKind = "ollama" | "local_openai_compatible";
+export type AiProviderKind =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "openrouter"
+  | "grok"
+  | "groq"
+  | "deepseek"
+  | "github_copilot"
+  | "ollama"
+  | "local_openai_compatible";
 
 export type AiProviderConfig = {
   id: string;
@@ -264,6 +274,8 @@ export type AiProviderConfig = {
   host?: string | null;
   subPath?: string | null;
   defaultModel: string;
+  models?: string[];
+  apiKeyRef?: string | null;
   enabled: boolean;
   isDefault?: boolean;
 };

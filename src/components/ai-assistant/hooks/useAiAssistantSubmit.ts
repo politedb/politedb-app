@@ -17,6 +17,7 @@ import type {
   TableItem,
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
+import { DEFAULT_LOCAL_AI_PROVIDER_ID } from "src/lib/ai-assistant/providers";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
@@ -27,12 +28,16 @@ function isAbortError(error: unknown) {
 function formatAssistantRequestError(args: {
   error: unknown;
   lang: ReturnType<typeof resolveReplyLanguage>;
+  endpoint?: string;
+  providerId?: string;
 }) {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
   const isProviderRequest =
     raw.includes("AI_CHAT_FAILED") ||
+    raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
+    raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
     raw.includes("AI_PROVIDER") ||
     raw.includes("OLLAMA_GENERATE_FAILED") ||
@@ -40,7 +45,12 @@ function formatAssistantRequestError(args: {
 
   if (!isProviderRequest) return null;
 
+  const endpoint = (args.endpoint ?? "").toLowerCase();
   const isLocalEndpoint =
+    args.providerId === DEFAULT_LOCAL_AI_PROVIDER_ID ||
+    endpoint.includes("127.0.0.1") ||
+    endpoint.includes("localhost") ||
+    endpoint.includes(":11434") ||
     raw.includes("127.0.0.1") ||
     raw.includes("localhost") ||
     raw.includes(":11434");
@@ -55,15 +65,24 @@ function formatAssistantRequestError(args: {
       : "This conversation exceeded the local model context limit. PoliteDB has reduced the context; try sending it again.";
   }
 
+  if (
+    raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
+    raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT")
+  ) {
+    return vi
+      ? "Model không tạo được nội dung trả lời. Hãy thử lại hoặc chọn model khác."
+      : "The model did not produce a final response. Try again or choose another model.";
+  }
+
   if (vi) {
     return isLocalEndpoint
       ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama/local OpenAI-compatible server đã chạy chưa."
-      : "Không kết nối được tới local AI provider. Hãy kiểm tra host, model hoặc local runtime trong AI settings.";
+      : "Không kết nối được tới AI provider. Hãy kiểm tra API key, host, hoặc model trong AI settings.";
   }
 
   return isLocalEndpoint
     ? "I could not reach the local AI provider. Check that Ollama or your OpenAI-compatible local server is running."
-    : "I could not reach the local AI provider. Check the host, model, or local runtime in AI settings.";
+    : "I could not reach the AI provider. Check the API key, host, or model in AI settings.";
 }
 
 export function useAiAssistantSubmit(args: {
@@ -89,7 +108,6 @@ export function useAiAssistantSubmit(args: {
   endpoint: string;
   model: string;
   engine: DatabaseEngine;
-  workspaceId?: string;
   runtimeConnectionId?: string;
   activeSchema?: string;
   activeTable?: TableItem;
@@ -123,12 +141,12 @@ export function useAiAssistantSubmit(args: {
     endpoint,
     model,
     engine,
+    runtimeConnectionId,
     activeSchema,
     tables,
     columnsByTable,
     columnDetailsByTable,
     currentSql,
-    runtimeConnectionId,
     activeTable,
     savedConnections,
     conversationState,
@@ -139,8 +157,10 @@ export function useAiAssistantSubmit(args: {
   const requestSeqRef = useRef(0);
 
   const canSubmit = useMemo(() => {
-    return Boolean(prompt.trim() && endpoint.trim() && model.trim());
-  }, [prompt, endpoint, model]);
+    return Boolean(
+      prompt.trim() && model.trim() && (providerId?.trim() || endpoint.trim())
+    );
+  }, [prompt, endpoint, model, providerId]);
 
   const handleCancelSubmit = useCallback(() => {
     requestSeqRef.current += 1;
@@ -344,6 +364,8 @@ export function useAiAssistantSubmit(args: {
       const assistantError = formatAssistantRequestError({
         error: err,
         lang,
+        endpoint,
+        providerId,
       });
       appendAssistantMessage(
         {

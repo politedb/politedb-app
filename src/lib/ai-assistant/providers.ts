@@ -1,8 +1,10 @@
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import {
-  aiProviderDelete,
+  aiProviderDelete as tauriAiProviderDelete,
   aiProviderList as tauriAiProviderList,
   aiProviderSaveConfig,
+  aiProviderSetKey,
+  aiProviderValidateConfig,
   aiProviderTest,
 } from "src/lib/tauri/ai";
 import {
@@ -19,21 +21,53 @@ export const LOCAL_AI_PROVIDER_KINDS: AiProviderKind[] = [
 ];
 
 export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
-  ollama: "Ollama",
-  local_openai_compatible: "Local API",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  gemini: "Google AI",
+  openrouter: "OpenRouter",
+  grok: "Grok",
+  deepseek: "DeepSeek",
+  github_copilot: "GitHub Copilot",
+  groq: "Groq",
+  ollama: "PoliteDB Local",
+  local_openai_compatible: "PoliteDB Local",
 };
 
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
+  openai: "gpt-4.1-mini",
+  anthropic: "claude-sonnet-4-5",
+  gemini: "gemini-2.5-flash",
+  openrouter: "openai/gpt-4.1-mini",
+  grok: "grok-3-mini",
+  deepseek: "deepseek-chat",
+  github_copilot: "gpt-4.1",
+  groq: "openai/gpt-oss-120b",
   ollama: DEFAULT_AI_MODEL_NAME,
   local_openai_compatible: DEFAULT_AI_MODEL_NAME,
 };
 
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
+  openai: "https://api.openai.com",
+  anthropic: "https://api.anthropic.com",
+  gemini: "https://generativelanguage.googleapis.com",
+  openrouter: "https://openrouter.ai/api",
+  grok: "https://api.x.ai",
+  deepseek: "https://api.deepseek.com",
+  github_copilot: "https://models.inference.ai.azure.com",
+  groq: "https://api.groq.com/openai",
   ollama: "http://127.0.0.1:11434",
   local_openai_compatible: "http://127.0.0.1:11434",
 };
 
 export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
+  openai: "/v1",
+  anthropic: "/v1",
+  gemini: "/v1beta",
+  openrouter: "/v1",
+  grok: "/v1",
+  deepseek: "/v1",
+  github_copilot: "",
+  groq: "/v1",
   ollama: "/v1",
   local_openai_compatible: "/v1",
 };
@@ -52,6 +86,7 @@ export function makeDefaultAiProvider(
 ): AiProviderConfig {
   const host = overrides.host ?? DEFAULT_HOSTS[kind];
   const subPath = overrides.subPath ?? DEFAULT_SUB_PATHS[kind];
+  const defaultModel = overrides.defaultModel ?? DEFAULT_MODELS[kind];
   return {
     id: overrides.id ?? makeId(kind),
     kind,
@@ -59,7 +94,8 @@ export function makeDefaultAiProvider(
     host,
     subPath,
     baseUrl: overrides.baseUrl ?? buildBaseUrl(host, subPath),
-    defaultModel: overrides.defaultModel ?? DEFAULT_MODELS[kind],
+    defaultModel,
+    models: overrides.models ?? [defaultModel],
     enabled: overrides.enabled ?? true,
     isDefault: overrides.isDefault ?? false,
   };
@@ -101,31 +137,69 @@ export function normalizeAiProviderConfig(
   const parts = splitBaseUrl(provider.baseUrl, kind);
   const host = provider.host ?? parts.host;
   const subPath = provider.subPath ?? parts.subPath;
+  const defaultModel = isLocalAiProviderKind(kind)
+    ? normalizeLocalAiModelName(provider.defaultModel)
+    : provider.defaultModel.trim() || DEFAULT_MODELS[kind];
+  const models = Array.from(
+    new Set(
+      [...(provider.models ?? []), defaultModel]
+        .map((model) =>
+          isLocalAiProviderKind(kind)
+            ? normalizeLocalAiModelName(model)
+            : model.trim()
+        )
+        .filter(Boolean)
+    )
+  );
   return {
     ...provider,
     kind,
-    label: provider.label || AI_PROVIDER_LABELS[kind],
+    label:
+      !provider.label || provider.label === "Local API"
+        ? AI_PROVIDER_LABELS[kind]
+        : provider.label,
     host,
     subPath,
     baseUrl: buildBaseUrl(host, subPath),
-    defaultModel: normalizeLocalAiModelName(provider.defaultModel),
+    defaultModel,
+    models,
   };
 }
 
+export function resolveSelectedAiProvider(
+  providers: AiProviderConfig[],
+  selectedId?: string | null
+): AiProviderConfig | undefined {
+  const enabled = providers.filter((provider) => provider.enabled);
+  const selected = selectedId?.trim();
+  return (
+    (selected
+      ? enabled.find((provider) => provider.id === selected)
+      : undefined) ??
+    enabled.find((provider) => provider.isDefault) ??
+    enabled[0] ??
+    providers[0]
+  );
+}
+
 export function getSelectedAiProviderId() {
-  return DEFAULT_LOCAL_AI_PROVIDER_ID;
+  try {
+    return (
+      localStorage.getItem(AI_SELECTED_PROVIDER_KEY)?.trim() ||
+      DEFAULT_LOCAL_AI_PROVIDER_ID
+    );
+  } catch {
+    return DEFAULT_LOCAL_AI_PROVIDER_ID;
+  }
 }
 
 export function setSelectedAiProviderId(providerId: string) {
-  void providerId;
+  const next = providerId.trim() || DEFAULT_LOCAL_AI_PROVIDER_ID;
   try {
-    localStorage.setItem(
-      AI_SELECTED_PROVIDER_KEY,
-      DEFAULT_LOCAL_AI_PROVIDER_ID
-    );
+    localStorage.setItem(AI_SELECTED_PROVIDER_KEY, next);
     window.dispatchEvent(
       new CustomEvent("politedb-ai-provider-selected", {
-        detail: { providerId: DEFAULT_LOCAL_AI_PROVIDER_ID },
+        detail: { providerId: next },
       })
     );
   } catch {}
@@ -139,6 +213,7 @@ export async function ensureLocalAiProvider(args: {
   const existing = providers.find(
     (item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID
   );
+  const hasDefaultProvider = providers.some((provider) => provider.isDefault);
   const parts = splitBaseUrl(args.endpoint, "ollama");
   const next: AiProviderConfig = {
     id: DEFAULT_LOCAL_AI_PROVIDER_ID,
@@ -148,12 +223,15 @@ export async function ensureLocalAiProvider(args: {
     subPath: parts.subPath,
     baseUrl: args.endpoint.trim().replace(/\/+$/, ""),
     defaultModel: DEFAULT_MODELS.ollama,
+    models: [DEFAULT_MODELS.ollama],
     enabled: true,
+    isDefault: hasDefaultProvider ? Boolean(existing?.isDefault) : true,
   };
 
   if (
     existing?.baseUrl === next.baseUrl &&
     existing?.defaultModel === next.defaultModel &&
+    existing?.isDefault === next.isDefault &&
     existing?.enabled
   ) {
     return existing;
@@ -164,26 +242,43 @@ export async function ensureLocalAiProvider(args: {
 
 export async function saveAiProviderWithOptionalKey(args: {
   config: AiProviderConfig;
+  apiKey?: string;
 }) {
-  if (!isLocalAiProviderKind(args.config.kind)) {
-    throw new Error("Only local AI providers are supported.");
-  }
   const config = {
     ...args.config,
     baseUrl:
       args.config.baseUrl ??
       buildBaseUrl(args.config.host, args.config.subPath),
   };
-  return aiProviderSaveConfig(config);
+  if (!isLocalAiProviderKind(config.kind)) {
+    for (const model of config.models ?? [config.defaultModel]) {
+      try {
+        await aiProviderValidateConfig(
+          { ...config, defaultModel: model },
+          args.apiKey
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${model}: ${message}`);
+      }
+    }
+  }
+  const saved = await aiProviderSaveConfig(config);
+  let result = saved;
+  if (args.apiKey?.trim()) {
+    result = await aiProviderSetKey(saved.id, args.apiKey.trim());
+  }
+  window.dispatchEvent(new Event("politedb-ai-providers-changed"));
+  return result;
 }
 
-export { aiProviderDelete, aiProviderSaveConfig, aiProviderTest };
+export async function aiProviderDelete(providerId: string) {
+  await tauriAiProviderDelete(providerId);
+  window.dispatchEvent(new Event("politedb-ai-providers-changed"));
+}
+
+export { aiProviderSaveConfig, aiProviderTest };
 
 export async function aiProviderList() {
-  const providers = await tauriAiProviderList();
-  return providers.filter(
-    (provider) =>
-      provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID &&
-      isLocalAiProviderKind(provider.kind)
-  );
+  return tauriAiProviderList();
 }

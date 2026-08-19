@@ -28,6 +28,7 @@ const setSelectedAiProviderIdMock = vi.fn();
 const aiRuntimeStatusMock = vi.fn();
 const aiRuntimeDownloadDefaultModelMock = vi.fn();
 const aiRuntimeCancelModelDownloadMock = vi.fn();
+const aiRuntimeDeleteDefaultModelMock = vi.fn();
 const aiRuntimeStartMock = vi.fn();
 const aiRuntimeStopMock = vi.fn();
 
@@ -65,6 +66,8 @@ vi.mock("src/lib/tauri", () => ({
     aiRuntimeCancelModelDownloadMock(...args),
   aiRuntimeDownloadDefaultModel: (...args: any[]) =>
     aiRuntimeDownloadDefaultModelMock(...args),
+  aiRuntimeDeleteDefaultModel: (...args: any[]) =>
+    aiRuntimeDeleteDefaultModelMock(...args),
   aiRuntimeStart: (...args: any[]) => aiRuntimeStartMock(...args),
   aiRuntimeStop: (...args: any[]) => aiRuntimeStopMock(...args),
 }));
@@ -75,6 +78,8 @@ vi.mock("src/lib/tauri/query", () => ({
 
 vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
+  isLocalAiProviderKind: (kind: string) =>
+    kind === "ollama" || kind === "local_openai_compatible",
   normalizeAiProviderConfig: (provider: any) => provider,
   ensureLocalAiProvider: vi.fn().mockResolvedValue({
     id: "local",
@@ -87,6 +92,10 @@ vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   getSelectedAiProviderId: vi.fn(() => "local"),
   setSelectedAiProviderId: (...args: any[]) =>
     setSelectedAiProviderIdMock(...args),
+  resolveSelectedAiProvider: (providers: any[], selectedId?: string) =>
+    providers.find((provider) => provider.id === selectedId) ??
+    providers.find((provider) => provider.isDefault) ??
+    providers[0],
   makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
     id: overrides.id ?? kind,
     kind,
@@ -155,9 +164,12 @@ vi.mock("src/components/common/Button", () => ({
 
 vi.mock("src/components/icons", () => ({
   ArrowDown: () => <span>arrow-down</span>,
+  ArrowRightIcon: () => <span>arrow-right</span>,
   BackupIcon: () => <span>backup</span>,
+  ChatPlusIcon: () => <span>new-chat</span>,
   ChevronDownIcon: () => <span>chevron-down</span>,
   DownloadIcon: () => <span>download</span>,
+  MinusIcon: () => <span>minus</span>,
   MoreVerticalIcon: () => <span>more</span>,
   VaultIcon: () => <span>vault</span>,
   PlayIcon: () => <span>play</span>,
@@ -165,6 +177,7 @@ vi.mock("src/components/icons", () => ({
   StopIcon: () => <span>stop</span>,
   Settings: () => <span>settings</span>,
   SettingsIcon: () => <span>settings</span>,
+  ShareIcon: () => <span>share</span>,
   SparklesIcon: () => <span>sparkles</span>,
   XIcon: () => <span>x</span>,
 }));
@@ -200,10 +213,6 @@ function mockMissingModelStatus() {
   aiRuntimeStatusMock.mockImplementation(() =>
     Promise.resolve(missingModelStatus())
   );
-}
-
-function pendingPromise<T>() {
-  return new Promise<T>(() => {});
 }
 
 let renderSeq = 0;
@@ -274,6 +283,7 @@ beforeEach(() => {
       phase: "ready",
       endpoint: "http://127.0.0.1:8080/v1",
       model_name: "qwen2.5-coder:7b",
+      model_path: "/tmp/default.gguf",
     })
   );
   aiRuntimeDownloadDefaultModelMock.mockResolvedValue(
@@ -313,88 +323,36 @@ beforeEach(() => {
 });
 
 describe("AiAssistantPanel", () => {
-  it("shows missing model state on first launch and downloads only after user action", async () => {
+  it("keeps chat available without prompting for a missing local model", async () => {
     mockMissingModelStatus();
 
-    renderPanel();
+    renderPanel({ presentation: "floating" });
 
-    await screen.findByText("Missing AI model");
-    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
-    expect(aiRuntimeStartMock).not.toHaveBeenCalled();
-
-    const downloadedStatus = status({
-      phase: "stopped",
-      model_name: "default",
-      model_path: "/tmp/default.gguf",
-      missing: [],
-    });
-
-    aiRuntimeDownloadDefaultModelMock.mockResolvedValueOnce(downloadedStatus);
-    aiRuntimeStatusMock.mockResolvedValue(downloadedStatus);
-    aiRuntimeStartMock.mockResolvedValue(
-      status({
-        phase: "ready",
-        endpoint: "http://127.0.0.1:8080/v1",
-        model_name: "qwen2.5-coder:7b",
-        model_path: "/tmp/default.gguf",
-      })
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
-
-    await waitFor(() =>
-      expect(aiRuntimeDownloadDefaultModelMock).toHaveBeenCalledTimes(1)
-    );
-    await waitFor(() => expect(aiRuntimeStartMock).toHaveBeenCalledTimes(1));
-    expect(markLocalAiModelSeenMock).toHaveBeenCalled();
-  });
-
-  it("does not download the missing model when retrying runtime setup", async () => {
-    mockMissingModelStatus();
-
-    renderPanel();
-
-    await screen.findByText("Missing AI model");
-    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
-    expect(aiRuntimeStartMock).not.toHaveBeenCalled();
-  });
-
-  it("shows cancel while the model download is running", async () => {
-    mockMissingModelStatus();
-    aiRuntimeDownloadDefaultModelMock.mockReturnValueOnce(pendingPromise());
-
-    renderPanel();
-
-    await screen.findByText("Missing AI model");
-    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
-
-    await screen.findByText("Downloading local AI model");
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Retry" })
+      screen.queryByRole("button", { name: "Download model" })
     ).not.toBeInTheDocument();
+    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() =>
-      expect(aiRuntimeCancelModelDownloadMock).toHaveBeenCalledTimes(1)
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
+    await screen.findByText("Add a provider in Settings to choose models.");
+    expect(
+      screen.queryByRole("button", { name: /Qwen2\.5-Coder-7B/ })
+    ).not.toBeInTheDocument();
   });
 
-  it("shows retry only after model download fails", async () => {
+  it("keeps settings available when the local model is missing", async () => {
     mockMissingModelStatus();
-    aiRuntimeDownloadDefaultModelMock.mockRejectedValueOnce(
-      new Error("AI_MODEL_DOWNLOAD_FAILED: network error")
-    );
 
-    renderPanel();
+    renderPanel({ presentation: "panel" });
 
-    await screen.findByText("Missing AI model");
-    fireEvent.click(screen.getByRole("button", { name: "Download model" }));
-
-    await screen.findByRole("button", { name: "Retry" });
+    expect(await screen.findByTitle("AI settings")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Cancel" })
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: "Download model" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("AI settings"));
+    await screen.findByText("AI Provider Settings");
   });
 
   it("starts runtime automatically when runtime assets are available", async () => {
@@ -594,6 +552,6 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "Settings.." }));
 
-    await screen.findByText("AI Assistant Settings");
+    await screen.findByText("AI Provider Settings");
   });
 });

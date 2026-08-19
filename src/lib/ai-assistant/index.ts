@@ -1795,6 +1795,7 @@ export async function chatReply(args: {
           conversationSummary,
           question: args.question,
         }),
+        maxTokens: 640,
         onStatusChange: args.onStatusChange,
         signal: args.signal,
         onDelta: args.onDelta,
@@ -1827,6 +1828,7 @@ export async function chatReply(args: {
     endpoint: args.endpoint,
     model: args.model,
     prompt,
+    maxTokens: 640,
     onStatusChange: args.onStatusChange,
     signal: args.signal,
   });
