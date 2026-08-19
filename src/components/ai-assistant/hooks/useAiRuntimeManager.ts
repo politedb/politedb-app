@@ -60,6 +60,14 @@ function isRuntimeReady(status?: AiRuntimeStatus | null) {
   return status?.phase === "ready" && Boolean(status.endpoint?.trim());
 }
 
+function isTerminalRuntimePhase(status: AiRuntimeStatus) {
+  return (
+    status.phase === "error" ||
+    status.phase === "missing" ||
+    (status.phase === "stopped" && !status.endpoint)
+  );
+}
+
 async function pollRuntimeUntilReady(
   onStatus: (status: AiRuntimeStatus) => void,
   options?: { maxWaitMs?: number; intervalMs?: number }
@@ -71,7 +79,7 @@ async function pollRuntimeUntilReady(
   while (Date.now() - startedAt < maxWaitMs) {
     const status = await aiRuntimeStatus();
     onStatus(status);
-    if (isRuntimeReady(status)) return status;
+    if (isRuntimeReady(status) || isTerminalRuntimePhase(status)) return status;
     await sleep(intervalMs);
   }
 
@@ -106,6 +114,19 @@ export function useAiRuntimeManager(args: {
   const suppressAutoStartRef = useRef(false);
   const preferredModelRef = useRef(normalizeLocalAiModelName(initialModel));
   const downloadInFlightRef = useRef<Promise<unknown> | null>(null);
+  const runtimeBusyRef = useRef(false);
+
+  const beginRuntimeOp = () => {
+    if (downloadInFlightRef.current || runtimeBusyRef.current) return false;
+    runtimeBusyRef.current = true;
+    setRuntimeBusy(true);
+    return true;
+  };
+
+  const endRuntimeOp = () => {
+    runtimeBusyRef.current = false;
+    setRuntimeBusy(false);
+  };
 
   const handleLoadModels = useCallback(
     async (endpointOverride?: string) => {
@@ -204,9 +225,8 @@ export function useAiRuntimeManager(args: {
   }, [applyRuntimeStatus, handleLoadModels]);
 
   const handleStartBundledRuntime = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = false;
-    setRuntimeBusy(true);
     try {
       const status = await aiRuntimeStart();
       setRuntimeStatus(status);
@@ -220,42 +240,39 @@ export function useAiRuntimeManager(args: {
         if (nextStatus.endpoint) setEndpoint(nextStatus.endpoint);
       }
     } finally {
-      setRuntimeBusy(false);
+      endRuntimeOp();
     }
   }, [handleLoadModels]);
 
   const handleStopBundledRuntime = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = true;
-    setRuntimeBusy(true);
     try {
       const status = await aiRuntimeStop();
       setRuntimeStatus(status);
     } finally {
-      setRuntimeBusy(false);
+      endRuntimeOp();
     }
   }, []);
 
   const handleRetryRuntimeSetup = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = false;
     setRuntimeStartFailed(false);
     setModelDownloadFailed(false);
-    setRuntimeBusy(true);
     try {
       await ensureBundledRuntimeReady();
     } finally {
-      setRuntimeBusy(false);
+      endRuntimeOp();
     }
   }, [ensureBundledRuntimeReady]);
 
   const handleDownloadModel = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = false;
     setModelDownloadFailed(false);
     setRuntimeStartFailed(false);
     setModelDownloadInProgress(true);
-    setRuntimeBusy(true);
     const run = (async () => {
       try {
         const downloaded = await aiRuntimeDownloadDefaultModel();
@@ -329,7 +346,7 @@ export function useAiRuntimeManager(args: {
         }));
       } finally {
         setModelDownloadInProgress(false);
-        setRuntimeBusy(false);
+        endRuntimeOp();
       }
     })();
     downloadInFlightRef.current = run;
@@ -355,10 +372,9 @@ export function useAiRuntimeManager(args: {
   }, []);
 
   const handleDeleteModel = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = true;
     autoStartAttemptedRef.current = true;
-    setRuntimeBusy(true);
     try {
       const status = await aiRuntimeDeleteDefaultModel();
       setEndpoint("");
@@ -366,20 +382,19 @@ export function useAiRuntimeManager(args: {
       setModelDownloadFailed(false);
       setRuntimeStartFailed(false);
     } finally {
-      setRuntimeBusy(false);
+      endRuntimeOp();
     }
   }, []);
 
   const handleRefreshRuntimeSetup = useCallback(async () => {
-    if (downloadInFlightRef.current) return;
+    if (!beginRuntimeOp()) return;
     suppressAutoStartRef.current = false;
     setRuntimeStartFailed(false);
     setModelDownloadFailed(false);
-    setRuntimeBusy(true);
     try {
       await ensureBundledRuntimeReady();
     } finally {
-      setRuntimeBusy(false);
+      endRuntimeOp();
     }
   }, [ensureBundledRuntimeReady]);
 

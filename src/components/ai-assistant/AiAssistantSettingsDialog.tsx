@@ -290,7 +290,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                       {AI_PROVIDER_LABELS[kind]}
                     </span>
                     {available ? (
-                      <span class="size-1.5 rounded-full bg-emerald-400" />
+                      <span class="size-2 rounded-full bg-emerald-400" />
                     ) : null}
                   </button>
                   {active && configured.length > 1 ? (

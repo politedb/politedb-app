@@ -67,6 +67,7 @@ pub struct AiRuntimeHandle {
     pub model_downloaded_bytes: Option<u64>,
     pub model_total_bytes: Option<u64>,
     pub cancel_model_download: bool,
+    start_generation: u64,
 }
 
 impl Default for AiRuntimeHandle {
@@ -84,6 +85,7 @@ impl Default for AiRuntimeHandle {
             model_downloaded_bytes: None,
             model_total_bytes: None,
             cancel_model_download: false,
+            start_generation: 0,
         }
     }
 }
@@ -340,7 +342,7 @@ fn pick_free_port() -> Result<u16, String> {
     Ok(port)
 }
 
-async fn wait_until_port_ready(port: u16) -> Result<(), String> {
+async fn wait_until_port_ready(port: u16, generation: u64, state: &AppState) -> Result<(), String> {
     let started = Instant::now();
     loop {
         if TcpStream::connect((DEFAULT_HOST, port)).await.is_ok() {
@@ -351,8 +353,19 @@ async fn wait_until_port_ready(port: u16) -> Result<(), String> {
             return Err("Timed out waiting for AI runtime to accept connections.".into());
         }
 
+        {
+            let runtime = state.ai_runtime.lock().await;
+            if !is_current_start(&runtime, port, generation) {
+                return Err("AI_RUNTIME_START_SUPERSEDED".into());
+            }
+        }
+
         sleep(Duration::from_millis(350)).await;
     }
+}
+
+fn is_current_start(runtime: &AiRuntimeHandle, port: u16, generation: u64) -> bool {
+    runtime.start_generation == generation && runtime.port == Some(port)
 }
 
 fn format_ai_runtime_early_exit(status: std::process::ExitStatus) -> String {
@@ -401,18 +414,12 @@ fn model_name_from_path(path: &Path) -> String {
 pub async fn ai_runtime_status(app: &tauri::AppHandle, state: &AppState) -> AiRuntimeStatus {
     let (server_bin, model_path, missing) = detect_missing(app);
     let mut runtime = state.ai_runtime.lock().await;
-    let is_downloading_model = matches!(runtime.phase, AiRuntimePhase::Starting)
-        && (runtime.model_downloaded_bytes.is_some()
-            || runtime
-                .last_error
-                .as_deref()
-                .is_some_and(|msg| msg.contains("Downloading AI model")));
-
     if ensure_child_not_exited(&mut runtime).await.unwrap_or(false) && runtime.endpoint.is_some() {
         return runtime.to_status(missing);
     }
 
-    if runtime.child.is_none() && is_downloading_model {
+    // Keep Starting while a download or llama-server spawn is in flight (child is still none).
+    if runtime.child.is_none() && matches!(runtime.phase, AiRuntimePhase::Starting) {
         runtime.server_bin = server_bin;
         if runtime.model_path.is_none() {
             runtime.model_path = model_path.clone();
@@ -446,6 +453,9 @@ pub async fn ai_runtime_start(
         if is_model_download_in_progress(&runtime) {
             return Err("AI_MODEL_DOWNLOAD_BUSY: model download is in progress".to_string());
         }
+        if matches!(runtime.phase, AiRuntimePhase::Starting) {
+            return Ok(runtime.to_status(Vec::new()));
+        }
     }
 
     let (server_bin, model_path, missing) = detect_missing(app);
@@ -453,6 +463,9 @@ pub async fn ai_runtime_start(
         let mut runtime = state.ai_runtime.lock().await;
         if is_model_download_in_progress(&runtime) {
             return Err("AI_MODEL_DOWNLOAD_BUSY: model download is in progress".to_string());
+        }
+        if matches!(runtime.phase, AiRuntimePhase::Starting) {
+            return Ok(runtime.to_status(missing));
         }
         runtime.phase = AiRuntimePhase::Missing;
         runtime.last_error = Some("AI server binary not found.".to_string());
@@ -464,29 +477,15 @@ pub async fn ai_runtime_start(
         if is_model_download_in_progress(&runtime) {
             return Err("AI_MODEL_DOWNLOAD_BUSY: model download is in progress".to_string());
         }
+        if matches!(runtime.phase, AiRuntimePhase::Starting) {
+            return Ok(runtime.to_status(missing));
+        }
         runtime.phase = AiRuntimePhase::Missing;
         runtime.last_error = Some("AI GGUF model not found.".to_string());
         return Ok(runtime.to_status(missing));
     };
 
     ensure_executable(&server_bin)?;
-
-    {
-        let mut runtime = state.ai_runtime.lock().await;
-        if is_model_download_in_progress(&runtime) {
-            return Err("AI_MODEL_DOWNLOAD_BUSY: model download is in progress".to_string());
-        }
-        if ensure_child_not_exited(&mut runtime).await? && runtime.endpoint.is_some() {
-            return Ok(runtime.to_status(Vec::new()));
-        }
-        runtime.phase = AiRuntimePhase::Starting;
-        runtime.last_error = None;
-        runtime.server_bin = Some(server_bin.clone());
-        runtime.model_path = Some(model_path.clone());
-        runtime.model_name = Some(model_name_from_path(&model_path));
-        runtime.model_downloaded_bytes = None;
-        runtime.model_total_bytes = None;
-    }
 
     let port = pick_free_port()?;
     let endpoint = format!("http://{DEFAULT_HOST}:{port}/v1");
@@ -516,20 +515,48 @@ pub async fn ai_runtime_start(
         .stderr(Stdio::null())
         .kill_on_drop(true);
 
-    let child = command
-        .spawn()
-        .map_err(|e| format!("Failed to start bundled AI runtime: {e}"))?;
-
-    {
+    let generation = {
         let mut runtime = state.ai_runtime.lock().await;
-        runtime.port = Some(port);
-        runtime.endpoint = Some(endpoint.clone());
-        runtime.child = Some(child);
-        runtime.managed_by_app = true;
-    }
+        if is_model_download_in_progress(&runtime) {
+            return Err("AI_MODEL_DOWNLOAD_BUSY: model download is in progress".to_string());
+        }
+        if matches!(runtime.phase, AiRuntimePhase::Starting) {
+            return Ok(runtime.to_status(Vec::new()));
+        }
+        if ensure_child_not_exited(&mut runtime).await? && runtime.endpoint.is_some() {
+            return Ok(runtime.to_status(Vec::new()));
+        }
 
-    if let Err(e) = wait_until_port_ready(port).await {
+        runtime.phase = AiRuntimePhase::Starting;
+        runtime.last_error = None;
+        runtime.server_bin = Some(server_bin.clone());
+        runtime.model_path = Some(model_path.clone());
+        runtime.model_name = Some(model_name_from_path(&model_path));
+        runtime.model_downloaded_bytes = None;
+        runtime.model_total_bytes = None;
+
+        match command.spawn() {
+            Ok(child) => {
+                runtime.start_generation = runtime.start_generation.wrapping_add(1);
+                runtime.port = Some(port);
+                runtime.endpoint = Some(endpoint.clone());
+                runtime.child = Some(child);
+                runtime.managed_by_app = true;
+                runtime.start_generation
+            }
+            Err(e) => {
+                runtime.phase = AiRuntimePhase::Error;
+                runtime.last_error = Some(format!("Failed to start bundled AI runtime: {e}"));
+                return Err(format!("Failed to start bundled AI runtime: {e}"));
+            }
+        }
+    };
+
+    if let Err(e) = wait_until_port_ready(port, generation, state).await {
         let mut runtime = state.ai_runtime.lock().await;
+        if !is_current_start(&runtime, port, generation) {
+            return Ok(runtime.to_status(Vec::new()));
+        }
         if let Some(child) = runtime.child.as_mut() {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -537,12 +564,18 @@ pub async fn ai_runtime_start(
         runtime.child = None;
         runtime.phase = AiRuntimePhase::Error;
         runtime.last_error = Some(e.clone());
+        runtime.endpoint = None;
+        runtime.port = None;
+        runtime.managed_by_app = false;
         return Err(e);
     }
 
     let mut runtime = state.ai_runtime.lock().await;
+    if !is_current_start(&runtime, port, generation) {
+        return Ok(runtime.to_status(Vec::new()));
+    }
     runtime.phase = AiRuntimePhase::Ready;
-    runtime.to_status(Vec::new()).pipe(Ok)
+    Ok(runtime.to_status(Vec::new()))
 }
 
 pub async fn ai_runtime_stop(state: &AppState) -> Result<AiRuntimeStatus, String> {
@@ -570,6 +603,35 @@ async fn abort_model_download(state: &AppState, temp_path: &Path, error: String)
     runtime.model_total_bytes = None;
     runtime.cancel_model_download = false;
     error
+}
+
+async fn download_cancel_requested(state: &AppState) {
+    loop {
+        {
+            let runtime = state.ai_runtime.lock().await;
+            if runtime.cancel_model_download {
+                return;
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn apply_canceled_model_download(
+    state: &AppState,
+    temp_path: &Path,
+    server_bin: Option<&Path>,
+) -> AiRuntimeStatus {
+    let _ = fs::remove_file(temp_path);
+    let mut runtime = state.ai_runtime.lock().await;
+    runtime.phase = AiRuntimePhase::Missing;
+    runtime.last_error = Some("AI model download canceled.".to_string());
+    runtime.model_path = None;
+    runtime.model_name = None;
+    runtime.model_downloaded_bytes = None;
+    runtime.model_total_bytes = None;
+    runtime.cancel_model_download = false;
+    runtime.to_status(missing_items(server_bin, None))
 }
 
 async fn stop_runtime_handle(runtime: &mut AiRuntimeHandle) -> Result<(), String> {
@@ -671,11 +733,16 @@ pub async fn ai_runtime_download_default_model(
 
     let model_url = default_model_download_url();
     let downloaded = async {
-        let response = reqwest::Client::new()
-            .get(&model_url)
-            .send()
-            .await
-            .map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?;
+        let response = tokio::select! {
+            _ = download_cancel_requested(state) => {
+                return Ok(
+                    apply_canceled_model_download(state, &temp_path, server_bin.as_deref()).await,
+                );
+            }
+            result = reqwest::Client::new().get(&model_url).send() => {
+                result.map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?
+            }
+        };
 
         if !response.status().is_success() {
             return Err(format!(
@@ -698,27 +765,21 @@ pub async fn ai_runtime_download_default_model(
             .map_err(|e| format!("Failed to create temp model file: {e}"))?;
         let mut response = response;
         let mut downloaded_bytes: u64 = 0;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?
-        {
-            {
-                let runtime = state.ai_runtime.lock().await;
-                if runtime.cancel_model_download {
-                    drop(runtime);
-                    let _ = fs::remove_file(&temp_path);
-                    let mut runtime = state.ai_runtime.lock().await;
-                    runtime.phase = AiRuntimePhase::Missing;
-                    runtime.last_error = Some("AI model download canceled.".to_string());
-                    runtime.model_path = None;
-                    runtime.model_name = None;
-                    runtime.model_downloaded_bytes = None;
-                    runtime.model_total_bytes = None;
-                    runtime.cancel_model_download = false;
-                    return Ok(runtime.to_status(missing_items(server_bin.as_deref(), None)));
+        loop {
+            let chunk = tokio::select! {
+                _ = download_cancel_requested(state) => {
+                    return Ok(
+                        apply_canceled_model_download(state, &temp_path, server_bin.as_deref())
+                            .await,
+                    );
                 }
-            }
+                chunk = response.chunk() => {
+                    chunk.map_err(|e| format!("AI_MODEL_DOWNLOAD_FAILED: {e}"))?
+                }
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
 
             downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
             file.write_all(&chunk)
@@ -797,17 +858,12 @@ pub async fn ai_runtime_delete_default_model(
     Ok(ai_runtime_status(app, state).await)
 }
 
-trait Pipe: Sized {
-    fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T {
-        f(self)
-    }
-}
-
-impl<T> Pipe for T {}
-
 #[cfg(test)]
 mod tests {
-    use super::missing_items;
+    use super::{
+        is_current_start, is_model_download_in_progress, missing_items, AiRuntimeHandle,
+        AiRuntimePhase,
+    };
     use std::path::Path;
 
     #[test]
@@ -839,5 +895,26 @@ mod tests {
         assert!(missing
             .iter()
             .any(|item| item.contains("Missing GGUF model")));
+    }
+
+    #[test]
+    fn current_start_requires_matching_generation_and_port() {
+        let mut runtime = AiRuntimeHandle::default();
+        runtime.start_generation = 3;
+        runtime.port = Some(1234);
+
+        assert!(is_current_start(&runtime, 1234, 3));
+        assert!(!is_current_start(&runtime, 1234, 2));
+        assert!(!is_current_start(&runtime, 9999, 3));
+    }
+
+    #[test]
+    fn download_in_progress_requires_starting_and_bytes() {
+        let mut runtime = AiRuntimeHandle::default();
+        runtime.phase = AiRuntimePhase::Starting;
+        assert!(!is_model_download_in_progress(&runtime));
+
+        runtime.model_downloaded_bytes = Some(0);
+        assert!(is_model_download_in_progress(&runtime));
     }
 }
