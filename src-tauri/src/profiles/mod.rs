@@ -2,6 +2,7 @@
 pub mod export_crypto;
 pub mod import_common;
 pub mod import_dbeaver;
+pub mod import_env;
 pub mod import_external;
 pub mod import_tableplus;
 pub mod sharing;

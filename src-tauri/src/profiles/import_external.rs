@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::profiles::import_dbeaver;
+use crate::profiles::import_env;
 use crate::profiles::import_tableplus;
 use crate::profiles::store as profile_store;
 use crate::profiles::types::ConnectionProfile;
@@ -11,6 +12,7 @@ use crate::profiles::types::ConnectionProfile;
 #[serde(rename_all = "snake_case")]
 pub enum ExternalImportSource {
     Dbeaver,
+    Env,
     Tableplus,
 }
 
@@ -60,6 +62,17 @@ pub fn import_external_file(
                 report.passwords_included,
             )
         }
+        ExternalFormat::Env => {
+            let text = std::str::from_utf8(&bytes)
+                .map_err(|_| "ENV_FILE_INVALID: file must be UTF-8 text".to_string())?;
+            let report = import_env::parse_env(text)?;
+            (
+                ExternalImportSource::Env,
+                report.profiles,
+                report.skipped,
+                report.passwords_included,
+            )
+        }
     };
 
     let (created, updated, profiles) = profile_store::profile_upsert_many(app, profiles)?;
@@ -78,6 +91,7 @@ pub fn import_external_file(
 
 enum ExternalFormat {
     Dbeaver,
+    Env,
     TablePlus,
 }
 
@@ -86,6 +100,15 @@ fn detect_format(path: &Path, bytes: &[u8]) -> Result<ExternalFormat, String> {
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if file_name == ".env" || file_name.starts_with(".env.") || ext.as_deref() == Some("env") {
+        return Ok(ExternalFormat::Env);
+    }
 
     if ext.as_deref() == Some("tableplusconnection")
         || (bytes.len() >= 2 && bytes[0] == 0x03 && bytes[1] == 0x01)
@@ -145,7 +168,7 @@ fn detect_format(path: &Path, bytes: &[u8]) -> Result<ExternalFormat, String> {
     }
 
     Err(
-        "Unrecognized import file. Use DBeaver data-sources.json, TablePlus .tableplusconnection / Connections.plist, or PoliteDB .politedbconnection."
+        "Unrecognized import file. Use a .env file, DBeaver data-sources.json, TablePlus .tableplusconnection / Connections.plist, or PoliteDB .politedbconnection."
             .into(),
     )
 }
@@ -160,5 +183,15 @@ mod tests {
             br#"{"connections":{"a":{"provider":"postgresql","name":"x","configuration":{}}}}"#;
         let fmt = detect_format(Path::new("/tmp/data-sources.json"), json).unwrap();
         assert!(matches!(fmt, ExternalFormat::Dbeaver));
+    }
+
+    #[test]
+    fn detects_env_files() {
+        let fmt = detect_format(
+            Path::new("/tmp/.env.local"),
+            b"DATABASE_URL=postgres://localhost/app",
+        )
+        .unwrap();
+        assert!(matches!(fmt, ExternalFormat::Env));
     }
 }

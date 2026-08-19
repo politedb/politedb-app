@@ -11,8 +11,13 @@ import { cn } from "src/utils/cn";
 import { PoliteDbIcon } from "../icons/PoliteDb";
 import { DbeaverIcon } from "../icons/Dbeaver";
 import { TablePlusIcon } from "../icons/TablePlus";
+import { ConsoleIcon } from "src/components/icons";
 
-export type ImportConnectionSource = "dbeaver" | "tableplus" | "politedb";
+export type ImportConnectionSource =
+  | "dbeaver"
+  | "env"
+  | "tableplus"
+  | "politedb";
 
 const SOURCES: {
   id: ImportConnectionSource;
@@ -21,6 +26,14 @@ const SOURCES: {
   hint: string;
   icon: React.ReactNode;
 }[] = [
+  {
+    id: "env",
+    title: "Environment file",
+    description:
+      "Import database settings or connection URLs from a .env file.",
+    hint: "Supports DB_HOST/PORT/USER/PASSWORD/NAME and common database URLs.",
+    icon: <ConsoleIcon className="size-full p-2 text-slate-600" />,
+  },
   {
     id: "politedb",
     title: "PoliteDB",

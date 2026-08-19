@@ -295,7 +295,7 @@ export type ProfileImportResult = {
   profiles: ConnectionProfile[];
 };
 
-export type ExternalImportSource = "dbeaver" | "tableplus";
+export type ExternalImportSource = "dbeaver" | "env" | "tableplus";
 
 export type ExternalImportResult = ProfileImportResult & {
   source: ExternalImportSource;

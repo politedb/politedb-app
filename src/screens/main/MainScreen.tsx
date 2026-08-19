@@ -264,30 +264,34 @@ export function MainScreen() {
 
     try {
       const path = await pickOpenFile(
-        source === "dbeaver"
+        source === "env"
           ? {
-              title: "Select DBeaver data-sources.json",
-              filters: [{ name: "DBeaver", extensions: ["json"] }],
+              title: "Select environment file",
             }
-          : source === "tableplus"
+          : source === "dbeaver"
             ? {
-                title: "Select TablePlus export",
-                filters: [
-                  {
-                    name: "TablePlus",
-                    extensions: ["tableplusconnection", "plist"],
-                  },
-                ],
+                title: "Select DBeaver data-sources.json",
+                filters: [{ name: "DBeaver", extensions: ["json"] }],
               }
-            : {
-                title: "Select PoliteDB export",
-                filters: [
-                  {
-                    name: "PoliteDB Connection",
-                    extensions: [CONNECTION_EXPORT_EXTENSION],
-                  },
-                ],
-              }
+            : source === "tableplus"
+              ? {
+                  title: "Select TablePlus export",
+                  filters: [
+                    {
+                      name: "TablePlus",
+                      extensions: ["tableplusconnection", "plist"],
+                    },
+                  ],
+                }
+              : {
+                  title: "Select PoliteDB export",
+                  filters: [
+                    {
+                      name: "PoliteDB Connection",
+                      extensions: [CONNECTION_EXPORT_EXTENSION],
+                    },
+                  ],
+                }
       );
       if (!path || typeof path !== "string") return;
 

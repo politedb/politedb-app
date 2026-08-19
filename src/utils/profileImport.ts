@@ -5,6 +5,7 @@ export const IMPORT_FILE_EXTENSIONS = [
   "json",
   "tableplusconnection",
   "plist",
+  "env",
 ] as const;
 
 export function isTablePlusEncryptedPath(path: string) {
@@ -32,7 +33,12 @@ export function isLikelyTablePlusPlistPath(path: string) {
 export function formatExternalImportSuccessMessage(
   result: ExternalImportResult
 ) {
-  const sourceLabel = result.source === "dbeaver" ? "DBeaver" : "TablePlus";
+  const sourceLabel =
+    result.source === "dbeaver"
+      ? "DBeaver"
+      : result.source === "env"
+        ? ".env"
+        : "TablePlus";
 
   const lines = [
     `Imported ${result.created} connection(s) from ${sourceLabel}.`,
@@ -57,7 +63,7 @@ export function formatExternalImportSuccessMessage(
       "",
       "DBeaver stores passwords in a separate encrypted credentials file. Enter database passwords in PoliteDB after import."
     );
-  } else if (!result.passwords_included) {
+  } else if (result.source === "tableplus" && !result.passwords_included) {
     lines.push(
       "",
       "No passwords were found in this TablePlus export. Re-enter them in each connection after import."
@@ -77,7 +83,8 @@ export function formatExternalImportError(err: unknown) {
   }
   if (
     msg.includes("DBEAVER_IMPORT_EMPTY") ||
-    msg.includes("TABLEPLUS_IMPORT_EMPTY")
+    msg.includes("TABLEPLUS_IMPORT_EMPTY") ||
+    msg.includes("ENV_IMPORT_EMPTY")
   ) {
     return "No supported connections were found in this file.";
   }
