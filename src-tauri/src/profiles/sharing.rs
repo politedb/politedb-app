@@ -405,6 +405,7 @@ mod tests {
                 snowflake: None,
                 duckdb: None,
                 clickhouse: None,
+                google_sheets: None,
             },
             tags: vec![],
             indicator_color: None,

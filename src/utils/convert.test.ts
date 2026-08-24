@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { cellToString, cellToUtf8String } from "./convert";
+import {
+  cellToBinaryHexString,
+  cellToString,
+  formatBytesB64AsHex,
+} from "./convert";
 
-describe("cellToString", () => {
-  it("renders binary cells as uppercase hex", () => {
-    expect(cellToString({ t: "BytesB64", v: "AQID/w==" })).toBe("010203FF");
+describe("cell conversion", () => {
+  it("keeps BytesB64 text conversion backward compatible", () => {
+    expect(cellToString({ t: "BytesB64", v: "aW50" })).toBe("int");
   });
 
-  it("decodes byte cells as UTF-8 when explicitly requested", () => {
-    expect(cellToUtf8String({ t: "BytesB64", v: "aW50" })).toBe("int");
-    expect(cellToUtf8String({ t: "BytesB64", v: "dmFyY2hhcg==" })).toBe(
-      "varchar"
+  it("formats binary cells as hex only through the binary converter", () => {
+    expect(formatBytesB64AsHex("AQID/w==")).toBe("010203FF");
+    expect(cellToBinaryHexString({ t: "BytesB64", v: "AQID/w==" })).toBe(
+      "010203FF"
     );
+  });
+
+  it("preserves null semantics for both converters", () => {
+    expect(cellToString({ t: "Null" }, true)).toBeNull();
+    expect(cellToBinaryHexString({ t: "Null" }, true)).toBeNull();
   });
 });

@@ -1,9 +1,5 @@
 import { isSqliteLike } from "src/utils/sqliteLike";
-import {
-  cellToString,
-  cellToUtf8String,
-  formatBytesSize,
-} from "src/utils/convert";
+import { cellToString, formatBytesSize } from "src/utils/convert";
 import { normalizeClickhouseDbType } from "src/utils/clickhouse";
 import {
   diagramTableColumnsQuery,
@@ -57,14 +53,14 @@ export async function loadColumns(params: {
 
   return (res.rows as unknown[][])
     .map((r) => {
-      const name = cellToUtf8String(r?.[0]);
-      let db_type = cellToUtf8String(r?.[1]) ?? "";
+      const name = cellToString(r?.[0]);
+      let db_type = cellToString(r?.[1]) ?? "";
       if (engine === "clickhouse") {
-        db_type = normalizeClickhouseDbType(db_type, cellToUtf8String(r?.[2]));
+        db_type = normalizeClickhouseDbType(db_type, cellToString(r?.[2]));
       }
       const is_primary = diagramQ ? cellIsTruthyPrimary(r?.[2]) : undefined;
       const columnDefaultIndex = diagramQ ? 3 : engine === "clickhouse" ? 3 : 2;
-      const column_default = cellToUtf8String(r?.[columnDefaultIndex], true);
+      const column_default = cellToString(r?.[columnDefaultIndex], true);
       return { name, db_type, is_primary, column_default };
     })
     .filter(isNonEmptyName);
@@ -369,21 +365,21 @@ export async function loadMeta(params: {
     addLogQuery(qConstraints, engine);
 
     const structure = (structureRes.rows as unknown[][]).map((row) => ({
-      column_name: cellToUtf8String(row?.[1]),
-      data_type: cellToUtf8String(row?.[2]),
-      is_nullable: (cellToUtf8String(row?.[3]) ?? "").toLowerCase() === "yes",
+      column_name: cellToString(row?.[1]),
+      data_type: cellToString(row?.[2]),
+      is_nullable: (cellToString(row?.[3]) ?? "").toLowerCase() === "yes",
       check: "",
-      column_default: cellToUtf8String(row?.[4]),
-      comment: cellToUtf8String(row?.[5]) ?? "",
+      column_default: cellToString(row?.[4]),
+      comment: cellToString(row?.[5]) ?? "",
     }));
 
     const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
-      index_name: cellToUtf8String(row?.[0]),
-      index_algorithm: cellToUtf8String(row?.[1]),
-      is_unique: Number(cellToUtf8String(row?.[2]) ?? "1") === 0,
-      is_primary: cellToUtf8String(row?.[3])?.toLowerCase() === "true",
+      index_name: cellToString(row?.[0]),
+      index_algorithm: cellToString(row?.[1]),
+      is_unique: Number(cellToString(row?.[2]) ?? "1") === 0,
+      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
       index_definition: "",
-      column_name: cellToUtf8String(row?.[4]) ?? "",
+      column_name: cellToString(row?.[4]) ?? "",
       condition: "",
       include: "",
       comment: "",

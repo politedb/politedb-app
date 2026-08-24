@@ -141,14 +141,8 @@ fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
         return CellValue::BytesB64(B64.encode(b));
     }
 
-    // 4) Binary BLOB/VARBINARY/BINARY: always base64 (avoid corrupting arbitrary binary).
-    // MySQL reports TEXT and VARCHAR-like values through byte variants too; only binary
-    // charset means opaque bytes.
-    if is_binary_bytes(decoder) {
-        return CellValue::BytesB64(B64.encode(b));
-    }
-
-    // 5) DECIMAL/NEWDECIMAL: keep as string (lossless)
+    // 4) DECIMAL/NEWDECIMAL use the binary charset in MySQL metadata even
+    // though their payload is textual. Decode them before binary detection.
     if matches!(
         ty,
         ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL
@@ -157,6 +151,13 @@ fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
             Ok(s) => CellValue::Str(s.to_string()),
             Err(_) => CellValue::BytesB64(B64.encode(b)),
         };
+    }
+
+    // 5) Binary BLOB/VARBINARY/BINARY: always base64 (avoid corrupting arbitrary binary).
+    // MySQL reports TEXT and VARCHAR-like values through byte variants too; only binary
+    // charset means opaque bytes.
+    if is_binary_bytes(decoder) {
+        return CellValue::BytesB64(B64.encode(b));
     }
 
     // 6) ENUM/SET: returned as string (bytes). Keep UTF-8 else base64.
@@ -220,4 +221,37 @@ fn mysql_column_type_label(c: &mysql_async::Column) -> String {
     }
 
     label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decimal_with_binary_charset_stays_textual() {
+        let decoder = ColDecoder {
+            ty: ColumnType::MYSQL_TYPE_NEWDECIMAL,
+            character_set: 63,
+            flags: ColumnFlags::empty(),
+        };
+
+        match decode_bytes(b"123.45", &decoder) {
+            CellValue::Str(value) => assert_eq!(value, "123.45"),
+            other => panic!("expected decimal string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blob_with_binary_charset_stays_base64() {
+        let decoder = ColDecoder {
+            ty: ColumnType::MYSQL_TYPE_LONG_BLOB,
+            character_set: 63,
+            flags: ColumnFlags::BINARY_FLAG,
+        };
+
+        match decode_bytes(&[0x01, 0x02, 0xff], &decoder) {
+            CellValue::BytesB64(value) => assert_eq!(value, "AQL/"),
+            other => panic!("expected base64 bytes, got {other:?}"),
+        }
+    }
 }

@@ -28,28 +28,38 @@ export function decodeBytesB64(b64: string): Uint8Array | null {
   }
 }
 
+function decodeBytesB64ToUtf8(b64: string): string {
+  const bytes = decodeBytesB64(b64);
+  if (!bytes) return b64;
+
+  try {
+    if (typeof TextDecoder === "function") {
+      return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    }
+
+    // Fallback: latin1-style string
+    return String.fromCharCode(...bytes);
+  } catch {
+    // Keep original encoded value if decode fails
+    return b64;
+  }
+}
+
 export function formatBytesB64AsHex(b64: string): string {
   const bytes = decodeBytesB64(b64);
-  if (!bytes) return "";
+  if (!bytes) return b64;
 
   return Array.from(bytes, (byte) =>
     byte.toString(16).padStart(2, "0").toUpperCase()
   ).join("");
 }
 
-export function cellToUtf8String(
+export function cellToBinaryHexString(
   cell: any,
   allowNull: boolean = false
 ): string | null {
-  if (cell && typeof cell === "object" && (cell as any).t === "BytesB64") {
-    const bytes = decodeBytesB64(String((cell as any).v ?? ""));
-    if (bytes && typeof TextDecoder === "function") {
-      try {
-        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      } catch {
-        return cellToString(cell, allowNull);
-      }
-    }
+  if (cell && typeof cell === "object" && cell.t === "BytesB64") {
+    return formatBytesB64AsHex(String(cell.v ?? ""));
   }
   return cellToString(cell, allowNull);
 }
@@ -72,9 +82,9 @@ export function cellToString(
     if (isDefaultCellEditValue(cell)) return "DEFAULT";
     // { t: "Null" }
     if ((cell as any).t === "Null") return allowNull ? null : "";
-    // { t: "BytesB64", v: "..." } -> uppercase hex for display/use
+    // { t: "BytesB64", v: "..." } -> decode for display/use
     if ((cell as any).t === "BytesB64") {
-      return formatBytesB64AsHex(String((cell as any).v ?? ""));
+      return decodeBytesB64ToUtf8(String((cell as any).v ?? ""));
     }
     // { t: "Str", v: "public" } and other scalar wrappers
     if ("v" in cell) return String((cell as any).v ?? "");

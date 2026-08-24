@@ -15,8 +15,16 @@ export interface UseTableDataOperationsProps {
   ) => void;
 }
 
+export function buildNewRowPatch(
+  columns: Array<{ name: string }>,
+  rowKey = `new_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+) {
+  const data: Record<string, unknown> = { __rowKey: rowKey };
+  for (const column of columns) data[column.name] = null;
+  return data;
+}
+
 export function useTableDataOperations({
-  activeKey,
   profileId,
   activeTableWindowId,
   isLocked = false,
@@ -45,15 +53,15 @@ export function useTableDataOperations({
   );
 
   const handleDeleteRow = useCallback(
-    (rowIndex: number, offset: number, rowKeyOverride?: string) => {
+    (rowIndex: number, _offset: number, rowKeyOverride?: string) => {
       if (isLocked) return;
       const rowKey = rowKeyOverride ?? String(rowIndex);
       const store = useConnectionStore.getState();
       const windowPatches =
         store.dataPatchMap[profileId]?.[activeTableWindowId]?.patches ?? null;
 
-      // If this row is a new row (only in create patch), remove the create patch
-      // and the row from the store so we don't generate INSERT + DELETE SQL
+      // Unsaved rows exist only in create patches. Removing one must not mutate
+      // the loaded row cache, which contains authoritative database rows.
       if (windowPatches?.create?.data?.[rowKey]) {
         store.removeDataPatch(
           profileId,
@@ -62,20 +70,18 @@ export function useTableDataOperations({
           DATA_KEYS.data,
           rowKey
         );
-        const globalRowIndex = offset + rowIndex;
-        store.removeRow(activeKey, globalRowIndex);
         return;
       }
 
       onDataChange?.(DATA_ACTIONS.delete, DATA_KEYS.data, rowIndex, {});
     },
-    [isLocked, activeKey, activeTableWindowId, onDataChange, profileId]
+    [isLocked, activeTableWindowId, onDataChange, profileId]
   );
 
   const handleAddRow = useCallback(
     (
       columns: Array<{ name: string }>,
-      rowIndex: number,
+      _rowIndex: number,
       onDataChange?: (
         action: DataAction,
         dataKey: DataKey,
@@ -89,29 +95,18 @@ export function useTableDataOperations({
         return;
       }
 
-      // Generate a unique row key for the new row
-      const newRowKey = rowIndex.toString();
-
-      // Initialize the new row with empty values for all columns
-      const newRowData: Record<string, any> = {};
-      columns.forEach((col) => {
-        newRowData[col.name] = null;
-      });
-
-      // Add the row to the store (always use current activeKey so we don't add to the wrong table when switching)
-      useConnectionStore
-        .getState()
-        .addRow(activeKey, Object.values(newRowData));
-
-      // Create the new row patch with action="create"
+      // New rows have one authoritative representation: the create patch.
+      // The table derives its visible new rows from these patches.
       if (onDataChange) {
-        onDataChange(DATA_ACTIONS.create, DATA_KEYS.data, -1, {
-          ...newRowData,
-          __rowKey: newRowKey,
-        });
+        onDataChange(
+          DATA_ACTIONS.create,
+          DATA_KEYS.data,
+          -1,
+          buildNewRowPatch(columns)
+        );
       }
     },
-    [isLocked, activeKey]
+    [isLocked]
   );
 
   return {

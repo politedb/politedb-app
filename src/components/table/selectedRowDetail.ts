@@ -3,7 +3,7 @@ import type {
   SelectedRowDetail,
   SelectedRowField,
 } from "src/stores/connection";
-import { cellToString } from "src/utils/convert";
+import { formatTableCellValue } from "./tableCellValue";
 
 type PatchHelpers = {
   getPatchedValue: (
@@ -33,7 +33,7 @@ export function buildSelectedRowFields(
       rowArr[colIdx],
       newRows
     );
-    const parsed = cellToString(raw, true);
+    const parsed = formatTableCellValue(raw, col.db_type, true);
     const isNull = parsed === null;
     return {
       name: col.name,

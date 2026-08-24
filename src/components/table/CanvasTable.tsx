@@ -23,11 +23,11 @@ import { useTableFocusState } from "src/hooks/useTableFocusState";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { openDialog } from "src/lib/system-dialog";
 import { readFile } from "src/lib/system-fs";
+import { formatTableCellValue } from "./tableCellValue";
+import { tableCellBackground } from "./tableCellBackground";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
-const SELECTED_BG_FOCUSED = "#bedbff";
-const SELECTED_BG_UNFOCUSED = "#dbdbdb";
 const ACTIVE_CELL_STROKE_FOCUSED = "#0000ff";
 const ACTIVE_CELL_STROKE_UNFOCUSED = "#9ca3af";
 const SELECTED_TEXT_UNFOCUSED = "#6b7280";
@@ -599,39 +599,30 @@ export function CanvasTable({
         const cached = cellTextCacheRef.current.get(valueKey);
         let s = cached?.text;
         if (!cached || !Object.is(cached.raw, v)) {
-          s = cellToString(v) || "NULL";
+          s = formatTableCellValue(v, col.db_type) || "NULL";
           if (cellTextCacheRef.current.size > 50000) {
             cellTextCacheRef.current.clear();
           }
           cellTextCacheRef.current.set(valueKey, { raw: v, text: s });
         }
 
-        const dirty = isCellDirty?.(r, col.name);
-
-        if (dirty) {
-          ctx.fillStyle = "#fdf0bb";
-          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
-        }
-
-        if (deletedRows?.has(r)) {
-          ctx.fillStyle = "#fbbdbd";
-          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
-        }
-
-        if (isNewRow?.(r)) {
-          ctx.fillStyle = "#dcfce7";
-          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
-        }
-
+        const dirty = !!isCellDirty?.(r, col.name);
         const isRowSelected =
           selectedRows?.has(r) || (selected && selected.rowIdx === r);
+        const background = tableCellBackground({
+          dirty,
+          deleted: !!deletedRows?.has(r),
+          newRow: !!isNewRow?.(r),
+          selected: !!isRowSelected,
+          focused: isFocused,
+        });
+
+        if (background) {
+          ctx.fillStyle = background;
+          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
+        }
 
         if (isRowSelected) {
-          ctx.fillStyle = isFocused
-            ? SELECTED_BG_FOCUSED
-            : SELECTED_BG_UNFOCUSED;
-          ctx.fillRect(x, y + 1, w - 1, ROW_HEIGHT - 1);
-
           if (selected && selected.colIdx === c && selected.rowIdx === r) {
             ctx.strokeStyle = isFocused
               ? ACTIVE_CELL_STROKE_FOCUSED
@@ -1451,8 +1442,11 @@ export function CanvasTable({
       onStartEdit?.({ rowIdx, colIdx });
 
       const row = getRowAt(rowIdx);
-      const s = cellToString(row?.[colIdx] ?? null);
       const kind = getCellEditorKind(columns[colIdx]);
+      const s = formatTableCellValue(
+        row?.[colIdx] ?? null,
+        columns[colIdx]?.db_type
+      );
       setEditorError(null);
       if (kind === "bool") {
         const normalized = String(s ?? "").toLowerCase();
