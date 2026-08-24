@@ -2,6 +2,7 @@ import {
   ChatPlusIcon,
   ClockIcon,
   DatabaseIcon,
+  DownloadIcon,
   HeartIcon,
   KeyboardIcon,
   KeyIcon,
@@ -19,7 +20,6 @@ import {
   type SettingsDialogSection,
 } from "src/components/modal/SettingsDialog";
 import { useState } from "preact/hooks";
-// import { TagChips } from "src/components/common/TagChips";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 const REQUEST_FEATURE_URL =
@@ -155,16 +155,6 @@ export function LeftNav(props: {
               </ul>
             </div>
           </div>
-          {updateAvailable && (
-            <Button
-              onClick={() => void installUpdate()}
-              disabled={isInstallingUpdate}
-              class="w-full rounded-xl text-sm disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isInstallingUpdate ? "Installing update..." : "Update"}
-            </Button>
-          )}
-
           <Dropdown
             widthClassName="w-64 px-2!"
             open={openSettings}
@@ -172,7 +162,7 @@ export function LeftNav(props: {
             positions={["top", "left"]}
             align="start"
             trigger={
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex w-full items-center gap-2">
                 <Button
                   variant="ghost"
                   className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:border-slate-100 hover:bg-slate-100"
@@ -184,6 +174,25 @@ export function LeftNav(props: {
                     Settings
                   </div>
                 </Button>
+
+                {updateAvailable ? (
+                  <Button
+                    class="rounded-full p-1"
+                    title={isInstallingUpdate ? "Installing..." : "Download"}
+                    aria-label={isInstallingUpdate ? "Installing" : "Download"}
+                    disabled={isInstallingUpdate}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void installUpdate();
+                    }}
+                  >
+                    {isInstallingUpdate ? (
+                      <span class="px-1">Installing</span>
+                    ) : (
+                      <DownloadIcon className="size-3.5" />
+                    )}
+                  </Button>
+                ) : null}
               </div>
             }
             items={[
