@@ -164,20 +164,15 @@ export function TableStructure({
     [filteredTableData]
   );
 
-  const {
-    selectedRowIndex,
-    selectedRows,
-    selectedColIndex,
-    handleRowSelect,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
-    deletedRows,
-    containerRef: rootRef,
-    totalRows: tableData.length,
-    selectableRowIndices,
-    isTableFocused,
-  });
+  const { selectedRowIndex, selectedRows, handleRowSelect, handleColSelect } =
+    useTableRowSelection({
+      onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
+      deletedRows,
+      containerRef: rootRef,
+      totalRows: tableData.length,
+      selectableRowIndices,
+      isTableFocused,
+    });
 
   useEffect(() => {
     if (!allowForeignKeyEditing && fkRowIndex !== null) {
@@ -205,7 +200,12 @@ export function TableStructure({
   const structureUpdatePatches = useMemo(
     () =>
       dataPatchMap?.[activeTableWindow.id]?.patches?.update?.structure ?? {},
-    [JSON.stringify(dataPatchMap)]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      activeTableWindow.id,
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      dataPatchMap?.[activeTableWindow.id]?.patches?.update?.structure,
+    ]
   );
 
   const tableColumns = useMemo<
@@ -371,26 +371,24 @@ export function TableStructure({
         },
       })),
     ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
-      busy,
-      editedData,
+      visibleColumns,
+      initData,
       deletedRows,
       selectedRows,
-      selectedRowIndex,
-      selectedColIndex,
-      handleDataChange,
-      handleColSelect,
-      handleRowSelect,
-      initData,
       columnInputOptions,
-      foreignKeys,
       findFkForColumn,
+      foreignKeys,
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       JSON.stringify(structureUpdatePatches),
-      openFkDialog,
-      readOnly,
-      visibleColumns,
-      allowForeignKeyEditing,
       isTableFocused,
+      busy,
+      readOnly,
+      handleDataChange,
+      handleRowSelect,
+      handleColSelect,
+      openFkDialog,
     ]
   );
 

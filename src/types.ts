@@ -150,7 +150,8 @@ export type DatabaseEngine =
   | "snowflake"
   | "duckdb"
   | "cassandra"
-  | "clickhouse";
+  | "clickhouse"
+  | "google_sheets";
 
 export type DatabaseType = {
   engine: DatabaseEngine;
@@ -158,6 +159,7 @@ export type DatabaseType = {
   abbreviation: string;
   color: string;
   available: boolean;
+  desc?: string;
 };
 
 export type TableSizeInfo = {
@@ -229,6 +231,7 @@ export type DatabaseConfig = {
   dataTypes: readonly string[];
   indexAlgorithms: readonly string[];
   allowFk?: boolean;
+  isBeta?: boolean;
 };
 
 export type TableForeignKey = {

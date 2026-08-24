@@ -24,8 +24,7 @@ export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
 function isAbortError(error: unknown) {
   if (error instanceof DOMException && error.name === "AbortError") return true;
-  const message =
-    error instanceof Error ? error.message : String(error ?? "");
+  const message = error instanceof Error ? error.message : String(error ?? "");
   return message.includes("AI_CHAT_CANCELED");
 }
 

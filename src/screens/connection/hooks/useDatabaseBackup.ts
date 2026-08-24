@@ -878,6 +878,7 @@ export function useDatabaseBackup() {
         setDbRestoreRunning(false);
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.refreshSchemaAndTables]
   );
 

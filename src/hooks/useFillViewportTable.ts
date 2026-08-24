@@ -63,14 +63,7 @@ export function useFillViewportTable({
     resizeObserver.observe(containerRef.current);
 
     return () => resizeObserver.disconnect();
-  }, [
-    dataLength,
-    fillViewport,
-    estimatedRowHeight,
-    headerHeight,
-    // Note: containerRef and tableRef are refs and don't need to be in deps
-    // but we include tableRef?.current in the closure for safety
-  ]);
+  }, [dataLength, fillViewport, estimatedRowHeight, headerHeight, tableRef]);
 
   return { emptyRowsCount, containerRef };
 }

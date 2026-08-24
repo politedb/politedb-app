@@ -163,6 +163,7 @@ export function TableData({
         colName
       );
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [patches, patchHelpers, newRows]
   );
 

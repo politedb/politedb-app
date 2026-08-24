@@ -3,6 +3,7 @@ pub mod app;
 pub mod cassandra;
 pub mod connection;
 pub mod export;
+pub mod google_sheets;
 pub mod license;
 pub mod mongo;
 pub mod operation;

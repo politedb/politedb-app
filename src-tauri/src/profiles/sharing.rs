@@ -147,6 +147,11 @@ fn resolve_db_passwords_inline(
                 turso.auth_token = inline_secret_from_ref(app, &turso.auth_token)?;
             }
         }
+        EngineKind::GoogleSheets => {
+            if let Some(sheets) = input.google_sheets.as_mut() {
+                sheets.credential = inline_secret_from_ref(app, &sheets.credential)?;
+            }
+        }
         EngineKind::Sqlite | EngineKind::Duckdb => {}
     }
     Ok(())
@@ -214,6 +219,11 @@ fn redact_db_passwords(input: &mut ConnectionCreateInput) {
         EngineKind::Turso => {
             if let Some(turso) = input.turso.as_mut() {
                 redact(&mut turso.auth_token);
+            }
+        }
+        EngineKind::GoogleSheets => {
+            if let Some(sheets) = input.google_sheets.as_mut() {
+                redact(&mut sheets.credential);
             }
         }
         EngineKind::Sqlite | EngineKind::Duckdb => {}

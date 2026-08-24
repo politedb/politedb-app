@@ -63,7 +63,7 @@ export function useTableMetaState(props: Props) {
 
   useEffect(() => {
     setPrimaryKey(primaryKeyFromDB);
-  }, [primaryKeyFromDB.join(",")]);
+  }, [primaryKeyFromDB]);
 
   const changeTableName = useCallback(
     (name: string) => {

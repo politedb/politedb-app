@@ -20,6 +20,7 @@ fn engine_key(engine: EngineKind) -> &'static str {
         EngineKind::Redis => "redis",
         EngineKind::Snowflake => "snowflake",
         EngineKind::Clickhouse => "clickhouse",
+        EngineKind::GoogleSheets => "google_sheets",
     }
 }
 

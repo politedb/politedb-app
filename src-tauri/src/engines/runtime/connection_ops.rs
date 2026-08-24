@@ -56,6 +56,7 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Snowflake(c) => c.id,
             EngineConnection::Duckdb(c) => c.id,
             EngineConnection::Clickhouse(c) => c.id,
+            EngineConnection::GoogleSheets(c) => c.id,
         }
     }
 
@@ -74,6 +75,7 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Snowflake(c) => c.label.clone(),
             EngineConnection::Duckdb(c) => c.label.clone(),
             EngineConnection::Clickhouse(c) => c.label.clone(),
+            EngineConnection::GoogleSheets(c) => c.label.clone(),
         }
     }
 
@@ -92,6 +94,7 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Snowflake(_) => EngineKind::Snowflake,
             EngineConnection::Duckdb(_) => EngineKind::Duckdb,
             EngineConnection::Clickhouse(_) => EngineKind::Clickhouse,
+            EngineConnection::GoogleSheets(_) => EngineKind::GoogleSheets,
         }
     }
 
@@ -114,6 +117,7 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Snowflake(_) => {}
             EngineConnection::Duckdb(_) => {}
             EngineConnection::Clickhouse(_) => {}
+            EngineConnection::GoogleSheets(_) => {}
         }
     }
 
@@ -341,7 +345,10 @@ impl ConnectionOps for EngineConnection {
             }
             EngineConnection::Mongo(_)
             | EngineConnection::Cassandra(_)
-            | EngineConnection::Redis(_) => Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into()),
+            | EngineConnection::Redis(_)
+            | EngineConnection::GoogleSheets(_) => {
+                Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into())
+            }
         }
     }
 
@@ -674,7 +681,9 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Mongo(_) | EngineConnection::Cassandra(_) => {
                 Err("ENGINE_OPERATION_NOT_SUPPORTED".into())
             }
-            EngineConnection::Redis(_) => Err("ENGINE_OPERATION_NOT_SUPPORTED".into()),
+            EngineConnection::Redis(_) | EngineConnection::GoogleSheets(_) => {
+                Err("ENGINE_OPERATION_NOT_SUPPORTED".into())
+            }
         }
     }
 

@@ -31,7 +31,7 @@ export function AssignConnectionGroupDialog(props: {
     setValues(selectedGroupIds ?? []);
     setQuery("");
     setFocused(false);
-  }, [open, selectedGroupIdsKey]);
+  }, [open, selectedGroupIds, selectedGroupIdsKey]);
 
   const selectedGroups = useMemo(() => {
     const selected = new Set(values);

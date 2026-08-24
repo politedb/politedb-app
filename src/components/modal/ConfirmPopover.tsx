@@ -103,7 +103,7 @@ export function ConfirmPopover(props: {
     }
 
     setPos({ top, left, placement });
-  }, [open]);
+  }, [align, open]);
 
   // outside / esc
   useEffect(() => {

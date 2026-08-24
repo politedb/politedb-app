@@ -56,12 +56,13 @@ export function useTableStructureOperations({
         [field]: value,
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       isLocked,
-      initData?.length,
+      setEditedData,
       activeProfileScreen,
       activeTableWindowId,
-      setEditedData,
+      initData?.length,
       onDataChange,
     ]
   );

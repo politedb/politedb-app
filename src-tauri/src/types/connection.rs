@@ -6,8 +6,9 @@ use crate::{
     types::{
         engine::{
             CassandraConnectInput, ClickhouseConnectInput, D1ConnectInput, DuckdbConnectInput,
-            EngineKind, MongoConnectInput, MySqlConnectInput, OracleConnectInput, PgConnectInput,
-            SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput, TursoConnectInput,
+            EngineKind, GoogleSheetsConnectInput, MongoConnectInput, MySqlConnectInput,
+            OracleConnectInput, PgConnectInput, SnowflakeConnectInput, SqlServerConnectInput,
+            SqliteConnectInput, TursoConnectInput,
         },
         RedisConnectInput,
     },
@@ -38,6 +39,7 @@ pub struct ConnectionCreateInput {
     pub snowflake: Option<SnowflakeConnectInput>,
     pub duckdb: Option<DuckdbConnectInput>,
     pub clickhouse: Option<ClickhouseConnectInput>,
+    pub google_sheets: Option<GoogleSheetsConnectInput>,
 
     pub ssh: Option<SshTunnelInput>,
 }

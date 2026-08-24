@@ -280,6 +280,7 @@ fn build_tableplus_input(
         snowflake: None,
         duckdb: None,
         clickhouse: None,
+        google_sheets: None,
         ssh: None,
     };
 
@@ -451,6 +452,7 @@ fn build_tableplus_input(
                 statement_timeout_ms: None,
             });
         }
+        EngineKind::GoogleSheets => return Err("TABLEPLUS_ENGINE_NOT_SUPPORTED".into()),
     }
 
     Ok(input)
@@ -543,6 +545,10 @@ fn profile_has_password(profile: &ConnectionProfile) -> bool {
             .clickhouse
             .as_ref()
             .is_some_and(|p| secret_nonempty(&p.password)),
+        EngineKind::GoogleSheets => input
+            .google_sheets
+            .as_ref()
+            .is_some_and(|sheets| secret_nonempty(&sheets.credential)),
     }
 }
 

@@ -4,6 +4,7 @@ pub mod clickhouse;
 pub mod csv_import;
 pub mod d1;
 pub mod driver;
+pub mod google_sheets;
 pub mod duckdb;
 pub mod merge;
 pub mod mongo;
@@ -39,4 +40,5 @@ pub enum EngineConnection {
     Snowflake(snowflake::connection::SnowflakeConn),
     Duckdb(duckdb::connection::DuckdbConn),
     Clickhouse(clickhouse::connection::ClickhouseConn),
+    GoogleSheets(google_sheets::connection::GoogleSheetsConn),
 }

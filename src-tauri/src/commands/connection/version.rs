@@ -258,6 +258,9 @@ pub(crate) async fn fetch_connection_version(conn: &EngineConnection) -> Result<
                 }
             }
         }
+        crate::engines::EngineConnection::GoogleSheets(_) => {
+            Ok("Google Sheets API v4".to_string())
+        }
     }
 }
 

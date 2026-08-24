@@ -85,6 +85,7 @@ export function TableFilterBar({
       value: "",
       enabled: true,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columns[0]?.name]);
 
   const addRow = useCallback(() => {
@@ -112,7 +113,7 @@ export function TableFilterBar({
       next[index] = { ...next[index]!, ...patch };
       onFiltersChange(next);
     },
-    [filters, onFiltersChange]
+    [defaultFilter, filters, onFiltersChange]
   );
 
   const handleApplyAll = useCallback(
@@ -255,7 +256,7 @@ export function TableFilterBar({
                     (e.currentTarget as HTMLInputElement).blur();
                   }}
                   className={cn(
-                    "min-w-[140px] flex-1 px-3 py-0.25 text-sm outline-none",
+                    "min-w-35 flex-1 px-3 py-px text-sm outline-none",
                     "border border-neutral-300 bg-white focus:border-blue-400",
                     queryError &&
                       "border-red-300 bg-red-100! focus:border-red-400",
@@ -267,14 +268,14 @@ export function TableFilterBar({
               <div class="flex items-center gap-1">
                 <Button
                   variant="shadow"
-                  className="px-3 py-[3px] text-xs"
+                  className="px-3 py-0.75 text-xs"
                   onClick={() => handleApplyRow(row)}
                 >
                   Apply
                 </Button>
                 <Button
                   variant="shadow"
-                  className="p-[5px] text-xs"
+                  className="p-1.25 text-xs"
                   onClick={() => removeRow(index)}
                   aria-label="Remove filter"
                 >
@@ -283,7 +284,7 @@ export function TableFilterBar({
                 <Button
                   variant="shadow"
                   className={cn(
-                    "invisible p-[5px] text-xs",
+                    "invisible p-1.25 text-xs",
                     index === 0 && "visible"
                   )}
                   onClick={addRow}
@@ -303,7 +304,7 @@ export function TableFilterBar({
           {onExport && (
             <Button
               variant="shadow"
-              className="px-3 py-[3px] text-xs"
+              className="px-3 py-0.75 text-xs"
               onClick={onExport}
             >
               Export
@@ -312,7 +313,7 @@ export function TableFilterBar({
           {onShowSql && currentSql && (
             <Button
               variant="shadow"
-              className="px-3 py-[3px] text-xs"
+              className="px-3 py-0.75 text-xs"
               onClick={() => onShowSql(currentSql)}
             >
               SQL
@@ -323,7 +324,7 @@ export function TableFilterBar({
           <div class="flex items-center gap-2">
             <Button
               variant="shadow"
-              className="px-3 py-[3px] text-xs"
+              className="px-3 py-0.75 text-xs"
               onClick={() => onClear(true)}
             >
               Clear
@@ -331,7 +332,7 @@ export function TableFilterBar({
             <div class="relative">
               <Button variant="shadow" className="gap-0 p-0 text-xs">
                 <div
-                  class="py-[3px] pr-2 pl-3"
+                  class="py-0.75 pr-2 pl-3"
                   onClick={() => handleApplyAll("AND")}
                 >
                   Apply All

@@ -77,7 +77,7 @@ export function useCreateSchemaTable() {
         setBusy(false);
       }
     },
-    [activeTab, ensureRuntimeConnection]
+    [activeTab, addQueryHistory, addSchema, ensureRuntimeConnection]
   );
 
   const createTable = useCallback(

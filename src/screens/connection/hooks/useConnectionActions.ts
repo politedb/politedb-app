@@ -384,6 +384,7 @@ export function useConnectionActions(
 
   const openSql = useCallback(() => {
     openSqlEditor();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engine, openSqlEditor]);
 
   const selectTable = useCallback(
@@ -695,15 +696,17 @@ export function useConnectionActions(
     }
   }, [
     isActiveTabLocked,
+    getPatchMap,
     runtimeConnectionId,
-    activeProfileScreen,
+    refreshRuntimeConnection,
+    setError,
     engine,
-    runSqlWithHistory,
+    activeProfileScreen,
+    offset,
     clearTablePatchChanges,
     loadTableData,
     limit,
-    offset,
-    setError,
+    runSqlWithHistory,
     refreshSchemaAndTables,
   ]);
 
@@ -723,7 +726,13 @@ export function useConnectionActions(
     if (!hasPatches && !hasNewTable) return;
 
     setShowSaveDialog(true);
-  }, [isActiveTabLocked, getNewTableSql, getPatchMap, setError]);
+  }, [
+    isActiveTabLocked,
+    getNewTableSql,
+    getPatchMap,
+    setShowSaveDialog,
+    setError,
+  ]);
 
   const saveNewTables = useCallback(async () => {
     const drafts = getNewTableDraftEntries({
@@ -951,7 +960,16 @@ export function useConnectionActions(
         filterCombine: activeTableFilter?.appliedFilterCombine ?? "AND",
       }
     );
-  }, [clearChanges, closeTab, activeProfileScreen, activeTableWindow]);
+  }, [
+    activeTableWindow,
+    activeProfileScreen,
+    loadTableData,
+    limit,
+    offset,
+    clearChanges,
+    closeTab,
+    closeNewWindows,
+  ]);
 
   const renameRedisKey = useCallback(
     async (table: TableItem, nextName: string) => {

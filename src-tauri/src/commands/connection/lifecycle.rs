@@ -250,6 +250,16 @@ pub async fn connection_test(
                         }
                     }
                 }
+                crate::types::EngineKind::GoogleSheets => {
+                    if let Some(sheets) = input.google_sheets.as_mut() {
+                        if sheets.credential.kind == crate::types::SecretRefKind::Keychain
+                            && sheets.credential.value.trim().is_empty()
+                        {
+                            sheets.credential.kind = crate::types::SecretRefKind::Inline;
+                            sheets.credential.value = pw.to_string();
+                        }
+                    }
+                }
             }
         }
 

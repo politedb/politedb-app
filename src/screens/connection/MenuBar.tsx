@@ -437,9 +437,10 @@ export function MenuBar({
   }, [
     profile,
     activeTab?.databaseOverride,
+    activeTab?.label,
+    databaseVersion,
     activeSchema,
     activeTable,
-    databaseVersion,
   ]);
 
   const connected = !!connectionInfo && !loadTableError;
@@ -751,7 +752,7 @@ export function MenuBar({
 
               {progressVisible ? (
                 <div
-                  class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[3px] bg-neutral-100"
+                  class="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-0.75 bg-neutral-100"
                   role="progressbar"
                   aria-valuemin={0}
                   aria-valuemax={100}

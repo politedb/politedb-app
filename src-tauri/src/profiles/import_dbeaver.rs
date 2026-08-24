@@ -187,6 +187,7 @@ fn build_input(
         snowflake: None,
         duckdb: None,
         clickhouse: None,
+        google_sheets: None,
         ssh: None,
     };
 
@@ -355,6 +356,7 @@ fn build_input(
                 statement_timeout_ms: None,
             });
         }
+        EngineKind::GoogleSheets => return Err("DBEAVER_ENGINE_NOT_SUPPORTED".into()),
     }
 
     Ok(input)
@@ -473,6 +475,7 @@ fn remote_target(input: &ConnectionCreateInput, handler: &Value) -> (String, u16
             .as_ref()
             .map(|p| (p.host.clone(), p.port))
             .unwrap_or_else(|| ("127.0.0.1".into(), 9000)),
+        EngineKind::GoogleSheets => (String::new(), 0),
     }
 }
 

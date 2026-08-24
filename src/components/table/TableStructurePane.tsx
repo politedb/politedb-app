@@ -95,11 +95,14 @@ export function TableStructurePane(props: {
         activeTableMeta.structure
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     profileId,
     activeTableWindow.id,
     activeTableMeta.structure,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(tableStructure),
+    setTableStructure,
   ]);
 
   useEffect(() => {
@@ -110,11 +113,14 @@ export function TableStructurePane(props: {
         activeTableMeta.constraints
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     profileId,
     activeTableWindow.id,
     activeTableMeta.constraints,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(tableConstraints),
+    setTableConstraints,
   ]);
 
   return (

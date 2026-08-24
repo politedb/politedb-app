@@ -55,7 +55,8 @@ pub fn default_port(engine: EngineKind) -> u16 {
         | EngineKind::D1
         | EngineKind::Turso
         | EngineKind::Duckdb
-        | EngineKind::Snowflake => 0,
+        | EngineKind::Snowflake
+        | EngineKind::GoogleSheets => 0,
         EngineKind::Clickhouse => 9000,
     }
 }

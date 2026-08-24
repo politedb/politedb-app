@@ -505,91 +505,6 @@ export function CanvasTable({
 
   const bodyH = Math.max(1, viewport.h - HEADER_HEIGHT);
 
-  useEffect(() => {
-    textCacheRef.current.clear();
-    cellTextCacheRef.current.clear();
-  }, [dataVersion, colWidths]);
-
-  // --------------------------------------------------------------------------
-  // Resize Observer
-  // --------------------------------------------------------------------------
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-
-    let rafId: number | null = null;
-    let nextW = Math.max(1, Math.floor(el.clientWidth));
-    let nextH = Math.max(1, Math.floor(el.clientHeight));
-
-    const commitViewport = () => {
-      rafId = null;
-      const prev = viewportRef.current;
-      if (prev.w === nextW && prev.h === nextH) return;
-      const next = { w: nextW, h: nextH };
-      viewportRef.current = next;
-      setViewport(next);
-    };
-
-    const ro = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (!rect) return;
-      nextW = Math.max(1, Math.floor(rect.width));
-      nextH = Math.max(1, Math.floor(rect.height));
-      if (rafId != null) return;
-      rafId = requestAnimationFrame(commitViewport);
-    });
-
-    commitViewport();
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      if (rafId != null) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  // --------------------------------------------------------------------------
-  // Canvas Resolution Setup (HiDPI support)
-  // --------------------------------------------------------------------------
-  useLayoutEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    canvas.style.width = `${viewport.w}px`;
-    canvas.style.height = `${bodyH}px`;
-    canvas.width = Math.floor(viewport.w * dpr);
-    canvas.height = Math.floor(bodyH * dpr);
-
-    const ctx = canvas.getContext("2d");
-    ctxRef.current = ctx;
-    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    draw();
-  }, [viewport.w, viewport.h, bodyH]);
-
-  // --------------------------------------------------------------------------
-  // Helper: Get Cell Rect
-  // --------------------------------------------------------------------------
-  const getRect = useCallback(
-    (
-      rowIdx: number,
-      colIdx: number,
-      currentLeft: number,
-      currentTop: number
-    ) => {
-      const col = columns[colIdx];
-      if (!col) return null;
-
-      const x = (colLefts[colIdx] ?? 0) - currentLeft;
-      const w = colWidths[col.name] ?? 140; // Use state
-      const y = rowIdx * ROW_HEIGHT - currentTop;
-      const h = ROW_HEIGHT;
-
-      return { x, y, w, h };
-    },
-    [columns, colLefts, colWidths]
-  );
-
   // --------------------------------------------------------------------------
   // DRAW FUNCTION (Uses colWidths state)
   // --------------------------------------------------------------------------
@@ -775,20 +690,106 @@ export function CanvasTable({
       }
     }
   }, [
-    viewport.w,
     bodyH,
     totalRows,
+    viewport.w,
     columns,
     colLefts,
     colWidths,
     getRowAt,
-    selected,
-    selectedRows,
-    deletedRows,
     isCellDirty,
+    deletedRows,
     isNewRow,
+    selectedRows,
+    selected,
     isFocused,
+    foreignKeyMap,
   ]);
+
+  useEffect(() => {
+    textCacheRef.current.clear();
+    cellTextCacheRef.current.clear();
+  }, [dataVersion, colWidths]);
+
+  // --------------------------------------------------------------------------
+  // Resize Observer
+  // --------------------------------------------------------------------------
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    let rafId: number | null = null;
+    let nextW = Math.max(1, Math.floor(el.clientWidth));
+    let nextH = Math.max(1, Math.floor(el.clientHeight));
+
+    const commitViewport = () => {
+      rafId = null;
+      const prev = viewportRef.current;
+      if (prev.w === nextW && prev.h === nextH) return;
+      const next = { w: nextW, h: nextH };
+      viewportRef.current = next;
+      setViewport(next);
+    };
+
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      nextW = Math.max(1, Math.floor(rect.width));
+      nextH = Math.max(1, Math.floor(rect.height));
+      if (rafId != null) return;
+      rafId = requestAnimationFrame(commitViewport);
+    });
+
+    commitViewport();
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  // --------------------------------------------------------------------------
+  // Canvas Resolution Setup (HiDPI support)
+  // --------------------------------------------------------------------------
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = `${viewport.w}px`;
+    canvas.style.height = `${bodyH}px`;
+    canvas.width = Math.floor(viewport.w * dpr);
+    canvas.height = Math.floor(bodyH * dpr);
+
+    const ctx = canvas.getContext("2d");
+    ctxRef.current = ctx;
+    if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    draw();
+  }, [viewport.w, viewport.h, bodyH, draw]);
+
+  // --------------------------------------------------------------------------
+  // Helper: Get Cell Rect
+  // --------------------------------------------------------------------------
+  const getRect = useCallback(
+    (
+      rowIdx: number,
+      colIdx: number,
+      currentLeft: number,
+      currentTop: number
+    ) => {
+      const col = columns[colIdx];
+      if (!col) return null;
+
+      const x = (colLefts[colIdx] ?? 0) - currentLeft;
+      const w = colWidths[col.name] ?? 140; // Use state
+      const y = rowIdx * ROW_HEIGHT - currentTop;
+      const h = ROW_HEIGHT;
+
+      return { x, y, w, h };
+    },
+    [columns, colLefts, colWidths]
+  );
 
   useEffect(() => {
     draw();
@@ -1094,35 +1095,6 @@ export function CanvasTable({
     return true;
   }, [onPasteRows]);
 
-  const startEditingFromMenu = useCallback(
-    (rowIdx: number, colIdx: number) => {
-      const row = getRowAt(rowIdx);
-      const s = cellToString(row?.[colIdx] ?? null);
-      const kind = getCellEditorKind(columns[colIdx]);
-      onStartEdit?.({ rowIdx, colIdx });
-      setEditorError(null);
-      if (kind === "bool") {
-        const normalized = String(s ?? "").toLowerCase();
-        setEditorValue(
-          normalized === "true" || normalized === "1"
-            ? "true"
-            : normalized === "false" || normalized === "0"
-              ? "false"
-              : "__NULL__"
-        );
-      } else if (kind === "date" || kind === "datetime") {
-        setEditorValue(toDateInputValue(s ?? "", kind));
-      } else {
-        setEditorValue(s ?? "");
-      }
-      const { left, top } = scrollRef.current;
-      const r = getRect(rowIdx, colIdx, left, top);
-      if (r) setEditorRect(r);
-      queueMicrotask(() => editorRef.current?.focus());
-    },
-    [columns, getRect, getRowAt, onStartEdit]
-  );
-
   const commitMenuValue = useCallback(
     (rowIdx: number, colIdx: number, value: unknown) => {
       if (rowIdx < 0 || colIdx < 0) return;
@@ -1311,8 +1283,6 @@ export function CanvasTable({
     columns,
     rowMenu,
     selectedRows,
-    totalRows,
-    getRowAt,
     onRefresh,
     onAddRow,
     onDuplicateRow,
@@ -1324,7 +1294,6 @@ export function CanvasTable({
     onQuickFilter,
     copyCellValue,
     copyRowsAs,
-    startEditingFromMenu,
     commitMenuValue,
     addFileValue,
   ]);
@@ -1390,11 +1359,14 @@ export function CanvasTable({
       onSelect?.(rowIdx, colIdx, e.metaKey || e.ctrlKey, e.shiftKey);
     },
     [
-      columns,
-      editing,
       totalRows,
+      columns,
       colLefts,
       colWidths,
+      foreignKeyMap,
+      onCellActivate,
+      editing,
+      rootRef,
       onSelect,
       commitAndExit,
       onClearSelection,

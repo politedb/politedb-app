@@ -107,11 +107,13 @@ export function ForeignKeyDialog(props: {
       }
     };
     loadTableMetadata();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeScreen,
     schema,
     refKey,
     loadTableData,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(tableDataMap),
   ]);
 

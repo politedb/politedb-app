@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 type Direction = "vertical" | "horizontal";
 
@@ -51,16 +51,19 @@ export function SplitPane(props: Props) {
 
   const isVertical = direction === "vertical";
 
-  function getContainerSize() {
+  const getContainerSize = useCallback(() => {
     const el = containerRef.current;
     if (!el) return 0;
     return isVertical ? el.clientHeight : el.clientWidth;
-  }
+  }, [isVertical]);
 
-  function clampSize(px: number, total: number) {
-    const maxFirst = total - splitterPx - Math.max(minSecondPx, 0);
-    return Math.min(Math.max(px, minFirstPx), maxFirst);
-  }
+  const clampSize = useCallback(
+    (px: number, total: number) => {
+      const maxFirst = total - splitterPx - Math.max(minSecondPx, 0);
+      return Math.min(Math.max(px, minFirstPx), maxFirst);
+    },
+    [minFirstPx, minSecondPx, splitterPx]
+  );
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -116,7 +119,15 @@ export function SplitPane(props: Props) {
 
     ro.observe(el);
     return () => ro.disconnect();
-  }, [initialRatio, splitterPx, minFirstPx, minSecondPx, fixedPaneOnResize]);
+  }, [
+    initialRatio,
+    splitterPx,
+    minFirstPx,
+    minSecondPx,
+    fixedPaneOnResize,
+    getContainerSize,
+    clampSize,
+  ]);
 
   function onPointerDown(e: PointerEvent) {
     e.preventDefault();

@@ -140,7 +140,6 @@ export function ExportTableDialog({
     tableName,
     connectionId,
     schema,
-    tableName,
     totalRows,
     appliedFilters,
     appliedFilterCombine,

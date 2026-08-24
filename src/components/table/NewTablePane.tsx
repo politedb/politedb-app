@@ -198,14 +198,12 @@ export function NewTablePane({
         },
       })),
     [
-      tableState.columns.length,
-      selectedRowIndex,
+      tableState,
       selectedRows,
+      columnOptions,
+      isTableFocused,
       busy,
       isProfileLocked,
-      columnOptions,
-      tableState.updateColumn,
-      isTableFocused,
       handleRowSelect,
     ]
   );

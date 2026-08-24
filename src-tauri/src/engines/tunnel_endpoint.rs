@@ -50,6 +50,7 @@ pub fn rewrite_tunnel_endpoint(
             r.port = port;
         }
         crate::types::EngineKind::Snowflake => {}
+        crate::types::EngineKind::GoogleSheets => {}
         crate::types::EngineKind::Duckdb => {}
         crate::types::EngineKind::Clickhouse => {
             let ch = input

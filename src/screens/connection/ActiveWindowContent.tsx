@@ -70,11 +70,7 @@ export function ActiveWindowContent() {
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
-  }, [
-    profileId,
-    activeTableWindow?.table?.schema,
-    activeTableWindow?.table?.name,
-  ]);
+  }, [activeTableWindow, profileId]);
 
   // -------------------------------------------------------------------------
   // Orchestration: patch writes

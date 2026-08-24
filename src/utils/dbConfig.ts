@@ -78,4 +78,9 @@ const DATABASES_CONFIG: Record<DatabaseEngine, DatabaseConfig> = {
     indexAlgorithms: [],
     allowFk: false,
   },
+  google_sheets: {
+    dataTypes: [],
+    indexAlgorithms: [],
+    allowFk: false,
+  },
 };

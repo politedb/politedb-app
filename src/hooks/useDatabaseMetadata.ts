@@ -11,6 +11,8 @@ import {
   cassandraListTables,
   cassandraTableOverview,
   connectionVersion,
+  googleSheetsListSheets,
+  googleSheetsSheetOverview,
   mongoCollectionOverview,
   mongoListCollections,
   mongoListDatabases,
@@ -85,11 +87,14 @@ export function useDatabaseMetadata() {
   const [, bump] = useState(0);
   const touch = () => bump((v) => v + 1);
 
-  const setCache = (metaKey: string, patch: Partial<DbMetadata>) => {
-    const prev = cacheRef.current[metaKey] ?? emptyMeta(patch.engine);
-    cacheRef.current[metaKey] = { ...prev, ...patch };
-    touch();
-  };
+  const setCache = useCallback(
+    (metaKey: string, patch: Partial<DbMetadata>) => {
+      const prev = cacheRef.current[metaKey] ?? emptyMeta(patch.engine);
+      cacheRef.current[metaKey] = { ...prev, ...patch };
+      touch();
+    },
+    []
+  );
 
   const runMetadataQuery = useCallback(
     (connectionId: string, sql: string) =>
@@ -192,6 +197,45 @@ export function useDatabaseMetadata() {
       const p = (async (): Promise<DbMetadata> => {
         try {
           if (columnsOnly && existing) {
+            if (engine === "google_sheets") {
+              const columnsByTable: Record<string, string[]> = {};
+              const columnDetailsByTable: Record<string, AiColumnMetadata[]> =
+                {};
+              const tables = existing.tables ?? [];
+              for (let i = 0; i < tables.length; i++) {
+                const table = tables[i]!;
+                const overview = await googleSheetsSheetOverview({
+                  connectionId,
+                  sheet: table.name,
+                });
+                const key = `${table.schema}.${table.name}`;
+                columnsByTable[key] = overview.columns.map(
+                  (column) => column.name
+                );
+                columnDetailsByTable[key] = overview.columns.map((column) => ({
+                  name: column.name,
+                  dataType: column.db_type,
+                  nullable: "YES",
+                }));
+                setCache(metaKey, {
+                  progress:
+                    35 +
+                    Math.floor(((i + 1) / Math.max(1, tables.length)) * 65),
+                });
+              }
+              setCache(metaKey, {
+                columnsByTable,
+                columnDetailsByTable,
+                columnsLoaded: true,
+                loading: false,
+                loaded: true,
+                error: null,
+                progress: 100,
+                stage: "done",
+              });
+              return cacheRef.current[metaKey]!;
+            }
+
             if (engine === "mongo") {
               const columnsByTable: Record<string, string[]> = {
                 ...existing.columnsByTable,
@@ -308,6 +352,54 @@ export function useDatabaseMetadata() {
           }
 
           const version = await connectionVersion(connectionId);
+
+          if (engine === "google_sheets") {
+            const metadata = await googleSheetsListSheets(connectionId);
+            const schema = metadata.spreadsheet_title || "Google Sheets";
+            const tables: TableItem[] = metadata.sheets.map((sheet) => ({
+              schema,
+              name: sheet.title,
+              kind: "table",
+              estimatedRow: sheet.row_count,
+            }));
+            const columnsByTable: Record<string, string[]> = {};
+            const columnDetailsByTable: Record<string, AiColumnMetadata[]> = {};
+
+            if (includeColumns) {
+              for (let i = 0; i < tables.length; i++) {
+                const table = tables[i]!;
+                const overview = await googleSheetsSheetOverview({
+                  connectionId,
+                  sheet: table.name,
+                });
+                const key = `${schema}.${table.name}`;
+                columnsByTable[key] = overview.columns.map(
+                  (column) => column.name
+                );
+                columnDetailsByTable[key] = overview.columns.map((column) => ({
+                  name: column.name,
+                  dataType: column.db_type,
+                  nullable: "YES",
+                }));
+              }
+            }
+
+            setCache(metaKey, {
+              schemas: [schema],
+              objects: [],
+              tables,
+              columnsByTable,
+              columnDetailsByTable,
+              columnsLoaded: includeColumns,
+              version,
+              loading: false,
+              loaded: true,
+              error: null,
+              progress: 100,
+              stage: "done",
+            });
+            return cacheRef.current[metaKey]!;
+          }
 
           if (engine === "mongo") {
             const schemas = await mongoListDatabases(connectionId);
@@ -605,7 +697,7 @@ export function useDatabaseMetadata() {
       inflightRef.current[metaKey] = p;
       return p;
     },
-    [runMetadataQuery]
+    [runMetadataQuery, setCache]
   );
 
   const get = useCallback(
@@ -647,7 +739,7 @@ export function useDatabaseMetadata() {
     [load]
   );
 
-  const invalidate = useCallback((args: { metaKey: string }) => {
+  const clear = useCallback((args: { metaKey: string }) => {
     const { metaKey } = args;
     delete cacheRef.current[metaKey];
     inflightRef.current[metaKey] = null;
@@ -678,12 +770,11 @@ export function useDatabaseMetadata() {
         includeColumns,
       });
     },
-    [invalidate, load]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clear, load]
   );
 
-  const clear = invalidate;
-
-  return { get, load, refresh, invalidate, clear };
+  return { get, load, refresh, clear };
 }
 
 export type MetadataApi = ReturnType<typeof useDatabaseMetadata>;

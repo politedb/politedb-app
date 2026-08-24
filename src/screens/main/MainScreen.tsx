@@ -4,7 +4,6 @@ import { v4 as uuid } from "uuid";
 
 import { ConnectionModal } from "src/components/modal/ConnectionModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
-import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { NewConnectionGroupDialog } from "src/components/modal/NewConnectionGroupDialog";
 import { ImportConnectionPasswordDialog } from "src/components/modal/ImportConnectionPasswordDialog";
 import {
@@ -12,7 +11,6 @@ import {
   type ImportConnectionSource,
 } from "src/components/modal/ImportConnectionSourceDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
-import { PrivacyDialog } from "src/components/modal/PrivacyDialog";
 
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
@@ -106,8 +104,6 @@ export function MainScreen() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
-  const [privacyOpen, setPrivacyOpen] = useState(false);
-  const [licenseOpen, setLicenseOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [importSourceDialogOpen, setImportSourceDialogOpen] = useState(false);
@@ -569,14 +565,6 @@ export function MainScreen() {
           />
         </OverlayModal>
 
-        <PrivacyDialog
-          open={privacyOpen}
-          onClose={() => setPrivacyOpen(false)}
-        />
-        <LicenseDialog
-          open={licenseOpen}
-          onClose={() => setLicenseOpen(false)}
-        />
         <NewConnectionGroupDialog
           open={newGroupOpen}
           onClose={() => setNewGroupOpen(false)}

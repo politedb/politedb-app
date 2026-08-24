@@ -431,6 +431,25 @@ export function preparePayloadWithSecret(
     };
   }
 
+  if (engine === "google_sheets") {
+    const sheets = input.google_sheets;
+    if (!sheets) throw new Error("GOOGLE_SHEETS_CONFIG_MISSING");
+    return {
+      engine,
+      label,
+      tags,
+      indicator_color,
+      google_sheets: {
+        ...sheets,
+        credential: secretRefForDb(
+          persistSecrets,
+          plan.dbKey,
+          plan.dbPasswordPlain
+        ),
+      },
+    };
+  }
+
   // Unknown engine: keep payload but still respect secret rule if a known field exists
   // (You can tighten this later by throwing.)
   return {
@@ -448,6 +467,7 @@ export function preparePayloadWithSecret(
     mongo: input.mongo,
     redis: input.redis,
     clickhouse: input.clickhouse,
+    google_sheets: input.google_sheets,
   };
 }
 
@@ -668,6 +688,12 @@ function dbPasswordRef(input: ConnectionCreateInput): SecretRef | undefined {
       return input.cassandra?.password;
     case "redis":
       return input.redis?.password;
+    case "d1":
+      return input.d1?.api_token;
+    case "turso":
+      return input.turso?.auth_token;
+    case "google_sheets":
+      return input.google_sheets?.credential;
     default:
       return undefined;
   }
@@ -687,6 +713,10 @@ function inferStoreKeychainFromCreateInput(
   if (e === "clickhouse") return input.clickhouse?.password?.kind !== "inline";
   if (e === "mongo") return input.mongo?.password?.kind !== "inline";
   if (e === "cassandra") return input.cassandra?.password?.kind !== "inline";
+  if (e === "d1") return input.d1?.api_token?.kind !== "inline";
+  if (e === "turso") return input.turso?.auth_token?.kind !== "inline";
+  if (e === "google_sheets")
+    return input.google_sheets?.credential?.kind !== "inline";
   if (e === "sqlite" || e === "duckdb") return false;
   return true;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { writeFile } from "src/lib/system-fs";
 import { Button } from "src/components/common/Button";
 import { OverlayModal } from "src/components/modal/OverlayModal";
@@ -661,7 +661,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
 
   const disabled = !connectionId || !schema || engine === "redis";
 
-  const loadDiagram = async () => {
+  const loadDiagram = useCallback(async () => {
     if (disabled || !connectionId || !engine || !schema) return;
 
     setLoading(true);
@@ -758,12 +758,12 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [connectionId, disabled, engine, metaKey, metadata, schema]);
 
   useEffect(() => {
     if (!open) return;
     void loadDiagram();
-  }, [open, connectionId, engine, schema, metaKey]);
+  }, [open, connectionId, engine, schema, metaKey, loadDiagram]);
 
   const subtitle = useMemo(() => {
     if (!diagram) return "";

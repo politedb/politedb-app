@@ -61,7 +61,6 @@ export async function showMessage(
   options?: string | MessageDialogOptions
 ): Promise<void> {
   if (!isTauriRuntime()) {
-    // eslint-disable-next-line no-alert
     window.alert(typeof options === "string" ? `${options}\n\n${body}` : body);
     return;
   }
@@ -74,7 +73,6 @@ export async function askDialog(
   options?: string | ConfirmDialogOptions
 ): Promise<boolean> {
   if (!isTauriRuntime()) {
-    // eslint-disable-next-line no-alert
     return window.confirm(
       typeof options === "string" ? `${options}\n\n${body}` : body
     );
@@ -88,7 +86,6 @@ export async function confirmDialog(
   options?: string | ConfirmDialogOptions
 ): Promise<boolean> {
   if (!isTauriRuntime()) {
-    // eslint-disable-next-line no-alert
     return window.confirm(
       typeof options === "string" ? `${options}\n\n${body}` : body
     );

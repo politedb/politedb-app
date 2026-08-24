@@ -30,6 +30,10 @@ import { useConnectionStatus } from "./useConnectionStatus";
 import { DatabaseEngine } from "src/types";
 import { SUPPORTED_DATABASES } from "src/constant";
 import { trackEvent } from "src/lib/analytics";
+import {
+  getConnectionFormEngineConfig,
+  hasRequiredConnectionFields,
+} from "./engineFormConfig";
 
 export function ConnectionFormDialog({
   onClose,
@@ -73,33 +77,14 @@ export function ConnectionFormDialog({
   }
 
   const v = watch();
-  const requiredOk = useMemo(() => {
-    const host = v.host?.trim();
-    const user = v.user?.trim();
-    const database = v.database?.trim();
-    const port = v.port;
-
-    const hostOk = !!host && Number.isFinite(Number(port));
-
-    if (v.engine === "sqlite" || v.engine === "d1" || v.engine === "duckdb") {
-      return !!database;
-    }
-
-    if (v.engine === "turso") {
-      return !!host;
-    }
-
-    if (
-      v.engine === "redis" ||
-      v.engine === "mongo" ||
-      v.engine === "cassandra"
-    ) {
-      // Redis: only host + port are required; user/password/db are optional
-      return hostOk;
-    }
-
-    return hostOk && !!user;
-  }, [v]);
+  const engineConfig = useMemo(
+    () => getConnectionFormEngineConfig(v.engine),
+    [v.engine]
+  );
+  const requiredOk = useMemo(() => hasRequiredConnectionFields(v), [v]);
+  const engineLabel =
+    SUPPORTED_DATABASES.find((database) => database.engine === engine)?.label ??
+    engine;
 
   const onTest = handleSubmit(async (v) => {
     const startedAt = Date.now();
@@ -271,8 +256,7 @@ export function ConnectionFormDialog({
       <div class="relative shrink-0 border-b border-slate-200 px-6 py-4">
         <div class="text-center">
           <div class="text-lg font-semibold text-slate-900">
-            {SUPPORTED_DATABASES.find((d) => d.engine === engine)?.label}{" "}
-            Connection
+            {engineLabel} Connection
           </div>
         </div>
 
@@ -307,19 +291,7 @@ export function ConnectionFormDialog({
           status={status}
           requiredOk={requiredOk}
           storeKeychain={v.storeKeychain}
-          requiredHint={
-            v.engine === "sqlite" || v.engine === "duckdb"
-              ? "Required: Database file path."
-              : v.engine === "redis" ||
-                  v.engine === "mongo" ||
-                  v.engine === "cassandra"
-                ? "Required: Host, Port."
-                : v.engine === "d1"
-                  ? "Required: Account ID, Database ID, API token."
-                  : v.engine === "turso"
-                    ? "Required: Database URL, Auth token."
-                    : "Required: Host, Port, User."
-          }
+          requiredHint={engineConfig.requiredHint}
           onTest={onTest}
           onSave={onSave}
           onConnect={onConnect}

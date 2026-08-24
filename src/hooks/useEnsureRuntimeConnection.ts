@@ -92,6 +92,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     return () => {
       canceled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab?.id,
     activeTab?.profileId,
@@ -136,6 +137,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     } finally {
       setConnecting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeTab?.id,
     activeTab?.profileId,

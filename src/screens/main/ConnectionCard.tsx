@@ -47,6 +47,34 @@ function firstNonEmpty(...xs: Array<string | undefined | null>) {
   return "";
 }
 
+function formatConnectionTarget(
+  profile: ConnectionProfile,
+  engine: string,
+  host?: string,
+  port?: number
+) {
+  switch (engine) {
+    case "d1":
+      return profile.input?.d1?.account_id?.trim() ?? "";
+    case "turso":
+      return profile.input?.turso?.url?.trim() ?? "";
+    case "snowflake":
+      return profile.input?.snowflake?.account?.trim() ?? "";
+    case "google_sheets":
+      return "";
+    default:
+      return host ? `${host}${port != null ? `:${port}` : ""}` : "";
+  }
+}
+
+function getConnectionCardToneClass(selected: boolean, isPinned: boolean) {
+  if (selected) return "border-blue-600 bg-blue-50";
+  if (isPinned) {
+    return "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70";
+  }
+  return "border-slate-200 bg-white hover:bg-neutral-50";
+}
+
 type EngineInput =
   | ConnectionProfile["input"]["postgres"]
   | ConnectionProfile["input"]["mysql"]
@@ -60,7 +88,8 @@ type EngineInput =
   | ConnectionProfile["input"]["redis"]
   | ConnectionProfile["input"]["snowflake"]
   | ConnectionProfile["input"]["duckdb"]
-  | ConnectionProfile["input"]["clickhouse"];
+  | ConnectionProfile["input"]["clickhouse"]
+  | ConnectionProfile["input"]["google_sheets"];
 
 function getEngineInput(profile: ConnectionProfile): {
   engine: string;
@@ -105,6 +134,9 @@ function getEngineInput(profile: ConnectionProfile): {
   }
   if (engine === "clickhouse") {
     return { engine, input: profile.input?.clickhouse };
+  }
+  if (engine === "google_sheets") {
+    return { engine, input: profile.input?.google_sheets };
   }
   return { engine, input: undefined };
 }
@@ -160,22 +192,12 @@ function buildSubtitle(profile: ConnectionProfile) {
     case "clickhouse":
       database = profile.input?.clickhouse?.database ?? "";
       break;
+    case "google_sheets":
+      database = profile.input?.google_sheets?.spreadsheet_id ?? "";
+      break;
   }
 
-  const accountId =
-    engine === "d1"
-      ? profile.input?.d1?.account_id?.trim()
-      : engine === "turso"
-        ? profile.input?.turso?.url?.trim()
-        : engine === "snowflake"
-          ? profile.input?.snowflake?.account?.trim()
-          : host;
-  const hostPort =
-    engine === "d1" || engine === "turso" || engine === "snowflake"
-      ? accountId || ""
-      : host
-        ? `${host}${port != null ? `:${port}` : ""}`
-        : "";
+  const hostPort = formatConnectionTarget(profile, engine, host, port);
   const databaseLabel = formatConnectionDatabaseDisplay(database, engine);
   const subtitle = firstNonEmpty(
     hostPort && databaseLabel ? `${hostPort} • ${databaseLabel}` : hostPort,
@@ -374,6 +396,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   useEffect(() => {
     if (!menuOpen) return;
     return () => closeMenu();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId]);
 
   const menuPosition = (() => {
@@ -406,11 +429,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       class={cn(
         "group relative flex cursor-default items-center justify-between gap-3 select-none",
         "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
-        selected
-          ? "border-blue-600 bg-blue-50"
-          : isPinned
-            ? "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70"
-            : "border-slate-200 bg-white hover:bg-neutral-50"
+        getConnectionCardToneClass(selected, isPinned)
       )}
     >
       {/* LEFT */}

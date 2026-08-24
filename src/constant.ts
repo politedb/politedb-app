@@ -2,7 +2,6 @@ import { DataAction, DataKey, TableFilterState } from "./stores/connection";
 import { DatabaseType } from "./types";
 
 export const SUPPORTED_DATABASES: readonly (DatabaseType & {
-  desc?: string;
   defaultLabels?: string[];
 })[] = [
   {
@@ -130,6 +129,15 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     available: true,
     desc: "Column-oriented OLAP database for real-time analytics.",
     defaultLabels: ["Chronos", "Helix", "Vector"],
+  },
+  {
+    engine: "google_sheets",
+    label: "Google Sheets",
+    abbreviation: "Gs",
+    color: "bg-green-600",
+    available: false,
+    desc: "Browse worksheets as read-only tables.",
+    defaultLabels: ["Sheets"],
   },
 ] as const;
 

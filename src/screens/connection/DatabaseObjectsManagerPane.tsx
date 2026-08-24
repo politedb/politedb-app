@@ -151,8 +151,8 @@ export function DatabaseObjectsManagerPane(props: {
     [rt]
   );
 
-  const allObjects = meta.objects ?? [];
-  const availableSchemas = meta.schemas ?? [];
+  const allObjects = useMemo(() => meta.objects ?? [], [meta.objects]);
+  const availableSchemas = useMemo(() => meta.schemas ?? [], [meta.schemas]);
   const kindCapability = getDatabaseObjectCapability(rt.engine, kind);
 
   useEffect(() => {
@@ -256,7 +256,8 @@ export function DatabaseObjectsManagerPane(props: {
   useEffect(() => {
     if (isCreateMode || !selectedObject) return;
     void loadSelectedObjectDefinition(selectedObject);
-  }, [selectedObject?.id, isCreateMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedObject?.id, isCreateMode, loadSelectedObjectDefinition]);
 
   const startCreateMode = () => {
     setError(null);
@@ -475,7 +476,7 @@ export function DatabaseObjectsManagerPane(props: {
               onChange={(e) =>
                 setSchemaFilter((e.currentTarget as HTMLSelectElement).value)
               }
-              className="h-[26px] rounded-md border-neutral-200 px-2 text-xs!"
+              className="h-6.5 rounded-md border-neutral-200 px-2 text-xs!"
             >
               {availableSchemas.map((schema) => (
                 <option key={schema} value={schema}>
@@ -553,7 +554,7 @@ export function DatabaseObjectsManagerPane(props: {
                     schema: (e.currentTarget as HTMLSelectElement).value,
                   }))
                 }
-                className="h-[26px] rounded-md! border-neutral-200 px-2 text-xs!"
+                className="h-6.5 rounded-md! border-neutral-200 px-2 text-xs!"
               >
                 {availableSchemas.map((schema) => (
                   <option key={schema} value={schema}>

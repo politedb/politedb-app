@@ -36,6 +36,7 @@ const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   snowflake: ["index_name", "index_algorithm", "is_unique", "column_name"],
   duckdb: ["index_name", "index_algorithm", "is_unique", "column_name"],
   clickhouse: ["index_name", "index_algorithm", "is_unique", "column_name"],
+  google_sheets: [],
 };
 
 interface Props {
@@ -136,20 +137,15 @@ export function TableConstraints({
   );
 
   // Use row selection hook
-  const {
-    selectedRowIndex,
-    selectedRows,
-    handleRowSelect,
-    selectedColIndex,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: handleDeleteRecord,
-    deletedRows,
-    containerRef: rootRef,
-    totalRows: tableData.length,
-    selectableRowIndices,
-    isTableFocused,
-  });
+  const { selectedRowIndex, selectedRows, handleRowSelect, handleColSelect } =
+    useTableRowSelection({
+      onDeleteRow: handleDeleteRecord,
+      deletedRows,
+      containerRef: rootRef,
+      totalRows: tableData.length,
+      selectableRowIndices,
+      isTableFocused,
+    });
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
@@ -180,7 +176,7 @@ export function TableConstraints({
           value: name,
         })),
       }) as Record<keyof TableConstraint, InputOption[]>,
-    [dbConfig]
+    [columnNames, dbConfig.indexAlgorithms]
   );
 
   const tableColumns = useMemo<
@@ -276,18 +272,17 @@ export function TableConstraints({
       })),
     ],
     [
-      busy,
-      editedData.length,
+      engine,
+      initData,
       deletedRows,
       selectedRows,
-      selectedRowIndex,
-      selectedColIndex,
+      columnInputOptions,
+      isTableFocused,
+      busy,
+      readOnly,
       handleDataChange,
       handleRowSelect,
-      onDeleteRecord,
-      initData,
-      readOnly,
-      isTableFocused,
+      handleColSelect,
     ]
   );
 

@@ -77,7 +77,7 @@ export function useColumnSizing(columns: ColumnMeta[]) {
 
       return next ?? prev;
     });
-  }, [columnsKey]);
+  }, [columns, columnsKey]);
 
   // Memoized width lookup
   const widthByName = useMemo(() => {
@@ -87,6 +87,7 @@ export function useColumnSizing(columns: ColumnMeta[]) {
       out[col.name] = columnSizes[col.name] ?? DEFAULT_COL_WIDTH;
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnsKey, columnSizes]);
 
   // Total width (simple loop, no reduce overhead)
@@ -96,6 +97,7 @@ export function useColumnSizing(columns: ColumnMeta[]) {
       sum += widthByName[columns[i].name];
     }
     return sum;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnsKey, widthByName]);
 
   const resetColumnWidth = useCallback((col: ColumnMeta) => {
@@ -137,6 +139,7 @@ export function useColumnResize(
   useEffect(() => {
     return () => {
       if (stateRef.current.rafId != null) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         cancelAnimationFrame(stateRef.current.rafId);
       }
     };
@@ -278,6 +281,7 @@ export function useNewRows(
 ): NewRowData[] {
   return useMemo(
     () => buildNewRowsFromPatches(patches, newRowKeys, columns),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [patches, newRowKeys, columnsKey]
   );
 }
@@ -294,16 +298,19 @@ export function useMergedRefs<T>(
     | undefined
   >
 ) {
-  return useCallback((node: T | null) => {
-    for (const ref of refs) {
-      if (!ref) continue;
-      if (typeof ref === "function") {
-        ref(node);
-      } else {
-        (ref as React.MutableRefObject<T | null>).current = node;
+  return useCallback(
+    (node: T | null) => {
+      for (const ref of refs) {
+        if (!ref) continue;
+        if (typeof ref === "function") {
+          ref(node);
+        } else {
+          (ref as React.MutableRefObject<T | null>).current = node;
+        }
       }
-    }
-  }, refs);
+    },
+    [refs]
+  );
 }
 
 // ============================================================================
@@ -337,7 +344,7 @@ export function useTableFilter(
       });
       startedRef.current = null; // allow effect to run with new filters
     },
-    [setTableFilter, current]
+    [setTableFilter, current, startedRef]
   );
 
   const handleClearFilters = useCallback(
@@ -345,7 +352,7 @@ export function useTableFilter(
       clearTableFilter(key, visible);
       startedRef.current = null; // allow effect to run without filters
     },
-    [clearTableFilter, key]
+    [clearTableFilter, key, startedRef]
   );
 
   const setFilters = useCallback(

@@ -25,6 +25,20 @@ function Spinner() {
   );
 }
 
+function getIdleStatusMessage(options: {
+  requiredOk: boolean;
+  requiredHint?: string;
+  storeKeychain: boolean;
+}) {
+  if (!options.requiredOk) {
+    return options.requiredHint || "Required: Host, Port, User.";
+  }
+  if (options.storeKeychain) {
+    return "Tip: In Keychain mode, Test may fail if password isn’t resolved.";
+  }
+  return "Ready";
+}
+
 export function ConnectionFooter(props: {
   className?: string;
 
@@ -59,11 +73,11 @@ export function ConnectionFooter(props: {
 
   const statusNode = (() => {
     if (status.kind === "idle") {
-      const msg = !requiredOk
-        ? requiredHint || "Required: Host, Port, User."
-        : storeKeychain
-          ? "Tip: In Keychain mode, Test may fail if password isn’t resolved."
-          : "Ready";
+      const msg = getIdleStatusMessage({
+        requiredOk,
+        requiredHint,
+        storeKeychain,
+      });
       return (
         <>
           <span class="h-2 w-2 rounded-full bg-slate-400" />

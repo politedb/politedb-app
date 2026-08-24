@@ -206,7 +206,7 @@ export function MainTableDataPane(props: {
       }
       handleApplyFilters(newFilters, combine, tableKey);
     },
-    [offset, limit, pageChange, handleApplyFilters]
+    [offset, handleApplyFilters, pageChange, limit, setSettledPagination]
   );
 
   const clearFilters = useCallback(
@@ -217,7 +217,7 @@ export function MainTableDataPane(props: {
       }
       handleClearFilters(visible);
     },
-    [offset, limit, pageChange, handleClearFilters]
+    [offset, handleClearFilters, pageChange, limit, setSettledPagination]
   );
 
   const setSelectedRowDetail = useConnectionStore(
@@ -233,7 +233,7 @@ export function MainTableDataPane(props: {
   useEffect(() => {
     clearSelectedRowDetail(activeKey);
     setSettledPagination({ limit, offset });
-  }, [activeKey, clearSelectedRowDetail]);
+  }, [activeKey, clearSelectedRowDetail, limit, offset, setSettledPagination]);
 
   const handleSelectedRowDetailChange = useCallback(
     (detail: SelectedRowDetail | null) => {
@@ -620,7 +620,13 @@ export function MainTableDataPane(props: {
     }
 
     return Math.min(basePageTotal, loadedRowCount);
-  }, [rowsInfo, hasAppliedFilters, basePageTotal, loadedRowCount]);
+  }, [
+    rowsInfo,
+    hasAppliedFilters,
+    loadedRowCount,
+    basePageTotal,
+    meta.rowCount,
+  ]);
 
   const visiblePageTotal = showingStalePage ? renderBasePageTotal : pageTotal;
 
@@ -658,6 +664,7 @@ export function MainTableDataPane(props: {
       };
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta.foreignKeys, activeTableWindow.table.schema]);
 
   const handleNavigateFk = useCallback(
@@ -815,20 +822,29 @@ export function MainTableDataPane(props: {
   const onCloneOpen = useCallback(() => {
     if (isProfileLocked) return;
     setCloneDialogOpen(true);
-  }, [isProfileLocked]);
-  const onCloneClose = useCallback(() => setCloneDialogOpen(false), []);
+  }, [isProfileLocked, setCloneDialogOpen]);
+  const onCloneClose = useCallback(
+    () => setCloneDialogOpen(false),
+    [setCloneDialogOpen]
+  );
 
   const onTruncateOpen = useCallback(() => {
     if (isNewTable || isProfileLocked) return;
     setTruncateDialogOpen(true);
-  }, [isNewTable, isProfileLocked]);
-  const onTruncateClose = useCallback(() => setTruncateDialogOpen(false), []);
+  }, [isNewTable, isProfileLocked, setTruncateDialogOpen]);
+  const onTruncateClose = useCallback(
+    () => setTruncateDialogOpen(false),
+    [setTruncateDialogOpen]
+  );
 
   const onDropOpen = useCallback(() => {
     if (isProfileLocked) return;
     setDropDialogOpen(true);
-  }, [isProfileLocked]);
-  const onDropClose = useCallback(() => setDropDialogOpen(false), []);
+  }, [isProfileLocked, setDropDialogOpen]);
+  const onDropClose = useCallback(
+    () => setDropDialogOpen(false),
+    [setDropDialogOpen]
+  );
 
   const handleTruncate = useCallback(
     async (opts: { restartIdentity: boolean; cascade: boolean }) => {
@@ -844,6 +860,7 @@ export function MainTableDataPane(props: {
       });
       await reloadTableData(schema, name);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       isNewTable,
       isProfileLocked,
@@ -870,6 +887,7 @@ export function MainTableDataPane(props: {
     });
     await rt.refreshSchemaAndTables();
     await actions.closeWindow(activeTableWindow.id, new MouseEvent("click"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isProfileLocked,
     meta.connectionId,
@@ -908,6 +926,7 @@ export function MainTableDataPane(props: {
       }
       await rt.refreshSchemaAndTables();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       isProfileLocked,
       meta.connectionId,
@@ -944,17 +963,18 @@ export function MainTableDataPane(props: {
         onSuccess: async () => reloadTableData(schema, name),
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       isProfileLocked,
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
+      runImport,
       meta.connectionId,
       meta.columns,
-      engine,
       limit,
       offset,
+      engine,
       reloadTableData,
-      runImport,
     ]
   );
 
@@ -975,6 +995,7 @@ export function MainTableDataPane(props: {
       rt.setPendingTableAction(null);
     }, 80);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isProfileLocked,
     rt.pendingTableAction,

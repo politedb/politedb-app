@@ -121,6 +121,7 @@ fn main() {
         Arc::new(engines::redis::driver::RedisDriver),
         Arc::new(engines::snowflake::driver::SnowflakeDriver),
         Arc::new(engines::clickhouse::driver::ClickhouseDriver),
+        Arc::new(engines::google_sheets::driver::GoogleSheetsDriver),
     ];
 
     let engines = EngineRegistry::new(drivers);
@@ -219,6 +220,10 @@ fn main() {
             commands::cassandra::cassandra_fetch_rows,
             commands::cassandra::cassandra_primary_key_columns,
             commands::cassandra::cassandra_update_rows,
+            // Google Sheets
+            commands::google_sheets::google_sheets_list_sheets,
+            commands::google_sheets::google_sheets_sheet_overview,
+            commands::google_sheets::google_sheets_fetch_rows,
             // mongo
             commands::mongo::mongo_list_databases,
             commands::mongo::mongo_list_collections,

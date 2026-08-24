@@ -7,14 +7,14 @@ import { FilePathPicker } from "../common/FilePathPicker";
 import type { SectionProps } from "./connectionForm.utils";
 import { Select } from "../common/Select";
 import { toNumber } from "src/utils/convert";
+import { getConnectionFormEngineConfig } from "./engineFormConfig";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
 export function SSHSection(props: SectionProps) {
   const { control, onDirty } = props;
   const engine = useWatch({ control, name: "engine" });
-  const isSqlite = engine === "sqlite" || engine === "d1" || engine === "turso";
-  const isDuckDB = engine === "duckdb";
+  const engineConfig = getConnectionFormEngineConfig(engine);
 
   const sshEnabled = useController({ control, name: "sshEnabled" });
 
@@ -102,7 +102,7 @@ export function SSHSection(props: SectionProps) {
   const keyErr = sshKeyPath.fieldState.error?.message;
   const pwErr = sshPassword.fieldState.error?.message;
 
-  if (isSqlite || isDuckDB) return null;
+  if (!engineConfig.showSsh) return null;
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">

@@ -222,6 +222,11 @@ export type ClickHouseConnectInput = {
   statement_timeout_ms?: number | null;
 };
 
+export type GoogleSheetsConnectInput = {
+  spreadsheet_id: string;
+  credential: SecretRef;
+};
+
 /* ============================================================================
  * Connection (runtime)
  * ============================================================================
@@ -249,6 +254,7 @@ export type ConnectionCreateInput = {
   snowflake?: SnowflakeConnectInput;
   duckdb?: DuckdbConnectInput;
   clickhouse?: ClickHouseConnectInput;
+  google_sheets?: GoogleSheetsConnectInput;
 };
 
 export type ConnectionInfo = {

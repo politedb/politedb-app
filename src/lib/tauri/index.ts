@@ -6,6 +6,7 @@ export * from "./connection";
 export * from "./profile";
 export * from "./operation";
 export * from "./cassandra";
+export * from "./googleSheets";
 export * from "./mongo";
 export * from "./redis";
 export * from "./ai";

@@ -7,8 +7,15 @@ import type { ClickHouseProtocol } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
 import { SSLSection } from "./SSLSection";
 import type { SectionProps } from "./connectionForm.utils";
-import { defaultClickHousePort } from "./connectionForm.utils";
+import {
+  defaultClickHousePort,
+  defaultPortForEngine,
+} from "./connectionForm.utils";
 import { cn } from "src/utils/cn";
+import {
+  getConnectionFormEngineConfig,
+  getCredentialInputPlaceholder,
+} from "./engineFormConfig";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
@@ -25,14 +32,16 @@ export function ConnectionBasicsSection(
   const isRedis = engine === "redis";
   const isMongo = engine === "mongo";
   const isCassandra = engine === "cassandra";
-  const isOptionalAuth = isRedis || isMongo || isCassandra;
   const isSqlite = engine === "sqlite";
   const isD1 = engine === "d1";
   const isTurso = engine === "turso";
   const isSnowflake = engine === "snowflake";
   const isDuckDB = engine === "duckdb";
   const isClickHouse = engine === "clickhouse";
-  const isFileLessSql = isSqlite || isD1 || isTurso || isDuckDB || isSnowflake;
+  const isGoogleSheets = engine === "google_sheets";
+  const engineConfig = getConnectionFormEngineConfig(engine);
+  const isOptionalAuth = engineConfig.authOptional;
+  const isFileLessSql = engineConfig.fileless;
 
   const clickhouseProtocolCtl = useController({
     control,
@@ -113,6 +122,12 @@ export function ConnectionBasicsSection(
             String(v ?? "").trim().length > 0 || "Database name is required."
           );
         }
+        if (isGoogleSheets) {
+          return (
+            String(v ?? "").trim().length > 0 ||
+            "Spreadsheet ID or URL is required."
+          );
+        }
         return true;
       },
     },
@@ -137,8 +152,13 @@ export function ConnectionBasicsSection(
       validate: (v) => {
         if (isOptionalAuth || isSqlite || isDuckDB) return true;
         if (storeKeychain) return true;
-        if (isD1 || isTurso) {
-          return String(v ?? "").trim().length > 0 || "API token is required.";
+        if (isD1 || isTurso || isGoogleSheets) {
+          return (
+            String(v ?? "").trim().length > 0 ||
+            (isGoogleSheets
+              ? "API key or OAuth token is required."
+              : "API token is required.")
+          );
         }
         return String(v ?? "").trim().length > 0 || "Password is required.";
       },
@@ -183,23 +203,10 @@ export function ConnectionBasicsSection(
   }, [password.field.value]);
 
   const defaultPort = useMemo(() => {
-    if (engine === "mysql" || engine === "mariadb") return 3306;
-    if (engine === "sqlserver") return 1433;
-    if (engine === "mongo") return 27017;
-    if (engine === "cassandra") return 9042;
-    if (engine === "redis") return 6379;
     if (engine === "clickhouse") {
       return defaultClickHousePort(clickHouseProtocol ?? "native");
     }
-    if (
-      engine === "sqlite" ||
-      engine === "duckdb" ||
-      engine === "d1" ||
-      engine === "turso" ||
-      engine === "snowflake"
-    )
-      return 0;
-    return 5432;
+    return defaultPortForEngine(engine);
   }, [engine, clickHouseProtocol]);
 
   const nameErr = !!errors?.name || isEmpty(name.field.value);
@@ -213,7 +220,8 @@ export function ConnectionBasicsSection(
     (!isFileLessSql && isEmpty(String(port.field.value ?? "")));
   const dbErr =
     (!isMongo && !isCassandra && !!errors?.database) ||
-    ((isSqlite || isDuckDB || isD1) && isEmpty(database.field.value));
+    ((isSqlite || isDuckDB || isD1 || isGoogleSheets) &&
+      isEmpty(database.field.value));
   const userErr =
     (!isOptionalAuth && !isFileLessSql && !!errors?.user) ||
     (!isOptionalAuth &&
@@ -228,6 +236,15 @@ export function ConnectionBasicsSection(
     (!!errors?.password ||
       !!password.fieldState.error ||
       isEmpty(password.field.value));
+  const showDatabaseInput = !isRedis;
+  const databaseUserGridClass =
+    isSqlite || isDuckDB ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3";
+  const databaseInputClass = isSqlite || isDuckDB ? "col-span-2" : "";
+  const userInputClass = isRedis ? "col-span-2" : "";
+  const credentialPlaceholder = getCredentialInputPlaceholder(
+    engineConfig,
+    !!storeKeychain
+  );
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
@@ -235,25 +252,11 @@ export function ConnectionBasicsSection(
         <div class="text-sm font-semibold text-slate-900">
           Connection basics
         </div>
-        <div class="text-xs text-slate-500">
-          {isSqlite || isDuckDB
-            ? "Database file path"
-            : isD1
-              ? "Cloudflare account, database, API token"
-              : isTurso
-                ? "Database URL and auth token"
-                : isSnowflake
-                  ? "Account, warehouse, database, user"
-                  : isClickHouse
-                    ? "Driver + host/port"
-                    : isOptionalAuth
-                      ? "Host, Port (keyspace optional)"
-                      : "Host, Port, User (database optional)"}
-        </div>
+        <div class="text-xs text-slate-500">{engineConfig.basicsHint}</div>
       </div>
 
       <div class="space-y-4">
-        <Field label={isClickHouse ? "Name / Driver" : "Name"}>
+        <Field label={engineConfig.nameLabel}>
           <div
             class={cn(
               "grid grid-cols-1 gap-3",
@@ -321,6 +324,20 @@ export function ConnectionBasicsSection(
               error={hostErr}
               onInput={(e: InputEvt) => {
                 host.field.onChange(e.currentTarget.value);
+                dirty();
+              }}
+            />
+          </Field>
+        ) : null}
+
+        {isGoogleSheets ? (
+          <Field label="Spreadsheet ID or URL">
+            <Input
+              value={database.field.value}
+              placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+              error={dbErr}
+              onInput={(e: InputEvt) => {
+                database.field.onChange(e.currentTarget.value);
                 dirty();
               }}
             />
@@ -396,7 +413,7 @@ export function ConnectionBasicsSection(
           </>
         ) : null}
 
-        {!isFileLessSql && (
+        {engineConfig.showHostPort && (
           <Field label="Host / Port" alignTop>
             <div class="grid grid-cols-3 gap-3">
               <Input
@@ -430,38 +447,15 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isD1 && !isTurso && !isSnowflake ? (
-          <Field
-            label={
-              isSqlite || isDuckDB
-                ? "Database Path"
-                : isRedis
-                  ? "User"
-                  : "Database / User"
-            }
-            alignTop
-          >
-            <div
-              class={
-                isSqlite || isDuckDB
-                  ? "grid grid-cols-1 gap-3"
-                  : "grid grid-cols-2 gap-3"
-              }
-            >
-              {!isRedis && (
+        {engineConfig.showDatabaseUser ? (
+          <Field label={engineConfig.databaseUserLabel} alignTop>
+            <div class={databaseUserGridClass}>
+              {showDatabaseInput && (
                 <Input
                   value={database.field.value}
-                  placeholder={
-                    isSqlite
-                      ? "/absolute/path/to/file.db"
-                      : isDuckDB
-                        ? "/absolute/path/to/file.duckdb"
-                        : isCassandra
-                          ? "keyspace (optional)"
-                          : "database"
-                  }
+                  placeholder={engineConfig.databasePlaceholder}
                   error={dbErr}
-                  class={isSqlite || isDuckDB ? "col-span-2" : ""}
+                  class={databaseInputClass}
                   onInput={(e: InputEvt) => {
                     database.field.onChange(e.currentTarget.value);
                     dirty();
@@ -473,7 +467,7 @@ export function ConnectionBasicsSection(
                   value={user.field.value}
                   placeholder="user"
                   error={userErr}
-                  class={isRedis ? "col-span-2" : ""}
+                  class={userInputClass}
                   onInput={(e: InputEvt) => {
                     user.field.onChange(e.currentTarget.value);
                     dirty();
@@ -485,11 +479,8 @@ export function ConnectionBasicsSection(
         ) : null}
 
         {/* Password + Storage (merged) */}
-        {!isSqlite && !isDuckDB && (
-          <Field
-            label={isD1 ? "API Token" : isTurso ? "Auth Token" : "Password"}
-            alignTop
-          >
+        {engineConfig.showCredential && (
+          <Field label={engineConfig.credentialLabel} alignTop>
             <div class="space-y-2">
               {/* Password row */}
               {shouldShowMasked ? (
@@ -523,11 +514,7 @@ export function ConnectionBasicsSection(
                     type={showPassword ? "text" : "password"}
                     value={password.field.value}
                     error={pwErr}
-                    placeholder={
-                      storeKeychain
-                        ? "Enter password (save in Keychain)"
-                        : "Enter password (not saved)"
-                    }
+                    placeholder={credentialPlaceholder}
                     onInput={(e: InputEvt) => {
                       password.field.onChange(e.currentTarget.value);
                       dirty();
@@ -609,7 +596,7 @@ export function ConnectionBasicsSection(
           </Field>
         )}
 
-        {!isSqlite && !isDuckDB && !isSnowflake && (
+        {engineConfig.showSsl && (
           <SSLSection
             sslMode={sslMode.field.value}
             sslKey={sslKey.field.value}

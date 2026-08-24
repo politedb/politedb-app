@@ -30,6 +30,7 @@ export function defaultPortForEngine(engine: DatabaseEngine): number {
     case "oracle":
       return 1521;
     case "snowflake":
+    case "google_sheets":
       return 0;
     case "clickhouse":
       return 9000;
@@ -43,7 +44,8 @@ export function defaultHostForEngine(engine: DatabaseEngine): string {
     engine === "sqlite" ||
     engine === "d1" ||
     engine === "duckdb" ||
-    engine === "snowflake"
+    engine === "snowflake" ||
+    engine === "google_sheets"
   ) {
     return "";
   }
@@ -71,6 +73,7 @@ export function pickByEngine<T>(
     snowflake?: T;
     duckdb?: T;
     clickhouse?: T;
+    google_sheets?: T;
   }
 ): T | undefined {
   if (engine === "postgres") return by.postgres;
@@ -86,6 +89,7 @@ export function pickByEngine<T>(
   if (engine === "redis") return by.redis;
   if (engine === "snowflake") return by.snowflake;
   if (engine === "clickhouse") return by.clickhouse;
+  if (engine === "google_sheets") return by.google_sheets;
   return undefined;
 }
 
@@ -467,6 +471,21 @@ function buildTursoInput(v: FormValues): ConnectionCreateInput {
   };
 }
 
+function buildGoogleSheetsInput(v: FormValues): ConnectionCreateInput {
+  return {
+    engine: "google_sheets",
+    label: v.name,
+    tags: v.tags.map(normalizeTag),
+    indicator_color: v.indicator_color,
+    google_sheets: {
+      spreadsheet_id: String(v.database ?? "").trim(),
+      credential: v.storeKeychain
+        ? { kind: "keychain", value: v.password }
+        : { kind: "inline", value: v.password },
+    },
+  };
+}
+
 export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
   switch (v.engine) {
     case "postgres":
@@ -497,6 +516,8 @@ export function buildConnectionInput(v: FormValues): ConnectionCreateInput {
       return buildRedisInput(v);
     case "clickhouse":
       return buildClickhouseInput(v);
+    case "google_sheets":
+      return buildGoogleSheetsInput(v);
     default:
       throw new Error(`Unsupported engine: ${String(v.engine)}`);
   }

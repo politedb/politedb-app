@@ -14,7 +14,7 @@ function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
 }
 
-function matchesDb(db: DatabaseType & { desc?: string }, q: string) {
+function matchesDb(db: DatabaseType, q: string) {
   const query = normalizeQuery(q);
   if (!query) return true;
 
@@ -36,9 +36,7 @@ function findDb(engine: DatabaseEngine | null) {
   return SUPPORTED_DATABASES.find((d) => d.engine === engine) ?? null;
 }
 
-function firstAvailableEngine(
-  list: readonly (DatabaseType & { desc?: string })[]
-) {
+function firstAvailableEngine(list: readonly DatabaseType[]) {
   // Option 3: auto-select Postgres if available, else first available
   const pg = list.find((d) => d.engine === "postgres" && d.available);
   if (pg) return pg.engine;
@@ -64,7 +62,7 @@ function RowBadge(props: { kind: "available" | "soon" }) {
 }
 
 function EngineRow(props: {
-  db: DatabaseType & { desc?: string };
+  db: DatabaseType;
   active: boolean;
   onPick: () => void;
 }) {

@@ -45,7 +45,7 @@ export function useSqlHistoryRunner(opts?: Options) {
         // Invalidate metadata logic
         if (opts?.metadata) {
           const metaKey = `${opts.engine}:${opts.profileId}`;
-          opts.metadata.invalidate({ metaKey });
+          opts.metadata.clear({ metaKey });
 
           // Background reload
           void opts.metadata.load({
@@ -63,7 +63,7 @@ export function useSqlHistoryRunner(opts?: Options) {
         return { mode: "stream", opId };
       }
     },
-    [opts?.engine, opts?.metadata, activeTab, addQueryHistory]
+    [activeTab, addQueryHistory, opts?.metadata, opts?.engine, opts?.profileId]
   );
 
   return {

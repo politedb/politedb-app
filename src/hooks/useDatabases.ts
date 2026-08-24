@@ -80,6 +80,7 @@ export function useDatabases({
     } finally {
       setBusy(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runtimeConnectionId, engine, selectedDb]);
 
   useEffect(() => {

@@ -164,6 +164,7 @@ export function ConnectionScreen() {
   const activeTablePagination = useMemo(() => {
     if (!activeTableWindow) return null;
     return getTablePagination(activeTableWindow.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTableWindow?.id, limit, offset]);
   const currentLimit = activeTablePagination?.limit ?? limit;
   const currentOffset = activeTablePagination?.offset ?? offset;
@@ -177,7 +178,7 @@ export function ConnectionScreen() {
 
   useEffect(() => {
     setErrorDialogOpen(!!errorRuntime);
-  }, [errorRuntime]);
+  }, [errorRuntime, setErrorDialogOpen]);
 
   /* =============================================================================
    * Engine/metaKey (depends on activeTab)
@@ -223,7 +224,14 @@ export function ConnectionScreen() {
         setRuntimeConnectionError(null);
       }
     },
-    [activeTab, saveProfile, loadProfiles, closeEdit, setRuntimeConnectionError]
+    [
+      activeTab,
+      saveProfile,
+      loadProfiles,
+      closeEdit,
+      setErrorDialogOpen,
+      setRuntimeConnectionError,
+    ]
   );
 
   const metaKey = useMemo(() => {
@@ -245,12 +253,13 @@ export function ConnectionScreen() {
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    activeProfileScreen,
     activeTableWindow?.id,
     activeTableWindow?.table?.schema,
     activeTableWindow?.table?.name,
     getTableData,
+    activeProfileScreen,
   ]);
 
   const activeTableLoadKey = useMemo(() => {
@@ -260,12 +269,7 @@ export function ConnectionScreen() {
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
-  }, [
-    activeProfileScreen,
-    activeTableWindow,
-    activeTableWindow?.table?.schema,
-    activeTableWindow?.table?.name,
-  ]);
+  }, [activeProfileScreen, activeTableWindow]);
 
   const rowsStreamState = useConnectionStore((s) => {
     if (!activeTableLoadKey) return null;
@@ -341,7 +345,12 @@ export function ConnectionScreen() {
     setRuntimeConnectionError(null);
     setErrorDialogOpen(false);
     void refreshSchemaAndTables();
-  }, [runtimeConnectionId, refreshSchemaAndTables, setRuntimeConnectionError]);
+  }, [
+    runtimeConnectionId,
+    refreshSchemaAndTables,
+    setRuntimeConnectionError,
+    setErrorDialogOpen,
+  ]);
 
   const sidebarTables = useMemo(() => {
     const base = [...filteredTables];
@@ -554,14 +563,21 @@ export function ConnectionScreen() {
         actionsRef.current.deleteRedisKey(table),
       openSearch: () => setSearchDialogOpen(true),
     };
-  }, [isProfileLocked, triggerRefresh]);
+  }, [
+    isProfileLocked,
+    setPendingTableAction,
+    setSearchDialogOpen,
+    triggerRefresh,
+  ]);
 
   const patchMap = useMemo(() => {
     return actions.getPatchMap() || ({} as PatchMap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions.getPatchMap()]);
 
   const newTableSql = useMemo(() => {
     return actions.getNewTableSql().data;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions.getNewTableSql().data]);
 
   const diagramDatabase = useMemo(() => {
@@ -616,7 +632,7 @@ export function ConnectionScreen() {
 
   const openDiagram = useMemo(() => {
     return () => setDiagramOpen(true);
-  }, []);
+  }, [setDiagramOpen]);
 
   const openDatabaseObjects = useMemo(() => {
     return () => {
@@ -696,6 +712,7 @@ export function ConnectionScreen() {
       runSqlWithHistory,
       refreshSchemaAndTables,
       pendingTableAction,
+      setPendingTableAction,
     ]
   );
 

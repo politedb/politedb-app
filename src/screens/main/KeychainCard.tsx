@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useMemo, useRef, useState } from "preact/hooks";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import {
   CopyIcon,
@@ -33,7 +33,7 @@ export function KeychainCard(props: {
 
   const { label, tag } = useMemo(() => parseKeyName(keyName), [keyName]);
 
-  async function onDeleteSecret() {
+  const onDeleteSecret = useCallback(async () => {
     const ok = await Promise.resolve(
       window.confirm(
         `Delete keychain secret?\n\nThis will remove the saved keychain.`
@@ -41,7 +41,7 @@ export function KeychainCard(props: {
     );
     if (!ok) return;
     onDelete();
-  }
+  }, [onDelete]);
 
   const menuItems = useMemo<MenuItem[]>(
     () => [
@@ -70,7 +70,7 @@ export function KeychainCard(props: {
         icon: <TrashIcon className="size-4" />,
       },
     ],
-    [disabled, onCopy, onDelete, onOpen]
+    [disabled, onCopy, onDeleteSecret, onOpen]
   );
 
   return (

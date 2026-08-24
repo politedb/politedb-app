@@ -369,6 +369,7 @@ fn empty_input(engine: EngineKind, label: String) -> ConnectionCreateInput {
         snowflake: None,
         duckdb: None,
         clickhouse: None,
+        google_sheets: None,
         ssh: None,
     }
 }

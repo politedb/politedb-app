@@ -12,6 +12,7 @@ const ENGINES_WITHOUT_DEFAULT_CREDENTIALS = new Set<DatabaseEngine>([
   "duckdb",
   "d1",
   "turso",
+  "google_sheets",
 ]);
 
 const NON_SQL_PATCH_ENGINES = new Set<DatabaseEngine>([
@@ -45,6 +46,10 @@ export function resolveDefaultSchema(
 
 export function supportsTableMeta(engine: DatabaseEngine | undefined): boolean {
   return engine !== "redis" && engine !== "mongo" && engine !== "cassandra";
+}
+
+export function isReadOnlyEngine(engine: DatabaseEngine | undefined): boolean {
+  return engine === "google_sheets";
 }
 
 export function isNonSqlPatchEngine(

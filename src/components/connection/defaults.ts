@@ -18,6 +18,7 @@ import {
   defaultCredentialDatabase,
   defaultCredentialUser,
 } from "src/lib/engines";
+import { getConnectionFormEngineConfig } from "./engineFormConfig";
 
 function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
   return (
@@ -41,6 +42,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
   const rd = input?.redis;
   const sf = input?.snowflake;
   const ch = input?.clickhouse;
+  const sheets = input?.google_sheets;
 
   const host =
     pickByEngine(engine, {
@@ -56,6 +58,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       redis: rd?.host,
       snowflake: sf?.account,
       clickhouse: ch?.host,
+      google_sheets: "",
     }) || defaultHostForEngine(engine);
 
   const port =
@@ -72,6 +75,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       redis: rd?.port,
       snowflake: 0,
       clickhouse: ch?.port,
+      google_sheets: 0,
     }) ?? defaultPortForEngine(engine);
 
   const user =
@@ -86,6 +90,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       redis: rd?.user,
       snowflake: sf?.user,
       clickhouse: ch?.user,
+      google_sheets: "",
     }) || defaultCredentialUser(engine);
 
   const database =
@@ -102,6 +107,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       cassandra: cassandra?.keyspace ?? undefined,
       snowflake: sf?.database,
       clickhouse: ch?.database,
+      google_sheets: sheets?.spreadsheet_id,
     }) || defaultCredentialDatabase(engine);
 
   const snowflakeWarehouse = sf?.warehouse ?? "";
@@ -159,6 +165,10 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
     case "turso":
       password = resolveInline(turso?.auth_token);
       storeKeychain = resolveStoreKeychain(turso?.auth_token);
+      break;
+    case "google_sheets":
+      password = resolveInline(sheets?.credential);
+      storeKeychain = resolveStoreKeychain(sheets?.credential);
       break;
     case "duckdb":
     case "sqlite":
@@ -220,14 +230,8 @@ function makeSslDefaults(
     mysql: my?.ssl_ca_path ?? undefined,
   });
 
-  // Redis/Mongo: default to "disable" so local instances work without TLS.
-  // Postgres/MySQL keep "prefer" for smoother dev/prod behavior.
-  const defaultSsl =
-    engine === "redis" || engine === "mongo" || engine === "cassandra"
-      ? ("disable" as const)
-      : ("prefer" as const);
-
-  const sslMode: FormValues["sslMode"] = ssl_mode ?? defaultSsl;
+  const defaultSslMode = getConnectionFormEngineConfig(engine).defaultSslMode;
+  const sslMode: FormValues["sslMode"] = ssl_mode ?? defaultSslMode;
 
   return {
     sslMode,

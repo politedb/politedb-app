@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import * as monaco from "monaco-editor";
 import type { DatabaseEngine, SqlEditorWindow, TableItem } from "src/types";
@@ -238,7 +244,7 @@ export function SqlEditorPane(props: Props) {
     );
   };
 
-  const applyRunHighlight = (range: monaco.IRange | null) => {
+  const applyRunHighlight = useCallback((range: monaco.IRange | null) => {
     const editor = editorRef.current;
     if (!editor) return;
 
@@ -258,9 +264,9 @@ export function SqlEditorPane(props: Props) {
         },
       ]
     );
-  };
+  }, []);
 
-  const flushDraft = async () => {
+  const flushDraft = useCallback(async () => {
     const full = getFullSql();
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -278,9 +284,9 @@ export function SqlEditorPane(props: Props) {
       savingRef.current = false;
     }
     return full;
-  };
+  }, [draftId, win.id]);
 
-  const scheduleBackgroundSave = () => {
+  const scheduleBackgroundSave = useCallback(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
 
     saveTimerRef.current = window.setTimeout(() => {
@@ -306,47 +312,50 @@ export function SqlEditorPane(props: Props) {
         }
       })();
     }, 700);
-  };
+  }, [draftId, win.id]);
 
-  const appendSqlToEditor = async (sql: string) => {
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    const next = sql.trim();
-    if (!editor || !model || !next) return;
+  const appendSqlToEditor = useCallback(
+    async (sql: string) => {
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      const next = sql.trim();
+      if (!editor || !model || !next) return;
 
-    const current = model.getValue().trim();
-    const merged = current ? `${current}\n\n${next}` : next;
+      const current = model.getValue().trim();
+      const merged = current ? `${current}\n\n${next}` : next;
 
-    applyingExternalCounterRef.current += 1;
-    const currentCounter = applyingExternalCounterRef.current;
+      applyingExternalCounterRef.current += 1;
+      const currentCounter = applyingExternalCounterRef.current;
 
-    try {
-      model.pushEditOperations(
-        [],
-        [{ range: model.getFullModelRange(), text: merged }],
-        () => []
-      );
-      dirtyRef.current = false;
-    } finally {
-      queueMicrotask(() => {
-        if (applyingExternalCounterRef.current === currentCounter) {
-          applyingExternalCounterRef.current = 0;
-        }
-      });
-    }
+      try {
+        model.pushEditOperations(
+          [],
+          [{ range: model.getFullModelRange(), text: merged }],
+          () => []
+        );
+        dirtyRef.current = false;
+      } finally {
+        queueMicrotask(() => {
+          if (applyingExternalCounterRef.current === currentCounter) {
+            applyingExternalCounterRef.current = 0;
+          }
+        });
+      }
 
-    clearRunHighlight();
-    savingRef.current = true;
-    try {
-      await saveSqlDraft(draftId, merged);
-      callbacksRef.current.onCommitContent?.(win.id, merged);
-    } catch (error) {
-      dirtyRef.current = true;
-    } finally {
-      savingRef.current = false;
-    }
-    editor.focus();
-  };
+      clearRunHighlight();
+      savingRef.current = true;
+      try {
+        await saveSqlDraft(draftId, merged);
+        callbacksRef.current.onCommitContent?.(win.id, merged);
+      } catch (error) {
+        dirtyRef.current = true;
+      } finally {
+        savingRef.current = false;
+      }
+      editor.focus();
+    },
+    [draftId, win.id]
+  );
 
   // Apply transformation to selection (if any) or whole doc; preserve selection.
   const applyTransform = async (
@@ -397,7 +406,7 @@ export function SqlEditorPane(props: Props) {
     await flushDraft();
   };
 
-  const onRun = async () => {
+  const onRun = useCallback(async () => {
     const ed = editorRef.current;
     if (!ed || !callbacksRef.current.onRunSql) return;
 
@@ -415,7 +424,7 @@ export function SqlEditorPane(props: Props) {
     } finally {
       queueMicrotask(() => setIsLocalExecuting(false));
     }
-  };
+  }, [applyRunHighlight, flushDraft, win.id]);
 
   const onExplain = async () => {
     const ed = editorRef.current;
@@ -477,7 +486,7 @@ export function SqlEditorPane(props: Props) {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [saveShortcut, win.id]);
+  }, [flushDraft, saveShortcut, win.id]);
 
   // Reduce unhandled cancellation noise
   useEffect(() => {
@@ -673,7 +682,16 @@ export function SqlEditorPane(props: Props) {
       disposed = true;
       editorRef.current?.__disposeAll?.();
     };
-  }, [draftId, modelUri, win.id]);
+  }, [
+    appendSqlToEditor,
+    draftId,
+    flushDraft,
+    modelUri,
+    onRun,
+    scheduleBackgroundSave,
+    win.content,
+    win.id,
+  ]);
 
   // External content sync (if parent pushes content)
   useEffect(() => {

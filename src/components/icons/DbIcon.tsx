@@ -15,6 +15,7 @@ import cloudflared1 from "src/assets/db/d1.svg";
 import cassandra from "src/assets/db/cassandra.svg";
 import clickhouse from "src/assets/db/clickhouse.svg";
 import turso from "src/assets/db/turso.svg";
+import sheets from "src/assets/db/sheets.svg";
 
 // Import DatabaseEngine from shared types if available; otherwise keep this local alias.
 export type DatabaseEngine =
@@ -31,7 +32,8 @@ export type DatabaseEngine =
   | "snowflake"
   | "duckdb"
   | "cassandra"
-  | "clickhouse";
+  | "clickhouse"
+  | "google_sheets";
 
 type DbIconSrc = string;
 
@@ -50,6 +52,7 @@ const DB_ICON_MAP: Partial<Record<DatabaseEngine, DbIconSrc>> = {
   duckdb,
   cassandra,
   clickhouse,
+  google_sheets: sheets,
 };
 
 function normalizeEngine(engine?: string): DatabaseEngine | null {
@@ -66,6 +69,9 @@ function normalizeEngine(engine?: string): DatabaseEngine | null {
   if (k === "dk") return "duckdb";
   if (k === "ch") return "clickhouse";
   if (k === "tu") return "turso";
+  if (k === "google sheets" || k === "sheets" || k === "gs") {
+    return "google_sheets";
+  }
 
   // exact
   if (k in DB_ICON_MAP) return k as DatabaseEngine;
@@ -89,6 +95,7 @@ function engineFromAbbr(abbreviation?: string): DatabaseEngine | null {
   if (k === "sf") return "snowflake";
   if (k === "dk") return "duckdb";
   if (k === "ch") return "clickhouse";
+  if (k === "gs") return "google_sheets";
   return null;
 }
 

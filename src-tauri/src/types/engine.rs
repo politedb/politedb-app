@@ -17,6 +17,7 @@ pub enum EngineKind {
     Duckdb,
     Cassandra,
     Clickhouse,
+    GoogleSheets,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -62,6 +63,12 @@ pub struct TursoConnectInput {
     pub url: String,
     pub auth_token: SecretRef,
     pub statement_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoogleSheetsConnectInput {
+    pub spreadsheet_id: String,
+    pub credential: SecretRef,
 }
 
 use crate::types::secret::SecretRef;

@@ -72,6 +72,7 @@ export function useMiddleEllipsisByWidth(opts: UseMiddleEllipsisOpts): {
     const cs = getComputedStyle(el);
     // Match how browser measures: "font" includes weight/size/family etc.
     return cs.font || `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [font, width]); // width change ensures ref computed style ready
 
   const value = useMemo(() => {
