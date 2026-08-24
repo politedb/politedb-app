@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tableCellBackground } from "./tableCellBackground";
 
 describe("tableCellBackground", () => {
-  it("keeps a selected new row green", () => {
+  it("uses selection color for a selected new row", () => {
     expect(
       tableCellBackground({
         dirty: false,
@@ -11,7 +11,7 @@ describe("tableCellBackground", () => {
         selected: true,
         focused: true,
       })
-    ).toBe("#dcfce7");
+    ).toBe("#bedbff");
   });
 
   it("uses normal selection color for persisted rows", () => {

@@ -55,6 +55,16 @@ const formatPatchValue = (
     ? "DEFAULT"
     : formatValue(value, dbType, engine);
 
+function isNullCellValue(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === "object" &&
+      value !== null &&
+      (value as { t?: unknown }).t === "Null")
+  );
+}
+
 function isUnsafeFallbackWhereColumn(dbType: string | undefined) {
   if (!dbType) return false;
   if (isBlobColumnType(dbType)) return true;
@@ -273,29 +283,13 @@ export function generateUpdateSqlFromPatches(
       }
 
       const cellValue = originalRow[i];
-      const originalValue = cellToString(cellValue);
       const colName = qIdent(col.name, engine);
 
-      // Handle null/empty values
-      if (
-        cellValue === null ||
-        cellValue === undefined ||
-        originalValue === ""
-      ) {
+      if (isNullCellValue(cellValue)) {
         whereClauses.push(`${colName} IS NULL`);
       } else {
-        // Extract actual value from cell object if needed
-        let valueToCompare: any = originalValue;
-        if (typeof cellValue === "object" && cellValue !== null) {
-          if ("v" in cellValue) {
-            valueToCompare = (cellValue as any).v;
-          } else if ((cellValue as any).t === "Null") {
-            whereClauses.push(`${colName} IS NULL`);
-            continue;
-          }
-        }
         whereClauses.push(
-          `${colName} = ${formatValue(valueToCompare, col.db_type, engine)}`
+          `${colName} = ${formatValue(cellValue, col.db_type, engine)}`
         );
       }
     }
@@ -955,29 +949,13 @@ export function generateDeleteSqlFromPatches(
       }
 
       const cellValue = originalRow[i];
-      const originalValue = cellToString(cellValue);
       const colName = qIdent(col.name, engine);
 
-      // Handle null/empty values
-      if (
-        cellValue === null ||
-        cellValue === undefined ||
-        originalValue === ""
-      ) {
+      if (isNullCellValue(cellValue)) {
         whereClauses.push(`${colName} IS NULL`);
       } else {
-        // Extract actual value from cell object if needed
-        let valueToCompare: any = originalValue;
-        if (typeof cellValue === "object" && cellValue !== null) {
-          if ("v" in cellValue) {
-            valueToCompare = (cellValue as any).v;
-          } else if ((cellValue as any).t === "Null") {
-            whereClauses.push(`${colName} IS NULL`);
-            continue;
-          }
-        }
         whereClauses.push(
-          `${colName} = ${formatValue(valueToCompare, col.db_type, engine)}`
+          `${colName} = ${formatValue(cellValue, col.db_type, engine)}`
         );
       }
     }

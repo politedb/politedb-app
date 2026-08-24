@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import { cellToString } from "src/utils/convert";
+import { cellEditValuesEqual, cellToString } from "src/utils/convert";
 import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 import type { ConnectionState, DataPatchesState } from "./types";
 import {
@@ -480,9 +480,7 @@ export const useConnectionStore = create<ConnectionState>()(
                     }
                   }
                 }
-                const patchStr = cellToString(value);
-                const origStr = cellToString(origVal);
-                if (patchStr !== origStr) cleaned[key] = value;
+                if (!cellEditValuesEqual(value, origVal)) cleaned[key] = value;
               }
               dataToWrite = cleaned;
             }

@@ -140,7 +140,8 @@ export const tableStructuresQuery = (
       column_name AS CHECK,
       column_name AS check_constraint,
       column_default,
-      pg_catalog.col_description (${oid}, ordinal_position) AS comment
+      pg_catalog.col_description (${oid}, ordinal_position) AS comment,
+      is_identity
     FROM
       information_schema.columns
       JOIN pg_attribute pa ON attrelid = ${oid}
@@ -381,7 +382,7 @@ export const tableConstraintsQuery = (
   return regexEscape(queryStr);
 };
 
-/** Foreign keys for a table (Postgres). Returns one row per FK with aggregated columns. */
+/** Foreign keys for a table. Returns one row per FK with aggregated columns. */
 export const tableForeignKeysQuery = (
   schema: string,
   tableName: string,
@@ -391,6 +392,32 @@ export const tableForeignKeysQuery = (
     return `
       SELECT '' WHERE 1=0;
     `;
+  }
+
+  if (engine === "mysql" || engine === "mariadb") {
+    const queryStr = `
+      SELECT
+        kcu.constraint_name,
+        kcu.table_schema,
+        kcu.table_name,
+        GROUP_CONCAT(kcu.column_name ORDER BY kcu.ordinal_position SEPARATOR ',') AS column_names,
+        MAX(kcu.referenced_table_schema) AS ref_table_schema,
+        MAX(kcu.referenced_table_name) AS ref_table_name,
+        GROUP_CONCAT(kcu.referenced_column_name ORDER BY kcu.ordinal_position SEPARATOR ',') AS ref_column_names,
+        MAX(rc.update_rule) AS on_update,
+        MAX(rc.delete_rule) AS on_delete
+      FROM information_schema.key_column_usage kcu
+      JOIN information_schema.referential_constraints rc
+        ON rc.constraint_schema = kcu.constraint_schema
+       AND rc.constraint_name = kcu.constraint_name
+       AND rc.table_name = kcu.table_name
+      WHERE kcu.table_schema = ${qLiteral(schema)}
+        AND kcu.table_name = ${qLiteral(tableName)}
+        AND kcu.referenced_table_name IS NOT NULL
+      GROUP BY kcu.constraint_name, kcu.table_schema, kcu.table_name
+      ORDER BY kcu.constraint_name;
+    `;
+    return regexEscape(queryStr);
   }
 
   if (engine === "oracle") {

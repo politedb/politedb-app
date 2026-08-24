@@ -44,6 +44,16 @@ type RowMenuState = {
 type CellEditorKind = "text" | "json" | "date" | "datetime" | "bool" | "blob";
 const ROW_CLIPBOARD_PREFIX = "POLITEDB_ROWS:";
 
+export function getCanvasRowBackground(
+  isNewRow: boolean,
+  isSelected: boolean,
+  isFocused: boolean
+): string | null {
+  if (isNewRow) return "#dcfce7";
+  if (!isSelected) return null;
+  return isFocused ? "#bedbff" : "#dbdbdb";
+}
+
 type Props = {
   columns: ColumnMeta[];
   totalRows: number;
@@ -474,6 +484,7 @@ export function CanvasTable({
   const editorRef = useRef<
     HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   >(null);
+  const editorWasModifiedRef = useRef(false);
   const [editorValue, setEditorValue] = useState("");
   const [editorError, setEditorError] = useState<string | null>(null);
   const [editorRect, setEditorRect] = useState<{
@@ -869,14 +880,24 @@ export function CanvasTable({
   }, [isResizing]);
 
   const cancelExit = useCallback(() => {
+    editorWasModifiedRef.current = false;
     onExitEdit?.();
     setEditorRect(null);
     setEditorError(null);
   }, [onExitEdit]);
 
+  const updateEditorValue = useCallback((value: string) => {
+    editorWasModifiedRef.current = true;
+    setEditorValue(value);
+  }, []);
+
   const commitAndExit = useCallback(() => {
     if (!editing) return;
     if (editorKind === "blob") {
+      cancelExit();
+      return;
+    }
+    if (!editorWasModifiedRef.current) {
       cancelExit();
       return;
     }
@@ -895,6 +916,7 @@ export function CanvasTable({
       nextValue = fromDateInputValue(editorValue, editorKind);
     }
 
+    editorWasModifiedRef.current = false;
     onCommitEdit?.(editing, nextValue);
     onExitEdit?.();
     setEditorRect(null);
@@ -903,6 +925,7 @@ export function CanvasTable({
 
   const commitNullAndExit = useCallback(() => {
     if (!editing || editorKind === "blob") return;
+    editorWasModifiedRef.current = false;
     onCommitEdit?.(editing, null);
     onExitEdit?.();
     setEditorRect(null);
@@ -1447,6 +1470,7 @@ export function CanvasTable({
         row?.[colIdx] ?? null,
         columns[colIdx]?.db_type
       );
+      editorWasModifiedRef.current = false;
       setEditorError(null);
       if (kind === "bool") {
         const normalized = String(s ?? "").toLowerCase();
@@ -1672,7 +1696,9 @@ export function CanvasTable({
               )}
               value={editorValue}
               onInput={(e) =>
-                setEditorValue((e.currentTarget as HTMLTextAreaElement).value)
+                updateEditorValue(
+                  (e.currentTarget as HTMLTextAreaElement).value
+                )
               }
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -1688,10 +1714,10 @@ export function CanvasTable({
               class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none"
               value={editorValue}
               onInput={(e) =>
-                setEditorValue((e.currentTarget as HTMLSelectElement).value)
+                updateEditorValue((e.currentTarget as HTMLSelectElement).value)
               }
               onChange={(e) =>
-                setEditorValue((e.currentTarget as HTMLSelectElement).value)
+                updateEditorValue((e.currentTarget as HTMLSelectElement).value)
               }
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitAndExit();
@@ -1725,10 +1751,10 @@ export function CanvasTable({
                   : editorValue
               }
               onInput={(e) =>
-                setEditorValue((e.currentTarget as HTMLInputElement).value)
+                updateEditorValue((e.currentTarget as HTMLInputElement).value)
               }
               onChange={(e) =>
-                setEditorValue((e.currentTarget as HTMLInputElement).value)
+                updateEditorValue((e.currentTarget as HTMLInputElement).value)
               }
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitAndExit();

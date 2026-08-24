@@ -1,9 +1,10 @@
 import { useCallback } from "preact/hooks";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
+import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
+import type { ColumnMeta } from "src/lib/tauri/types";
 
 export interface UseTableDataOperationsProps {
-  activeKey: string;
   profileId: string;
   activeTableWindowId: string;
   isLocked?: boolean;
@@ -16,12 +17,23 @@ export interface UseTableDataOperationsProps {
 }
 
 export function buildNewRowPatch(
-  columns: Array<{ name: string }>,
-  rowKey = `new_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  columns: Pick<ColumnMeta, "name" | "column_default" | "auto_generated">[],
+  existingRowKeys: readonly string[]
 ) {
-  const data: Record<string, unknown> = { __rowKey: rowKey };
-  for (const column of columns) data[column.name] = null;
-  return data;
+  const usedKeys = new Set(existingRowKeys);
+  let rowNumber = existingRowKeys.length;
+  while (usedKeys.has(`new:${rowNumber}`)) rowNumber += 1;
+
+  const data: Record<string, unknown> = {};
+  for (const column of columns) {
+    const hasDatabaseDefault =
+      column.auto_generated === true ||
+      (typeof column.column_default === "string" &&
+        column.column_default.trim() !== "");
+    data[column.name] = hasDatabaseDefault ? defaultCellEditValue() : null;
+  }
+
+  return { rowKey: `new:${rowNumber}`, data };
 }
 
 export function useTableDataOperations({
@@ -53,9 +65,17 @@ export function useTableDataOperations({
   );
 
   const handleDeleteRow = useCallback(
-    (rowIndex: number, _offset: number, rowKeyOverride?: string) => {
+    (
+      rowIndex: number,
+      offsetOrRowKey?: number | string,
+      rowKeyOverride?: string
+    ) => {
       if (isLocked) return;
-      const rowKey = rowKeyOverride ?? String(rowIndex);
+      const rowKey =
+        rowKeyOverride ??
+        (typeof offsetOrRowKey === "string"
+          ? offsetOrRowKey
+          : String(rowIndex));
       const store = useConnectionStore.getState();
       const windowPatches =
         store.dataPatchMap[profileId]?.[activeTableWindowId]?.patches ?? null;
@@ -80,9 +100,9 @@ export function useTableDataOperations({
 
   const handleAddRow = useCallback(
     (
-      columns: Array<{ name: string }>,
-      _rowIndex: number,
-      onDataChange?: (
+      columns: Pick<ColumnMeta, "name" | "column_default" | "auto_generated">[],
+      _rowIndex?: number,
+      onDataChangeOverride?: (
         action: DataAction,
         dataKey: DataKey,
         rowIndex: number,
@@ -97,16 +117,21 @@ export function useTableDataOperations({
 
       // New rows have one authoritative representation: the create patch.
       // The table derives its visible new rows from these patches.
-      if (onDataChange) {
-        onDataChange(
-          DATA_ACTIONS.create,
-          DATA_KEYS.data,
-          -1,
-          buildNewRowPatch(columns)
+      const emitDataChange = onDataChangeOverride ?? onDataChange;
+      if (emitDataChange) {
+        const store = useConnectionStore.getState();
+        const existingRowKeys = Object.keys(
+          store.dataPatchMap[profileId]?.[activeTableWindowId]?.patches?.create
+            ?.data ?? {}
         );
+        const { rowKey, data } = buildNewRowPatch(columns, existingRowKeys);
+        emitDataChange(DATA_ACTIONS.create, DATA_KEYS.data, -1, {
+          ...data,
+          __rowKey: rowKey,
+        });
       }
     },
-    [isLocked]
+    [activeTableWindowId, isLocked, onDataChange, profileId]
   );
 
   return {

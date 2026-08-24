@@ -4,9 +4,43 @@ import {
   generateSqlFromPatches,
   generateSqlPlanFromPatches,
   generateDeleteSqlFromPatches,
+  generateInsertSqlFromPatches,
   generateUpdateSqlFromPatches,
   type PatchMap,
 } from "./generateSql";
+
+describe("generateInsertSqlFromPatches", () => {
+  it("preserves DEFAULT, NULL, empty strings, and values", () => {
+    const sql = generateInsertSqlFromPatches(
+      {
+        create: {
+          data: {
+            "new:0": {
+              id: { __politedbCellEdit: "default" },
+              nullable_value: null,
+              empty_value: "",
+              title: "hello",
+              __rowKey: "new:0",
+            },
+          },
+        },
+      },
+      "public",
+      "items",
+      "postgres",
+      [
+        { name: "id", db_type: "integer" },
+        { name: "nullable_value", db_type: "text" },
+        { name: "empty_value", db_type: "text" },
+        { name: "title", db_type: "text" },
+      ]
+    );
+
+    expect(sql).toEqual([
+      'INSERT INTO "public"."items" ("id", "nullable_value", "empty_value", "title")\nVALUES (DEFAULT, NULL, \'\', \'hello\');',
+    ]);
+  });
+});
 
 function mysqlJsonDisplayLiteral(value: unknown) {
   const json = typeof value === "string" ? value : JSON.stringify(value);
@@ -17,6 +51,67 @@ function mysqlJsonDisplayLiteral(value: unknown) {
 }
 
 describe("generateUpdateSqlFromPatches", () => {
+  it("preserves empty-string and binary primary keys in UPDATE identity", () => {
+    const emptyKeySql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { title: "updated" } } } },
+      "fleet",
+      "items",
+      {
+        columns: [
+          { name: "code", db_type: "varchar" },
+          { name: "title", db_type: "varchar" },
+        ],
+        rows: [
+          [
+            { t: "Str", v: "" },
+            { t: "Str", v: "old" },
+          ],
+        ],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "code",
+        },
+      ],
+      "mysql"
+    );
+    const binaryKeySql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { title: "updated" } } } },
+      "fleet",
+      "binary_items",
+      {
+        columns: [
+          { name: "id", db_type: "binary" },
+          { name: "title", db_type: "varchar" },
+        ],
+        rows: [[{ t: "BytesB64", v: "AQID/w==" }, "old"]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(emptyKeySql[0]).toContain(
+      "WHERE `code` = CONVERT(UNHEX('') USING utf8mb4)"
+    );
+    expect(emptyKeySql[0]).not.toContain("`code` IS NULL");
+    expect(binaryKeySql[0]).toContain("WHERE `id` = X'010203ff';");
+    expect(binaryKeySql[0]).not.toContain("AQID/w==");
+  });
+
   it("serializes MySQL JSON updates and avoids JSON columns in fallback WHERE", () => {
     const sql = generateUpdateSqlFromPatches(
       {
@@ -212,6 +307,54 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(sql[0]).toBe(
       "ALTER TABLE `demo_db`.`order_items` DELETE WHERE `id` = 1;"
     );
+  });
+
+  it("preserves empty-string and binary primary keys in DELETE identity", () => {
+    const emptyKeySql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": {} } } },
+      "fleet",
+      "items",
+      {
+        columns: [{ name: "code", db_type: "varchar" }],
+        rows: [[{ t: "Str", v: "" }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "code",
+        },
+      ],
+      "mysql"
+    );
+    const binaryKeySql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": {} } } },
+      "fleet",
+      "binary_items",
+      {
+        columns: [{ name: "id", db_type: "longblob" }],
+        rows: [[{ t: "BytesB64", v: "AQID/w==" }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(emptyKeySql[0]).toContain(
+      "WHERE `code` = CONVERT(UNHEX('') USING utf8mb4)"
+    );
+    expect(binaryKeySql[0]).toContain("WHERE `id` = X'010203ff';");
   });
 
   it("normalizes double-encoded JSON strings for MySQL updates", () => {

@@ -421,6 +421,8 @@ export type ColumnMeta = {
   db_type: string;
   readonly?: boolean;
   column_default?: string | null;
+  is_primary?: boolean;
+  auto_generated?: boolean;
 };
 
 export type TableChunk = {

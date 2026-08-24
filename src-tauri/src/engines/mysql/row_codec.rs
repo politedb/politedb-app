@@ -168,7 +168,7 @@ fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
         };
     }
 
-    // 7) YEAR: often returned as bytes depending on protocol/settings; prefer string
+    // 6) YEAR: often returned as bytes depending on protocol/settings; prefer string
     if ty == ColumnType::MYSQL_TYPE_YEAR {
         return match std::str::from_utf8(b) {
             Ok(s) => CellValue::Str(s.to_string()),
@@ -176,7 +176,12 @@ fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
         };
     }
 
-    // 8) TEXT/STRING/VARCHAR/VAR_STRING/CHAR and most other “text-ish”:
+    // 7) Binary BLOB/VARBINARY/BINARY: preserve opaque bytes.
+    if is_binary_bytes(decoder) {
+        return CellValue::BytesB64(B64.encode(b));
+    }
+
+    // 8) TEXT/STRING/VARCHAR/VAR_STRING/CHAR and most other text-like values:
     // Try UTF-8; if not, keep bytes base64 (do not lose data).
     match std::str::from_utf8(b) {
         Ok(s) => CellValue::Str(s.to_string()),
@@ -205,22 +210,130 @@ fn is_blob_type(ty: ColumnType) -> bool {
 
 fn mysql_column_type_label(c: &mysql_async::Column) -> String {
     let ty = c.column_type();
-    let raw = format!("{ty:?}");
-    let label = raw
-        .strip_prefix("MYSQL_TYPE_")
-        .unwrap_or(raw.as_str())
-        .to_ascii_lowercase();
+    const MYSQL_BINARY_CHARSET: u16 = 63;
+    let is_binary =
+        c.character_set() == MYSQL_BINARY_CHARSET || c.flags().contains(ColumnFlags::BINARY_FLAG);
+    mysql_column_type_label_for(ty, is_binary).to_string()
+}
 
-    if is_blob_type(ty) {
-        const MYSQL_BINARY_CHARSET: u16 = 63;
-        if c.character_set() == MYSQL_BINARY_CHARSET || c.flags().contains(ColumnFlags::BINARY_FLAG)
-        {
-            return "blob".to_string();
+fn mysql_column_type_label_for(ty: ColumnType, is_binary: bool) -> &'static str {
+    match ty {
+        ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => "decimal",
+        ColumnType::MYSQL_TYPE_TINY => "tinyint",
+        ColumnType::MYSQL_TYPE_SHORT => "smallint",
+        ColumnType::MYSQL_TYPE_LONG => "int",
+        ColumnType::MYSQL_TYPE_LONGLONG => "bigint",
+        ColumnType::MYSQL_TYPE_INT24 => "mediumint",
+        ColumnType::MYSQL_TYPE_FLOAT => "float",
+        ColumnType::MYSQL_TYPE_DOUBLE => "double",
+        ColumnType::MYSQL_TYPE_NULL => "null",
+        ColumnType::MYSQL_TYPE_TIMESTAMP | ColumnType::MYSQL_TYPE_TIMESTAMP2 => "timestamp",
+        ColumnType::MYSQL_TYPE_DATE | ColumnType::MYSQL_TYPE_NEWDATE => "date",
+        ColumnType::MYSQL_TYPE_TIME | ColumnType::MYSQL_TYPE_TIME2 => "time",
+        ColumnType::MYSQL_TYPE_DATETIME | ColumnType::MYSQL_TYPE_DATETIME2 => "datetime",
+        ColumnType::MYSQL_TYPE_YEAR => "year",
+        ColumnType::MYSQL_TYPE_VARCHAR | ColumnType::MYSQL_TYPE_VAR_STRING => {
+            if is_binary {
+                "varbinary"
+            } else {
+                "varchar"
+            }
         }
-        return "text".to_string();
+        ColumnType::MYSQL_TYPE_STRING => {
+            if is_binary {
+                "binary"
+            } else {
+                "char"
+            }
+        }
+        ColumnType::MYSQL_TYPE_BIT => "bit",
+        ColumnType::MYSQL_TYPE_JSON => "json",
+        ColumnType::MYSQL_TYPE_ENUM => "enum",
+        ColumnType::MYSQL_TYPE_SET => "set",
+        ColumnType::MYSQL_TYPE_TINY_BLOB => {
+            if is_binary {
+                "tinyblob"
+            } else {
+                "tinytext"
+            }
+        }
+        ColumnType::MYSQL_TYPE_MEDIUM_BLOB => {
+            if is_binary {
+                "mediumblob"
+            } else {
+                "mediumtext"
+            }
+        }
+        ColumnType::MYSQL_TYPE_LONG_BLOB => {
+            if is_binary {
+                "longblob"
+            } else {
+                "longtext"
+            }
+        }
+        ColumnType::MYSQL_TYPE_BLOB => {
+            if is_binary {
+                "blob"
+            } else {
+                "text"
+            }
+        }
+        ColumnType::MYSQL_TYPE_GEOMETRY => "geometry",
+        ColumnType::MYSQL_TYPE_VECTOR => "vector",
+        ColumnType::MYSQL_TYPE_TYPED_ARRAY => "typed_array",
+        ColumnType::MYSQL_TYPE_UNKNOWN => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decoder(ty: ColumnType, character_set: u16) -> ColDecoder {
+        ColDecoder {
+            ty,
+            character_set,
+            flags: ColumnFlags::empty(),
+        }
     }
 
-    label
+    #[test]
+    fn decimal_bytes_are_text_even_with_binary_charset() {
+        let value = decode_bytes(
+            b"1234567890.25",
+            &decoder(ColumnType::MYSQL_TYPE_NEWDECIMAL, 63),
+        );
+        assert!(matches!(value, CellValue::Str(ref text) if text == "1234567890.25"));
+    }
+
+    #[test]
+    fn binary_bytes_stay_base64() {
+        let value = decode_bytes(
+            &[0x00, 0xFF, 0x10],
+            &decoder(ColumnType::MYSQL_TYPE_LONG_BLOB, 63),
+        );
+        assert!(matches!(value, CellValue::BytesB64(ref text) if text == "AP8Q"));
+    }
+
+    #[test]
+    fn protocol_types_map_to_sql_types_used_by_editor() {
+        assert_eq!(
+            mysql_column_type_label_for(ColumnType::MYSQL_TYPE_LONG, true),
+            "int"
+        );
+        assert_eq!(
+            mysql_column_type_label_for(ColumnType::MYSQL_TYPE_NEWDECIMAL, true),
+            "decimal"
+        );
+        assert_eq!(
+            mysql_column_type_label_for(ColumnType::MYSQL_TYPE_LONG_BLOB, true),
+            "longblob"
+        );
+        assert_eq!(
+            mysql_column_type_label_for(ColumnType::MYSQL_TYPE_LONG_BLOB, false),
+            "longtext"
+        );
+    }
 }
 
 #[cfg(test)]

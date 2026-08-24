@@ -176,6 +176,8 @@ export type TableStructure = {
   column_default: string;
   foreign_key: string;
   comment: string;
+  extra?: string;
+  is_identity?: boolean;
   isNew?: boolean;
 };
 

@@ -37,6 +37,7 @@ import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import { connectionTabHasChanges } from "src/screens/connection/tabDirty";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/lib/queries/sql";
+import { buildTableReloadQueryFlags } from "src/screens/connection/tableReloadQueryFlags";
 
 /* =============================================================================
  * Types
@@ -175,18 +176,11 @@ function getTableReloadQueryFlags(
 ): LoadFlags {
   const key = tableKey(tabId, schema, tableName);
   const store = useConnectionStore.getState();
-  const filterState = store.tableFilterByKey[key];
-  const appliedFilters = filterState?.appliedFilters ?? [];
-  const hasAppliedFilters = appliedFilters.some(
-    (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
+  return buildTableReloadQueryFlags(
+    flags,
+    store.tableFilterByKey[key],
+    store.tableSortByKey[key]
   );
-
-  return {
-    ...flags,
-    filters: hasAppliedFilters ? appliedFilters : undefined,
-    filterCombine: filterState?.appliedFilterCombine ?? "AND",
-    sortBy: store.tableSortByKey[key] ?? null,
-  };
 }
 
 type NewTableLike = {
@@ -933,32 +927,22 @@ export function useConnectionActions(
 
     if (!activeTableWindow) return;
 
-    const activeTableKey = tableKey(
-      activeProfileScreen,
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name
-    );
-    const activeTableFilter =
-      useConnectionStore.getState().tableFilterByKey[activeTableKey];
-
-    // 🔥 Reload table data after discard so rows are restored from DB
     await loadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name,
       { limit, offset },
-      {
-        force: true,
-        forceRefresh: true,
-        refreshRows: true,
-        refreshMeta: false,
-        refreshStats: false,
-        filters:
-          activeTableFilter?.appliedFilters &&
-          activeTableFilter.appliedFilters.length > 0
-            ? activeTableFilter.appliedFilters
-            : undefined,
-        filterCombine: activeTableFilter?.appliedFilterCombine ?? "AND",
-      }
+      getTableReloadQueryFlags(
+        activeProfileScreen,
+        activeTableWindow.table.schema,
+        activeTableWindow.table.name,
+        {
+          force: true,
+          forceRefresh: true,
+          refreshRows: true,
+          refreshMeta: false,
+          refreshStats: false,
+        }
+      )
     );
   }, [
     activeTableWindow,

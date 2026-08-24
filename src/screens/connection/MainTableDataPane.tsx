@@ -289,10 +289,10 @@ export function MainTableDataPane(props: {
     [activeKey, setTableSort, renderOffset, pageChange, limit]
   );
 
-  const patches =
-    useConnectionStore.getState().dataPatchMap[profileId]?.[
-      activeTableWindow.id
-    ]?.patches ?? null;
+  const patches = useConnectionStore(
+    (state) =>
+      state.dataPatchMap[profileId]?.[activeTableWindow.id]?.patches ?? null
+  );
   const newRowKeys = useMemo(
     () => Object.keys((patches?.create?.data ?? {}) as Record<string, unknown>),
     [patches]
@@ -329,7 +329,7 @@ export function MainTableDataPane(props: {
           ? String(data.__rowKey)
           : String(rowIndex);
 
-      // Update patches for UI consistency (but not for creates, since they're handled by store)
+      // Patches are the source of truth for unsaved edits and new rows.
       useConnectionStore.getState().setDataPatchMap(profileId, {
         dataKey,
         action,
@@ -396,7 +396,6 @@ export function MainTableDataPane(props: {
   );
 
   const { handleAddRow, handleDeleteRow } = useTableDataOperations({
-    activeKey,
     profileId,
     activeTableWindowId: activeTableWindow.id,
     isLocked: isDataReadOnly,
@@ -404,18 +403,24 @@ export function MainTableDataPane(props: {
   });
 
   const tableColumns = useMemo(() => {
-    const defaultsByColumn = new Map(
-      (meta.structure ?? []).map((col) => [
-        col.column_name,
-        col.column_default ?? null,
-      ])
+    const structureByColumn = new Map(
+      (meta.structure ?? []).map((col) => [col.column_name, col])
     );
     return (meta.columns ?? []).map((col) => ({
       ...col,
       column_default:
-        col.column_default ?? defaultsByColumn.get(col.name) ?? null,
+        col.column_default ??
+        structureByColumn.get(col.name)?.column_default ??
+        null,
+      auto_generated:
+        col.auto_generated ||
+        structureByColumn.get(col.name)?.is_identity === true ||
+        /auto_increment/i.test(structureByColumn.get(col.name)?.extra ?? "") ||
+        ((engine === "sqlite" || engine === "d1" || engine === "turso") &&
+          col.is_primary === true &&
+          /int/i.test(col.db_type)),
     }));
-  }, [meta.columns, meta.structure]);
+  }, [engine, meta.columns, meta.structure]);
   const columnsKey = useMemo(
     () => tableColumns.map((col) => col.name).join("\0"),
     [tableColumns]
@@ -1151,7 +1156,7 @@ export function MainTableDataPane(props: {
         onCountExact={handleCountExact}
         onAddRow={() => {
           if (!canAddDataRow) return;
-          handleAddRow(meta.columns ?? [], loadedRowCount, onDataChange);
+          handleAddRow(tableColumns, loadedRowCount, onDataChange);
         }}
         onAddColumn={isStructureReadOnly ? () => {} : onAddColumn}
         onAddIndex={isStructureReadOnly ? () => {} : onAddIndex}

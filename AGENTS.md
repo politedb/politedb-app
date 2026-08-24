@@ -30,6 +30,14 @@ PoliteDB is a Tauri v2 desktop database client with a Rust backend and a Preact/
 - When changing shared query, table editing, profile import/export, keychain, SSH, updater, or AI runtime flows, add or update focused tests where practical.
 - Use existing helpers and patterns before adding new abstractions.
 
+## Behavioral Compatibility
+
+- Before changing existing logic, identify its current invariants and every shared state path it affects.
+- Preserve existing behavior unless the request explicitly changes that behavior.
+- Add or update regression tests for both the reported case and adjacent existing workflows.
+- A logical entity must have one authoritative in-memory representation; do not mutate parallel state paths that render or persist the same entity twice.
+- For shared editing state, verify create, edit, delete, save, reload, filter, and sort behavior as applicable before considering the change complete.
+
 ## SOLID Principles
 
 Apply SOLID when designing or refactoring code. Prefer extending existing boundaries over inventing parallel structures.

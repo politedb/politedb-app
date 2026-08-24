@@ -1,6 +1,6 @@
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { DataAction, DataKey } from "src/stores/connection";
-import { cellToString } from "src/utils/convert";
+import { cellEditValuesEqual } from "src/utils/convert";
 
 type PatchHelpers = {
   isNewRow: (rowIndex: number) => boolean;
@@ -62,11 +62,9 @@ export function commitTableCellEdit(params: {
     newRows
   );
 
-  const prev = (cellToString(patchedValue) ?? "").trim();
-  const next = (cellToString(newValue) ?? "").trim();
   const isNewRow = patchHelpers.isNewRow(rowIdx);
 
-  if (!isNewRow && prev === next) return false;
+  if (!isNewRow && cellEditValuesEqual(patchedValue, newValue)) return false;
 
   const changeData: Record<string, unknown> = { [columnName]: newValue };
 

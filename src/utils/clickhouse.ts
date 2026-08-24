@@ -56,15 +56,17 @@ export function normalizeClickhouseDbType(
 ): string {
   const dt = (dataType ?? "").trim();
   if (!dt) return dt;
-  if (clickhouseDecimalScale(dt) !== null) return dt;
   const scale = Number(numericScale);
   if (!Number.isFinite(scale) || scale < 0) return dt;
   const inner = unwrapClickhouseType(dt).toLowerCase();
   if (!inner.startsWith("decimal")) return dt;
   if (inner.includes(",")) return dt;
-  const oneArg = inner.match(/^(decimal(?:32|64|128|256)?)\s*\(\s*(\d+)\s*\)/i);
+  const oneArg = unwrapClickhouseType(dt).match(
+    /^(decimal(?:32|64|128|256)?)\s*\(\s*(\d+)\s*\)/i
+  );
   if (oneArg) {
     return `${oneArg[1]}(${oneArg[2]}, ${scale})`;
   }
+  if (clickhouseDecimalScale(dt) !== null) return dt;
   return `Decimal(18, ${scale})`;
 }

@@ -72,7 +72,7 @@ function rowIdentity(
     const value = cellToString(row[index], true);
     return `${column.name}=${value || "NULL"}`;
   });
-  const label = pkColumns.length ? "Primary Key" : "Virtual Key";
+  const label = pkColumns.length ? "Primary key" : "Virtual key";
   return parts.length ? `${label}: ${parts.join(", ")}` : `Row ${rowKey}`;
 }
 

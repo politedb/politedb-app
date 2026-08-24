@@ -93,6 +93,16 @@ export function cellToString(
   return "";
 }
 
+export function cellEditValuesEqual(left: unknown, right: unknown): boolean {
+  const leftIsDefault = isDefaultCellEditValue(left);
+  const rightIsDefault = isDefaultCellEditValue(right);
+  if (leftIsDefault || rightIsDefault) {
+    return leftIsDefault && rightIsDefault;
+  }
+
+  return cellToString(left, true) === cellToString(right, true);
+}
+
 export function toNumber(v: any, fallback: number) {
   const x = Number(v);
   return Number.isFinite(x) ? x : fallback;

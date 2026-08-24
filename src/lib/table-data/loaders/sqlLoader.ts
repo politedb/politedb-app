@@ -411,6 +411,7 @@ export async function loadMeta(params: {
     check: cellToString(row?.[9]),
     column_default: cellToString(row?.[11]),
     comment: cellToString(row?.[12]),
+    is_identity: cellToString(row?.[13])?.toLowerCase() === "yes",
   }));
 
   const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
@@ -460,8 +461,6 @@ async function loadForeignKeysOnce(params: {
   const { connId, schema, tableName, engine, addLogQuery } = params;
 
   if (
-    engine === "mysql" ||
-    engine === "mariadb" ||
     engine === "snowflake" ||
     engine === "clickhouse" ||
     isSqliteLike(engine)
