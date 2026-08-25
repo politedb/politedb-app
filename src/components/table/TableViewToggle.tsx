@@ -9,18 +9,18 @@ interface Props {
 
 export function TableViewToggle({ viewMode, onViewModeChange }: Props) {
   return (
-    <div class="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
+    <div class="flex items-center rounded-md bg-neutral-100">
       <Button
         variant={viewMode === "data" ? "default" : "ghost"}
         onClick={() => onViewModeChange?.("data")}
-        className="px-3 py-1"
+        className="px-5 py-0.75 text-sm font-medium"
       >
         Data
       </Button>
       <Button
         variant={viewMode === "structure" ? "default" : "ghost"}
         onClick={() => onViewModeChange?.("structure")}
-        className="px-3 py-1"
+        className="px-3 py-0.75 text-sm font-medium"
       >
         Structure
       </Button>

@@ -131,7 +131,7 @@ export function SettingsDialog(props: Props) {
                   <div
                     class={[
                       "mt-0.5 truncate text-xs",
-                      selected ? "text-blue-100" : "text-slate-500",
+                      selected ? "text-white" : "text-slate-500",
                     ].join(" ")}
                   >
                     {section.caption}

@@ -90,8 +90,8 @@ export function Button({
   return (
     <button
       className={cn(
-        "flex items-center justify-center gap-1.5 rounded-md px-4 py-1 text-xs font-medium transition-colors",
-        "border disabled:cursor-not-allowed disabled:opacity-50",
+        "flex items-center justify-center gap-1.5 rounded-md px-4 py-1 text-sm font-medium transition-colors",
+        "border disabled:cursor-not-allowed disabled:border-transparent disabled:opacity-50",
         variantStyles[variant],
         borderStyles[variant],
         active && activeStyles[variant],

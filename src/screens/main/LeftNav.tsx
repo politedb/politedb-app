@@ -146,14 +146,12 @@ export function LeftNav(props: {
         {/* Bottom spacer */}
         <div class="mt-auto space-y-2.5 px-3 pb-3">
           <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
-            <div>
-              Tips:
-              <ul class="list-decimal pl-4.5">
-                <li>Right-click a connection for actions.</li>
-                <li>Double-click a connection to open it.</li>
-                <li>Pin connections to keep it at the top.</li>
-              </ul>
-            </div>
+            Tips:
+            <ul class="list-decimal pl-4.5">
+              <li>Right-click a connection for actions.</li>
+              <li>Double-click a connection to open it.</li>
+              <li>Pin connections to keep it at the top.</li>
+            </ul>
           </div>
           <Dropdown
             widthClassName="w-64 px-2!"

@@ -304,11 +304,11 @@ export function LeftNav({
           <Input
             type="text"
             placeholder="Search tables, functions..."
-            left={<SearchIcon className="size-3.5 text-neutral-500" />}
+            left={<SearchIcon className="size-4 text-neutral-500" />}
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
             className={cn(
-              "rounded-lg border border-neutral-200 bg-white! py-1.5 text-[11px]"
+              "rounded-lg border border-neutral-200 bg-white! py-1.5 text-sm"
             )}
           />
         </div>
@@ -443,14 +443,14 @@ export function LeftNav({
                           <KeyIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-blue-100" : "text-amber-500"
+                              isActive ? "text-white" : "text-amber-500"
                             )}
                           />
                         ) : (
                           <TableIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-blue-100" : "text-blue-500"
+                              isActive ? "text-white" : "text-blue-500"
                             )}
                           />
                         )}
@@ -547,7 +547,7 @@ export function LeftNav({
         />
       )}
 
-      <div class="m-2 rounded-lg border border-slate-200 bg-white/60 px-2 py-1 text-xs text-slate-600">
+      <div class="m-2 rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
         Tips:
         <ul class="list-decimal pl-4.5">
           <li>Right-click a table for actions.</li>
@@ -581,8 +581,8 @@ export function LeftNav({
             title={schemaLabel}
             disabled={connectionChromeBlocked}
             className={cn(
-              "h-6 w-full rounded-lg border-neutral-300 bg-white",
-              "text-xs! font-medium! text-neutral-800",
+              "h-7 w-full rounded-lg border-neutral-300 bg-white",
+              "text-sm! font-medium! text-neutral-800",
               "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
             )}
             value={currSchema}

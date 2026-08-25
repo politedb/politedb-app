@@ -317,7 +317,7 @@ export function Table<T = any>({
                 key={col.key}
                 class={cn(
                   "relative border-r border-neutral-50 active:bg-neutral-100",
-                  "p-2 text-xs font-semibold text-neutral-700",
+                  "p-2 text-sm font-semibold text-neutral-700",
                   isCenterColumn(col) ? "text-center" : "text-left",
                   stickyHeader &&
                     "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",

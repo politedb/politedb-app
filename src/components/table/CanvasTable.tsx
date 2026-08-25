@@ -1675,9 +1675,10 @@ export function CanvasTable({
   return (
     <div
       ref={rootCallbackRef}
-      class={`table-focus-root relative h-full min-h-0 w-full bg-white outline-none ${
-        isResizing ? "cursor-col-resize select-none" : ""
-      }`}
+      class={cn(
+        "table-focus-root relative h-full min-h-0 w-full bg-white outline-none",
+        isResizing && "cursor-col-resize select-none"
+      )}
       tabIndex={0}
       onKeyDown={(e) => {
         // When editing a cell, let the input handle Backspace/Delete
@@ -1814,20 +1815,22 @@ export function CanvasTable({
             height: Math.max(1, HEADER_HEIGHT + totalRows * ROW_HEIGHT),
             position: "relative",
           }}
-        >
-          {/* Canvas Layer */}
-          <canvas
-            ref={canvasRef}
-            style={{
-              position: "sticky",
-              top: HEADER_HEIGHT,
-              left: 0,
-              display: "block",
-              zIndex: 1,
-            }}
-          />
-        </div>
+        />
       </div>
+
+      {/* Viewport overlay must not contribute to scrollWidth/scrollHeight. */}
+      <canvas
+        ref={canvasRef}
+        data-canvas-table-viewport
+        style={{
+          position: "absolute",
+          top: HEADER_HEIGHT,
+          left: 0,
+          display: "block",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
 
       {/* Editor Overlay */}
       {editorRect && editing && !isResizing && (

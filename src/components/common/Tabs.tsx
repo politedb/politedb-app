@@ -45,7 +45,7 @@ export function Tabs<T extends string = string>({
             type="button"
             onClick={() => onValueChange(tab.value)}
             class={cn(
-              "-mb-px rounded-none border-0 border-b-2 px-3 py-2 text-xs font-semibold transition-colors hover:bg-transparent",
+              "-mb-px rounded-none border-0 border-b-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-transparent",
               value === tab.value
                 ? "border-blue-500 text-blue-600 hover:border-blue-500 active:border-blue-500"
                 : "border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900 active:border-neutral-300"

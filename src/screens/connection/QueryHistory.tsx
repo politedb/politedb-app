@@ -123,13 +123,10 @@ export function QueryHistory({ activeProfileId }: Props) {
           <Button
             variant="ghost"
             onClick={onClear}
-            class={cn(
-              "h-7 px-2 text-xs text-neutral-600",
-              "hover:bg-neutral-100"
-            )}
+            class={cn("h-7 px-2 text-neutral-600", "hover:bg-neutral-100")}
             title="Clear history"
           >
-            <TrashIcon className="size-4" />
+            <TrashIcon className="size-4.25" />
             Clear
           </Button>
         )}

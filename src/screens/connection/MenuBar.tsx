@@ -673,7 +673,7 @@ export function MenuBar({
           <div class="relative w-full max-w-220 min-w-0">
             <div
               class={cn(
-                "relative flex h-7 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white pr-2 pl-8",
+                "relative flex h-7.75 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white pr-2 pl-8",
                 loadTableError
                   ? "border-red-300"
                   : "border-neutral-200 hover:border-neutral-300",
@@ -699,7 +699,7 @@ export function MenuBar({
                 <div class="flex min-w-0 flex-1 items-center gap-1 truncate">
                   {dbLabel.db ? (
                     <span
-                      class="text-xs font-semibold text-neutral-800"
+                      class="text-sm font-semibold text-neutral-800"
                       title={dbLabel.dbTitle || dbLabel.db}
                     >
                       {dbLabel.db}
@@ -708,11 +708,11 @@ export function MenuBar({
                   {dbLabel.target ? (
                     <>
                       {dbLabel.db ? (
-                        <ChevronRightIcon className="size-2" />
+                        <ChevronRightIcon className="size-2.5" />
                       ) : null}
                       <span
                         class={cn(
-                          "text-xs font-medium text-neutral-600",
+                          "text-sm font-medium text-neutral-600",
                           !dbLabel.db && "font-semibold text-neutral-800"
                         )}
                       >
@@ -767,7 +767,7 @@ export function MenuBar({
               ) : null}
             </div>
 
-            <div class="absolute top-0 left-2 z-10 flex h-7 items-center">
+            <div class="absolute top-0 left-2 z-10 flex h-7.75 items-center">
               <IconButton
                 className="size-4 active:bg-transparent"
                 title="Recheck connection latency"
@@ -860,7 +860,7 @@ export function MenuBar({
               rt.engine === "cassandra"
             }
           >
-            <SquareFunctionIcon className="size-4 text-neutral-700" />
+            <SquareFunctionIcon className="size-5 text-neutral-700" />
           </IconButton>
 
           <IconButton

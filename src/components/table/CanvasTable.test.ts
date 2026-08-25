@@ -86,6 +86,22 @@ describe("getCanvasRowBackground", () => {
 });
 
 describe("CanvasTable cell editor", () => {
+  it("keeps the viewport canvas outside scroll content", () => {
+    render(
+      h(CanvasTableHarness, {
+        onCommitEdit: vi.fn(),
+        cellValue: "value",
+      })
+    );
+
+    const scroller = document.querySelector(".overflow-auto");
+    const canvas = document.querySelector("[data-canvas-table-viewport]");
+    expect(scroller).not.toBeNull();
+    expect(canvas).not.toBeNull();
+    expect(scroller?.contains(canvas)).toBe(false);
+    expect(canvas).toHaveStyle({ position: "absolute", pointerEvents: "none" });
+  });
+
   it("opens a value menu directly from the boolean control", () => {
     const onCommitEdit = vi.fn();
     render(

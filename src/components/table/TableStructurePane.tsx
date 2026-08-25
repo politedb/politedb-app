@@ -129,7 +129,7 @@ export function TableStructurePane(props: {
       <div class="border-b border-neutral-200 bg-neutral-50 p-2">
         <div class="flex items-center gap-4">
           <div class="flex w-fit items-center gap-2">
-            <label class="text-xs font-semibold text-neutral-700">Name</label>
+            <label class="text-sm font-semibold text-neutral-700">Name</label>
             <Input
               value={tableName}
               onInput={(e) => changeTableName(e.currentTarget.value)}
@@ -140,7 +140,7 @@ export function TableStructurePane(props: {
           </div>
           <div class="flex-1">
             <TagSelect
-              className="w-full"
+              className="w-full [&>label]:text-sm"
               label="Primary"
               values={primaryKey}
               onChange={togglePrimaryKey}

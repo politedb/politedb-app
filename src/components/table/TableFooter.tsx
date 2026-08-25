@@ -152,7 +152,7 @@ export function TableFooter({
   return (
     <div
       class={cn(
-        "flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-[9.25px]",
+        "flex items-center justify-between gap-2 border-t border-neutral-200 bg-neutral-50 p-2",
         className
       )}
     >
@@ -169,21 +169,21 @@ export function TableFooter({
             {structPaneTab === "columns" ? (
               <Button
                 variant="shadow"
-                className="px-2"
+                className="px-2 py-0.75 text-sm"
                 onClick={onAddColumn}
                 disabled={readOnly}
               >
-                <PlusIcon className="size-3.5" />
+                <PlusIcon className="size-3" />
                 Column
               </Button>
             ) : structPaneTab === "constraints" ? (
               <Button
                 variant="shadow"
-                className="px-2"
+                className="px-2 py-0.75 text-sm"
                 onClick={onAddIndex}
                 disabled={readOnly}
               >
-                <PlusIcon className="size-3.5" />
+                <PlusIcon className="size-3" />
                 Index
               </Button>
             ) : null}
@@ -193,11 +193,11 @@ export function TableFooter({
         {showActions && viewMode === "data" && canAddRow && (
           <Button
             variant="shadow"
-            className="px-2"
+            className="px-2 py-0.75 text-sm"
             onClick={onAddRow}
             disabled={readOnly}
           >
-            <PlusIcon className="size-3.5" />
+            <PlusIcon className="size-3" />
             Row
           </Button>
         )}
@@ -273,7 +273,7 @@ export function TableFooter({
           <Button
             variant={filterBarVisible ? "default" : "shadow"}
             class={cn(
-              "py-[2.5px]",
+              "py-0.75 text-sm",
               filterBarVisible && "border border-blue-500"
             )}
             onClick={onFilters}
@@ -285,24 +285,24 @@ export function TableFooter({
               variant="outline"
               onClick={() => handlePageChange(offset - limit)}
               disabled={offset === 0}
-              className="px-3 py-1"
+              className="h-6.75 px-3 py-1"
             >
-              <ChevronLeftIcon className="size-3" />
+              <ChevronLeftIcon className="size-4" />
             </Button>
             <Button
               variant="outline"
               onClick={() => handlePageChange(offset + limit)}
               disabled={offset + limit >= pagination.totalRows}
-              className="px-3 py-1"
+              className="h-6.75 px-3 py-1"
             >
-              <ChevronRightIcon className="size-3" />
+              <ChevronRightIcon className="size-4" />
             </Button>
             <Select
               value={limit}
               onChange={(e: any) =>
                 handlePageSizeChange(Number(e.target.value))
               }
-              class="h-fit px-2 py-1 text-sm"
+              class="h-6.75 text-sm"
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option value={size}>{size}</option>

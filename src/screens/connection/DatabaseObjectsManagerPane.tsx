@@ -59,7 +59,7 @@ function ObjectKindTab(props: {
       onClick={props.onClick}
       disabled={props.disabled}
       className={cn(
-        "rounded-md border-none px-2 py-1 text-xs font-semibold",
+        "flex-1 rounded-md border-none px-2 py-0.5 text-sm font-semibold",
         props.active
           ? "bg-blue-600 text-white hover:bg-blue-600"
           : "text-neutral-600 hover:bg-neutral-100"
@@ -387,7 +387,7 @@ export function DatabaseObjectsManagerPane(props: {
     <div class="flex h-10 items-center gap-2 border-y border-neutral-200 bg-neutral-50 px-3">
       <Button
         variant="ghost"
-        className="px-2 py-1 text-xs"
+        className="px-2 py-0.5 text-sm"
         onClick={startCreateMode}
         disabled={!kindCapability.canCreate || running}
       >
@@ -395,7 +395,7 @@ export function DatabaseObjectsManagerPane(props: {
       </Button>
       <Button
         variant="ghost"
-        className="px-2 py-1 text-xs"
+        className="px-2 py-0.5 text-sm"
         onClick={() => void refreshObjects()}
         disabled={running}
       >
@@ -404,7 +404,7 @@ export function DatabaseObjectsManagerPane(props: {
       {isCreateMode ? (
         <Button
           variant="ghost"
-          className="px-2 py-1 text-xs"
+          className="px-2 py-0.5 text-sm"
           onClick={regenerateTemplate}
           disabled={running}
         >
@@ -414,7 +414,7 @@ export function DatabaseObjectsManagerPane(props: {
       <div class="ml-auto flex items-center gap-2">
         <Button
           variant="destructive"
-          className="px-2 py-1 text-xs"
+          className="px-4 py-0.5 text-sm"
           onClick={openDeletePreview}
           disabled={
             !selectedObject?.capability.canDelete || isCreateMode || running
@@ -424,7 +424,7 @@ export function DatabaseObjectsManagerPane(props: {
         </Button>
         <Button
           variant="default"
-          className="px-2 py-1 text-xs"
+          className="px-4 py-0.5 text-sm"
           onClick={openSavePreview}
           disabled={
             running ||
@@ -467,8 +467,8 @@ export function DatabaseObjectsManagerPane(props: {
             <Input
               value={search}
               placeholder={`Search ${objectKindLabel(kind).toLowerCase()}...`}
-              className="border border-neutral-200 bg-white py-1.5 text-xs"
-              left={<SearchIcon className="size-3.5 text-neutral-500" />}
+              className="border border-neutral-200 bg-white py-1 text-sm"
+              left={<SearchIcon className="size-4 text-neutral-500" />}
               onValueChange={setSearch}
             />
             <Select
@@ -476,7 +476,7 @@ export function DatabaseObjectsManagerPane(props: {
               onChange={(e) =>
                 setSchemaFilter((e.currentTarget as HTMLSelectElement).value)
               }
-              className="h-6.5 rounded-md border-neutral-200 px-2 text-xs!"
+              className="h-7 rounded-md border-neutral-200 px-2 text-sm!"
             >
               {availableSchemas.map((schema) => (
                 <option key={schema} value={schema}>
@@ -487,7 +487,7 @@ export function DatabaseObjectsManagerPane(props: {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+        <div class="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
           {!kindCapability.canList ? (
             <div class="rounded-md border border-dashed border-neutral-300 bg-white px-3 py-4 text-sm text-neutral-500">
               {unsupportedText}

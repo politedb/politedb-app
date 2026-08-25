@@ -51,7 +51,7 @@ export function NewTableMenu({
           <Button
             variant="outline"
             className={cn(
-              "size-6 p-2",
+              "size-6.5 p-2 text-sm",
               "border-neutral-300 bg-white text-neutral-800"
             )}
             title={disabled ? "Not supported" : "New"}

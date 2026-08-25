@@ -16,11 +16,7 @@ vi.mock("src/stores/connection", () => ({
     }),
 }));
 
-function renderField(field: {
-  name: string;
-  value: string;
-  isNull?: boolean;
-}) {
+function renderField(field: { name: string; value: string; isNull?: boolean }) {
   render(
     <RightNav
       sizeInfo={null}

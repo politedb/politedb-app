@@ -123,10 +123,14 @@ table {
 *::-webkit-scrollbar {
   width: 6px;
   height: 6px;
+  background-color: transparent;
 }
 
-*::-webkit-scrollbar-track {
-  background: transparent;
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track-piece,
+*::-webkit-scrollbar-corner {
+  background-color: transparent;
+  box-shadow: none;
 }
 
 *::-webkit-scrollbar-thumb {

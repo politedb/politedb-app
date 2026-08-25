@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import {
   TableIcon,
@@ -20,6 +20,32 @@ interface Props {
   openWindows: OpenWindow[];
   setActiveWindowId: (id: string) => void;
   activeWindowId: string | null;
+}
+
+export function getTabRevealScrollLeft(args: {
+  scrollLeft: number;
+  viewportLeft: number;
+  viewportRight: number;
+  tabLeft: number;
+  tabRight: number;
+  padding?: number;
+}) {
+  const {
+    scrollLeft,
+    viewportLeft,
+    viewportRight,
+    tabLeft,
+    tabRight,
+    padding = 4,
+  } = args;
+
+  if (tabLeft < viewportLeft + padding) {
+    return Math.max(0, scrollLeft + tabLeft - viewportLeft - padding);
+  }
+  if (tabRight > viewportRight - padding) {
+    return scrollLeft + tabRight - viewportRight + padding;
+  }
+  return null;
 }
 
 function getWindowTitle(w: OpenWindow) {
@@ -46,6 +72,7 @@ export function NavigationTabs({
     (s) => s.shortcuts.closeCurrent
   );
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef(new Map<string, HTMLDivElement>());
 
   const [ctx, setCtx] = useState<{
     x: number;
@@ -59,6 +86,32 @@ export function NavigationTabs({
     if (!el) return;
     el.scrollBy({ left: el.clientWidth * 0.7 * dir, behavior: "smooth" });
   };
+
+  const revealTab = useCallback((id: string, behavior: ScrollBehavior) => {
+    const scroller = scrollerRef.current;
+    const tab = tabRefs.current.get(id);
+    if (!scroller || !tab) return;
+
+    const viewportRect = scroller.getBoundingClientRect();
+    const tabRect = tab.getBoundingClientRect();
+    const left = getTabRevealScrollLeft({
+      scrollLeft: scroller.scrollLeft,
+      viewportLeft: viewportRect.left,
+      viewportRight: viewportRect.right,
+      tabLeft: tabRect.left,
+      tabRight: tabRect.right,
+    });
+    if (left == null) return;
+    scroller.scrollTo({ left, behavior });
+  }, []);
+
+  useEffect(() => {
+    if (!activeWindowId) return;
+    const rafId = requestAnimationFrame(() =>
+      revealTab(activeWindowId, "smooth")
+    );
+    return () => cancelAnimationFrame(rafId);
+  }, [activeWindowId, openWindows, revealTab]);
 
   const onWheel = (e: WheelEvent) => {
     const el = scrollerRef.current;
@@ -138,7 +191,14 @@ export function NavigationTabs({
             return (
               <div
                 key={w.id}
-                onClick={() => setActiveWindowId(w.id)}
+                ref={(element) => {
+                  if (element) tabRefs.current.set(w.id, element);
+                  else tabRefs.current.delete(w.id);
+                }}
+                onClick={() => {
+                  setActiveWindowId(w.id);
+                  revealTab(w.id, "smooth");
+                }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setCtx({
@@ -174,12 +234,13 @@ export function NavigationTabs({
                 )}
 
                 {w.type === "db-object-manager" && (
-                  <SquareFunctionIcon className="size-4 text-blue-500" />
+                  <SquareFunctionIcon className="size-5 text-blue-500" />
                 )}
 
                 <span
                   class={cn(
-                    "max-w-40 truncate select-none",
+                    "max-w-40 truncate text-sm font-medium select-none",
+                    w.type === "db-object-manager" && "text-[12px]",
                     active && "font-semibold"
                   )}
                 >

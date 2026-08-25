@@ -39,7 +39,7 @@ const NAV_BUTTONS: NavButton[] = [
   {
     id: "main",
     label: "Databases",
-    icon: <DatabaseIcon className="size-3.5" />,
+    icon: <DatabaseIcon className="size-4.5" />,
   },
 ];
 
@@ -195,16 +195,16 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                 }}
                 class={[
                   "inline-flex items-center gap-1.5",
-                  "h-7 rounded-lg px-2.5 shadow-sm",
-                  "border text-xs font-semibold transition-colors",
+                  "rounded-lg px-2.5 py-1.25 shadow-sm",
+                  "border text-sm font-medium transition-colors",
                   isActive
-                    ? "border-blue-300 bg-blue-100 text-blue-500"
-                    : "border-slate-200 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                    ? "border-blue-300 bg-blue-100 text-blue-600"
+                    : "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800",
                 ].join(" ")}
                 aria-current={isActive ? "page" : undefined}
                 data-tauri-drag-region="false"
               >
-                <span class={isActive ? "text-blue-500" : "text-slate-400"}>
+                <span class={isActive ? "text-blue-600" : "text-neutral-600"}>
                   {nav.icon}
                 </span>
                 <span class="leading-none">Databases</span>
@@ -252,7 +252,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                       <DbIcon engine={tab.engine} px={16} />
                     </span>
 
-                    <span class="truncate text-xs font-medium">
+                    <span class="truncate text-sm font-medium">
                       {tab.label}
                     </span>
                   </div>

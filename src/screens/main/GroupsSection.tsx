@@ -34,7 +34,7 @@ export function GroupsSection(props: {
         <Button
           variant="outline"
           onClick={() => onPickGroup(undefined)}
-          class={`rounded-full px-3 text-xs font-semibold ${
+          class={`rounded-full px-3 py-0.75 text-sm font-semibold ${
             !selectedGroupId
               ? "border-blue-300 bg-blue-50 text-blue-700"
               : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
@@ -45,7 +45,7 @@ export function GroupsSection(props: {
         {groups.map(({ group }) => (
           <div
             key={group.id}
-            class={`flex items-center gap-1 rounded-full border py-1 pr-2 pl-3 text-xs font-semibold ${
+            class={`flex items-center gap-1 rounded-full border py-0.75 pr-2 pl-3 text-sm font-semibold ${
               selectedGroupId === group.id
                 ? "border-blue-300 bg-blue-50 text-blue-700"
                 : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
