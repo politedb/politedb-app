@@ -334,11 +334,6 @@ mod tests {
             "longtext"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn decimal_with_binary_charset_stays_textual() {

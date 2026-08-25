@@ -11,6 +11,11 @@ use crate::types::{
     SnowflakeConnectInput, SqlServerConnectInput, SqliteConnectInput,
 };
 
+const IMPORT_CONNECT_TIMEOUT_MS: u64 = 60_000;
+const IMPORT_STATEMENT_TIMEOUT_MS: u64 = 60_000;
+const DEFAULT_NETWORK_SQL_SSL_MODE: &str = "prefer";
+const DEFAULT_NOSQL_SSL_MODE: &str = "disable";
+
 #[derive(Debug, Default)]
 pub struct TablePlusImportReport {
     pub profiles: Vec<ConnectionProfile>,
@@ -137,16 +142,16 @@ fn connection_value_to_profile(value: &Value) -> Result<Option<ConnectionProfile
         field_str(value, &["DatabaseName", "databaseName", "database"]).unwrap_or_default();
     let user = field_str(value, &["DatabaseUser", "databaseUser", "user"]).unwrap_or_default();
 
-    let db_password = field_str(
-        value,
-        &[
-            "ServerPassword",
-            "serverPassword",
-            "DatabasePassword",
-            "databasePassword",
-        ],
-    )
-    .or_else(|| field_str(value, &["Password", "password"]));
+    let ssh_enabled = is_ssh_enabled(value);
+    let db_password = field_str(value, &["DatabasePassword", "databasePassword"])
+        .or_else(|| field_str(value, &["Password", "password"]))
+        // Older non-SSH exports may store the database password here. For SSH
+        // profiles this field belongs to tunnel authentication instead.
+        .or_else(|| {
+            (!ssh_enabled)
+                .then(|| field_str(value, &["ServerPassword", "serverPassword"]))
+                .flatten()
+        });
 
     let env = field_str(value, &["Enviroment", "Environment", "environment"]).unwrap_or_default();
 
@@ -161,7 +166,7 @@ fn connection_value_to_profile(value: &Value) -> Result<Option<ConnectionProfile
     )?;
     input.tags = tag_from_env(&env);
 
-    if is_ssh_enabled(value) {
+    if ssh_enabled {
         if let Some(ssh) = parse_tableplus_ssh(value, &host, port) {
             input.ssh = Some(ssh);
         }
@@ -292,13 +297,15 @@ fn build_tableplus_input(
                 database: database.to_string(),
                 user: user.to_string(),
                 password,
-                ssl_mode: None,
+                // Match the connection form default so imported profiles are
+                // immediately connectable without first opening and saving them.
+                ssl_mode: Some(DEFAULT_NETWORK_SQL_SSL_MODE.into()),
                 ssl_key_path: None,
                 ssl_cert_path: None,
                 ssl_ca_path: None,
                 pool_max_size: None,
-                connect_timeout_ms: None,
-                statement_timeout_ms: None,
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
+                statement_timeout_ms: Some(0),
             });
         }
         EngineKind::Mysql | EngineKind::Mariadb => {
@@ -308,12 +315,12 @@ fn build_tableplus_input(
                 database: database.to_string(),
                 user: user.to_string(),
                 password,
-                ssl_mode: None,
+                ssl_mode: Some(DEFAULT_NETWORK_SQL_SSL_MODE.into()),
                 ssl_key_path: None,
                 ssl_cert_path: None,
                 ssl_ca_path: None,
                 pool_max_size: None,
-                connect_timeout_ms: None,
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
                 statement_timeout_ms: None,
             });
         }
@@ -324,9 +331,9 @@ fn build_tableplus_input(
                 database: database.to_string(),
                 user: user.to_string(),
                 password,
-                encrypt: None,
-                connect_timeout_ms: None,
-                statement_timeout_ms: None,
+                encrypt: Some(true),
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::Sqlite => {
@@ -337,7 +344,7 @@ fn build_tableplus_input(
             };
             input.sqlite = Some(SqliteConnectInput {
                 path,
-                statement_timeout_ms: None,
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::Oracle => {
@@ -347,8 +354,8 @@ fn build_tableplus_input(
                 database: database.to_string(),
                 user: user.to_string(),
                 password,
-                connect_timeout_ms: None,
-                statement_timeout_ms: None,
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::Mongo => {
@@ -366,8 +373,8 @@ fn build_tableplus_input(
                     Some(user.to_string())
                 },
                 password,
-                ssl_mode: None,
-                connect_timeout_ms: None,
+                ssl_mode: Some(DEFAULT_NOSQL_SSL_MODE.into()),
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
             });
         }
         EngineKind::Cassandra => {
@@ -385,8 +392,8 @@ fn build_tableplus_input(
                     Some(user.to_string())
                 },
                 password,
-                ssl_mode: None,
-                connect_timeout_ms: None,
+                ssl_mode: Some(DEFAULT_NOSQL_SSL_MODE.into()),
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
             });
         }
         EngineKind::Redis => {
@@ -400,7 +407,7 @@ fn build_tableplus_input(
                 },
                 password,
                 db: None,
-                ssl_mode: None,
+                ssl_mode: Some(DEFAULT_NOSQL_SSL_MODE.into()),
                 connect_timeout_ms: None,
                 pool_max_size: None,
             });
@@ -420,8 +427,8 @@ fn build_tableplus_input(
                 role: None,
                 user: user.to_string(),
                 password,
-                connect_timeout_ms: None,
-                statement_timeout_ms: None,
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::Duckdb => {
@@ -432,7 +439,7 @@ fn build_tableplus_input(
             };
             input.duckdb = Some(DuckdbConnectInput {
                 path,
-                statement_timeout_ms: None,
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::Clickhouse => {
@@ -447,9 +454,9 @@ fn build_tableplus_input(
                     9000 | 9440 => Some(crate::types::ClickhouseProtocol::Native),
                     _ => None,
                 },
-                ssl_mode: None,
-                connect_timeout_ms: None,
-                statement_timeout_ms: None,
+                ssl_mode: Some(DEFAULT_NETWORK_SQL_SSL_MODE.into()),
+                connect_timeout_ms: Some(IMPORT_CONNECT_TIMEOUT_MS),
+                statement_timeout_ms: Some(IMPORT_STATEMENT_TIMEOUT_MS),
             });
         }
         EngineKind::GoogleSheets => return Err("TABLEPLUS_ENGINE_NOT_SUPPORTED".into()),
@@ -575,6 +582,57 @@ mod tests {
         assert!(report.passwords_included);
         let pg = report.profiles[0].input.postgres.as_ref().unwrap();
         assert_eq!(pg.password.value, "secret");
+        assert_eq!(pg.ssl_mode.as_deref(), Some("prefer"));
+        assert_eq!(pg.connect_timeout_ms, Some(60_000));
+    }
+
+    #[test]
+    fn keeps_database_and_ssh_passwords_separate() {
+        let json = r#"[{
+          "ConnectionName": "remote-pg",
+          "Driver": "PostgreSQL",
+          "DatabaseHost": "db.internal",
+          "DatabasePort": "5432",
+          "DatabaseName": "app",
+          "DatabaseUser": "postgres",
+          "DatabasePassword": "database-secret",
+          "isOverSSH": true,
+          "ServerAddress": "bastion.internal",
+          "ServerPort": "22",
+          "ServerUser": "deploy",
+          "ServerPassword": "ssh-secret"
+        }]"#;
+
+        let report = parse_tableplus_json(json).unwrap();
+        let profile = &report.profiles[0];
+        let pg = profile.input.postgres.as_ref().unwrap();
+        assert_eq!(pg.password.value, "database-secret");
+
+        let ssh = profile.input.ssh.as_ref().unwrap();
+        match &ssh.auth {
+            SshAuth::Password { password } => assert_eq!(password, "ssh-secret"),
+            SshAuth::PrivateKey { .. } => panic!("expected password SSH auth"),
+        }
+    }
+
+    #[test]
+    fn does_not_reuse_ssh_password_as_database_password() {
+        let json = r#"[{
+          "ConnectionName": "remote-pg",
+          "Driver": "PostgreSQL",
+          "DatabaseHost": "db.internal",
+          "DatabasePort": "5432",
+          "DatabaseName": "app",
+          "DatabaseUser": "postgres",
+          "isOverSSH": true,
+          "ServerAddress": "bastion.internal",
+          "ServerUser": "deploy",
+          "ServerPassword": "ssh-secret"
+        }]"#;
+
+        let report = parse_tableplus_json(json).unwrap();
+        let pg = report.profiles[0].input.postgres.as_ref().unwrap();
+        assert!(pg.password.value.is_empty());
     }
 
     #[test]
