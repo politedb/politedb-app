@@ -110,6 +110,7 @@ function EditableRowFieldList({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [openSpecialField, setOpenSpecialField] = useState<string | null>(null);
   const draftsRef = useRef<Record<string, string>>({});
+  const dirtyFieldsRef = useRef(new Set<string>());
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -118,21 +119,28 @@ function EditableRowFieldList({
       next[field.name] = field.isNull ? "" : field.value;
     }
     draftsRef.current = next;
+    dirtyFieldsRef.current.clear();
     setDrafts(next);
     setOpenSpecialField(null);
   }, [fields, rowIndex]);
 
   const commit = useCallback(
-    (name: string, value?: unknown) => {
+    (name: string, value?: unknown, force = false) => {
       if (readOnly || !commitField) return;
 
       const field = fields.find((f) => f.name === name);
       if (field?.readonly) return;
+      if (!force && !dirtyFieldsRef.current.has(name)) return;
 
       const draft =
         value === undefined ? (draftsRef.current[name] ?? "") : value;
-      const prevDisplay = field?.isNull ? "" : (field?.value ?? "");
-      if (typeof draft === "string" && draft.trim() === prevDisplay.trim()) {
+      const unchanged =
+        (draft === null && field?.isNull) ||
+        (typeof draft === "string" &&
+          !field?.isNull &&
+          draft === (field?.value ?? ""));
+      dirtyFieldsRef.current.delete(name);
+      if (unchanged) {
         return;
       }
 
@@ -141,13 +149,15 @@ function EditableRowFieldList({
     [readOnly, commitField, fields, rowIndex]
   );
 
-  const setDraftValue = useCallback((name: string, value: string) => {
-    setDrafts((prev) => {
-      const next = { ...prev, [name]: value };
+  const setDraftValue = useCallback(
+    (name: string, value: string, markDirty = true) => {
+      const next = { ...draftsRef.current, [name]: value };
       draftsRef.current = next;
-      return next;
-    });
-  }, []);
+      if (markDirty) dirtyFieldsRef.current.add(name);
+      setDrafts(next);
+    },
+    []
+  );
 
   const applySpecialValue = useCallback(
     (
@@ -157,14 +167,14 @@ function EditableRowFieldList({
       if (field.readonly || readOnly) return;
 
       if (action === "null") {
-        setDraftValue(field.name, "");
-        commit(field.name, null);
+        setDraftValue(field.name, "", false);
+        commit(field.name, null, true);
         return;
       }
 
       if (!hasColumnDefault(field)) return;
-      setDraftValue(field.name, "DEFAULT");
-      commit(field.name, defaultCellEditValue());
+      setDraftValue(field.name, "DEFAULT", false);
+      commit(field.name, defaultCellEditValue(), true);
     },
     [commit, readOnly, setDraftValue]
   );

@@ -21,6 +21,7 @@ export function ContextMenu(props: {
   y: number;
   items: MenuItem[];
   onClose: () => void;
+  class?: string;
 }) {
   const { open, x, y, items, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -81,7 +82,8 @@ export function ContextMenu(props: {
         // flatter container
         "rounded-lg border border-neutral-200 bg-white",
         // lighter shadow (more native)
-        "shadow-[0_10px_24px_rgba(0,0,0,0.14)]"
+        "shadow-[0_10px_24px_rgba(0,0,0,0.14)]",
+        props.class
       )}
       style={{ left: x, top: y }}
       role="menu"

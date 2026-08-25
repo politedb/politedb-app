@@ -31,9 +31,17 @@ const HEADER_HEIGHT = 28;
 const ACTIVE_CELL_STROKE_FOCUSED = "#0000ff";
 const ACTIVE_CELL_STROKE_UNFOCUSED = "#9ca3af";
 const SELECTED_TEXT_UNFOCUSED = "#6b7280";
+const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
+const BOOLEAN_CONTROL_WIDTH = 18;
 
 type EditingCell = { rowIdx: number; colIdx: number };
 type HeaderMenuState = { x: number; y: number; colName: string };
+type BooleanMenuState = {
+  x: number;
+  y: number;
+  rowIdx: number;
+  colIdx: number;
+};
 type RowMenuState = {
   x: number;
   y: number;
@@ -453,6 +461,7 @@ export function CanvasTable({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const resizeRafRef = useRef<number | null>(null);
 
   // --- INTERNAL STATE FOR COLUMNS ---
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => ({
@@ -477,6 +486,10 @@ export function CanvasTable({
     colName: string;
     startX: number;
     startWidth: number;
+    pendingWidth: number;
+    pointerId: number;
+    target: HTMLElement;
+    lastCommitAt: number;
   } | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
@@ -495,9 +508,11 @@ export function CanvasTable({
   } | null>(null);
   const [headerMenu, setHeaderMenu] = useState<HeaderMenuState | null>(null);
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null);
-  const editorKind = editing
+  const [booleanMenu, setBooleanMenu] = useState<BooleanMenuState | null>(null);
+  const nativeEditorKind = editing
     ? getCellEditorKind(columns[editing.colIdx])
     : "text";
+  const editorKind = nativeEditorKind === "bool" ? "text" : nativeEditorKind;
 
   // --- Viewport ---
   const [viewport, setViewport] = useState({ w: 1, h: 1 });
@@ -644,8 +659,13 @@ export function CanvasTable({
 
         if (s) {
           const isFkCol = !!foreignKeyMap && !!foreignKeyMap[col.name];
-          const arrowWidth = isFkCol ? 14 : 0;
-          const maxTextWidth = Math.max(0, w - 16 - arrowWidth);
+          const isBooleanCol = getCellEditorKind(col) === "bool";
+          const rightControlWidth = isBooleanCol
+            ? BOOLEAN_CONTROL_WIDTH
+            : isFkCol
+              ? 14
+              : 0;
+          const maxTextWidth = Math.max(0, w - 16 - rightControlWidth);
           const cacheKey = `${maxTextWidth}|${s}`;
           let displayText = textCacheRef.current.get(cacheKey);
           if (!displayText) {
@@ -664,7 +684,7 @@ export function CanvasTable({
                 : "#111827";
 
           // Draw FK arrow on the right side of the cell (thin right arrow)
-          if (isFkCol && s !== "NULL") {
+          if (isFkCol && !isBooleanCol && s !== "NULL") {
             const centerY = y + ROW_HEIGHT / 2;
             const arrowRight = x + w - 8;
             const arrowLeft = arrowRight - 8;
@@ -684,6 +704,26 @@ export function CanvasTable({
             ctx.lineTo(arrowRight, centerY);
             ctx.lineTo(arrowRight - 3.5, centerY + 3.5);
             ctx.stroke();
+          }
+
+          if (isBooleanCol) {
+            const centerX = x + w - BOOLEAN_CONTROL_WIDTH / 2;
+            const centerY = y + ROW_HEIGHT / 2;
+            ctx.fillStyle = "#9ca3af";
+
+            ctx.beginPath();
+            ctx.moveTo(centerX - 3, centerY - 2);
+            ctx.lineTo(centerX + 3, centerY - 2);
+            ctx.lineTo(centerX, centerY - 5);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(centerX - 3, centerY + 2);
+            ctx.lineTo(centerX + 3, centerY + 2);
+            ctx.lineTo(centerX, centerY + 5);
+            ctx.closePath();
+            ctx.fill();
           }
 
           ctx.fillStyle = textColor;
@@ -711,7 +751,7 @@ export function CanvasTable({
   useEffect(() => {
     textCacheRef.current.clear();
     cellTextCacheRef.current.clear();
-  }, [dataVersion, colWidths]);
+  }, [dataVersion]);
 
   // --------------------------------------------------------------------------
   // Resize Observer
@@ -834,48 +874,93 @@ export function CanvasTable({
   // Resize Handlers (Logic)
   // --------------------------------------------------------------------------
   const handleResizeStart = (
-    e: MouseEvent,
+    e: PointerEvent,
     colName: string,
     currentWidth: number
   ) => {
     e.preventDefault();
     e.stopPropagation();
 
+    const target = e.currentTarget as HTMLElement;
     resizingRef.current = {
       colName,
       startX: e.clientX,
       startWidth: currentWidth,
+      pendingWidth: currentWidth,
+      pointerId: e.pointerId,
+      target,
+      lastCommitAt: Number.NEGATIVE_INFINITY,
     };
+
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {}
     setIsResizing(true);
   };
 
   useEffect(() => {
     if (!isResizing) return;
 
-    const onMove = (e: MouseEvent) => {
+    const commitWidth = (colName: string, width: number) => {
+      setColWidths((prev) =>
+        prev[colName] === width ? prev : { ...prev, [colName]: width }
+      );
+    };
+
+    const paintResizeFrame = (timestamp: number) => {
+      resizeRafRef.current = null;
       const state = resizingRef.current;
       if (!state) return;
 
-      const delta = e.clientX - state.startX;
-      const newW = Math.max(50, state.startWidth + delta);
-
-      // Update internal state -> Triggers re-render -> Updates colWidths -> Updates Draw
-      setColWidths((prev) => ({
-        ...prev,
-        [state.colName]: newW,
-      }));
+      if (timestamp - state.lastCommitAt >= COLUMN_RESIZE_COMMIT_INTERVAL_MS) {
+        state.lastCommitAt = timestamp;
+        commitWidth(state.colName, state.pendingWidth);
+      }
     };
 
-    const onUp = () => {
+    const onMove = (e: PointerEvent) => {
+      const state = resizingRef.current;
+      if (!state || e.pointerId !== state.pointerId) return;
+
+      const delta = e.clientX - state.startX;
+      state.pendingWidth = Math.max(50, state.startWidth + delta);
+
+      if (resizeRafRef.current == null) {
+        resizeRafRef.current = requestAnimationFrame(paintResizeFrame);
+      }
+    };
+
+    const finishResize = (e: PointerEvent) => {
+      const state = resizingRef.current;
+      if (!state || e.pointerId !== state.pointerId) return;
+
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
+
+      const { colName, pendingWidth, pointerId, target } = state;
+      commitWidth(colName, pendingWidth);
+
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {}
+
       setIsResizing(false);
       resizingRef.current = null;
     };
 
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+      if (resizeRafRef.current != null) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
     };
   }, [isResizing]);
 
@@ -893,7 +978,7 @@ export function CanvasTable({
 
   const commitAndExit = useCallback(() => {
     if (!editing) return;
-    if (editorKind === "blob") {
+    if (nativeEditorKind === "blob") {
       cancelExit();
       return;
     }
@@ -903,17 +988,27 @@ export function CanvasTable({
     }
 
     let nextValue: unknown = editorValue;
-    if (editorKind === "json" && editorValue.trim() !== "") {
+    if (nativeEditorKind === "json" && editorValue.trim() !== "") {
       try {
         nextValue = JSON.stringify(JSON.parse(editorValue));
       } catch {
         setEditorError("Invalid JSON");
         return;
       }
-    } else if (editorKind === "bool") {
-      nextValue = editorValue === "__NULL__" ? null : editorValue === "true";
-    } else if (editorKind === "date" || editorKind === "datetime") {
-      nextValue = fromDateInputValue(editorValue, editorKind);
+    } else if (nativeEditorKind === "bool") {
+      const normalized = editorValue.trim().toLowerCase();
+      if (normalized === "__null__" || normalized === "null") {
+        nextValue = null;
+      } else if (normalized === "true" || normalized === "1") {
+        nextValue = true;
+      } else if (normalized === "false" || normalized === "0") {
+        nextValue = false;
+      } else {
+        setEditorError("Use true, false, 1, 0, or NULL");
+        return;
+      }
+    } else if (nativeEditorKind === "date" || nativeEditorKind === "datetime") {
+      nextValue = fromDateInputValue(editorValue, nativeEditorKind);
     }
 
     editorWasModifiedRef.current = false;
@@ -921,16 +1016,23 @@ export function CanvasTable({
     onExitEdit?.();
     setEditorRect(null);
     setEditorError(null);
-  }, [editing, editorKind, editorValue, onCommitEdit, onExitEdit, cancelExit]);
+  }, [
+    editing,
+    nativeEditorKind,
+    editorValue,
+    onCommitEdit,
+    onExitEdit,
+    cancelExit,
+  ]);
 
   const commitNullAndExit = useCallback(() => {
-    if (!editing || editorKind === "blob") return;
+    if (!editing || nativeEditorKind === "blob") return;
     editorWasModifiedRef.current = false;
     onCommitEdit?.(editing, null);
     onExitEdit?.();
     setEditorRect(null);
     setEditorError(null);
-  }, [editing, editorKind, onCommitEdit, onExitEdit]);
+  }, [editing, nativeEditorKind, onCommitEdit, onExitEdit]);
 
   // --------------------------------------------------------------------------
   // Auto-scroll on new row
@@ -1312,6 +1414,77 @@ export function CanvasTable({
     addFileValue,
   ]);
 
+  const booleanMenuItems = useMemo<MenuItem[]>(() => {
+    const column = booleanMenu ? columns[booleanMenu.colIdx] : undefined;
+    const hasDefault =
+      column?.column_default != null && column.column_default !== "";
+    const commit = (value: boolean | null) => {
+      if (!booleanMenu) return;
+      onCommitEdit?.(
+        { rowIdx: booleanMenu.rowIdx, colIdx: booleanMenu.colIdx },
+        value
+      );
+    };
+
+    const items: MenuItem[] = [
+      { type: "item", label: "TRUE", onClick: () => commit(true) },
+      { type: "item", label: "FALSE", onClick: () => commit(false) },
+      { type: "sep" },
+      { type: "item", label: "NULL", onClick: () => commit(null) },
+    ];
+    if (hasDefault) {
+      items.push({
+        type: "item",
+        label: "DEFAULT",
+        onClick: () => {
+          if (!booleanMenu) return;
+          onCommitEdit?.(
+            { rowIdx: booleanMenu.rowIdx, colIdx: booleanMenu.colIdx },
+            defaultCellEditValue()
+          );
+        },
+      });
+    }
+    return items;
+  }, [booleanMenu, columns, onCommitEdit]);
+
+  const openCellEditor = useCallback(
+    (rowIdx: number, colIdx: number) => {
+      const column = columns[colIdx];
+      if (!column) return;
+
+      const kind = getCellEditorKind(column);
+      onStartEdit?.({ rowIdx, colIdx });
+
+      const row = getRowAt(rowIdx);
+      const value = formatTableCellValue(row?.[colIdx] ?? null, column.db_type);
+      editorWasModifiedRef.current = false;
+      setEditorError(null);
+
+      if (kind === "date" || kind === "datetime") {
+        setEditorValue(toDateInputValue(value ?? "", kind));
+      } else {
+        setEditorValue(value ?? "");
+      }
+
+      const { left, top } = scrollRef.current;
+      const rect = getRect(rowIdx, colIdx, left, top);
+      if (rect) setEditorRect(rect);
+
+      queueMicrotask(() => {
+        const editor = editorRef.current;
+        editor?.focus();
+        if (
+          editor instanceof HTMLInputElement ||
+          editor instanceof HTMLTextAreaElement
+        ) {
+          editor.select();
+        }
+      });
+    },
+    [columns, getRowAt, getRect, onStartEdit]
+  );
+
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
   // --------------------------------------------------------------------------
@@ -1348,16 +1521,36 @@ export function CanvasTable({
         return;
       }
 
+      const col = columns[colIdx];
+      const colLeft = colLefts[colIdx] ?? 0;
+      const colWidth = colWidths[col.name] ?? 140;
+      const relX = x - colLeft;
+
+      if (
+        getCellEditorKind(col) === "bool" &&
+        relX >= colWidth - BOOLEAN_CONTROL_WIDTH
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (editing) commitAndExit();
+        onSelect?.(rowIdx, colIdx);
+        setHeaderMenu(null);
+        setRowMenu(null);
+        setBooleanMenu({
+          x: e.clientX - 70,
+          y: e.clientY,
+          rowIdx,
+          colIdx,
+        });
+        return;
+      }
+
       // If this is an FK column and click is on the arrow area (right ~16px),
       // trigger navigation instead of normal select.
       if (foreignKeyMap && onCellActivate) {
-        const col = columns[colIdx];
         const fk = foreignKeyMap[col.name];
         if (fk) {
-          const colLeft = colLefts[colIdx] ?? 0;
-          const w = colWidths[col.name] ?? 140;
-          const relX = x - colLeft;
-          if (relX >= w - 18 && relX <= w) {
+          if (relX >= colWidth - 18 && relX <= colWidth) {
             const handled = onCellActivate({ rowIdx, colIdx });
             if (handled) return;
           }
@@ -1462,46 +1655,9 @@ export function CanvasTable({
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
 
-      onStartEdit?.({ rowIdx, colIdx });
-
-      const row = getRowAt(rowIdx);
-      const kind = getCellEditorKind(columns[colIdx]);
-      const s = formatTableCellValue(
-        row?.[colIdx] ?? null,
-        columns[colIdx]?.db_type
-      );
-      editorWasModifiedRef.current = false;
-      setEditorError(null);
-      if (kind === "bool") {
-        const normalized = String(s ?? "").toLowerCase();
-        setEditorValue(
-          normalized === "true" || normalized === "1"
-            ? "true"
-            : normalized === "false" || normalized === "0"
-              ? "false"
-              : "__NULL__"
-        );
-      } else if (kind === "date" || kind === "datetime") {
-        setEditorValue(toDateInputValue(s ?? "", kind));
-      } else {
-        setEditorValue(s ?? "");
-      }
-
-      const r2 = getRect(rowIdx, colIdx, left, top);
-      if (r2) setEditorRect(r2);
-
-      queueMicrotask(() => editorRef.current?.focus());
+      openCellEditor(rowIdx, colIdx);
     },
-    [
-      columns,
-      colLefts,
-      colWidths,
-      totalRows,
-      onAddRow,
-      onStartEdit,
-      getRowAt,
-      getRect,
-    ]
+    [columns, colLefts, colWidths, totalRows, onAddRow, openCellEditor]
   );
 
   // Sync editor position when widths change or scrolling
@@ -1636,8 +1792,8 @@ export function CanvasTable({
                   {/* --- RESIZE HANDLE --- */}
                   <div
                     data-resize-handle
-                    class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
-                    onMouseDown={(e) => handleResizeStart(e, col.name, w)}
+                    class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize touch-none hover:bg-neutral-200 active:bg-neutral-400"
+                    onPointerDown={(e) => handleResizeStart(e, col.name, w)}
                   />
                 </div>
               );
@@ -1708,27 +1864,6 @@ export function CanvasTable({
               }}
               onBlur={commitAndExit}
             />
-          ) : editorKind === "bool" ? (
-            <select
-              ref={editorRef as any}
-              class="h-7 w-full bg-white px-2 text-sm shadow-sm outline-none"
-              value={editorValue}
-              onInput={(e) =>
-                updateEditorValue((e.currentTarget as HTMLSelectElement).value)
-              }
-              onChange={(e) =>
-                updateEditorValue((e.currentTarget as HTMLSelectElement).value)
-              }
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitAndExit();
-                if (e.key === "Escape") cancelExit();
-              }}
-              onBlur={commitAndExit}
-            >
-              <option value="true">true</option>
-              <option value="false">false</option>
-              <option value="__NULL__">NULL</option>
-            </select>
           ) : (
             <input
               ref={editorRef as any}
@@ -1794,6 +1929,14 @@ export function CanvasTable({
         y={rowMenu?.y ?? 0}
         items={rowMenuItems}
         onClose={() => setRowMenu(null)}
+      />
+      <ContextMenu
+        class="min-w-20"
+        open={booleanMenu !== null}
+        x={booleanMenu?.x ?? 0}
+        y={booleanMenu?.y ?? 0}
+        items={booleanMenuItems}
+        onClose={() => setBooleanMenu(null)}
       />
     </div>
   );

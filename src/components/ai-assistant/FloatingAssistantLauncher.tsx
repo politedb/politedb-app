@@ -108,7 +108,7 @@ export function FloatingAssistantLauncher(props: {
     context?.scopeKey ?? FLOATING_ASSISTANT_CHAT_SESSION_KEY;
 
   return (
-    <div ref={rootRef} class="fixed right-4 bottom-4 z-50">
+    <div ref={rootRef} class="fixed right-6 bottom-9 z-50">
       {open ? (
         <div
           class={cn(
@@ -173,7 +173,7 @@ export function FloatingAssistantLauncher(props: {
       {!open ? (
         <Button
           variant="default"
-          class="ml-auto rounded-full bg-blue-600 p-3 text-sm font-semibold shadow-xl transition-all hover:scale-105"
+          class="ml-auto rounded-full p-2.5 text-sm font-semibold shadow-xl transition-all hover:scale-105"
           title="Open AI assistant"
           aria-label="Open AI assistant"
           onClick={openAssistant}
