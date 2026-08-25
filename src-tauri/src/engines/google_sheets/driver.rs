@@ -29,9 +29,7 @@ impl EngineDriver for GoogleSheetsDriver {
         label: String,
         input: ConnectionCreateInput,
     ) -> Result<EngineConnection, String> {
-        let sheets = input
-            .google_sheets
-            .ok_or("GOOGLE_SHEETS_CONFIG_MISSING")?;
+        let sheets = input.google_sheets.ok_or("GOOGLE_SHEETS_CONFIG_MISSING")?;
         let spreadsheet_id = normalize_spreadsheet_id(&sheets.spreadsheet_id)?;
         let credential = resolve_secret_ref(app, &sheets.credential).await?;
         let http = make_http_client()?;
@@ -52,14 +50,14 @@ impl EngineDriver for GoogleSheetsDriver {
         input: ConnectionCreateInput,
         secrets: Option<ConnectionTestSecrets>,
     ) -> Result<(), String> {
-        let sheets = input
-            .google_sheets
-            .ok_or("GOOGLE_SHEETS_CONFIG_MISSING")?;
+        let sheets = input.google_sheets.ok_or("GOOGLE_SHEETS_CONFIG_MISSING")?;
         let spreadsheet_id = normalize_spreadsheet_id(&sheets.spreadsheet_id)?;
         let credential = resolve_secret_ref_for_test(
             app,
             &sheets.credential,
-            secrets.as_ref().and_then(|value| value.db_password.as_deref()),
+            secrets
+                .as_ref()
+                .and_then(|value| value.db_password.as_deref()),
         )
         .await?;
         fetch_metadata(&make_http_client()?, &spreadsheet_id, &credential)

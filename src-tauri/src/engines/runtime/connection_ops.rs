@@ -346,9 +346,7 @@ impl ConnectionOps for EngineConnection {
             EngineConnection::Mongo(_)
             | EngineConnection::Cassandra(_)
             | EngineConnection::Redis(_)
-            | EngineConnection::GoogleSheets(_) => {
-                Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into())
-            }
+            | EngineConnection::GoogleSheets(_) => Err("ENGINE_TRANSACTION_NOT_SUPPORTED".into()),
         }
     }
 

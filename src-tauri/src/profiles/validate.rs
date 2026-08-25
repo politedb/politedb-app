@@ -222,10 +222,8 @@ pub fn validate_input(input: &ConnectionCreateInput) -> Result<(), String> {
                 .google_sheets
                 .as_ref()
                 .ok_or("GOOGLE_SHEETS_CONFIG_MISSING")?;
-            crate::engines::google_sheets::api::normalize_spreadsheet_id(
-                &sheets.spreadsheet_id,
-            )
-            .map(|_| ())
+            crate::engines::google_sheets::api::normalize_spreadsheet_id(&sheets.spreadsheet_id)
+                .map(|_| ())
         }
     }
 }

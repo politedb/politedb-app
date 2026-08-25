@@ -28,10 +28,13 @@ use security_framework_sys::keychain_item::{
     SecItemAdd, SecItemCopyMatching, SecItemDelete, SecItemUpdate,
 };
 
+const ERR_SEC_MISSING_ENTITLEMENT: OSStatus = -34018;
+
 #[link(name = "Security", kind = "framework")]
 extern "C" {
     static kSecAttrAccessible: CFStringRef;
     static kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly: CFStringRef;
+    static kSecUseDataProtectionKeychain: CFStringRef;
     static kSecMatchLimitOne: CFStringRef;
     static kSecMatchLimitAll: CFStringRef;
 }
@@ -65,7 +68,7 @@ fn os_err(code: OSStatus, ctx: &str) -> String {
  * Query builder (stable, TablePlus-like)
  * ============================================================================= */
 
-fn build_query_service(service: &str) -> CFMutableDictionary {
+fn build_query_service(service: &str, data_protection: bool) -> CFMutableDictionary {
     let service_cf = cfstr(service);
 
     unsafe {
@@ -82,14 +85,20 @@ fn build_query_service(service: &str) -> CFMutableDictionary {
             &k_str(kSecAttrSynchronizable),
             &(CFBoolean::false_value().as_concrete_TypeRef() as CFTypeRef),
         );
+        if data_protection {
+            d.add(
+                &k_str(kSecUseDataProtectionKeychain),
+                &(CFBoolean::true_value().as_concrete_TypeRef() as CFTypeRef),
+            );
+        }
 
         d
     }
 }
 
-fn build_query(service: &str, account: &str) -> CFMutableDictionary {
+fn build_query(service: &str, account: &str, data_protection: bool) -> CFMutableDictionary {
     let account_cf = cfstr(account);
-    let mut d = build_query_service(service);
+    let mut d = build_query_service(service, data_protection);
     d.add(
         &unsafe { k_str(kSecAttrAccount) },
         &(account_cf.as_concrete_TypeRef() as CFTypeRef),
@@ -139,18 +148,13 @@ fn extract_account_from_dict(dict: CFDictionaryRef) -> Option<String> {
  * Public API
  * ============================================================================= */
 
-pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), String> {
-    if service.trim().is_empty() {
-        return Err("SECRET_SERVICE_EMPTY".into());
-    }
-    if account.trim().is_empty() {
-        return Err("SECRET_KEY_EMPTY".into());
-    }
-    if value.is_empty() {
-        return Err("SECRET_VALUE_EMPTY".into());
-    }
-
-    let mut attrs = build_query(service, account);
+fn set_password_in(
+    service: &str,
+    account: &str,
+    value: &str,
+    data_protection: bool,
+) -> Result<(), String> {
+    let mut attrs = build_query(service, account, data_protection);
 
     // value
     attrs.add(
@@ -174,14 +178,38 @@ pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), Str
 
     // Duplicate => update
     if status == errSecDuplicateItem {
-        return update_password(service, account, value);
+        return update_password_in(service, account, value, data_protection);
     }
 
     Err(os_err(status, "KEYCHAIN_ADD_FAILED"))
 }
 
-pub fn update_password(service: &str, account: &str, value: &str) -> Result<(), String> {
-    let query = build_query(service, account);
+pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), String> {
+    if service.trim().is_empty() {
+        return Err("SECRET_SERVICE_EMPTY".into());
+    }
+    if account.trim().is_empty() {
+        return Err("SECRET_KEY_EMPTY".into());
+    }
+    if value.is_empty() {
+        return Err("SECRET_VALUE_EMPTY".into());
+    }
+
+    match set_password_in(service, account, value, true) {
+        Err(error) if is_missing_entitlement_error(&error) => {
+            set_password_in(service, account, value, false)
+        }
+        result => result,
+    }
+}
+
+fn update_password_in(
+    service: &str,
+    account: &str,
+    value: &str,
+    data_protection: bool,
+) -> Result<(), String> {
+    let query = build_query(service, account, data_protection);
 
     let mut attrs = CFMutableDictionary::new();
     attrs.add(
@@ -198,8 +226,16 @@ pub fn update_password(service: &str, account: &str, value: &str) -> Result<(), 
     }
 }
 
-pub fn get_password(service: &str, account: &str) -> Result<String, String> {
-    let mut query = build_query(service, account);
+fn is_missing_entitlement_error(error: &str) -> bool {
+    error.ends_with(&format!("OSSTATUS={ERR_SEC_MISSING_ENTITLEMENT}"))
+}
+
+fn get_password_from(
+    service: &str,
+    account: &str,
+    data_protection: bool,
+) -> Result<String, String> {
+    let mut query = build_query(service, account, data_protection);
 
     query.add(
         &unsafe { k_str(kSecReturnData) },
@@ -225,8 +261,25 @@ pub fn get_password(service: &str, account: &str) -> Result<String, String> {
     }
 }
 
-pub fn delete_password(service: &str, account: &str) -> Result<(), String> {
-    let query = build_query(service, account);
+pub fn get_password(service: &str, account: &str) -> Result<String, String> {
+    match get_password_from(service, account, true) {
+        Ok(value) => Ok(value),
+        Err(error) if is_missing_entitlement_error(&error) => {
+            get_password_from(service, account, false)
+        }
+        Err(error) if error == "KEYCHAIN_ITEM_NOT_FOUND" => {
+            let value = get_password_from(service, account, false)?;
+            // Legacy items can show the macOS ACL prompt once. Copying the
+            // authorized value makes future reads use the signed app access group.
+            let _ = set_password(service, account, &value);
+            Ok(value)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn delete_password_from(service: &str, account: &str, data_protection: bool) -> Result<(), String> {
+    let query = build_query(service, account, data_protection);
     let status = unsafe { SecItemDelete(query.as_concrete_TypeRef()) };
 
     if status == errSecSuccess || status == errSecItemNotFound {
@@ -236,12 +289,21 @@ pub fn delete_password(service: &str, account: &str) -> Result<(), String> {
     }
 }
 
-pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
+pub fn delete_password(service: &str, account: &str) -> Result<(), String> {
+    let protected_result = match delete_password_from(service, account, true) {
+        Err(error) if is_missing_entitlement_error(&error) => Ok(()),
+        result => result,
+    };
+    let legacy_result = delete_password_from(service, account, false);
+    protected_result.and(legacy_result)
+}
+
+fn list_accounts_from(service: &str, data_protection: bool) -> Result<Vec<String>, String> {
     if service.trim().is_empty() {
         return Err("SECRET_SERVICE_EMPTY".into());
     }
 
-    let mut query = build_query_service(service);
+    let mut query = build_query_service(service, data_protection);
     query.add(
         &unsafe { k_str(kSecReturnAttributes) },
         &(CFBoolean::true_value().as_concrete_TypeRef() as CFTypeRef),
@@ -285,6 +347,17 @@ pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
 
     unsafe { CFRelease(out) };
 
+    keys.sort();
+    keys.dedup();
+    Ok(keys)
+}
+
+pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
+    let mut keys = match list_accounts_from(service, true) {
+        Err(error) if is_missing_entitlement_error(&error) => Vec::new(),
+        result => result?,
+    };
+    keys.extend(list_accounts_from(service, false)?);
     keys.sort();
     keys.dedup();
     Ok(keys)

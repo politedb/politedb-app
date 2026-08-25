@@ -240,16 +240,11 @@ pub async fn fetch_overview(
     row_count: usize,
     column_count: usize,
 ) -> Result<GoogleSheetOverview, String> {
-    let header = fetch_values(
-        http,
-        spreadsheet_id,
-        credential,
-        &sheet_range(sheet, "1:1"),
-    )
-    .await?
-    .into_iter()
-    .next()
-    .unwrap_or_default();
+    let header = fetch_values(http, spreadsheet_id, credential, &sheet_range(sheet, "1:1"))
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let width = column_count.max(header.len());
     Ok(GoogleSheetOverview {
         columns: normalize_columns(&header, width),
@@ -265,16 +260,11 @@ pub async fn fetch_rows(
     limit: usize,
     offset: usize,
 ) -> Result<GoogleSheetRows, String> {
-    let header = fetch_values(
-        http,
-        spreadsheet_id,
-        credential,
-        &sheet_range(sheet, "1:1"),
-    )
-    .await?
-    .into_iter()
-    .next()
-    .unwrap_or_default();
+    let header = fetch_values(http, spreadsheet_id, credential, &sheet_range(sheet, "1:1"))
+        .await?
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let start = offset.saturating_add(2);
     let end = start.saturating_add(limit.max(1)).saturating_sub(1);
     let raw_rows = fetch_values(
