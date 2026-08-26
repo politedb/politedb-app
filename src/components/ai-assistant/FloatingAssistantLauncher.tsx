@@ -30,11 +30,7 @@ export function normalizeSavedConnectionTags(tags: unknown[] = [], label = "") {
   return Array.from(normalized);
 }
 
-export function FloatingAssistantLauncher(props: {
-  aiLocked?: boolean;
-  onOpenLicense?: () => void;
-}) {
-  const { aiLocked = false, onOpenLicense } = props;
+export function FloatingAssistantLauncher() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const activeProfileScreen = useScreenStore(
@@ -119,53 +115,23 @@ export function FloatingAssistantLauncher(props: {
           role="dialog"
           aria-label="AI assistant"
         >
-          <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
-              {aiLocked ? (
-                <div class="h-full bg-white dark:bg-slate-900" />
-              ) : (
-                <AiAssistantPanel
-                  presentation="floating"
-                  onClose={() => setOpen(false)}
-                  chatSessionKey={chatSessionKey}
-                  engine={context?.engine ?? "postgres"}
-                  runtimeConnectionId={context?.runtimeConnectionId}
-                  activeSchema={context?.activeSchema}
-                  activeTable={context?.activeTable}
-                  tables={context?.tables ?? []}
-                  columnsByTable={context?.columnsByTable}
-                  columnDetailsByTable={context?.columnDetailsByTable}
-                  currentSql={context?.currentSql}
-                  querySafetyMode={context?.querySafetyMode}
-                  savedConnections={savedConnections}
-                  onInsertSql={context?.onInsertSql}
-                />
-              )}
-            </div>
-            {aiLocked ? (
-              <div class="absolute inset-0 z-20 flex items-center justify-center bg-white/78 px-6 backdrop-blur-sm dark:bg-slate-950/78">
-                <div class="max-w-sm rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-xl dark:border-slate-700 dark:bg-slate-900">
-                  <div class="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300">
-                    <SparklesIcon className="size-5" />
-                  </div>
-                  <div class="text-base font-semibold text-slate-900 dark:text-slate-100">
-                    AI requires an active license
-                  </div>
-                  <p class="mt-2 text-sm leading-5 text-slate-500 dark:text-slate-400">
-                    Activate your PoliteDB license to use the assistant.
-                  </p>
-                  <div class="mt-4 flex justify-center gap-2">
-                    <Button
-                      variant="default"
-                      class="rounded-lg px-4 py-2 text-sm"
-                      onClick={onOpenLicense}
-                    >
-                      Activate license
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+          <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <AiAssistantPanel
+              presentation="floating"
+              onClose={() => setOpen(false)}
+              chatSessionKey={chatSessionKey}
+              engine={context?.engine ?? "postgres"}
+              runtimeConnectionId={context?.runtimeConnectionId}
+              activeSchema={context?.activeSchema}
+              activeTable={context?.activeTable}
+              tables={context?.tables ?? []}
+              columnsByTable={context?.columnsByTable}
+              columnDetailsByTable={context?.columnDetailsByTable}
+              currentSql={context?.currentSql}
+              querySafetyMode={context?.querySafetyMode}
+              savedConnections={savedConnections}
+              onInsertSql={context?.onInsertSql}
+            />
           </div>
         </div>
       ) : null}
