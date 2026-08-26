@@ -23,6 +23,25 @@ function isEmpty(v: unknown) {
   return !String(v ?? "").trim();
 }
 
+type ControlledFieldState = {
+  field: { value: unknown };
+  fieldState: { error?: unknown; isDirty: boolean };
+};
+
+function shouldShowFieldError(
+  controller: ControlledFieldState,
+  formError: unknown,
+  isRequired: boolean
+) {
+  return Boolean(
+    formError ||
+    controller.fieldState.error ||
+    (isRequired &&
+      controller.fieldState.isDirty &&
+      isEmpty(controller.field.value))
+  );
+}
+
 export function ConnectionBasicsSection(
   props: SectionProps & { isCreateNewConnection: boolean }
 ) {
@@ -209,38 +228,33 @@ export function ConnectionBasicsSection(
     return defaultPortForEngine(engine);
   }, [engine, clickHouseProtocol]);
 
-  const nameErr = !!errors?.name || isEmpty(name.field.value);
-  const hostErr =
-    !!errors?.host ||
-    !!host.fieldState.error ||
-    (isTurso && isEmpty(host.field.value)) ||
-    (isD1 && isEmpty(host.field.value));
-  const portErr =
-    !!errors?.port ||
-    (!isFileLessSql && isEmpty(String(port.field.value ?? "")));
-  const dbErr =
-    (!isMongo && !isCassandra && !!errors?.database) ||
-    ((isSqlite || isDuckDB || isD1 || isGoogleSheets) &&
-      isEmpty(database.field.value));
-  const userErr =
-    (!isOptionalAuth && !isFileLessSql && !!errors?.user) ||
-    (!isOptionalAuth &&
-      !isFileLessSql &&
-      !isDuckDB &&
-      isEmpty(user.field.value));
-  const pwErr =
-    !storeKeychain &&
-    !isOptionalAuth &&
-    !isSqlite &&
-    !isDuckDB &&
-    (!!errors?.password ||
-      !!password.fieldState.error ||
-      isEmpty(password.field.value));
+  const hostRequired = isTurso || isD1;
+  const portRequired = !isFileLessSql;
+  const databaseRequired = isSqlite || isDuckDB || isD1 || isGoogleSheets;
+  const userRequired = !isOptionalAuth && !isFileLessSql && !isDuckDB;
+  const passwordRequired =
+    !storeKeychain && !isOptionalAuth && !isSqlite && !isDuckDB;
+
+  const nameErr = shouldShowFieldError(name, errors?.name, true);
+  const hostErr = shouldShowFieldError(host, errors?.host, hostRequired);
+  const portErr = shouldShowFieldError(port, errors?.port, portRequired);
+  const dbErr = shouldShowFieldError(
+    database,
+    isMongo || isCassandra ? undefined : errors?.database,
+    databaseRequired
+  );
+  const userErr = shouldShowFieldError(
+    user,
+    userRequired ? errors?.user : undefined,
+    userRequired
+  );
+  const pwErr = shouldShowFieldError(
+    password,
+    passwordRequired ? errors?.password : undefined,
+    passwordRequired
+  );
   const showDatabaseInput = !isRedis;
-  const databaseUserGridClass =
-    isSqlite || isDuckDB ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3";
-  const databaseInputClass = isSqlite || isDuckDB ? "col-span-2" : "";
-  const userInputClass = isRedis ? "col-span-2" : "";
+
   const credentialPlaceholder = getCredentialInputPlaceholder(
     engineConfig,
     !!storeKeychain
@@ -449,13 +463,18 @@ export function ConnectionBasicsSection(
 
         {engineConfig.showDatabaseUser ? (
           <Field label={engineConfig.databaseUserLabel} alignTop>
-            <div class={databaseUserGridClass}>
+            <div
+              class={cn(
+                "grid gap-3",
+                isSqlite || isDuckDB ? "grid-cols-1" : "grid-cols-2"
+              )}
+            >
               {showDatabaseInput && (
                 <Input
                   value={database.field.value}
                   placeholder={engineConfig.databasePlaceholder}
                   error={dbErr}
-                  class={databaseInputClass}
+                  class={cn((isSqlite || isDuckDB) && "col-span-2")}
                   onInput={(e: InputEvt) => {
                     database.field.onChange(e.currentTarget.value);
                     dirty();
@@ -467,7 +486,7 @@ export function ConnectionBasicsSection(
                   value={user.field.value}
                   placeholder="user"
                   error={userErr}
-                  class={userInputClass}
+                  class={cn(isRedis ? "col-span-2" : "")}
                   onInput={(e: InputEvt) => {
                     user.field.onChange(e.currentTarget.value);
                     dirty();

@@ -180,6 +180,7 @@ export function ConnectionFooter(props: {
           open={openErrorDialog}
           onClose={() => setOpenErrorDialog(false)}
           error={status.message}
+          showRevertNote={false}
         />
       )}
     </>

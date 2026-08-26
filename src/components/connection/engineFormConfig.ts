@@ -131,9 +131,10 @@ export const CONNECTION_FORM_ENGINE_CONFIG: Record<
   google_sheets: {
     ...NETWORK_SQL_CONFIG,
     basicsHint: "Spreadsheet URL and Google credential",
-    requiredHint: "Required: Spreadsheet ID or URL, API key or OAuth token.",
-    credentialLabel: "API Key / OAuth Token",
-    credentialPlaceholder: "Google API key or OAuth access token",
+    requiredHint:
+      "Required: Spreadsheet ID or URL. API key for public sheets only or OAuth token for private sheets.",
+    credentialLabel: "API Key (public) / OAuth Token (private)",
+    credentialPlaceholder: "API key or OAuth access token",
     fileless: true,
     showHostPort: false,
     showDatabaseUser: false,

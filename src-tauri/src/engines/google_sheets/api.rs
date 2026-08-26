@@ -1,4 +1,4 @@
-use reqwest::{Client, RequestBuilder};
+use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -114,20 +114,53 @@ async fn parse_response<T: for<'de> Deserialize<'de>>(
         .map_err(|_| "GOOGLE_SHEETS_RESPONSE_READ_FAILED".to_string())?;
 
     if !status.is_success() {
-        let message = serde_json::from_str::<Value>(&body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("error")
-                    .and_then(|error| error.get("message"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .unwrap_or_else(|| status.to_string());
-        return Err(format!("GOOGLE_SHEETS_API_FAILED: {message}"));
+        return Err(google_api_error(status, &body));
     }
 
     serde_json::from_str(&body).map_err(|_| "GOOGLE_SHEETS_RESPONSE_INVALID".to_string())
+}
+
+fn google_api_error(status: StatusCode, body: &str) -> String {
+    let message = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| status.to_string());
+    let normalized = message.to_ascii_lowercase();
+
+    if status == StatusCode::UNAUTHORIZED {
+        return "GOOGLE_SHEETS_AUTH_INVALID: OAuth access token is invalid or expired.".to_string();
+    }
+
+    if status == StatusCode::FORBIDDEN {
+        if normalized.contains("has not been used")
+            || normalized.contains("is disabled")
+            || normalized.contains("api has not been used")
+        {
+            return "GOOGLE_SHEETS_API_DISABLED: Enable Google Sheets API for the Google Cloud project used by this credential."
+                .to_string();
+        }
+
+        if normalized.contains("does not have permission")
+            || normalized.contains("permission denied")
+            || normalized.contains("forbidden")
+        {
+            return "GOOGLE_SHEETS_PERMISSION_DENIED: This credential cannot access the spreadsheet. API keys only work with public spreadsheets. For private spreadsheets, use an OAuth access token with the spreadsheets.readonly scope and share the sheet with that Google account."
+                .to_string();
+        }
+    }
+
+    if status == StatusCode::NOT_FOUND {
+        return "GOOGLE_SHEETS_NOT_FOUND: Spreadsheet was not found or this credential cannot access it."
+            .to_string();
+    }
+
+    format!("GOOGLE_SHEETS_API_FAILED: {message}")
 }
 
 pub async fn fetch_metadata(
@@ -320,5 +353,33 @@ mod tests {
             .map(|column| column.name)
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["name", "name 2", "Column 3"]);
+    }
+
+    #[test]
+    fn explains_private_sheet_permission_errors() {
+        let body = r#"{"error":{"message":"The caller does not have permission"}}"#;
+
+        assert_eq!(
+            google_api_error(StatusCode::FORBIDDEN, body),
+            "GOOGLE_SHEETS_PERMISSION_DENIED: This credential cannot access the spreadsheet. API keys only work with public spreadsheets. For private spreadsheets, use an OAuth access token with the spreadsheets.readonly scope and share the sheet with that Google account."
+        );
+    }
+
+    #[test]
+    fn explains_invalid_oauth_tokens() {
+        assert_eq!(
+            google_api_error(StatusCode::UNAUTHORIZED, "{}"),
+            "GOOGLE_SHEETS_AUTH_INVALID: OAuth access token is invalid or expired."
+        );
+    }
+
+    #[test]
+    fn explains_disabled_google_sheets_api() {
+        let body = r#"{"error":{"message":"Google Sheets API has not been used in project 123 before or it is disabled."}}"#;
+
+        assert_eq!(
+            google_api_error(StatusCode::FORBIDDEN, body),
+            "GOOGLE_SHEETS_API_DISABLED: Enable Google Sheets API for the Google Cloud project used by this credential."
+        );
     }
 }

@@ -135,7 +135,7 @@ export const SUPPORTED_DATABASES: readonly (DatabaseType & {
     label: "Google Sheets",
     abbreviation: "Gs",
     color: "bg-green-600",
-    available: false,
+    available: true,
     desc: "Browse worksheets as read-only tables.",
     defaultLabels: ["Sheets"],
   },

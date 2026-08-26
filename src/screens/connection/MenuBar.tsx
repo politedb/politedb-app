@@ -501,6 +501,10 @@ export function MenuBar({
       connectionInfo.version
     );
 
+    if (connectionInfo.engine === "google_sheets") {
+      return version || "Google Sheets";
+    }
+
     return [pretty, version].filter(Boolean).join(" ");
   }, [connectionInfo]);
 
