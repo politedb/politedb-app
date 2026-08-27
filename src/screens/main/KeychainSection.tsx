@@ -18,7 +18,7 @@ import {
 import { KeychainCard } from "./KeychainCard";
 import type { KeychainSortMode, ViewMode } from "src/types";
 import { cn } from "src/utils/cn";
-import { LockIcon } from "src/components/icons";
+import { CopyIcon, LockIcon } from "src/components/icons";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -290,38 +290,46 @@ export function KeychainSection(props: {
         </DialogHeader>
         <DialogContent className="gap-3 pt-1">
           <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div>
-              <div class="mb-1 text-xs font-medium text-slate-700">Key</div>
-              <Input
-                value={key}
-                onValueChange={setKey}
-                placeholder="example: profile:abc:postgres:password"
-                className="rounded-md border border-slate-300 bg-white"
-              />
-            </div>
-            <div>
-              <div class="mb-1 text-xs font-medium text-slate-700">Value</div>
-              <Input
-                value={value}
-                onValueChange={setValue}
-                placeholder="Secret value"
-                className="rounded-md border border-slate-300 bg-white"
-                type="password"
-              />
-            </div>
-          </div>
-
-          <div>
-            <div class="mb-1 text-xs font-medium text-slate-700">
-              Last loaded value
-            </div>
             <Input
-              value={resolvedValue}
-              readOnly
-              className="rounded-md border border-slate-300 bg-slate-50 font-mono"
-              placeholder="No value loaded"
+              label="Key"
+              value={key}
+              onValueChange={setKey}
+              placeholder="Secret key"
+              className="rounded-md border border-slate-300 bg-white"
+              right={
+                <CopyIcon
+                  onClick={() => void navigator.clipboard.writeText(key)}
+                  className="size-4"
+                />
+              }
+            />
+
+            <Input
+              label="Value"
+              value={value}
+              onValueChange={setValue}
+              placeholder="Secret value"
+              className="rounded-md border border-slate-300 bg-white"
+              type="password"
             />
           </div>
+
+          <Input
+            label="Last loaded value"
+            value={new Array(48).fill("*").join("")}
+            readOnly
+            className="rounded-md border border-slate-300 bg-slate-50 align-middle"
+            style={{ paddingTop: "8px", paddingBottom: "6px" }}
+            placeholder="No value loaded"
+            right={
+              <CopyIcon
+                onClick={() =>
+                  void navigator.clipboard.writeText(resolvedValue)
+                }
+                className="size-4"
+              />
+            }
+          />
 
           {(message || error) && (
             <div
@@ -339,27 +347,20 @@ export function KeychainSection(props: {
         <DialogFooter className="justify-between pt-1">
           <div class="flex items-center gap-2">
             <Button
-              variant="outline"
-              className="py-1.5"
-              onClick={() => void navigator.clipboard.writeText(key)}
-              disabled={!key}
+              variant="shadow"
+              className="py-1"
+              onClick={() => void handleGet()}
+              loading={busy}
+              disabled={!canSubmit}
             >
-              Copy key
-            </Button>
-            <Button
-              variant="outline"
-              className="py-1.5"
-              onClick={() => void navigator.clipboard.writeText(resolvedValue)}
-              disabled={!resolvedValue}
-            >
-              Copy value
+              Load key
             </Button>
           </div>
 
           <div class="flex items-center gap-2">
             <Button
               variant="default"
-              className="py-1.5"
+              className="py-1"
               onClick={() => void handleSet()}
               loading={busy}
               disabled={!canSubmit}
@@ -367,17 +368,8 @@ export function KeychainSection(props: {
               Save
             </Button>
             <Button
-              variant="shadow"
-              className="py-1.5"
-              onClick={() => void handleGet()}
-              loading={busy}
-              disabled={!canSubmit}
-            >
-              Get
-            </Button>
-            <Button
               variant="outline"
-              className="border-rose-300 py-1.5 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+              className="border-rose-300 py-1 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
               onClick={() => void handleDelete()}
               loading={busy}
               disabled={!canSubmit}

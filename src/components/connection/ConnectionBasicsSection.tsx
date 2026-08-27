@@ -288,6 +288,7 @@ export function ConnectionBasicsSection(
             />
             {isClickHouse ? (
               <Select
+                class="h-10"
                 value={clickhouseProtocolCtl.field.value ?? "native"}
                 onChange={(e) => {
                   const protocol = e.currentTarget.value as ClickHouseProtocol;

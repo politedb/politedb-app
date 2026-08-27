@@ -478,7 +478,7 @@ export function MainScreen() {
 
           {/* Content canvas (scroll only here) */}
           <div
-            class="min-h-0 flex-1 overflow-y-auto bg-neutral-100"
+            class="overlay-scrollbar-y min-h-0 flex-1 overflow-y-auto bg-neutral-100"
             data-scroll-root
           >
             {activeNav === "logs" ? (

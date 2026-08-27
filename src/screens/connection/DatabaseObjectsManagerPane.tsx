@@ -476,7 +476,7 @@ export function DatabaseObjectsManagerPane(props: {
               onChange={(e) =>
                 setSchemaFilter((e.currentTarget as HTMLSelectElement).value)
               }
-              className="h-7 rounded-md border-neutral-200 px-2 text-sm!"
+              className="h-8 border-neutral-200"
             >
               {availableSchemas.map((schema) => (
                 <option key={schema} value={schema}>
@@ -545,7 +545,7 @@ export function DatabaseObjectsManagerPane(props: {
         {isCreateMode ? (
           <div class="grid grid-cols-3 gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
             <div class="space-y-1">
-              <div class="text-xs font-medium text-neutral-500">Schema</div>
+              <div class="text-sm font-medium text-neutral-500">Schema</div>
               <Select
                 value={draft.schema}
                 onChange={(e) =>
@@ -554,7 +554,7 @@ export function DatabaseObjectsManagerPane(props: {
                     schema: (e.currentTarget as HTMLSelectElement).value,
                   }))
                 }
-                className="h-6.5 rounded-md! border-neutral-200 px-2 text-xs!"
+                className="h-8 border-neutral-200"
               >
                 {availableSchemas.map((schema) => (
                   <option key={schema} value={schema}>
@@ -564,17 +564,17 @@ export function DatabaseObjectsManagerPane(props: {
               </Select>
             </div>
             <div class="space-y-1">
-              <div class="text-xs font-medium text-neutral-500">Name</div>
+              <div class="text-sm font-medium text-neutral-500">Name</div>
               <Input
                 value={draft.name}
-                className="border border-neutral-200 bg-white py-1.5 text-xs"
+                className="border border-neutral-200 bg-white py-1.25 text-sm"
                 onValueChange={(value) =>
                   setDraft((prev) => ({ ...prev, name: value }))
                 }
               />
             </div>
             <div class="space-y-1">
-              <div class="text-xs font-medium text-neutral-500">
+              <div class="text-sm font-medium text-neutral-500">
                 {kind === "trigger" ? "Target table" : "Object type"}
               </div>
               {kind === "trigger" ? (
@@ -586,7 +586,7 @@ export function DatabaseObjectsManagerPane(props: {
                       tableName: (e.currentTarget as HTMLSelectElement).value,
                     }))
                   }
-                  className="h-8 rounded-md px-2 text-xs"
+                  className="h-8 border-neutral-200"
                 >
                   <option value="">Select table</option>
                   {(meta.tables ?? [])
@@ -601,7 +601,7 @@ export function DatabaseObjectsManagerPane(props: {
                     ))}
                 </Select>
               ) : (
-                <div class="flex h-8 items-center rounded-md border border-neutral-200 bg-white px-2 text-xs font-medium text-neutral-600">
+                <div class="flex items-center rounded-md border border-neutral-200 bg-white px-2 py-1.25 text-sm font-medium text-neutral-600">
                   {objectKindLabel(kind)}
                 </div>
               )}

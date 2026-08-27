@@ -19,7 +19,7 @@ export function Select({
       disabled={disabled}
       className={cn(
         // base
-        "h-9 w-full rounded-lg border px-3 text-sm font-medium outline-none",
+        "schema-select h-9 w-full rounded-lg border text-sm! outline-none",
         "bg-white text-slate-900",
         "placeholder:text-slate-400",
 

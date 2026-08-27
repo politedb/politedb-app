@@ -4,7 +4,7 @@ import { TagInput } from "../common/TagInput";
 import { ColorPicker } from "../common/ColorPicker";
 import type { SectionProps } from "./connectionForm.utils";
 
-const TAG_SUGGESTIONS = ["dev", "staging", "prod", "read"];
+const TAG_SUGGESTIONS = ["local", "dev", "staging", "prod"];
 
 export function IdentitySection(props: SectionProps) {
   const { control, onDirty } = props;

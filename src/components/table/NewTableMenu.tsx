@@ -1,5 +1,5 @@
 import { MenuDropdown, MenuDropdownItem } from "../common/MenuDropdown";
-import { TableIcon, SchemaIcon } from "../icons";
+import { TableIcon, SchemaIcon, PlusIcon } from "../icons";
 import { cn } from "src/utils/cn";
 import { Button } from "../common/Button";
 import {
@@ -50,14 +50,11 @@ export function NewTableMenu({
         trigger={
           <Button
             variant="outline"
-            className={cn(
-              "size-6.5 p-2 text-sm",
-              "border-neutral-300 bg-white text-neutral-800"
-            )}
+            className={cn("size-7 p-1 text-sm", "border-neutral-300 bg-white")}
             title={disabled ? "Not supported" : "New"}
             disabled={disabled}
           >
-            +
+            <PlusIcon class="size-2.5 text-neutral-800" />
           </Button>
         }
         align="top"

@@ -302,7 +302,7 @@ export function TableFooter({
               onChange={(e: any) =>
                 handlePageSizeChange(Number(e.target.value))
               }
-              class="h-6.75 text-sm"
+              class="h-6.75"
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option value={size}>{size}</option>

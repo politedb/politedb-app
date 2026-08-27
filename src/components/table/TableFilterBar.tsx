@@ -199,7 +199,7 @@ export function TableFilterBar({
                     column: (e.target as HTMLSelectElement).value,
                   })
                 }
-                class="h-6 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
+                class="h-6 w-36 border-neutral-300 text-center [text-align-last:center]"
               >
                 {columnNames.map((name) => (
                   <option key={name} value={name}>
@@ -216,7 +216,7 @@ export function TableFilterBar({
                     ),
                   })
                 }
-                class="h-6 w-36 border-neutral-300 text-center text-sm! [text-align-last:center]"
+                class="h-6 w-36 border-neutral-300 text-center [text-align-last:center]"
               >
                 {FILTER_OPERATORS.map((op) => (
                   <Fragment key={op.value}>

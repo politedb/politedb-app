@@ -1,8 +1,24 @@
 @import "tailwindcss";
 @tailwind utilities;
 
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/InterVariable.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/InterVariable-Italic.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
-  --font-ui: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-ui: "Inter", sans-serif;
   --color-new: #dcfce7;
   --color-dirty: #fdf0bb;
   --color-deleted: #fbbdbd;
@@ -30,14 +46,6 @@
   color: #6b7280;
 }
 
-@supports (-apple-system: none) {
-  :root {
-    --font-ui:
-      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-      system-ui;
-  }
-}
-
 :root {
   --titlebar-left-padding: 12px;
   --sidebar-width: 17.5rem;
@@ -46,6 +54,10 @@
 html[data-platform="macos"] {
   --titlebar-left-padding: 72px;
   /* add space for traffic lights */
+}
+
+html[data-platform="linux"] .schema-select {
+  transform: translateY(-1px);
 }
 
 html,
@@ -69,19 +81,8 @@ body,
   color: #0f0f0f;
   background-color: #f6f6f6;
 
-  /* Native-ish typography */
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Inter",
-    Roboto,
-    Helvetica,
-    Arial,
-    "Apple Color Emoji",
-    "Segoe UI Emoji";
+  /* Use one bundled UI font so metrics stay stable across desktop platforms. */
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.45;
   font-weight: 400;
@@ -98,9 +99,16 @@ body,
   color-scheme: light;
 }
 
+button,
+input,
 select,
+textarea,
 option {
   font-family: var(--font-ui);
+}
+
+select,
+option {
   font-size: 13px;
   font-weight: 400;
 }
@@ -140,6 +148,18 @@ table {
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Keep the main canvas full-width while its scrollbar floats above the content. */
+.overlay-scrollbar-y {
+  overflow-y: auto;
+  scrollbar-gutter: auto;
+}
+
+@supports (overflow-y: overlay) {
+  .overlay-scrollbar-y {
+    overflow-y: overlay;
+  }
 }
 
 .ai-result-scrollbar {
@@ -341,6 +361,7 @@ table {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .diagram-rel-flow,
   .diagram-rel-flow-particle {
     animation: none;

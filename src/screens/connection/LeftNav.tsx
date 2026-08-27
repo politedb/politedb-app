@@ -581,8 +581,7 @@ export function LeftNav({
             title={schemaLabel}
             disabled={connectionChromeBlocked}
             className={cn(
-              "h-7 w-full rounded-lg border-neutral-300 bg-white",
-              "text-sm! font-medium! text-neutral-800",
+              "h-7 w-full border-neutral-300 text-neutral-800",
               "focus:border-neutral-300 focus:ring-2 focus:ring-black/5"
             )}
             value={currSchema}
