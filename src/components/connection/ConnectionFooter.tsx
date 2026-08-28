@@ -134,7 +134,7 @@ export function ConnectionFooter(props: {
     <>
       <div
         class={cn(
-          "mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-4",
+          "rounded-2xl border border-slate-200 bg-white px-5 py-4",
           className
         )}
       >

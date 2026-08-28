@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 type Direction = "vertical" | "horizontal";
 
@@ -229,7 +230,14 @@ export function SplitPane(props: Props) {
       </div>
 
       {/* Second pane */}
-      <div class="min-h-0 min-w-0 flex-1 overflow-auto">{second}</div>
+      <OverlayScrollArea
+        className="min-h-0 min-w-0 flex-1"
+        contentClassName="h-full min-h-0"
+        horizontal
+        vertical
+      >
+        {second}
+      </OverlayScrollArea>
     </div>
   );
 }

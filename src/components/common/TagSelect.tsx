@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { ChevronSortIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { MenuItem, MenuPopover } from "./MenuPopover";
+import { OverlayScrollArea } from "./OverlayScrollArea";
 
 interface Props {
   className?: string;
@@ -114,7 +115,7 @@ export function TagSelect(props: Props) {
                   />
                 </div>
               ) : null}
-              <div class="max-h-60 overflow-y-auto py-1">
+              <OverlayScrollArea className="max-h-60" contentClassName="py-1">
                 {filteredOptions.length > 0 ? (
                   filteredOptions.map((name) => (
                     <MenuItem
@@ -136,7 +137,7 @@ export function TagSelect(props: Props) {
                       : "No columns available"}
                   </div>
                 )}
-              </div>
+              </OverlayScrollArea>
             </div>
           </MenuPopover>
         )}

@@ -5,6 +5,7 @@ import { useFillViewportTable } from "src/hooks/useFillViewportTable";
 import { useIndexedSort } from "src/hooks/useIndexedSort";
 import { ChevronUpIcon, ChevronDownIcon } from "src/components/icons";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
+import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 
 export interface TableColumn<T = any> {
   key: string;
@@ -280,201 +281,211 @@ export function Table<T = any>({
   }
 
   return (
-    <div
-      ref={containerRef}
-      class={cn(
-        "h-full overflow-auto bg-white",
-        emptyRowsCount > 0 && "overflow-y-hidden"
-      )}
-      onClick={handleTableClick}
-      onDblClick={handleTableDblClick}
-    >
-      <table
-        ref={tableRef}
+    <div class="relative h-full min-h-0 min-w-0 overflow-hidden bg-white">
+      <div
+        ref={containerRef}
         class={cn(
-          "w-full border-collapse border border-t-0 border-neutral-200",
-          className
+          "no-scrollbar h-full overflow-auto bg-white",
+          emptyRowsCount > 0 && "overflow-y-hidden"
         )}
-        style={TABLE_STYLE}
+        onClick={handleTableClick}
+        onDblClick={handleTableDblClick}
       >
-        <colgroup>
-          {columns.map((_col, colIndex) => (
-            <col
-              key={_col.key}
-              style={
-                colWidths[colIndex]
-                  ? { width: `${colWidths[colIndex]}px` }
-                  : undefined
-              }
-            />
-          ))}
-        </colgroup>
-
-        <thead class={cn("bg-neutral-50", headerClassName)}>
-          <tr>
-            {columns.map((col, colIndex) => (
-              <th
-                key={col.key}
-                class={cn(
-                  "relative border-r border-neutral-50 active:bg-neutral-100",
-                  "p-2 text-sm font-semibold text-neutral-700",
-                  isCenterColumn(col) ? "text-center" : "text-left",
-                  stickyHeader &&
-                    "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",
-                  col.headerClassName
-                )}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setHeaderMenu({
-                    x: e.clientX,
-                    y: e.clientY,
-                    column: col,
-                  });
-                }}
-              >
-                {col.sortable ? (
-                  <button
-                    class={cn(
-                      "flex w-full items-center gap-1 select-none",
-                      isCenterColumn(col) ? "justify-center" : "justify-between"
-                    )}
-                    onMouseUp={(e) => {
-                      if (e.button !== 0) return;
-                      if (!enableSort) return;
-                      const sortKey = resolveSortKey(col);
-                      e.stopPropagation();
-                      toggleSort(sortKey);
-                    }}
-                  >
-                    <span class="truncate">{col.label}</span>
-                    {enableSort &&
-                      sortState.key === (col.sortKey ?? (col.key as keyof T)) &&
-                      (sortState.direction === "asc" ? (
-                        <ChevronUpIcon className="size-3" />
-                      ) : (
-                        <ChevronDownIcon className="size-3" />
-                      ))}
-                  </button>
-                ) : (
-                  col.label
-                )}
-                <div
-                  class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
-                  onMouseDown={(e) => handleResizeStart(e, colIndex)}
-                />
-              </th>
-            ))}
-          </tr>
-        </thead>
-
-        <tbody>
-          {displayRows.map((row, displayIndex) => {
-            const sortedIndex = indexMap[displayIndex] ?? displayIndex;
-            const originalIndex =
-              rowIndexExtractor?.(row, sortedIndex) ?? sortedIndex;
-
-            let isSelected = false;
-
-            if (selectedRows) {
-              isSelected = selectedRows.has(originalIndex);
-            } else if (selectedRow != null) {
-              isSelected = findDisplayIndex(selectedRow) === displayIndex;
-            }
-
-            const isNewRow = (row as any).isNew;
-            const dynamicClassName =
-              typeof rowClassName === "function"
-                ? rowClassName(row, originalIndex)
-                : rowClassName;
-
-            return (
-              <tr
-                key={
-                  keyExtractor
-                    ? keyExtractor(row, originalIndex)
-                    : originalIndex
+        <table
+          ref={tableRef}
+          class={cn(
+            "w-full border-collapse border border-t-0 border-neutral-200",
+            className
+          )}
+          style={TABLE_STYLE}
+        >
+          <colgroup>
+            {columns.map((_col, colIndex) => (
+              <col
+                key={_col.key}
+                style={
+                  colWidths[colIndex]
+                    ? { width: `${colWidths[colIndex]}px` }
+                    : undefined
                 }
-                data-row={originalIndex}
-                class={cn(
-                  isNewRow && "bg-new!",
-                  isSelected &&
-                    (selectionFocused
-                      ? "bg-selected!"
-                      : "bg-selected-unfocused! text-neutral-500!"),
-                  dynamicClassName
-                )}
-              >
-                {columns.map((col, colIndex) => (
-                  <td
-                    key={col.key}
-                    class={cn(
-                      "border-r border-b border-neutral-200 px-1",
-                      colIndex === 0 && "border-l",
-                      col.className
-                    )}
-                  >
-                    {col.render
-                      ? col.render((row as any)[col.key], row, originalIndex)
-                      : (row as any)[col.key]}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+              />
+            ))}
+          </colgroup>
 
-          {/* Empty rows to fill viewport */}
-          {Array.from({ length: emptyRowsCount }, (_, idx) => {
-            const rowIndex = data.length + idx;
+          <thead class={cn("bg-neutral-50", headerClassName)}>
+            <tr>
+              {columns.map((col, colIndex) => (
+                <th
+                  key={col.key}
+                  class={cn(
+                    "relative border-r border-neutral-50 active:bg-neutral-100",
+                    "p-2 text-sm font-semibold text-neutral-700",
+                    isCenterColumn(col) ? "text-center" : "text-left",
+                    stickyHeader &&
+                      "sticky top-0 z-50 bg-neutral-50 shadow-[1px_1px_0_0_rgba(0,0,0,0.15)]",
+                    col.headerClassName
+                  )}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setHeaderMenu({
+                      x: e.clientX,
+                      y: e.clientY,
+                      column: col,
+                    });
+                  }}
+                >
+                  {col.sortable ? (
+                    <button
+                      class={cn(
+                        "flex w-full items-center gap-1 select-none",
+                        isCenterColumn(col)
+                          ? "justify-center"
+                          : "justify-between"
+                      )}
+                      onMouseUp={(e) => {
+                        if (e.button !== 0) return;
+                        if (!enableSort) return;
+                        const sortKey = resolveSortKey(col);
+                        e.stopPropagation();
+                        toggleSort(sortKey);
+                      }}
+                    >
+                      <span class="truncate">{col.label}</span>
+                      {enableSort &&
+                        sortState.key ===
+                          (col.sortKey ?? (col.key as keyof T)) &&
+                        (sortState.direction === "asc" ? (
+                          <ChevronUpIcon className="size-3" />
+                        ) : (
+                          <ChevronDownIcon className="size-3" />
+                        ))}
+                    </button>
+                  ) : (
+                    col.label
+                  )}
+                  <div
+                    class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize hover:bg-neutral-200 active:bg-neutral-400"
+                    onMouseDown={(e) => handleResizeStart(e, colIndex)}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
 
-            return (
-              <tr
-                key={`empty-${idx}`}
-                data-row={rowIndex}
-                data-empty="true"
-                class={cn(
-                  typeof rowClassName === "string" ? rowClassName : undefined
-                )}
-              >
-                {columns.map((col, colIndex) => {
-                  let content: any = "";
-                  if (col.key === "_rowNumber") {
-                    content = col.render
-                      ? col.render(rowIndex + 1, emptyRow, rowIndex)
-                      : rowIndex + 1;
-                  } else if (col.render) {
-                    content = col.render(
-                      (emptyRow as any)[col.key],
-                      emptyRow,
-                      rowIndex
-                    );
+          <tbody>
+            {displayRows.map((row, displayIndex) => {
+              const sortedIndex = indexMap[displayIndex] ?? displayIndex;
+              const originalIndex =
+                rowIndexExtractor?.(row, sortedIndex) ?? sortedIndex;
+
+              let isSelected = false;
+
+              if (selectedRows) {
+                isSelected = selectedRows.has(originalIndex);
+              } else if (selectedRow != null) {
+                isSelected = findDisplayIndex(selectedRow) === displayIndex;
+              }
+
+              const isNewRow = (row as any).isNew;
+              const dynamicClassName =
+                typeof rowClassName === "function"
+                  ? rowClassName(row, originalIndex)
+                  : rowClassName;
+
+              return (
+                <tr
+                  key={
+                    keyExtractor
+                      ? keyExtractor(row, originalIndex)
+                      : originalIndex
                   }
-
-                  return (
+                  data-row={originalIndex}
+                  class={cn(
+                    isNewRow && "bg-new!",
+                    isSelected &&
+                      (selectionFocused
+                        ? "bg-selected!"
+                        : "bg-selected-unfocused! text-neutral-500!"),
+                    dynamicClassName
+                  )}
+                >
+                  {columns.map((col, colIndex) => (
                     <td
                       key={col.key}
                       class={cn(
-                        "min-h-10 border-r border-b border-neutral-200 px-1",
+                        "border-r border-b border-neutral-200 px-1",
                         colIndex === 0 && "border-l",
                         col.className
                       )}
                     >
-                      {content}
+                      {col.render
+                        ? col.render((row as any)[col.key], row, originalIndex)
+                        : (row as any)[col.key]}
                     </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                  ))}
+                </tr>
+              );
+            })}
 
-      <ContextMenu
-        open={headerMenu !== null}
-        x={headerMenu?.x ?? 0}
-        y={headerMenu?.y ?? 0}
-        items={headerMenuItems}
-        onClose={() => setHeaderMenu(null)}
+            {/* Empty rows to fill viewport */}
+            {Array.from({ length: emptyRowsCount }, (_, idx) => {
+              const rowIndex = data.length + idx;
+
+              return (
+                <tr
+                  key={`empty-${idx}`}
+                  data-row={rowIndex}
+                  data-empty="true"
+                  class={cn(
+                    typeof rowClassName === "string" ? rowClassName : undefined
+                  )}
+                >
+                  {columns.map((col, colIndex) => {
+                    let content: any = "";
+                    if (col.key === "_rowNumber") {
+                      content = col.render
+                        ? col.render(rowIndex + 1, emptyRow, rowIndex)
+                        : rowIndex + 1;
+                    } else if (col.render) {
+                      content = col.render(
+                        (emptyRow as any)[col.key],
+                        emptyRow,
+                        rowIndex
+                      );
+                    }
+
+                    return (
+                      <td
+                        key={col.key}
+                        class={cn(
+                          "min-h-10 border-r border-b border-neutral-200 px-1",
+                          colIndex === 0 && "border-l",
+                          col.className
+                        )}
+                      >
+                        {content}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <ContextMenu
+          open={headerMenu !== null}
+          x={headerMenu?.x ?? 0}
+          y={headerMenu?.y ?? 0}
+          items={headerMenuItems}
+          onClose={() => setHeaderMenu(null)}
+        />
+      </div>
+      <OverlayScrollbars
+        scrollerRef={containerRef}
+        horizontal
+        vertical={emptyRowsCount === 0}
       />
     </div>
   );

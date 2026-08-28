@@ -315,7 +315,7 @@ export function LeftNav({
       </div>
 
       {/* Middle: Sections */}
-      <div class="flex-1 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {/* Functions (hidden for Mongo; schema = database, no SQL functions) */}
         {!isMongo && !isRedis && (
           <div class="mb-2">

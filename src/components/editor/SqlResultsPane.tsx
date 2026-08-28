@@ -7,6 +7,7 @@ import { useSqlStreamResult } from "src/screens/connection/hooks/useSqlStreamRes
 import { XIcon } from "src/components/icons";
 import { Button } from "../common/Button";
 import { Spinner } from "../common/Spinner";
+import { OverlayScrollArea } from "../common/OverlayScrollArea";
 
 /* =============================================================================
  * UI blocks
@@ -59,9 +60,14 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
         ) : null}
       </div>
 
-      <pre class="max-h-50 overflow-auto rounded-md bg-white/60 p-2 font-mono text-xs whitespace-pre-wrap text-neutral-800">
+      <OverlayScrollArea
+        className="max-h-50 rounded-md bg-white/60"
+        contentClassName="p-2 font-mono text-xs whitespace-pre-wrap text-neutral-800"
+        horizontal
+        vertical
+      >
         {props.error || "Unknown error."}
-      </pre>
+      </OverlayScrollArea>
     </div>
   );
 }
@@ -100,7 +106,12 @@ function RunTabs(props: {
   const { runs, activeRunId, onSelect, onClose } = props;
 
   return (
-    <div class="flex items-center gap-1 overflow-x-auto border-b border-neutral-200 bg-neutral-100 px-2 py-1">
+    <OverlayScrollArea
+      className="shrink-0 border-b border-neutral-200 bg-neutral-100"
+      contentClassName="flex items-center gap-1 px-2 py-1"
+      horizontal
+      vertical={false}
+    >
       {runs.map((run) => {
         const status = runStatus(run);
         const active = run.id === activeRunId;
@@ -121,7 +132,7 @@ function RunTabs(props: {
             <span>{run.title}</span>
             <Button
               variant="ghost"
-              class="invisible justify-center rounded-full p-0.25 group-hover:visible"
+              class="invisible justify-center rounded-full p-px group-hover:visible"
               aria-label={`Close ${run.title}`}
               title={`Close ${run.title}`}
               onClick={(e) => {
@@ -134,7 +145,7 @@ function RunTabs(props: {
           </div>
         );
       })}
-    </div>
+    </OverlayScrollArea>
   );
 }
 
@@ -147,7 +158,12 @@ function StatementTabs(props: {
   if (slots.length <= 1) return null;
 
   return (
-    <div class="flex items-center gap-1 overflow-x-auto border-b border-neutral-200 bg-neutral-50 px-2 py-1">
+    <OverlayScrollArea
+      className="shrink-0 border-b border-neutral-200 bg-neutral-50"
+      contentClassName="flex items-center gap-1 px-2 py-1"
+      horizontal
+      vertical={false}
+    >
       {slots.map((slot, idx) => (
         <button
           key={slot.index}
@@ -166,7 +182,7 @@ function StatementTabs(props: {
           </span>
         </button>
       ))}
-    </div>
+    </OverlayScrollArea>
   );
 }
 
@@ -356,20 +372,31 @@ export function SqlResultsPane(props: {
         onSelect={setActiveIndex}
       />
 
-      <div
-        class={cn(
-          "min-h-0 flex-1 bg-white",
-          !shouldShowTable && "overflow-auto"
-        )}
-      >
-        <ResultsContent
-          windowId={windowId}
-          runId={activeRun.id}
-          slot={slot}
-          safeIndex={safeIndex}
-          stream={slot.mode === "stream" ? stream : null}
-        />
-      </div>
+      {shouldShowTable ? (
+        <div class="min-h-0 flex-1 bg-white">
+          <ResultsContent
+            windowId={windowId}
+            runId={activeRun.id}
+            slot={slot}
+            safeIndex={safeIndex}
+            stream={slot.mode === "stream" ? stream : null}
+          />
+        </div>
+      ) : (
+        <OverlayScrollArea
+          className="min-h-0 flex-1 bg-white"
+          horizontal
+          vertical
+        >
+          <ResultsContent
+            windowId={windowId}
+            runId={activeRun.id}
+            slot={slot}
+            safeIndex={safeIndex}
+            stream={null}
+          />
+        </OverlayScrollArea>
+      )}
 
       <TableFooter
         className="justify-center"

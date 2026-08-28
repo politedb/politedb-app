@@ -11,6 +11,7 @@ import {
   type ImportConnectionSource,
 } from "src/components/modal/ImportConnectionSourceDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
@@ -477,9 +478,9 @@ export function MainScreen() {
           </div>
 
           {/* Content canvas (scroll only here) */}
-          <div
-            class="overlay-scrollbar-y min-h-0 flex-1 overflow-y-auto bg-neutral-100"
-            data-scroll-root
+          <OverlayScrollArea
+            className="min-h-0 flex-1 bg-neutral-100"
+            dataScrollRoot
           >
             {activeNav === "logs" ? (
               <ConnectionLogsSection
@@ -536,7 +537,7 @@ export function MainScreen() {
                 onEditorOpenChange={setKeychainEditorOpen}
               />
             )}
-          </div>
+          </OverlayScrollArea>
         </div>
 
         {/* Modals */}

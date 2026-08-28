@@ -20,6 +20,7 @@ import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
 import { buildPatchDiffs } from "src/utils/patchDiff";
 import { sqlForDisplay } from "src/utils/sqlDialect";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
 
 type ChangeSummary = {
@@ -223,7 +224,13 @@ export function SaveChangesDialog({
   }
 
   return (
-    <Dialog size="lg" open={open} onClose={onClose} closeOnOutsideClick={false}>
+    <Dialog
+      size="lg"
+      open={open}
+      onClose={onClose}
+      closeOnOutsideClick={false}
+      className="flex h-[min(90vh,48rem)] flex-col overflow-hidden"
+    >
       <DialogHeader className="shrink-0">
         <DialogTitle>Review changes before saving</DialogTitle>
         <DialogDescription>
@@ -231,173 +238,181 @@ export function SaveChangesDialog({
         </DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="min-h-0 flex-1 overflow-y-auto py-1">
-        {/* Summary Section */}
-        <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-          <h3 class="mb-3 text-sm font-semibold text-neutral-900">
-            Summary of Changes
-          </h3>
-          <div class="grid grid-cols-2 gap-2 text-sm">
-            {newTableSql && newTableSql.length > 0 && (
+      <DialogContent className="min-h-0 flex-1 overflow-hidden py-1">
+        <OverlayScrollArea
+          className="h-full min-h-0"
+          contentClassName="space-y-4"
+        >
+          {/* Summary Section */}
+          <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+            <h3 class="mb-3 text-sm font-semibold text-neutral-900">
+              Summary of Changes
+            </h3>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              {newTableSql && newTableSql.length > 0 && (
+                <SummaryItem
+                  label="CREATE TABLE"
+                  entity="table"
+                  count={newTableSql.length}
+                  color="bg-blue-100 text-blue-800"
+                />
+              )}
               <SummaryItem
-                label="CREATE TABLE"
-                entity="table"
-                count={newTableSql.length}
+                label="INSERT"
+                entity={isMongo ? "document" : "row"}
+                count={summary.inserts}
+                color="bg-green-100 text-green-800"
+              />
+              <SummaryItem
+                label="UPDATE"
+                entity={isMongo ? "document" : "row"}
+                count={summary.updates}
+                color="bg-amber-100 text-amber-800"
+              />
+              <SummaryItem
+                label="DELETE"
+                entity={isMongo ? "document" : "row"}
+                count={summary.deletes}
+                color="bg-red-100 text-red-800"
+              />
+              <SummaryItem
+                label="STRUCTURE"
+                entity="column"
+                count={summary.structureChanges}
                 color="bg-blue-100 text-blue-800"
               />
-            )}
-            <SummaryItem
-              label="INSERT"
-              entity={isMongo ? "document" : "row"}
-              count={summary.inserts}
-              color="bg-green-100 text-green-800"
-            />
-            <SummaryItem
-              label="UPDATE"
-              entity={isMongo ? "document" : "row"}
-              count={summary.updates}
-              color="bg-amber-100 text-amber-800"
-            />
-            <SummaryItem
-              label="DELETE"
-              entity={isMongo ? "document" : "row"}
-              count={summary.deletes}
-              color="bg-red-100 text-red-800"
-            />
-            <SummaryItem
-              label="STRUCTURE"
-              entity="column"
-              count={summary.structureChanges}
-              color="bg-blue-100 text-blue-800"
-            />
-            <SummaryItem
-              label="CONSTRAINT"
-              entity="constraint"
-              count={summary.constraintChanges}
-              color="bg-purple-100 text-purple-800"
-            />
+              <SummaryItem
+                label="CONSTRAINT"
+                entity="constraint"
+                count={summary.constraintChanges}
+                color="bg-purple-100 text-purple-800"
+              />
+            </div>
           </div>
-        </div>
 
-        {rowDiffs.length > 0 && (
+          {rowDiffs.length > 0 && (
+            <div class="rounded-lg border border-neutral-200">
+              <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+                <h3 class="text-sm font-semibold text-neutral-900">
+                  Row & Column Diff ({rowDiffs.length})
+                </h3>
+              </div>
+              <OverlayScrollArea
+                className="max-h-52"
+                contentClassName="space-y-3 p-4"
+              >
+                {rowDiffs.map((diff, index) => (
+                  <div
+                    key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
+                    class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="truncate font-mono text-xs text-neutral-600">
+                          Table: {diff.table}
+                        </p>
+                        <p class="truncate font-mono text-xs text-neutral-600">
+                          {diff.identity}
+                        </p>
+                      </div>
+                      <span
+                        class={cn(
+                          "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
+                          diff.action === "insert" &&
+                            "bg-green-100 text-green-700",
+                          diff.action === "update" &&
+                            "bg-amber-100 text-amber-700",
+                          diff.action === "delete" && "bg-red-100 text-red-700"
+                        )}
+                      >
+                        {diff.action}
+                      </span>
+                    </div>
+                    {diff.cells.length > 0 && (
+                      <div class="space-y-1">
+                        {diff.cells.map((cell) => (
+                          <div
+                            key={cell.column}
+                            class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
+                          >
+                            <span class="truncate font-medium text-neutral-700">
+                              {cell.column}
+                            </span>
+                            <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
+                              {cell.oldValue || "NULL"}
+                            </span>
+                            <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
+                              {cell.newValue || "NULL"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </OverlayScrollArea>
+            </div>
+          )}
+
+          {/* SQL Statements Section */}
           <div class="rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
               <h3 class="text-sm font-semibold text-neutral-900">
-                Row & Column Diff ({rowDiffs.length})
+                {isMongo
+                  ? `Mongo Operations to Execute (${allSqlStatements.length})`
+                  : `SQL Statements to Execute (${allSqlStatements.length})`}
               </h3>
             </div>
-            <div class="max-h-52 space-y-3 overflow-y-auto p-4">
-              {rowDiffs.map((diff, index) => (
-                <div
-                  key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
-                  class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
-                >
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="min-w-0">
-                      <p class="truncate font-mono text-xs text-neutral-600">
-                        Table: {diff.table}
-                      </p>
-                      <p class="truncate font-mono text-xs text-neutral-600">
-                        {diff.identity}
-                      </p>
-                    </div>
-                    <span
-                      class={cn(
-                        "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
-                        diff.action === "insert" &&
-                          "bg-green-100 text-green-700",
-                        diff.action === "update" &&
-                          "bg-amber-100 text-amber-700",
-                        diff.action === "delete" && "bg-red-100 text-red-700"
-                      )}
-                    >
-                      {diff.action}
-                    </span>
-                  </div>
-                  {diff.cells.length > 0 && (
-                    <div class="space-y-1">
-                      {diff.cells.map((cell) => (
-                        <div
-                          key={cell.column}
-                          class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
-                        >
-                          <span class="truncate font-medium text-neutral-700">
-                            {cell.column}
-                          </span>
-                          <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
-                            {cell.oldValue || "NULL"}
-                          </span>
-                          <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
-                            {cell.newValue || "NULL"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            <OverlayScrollArea className="max-h-60" contentClassName="p-4">
+              {allSqlStatements.length === 0 ? (
+                <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {isMongo
+                    ? "There are pending changes, but no Mongo operations were generated."
+                    : "There are pending changes, but no SQL statements were generated. Review the diff before saving."}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* SQL Statements Section */}
-        <div class="rounded-lg border border-neutral-200">
-          <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-            <h3 class="text-sm font-semibold text-neutral-900">
-              {isMongo
-                ? `Mongo Operations to Execute (${allSqlStatements.length})`
-                : `SQL Statements to Execute (${allSqlStatements.length})`}
-            </h3>
-          </div>
-          <div class="max-h-60 overflow-y-auto p-4">
-            {allSqlStatements.length === 0 ? (
-              <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {isMongo
-                  ? "There are pending changes, but no Mongo operations were generated."
-                  : "There are pending changes, but no SQL statements were generated. Review the diff before saving."}
-              </div>
-            ) : (
-              <div class="space-y-3">
-                {displaySqlStatements.map((sql, index) => {
-                  const sqlType = getSqlType(sql);
-                  const borderColor = SQL_BORDER_COLORS[sqlType];
-                  const copied = copiedIndex === index;
-                  return (
-                    <div
-                      key={index}
-                      class={`group relative rounded border p-3 ${borderColor}`}
-                    >
-                      <div class="absolute top-2 right-2 z-10">
-                        <Button
-                          variant="ghost"
-                          class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
-                            copied
-                              ? "opacity-100"
-                              : "opacity-0 group-hover:opacity-100"
-                          } transition-opacity`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void onCopyStatement(sql, index);
-                          }}
-                          title={copied ? "Copied!" : "Copy statement"}
-                        >
-                          {copied ? (
-                            <CopyCheckIcon className="size-3.5 text-green-700" />
-                          ) : (
-                            <CopyIcon className="size-3.5" />
-                          )}
-                        </Button>
+              ) : (
+                <div class="space-y-3">
+                  {displaySqlStatements.map((sql, index) => {
+                    const sqlType = getSqlType(sql);
+                    const borderColor = SQL_BORDER_COLORS[sqlType];
+                    const copied = copiedIndex === index;
+                    return (
+                      <div
+                        key={index}
+                        class={`group relative rounded border p-3 ${borderColor}`}
+                      >
+                        <div class="absolute top-2 right-2 z-10">
+                          <Button
+                            variant="ghost"
+                            class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
+                              copied
+                                ? "opacity-100"
+                                : "opacity-0 group-hover:opacity-100"
+                            } transition-opacity`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void onCopyStatement(sql, index);
+                            }}
+                            title={copied ? "Copied!" : "Copy statement"}
+                          >
+                            {copied ? (
+                              <CopyCheckIcon className="size-3.5 text-green-700" />
+                            ) : (
+                              <CopyIcon className="size-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                        <div class="line-clamp-3 pr-8 font-mono text-xs wrap-break-word">
+                          {highlightSql(sql)}
+                        </div>
                       </div>
-                      <div class="line-clamp-3 pr-8 font-mono text-xs wrap-break-word">
-                        {highlightSql(sql)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </OverlayScrollArea>
           </div>
-        </div>
+        </OverlayScrollArea>
       </DialogContent>
 
       <DialogFooter className="shrink-0">

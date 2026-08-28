@@ -4,11 +4,12 @@ import { ConnectionFormDialog } from "../connection/ConnectionFormDialog.tsx";
 import { OverlayModal } from "./OverlayModal.tsx";
 import { Button } from "../common/Button.tsx";
 import { DbIcon } from "../icons/DbIcon.tsx";
-import { SearchIcon, XIcon } from "../icons/index.tsx";
+import { SearchIcon } from "../icons/index.tsx";
 
 import type { DatabaseEngine, DatabaseType } from "src/types.ts";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { SUPPORTED_DATABASES } from "src/constant.ts";
+import { OverlayScrollArea } from "../common/OverlayScrollArea.tsx";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
@@ -241,7 +242,7 @@ export function ConnectionModal(props: {
   return (
     <OverlayModal open onClose={onClose}>
       <div
-        class="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        class="flex h-[85vh] max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
@@ -267,7 +268,7 @@ export function ConnectionModal(props: {
         tabIndex={0}
       >
         {/* Header */}
-        <div class="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+        <div class="flex items-center justify-between border-b border-slate-200 p-4">
           <div>
             <div class="text-lg font-semibold text-slate-900">
               New Connection
@@ -276,18 +277,10 @@ export function ConnectionModal(props: {
               Choose a database engine to continue
             </div>
           </div>
-
-          <Button
-            variant="ghost"
-            className="rounded-full border-none p-2 hover:bg-neutral-100"
-            onClick={onClose}
-          >
-            <XIcon className="size-4 text-slate-600" />
-          </Button>
         </div>
 
         {/* Search */}
-        <div class="shrink-0 border-b border-slate-200 bg-slate-50 px-6 py-3">
+        <div class="shrink-0 border-b border-slate-200 bg-slate-50 p-4">
           <div class="relative">
             <input
               ref={searchRef}
@@ -312,7 +305,11 @@ export function ConnectionModal(props: {
         </div>
 
         {/* List */}
-        <div class="min-h-0 flex-1 overflow-y-auto bg-white p-4">
+        <OverlayScrollArea
+          className="min-h-0 flex-1 basis-0 bg-white"
+          contentClassName="p-4"
+          dataScrollRoot
+        >
           {filtered.length === 0 ? (
             <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center">
               <div class="text-sm font-semibold text-slate-800">No results</div>
@@ -332,7 +329,7 @@ export function ConnectionModal(props: {
               ))}
             </div>
           )}
-        </div>
+        </OverlayScrollArea>
 
         {/* Footer (optional minimal) */}
         <div class="flex shrink-0 items-center justify-end border-t border-slate-200 bg-white px-6 py-3">

@@ -36,7 +36,7 @@ export function SqlEditorToolbar(props: Props) {
   const canCancel = isExecuting && !!onCancel;
 
   return (
-    <div class="flex h-9 items-center border-y border-neutral-200 bg-neutral-50 px-3">
+    <div class="flex h-10 items-center border-y border-neutral-200 bg-neutral-50 px-3">
       {/* Left actions */}
       <div class="flex items-center gap-1">
         <Button
@@ -89,7 +89,7 @@ export function SqlEditorToolbar(props: Props) {
                 ? "Run Selected (⌘⏎)"
                 : "Run Current (⌘⏎)"
           }
-          class={cn("py-1 disabled:opacity-60")}
+          class={cn("py-1.5 disabled:opacity-60")}
         >
           {canCancel ? (
             <XIcon className="size-4" />

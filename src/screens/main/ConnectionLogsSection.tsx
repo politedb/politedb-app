@@ -1,6 +1,7 @@
 import { useMemo } from "preact/hooks";
 import { DbIcon } from "src/components/icons/DbIcon";
 import { ClockIcon } from "src/components/icons";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
 import { useConnectionLogStore } from "src/stores/connectionLog";
 import {
@@ -61,14 +62,14 @@ export function ConnectionLogsSection({
               </p>
             </div>
           ) : (
-            <div class="overflow-x-auto">
-              <table class="w-full min-w-[800px] border-collapse text-left text-sm">
+            <OverlayScrollArea horizontal vertical={false}>
+              <table class="w-full min-w-200 border-collapse text-left text-sm">
                 <thead>
                   <tr class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-                    <th class="px-3 py-2">Date</th>
-                    <th class="px-3 py-2">Status</th>
-                    <th class="px-3 py-2">Device</th>
-                    <th class="px-3 py-2">Host</th>
+                    <th class="p-3">Date</th>
+                    <th class="p-3">Status</th>
+                    <th class="p-3">Device</th>
+                    <th class="p-3">Host</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,7 +153,7 @@ export function ConnectionLogsSection({
                   <span class="text-xs text-slate-500">Loading more…</span>
                 </div>
               ) : null}
-            </div>
+            </OverlayScrollArea>
           )}
         </div>
       </div>

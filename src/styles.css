@@ -150,18 +150,6 @@ table {
   background-color: rgba(0, 0, 0, 0.3);
 }
 
-/* Keep the main canvas full-width while its scrollbar floats above the content. */
-.overlay-scrollbar-y {
-  overflow-y: auto;
-  scrollbar-gutter: auto;
-}
-
-@supports (overflow-y: overlay) {
-  .overlay-scrollbar-y {
-    overflow-y: overlay;
-  }
-}
-
 .ai-result-scrollbar {
   scrollbar-gutter: stable;
   scrollbar-color: rgba(82, 82, 91, 0.7) rgba(228, 228, 231, 0.8);
@@ -361,7 +349,6 @@ table {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .diagram-rel-flow,
   .diagram-rel-flow-particle {
     animation: none;

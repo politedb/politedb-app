@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 import { KeyIcon, MinusIcon, PlusIcon } from "src/components/icons";
 
 type DiagramColumn = {
@@ -547,8 +548,8 @@ export function DiagramCanvas(props: { state: DiagramState }) {
   const contentMinW = `max(100%, ${scaledW}px)`;
 
   return (
-    <div class="flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div class="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-2 py-[5px]">
+    <div class="relative flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div class="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-2 py-1.25">
         <h2 class="text-sm font-bold text-slate-600">Diagram</h2>
         <div class="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white shadow-sm">
           <button
@@ -585,7 +586,7 @@ export function DiagramCanvas(props: { state: DiagramState }) {
           </button>
         </div>
       </div>
-      <div ref={scrollRef} class="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollRef} class="no-scrollbar min-h-0 flex-1 overflow-auto">
         <div
           class="inline-block min-w-full align-top"
           style={{
@@ -897,6 +898,7 @@ export function DiagramCanvas(props: { state: DiagramState }) {
           </div>
         </div>
       </div>
+      <OverlayScrollbars scrollerRef={scrollRef} horizontal vertical />
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   TableIcon,
 } from "src/components/icons";
 import { Spinner } from "src/components/common/Spinner";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import type {
   DatabaseObjectItem,
@@ -487,7 +488,10 @@ export function DatabaseObjectsManagerPane(props: {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
+        <OverlayScrollArea
+          className="min-h-0 flex-1"
+          contentClassName="space-y-1 p-3"
+        >
           {!kindCapability.canList ? (
             <div class="rounded-md border border-dashed border-neutral-300 bg-white px-3 py-4 text-sm text-neutral-500">
               {unsupportedText}
@@ -511,7 +515,7 @@ export function DatabaseObjectsManagerPane(props: {
               />
             ))
           )}
-        </div>
+        </OverlayScrollArea>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col bg-white">
@@ -681,9 +685,14 @@ export function DatabaseObjectsManagerPane(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogContent className="pt-0">
-          <pre class="max-h-90 overflow-auto rounded-md border border-neutral-200 bg-neutral-50 p-3 font-mono text-xs whitespace-pre-wrap text-neutral-900">
+          <OverlayScrollArea
+            className="max-h-90 rounded-md border border-neutral-200 bg-neutral-50"
+            contentClassName="p-3 font-mono text-xs whitespace-pre-wrap text-neutral-900"
+            horizontal
+            vertical
+          >
             {(confirmIntent?.statements ?? []).join("\n\n")}
-          </pre>
+          </OverlayScrollArea>
         </DialogContent>
         <DialogFooter>
           <Button

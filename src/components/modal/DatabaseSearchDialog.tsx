@@ -5,6 +5,7 @@ import { SearchIcon, TableIcon, SchemaIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 import type { TableItem } from "src/types";
+import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   open: boolean;
@@ -117,7 +118,7 @@ export function DatabaseSearchDialog({
 
   return (
     <Dialog open={open} size="md" showCloseButton={false} onClose={onClose}>
-      <DialogContent className="flex h-[60vh] max-h-[500px] flex-col overflow-hidden p-0">
+      <DialogContent className="relative flex h-[60vh] max-h-[500px] flex-col overflow-hidden p-0">
         <div class="shrink-0 border-b border-neutral-200 p-2">
           <Input
             ref={inputRef}
@@ -130,7 +131,10 @@ export function DatabaseSearchDialog({
             autoFocus={true}
           />
         </div>
-        <div class="flex-1 overflow-auto p-2" ref={listRef}>
+        <div
+          class="no-scrollbar min-h-0 flex-1 overflow-auto p-2"
+          ref={listRef}
+        >
           {filteredResults.length === 0 ? (
             <div class="p-4 text-center text-sm text-neutral-500">
               No results found.
@@ -192,6 +196,7 @@ export function DatabaseSearchDialog({
             </div>
           )}
         </div>
+        <OverlayScrollbars scrollerRef={listRef} />
       </DialogContent>
     </Dialog>
   );

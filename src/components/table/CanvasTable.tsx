@@ -25,6 +25,7 @@ import { openDialog } from "src/lib/system-dialog";
 import { readFile } from "src/lib/system-fs";
 import { formatTableCellValue } from "./tableCellValue";
 import { tableCellBackground } from "./tableCellBackground";
+import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -1726,7 +1727,7 @@ export function CanvasTable({
     >
       <div
         ref={scrollerRef}
-        class="relative h-full min-h-0 w-full overflow-auto overscroll-none border-t border-neutral-200"
+        class="no-scrollbar relative h-full min-h-0 w-full overflow-auto overscroll-none border-t border-neutral-200"
         style={{ overscrollBehavior: "none" }}
         onMouseDown={handleMouseDown}
         onContextMenu={handleContextMenu}
@@ -1817,6 +1818,8 @@ export function CanvasTable({
           }}
         />
       </div>
+
+      <OverlayScrollbars scrollerRef={scrollerRef} horizontal vertical />
 
       {/* Viewport overlay must not contribute to scrollWidth/scrollHeight. */}
       <canvas

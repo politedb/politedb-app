@@ -1,6 +1,7 @@
 import { Box } from "src/components/common/Box";
 import { DatabaseIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 type ErrorStateProps = {
   title?: string;
@@ -40,15 +41,14 @@ export function ErrorState({
                 Details
               </div>
 
-              <pre
-                class={cn(
-                  "mt-2 max-h-44 overflow-auto wrap-break-word whitespace-pre-wrap",
-                  "rounded-lg border border-neutral-200 bg-neutral-50 p-3",
-                  "font-mono text-[12px] leading-5 text-neutral-900"
-                )}
+              <OverlayScrollArea
+                className="mt-2 max-h-44 rounded-lg border border-neutral-200 bg-neutral-50"
+                contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-[12px] leading-5 text-neutral-900"
+                horizontal
+                vertical
               >
                 {message}
-              </pre>
+              </OverlayScrollArea>
 
               {hint ? (
                 <div class="mt-3 text-xs leading-5 text-neutral-500">

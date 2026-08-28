@@ -8,6 +8,7 @@ import {
   type DialogSize,
 } from "../common/Dialog";
 import { cn } from "src/utils/cn";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   open: boolean;
@@ -76,15 +77,14 @@ export function ErrorDialog({
           {isExecution ? (
             <>
               <div class="text-sm font-semibold text-neutral-500">Details</div>
-              <pre
-                class={cn(
-                  "max-h-64 overflow-auto wrap-break-word whitespace-pre-wrap",
-                  "rounded-lg border border-neutral-200 bg-neutral-50 p-3",
-                  "font-mono text-sm leading-5 text-neutral-900"
-                )}
+              <OverlayScrollArea
+                className="max-h-64 rounded-lg border border-neutral-200 bg-neutral-50"
+                contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-neutral-900"
+                horizontal
+                vertical
               >
                 {detail}
-              </pre>
+              </OverlayScrollArea>
             </>
           ) : (
             <p class="max-h-48 overflow-hidden text-ellipsis text-red-600">

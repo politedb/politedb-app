@@ -16,6 +16,7 @@ import { runSqlQuery } from "src/lib/tauri/query";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import type { DatabaseEngine, ForeignKeyInfo } from "src/types";
 import { cellToString } from "src/utils/convert";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 type DiagramGeneratorDialogProps = {
   open: boolean;
@@ -904,9 +905,14 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
                       >
                         {copied ? "Copied" : "Copy"}
                       </button>
-                      <pre class="min-h-0 flex-1 overflow-auto overscroll-contain rounded-lg bg-slate-800 p-4 text-xs leading-6 text-slate-100">
+                      <OverlayScrollArea
+                        className="min-h-0 flex-1 rounded-lg bg-slate-800"
+                        contentClassName="p-4 text-xs leading-6 whitespace-pre text-slate-100"
+                        horizontal
+                        vertical
+                      >
                         {diagram.mermaid}
-                      </pre>
+                      </OverlayScrollArea>
                     </div>
                   </div>
                 </div>

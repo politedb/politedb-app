@@ -161,11 +161,7 @@ export function NavigationTabs({
     : [];
 
   return (
-    <div
-      class={cn(
-        "flex shrink-0 items-end overflow-x-auto overflow-y-hidden pt-1"
-      )}
-    >
+    <div class={cn("flex shrink-0 items-end overflow-hidden pt-1")}>
       <div class="flex w-full items-stretch bg-neutral-100">
         {/* Left */}
         <div class="flex shrink-0 items-center px-1">

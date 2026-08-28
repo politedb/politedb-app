@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { MenuPopover, MenuItem } from "./MenuPopover";
 import { ChevronSortIcon } from "src/components/icons";
+import { OverlayScrollArea } from "./OverlayScrollArea";
 
 export type InputOption = string | { label: string; value: string };
 
@@ -154,7 +155,7 @@ export function Input(
           align="left"
           width={containerRef.current?.offsetWidth || 200}
         >
-          <div class="max-h-60 overflow-y-auto py-1">
+          <OverlayScrollArea className="max-h-60" contentClassName="py-1">
             {normalizedOptions.map((opt, index) => (
               <MenuItem
                 key={`${opt.value}-${index}`}
@@ -163,7 +164,7 @@ export function Input(
                 {opt.label}
               </MenuItem>
             ))}
-          </div>
+          </OverlayScrollArea>
         </MenuPopover>
       )}
     </div>

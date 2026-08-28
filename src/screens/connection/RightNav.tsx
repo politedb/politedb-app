@@ -9,6 +9,7 @@ import { ChevronDownIcon, SearchIcon } from "src/components/icons";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { Button } from "src/components/common/Button";
 import { isBlobColumnType } from "src/utils/sqlDialect";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   sizeInfo: TableSizeInfo | null;
@@ -381,17 +382,23 @@ function DataInfoPane({
 
   if (!hasRow) {
     return (
-      <div class="flex h-full flex-col gap-2 overflow-y-auto bg-neutral-100 px-3 py-2">
+      <OverlayScrollArea
+        className="h-full bg-neutral-100"
+        contentClassName="flex flex-col gap-2 px-3 py-2"
+      >
         <DataInfoSearch value={search} onValueChange={setSearch} />
         {sizeInfo ? (
           <TableSizeSection sizeInfo={sizeInfo} search={search} />
         ) : null}
-      </div>
+      </OverlayScrollArea>
     );
   }
 
   return (
-    <div class="flex h-full flex-col gap-2 overflow-y-auto bg-neutral-100 px-3 py-2">
+    <OverlayScrollArea
+      className="h-full bg-neutral-100"
+      contentClassName="flex flex-col gap-2 px-3 py-2"
+    >
       <DataInfoSearch value={search} onValueChange={setSearch} />
       <EditableRowFieldList
         rowIndex={selectedRowDetail.rowIndex}
@@ -399,7 +406,7 @@ function DataInfoPane({
         readOnly={dataReadOnly}
         tableLoadKey={tableLoadKey}
       />
-    </div>
+    </OverlayScrollArea>
   );
 }
 

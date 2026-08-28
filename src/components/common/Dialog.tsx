@@ -1,7 +1,8 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { XIcon } from "../icons";
 import { cn } from "src/utils/cn";
+import { OverlayScrollbars } from "./OverlayScrollArea";
 
 export type DialogSize = "xs" | "sm" | "md" | "lg" | "xl" | "full";
 
@@ -53,6 +54,8 @@ export function Dialog({
   closeOnOutsideClick = true,
   closeOnEsc = true,
 }: DialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
   // Handle ESC key
   useEffect(() => {
     if (!open || !closeOnEsc || !onClose) return;
@@ -88,33 +91,38 @@ export function Dialog({
       }}
     >
       <div
-        class={cn(
-          "relative mx-auto max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-neutral-200 bg-white shadow-xl",
-          sizeClasses[size],
-          className
-        )}
-        role="dialog"
-        aria-modal="true"
+        class={cn("relative mx-auto max-h-[90vh] w-full", sizeClasses[size])}
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
         }}
       >
-        {showCloseButton && onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            class={cn(
-              "absolute top-4 right-4 z-10 rounded-full p-1 text-neutral-400 transition-colors",
-              "hover:bg-neutral-100 hover:text-neutral-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
-            )}
-            aria-label="Close dialog"
-          >
-            <XIcon className="size-4" />
-          </button>
-        )}
-        {children}
+        <div
+          ref={panelRef}
+          class={cn(
+            "no-scrollbar relative max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-neutral-200 bg-white shadow-xl",
+            className
+          )}
+          role="dialog"
+          aria-modal="true"
+        >
+          {showCloseButton && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              class={cn(
+                "absolute top-4 right-4 z-10 rounded-full p-1 text-neutral-400 transition-colors",
+                "hover:bg-neutral-100 hover:text-neutral-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
+              )}
+              aria-label="Close dialog"
+            >
+              <XIcon className="size-4" />
+            </button>
+          )}
+          {children}
+        </div>
+        <OverlayScrollbars scrollerRef={panelRef} />
       </div>
     </div>
   );

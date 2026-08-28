@@ -2,6 +2,7 @@ import type { ComponentChildren } from "preact";
 import { useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   RefreshCwIcon,
   SearchIcon,
@@ -117,7 +118,7 @@ function CatalogTable<T>(props: {
   onOpen: (row: T) => void;
 }) {
   return (
-    <div class="min-h-0 flex-1 overflow-auto bg-white">
+    <OverlayScrollArea className="min-h-0 flex-1 bg-white" horizontal vertical>
       <table class="w-full min-w-max border-separate border-spacing-0 text-sm">
         <thead class="sticky top-0 z-10 bg-neutral-50">
           <tr>
@@ -177,7 +178,7 @@ function CatalogTable<T>(props: {
           )}
         </tbody>
       </table>
-    </div>
+    </OverlayScrollArea>
   );
 }
 

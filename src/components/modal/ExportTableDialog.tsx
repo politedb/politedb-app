@@ -19,6 +19,7 @@ import {
 import { ErrorDialog } from "./ErrorDialog";
 import { Checkbox } from "src/components/common/Checkbox";
 import type { DatabaseEngine, TableConstraint } from "src/types";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   open: boolean;
@@ -200,7 +201,10 @@ export function ExportTableDialog({
                     placeholder="Search columns..."
                     className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
                   />
-                  <div class="max-h-40 space-y-1 overflow-y-auto rounded-md border border-neutral-300 bg-white p-2">
+                  <OverlayScrollArea
+                    className="max-h-40 rounded-md border border-neutral-300 bg-white"
+                    contentClassName="space-y-1 p-2"
+                  >
                     {filteredColumnNames.length > 0 ? (
                       filteredColumnNames.map((name) => (
                         <Checkbox
@@ -216,7 +220,7 @@ export function ExportTableDialog({
                         No columns found. Try a different search.
                       </div>
                     )}
-                  </div>
+                  </OverlayScrollArea>
                   <p class="mt-1 text-xs text-neutral-500">
                     {selectedColumns.length === columnNames.length
                       ? "All fields selected"

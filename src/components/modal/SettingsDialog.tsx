@@ -12,6 +12,7 @@ import { DiagnosticsSettings } from "src/components/settings/DiagnosticsSettings
 import { GeneralSettings } from "src/components/settings/GeneralSettings";
 import { KeyboardSettings } from "src/components/settings/KeyboardSettings";
 import { LicenseKeySettings } from "src/components/settings/LicenseKey";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   DEFAULT_SETTINGS,
   loadAppSettings,
@@ -111,8 +112,11 @@ export function SettingsDialog(props: Props) {
         <DialogTitle className="text-lg font-semibold">Settings</DialogTitle>
       </DialogHeader>
       <DialogContent className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-0 p-0">
-        <aside class="min-h-0 overflow-y-auto border-r border-slate-200 bg-slate-50 p-3">
-          <div class="space-y-1">
+        <aside class="min-h-0 overflow-hidden border-r border-slate-200 bg-slate-50">
+          <OverlayScrollArea
+            className="h-full"
+            contentClassName="space-y-1 p-3"
+          >
             {SECTIONS.map((section) => {
               const selected = activeSection === section.id;
               return (
@@ -139,16 +143,18 @@ export function SettingsDialog(props: Props) {
                 </button>
               );
             })}
-          </div>
+          </OverlayScrollArea>
         </aside>
-        <main class="min-h-0 overflow-y-auto bg-white px-5 py-3">
-          <div class="mb-4">
-            <h2 class="text-base font-semibold text-slate-950">
-              {activeMeta?.label}
-            </h2>
-            <p class="mt-0.5 text-sm text-slate-500">{activeMeta?.caption}</p>
-          </div>
-          <div class="space-y-3">{renderSection()}</div>
+        <main class="min-h-0 overflow-hidden bg-white">
+          <OverlayScrollArea className="h-full" contentClassName="px-5 py-3">
+            <div class="mb-4">
+              <h2 class="text-base font-semibold text-slate-950">
+                {activeMeta?.label}
+              </h2>
+              <p class="mt-0.5 text-sm text-slate-500">{activeMeta?.caption}</p>
+            </div>
+            <div class="space-y-3">{renderSection()}</div>
+          </OverlayScrollArea>
         </main>
       </DialogContent>
     </Dialog>

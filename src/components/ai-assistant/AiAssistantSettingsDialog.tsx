@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   DownloadIcon,
   PlayIcon,
@@ -262,8 +263,11 @@ export function AiAssistantSettingsDialog(props: Props) {
         <DialogTitle>AI Provider Settings</DialogTitle>
       </DialogHeader>
       <DialogContent className="grid min-h-140 min-w-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden p-0">
-        <aside class="overflow-y-auto border-r border-neutral-200 bg-neutral-50 p-3">
-          <div class="space-y-1">
+        <aside class="min-h-0 overflow-hidden border-r border-neutral-200 bg-neutral-50">
+          <OverlayScrollArea
+            className="h-full"
+            contentClassName="space-y-1 p-3"
+          >
             {PROVIDER_KINDS.map((kind) => {
               const configured = normalizedProviders.filter(
                 (provider) => provider.kind === kind
@@ -315,11 +319,14 @@ export function AiAssistantSettingsDialog(props: Props) {
                 </div>
               );
             })}
-          </div>
+          </OverlayScrollArea>
         </aside>
 
-        <main class="min-w-0 overflow-y-auto p-5">
-          <div class="space-y-4">
+        <main class="min-h-0 min-w-0 overflow-hidden">
+          <OverlayScrollArea
+            className="h-full"
+            contentClassName="space-y-4 p-5"
+          >
             <Input
               label="Name"
               value={draft.label}
@@ -558,7 +565,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                 </Button>
               </div>
             </div>
-          </div>
+          </OverlayScrollArea>
         </main>
       </DialogContent>
     </Dialog>

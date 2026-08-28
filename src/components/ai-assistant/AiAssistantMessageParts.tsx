@@ -9,6 +9,10 @@ import {
 import type { ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 import { cn } from "src/utils/cn";
+import {
+  OverlayScrollArea,
+  OverlayScrollbars,
+} from "src/components/common/OverlayScrollArea";
 
 export type SqlRunState = "idle" | "running" | "done" | "inserted" | "error";
 
@@ -90,9 +94,14 @@ function SqlCodeBlock(props: {
           <CopyIcon className="size-3.5" />
         )}
       </button>
-      <pre class="max-h-56 max-w-full overflow-y-auto rounded-lg bg-neutral-800 p-3 pr-10 text-xs wrap-anywhere whitespace-pre-wrap text-neutral-100">
+      <OverlayScrollArea
+        className="max-h-56 max-w-full rounded-lg bg-neutral-800"
+        contentClassName="p-3 pr-10 text-xs wrap-anywhere whitespace-pre-wrap text-neutral-100"
+        horizontal
+        vertical
+      >
         <code class="wrap-anywhere whitespace-pre-wrap">{sql}</code>
-      </pre>
+      </OverlayScrollArea>
     </div>
   );
 }
@@ -334,7 +343,7 @@ function ResultPreviewBlock(props: {
       </div>
 
       {previewColumns.length && compact ? (
-        <div class="max-h-72 w-full min-w-0 overflow-y-auto rounded-lg border border-neutral-200 bg-white">
+        <OverlayScrollArea className="max-h-72 w-full min-w-0 rounded-lg border border-neutral-200 bg-white">
           {message.resultPreview.map((row, rowIndex) => (
             <div
               key={`${message.id}-compact-row-${rowIndex}`}
@@ -366,12 +375,12 @@ function ResultPreviewBlock(props: {
               </dl>
             </div>
           ))}
-        </div>
+        </OverlayScrollArea>
       ) : previewColumns.length ? (
-        <div class="w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="relative w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-neutral-200">
           <div
             ref={tableScrollRef}
-            class="ai-result-scrollbar max-h-56 w-full overflow-auto"
+            class="no-scrollbar max-h-56 w-full overflow-auto"
           >
             <table class="w-max min-w-full divide-y divide-neutral-200 text-xs">
               <thead class="sticky top-0 bg-neutral-50">
@@ -409,6 +418,7 @@ function ResultPreviewBlock(props: {
               </tbody>
             </table>
           </div>
+          <OverlayScrollbars scrollerRef={tableScrollRef} horizontal vertical />
         </div>
       ) : null}
 
@@ -416,9 +426,14 @@ function ResultPreviewBlock(props: {
         <summary class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">
           View raw JSON
         </summary>
-        <pre class="mt-2 max-h-56 overflow-auto rounded-lg bg-neutral-100 p-3 text-xs text-neutral-800">
+        <OverlayScrollArea
+          className="mt-2 max-h-56 rounded-lg bg-neutral-100"
+          contentClassName="p-3 text-xs text-neutral-800"
+          horizontal
+          vertical
+        >
           <code>{prettyJson(message.resultPreview)}</code>
-        </pre>
+        </OverlayScrollArea>
       </details>
     </div>
   );

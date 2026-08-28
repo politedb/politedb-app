@@ -1,6 +1,6 @@
 import { DatabaseIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
-import { cn } from "src/utils/cn";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 export function ConnectionFailedPlaceholder(props: {
   message: string;
@@ -17,16 +17,14 @@ export function ConnectionFailedPlaceholder(props: {
 
         <div class="text-lg font-semibold text-red-700">Connection failed</div>
 
-        <pre
-          class={cn(
-            "mt-4 max-h-52 overflow-auto text-left",
-            "wrap-break-word whitespace-pre-wrap",
-            "rounded-xl border border-red-200 bg-red-50/90 p-4",
-            "font-mono text-[12px] leading-relaxed text-red-900"
-          )}
+        <OverlayScrollArea
+          className="mt-4 max-h-52 rounded-xl border border-red-200 bg-red-50/90 text-left"
+          contentClassName="wrap-break-word whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-red-900"
+          horizontal
+          vertical
         >
           {message.trim()}
-        </pre>
+        </OverlayScrollArea>
 
         <p class="mt-4 text-sm leading-relaxed text-neutral-600">
           See the status bar above for the same message, or edit your connection

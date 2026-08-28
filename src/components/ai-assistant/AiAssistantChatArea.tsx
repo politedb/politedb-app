@@ -6,6 +6,7 @@ import {
 } from "src/components/ai-assistant/AiAssistantMessageCard";
 import { Dropdown } from "src/components/common/Dropdown";
 import { Popover } from "src/components/common/Popover";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   ArrowRightIcon,
   ChatPlusIcon,
@@ -135,7 +136,7 @@ function AiModelPicker(props: {
             </span>
           </div>
 
-          <div class="max-h-80 overflow-y-auto">
+          <OverlayScrollArea className="max-h-80">
             {enabledProviders.length ? (
               enabledProviders.flatMap((provider) =>
                 (provider.models?.length
@@ -180,7 +181,7 @@ function AiModelPicker(props: {
                 Add a provider in Settings to choose models.
               </div>
             )}
-          </div>
+          </OverlayScrollArea>
         </div>
       }
     >

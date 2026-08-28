@@ -10,6 +10,7 @@ import type { ConnectionGroup } from "src/stores/connectionGroups";
 import { SearchIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 export function AssignConnectionGroupDialog(props: {
   open: boolean;
@@ -126,7 +127,10 @@ export function AssignConnectionGroupDialog(props: {
           </div>
 
           {focused ? (
-            <div class="absolute z-20 mt-2 max-h-64 w-full space-y-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+            <OverlayScrollArea
+              className="absolute z-20 mt-2 max-h-64 w-full rounded-xl border border-slate-200 bg-white shadow-xl"
+              contentClassName="space-y-1 p-1"
+            >
               {groups.length ? (
                 filteredGroups.length ? (
                   filteredGroups.map((group) => {
@@ -163,7 +167,7 @@ export function AssignConnectionGroupDialog(props: {
                   No groups yet. Create a group first.
                 </div>
               )}
-            </div>
+            </OverlayScrollArea>
           ) : null}
         </div>
 

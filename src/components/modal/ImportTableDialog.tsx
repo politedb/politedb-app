@@ -19,6 +19,7 @@ import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
 import { ErrorDialog } from "./ErrorDialog";
 import type { ColumnMeta } from "src/lib/tauri/types";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   open: boolean;
@@ -186,7 +187,11 @@ export function ImportTableDialog({
                 </div>
               </div>
 
-              <div class="max-h-40 overflow-auto rounded border border-neutral-200">
+              <OverlayScrollArea
+                className="max-h-40 rounded border border-neutral-200"
+                horizontal
+                vertical
+              >
                 <table class="w-full text-xs">
                   <thead class="sticky top-0 bg-neutral-50">
                     <tr>
@@ -239,9 +244,9 @@ export function ImportTableDialog({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </OverlayScrollArea>
 
-              <div class="max-h-48 overflow-auto rounded border border-neutral-200">
+              <div class="h-48 overflow-hidden rounded border border-neutral-200">
                 <Table
                   columns={tableColumns}
                   data={tableData}
@@ -255,7 +260,12 @@ export function ImportTableDialog({
                 columns
               </p>
               {validationIssues.length > 0 && (
-                <div class="max-h-28 overflow-auto rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                <OverlayScrollArea
+                  className="max-h-28 rounded border border-red-200 bg-red-50"
+                  contentClassName="p-2 text-xs text-red-700"
+                  horizontal
+                  vertical
+                >
                   <p class="mb-1 font-medium">
                     {validationIssues.length} validation issue(s)
                   </p>
@@ -264,7 +274,7 @@ export function ImportTableDialog({
                       Row {issue.row}, {issue.column}: {issue.message}
                     </p>
                   ))}
-                </div>
+                </OverlayScrollArea>
               )}
             </>
           )}

@@ -10,6 +10,7 @@ import { Input } from "src/components/common/Input";
 import { DatabaseIcon, SearchIcon } from "src/components/icons";
 import type { DatabaseEngine } from "src/types";
 import { cn } from "src/utils/cn";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { useCallback, useEffect, useState } from "preact/hooks";
 import {
   canManageDatabases,
@@ -160,7 +161,10 @@ export function DatabaseManagerDialog({
         )}
 
         <div class="min-h-80 gap-4">
-          <div class="flex flex-col gap-1.5 overflow-auto rounded-lg">
+          <OverlayScrollArea
+            className="h-80 rounded-lg"
+            contentClassName="flex flex-col gap-1.5"
+          >
             {visibleDbs.length === 0 ? (
               <div class="px-2 py-4 text-sm text-neutral-500">No databases</div>
             ) : (
@@ -191,7 +195,7 @@ export function DatabaseManagerDialog({
                 </Button>
               ))
             )}
-          </div>
+          </OverlayScrollArea>
         </div>
       </DialogContent>
       <DialogFooter className="justify-between">

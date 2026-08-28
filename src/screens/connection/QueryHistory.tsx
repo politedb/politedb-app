@@ -10,6 +10,7 @@ import { Box } from "src/components/common/Box";
 import { cn } from "src/utils/cn";
 import { useConnectionStore } from "src/stores/connection";
 import type { ComponentChildren } from "preact";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   activeProfileId: string;
@@ -132,7 +133,7 @@ export function QueryHistory({ activeProfileId }: Props) {
         )}
       </div>
 
-      <div class="flex-1 overflow-y-auto">
+      <OverlayScrollArea className="min-h-0 flex-1">
         {queries.length === 0 ? (
           <Box className="text-center">
             <ClockIcon className="mx-auto mb-2 size-8 text-neutral-300" />
@@ -187,7 +188,7 @@ export function QueryHistory({ activeProfileId }: Props) {
             })}
           </div>
         )}
-      </div>
+      </OverlayScrollArea>
 
       <div class="border-t border-neutral-200 bg-white px-3 py-2">
         <p class="text-[11px] text-neutral-500">

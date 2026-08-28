@@ -13,6 +13,7 @@ import type {
   TableSizeInfo,
 } from "src/types";
 import type { SelectedRowDetail } from "src/stores/connection";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 type ViewMode = Array<"left" | "right" | "bottom">;
 
@@ -82,9 +83,14 @@ export function ConnectionWorkspaceLayout(props: {
         />
       )}
 
-      <div class="flex-1 overflow-auto">
+      <OverlayScrollArea
+        className="min-h-0 flex-1"
+        contentClassName="h-full min-h-0"
+        horizontal
+        vertical
+      >
         <ActiveWindowContent />
-      </div>
+      </OverlayScrollArea>
     </div>
   );
 
