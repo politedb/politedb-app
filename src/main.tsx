@@ -7,12 +7,18 @@ import { initAnalytics, trackAppLifecycle } from "./lib/analytics";
 import { operationBus } from "./lib/tauri/operationBus";
 import { gcSqlDrafts } from "./lib/tauri/sql";
 import { usePersistentStore } from "src/stores/persistentStore";
+import {
+  applyStoredThemePreference,
+  installSystemThemeListener,
+} from "src/lib/theme";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 }
 
 async function boot() {
+  applyStoredThemePreference();
+  installSystemThemeListener();
   initAnalytics();
 
   document.documentElement.setAttribute("autocapitalize", "off");

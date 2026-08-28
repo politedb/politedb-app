@@ -14,7 +14,7 @@ import {
 } from "./sqlCompletion";
 import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
 import { SqlEditorToolbar } from "./SqlEditorToolbar";
-import { ensureSqlTheme } from "./registerSqlTheme";
+import { ensureSqlTheme, setSqlTheme } from "./registerSqlTheme";
 import { formatSql, minifySql } from "src/utils/sqlFormatter";
 import { saveDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
@@ -511,11 +511,15 @@ export function SqlEditorPane(props: Props) {
       if (disposed) return;
 
       ensureSqlTheme();
+      const currentTheme =
+        document.documentElement.dataset.theme === "dark"
+          ? "politedb-sql-dark"
+          : "politedb-sql";
 
       const editor: ExtendedEditor = monaco.editor.create(rootRef.current!, {
         model: m,
         language: "sql",
-        theme: "politedb-sql",
+        theme: currentTheme,
         fontSize: 12,
         fontFamily:
           "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -556,6 +560,13 @@ export function SqlEditorPane(props: Props) {
       });
 
       editorRef.current = editor;
+      const onThemeChange = (event: Event) => {
+        const detail = (event as CustomEvent<{ resolved?: "light" | "dark" }>)
+          .detail;
+        setSqlTheme(detail?.resolved === "dark" ? "dark" : "light");
+      };
+      window.addEventListener("politedb:themechange", onThemeChange);
+
       liveSqlEditors.set(win.id, {
         getValue: () => editor.getModel()?.getValue() ?? "",
         appendSql: appendSqlToEditor,
@@ -635,6 +646,7 @@ export function SqlEditorPane(props: Props) {
 
       const disposeAll = () => {
         if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+        window.removeEventListener("politedb:themechange", onThemeChange);
         selSub.dispose();
         changeSub.dispose();
         triggerSub.dispose();

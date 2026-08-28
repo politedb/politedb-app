@@ -49,11 +49,11 @@ export function TagSelect(props: Props) {
       {label && (
         <label class="text-xs font-semibold text-neutral-700">{label}</label>
       )}
-      <div ref={containerRef} class="relative w-full">
+      <div ref={containerRef} class="relative w-full min-w-0">
         {/* Selected tags display */}
         <div
           class={cn(
-            "flex h-7 flex-wrap items-center gap-1 rounded-md border border-neutral-200 bg-white px-1.25 py-0.75 text-xs",
+            "flex h-7 items-center gap-1 overflow-hidden rounded-md border border-neutral-200 bg-white px-1.25 py-0.75 text-xs",
             !disabled &&
               "focus-within:border-blue-500 focus-within:outline-2 focus-within:outline-blue-500",
             disabled && "cursor-not-allowed bg-neutral-100 text-neutral-400"
@@ -63,29 +63,34 @@ export function TagSelect(props: Props) {
             setIsOpen(!isOpen);
           }}
         >
-          {values.length > 0 ? (
-            <>
-              {values.map((key) => (
-                <span
-                  key={key}
-                  class="flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700"
-                  onClick={(e) => {
-                    if (disabled) return;
-                    e.stopPropagation();
-                    onChange(key);
-                  }}
-                >
-                  {key}
-                  <XIcon className="size-3 hover:text-blue-900" />
-                </span>
-              ))}
-            </>
-          ) : (
-            <span class="text-neutral-400">Select columns...</span>
-          )}
+          <div
+            class="h-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
+            <div class="flex min-h-full flex-wrap items-center gap-1">
+              {values.length > 0 ? (
+                values.map((key) => (
+                  <span
+                    key={key}
+                    class="flex items-center gap-1 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700"
+                    onClick={(e) => {
+                      if (disabled) return;
+                      e.stopPropagation();
+                      onChange(key);
+                    }}
+                  >
+                    {key}
+                    <XIcon className="size-3 hover:text-blue-900" />
+                  </span>
+                ))
+              ) : (
+                <span class="text-neutral-400">Select columns...</span>
+              )}
+            </div>
+          </div>
           <ChevronSortIcon
             className={cn(
-              "ml-auto size-4 text-neutral-400",
+              "size-4 shrink-0 text-neutral-400",
               isOpen && "rotate-180",
               disabled && "opacity-60"
             )}

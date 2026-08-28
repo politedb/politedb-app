@@ -83,6 +83,11 @@ describe("getCanvasRowBackground", () => {
     expect(getCanvasRowBackground(false, true, false)).toBe("#dbdbdb");
     expect(getCanvasRowBackground(false, false, true)).toBeNull();
   });
+
+  it("uses dark canvas colors when theme is dark", () => {
+    expect(getCanvasRowBackground(false, true, true, "dark")).toBe("#264f78");
+    expect(getCanvasRowBackground(true, false, false, "dark")).toBe("#14532d");
+  });
 });
 
 describe("CanvasTable cell editor", () => {

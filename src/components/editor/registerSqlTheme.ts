@@ -336,17 +336,17 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
   ],
   colors: {
     // Editor base
-    "editor.background": "#111827",
-    "editor.foreground": "#E5E7EB",
+    "editor.background": "#1c1c1c",
+    "editor.foreground": "#E8E8E8",
 
     // Cursor
     "editorCursor.foreground": "#F9FAFB",
-    "editorCursor.background": "#111827",
+    "editorCursor.background": "#1c1c1c",
 
     // Selection
-    "editor.selectionBackground": "#1E3A5F",
-    "editor.selectionHighlightBackground": "#1E3A5F80",
-    "editor.inactiveSelectionBackground": "#374151",
+    "editor.selectionBackground": "#264F78",
+    "editor.selectionHighlightBackground": "#264F7880",
+    "editor.inactiveSelectionBackground": "#2E2E2E",
 
     // Word highlight
     "editor.wordHighlightBackground": "#78350F60",
@@ -358,17 +358,17 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editor.findMatchBorder": "#FACC15",
 
     // Line
-    "editor.lineHighlightBackground": "#1F2937",
+    "editor.lineHighlightBackground": "#262626",
     "editor.lineHighlightBorder": "#00000000",
-    "editorLineNumber.foreground": "#4B5563",
-    "editorLineNumber.activeForeground": "#9CA3AF",
+    "editorLineNumber.foreground": "#737373",
+    "editorLineNumber.activeForeground": "#A3A3A3",
 
     // Indent guides
-    "editorIndentGuide.background": "#374151",
-    "editorIndentGuide.activeBackground": "#4B5563",
+    "editorIndentGuide.background": "#2E2E2E",
+    "editorIndentGuide.activeBackground": "#525252",
 
     // Bracket matching
-    "editorBracketMatch.background": "#1E3A5F",
+    "editorBracketMatch.background": "#264F78",
     "editorBracketMatch.border": "#3B82F6",
 
     // Bracket pair colorization
@@ -378,7 +378,7 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editorBracketHighlight.foreground4": "#FBBF24",
 
     // Gutter
-    "editorGutter.background": "#0F172A",
+    "editorGutter.background": "#141414",
     "editorGutter.modifiedBackground": "#3B82F6",
     "editorGutter.addedBackground": "#22C55E",
     "editorGutter.deletedBackground": "#EF4444",
@@ -390,18 +390,18 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "scrollbarSlider.activeBackground": "#FFFFFF38",
 
     // Suggest widget
-    "editorSuggestWidget.background": "#1F2937",
-    "editorSuggestWidget.border": "#374151",
-    "editorSuggestWidget.foreground": "#E5E7EB",
-    "editorSuggestWidget.selectedBackground": "#1E3A5F",
+    "editorSuggestWidget.background": "#262626",
+    "editorSuggestWidget.border": "#2E2E2E",
+    "editorSuggestWidget.foreground": "#E8E8E8",
+    "editorSuggestWidget.selectedBackground": "#264F78",
     "editorSuggestWidget.selectedForeground": "#F9FAFB",
     "editorSuggestWidget.highlightForeground": "#60A5FA",
     "editorSuggestWidget.focusHighlightForeground": "#93C5FD",
 
     // Hover widget
-    "editorHoverWidget.background": "#1F2937",
-    "editorHoverWidget.border": "#374151",
-    "editorHoverWidget.foreground": "#E5E7EB",
+    "editorHoverWidget.background": "#262626",
+    "editorHoverWidget.border": "#2E2E2E",
+    "editorHoverWidget.foreground": "#E8E8E8",
 
     // Errors and warnings
     "editorError.foreground": "#F87171",
@@ -409,10 +409,10 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editorInfo.foreground": "#60A5FA",
 
     // Whitespace
-    "editorWhitespace.foreground": "#374151",
+    "editorWhitespace.foreground": "#2E2E2E",
 
     // Overview ruler
-    "editorOverviewRuler.border": "#374151",
+    "editorOverviewRuler.border": "#2E2E2E",
     "editorOverviewRuler.findMatchForeground": "#FACC15",
     "editorOverviewRuler.errorForeground": "#F87171",
     "editorOverviewRuler.warningForeground": "#FBBF24",
@@ -482,5 +482,10 @@ export function setSqlTheme(mode: "light" | "dark" = "light") {
  * Legacy API - ensures light theme is active
  */
 export function ensureSqlTheme() {
-  setSqlTheme("light");
+  const mode =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.theme === "dark"
+      ? "dark"
+      : "light";
+  setSqlTheme(mode);
 }

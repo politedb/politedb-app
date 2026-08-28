@@ -94,21 +94,23 @@ export function KeychainCard(props: {
           "group relative flex cursor-default items-center justify-between gap-3",
           "overflow-hidden rounded-2xl border px-3.5 py-3 shadow-sm transition",
           selected
-            ? "border-blue-600 bg-blue-50"
-            : "border-slate-200 bg-white hover:bg-neutral-50"
+            ? "border-blue-600 bg-blue-50 dark:border-blue-500/80 dark:bg-blue-950/35"
+            : "border-slate-200 bg-white hover:bg-neutral-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
         )}
       >
         <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 ring-1 ring-blue-200">
-            <KeyIcon className="size-6 text-slate-700" />
+          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 ring-1 ring-blue-200 dark:bg-blue-950/40 dark:ring-blue-500/40">
+            <KeyIcon className="size-6 text-slate-700 dark:text-blue-200" />
           </div>
 
           <div class="min-w-0 flex-1">
             <div class="flex flex-col justify-start gap-1">
-              <div class="truncate text-sm font-semibold text-slate-800">
+              <div class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
                 {label}
               </div>
-              <span class="text-xs text-neutral-600">{tag}</span>
+              <span class="text-xs text-neutral-600 dark:text-slate-400">
+                {tag}
+              </span>
             </div>
           </div>
         </div>
@@ -120,7 +122,7 @@ export function KeychainCard(props: {
             aria-label="Open key menu"
             class={cn(
               "rounded-full p-2 text-slate-400 transition",
-              "hover:bg-slate-100 hover:text-slate-700",
+              "hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200",
               menu
                 ? "opacity-100"
                 : "opacity-0 group-hover:opacity-100 focus:opacity-100"

@@ -5,11 +5,12 @@ import { OverlayModal } from "./OverlayModal.tsx";
 import { Button } from "../common/Button.tsx";
 import { DbIcon } from "../icons/DbIcon.tsx";
 import { SearchIcon } from "../icons/index.tsx";
+import { OverlayScrollArea } from "../common/OverlayScrollArea.tsx";
 
 import type { DatabaseEngine, DatabaseType } from "src/types.ts";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { SUPPORTED_DATABASES } from "src/constant.ts";
-import { OverlayScrollArea } from "../common/OverlayScrollArea.tsx";
+import { cn } from "src/utils/cn.ts";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
@@ -288,7 +289,10 @@ export function ConnectionModal(props: {
               value={query}
               placeholder="Search engines…"
               onInput={(e) => setQuery(e.currentTarget.value)}
-              class="h-10 w-full rounded-xl border border-slate-300 bg-white pr-3 pl-10 text-sm font-medium text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-200/60"
+              class={cn(
+                "h-10 w-full rounded-xl border border-slate-300 bg-white pr-3 pl-10 text-sm font-medium",
+                "text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200/60"
+              )}
             />
             <SearchIcon className="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-slate-400" />
           </div>

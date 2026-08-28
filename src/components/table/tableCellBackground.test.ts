@@ -25,4 +25,19 @@ describe("tableCellBackground", () => {
       })
     ).toBe("#bedbff");
   });
+
+  it("uses dark canvas colors when theme is dark", () => {
+    expect(
+      tableCellBackground(
+        {
+          dirty: false,
+          deleted: false,
+          newRow: false,
+          selected: true,
+          focused: true,
+        },
+        "dark"
+      )
+    ).toBe("#264f78");
+  });
 });

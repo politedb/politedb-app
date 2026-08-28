@@ -453,14 +453,14 @@ export function MainScreen() {
   }
 
   return (
-    <div class="flex h-full flex-col bg-neutral-50">
+    <div class="flex h-full flex-col bg-neutral-50 dark:bg-slate-950">
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <LeftNav active={activeNav} onChange={setActiveNav} />
 
         {/* Main column */}
         <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* TopBar: pinned */}
-          <div class="shrink-0 border-b border-slate-200 bg-white">
+          <div class="shrink-0 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
             <TopBar
               mode={activeNav}
               searchQuery={searchQuery}
@@ -479,7 +479,7 @@ export function MainScreen() {
 
           {/* Content canvas (scroll only here) */}
           <OverlayScrollArea
-            className="min-h-0 flex-1 bg-neutral-100"
+            className="min-h-0 flex-1 bg-neutral-100 dark:bg-slate-950"
             dataScrollRoot
           >
             {activeNav === "logs" ? (

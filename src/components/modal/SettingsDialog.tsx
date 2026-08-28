@@ -11,7 +11,7 @@ import { ConnectionsSettings } from "src/components/settings/ConnectionsSettings
 import { DiagnosticsSettings } from "src/components/settings/DiagnosticsSettings";
 import { GeneralSettings } from "src/components/settings/GeneralSettings";
 import { KeyboardSettings } from "src/components/settings/KeyboardSettings";
-import { LicenseKeySettings } from "src/components/settings/LicenseKey";
+import { LicenseKeySettings } from "@root/src/components/settings/LicenseKeySettings";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   DEFAULT_SETTINGS,
@@ -20,6 +20,7 @@ import {
   type AppSettings,
   type SettingsDialogSection,
 } from "src/components/settings/types";
+import { applyThemePreference } from "src/lib/theme";
 
 export type { SettingsDialogSection } from "src/components/settings/types";
 
@@ -34,6 +35,7 @@ const SECTIONS: Array<{
   label: string;
   caption: string;
 }> = [
+  { id: "appearance", label: "Appearance", caption: "Theme and density" },
   {
     id: "analytics",
     label: "Privacy & Analytics",
@@ -46,7 +48,7 @@ const SECTIONS: Array<{
 export function SettingsDialog(props: Props) {
   const { open, onClose, initialSection } = props;
   const [activeSection, setActiveSection] = useState<SettingsDialogSection>(
-    initialSection ?? "analytics"
+    initialSection ?? "appearance"
   );
   const [settings, setSettings] = useState<AppSettings>(() =>
     loadAppSettings()
@@ -58,7 +60,7 @@ export function SettingsDialog(props: Props) {
 
   useEffect(() => {
     if (open) {
-      setActiveSection(initialSection ?? "analytics");
+      setActiveSection(initialSection ?? "appearance");
     }
   }, [initialSection, open]);
 
@@ -69,6 +71,9 @@ export function SettingsDialog(props: Props) {
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
+    if (key === "theme") {
+      applyThemePreference(value as AppSettings["theme"]);
+    }
   }
 
   function renderSection() {

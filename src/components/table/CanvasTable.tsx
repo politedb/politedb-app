@@ -24,14 +24,15 @@ import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { openDialog } from "src/lib/system-dialog";
 import { readFile } from "src/lib/system-fs";
 import { formatTableCellValue } from "./tableCellValue";
-import { tableCellBackground } from "./tableCellBackground";
+import {
+  tableCellBackground,
+  getTableCanvasPalette,
+} from "./tableCellBackground";
 import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
+import { getResolvedTheme, type ResolvedTheme } from "src/lib/theme";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
-const ACTIVE_CELL_STROKE_FOCUSED = "#0000ff";
-const ACTIVE_CELL_STROKE_UNFOCUSED = "#9ca3af";
-const SELECTED_TEXT_UNFOCUSED = "#6b7280";
 const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
 const BOOLEAN_CONTROL_WIDTH = 18;
 
@@ -56,11 +57,13 @@ const ROW_CLIPBOARD_PREFIX = "POLITEDB_ROWS:";
 export function getCanvasRowBackground(
   isNewRow: boolean,
   isSelected: boolean,
-  isFocused: boolean
+  isFocused: boolean,
+  theme: ResolvedTheme = "light"
 ): string | null {
-  if (isNewRow) return "#dcfce7";
+  const palette = getTableCanvasPalette(theme);
+  if (isNewRow) return palette.newRow;
   if (!isSelected) return null;
-  return isFocused ? "#bedbff" : "#dbdbdb";
+  return isFocused ? palette.selected : palette.selectedUnfocused;
 }
 
 type Props = {
@@ -468,6 +471,18 @@ export function CanvasTable({
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => ({
     ...widthByName,
   }));
+  const [theme, setTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
+
+  useEffect(() => {
+    const onThemeChange = (event: Event) => {
+      const resolved = (event as CustomEvent<{ resolved?: ResolvedTheme }>)
+        .detail?.resolved;
+      setTheme(resolved === "dark" ? "dark" : getResolvedTheme());
+    };
+    window.addEventListener("politedb:themechange", onThemeChange);
+    return () =>
+      window.removeEventListener("politedb:themechange", onThemeChange);
+  }, []);
 
   // Sync widthByName if prop changes (optional)
   useEffect(() => {
@@ -546,9 +561,11 @@ export function CanvasTable({
     const visibleCount = Math.ceil(bodyH / ROW_HEIGHT) + 2;
     const lastRow = Math.min(totalRows, firstRow + visibleCount);
 
+    const palette = getTableCanvasPalette(theme);
+
     // 1. Clear
     ctx.clearRect(0, 0, viewport.w, bodyH);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = palette.background;
     ctx.fillRect(0, 0, viewport.w, bodyH);
 
     // 2. Zebra
@@ -557,7 +574,7 @@ export function CanvasTable({
       for (let y = startY; y < bodyH; y += ROW_HEIGHT) {
         const absoluteRowIdx = Math.floor((top + y) / ROW_HEIGHT);
         if ((absoluteRowIdx & 1) === 1) {
-          ctx.fillStyle = "#fafafa";
+          ctx.fillStyle = palette.zebra;
           ctx.fillRect(0, y, viewport.w, ROW_HEIGHT);
         }
       }
@@ -565,7 +582,7 @@ export function CanvasTable({
 
     // 3. Grid Lines
     ctx.beginPath();
-    ctx.strokeStyle = "#e5e5e5";
+    ctx.strokeStyle = palette.grid;
 
     // Horizontal
     const startY = -(top % ROW_HEIGHT || 0);
@@ -576,7 +593,7 @@ export function CanvasTable({
     }
 
     // Vertical
-    ctx.strokeStyle = "#e5e5e5";
+    ctx.strokeStyle = palette.grid;
     ctx.moveTo(0.5, 0);
     ctx.lineTo(0.5, bodyH);
 
@@ -636,13 +653,16 @@ export function CanvasTable({
         const dirty = !!isCellDirty?.(r, col.name);
         const isRowSelected =
           selectedRows?.has(r) || (selected && selected.rowIdx === r);
-        const background = tableCellBackground({
-          dirty,
-          deleted: !!deletedRows?.has(r),
-          newRow: !!isNewRow?.(r),
-          selected: !!isRowSelected,
-          focused: isFocused,
-        });
+        const background = tableCellBackground(
+          {
+            dirty,
+            deleted: !!deletedRows?.has(r),
+            newRow: !!isNewRow?.(r),
+            selected: !!isRowSelected,
+            focused: isFocused,
+          },
+          theme
+        );
 
         if (background) {
           ctx.fillStyle = background;
@@ -652,8 +672,8 @@ export function CanvasTable({
         if (isRowSelected) {
           if (selected && selected.colIdx === c && selected.rowIdx === r) {
             ctx.strokeStyle = isFocused
-              ? ACTIVE_CELL_STROKE_FOCUSED
-              : ACTIVE_CELL_STROKE_UNFOCUSED;
+              ? palette.activeStrokeFocused
+              : palette.activeStrokeUnfocused;
             ctx.strokeRect(x + 1, y + 1, w - 2, ROW_HEIGHT - 1);
           }
         }
@@ -679,10 +699,10 @@ export function CanvasTable({
 
           const textColor =
             s === "NULL"
-              ? "#9ca3af"
+              ? palette.textMuted
               : isRowSelected && !isFocused
-                ? SELECTED_TEXT_UNFOCUSED
-                : "#111827";
+                ? palette.textSelectedUnfocused
+                : palette.text;
 
           // Draw FK arrow on the right side of the cell (thin right arrow)
           if (isFkCol && !isBooleanCol && s !== "NULL") {
@@ -690,7 +710,7 @@ export function CanvasTable({
             const arrowRight = x + w - 8;
             const arrowLeft = arrowRight - 8;
 
-            ctx.strokeStyle = "#9ca3af";
+            ctx.strokeStyle = palette.textMuted;
             ctx.lineWidth = 1;
 
             // Shaft
@@ -710,7 +730,7 @@ export function CanvasTable({
           if (isBooleanCol) {
             const centerX = x + w - BOOLEAN_CONTROL_WIDTH / 2;
             const centerY = y + ROW_HEIGHT / 2;
-            ctx.fillStyle = "#9ca3af";
+            ctx.fillStyle = palette.textMuted;
 
             ctx.beginPath();
             ctx.moveTo(centerX - 3, centerY - 2);
@@ -747,6 +767,7 @@ export function CanvasTable({
     selected,
     isFocused,
     foreignKeyMap,
+    theme,
   ]);
 
   useEffect(() => {

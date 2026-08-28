@@ -155,7 +155,7 @@ export function ConnectionWorkspaceLayout(props: {
             </div>
           }
           second={
-            <div class="flex h-full flex-1 flex-col overflow-hidden bg-neutral-100">
+            <div class="flex h-full flex-1 flex-col overflow-hidden bg-neutral-100 dark:bg-slate-950">
               {viewMode.includes("right") ? (
                 <SplitPane
                   direction="horizontal"
@@ -178,7 +178,7 @@ export function ConnectionWorkspaceLayout(props: {
   }
 
   return (
-    <div class="flex h-full flex-1 overflow-hidden bg-neutral-100">
+    <div class="flex h-full flex-1 overflow-hidden bg-neutral-100 dark:bg-slate-950">
       {viewMode.includes("right") ? (
         <SplitPane
           direction="horizontal"

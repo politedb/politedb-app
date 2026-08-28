@@ -61,10 +61,11 @@ function SearchField(props: {
         }
         class={cn(
           "h-9 w-full rounded-lg border border-slate-300 bg-white py-2 pr-3 pl-9 text-sm text-slate-900 transition-colors",
-          "outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          "outline-none placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500",
+          "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-blue-500"
         )}
       />
-      <SearchIcon className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      <SearchIcon className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
     </div>
   );
 }
@@ -155,7 +156,7 @@ function SortMenu(props: {
           <Button
             variant="outline"
             onClick={() => setOpen((v) => !v)}
-            class="h-9 rounded-lg border border-slate-300 px-2"
+            class="h-9 rounded-lg border border-slate-300 px-2 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             title={title}
           >
             <SortIcon className="size-4" />
@@ -188,14 +189,14 @@ function ViewModeToggle(props: {
   const { mode, onChange } = props;
 
   return (
-    <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white">
+    <div class="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900">
       <button
         type="button"
         onClick={() => onChange("grid")}
         class={`flex h-9 w-9 items-center justify-center ${
           mode === "grid"
-            ? "bg-blue-50 text-blue-600"
-            : "text-slate-600 hover:bg-slate-50"
+            ? "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300"
+            : "text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
         }`}
         title="Grid view"
         aria-label="Grid view"
@@ -203,15 +204,15 @@ function ViewModeToggle(props: {
         <GridIcon className="size-4" />
       </button>
 
-      <div class="h-5 w-px bg-slate-200" />
+      <div class="h-5 w-px bg-slate-200 dark:bg-slate-700" />
 
       <button
         type="button"
         onClick={() => onChange("list")}
         class={`flex h-9 w-9 items-center justify-center ${
           mode === "list"
-            ? "bg-blue-50 text-blue-600"
-            : "text-slate-600 hover:bg-slate-50"
+            ? "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300"
+            : "text-slate-600 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
         }`}
         title="List view"
         aria-label="List view"
@@ -275,7 +276,7 @@ export function TopBar(props: TopBarProps) {
   );
 
   return (
-    <div class="flex h-16 w-full shrink-0 items-center gap-2 bg-white p-4">
+    <div class="flex h-16 w-full shrink-0 items-center gap-2 bg-white p-4 dark:bg-slate-950">
       <SearchField
         value={searchQuery}
         placeholder={searchPlaceholder}

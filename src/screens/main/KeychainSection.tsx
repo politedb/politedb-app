@@ -227,22 +227,22 @@ export function KeychainSection(props: {
   }, [keys, searchQuery, sortMode]);
 
   return (
-    <div class="h-full w-full bg-neutral-100">
+    <div class="h-full w-full bg-neutral-100 dark:bg-slate-950">
       <div class="mx-auto w-full max-w-400 px-6 py-5">
         {!tauriReady && (
-          <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300">
             Keychain is available only in the desktop app runtime (Tauri).
           </div>
         )}
 
         <div class="mb-3 flex items-center justify-between gap-8">
-          <h2 class="text-sm font-semibold tracking-wide text-slate-800">
+          <h2 class="text-sm font-semibold tracking-wide text-slate-800 dark:text-slate-300">
             Keychain ({filteredKeys.length})
           </h2>
 
           <div class="flex items-center gap-1">
             <LockIcon className="size-4 text-green-500" />
-            <span class="text-sm font-medium text-slate-500">
+            <span class="text-sm font-medium text-slate-500 dark:text-slate-400">
               Stored securely in macOS keychain
             </span>
           </div>

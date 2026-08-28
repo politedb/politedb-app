@@ -198,13 +198,19 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   "rounded-lg px-2.5 py-1.25 shadow-sm",
                   "border text-sm font-medium transition-colors",
                   isActive
-                    ? "border-blue-300 bg-blue-100 text-blue-600"
-                    : "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800",
+                    ? "border-blue-300 bg-blue-100 text-blue-600 dark:border-white/20 dark:bg-white/10 dark:text-zinc-100"
+                    : "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800 dark:border-white/12 dark:text-zinc-400 dark:hover:bg-white/6 dark:hover:text-zinc-100",
                 ].join(" ")}
                 aria-current={isActive ? "page" : undefined}
                 data-tauri-drag-region="false"
               >
-                <span class={isActive ? "text-blue-600" : "text-neutral-600"}>
+                <span
+                  class={
+                    isActive
+                      ? "text-blue-600 dark:text-zinc-100"
+                      : "text-neutral-600 dark:text-zinc-400"
+                  }
+                >
                   {nav.icon}
                 </span>
                 <span class="leading-none">Databases</span>
@@ -244,7 +250,7 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     "rounded-md border px-2 py-1 transition-all",
                     isActive
                       ? "border-slate-300 bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04),0_2px_8px_rgba(0,0,0,0.06)]"
-                      : "border-transparent bg-slate-100 text-slate-600 shadow-sm hover:border-slate-200 hover:bg-slate-50",
+                      : "border-transparent bg-slate-100 text-slate-600 shadow-sm hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-200/10",
                   ].join(" ")}
                 >
                   <div class="flex min-w-0 items-center gap-2">

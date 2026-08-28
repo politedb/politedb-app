@@ -879,21 +879,21 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
         <div class="min-h-0 flex-1 overflow-hidden">
           <div class="flex h-full min-h-0 flex-col overflow-hidden px-5 py-4">
             {disabled ? (
-              <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-300">
                 Diagram generation is available for database schemas with
                 tables.
               </div>
             ) : loading ? (
               <div class="flex min-h-0 flex-1 items-center justify-center">
                 <div class="text-center">
-                  <div class="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
+                  <div class="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600 dark:border-slate-700 dark:border-t-sky-400" />
                   <div class="mt-4 text-sm text-slate-500">
                     Building diagram from schema metadata...
                   </div>
                 </div>
               </div>
             ) : error ? (
-              <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              <div class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-300">
                 {error}
               </div>
             ) : diagram ? (

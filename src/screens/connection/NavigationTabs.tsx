@@ -162,7 +162,7 @@ export function NavigationTabs({
 
   return (
     <div class={cn("flex shrink-0 items-end overflow-hidden pt-1")}>
-      <div class="flex w-full items-stretch bg-neutral-100">
+      <div class="flex w-full items-stretch bg-neutral-100 dark:bg-slate-950">
         {/* Left */}
         <div class="flex shrink-0 items-center px-1">
           <Button
@@ -208,8 +208,8 @@ export function NavigationTabs({
                 class={cn(
                   "group flex shrink-0 items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
                   active
-                    ? "bg-white text-neutral-800 ring-1 ring-black/5"
-                    : "bg-neutral-200/70 text-neutral-600 hover:bg-neutral-300/80"
+                    ? "bg-white text-neutral-800 ring-1 ring-black/5 dark:bg-slate-900 dark:text-slate-100 dark:ring-white/10"
+                    : "bg-neutral-200/70 text-neutral-600 hover:bg-neutral-300/80 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                 )}
               >
                 {w.type === "table" && (
@@ -224,7 +224,7 @@ export function NavigationTabs({
                   ))}
 
                 {w.type === "sql" && (
-                  <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
+                  <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300">
                     SQL
                   </span>
                 )}

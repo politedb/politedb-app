@@ -85,6 +85,8 @@ const O_MARK_INSET = 9;
 const O_HIT_R = 10;
 const REL_FLOW_CLASS = "diagram-rel-flow";
 const REL_FLOW_PARTICLE_CLASS = "diagram-rel-flow-particle";
+const REL_IDLE_CLASS = "diagram-rel-idle";
+const REL_ACTIVE_CLASS = "diagram-rel-active";
 const ZOOM_MIN = 0.35;
 const ZOOM_MAX = 2.75;
 const ZOOM_STEP = 1.12;
@@ -523,10 +525,8 @@ const DiagramTableCard = memo(function DiagramTableCard(props: {
   return (
     <div
       data-diagram-table={item.key}
-      class={`absolute z-1 overflow-hidden rounded-xl border bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)] ${
-        highlighted
-          ? "border-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.45),0_10px_24px_rgba(15,23,42,0.08)]"
-          : "border-slate-200 hover:border-sky-500 hover:shadow-[0_0_0_2px_rgba(14,165,233,0.45),0_10px_24px_rgba(15,23,42,0.08)]"
+      class={`diagram-table-card absolute z-1 overflow-hidden rounded-xl border bg-white ${
+        highlighted ? "diagram-table-card-active" : ""
       }`}
       style={{
         left: `${item.x}px`,
@@ -543,7 +543,7 @@ const DiagramTableCard = memo(function DiagramTableCard(props: {
           {columnStart > 0 ? (
             <div style={{ height: `${columnStart * ROW_HEIGHT}px` }} />
           ) : null}
-          <div class="divide-y divide-slate-100">
+          <div class="divide-y divide-slate-200">
             {columns.slice(columnStart, columnEnd).map((column) => (
               <div
                 key={column.name}
@@ -800,7 +800,7 @@ export function DiagramCanvas(props: { state: DiagramState }) {
 
   return (
     <div class="relative flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div class="flex shrink-0 items-center justify-between border-b border-slate-100 bg-white px-2 py-1.25">
+      <div class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-2 py-1.25">
         <h2 class="text-sm font-bold text-slate-600">Diagram</h2>
         <div class="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white shadow-sm">
           <button
@@ -849,16 +849,11 @@ export function DiagramCanvas(props: { state: DiagramState }) {
             style={{ width: `${scaledW}px`, height: `${scaledH}px` }}
           >
             <div
-              class={`absolute top-0 left-0 antialiased ${USE_CSS_ZOOM ? "" : "origin-top-left"}`}
+              class={`diagram-surface absolute top-0 left-0 antialiased ${USE_CSS_ZOOM ? "" : "origin-top-left"}`}
               style={
                 {
                   width: `${layout.width}px`,
                   height: `${layout.height}px`,
-                  backgroundSize: "18px 18px",
-                  backgroundColor: "#fcfcfd",
-                  backgroundImage:
-                    "radial-gradient(#e2e8f0 1px, transparent 1px), radial-gradient(#e2e8f0 1px, transparent 1px)",
-                  backgroundPosition: "0 0, 9px 9px",
                   ...(USE_CSS_ZOOM
                     ? { zoom }
                     : {
@@ -1029,7 +1024,7 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                     <path
                       d={idleRelationPath}
                       fill="none"
-                      stroke="#94a3b8"
+                      class={REL_IDLE_CLASS}
                       stroke-width={REL_STROKE_WIDTH}
                       style={{ pointerEvents: "none" }}
                     />
@@ -1042,13 +1037,12 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                           if (relation.cardinality === "one-to-one") {
                             const o = oneToOneCircleCenters(g);
                             return (
-                              <g key={gk}>
+                              <g key={gk} class={REL_IDLE_CLASS}>
                                 <circle
                                   cx={o.startCx}
                                   cy={o.startCy}
                                   r={O_MARK_R}
                                   fill="none"
-                                  stroke="#94a3b8"
                                   stroke-width={REL_STROKE_WIDTH}
                                   style={{ pointerEvents: "none" }}
                                 />
@@ -1057,7 +1051,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                                   cy={o.endCy}
                                   r={O_MARK_R}
                                   fill="none"
-                                  stroke="#94a3b8"
                                   stroke-width={REL_STROKE_WIDTH}
                                   style={{ pointerEvents: "none" }}
                                 />
@@ -1071,13 +1064,12 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             g.enterFrom
                           );
                           return (
-                            <g key={gk}>
+                            <g key={gk} class={REL_IDLE_CLASS}>
                               <line
                                 x1={tick.x}
                                 y1={tick.y1}
                                 x2={tick.x}
                                 y2={tick.y2}
-                                stroke="#94a3b8"
                                 stroke-width={REL_STROKE_WIDTH}
                                 stroke-linecap="round"
                                 style={{ pointerEvents: "none" }}
@@ -1089,7 +1081,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                                   y1={y1}
                                   x2={x2}
                                   y2={y2}
-                                  stroke="#94a3b8"
                                   stroke-width={REL_STROKE_WIDTH}
                                   stroke-linecap="round"
                                   style={{ pointerEvents: "none" }}
@@ -1105,18 +1096,16 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                     if (relation.cardinality === "one-to-one") {
                       const o = oneToOneCircleCenters(g);
                       return (
-                        <g key={gk}>
+                        <g key={gk} class={REL_ACTIVE_CLASS}>
                           <path
                             d={g.path}
                             fill="none"
-                            stroke="#0284c7"
                             stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
                           <path
                             d={g.path}
                             fill="none"
-                            stroke="#0284c7"
                             stroke-width={2}
                             class={REL_FLOW_CLASS}
                             style={{ pointerEvents: "none" }}
@@ -1124,7 +1113,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                           <path
                             d={g.path}
                             fill="none"
-                            stroke="#0284c7"
                             class={REL_FLOW_PARTICLE_CLASS}
                             style={{ pointerEvents: "none" }}
                           />
@@ -1133,7 +1121,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             cy={o.startCy}
                             r={O_MARK_R}
                             fill="none"
-                            stroke="#0284c7"
                             stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
@@ -1142,7 +1129,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             cy={o.endCy}
                             r={O_MARK_R}
                             fill="none"
-                            stroke="#0284c7"
                             stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
@@ -1152,18 +1138,16 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                     const tick = oneToManyParentTickGeometry(g);
                     const crow = crowFootLines(g.endX, g.endY, g.enterFrom);
                     return (
-                      <g key={gk}>
+                      <g key={gk} class={REL_ACTIVE_CLASS}>
                         <path
                           d={g.path}
                           fill="none"
-                          stroke="#0284c7"
                           stroke-width={REL_STROKE_HOVER}
                           style={{ pointerEvents: "none" }}
                         />
                         <path
                           d={g.path}
                           fill="none"
-                          stroke="#0284c7"
                           stroke-width={2.1}
                           class={REL_FLOW_CLASS}
                           style={{ pointerEvents: "none" }}
@@ -1171,7 +1155,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                         <path
                           d={g.path}
                           fill="none"
-                          stroke="#0284c7"
                           class={REL_FLOW_PARTICLE_CLASS}
                           style={{ pointerEvents: "none" }}
                         />
@@ -1180,7 +1163,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                           y1={tick.y1}
                           x2={tick.x}
                           y2={tick.y2}
-                          stroke="#0284c7"
                           stroke-width={REL_STROKE_HOVER}
                           stroke-linecap="round"
                           style={{ pointerEvents: "none" }}
@@ -1192,7 +1174,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             y1={y1}
                             x2={x2}
                             y2={y2}
-                            stroke="#0284c7"
                             stroke-width={REL_STROKE_HOVER}
                             stroke-linecap="round"
                             style={{ pointerEvents: "none" }}

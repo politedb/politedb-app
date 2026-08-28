@@ -48,7 +48,7 @@ export function LeftNav(props: {
   const [openSettings, setOpenSettings] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
-    useState<SettingsDialogSection>("analytics");
+    useState<SettingsDialogSection>("appearance");
 
   const envSuffix = import.meta.env.DEV ? "-dev" : "";
 
@@ -72,12 +72,12 @@ export function LeftNav(props: {
   return (
     <>
       <aside
-        class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50"
+        class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
         style={{ width: "var(--sidebar-width)" }}
       >
         {/* Top padding / subtle header */}
         <div class="p-3">
-          <div class="text-[11px] font-semibold tracking-wide text-slate-500">
+          <div class="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
             NAVIGATION
           </div>
         </div>
@@ -99,8 +99,8 @@ export function LeftNav(props: {
                     "text-left",
                     "transition-colors",
                     isActive
-                      ? "bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-slate-200"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+                      ? "bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
                   ].join(" ")}
                   aria-current={isActive ? "page" : undefined}
                 >
@@ -109,8 +109,8 @@ export function LeftNav(props: {
                     class={[
                       "flex h-8 w-8 items-center justify-center rounded-lg",
                       isActive
-                        ? "bg-slate-100 text-slate-700"
-                        : "bg-transparent text-slate-500 group-hover:bg-slate-100/70",
+                        ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        : "bg-transparent text-slate-500 group-hover:bg-slate-100/70 dark:text-slate-500 dark:group-hover:bg-slate-800",
                       "transition-colors",
                     ].join(" ")}
                   >
@@ -122,7 +122,7 @@ export function LeftNav(props: {
                       {item.label}
                     </div>
                     {/* optional small description line (comment out if you don’t want it) */}
-                    <div class="mt-0.5 truncate text-[11px] text-slate-500">
+                    <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
                       {item.id === "connections"
                         ? "Saved profiles"
                         : item.id === "logs"
@@ -145,7 +145,7 @@ export function LeftNav(props: {
 
         {/* Bottom spacer */}
         <div class="mt-auto space-y-2.5 px-3 pb-3">
-          <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
+          <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400">
             Tips:
             <ul class="list-decimal pl-4.5">
               <li>Right-click a connection for actions.</li>
@@ -163,7 +163,7 @@ export function LeftNav(props: {
               <div className="flex w-full items-center gap-2">
                 <Button
                   variant="ghost"
-                  className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:border-slate-100 hover:bg-slate-100"
+                  className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:border-slate-100 hover:bg-slate-100 dark:text-slate-300 dark:hover:border-slate-800 dark:hover:bg-slate-900"
                   title="Settings"
                   onClick={() => setOpenSettings((v) => !v)}
                 >
@@ -213,7 +213,7 @@ export function LeftNav(props: {
                 separatorBefore: true,
                 icon: <SettingsIcon className="size-5" />,
                 label: "Preferences...",
-                onSelect: () => openSettingsSection("analytics"),
+                onSelect: () => openSettingsSection("appearance"),
                 className: "text-slate-900",
               },
               {
@@ -253,7 +253,7 @@ export function LeftNav(props: {
                 label: "Github Sponsor",
                 onSelect: handleSponsor,
                 className:
-                  "font-semibold my-1 py-1.25 bg-rose-50/80 hover:bg-rose-50! text-rose-500 border border-rose-200 bg-rose-50/80",
+                  "my-1 border border-rose-200 bg-rose-50/80 py-1.25 font-semibold text-rose-500 hover:bg-rose-50! dark:border-rose-500/40 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40!",
               },
             ]}
           />

@@ -69,6 +69,8 @@ describe("DiagramCanvas", () => {
     const mountedCards = container.querySelectorAll("[data-diagram-table]");
     expect(mountedCards.length).toBeGreaterThan(0);
     expect(mountedCards.length).toBeLessThan(tables.length / 2);
+    expect(container.querySelector(".diagram-surface")).not.toBeNull();
+    expect(container.querySelector(".diagram-rel-idle")).not.toBeNull();
   });
 
   it("windows tall table columns to the visible range", () => {

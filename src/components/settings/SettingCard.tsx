@@ -8,14 +8,14 @@ export function SettingCard(props: {
   return (
     <section
       class={cn(
-        "rounded-xl border border-slate-200 bg-white p-4 shadow-sm",
+        "rounded-xl border border-slate-200 bg-white shadow-sm",
         props.class
       )}
     >
       {props.title && (
         <h3 class="text-sm font-semibold text-slate-900">{props.title}</h3>
       )}
-      <div class={cn("space-y-1", props.title && "mt-3")}>{props.children}</div>
+      <div class={cn(props.title && "mt-3")}>{props.children}</div>
     </section>
   );
 }

@@ -71,23 +71,23 @@ export function Dropdown(props: {
         <div
           class={cn(
             widthClassName,
-            "overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-xl"
+            "overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900"
           )}
         >
           {items.map((item, idx) => (
             <div key={item.key ?? `${item.label}-${idx}`}>
               {item.separatorBefore ? (
-                <div class="my-1 h-px bg-slate-200" />
+                <div class="my-1 h-px bg-slate-200 dark:bg-slate-700" />
               ) : null}
               <button
                 type="button"
                 disabled={item.disabled}
                 class={cn(
-                  "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
-                  item.className,
+                  "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200",
                   item.disabled
                     ? "cursor-not-allowed opacity-58"
-                    : "hover:bg-slate-50",
+                    : "hover:bg-slate-50 dark:hover:bg-slate-800",
+                  item.className,
                   itemClassName
                 )}
                 onClick={() => {
@@ -97,11 +97,15 @@ export function Dropdown(props: {
                 }}
               >
                 {item.icon ? (
-                  <span class="shrink-0 text-slate-500">{item.icon}</span>
+                  <span class="shrink-0 text-slate-500 dark:text-slate-400">
+                    {item.icon}
+                  </span>
                 ) : null}
                 <span class="min-w-0 flex-1">{item.label}</span>
                 {item.rightSlot ? (
-                  <span class="shrink-0 text-slate-500">{item.rightSlot}</span>
+                  <span class="shrink-0 text-slate-500 dark:text-slate-400">
+                    {item.rightSlot}
+                  </span>
                 ) : null}
               </button>
             </div>

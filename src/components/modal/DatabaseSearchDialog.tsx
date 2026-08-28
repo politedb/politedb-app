@@ -118,8 +118,8 @@ export function DatabaseSearchDialog({
 
   return (
     <Dialog open={open} size="md" showCloseButton={false} onClose={onClose}>
-      <DialogContent className="relative flex h-[60vh] max-h-[500px] flex-col overflow-hidden p-0">
-        <div class="shrink-0 border-b border-neutral-200 p-2">
+      <DialogContent className="relative flex h-[60vh] max-h-125 flex-col gap-1 overflow-hidden p-0">
+        <div class="shrink-0 border-b border-neutral-200 p-3">
           <Input
             ref={inputRef}
             value={query}
@@ -152,7 +152,7 @@ export function DatabaseSearchDialog({
                     key={key}
                     variant="ghost"
                     className={cn(
-                      "justify-start px-2 py-2 text-left text-sm font-normal transition-none",
+                      "justify-start p-2 text-left text-sm font-normal transition-none",
                       selectedIndex === idx && "bg-neutral-100"
                     )}
                     onClick={() => {

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @tailwind utilities;
+@custom-variant dark (&:where(.dark, .dark *));
 
 @font-face {
   font-family: "Inter";
@@ -97,6 +98,311 @@ body,
 
   /* Desktop feel */
   color-scheme: light;
+}
+
+html.dark,
+html.dark body,
+html.dark #root {
+  background: #141414;
+  color: #e8e8e8;
+  color-scheme: dark;
+  --color-new: #14532d;
+  --color-dirty: #713f12;
+  --color-deleted: #7f1d1d;
+  --color-selected: #264f78;
+  --color-selected-unfocused: #2e2e2e;
+  --color-slate-950: #0d0d0d;
+  --color-slate-900: #141414;
+  --color-slate-800: #1e1e1e;
+  --color-slate-700: #2e2e2e;
+  --color-slate-600: #525252;
+  --color-slate-500: #737373;
+  --color-slate-400: #a3a3a3;
+  --color-gray-950: #0d0d0d;
+  --color-gray-900: #141414;
+  --color-gray-800: #1e1e1e;
+  --color-neutral-950: #0d0d0d;
+  --color-neutral-900: #141414;
+  --color-neutral-800: #1e1e1e;
+}
+
+html.dark .bg-white,
+html.dark .bg-white\!,
+html.dark .focus\:bg-white:focus,
+html.dark .focus\:bg-white\!:focus {
+  background-color: #1c1c1c !important;
+}
+
+html.dark .bg-white\/50,
+html.dark .bg-white\/60,
+html.dark .bg-white\/80,
+html.dark .hover\:bg-white\/60:hover {
+  background-color: rgb(20 20 20 / 0.82) !important;
+}
+
+html.dark .bg-neutral-50,
+html.dark .bg-neutral-100,
+html.dark .bg-neutral-100\/50,
+html.dark .bg-slate-50 {
+  background-color: #141414 !important;
+}
+
+html.dark .bg-neutral-300,
+html.dark .hover\:bg-neutral-300\/80:hover,
+html.dark .hover\:bg-neutral-200\/40:hover {
+  background-color: #2e2e2e !important;
+}
+
+html.dark .bg-slate-50\/80,
+html.dark .bg-neutral-50\/80,
+html.dark .hover\:bg-slate-50\/80:hover {
+  background-color: rgb(20 20 20 / 0.88) !important;
+}
+
+html.dark .hover\:bg-slate-100\/70:hover,
+html.dark .hover\:bg-slate-100\/80:hover {
+  background-color: #262626 !important;
+}
+
+html.dark .bg-blue-100,
+html.dark .hover\:bg-blue-100:hover,
+html.dark .hover\:bg-blue-100\!:hover,
+html.dark .active\:bg-blue-100:active {
+  background-color: rgb(255 255 255 / 0.08) !important;
+}
+
+html.dark .text-blue-600,
+html.dark .text-blue-800 {
+  color: #93c5fd !important;
+}
+
+html.dark .bg-rose-50\/80,
+html.dark .hover\:bg-rose-50\!:hover {
+  background-color: rgb(76 5 25 / 0.55) !important;
+}
+
+html.dark .bg-indigo-100 {
+  background-color: rgb(49 46 129 / 0.45) !important;
+}
+
+html.dark .text-indigo-600 {
+  color: #a5b4fc !important;
+}
+
+html.dark .bg-green-200,
+html.dark .hover\:bg-green-200\/80:hover,
+html.dark .active\:bg-green-200\/90:active {
+  background-color: rgb(20 83 45 / 0.55) !important;
+}
+
+html.dark .bg-amber-200,
+html.dark .hover\:bg-amber-200\/80:hover,
+html.dark .active\:bg-amber-200\/90:active {
+  background-color: rgb(113 63 18 / 0.55) !important;
+}
+
+html.dark .text-emerald-900 {
+  color: #6ee7b7 !important;
+}
+
+html.dark .bg-black\/20 {
+  background-color: rgb(255 255 255 / 0.22) !important;
+}
+
+html.dark .hover\:bg-black\/30:hover {
+  background-color: rgb(255 255 255 / 0.32) !important;
+}
+
+html.dark .bg-slate-100,
+html.dark .bg-neutral-200,
+html.dark .bg-neutral-200\/60,
+html.dark .bg-neutral-200\/70,
+html.dark .bg-neutral-200\/80,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-neutral-100:hover,
+html.dark .hover\:bg-neutral-50:hover,
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-neutral-200:hover,
+html.dark .hover\:bg-neutral-200\/60:hover,
+html.dark .hover\:bg-neutral-200\/80:hover,
+html.dark .active\:bg-neutral-100:active,
+html.dark .active\:bg-neutral-200:active,
+html.dark .active\:bg-neutral-200\/60:active,
+html.dark .active\:bg-neutral-200\/80:active,
+html.dark .active\:bg-neutral-200\/90:active {
+  background-color: #262626 !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/40,
+html.dark .bg-amber-50\/70,
+html.dark .bg-amber-100,
+html.dark .hover\:bg-amber-50:hover,
+html.dark .hover\:bg-amber-50\/70:hover {
+  background-color: rgb(69 26 3 / 0.45) !important;
+}
+
+html.dark .bg-blue-50,
+html.dark .bg-blue-50\/40,
+html.dark .bg-blue-50\/70 {
+  background-color: rgb(23 37 84 / 0.45) !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-100,
+html.dark .hover\:bg-rose-50:hover {
+  background-color: rgb(76 5 25 / 0.45) !important;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-100,
+html.dark .bg-green-50 {
+  background-color: rgb(2 44 34 / 0.45) !important;
+}
+
+html.dark .bg-sky-100 {
+  background-color: rgb(8 47 73 / 0.45) !important;
+}
+
+html.dark .hover\:bg-red-50:hover,
+html.dark .bg-red-50 {
+  background-color: rgb(127 29 29 / 0.4) !important;
+}
+
+html.dark .text-red-700,
+html.dark .text-red-600 {
+  color: #fca5a5 !important;
+}
+
+html.dark .text-slate-950,
+html.dark .text-slate-900,
+html.dark .text-neutral-900,
+html.dark .text-neutral-800 {
+  color: #e8e8e8 !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-slate-700,
+html.dark .text-neutral-700,
+html.dark .text-neutral-600 {
+  color: #c4c4c4 !important;
+}
+
+html.dark .text-slate-600,
+html.dark .text-slate-500,
+html.dark .text-neutral-500,
+html.dark .text-slate-400,
+html.dark .text-neutral-400,
+html.dark .text-neutral-300 {
+  color: #a3a3a3 !important;
+}
+
+html.dark .text-amber-900,
+html.dark .text-amber-800,
+html.dark .text-amber-700 {
+  color: #fcd34d !important;
+}
+
+html.dark .text-blue-700 {
+  color: #93c5fd !important;
+}
+
+html.dark .text-rose-800,
+html.dark .text-rose-700,
+html.dark .text-rose-500 {
+  color: #fda4af !important;
+}
+
+html.dark .text-emerald-700,
+html.dark .text-green-700 {
+  color: #6ee7b7 !important;
+}
+
+html.dark .text-sky-700 {
+  color: #7dd3fc !important;
+}
+
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .border-neutral-100,
+html.dark .border-neutral-200,
+html.dark .border-neutral-300,
+html.dark .border-neutral-400 {
+  border-color: #2e2e2e !important;
+}
+
+html.dark .border-amber-200,
+html.dark .border-amber-300 {
+  border-color: rgb(245 158 11 / 0.4) !important;
+}
+
+html.dark .border-blue-200,
+html.dark .border-blue-300 {
+  border-color: rgb(59 130 246 / 0.4) !important;
+}
+
+html.dark .border-rose-200,
+html.dark .border-rose-300 {
+  border-color: rgb(244 63 94 / 0.4) !important;
+}
+
+html.dark .border-emerald-200,
+html.dark .border-green-200 {
+  border-color: rgb(16 185 129 / 0.4) !important;
+}
+
+html.dark .border-sky-200 {
+  border-color: rgb(14 165 233 / 0.4) !important;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-neutral-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-neutral-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2e2e2e !important;
+}
+
+html.dark .table-focus-root.is-unfocused .bg-selected\! {
+  color: #a3a3a3;
+}
+
+html.dark .split-pane__divider::before {
+  --divider-color: #2e2e2e;
+}
+
+html.dark .split-pane__divider:hover::before {
+  background: #737373;
+}
+html.dark .ring-slate-200,
+html.dark .ring-neutral-200,
+html.dark .ring-blue-200 {
+  --tw-ring-color: #2e2e2e;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #1c1c1c;
+  color: #e8e8e8;
+  border-color: #2e2e2e;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #737373;
+}
+
+html.dark table tr:nth-child(even) {
+  background-color: #1c1c1c;
+}
+
+html.dark * {
+  scrollbar-color: rgba(163, 163, 163, 0.4) transparent;
+}
+
+html.dark *::-webkit-scrollbar-thumb {
+  background-color: rgba(163, 163, 163, 0.4);
 }
 
 button,
@@ -326,6 +632,66 @@ table {
   }
 }
 
+.diagram-surface {
+  background-color: #fcfcfd;
+  background-image:
+    radial-gradient(#e2e8f0 1px, transparent 1px),
+    radial-gradient(#e2e8f0 1px, transparent 1px);
+  background-size: 18px 18px;
+  background-position:
+    0 0,
+    9px 9px;
+}
+
+html.dark .diagram-surface {
+  background-color: #141414;
+  background-image:
+    radial-gradient(#2a2a2a 1px, transparent 1px),
+    radial-gradient(#2a2a2a 1px, transparent 1px);
+}
+
+.diagram-table-card {
+  border-color: #e2e8f0;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.diagram-table-card:hover,
+.diagram-table-card-active {
+  border-color: #0ea5e9;
+  box-shadow:
+    0 0 0 2px rgba(14, 165, 233, 0.45),
+    0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+html.dark .diagram-table-card {
+  border-color: #2e2e2e;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+html.dark .diagram-table-card:hover,
+html.dark .diagram-table-card-active {
+  border-color: #38bdf8;
+  box-shadow:
+    0 0 0 2px rgba(56, 189, 248, 0.5),
+    0 10px 24px rgba(0, 0, 0, 0.45);
+}
+
+.diagram-rel-idle {
+  stroke: #94a3b8;
+}
+
+html.dark .diagram-rel-idle {
+  stroke: #64748b;
+}
+
+.diagram-rel-active {
+  stroke: #0284c7;
+}
+
+html.dark .diagram-rel-active {
+  stroke: #38bdf8;
+}
+
 .diagram-rel-flow {
   stroke-dasharray: 2 38;
   stroke-opacity: 0.95;
@@ -340,6 +706,11 @@ table {
   stroke-opacity: 0.95;
   filter: drop-shadow(0 0 3px rgba(59, 130, 246, 0.45));
   animation: diagram-rel-flow-kf 4.8s linear infinite;
+}
+
+html.dark .diagram-rel-flow,
+html.dark .diagram-rel-flow-particle {
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.55));
 }
 
 .diagram-rel-flow,

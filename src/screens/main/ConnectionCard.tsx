@@ -67,12 +67,17 @@ function formatConnectionTarget(
   }
 }
 
-function getConnectionCardToneClass(selected: boolean, isPinned: boolean) {
-  if (selected) return "border-blue-600 bg-blue-50";
-  if (isPinned) {
-    return "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70";
+export function getConnectionCardToneClass(
+  selected: boolean,
+  isPinned: boolean
+) {
+  if (selected) {
+    return "border-blue-600 bg-blue-50 dark:border-blue-500/80 dark:bg-blue-950/35";
   }
-  return "border-slate-200 bg-white hover:bg-neutral-50";
+  if (isPinned) {
+    return "border-amber-200 bg-amber-50/40 hover:bg-amber-50/70 dark:border-amber-500/40 dark:bg-amber-950/40 dark:hover:bg-amber-950/60";
+  }
+  return "border-slate-200 bg-white hover:bg-neutral-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800";
 }
 
 type EngineInput =
@@ -229,7 +234,7 @@ const KebabButton = memo(function KebabButton(props: {
       aria-label="Open menu"
       class={[
         "rounded-full p-2 text-slate-400 transition",
-        "hover:bg-slate-100 hover:text-slate-700",
+        "hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-200",
         menuOpen
           ? "opacity-100"
           : "opacity-0 group-hover:opacity-100 focus:opacity-100",
@@ -434,7 +439,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     >
       {/* LEFT */}
       <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200">
+        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
           <DbIcon engine={engine} px={28} className="h-7 w-7" />
         </div>
 
@@ -451,7 +456,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               title={hasCustomIndicator ? "Indicator color" : "Default color"}
             />
 
-            <span class="min-w-0 truncate text-sm font-semibold text-slate-900">
+            <span class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
               {label}
             </span>
 
@@ -469,32 +474,32 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
             {currentGroups.slice(0, 1).map((group) => (
               <span
                 key={group.id}
-                class="inline-flex max-w-32 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700"
+                class="inline-flex max-w-32 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-200"
                 title={group.name}
               >
                 {group.name}
               </span>
             ))}
             {currentGroups.length > 1 ? (
-              <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500">
+              <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
                 +{currentGroups.length - 1}
               </span>
             ) : null}
           </div>
 
           {/* Subtitle row */}
-          <div class="mt-1 flex min-w-0 items-center gap-2 text-xs text-slate-500">
+          <div class="mt-1 flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             {subtitle ? (
               <span class="min-w-0 truncate" title={subtitle}>
                 {subtitle}
               </span>
             ) : (
-              <span class="text-slate-400">—</span>
+              <span class="text-slate-400 dark:text-slate-500">—</span>
             )}
 
             {hasSsh ? (
               <>
-                <span class="text-slate-300">•</span>
+                <span class="text-slate-300 dark:text-slate-600">•</span>
                 <span
                   class="inline-flex items-center gap-1 font-mono text-xs font-semibold tracking-wide text-indigo-500"
                   title="Connected via SSH tunnel"

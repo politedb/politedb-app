@@ -9,6 +9,7 @@ import {
 import { Button } from "../common/Button";
 import { cn } from "src/utils/cn";
 import { SettingCard } from "./SettingCard";
+import { FieldRow } from "./FieldRow";
 
 export function KeyboardSettings(props: { active: boolean }) {
   const active = props.active ?? true;
@@ -85,26 +86,15 @@ export function KeyboardSettings(props: { active: boolean }) {
           "Use at least one modifier key, like Cmd/Ctrl, Alt, or Shift."}
       </div>
 
-      <SettingCard class="p-0!">
-        {SHORTCUT_DEFINITIONS.map((item, index) => {
+      <SettingCard class="[&>div>div]:last:pb-4">
+        {SHORTCUT_DEFINITIONS.map((item) => {
           const isRecording = recordingId === item.id;
           return (
-            <div
+            <FieldRow
               key={item.id}
-              class={cn(
-                "flex items-center justify-between gap-4 px-4 py-3",
-                index > 0 ? "border-t border-slate-200" : ""
-              )}
+              label={item.label}
+              description={item.description}
             >
-              <div class="min-w-0 flex-1">
-                <div class="text-sm font-medium text-slate-900">
-                  {item.label}
-                </div>
-                <div class="mt-1 text-xs text-slate-500">
-                  {item.description}
-                </div>
-              </div>
-
               <div class="flex shrink-0 items-center gap-2">
                 <Button
                   variant={isRecording ? "default" : "shadow"}
@@ -130,7 +120,7 @@ export function KeyboardSettings(props: { active: boolean }) {
                   Reset
                 </Button>
               </div>
-            </div>
+            </FieldRow>
           );
         })}
       </SettingCard>

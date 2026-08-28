@@ -25,7 +25,7 @@ export function AnalyticsSettings(props: { active: boolean }) {
 
   return (
     <>
-      <SettingCard class="bg-slate-50 p-3 text-sm text-slate-700">
+      <SettingCard class="p-3 text-sm text-slate-700">
         <div class="font-medium text-slate-900">What we do not send</div>
         <div>
           No raw SQL text, no query content, no file paths, and no sensitive
@@ -33,7 +33,7 @@ export function AnalyticsSettings(props: { active: boolean }) {
         </div>
       </SettingCard>
 
-      <SettingCard class="bg-slate-50 p-3 text-sm text-slate-700">
+      <SettingCard class="p-3 text-sm text-slate-700">
         <div class="font-medium text-slate-900">Always tracked</div>
         <div>
           App opens, installs, daily active usage, and app update events.

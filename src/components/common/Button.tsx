@@ -52,7 +52,7 @@ const borderStyles: Record<ButtonVariant, string> = {
     "border-neutral-500/90 hover:border-neutral-600/90 active:border-neutral-600",
   outline: "border-neutral-400",
   ghost:
-    "border-transparent hover:border-neutral-200 active:border-neutral-100",
+    "border-transparent hover:border-neutral-200 active:border-neutral-100 dark:hover:border-transparent",
   destructive: "border-red-600 hover:border-red-600/90 active:border-red-700",
   secondary: "border-gray-500 hover:border-gray-600 active:border-gray-700",
 };

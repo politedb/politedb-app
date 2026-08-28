@@ -13,8 +13,8 @@ export function AppearanceSettings(props: {
   const { settings, update } = props;
 
   return (
-    <SettingCard title="Display">
-      <FieldRow label="Theme">
+    <SettingCard class="[&>div>div]:last:pb-4">
+      <FieldRow label="Theme" description="Switch theme mode.">
         <Select
           value={settings.theme}
           onChange={(event) =>

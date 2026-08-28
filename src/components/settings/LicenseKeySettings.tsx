@@ -127,7 +127,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
           </div>
         </div>
       ) : !isActive ? (
-        <div class="space-y-3">
+        <div class="space-y-0">
           <SettingCard>
             <FieldRow
               class="border-b-0"
@@ -180,22 +180,19 @@ export function LicenseKeySettings(props: { active: boolean }) {
         </div>
       ) : (
         <div class="space-y-3">
-          <SettingCard class="p-0! text-sm">
-            <div class="flex flex-col border-b border-slate-200 px-4 py-3">
-              <div class="font-medium">Managed by email:</div>
-              <div class="mt-1 text-neutral-700">
+          <SettingCard class="text-sm [&>div>div]:last:pb-4">
+            <FieldRow label="Managed by email:">
+              <div class="text-neutral-700">
                 {licenseState?.customer_email || "Unknown"}
               </div>
-            </div>
-            <div class="flex flex-col border-b border-slate-200 px-4 py-3">
-              <div class="font-medium">Device name:</div>
-              <div class="mt-1 text-neutral-700">
+            </FieldRow>
+            <FieldRow label="Device name:">
+              <div class="text-neutral-700">
                 {licenseState?.device_name || "Unknown"}
               </div>
-            </div>
-            <div class="flex flex-col border-b border-slate-200 px-4 py-3">
-              <div class="font-medium">Expires at:</div>
-              <div class="mt-1 space-x-1 text-neutral-700">
+            </FieldRow>
+            <FieldRow label="Expires at:">
+              <div class="space-x-1 text-neutral-700">
                 <span class="font-medium">
                   {formatDateTime(licenseState?.expires_at, true) || "Unknown"}
                 </span>
@@ -208,14 +205,13 @@ export function LicenseKeySettings(props: { active: boolean }) {
                   {daysUntilExpires} days)
                 </span>
               </div>
-            </div>
-            <div class="flex flex-col border-b border-slate-200 px-4 py-3">
-              <div class="font-medium">Last checked at:</div>
-              <div class="mt-1 text-neutral-700">
+            </FieldRow>
+            <FieldRow label="Last checked at:">
+              <div class="text-neutral-700">
                 {formatDateTime(licenseState?.last_validated_at, true) ||
                   "Unknown"}
               </div>
-            </div>
+            </FieldRow>
           </SettingCard>
           <div class="flex justify-end gap-2">
             <Button
@@ -227,7 +223,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
             </Button>
             <Button
               variant="outline"
-              className="border-red-200 text-red-600 hover:bg-red-50"
+              className="border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300"
               onClick={() => void deactivateLicense()}
               disabled={licenseBusy}
             >
