@@ -17,6 +17,7 @@ import { saveDialog, showMessage } from "src/lib/system-dialog";
 import type { DatabaseEngine, ForeignKeyInfo } from "src/types";
 import { cellToString } from "src/utils/convert";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import { mapPool } from "src/utils/mapPool";
 
 type DiagramGeneratorDialogProps = {
   open: boolean;
@@ -96,6 +97,7 @@ const REL_CORNER_RADIUS = 10;
 /** Hollow circles for 1:1 (optional-style O on the line) */
 const O_MARK_R = 3.5;
 const O_MARK_INSET = 9;
+const DIAGRAM_METADATA_CONCURRENCY = 8;
 
 function sanitizeEntityName(name: string) {
   const sanitized = name.replace(/[^A-Za-z0-9_]/g, "_");
@@ -681,65 +683,73 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
         (table) => table.schema === schema
       );
 
-      const tables = await Promise.all(
-        schemaTables.map(async (table) => {
+      const loaded = await mapPool(
+        schemaTables,
+        DIAGRAM_METADATA_CONCURRENCY,
+        async (table) => {
           const pkQuery = diagramTableColumnsQuery(schema, table.name, engine);
           const sql = pkQuery ?? tableColumnsQuery(schema, table.name, engine);
-          const res = await runSqlQuery(connectionId, sql, { batchSize: 500 });
-          const columns: DiagramColumn[] = (res.rows ?? []).map((row: any) => ({
-            name: cellToString(row?.[0]) ?? "",
-            type: cellToString(row?.[1]) ?? "",
-            isPrimaryKey: pkQuery ? cellIsTruthyPrimary(row?.[2]) : false,
-          }));
+          const csql =
+            engine === "mongo"
+              ? null
+              : diagramConstraintsSql(schema, table.name, engine);
+
+          const [colRes, fkRes, constraintRes] = await Promise.all([
+            runSqlQuery(connectionId, sql, { batchSize: 500 }),
+            engine === "mongo"
+              ? Promise.resolve(null)
+              : runSqlQuery(
+                  connectionId,
+                  tableForeignKeysQuery(schema, table.name, engine),
+                  { batchSize: 200 }
+                ),
+            csql
+              ? runSqlQuery(connectionId, csql, { batchSize: 400 }).catch(
+                  () => null
+                )
+              : Promise.resolve(null),
+          ]);
+
+          const columns: DiagramColumn[] = (colRes.rows ?? []).map(
+            (row: any) => ({
+              name: cellToString(row?.[0]) ?? "",
+              type: cellToString(row?.[1]) ?? "",
+              isPrimaryKey: pkQuery ? cellIsTruthyPrimary(row?.[2]) : false,
+            })
+          );
+
+          const uniqueSignatures: string[] = [];
+          for (const row of constraintRes?.rows ?? []) {
+            const sig = uniqueColumnSignatureFromConstraintRow(
+              row as unknown[],
+              engine
+            );
+            if (sig) uniqueSignatures.push(sig);
+          }
+
           return {
-            schema,
-            name: table.name,
-            columns: columns.filter((column) => column.name),
+            table: {
+              schema,
+              name: table.name,
+              columns: columns.filter((column) => column.name),
+            },
+            foreignKeys:
+              fkRes === null ? [] : mapForeignKeyRows(fkRes.rows ?? []),
+            uniqueSignatures,
           };
-        })
+        }
       );
 
-      let foreignKeys: ForeignKeyInfo[] = [];
-      if (engine !== "mongo") {
-        const fkChunks = await Promise.all(
-          schemaTables.map(async (table) => {
-            const sql = tableForeignKeysQuery(schema, table.name, engine);
-            const res = await runSqlQuery(connectionId, sql, {
-              batchSize: 200,
-            });
-            return mapForeignKeyRows(res.rows ?? []);
-          })
-        );
-        foreignKeys = dedupeForeignKeys(fkChunks.flat());
-      }
-
+      const tables = loaded.map((item) => item.table);
+      const foreignKeys = dedupeForeignKeys(
+        loaded.flatMap((item) => item.foreignKeys)
+      );
       const uniqueByChildTable = new Map<string, Set<string>>();
-      if (engine !== "mongo") {
-        await Promise.all(
-          schemaTables.map(async (table) => {
-            const csql = diagramConstraintsSql(schema, table.name, engine);
-            if (!csql) return;
-            try {
-              const cres = await runSqlQuery(connectionId, csql, {
-                batchSize: 400,
-              });
-              const tkey = tableKey(schema, table.name);
-              let set = uniqueByChildTable.get(tkey);
-              if (!set) {
-                set = new Set();
-                uniqueByChildTable.set(tkey, set);
-              }
-              for (const row of cres.rows ?? []) {
-                const sig = uniqueColumnSignatureFromConstraintRow(
-                  row as unknown[],
-                  engine
-                );
-                if (sig) set.add(sig);
-              }
-            } catch {
-              // ignore per-table constraint load failures
-            }
-          })
+      for (const item of loaded) {
+        if (item.uniqueSignatures.length === 0) continue;
+        uniqueByChildTable.set(
+          tableKey(schema, item.table.name),
+          new Set(item.uniqueSignatures)
         );
       }
 

@@ -1,5 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { memo } from "preact/compat";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
+import {
+  areDiagramViewportsEqual,
+  DEFAULT_DIAGRAM_VIEWPORT,
+  DIAGRAM_VIEWPORT_OVERSCAN,
+  getDiagramSvgViewBox,
+  getDiagramViewport,
+  getVisibleIndexWindow,
+  isDiagramRectVisible,
+  shouldRenderDiagramTableDetails,
+} from "src/components/diagram/diagramViewport";
 import { KeyIcon, MinusIcon, PlusIcon } from "src/components/icons";
 
 type DiagramColumn = {
@@ -142,24 +159,30 @@ function groupItemsIntoColumns(items: LayoutItem[], numColumns: number) {
   return cols;
 }
 
+function buildRelationNeighbors(relations: DiagramRelation[]) {
+  const neighbors = new Map<string, string[]>();
+  for (const relation of relations) {
+    const from = neighbors.get(relation.fromTable) ?? [];
+    from.push(relation.toTable);
+    neighbors.set(relation.fromTable, from);
+
+    const to = neighbors.get(relation.toTable) ?? [];
+    to.push(relation.fromTable);
+    neighbors.set(relation.toTable, to);
+  }
+  return neighbors;
+}
+
 function barycenterTowardColumn(
   item: LayoutItem,
-  relations: DiagramRelation[],
+  relationNeighbors: Map<string, string[]>,
   itemByKey: Map<string, LayoutItem>,
   neighborCol: number
 ): number | null {
   const ys: number[] = [];
-  for (const rel of relations) {
-    let other: LayoutItem | undefined;
-    if (rel.fromTable === item.key) {
-      const o = itemByKey.get(rel.toTable);
-      if (o && o.column === neighborCol) other = o;
-    }
-    if (rel.toTable === item.key) {
-      const o = itemByKey.get(rel.fromTable);
-      if (o && o.column === neighborCol) other = o;
-    }
-    if (other) ys.push(tableCenterY(other));
+  for (const neighborKey of relationNeighbors.get(item.key) ?? []) {
+    const neighbor = itemByKey.get(neighborKey);
+    if (neighbor?.column === neighborCol) ys.push(tableCenterY(neighbor));
   }
   if (ys.length === 0) return null;
   return ys.reduce((a, b) => a + b, 0) / ys.length;
@@ -167,13 +190,23 @@ function barycenterTowardColumn(
 
 function sortColumnByNeighborBarycenter(
   colItems: LayoutItem[],
-  relations: DiagramRelation[],
+  relationNeighbors: Map<string, string[]>,
   itemByKey: Map<string, LayoutItem>,
   neighborCol: number
 ): LayoutItem[] {
   return colItems.slice().sort((a, b) => {
-    const ba = barycenterTowardColumn(a, relations, itemByKey, neighborCol);
-    const bb = barycenterTowardColumn(b, relations, itemByKey, neighborCol);
+    const ba = barycenterTowardColumn(
+      a,
+      relationNeighbors,
+      itemByKey,
+      neighborCol
+    );
+    const bb = barycenterTowardColumn(
+      b,
+      relationNeighbors,
+      itemByKey,
+      neighborCol
+    );
     if (ba !== null && bb !== null && ba !== bb) return ba - bb;
     if (ba !== null && bb === null) return -1;
     if (ba === null && bb !== null) return 1;
@@ -203,6 +236,7 @@ function minimizeCrossingsVertical(
   colXs: number[]
 ): LayoutItem[] {
   if (numColumns <= 1 || relations.length === 0) return items;
+  const relationNeighbors = buildRelationNeighbors(relations);
   let current = items;
   for (let pass = 0; pass < 6; pass++) {
     const byKey = new Map(current.map((i) => [i.key, i]));
@@ -211,7 +245,7 @@ function minimizeCrossingsVertical(
       for (let c = 1; c < numColumns; c++)
         cols[c] = sortColumnByNeighborBarycenter(
           cols[c]!,
-          relations,
+          relationNeighbors,
           byKey,
           c - 1
         );
@@ -219,7 +253,7 @@ function minimizeCrossingsVertical(
       for (let c = numColumns - 2; c >= 0; c--)
         cols[c] = sortColumnByNeighborBarycenter(
           cols[c]!,
-          relations,
+          relationNeighbors,
           byKey,
           c + 1
         );
@@ -300,6 +334,7 @@ type RelationGeometry = {
   endY: number;
   enterFrom: "left" | "right";
   fromRight: boolean;
+  segments: Array<{ x: number; y: number; width: number; height: number }>;
 };
 
 function roundedOrthogonalPath(
@@ -346,17 +381,24 @@ function relationGeometry(
   const x2 = endX + (fromRight ? -26 : 26);
   const baseMiddleY = (startY + endY) / 2;
   const middleY = middleYOverride !== undefined ? middleYOverride : baseMiddleY;
-  const path = roundedOrthogonalPath(
-    [
-      { x: startX, y: startY },
-      { x: x1, y: startY },
-      { x: x1, y: middleY },
-      { x: x2, y: middleY },
-      { x: x2, y: endY },
-      { x: endX, y: endY },
-    ],
-    REL_CORNER_RADIUS
-  );
+  const points = [
+    { x: startX, y: startY },
+    { x: x1, y: startY },
+    { x: x1, y: middleY },
+    { x: x2, y: middleY },
+    { x: x2, y: endY },
+    { x: endX, y: endY },
+  ];
+  const path = roundedOrthogonalPath(points, REL_CORNER_RADIUS);
+  const segments = points.slice(1).map((point, index) => {
+    const previous = points[index]!;
+    return {
+      x: Math.min(previous.x, point.x),
+      y: Math.min(previous.y, point.y),
+      width: Math.max(1, Math.abs(point.x - previous.x)),
+      height: Math.max(1, Math.abs(point.y - previous.y)),
+    };
+  });
   return {
     path,
     startX,
@@ -365,6 +407,7 @@ function relationGeometry(
     endY,
     enterFrom: fromRight ? "left" : "right",
     fromRight,
+    segments,
   };
 }
 
@@ -454,6 +497,93 @@ function oneToOneCircleCenters(g: RelationGeometry) {
       };
 }
 
+function diagramTableKeyFromTarget(target: EventTarget | null): string | null {
+  const el =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null;
+  return (
+    el?.closest("[data-diagram-table]")?.getAttribute("data-diagram-table") ??
+    null
+  );
+}
+
+const DiagramTableCard = memo(function DiagramTableCard(props: {
+  item: LayoutItem;
+  highlighted: boolean;
+  showDetails: boolean;
+  columnStart: number;
+  columnEnd: number;
+}) {
+  const { item, highlighted, showDetails, columnStart, columnEnd } = props;
+  const columns = item.table.columns;
+
+  return (
+    <div
+      data-diagram-table={item.key}
+      class={`absolute z-1 overflow-hidden rounded-xl border bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)] ${
+        highlighted
+          ? "border-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.45),0_10px_24px_rgba(15,23,42,0.08)]"
+          : "border-slate-200 hover:border-sky-500 hover:shadow-[0_0_0_2px_rgba(14,165,233,0.45),0_10px_24px_rgba(15,23,42,0.08)]"
+      }`}
+      style={{
+        left: `${item.x}px`,
+        top: `${item.y}px`,
+        width: `${item.width}px`,
+        contain: "layout paint",
+      }}
+    >
+      <div class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-800">
+        {item.table.name}
+      </div>
+      {showDetails ? (
+        <div>
+          {columnStart > 0 ? (
+            <div style={{ height: `${columnStart * ROW_HEIGHT}px` }} />
+          ) : null}
+          <div class="divide-y divide-slate-100">
+            {columns.slice(columnStart, columnEnd).map((column) => (
+              <div
+                key={column.name}
+                data-diagram-column={column.name}
+                class="flex items-center justify-between gap-3 px-4 py-2 text-xs"
+              >
+                <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate text-slate-700">
+                  <span class="min-w-0 truncate">{column.name}</span>
+                  {column.isPrimaryKey ? (
+                    <KeyIcon
+                      className="size-3 shrink-0 text-slate-500"
+                      aria-label="Primary key"
+                    />
+                  ) : null}
+                </span>
+                <span class="shrink-0 font-medium text-slate-400">
+                  {column.type || "unknown"}
+                </span>
+              </div>
+            ))}
+          </div>
+          {columnEnd < columns.length ? (
+            <div
+              style={{
+                height: `${(columns.length - columnEnd) * ROW_HEIGHT}px`,
+              }}
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div
+          data-diagram-table-compact
+          class="bg-slate-50"
+          style={{ height: `${Math.max(0, item.height - HEADER_HEIGHT)}px` }}
+        />
+      )}
+    </div>
+  );
+});
+
 function relationHoverTitle(relation: DiagramRelation) {
   const fromShort = relation.fromTable.includes(".")
     ? relation.fromTable.slice(relation.fromTable.lastIndexOf(".") + 1)
@@ -470,9 +600,11 @@ export function DiagramCanvas(props: { state: DiagramState }) {
   const [zoom, setZoom] = useState(1);
   const [hoveredRelIndex, setHoveredRelIndex] = useState<number | null>(null);
   const [hoveredTableKey, setHoveredTableKey] = useState<string | null>(null);
+  const [viewport, setViewport] = useState(DEFAULT_DIAGRAM_VIEWPORT);
 
   const hoverLeaveTimerRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const viewportFrameRef = useRef<number | null>(null);
 
   const clearHoverLeaveTimer = () => {
     if (hoverLeaveTimerRef.current !== null) {
@@ -528,20 +660,139 @@ export function DiagramCanvas(props: { state: DiagramState }) {
     [layout.items]
   );
 
+  const relationRenderItems = useMemo(
+    () =>
+      state.relations.flatMap((relation, index) => {
+        const from = itemByKey.get(relation.fromTable);
+        const to = itemByKey.get(relation.toTable);
+        if (!from || !to) return [];
+        return [
+          {
+            relation,
+            index,
+            geometry: relationGeometry(
+              from,
+              to,
+              relation,
+              relationMiddleYByIndex.get(index)
+            ),
+          },
+        ];
+      }),
+    [itemByKey, relationMiddleYByIndex, state.relations]
+  );
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const updateViewport = () => {
+      viewportFrameRef.current = null;
+      const next = getDiagramViewport(
+        el.scrollLeft,
+        el.scrollTop,
+        el.clientWidth,
+        el.clientHeight,
+        zoom
+      );
+      setViewport((current) =>
+        areDiagramViewportsEqual(current, next) ? current : next
+      );
+    };
+    const scheduleViewportUpdate = () => {
+      if (viewportFrameRef.current !== null) return;
+      viewportFrameRef.current = window.requestAnimationFrame(updateViewport);
+    };
+
+    scheduleViewportUpdate();
+    el.addEventListener("scroll", scheduleViewportUpdate, { passive: true });
+    const observer = new ResizeObserver(scheduleViewportUpdate);
+    observer.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", scheduleViewportUpdate);
+      observer.disconnect();
+      if (viewportFrameRef.current !== null) {
+        window.cancelAnimationFrame(viewportFrameRef.current);
+        viewportFrameRef.current = null;
+      }
+    };
+  }, [layout.height, layout.width, zoom]);
+
+  const showDetails = shouldRenderDiagramTableDetails(zoom);
+  const svgBox = getDiagramSvgViewBox(viewport, layout.width, layout.height);
+
+  const visibleCards = useMemo(() => {
+    const rangeStart = viewport.top - DIAGRAM_VIEWPORT_OVERSCAN;
+    const rangeEnd = viewport.top + viewport.height + DIAGRAM_VIEWPORT_OVERSCAN;
+    return layout.items.flatMap((item) => {
+      if (!isDiagramRectVisible(item, viewport)) return [];
+      if (!showDetails) {
+        return [{ item, columnStart: 0, columnEnd: 0 }];
+      }
+      const columnWindow = getVisibleIndexWindow(
+        item.y + HEADER_HEIGHT,
+        ROW_HEIGHT,
+        item.table.columns.length,
+        rangeStart,
+        rangeEnd
+      );
+      return [
+        {
+          item,
+          columnStart: columnWindow.start,
+          columnEnd: columnWindow.end,
+        },
+      ];
+    });
+  }, [layout.items, showDetails, viewport]);
+
+  const visibleRelations = useMemo(
+    () =>
+      relationRenderItems.filter(({ geometry }) =>
+        geometry.segments.some((segment) =>
+          isDiagramRectVisible(segment, viewport)
+        )
+      ),
+    [relationRenderItems, viewport]
+  );
+
   const hoveredRelation =
     hoveredRelIndex !== null ? state.relations[hoveredRelIndex] : null;
 
-  const isRelationActive = (relation: DiagramRelation, index: number) =>
-    hoveredRelIndex === index ||
-    (!!hoveredTableKey &&
-      (hoveredTableKey === relation.fromTable ||
-        hoveredTableKey === relation.toTable));
+  const isRelationActive = useCallback(
+    (relation: DiagramRelation, index: number) =>
+      hoveredRelIndex === index ||
+      (!!hoveredTableKey &&
+        (hoveredTableKey === relation.fromTable ||
+          hoveredTableKey === relation.toTable)),
+    [hoveredRelIndex, hoveredTableKey]
+  );
 
-  const isTableHighlighted = (tableKey: string) =>
-    hoveredTableKey === tableKey ||
-    (!!hoveredRelation &&
-      (tableKey === hoveredRelation.fromTable ||
-        tableKey === hoveredRelation.toTable));
+  const highlightedTableKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (!hoveredRelation) return keys;
+    keys.add(hoveredRelation.fromTable);
+    keys.add(hoveredRelation.toTable);
+    return keys;
+  }, [hoveredRelation]);
+
+  const idleRelationPath = useMemo(() => {
+    const parts: string[] = [];
+    for (const item of visibleRelations) {
+      if (isRelationActive(item.relation, item.index)) continue;
+      parts.push(item.geometry.path);
+    }
+    return parts.join(" ");
+  }, [isRelationActive, visibleRelations]);
+
+  const activeRelations = useMemo(
+    () =>
+      visibleRelations.filter(({ relation, index }) =>
+        isRelationActive(relation, index)
+      ),
+    [isRelationActive, visibleRelations]
+  );
 
   const scaledW = layout.width * zoom;
   const scaledH = layout.height * zoom;
@@ -615,64 +866,51 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                       }),
                 } as Record<string, string | number>
               }
+              onMouseOver={(e) => {
+                const key = diagramTableKeyFromTarget(e.target);
+                if (key)
+                  setHoveredTableKey((current) =>
+                    current === key ? current : key
+                  );
+              }}
+              onMouseOut={(e) => {
+                const fromKey = diagramTableKeyFromTarget(e.target);
+                if (!fromKey) return;
+                const toKey = diagramTableKeyFromTarget(e.relatedTarget);
+                if (toKey === fromKey) return;
+                setHoveredTableKey((current) => {
+                  if (toKey) return toKey;
+                  return current === fromKey ? null : current;
+                });
+              }}
             >
-              {layout.items.map((item) => (
-                <div
+              {visibleCards.map(({ item, columnStart, columnEnd }) => (
+                <DiagramTableCard
                   key={item.key}
-                  class={`absolute z-1 overflow-hidden rounded-xl border bg-white shadow-[0_10px_24px_rgba(15,23,42,0.06)] transition-shadow duration-150 ${isTableHighlighted(item.key) ? "border-sky-500 shadow-[0_0_0_2px_rgba(14,165,233,0.45),0_10px_24px_rgba(15,23,42,0.08)]" : "border-slate-200"}`}
-                  style={{
-                    left: `${item.x}px`,
-                    top: `${item.y}px`,
-                    width: `${item.width}px`,
-                  }}
-                  onMouseEnter={() => setHoveredTableKey(item.key)}
-                  onMouseLeave={() =>
-                    setHoveredTableKey((k) => (k === item.key ? null : k))
-                  }
-                >
-                  <div class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-800">
-                    {item.table.name}
-                  </div>
-                  <div class="divide-y divide-slate-100">
-                    {item.table.columns.map((column) => (
-                      <div
-                        key={column.name}
-                        class="flex items-center justify-between gap-3 px-4 py-2 text-xs"
-                      >
-                        <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate text-slate-700">
-                          <span class="min-w-0 truncate">{column.name}</span>
-                          {column.isPrimaryKey ? (
-                            <KeyIcon
-                              className="size-3 shrink-0 text-slate-500"
-                              aria-label="Primary key"
-                            />
-                          ) : null}
-                        </span>
-                        <span class="shrink-0 font-medium text-slate-400">
-                          {column.type || "unknown"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                  item={item}
+                  highlighted={highlightedTableKeys.has(item.key)}
+                  showDetails={showDetails}
+                  columnStart={columnStart}
+                  columnEnd={columnEnd}
+                />
               ))}
               <svg
-                class="pointer-events-none absolute inset-0 z-100 overflow-visible"
-                width={layout.width}
-                height={layout.height}
-                viewBox={`0 0 ${layout.width} ${layout.height}`}
-                shape-rendering="geometricPrecision"
+                class="pointer-events-none absolute z-100 overflow-hidden"
+                style={{ left: `${svgBox.x}px`, top: `${svgBox.y}px` }}
+                width={svgBox.width}
+                height={svgBox.height}
+                viewBox={`${svgBox.x} ${svgBox.y} ${svgBox.width} ${svgBox.height}`}
               >
                 <defs>
                   <mask id="diagram-rel-mask" maskUnits="userSpaceOnUse">
                     <rect
-                      x={0}
-                      y={0}
-                      width={layout.width}
-                      height={layout.height}
+                      x={svgBox.x}
+                      y={svgBox.y}
+                      width={svgBox.width}
+                      height={svgBox.height}
                       fill="white"
                     />
-                    {layout.items.map((item) => (
+                    {visibleCards.map(({ item }) => (
                       <rect
                         key={`mask-${item.key}`}
                         x={item.x - 1}
@@ -686,98 +924,217 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                     ))}
                   </mask>
                 </defs>
-                {state.relations.map((relation, index) => {
-                  const from = itemByKey.get(relation.fromTable);
-                  const to = itemByKey.get(relation.toTable);
-                  if (!from || !to) return null;
-                  const g = relationGeometry(
-                    from,
-                    to,
-                    relation,
-                    relationMiddleYByIndex.get(index)
-                  );
-                  const isHover = isRelationActive(relation, index);
-                  const strokeColor = isHover ? "#0284c7" : "#94a3b8";
-                  const strokeW = isHover ? REL_STROKE_HOVER : REL_STROKE_WIDTH;
-                  const crow = crowFootLines(g.endX, g.endY, g.enterFrom);
-                  const gk = `${relation.fromTable}-${relation.toTable}-${index}`;
-                  const tip = relationHoverTitle(relation);
-                  if (relation.cardinality === "one-to-one") {
-                    const o = oneToOneCircleCenters(g);
-                    return (
-                      <g key={gk}>
-                        <path
-                          d={g.path}
-                          fill="none"
-                          stroke={HIT_STROKE}
-                          stroke-width={REL_HIT_STROKE_WIDTH}
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          class="cursor-pointer"
-                          style={{ pointerEvents: "stroke" }}
-                          onMouseEnter={() => onRelationHoverEnter(index)}
-                          onMouseLeave={onRelationHoverLeave}
-                        >
-                          <title>{tip}</title>
-                        </path>
-                        <circle
-                          cx={o.startCx}
-                          cy={o.startCy}
-                          r={O_HIT_R}
-                          fill={HIT_FILL}
-                          class="cursor-pointer"
-                          style={{ pointerEvents: "fill" }}
-                          onMouseEnter={() => onRelationHoverEnter(index)}
-                          onMouseLeave={onRelationHoverLeave}
-                        >
-                          <title>{tip}</title>
-                        </circle>
-                        <circle
-                          cx={o.endCx}
-                          cy={o.endCy}
-                          r={O_HIT_R}
-                          fill={HIT_FILL}
-                          class="cursor-pointer"
-                          style={{ pointerEvents: "fill" }}
-                          onMouseEnter={() => onRelationHoverEnter(index)}
-                          onMouseLeave={onRelationHoverLeave}
-                        >
-                          <title>{tip}</title>
-                        </circle>
-                        <g mask="url(#diagram-rel-mask)">
+                {showDetails
+                  ? visibleRelations.map(({ relation, index, geometry: g }) => {
+                      const tip = relationHoverTitle(relation);
+                      const gk = `${relation.fromTable}-${relation.toTable}-${index}`;
+                      if (relation.cardinality === "one-to-one") {
+                        const o = oneToOneCircleCenters(g);
+                        return (
+                          <g key={gk}>
+                            <path
+                              d={g.path}
+                              fill="none"
+                              stroke={HIT_STROKE}
+                              stroke-width={REL_HIT_STROKE_WIDTH}
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              class="cursor-pointer"
+                              style={{ pointerEvents: "stroke" }}
+                              onMouseEnter={() => onRelationHoverEnter(index)}
+                              onMouseLeave={onRelationHoverLeave}
+                            >
+                              <title>{tip}</title>
+                            </path>
+                            <circle
+                              cx={o.startCx}
+                              cy={o.startCy}
+                              r={O_HIT_R}
+                              fill={HIT_FILL}
+                              class="cursor-pointer"
+                              style={{ pointerEvents: "fill" }}
+                              onMouseEnter={() => onRelationHoverEnter(index)}
+                              onMouseLeave={onRelationHoverLeave}
+                            >
+                              <title>{tip}</title>
+                            </circle>
+                            <circle
+                              cx={o.endCx}
+                              cy={o.endCy}
+                              r={O_HIT_R}
+                              fill={HIT_FILL}
+                              class="cursor-pointer"
+                              style={{ pointerEvents: "fill" }}
+                              onMouseEnter={() => onRelationHoverEnter(index)}
+                              onMouseLeave={onRelationHoverLeave}
+                            >
+                              <title>{tip}</title>
+                            </circle>
+                          </g>
+                        );
+                      }
+                      const tick = oneToManyParentTickGeometry(g);
+                      const crow = crowFootLines(g.endX, g.endY, g.enterFrom);
+                      return (
+                        <g key={gk}>
                           <path
                             d={g.path}
                             fill="none"
-                            stroke={strokeColor}
-                            stroke-width={strokeW}
+                            stroke={HIT_STROKE}
+                            stroke-width={REL_HIT_STROKE_WIDTH}
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="cursor-pointer"
+                            style={{ pointerEvents: "stroke" }}
+                            onMouseEnter={() => onRelationHoverEnter(index)}
+                            onMouseLeave={onRelationHoverLeave}
+                          >
+                            <title>{tip}</title>
+                          </path>
+                          <line
+                            x1={tick.x}
+                            y1={tick.y1}
+                            x2={tick.x}
+                            y2={tick.y2}
+                            stroke={HIT_STROKE}
+                            stroke-width={12}
+                            stroke-linecap="round"
+                            class="cursor-pointer"
+                            style={{ pointerEvents: "stroke" }}
+                            onMouseEnter={() => onRelationHoverEnter(index)}
+                            onMouseLeave={onRelationHoverLeave}
+                          />
+                          {crow.map(([x1, y1, x2, y2], i) => (
+                            <line
+                              key={`${gk}-crow-hit-${i}`}
+                              x1={x1}
+                              y1={y1}
+                              x2={x2}
+                              y2={y2}
+                              stroke={HIT_STROKE}
+                              stroke-width={CROW_HIT_STROKE_WIDTH}
+                              stroke-linecap="round"
+                              class="cursor-pointer"
+                              style={{ pointerEvents: "stroke" }}
+                              onMouseEnter={() => onRelationHoverEnter(index)}
+                              onMouseLeave={onRelationHoverLeave}
+                            />
+                          ))}
+                        </g>
+                      );
+                    })
+                  : null}
+                <g mask="url(#diagram-rel-mask)">
+                  {idleRelationPath ? (
+                    <path
+                      d={idleRelationPath}
+                      fill="none"
+                      stroke="#94a3b8"
+                      stroke-width={REL_STROKE_WIDTH}
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null}
+                  {showDetails
+                    ? visibleRelations.map(
+                        ({ relation, index, geometry: g }) => {
+                          if (isRelationActive(relation, index)) return null;
+                          const gk = `${relation.fromTable}-${relation.toTable}-${index}-marks`;
+                          if (relation.cardinality === "one-to-one") {
+                            const o = oneToOneCircleCenters(g);
+                            return (
+                              <g key={gk}>
+                                <circle
+                                  cx={o.startCx}
+                                  cy={o.startCy}
+                                  r={O_MARK_R}
+                                  fill="none"
+                                  stroke="#94a3b8"
+                                  stroke-width={REL_STROKE_WIDTH}
+                                  style={{ pointerEvents: "none" }}
+                                />
+                                <circle
+                                  cx={o.endCx}
+                                  cy={o.endCy}
+                                  r={O_MARK_R}
+                                  fill="none"
+                                  stroke="#94a3b8"
+                                  stroke-width={REL_STROKE_WIDTH}
+                                  style={{ pointerEvents: "none" }}
+                                />
+                              </g>
+                            );
+                          }
+                          const tick = oneToManyParentTickGeometry(g);
+                          const crow = crowFootLines(
+                            g.endX,
+                            g.endY,
+                            g.enterFrom
+                          );
+                          return (
+                            <g key={gk}>
+                              <line
+                                x1={tick.x}
+                                y1={tick.y1}
+                                x2={tick.x}
+                                y2={tick.y2}
+                                stroke="#94a3b8"
+                                stroke-width={REL_STROKE_WIDTH}
+                                stroke-linecap="round"
+                                style={{ pointerEvents: "none" }}
+                              />
+                              {crow.map(([x1, y1, x2, y2], i) => (
+                                <line
+                                  key={`${gk}-crow-${i}`}
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={x2}
+                                  y2={y2}
+                                  stroke="#94a3b8"
+                                  stroke-width={REL_STROKE_WIDTH}
+                                  stroke-linecap="round"
+                                  style={{ pointerEvents: "none" }}
+                                />
+                              ))}
+                            </g>
+                          );
+                        }
+                      )
+                    : null}
+                  {activeRelations.map(({ relation, index, geometry: g }) => {
+                    const gk = `${relation.fromTable}-${relation.toTable}-${index}-active`;
+                    if (relation.cardinality === "one-to-one") {
+                      const o = oneToOneCircleCenters(g);
+                      return (
+                        <g key={gk}>
+                          <path
+                            d={g.path}
+                            fill="none"
+                            stroke="#0284c7"
+                            stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
-                          {isHover ? (
-                            <>
-                              <path
-                                d={g.path}
-                                fill="none"
-                                stroke={strokeColor}
-                                stroke-width={2}
-                                class={REL_FLOW_CLASS}
-                                style={{ pointerEvents: "none" }}
-                              />
-                              <path
-                                d={g.path}
-                                fill="none"
-                                stroke={strokeColor}
-                                class={REL_FLOW_PARTICLE_CLASS}
-                                style={{ pointerEvents: "none" }}
-                              />
-                            </>
-                          ) : null}
+                          <path
+                            d={g.path}
+                            fill="none"
+                            stroke="#0284c7"
+                            stroke-width={2}
+                            class={REL_FLOW_CLASS}
+                            style={{ pointerEvents: "none" }}
+                          />
+                          <path
+                            d={g.path}
+                            fill="none"
+                            stroke="#0284c7"
+                            class={REL_FLOW_PARTICLE_CLASS}
+                            style={{ pointerEvents: "none" }}
+                          />
                           <circle
                             cx={o.startCx}
                             cy={o.startCy}
                             r={O_MARK_R}
                             fill="none"
-                            stroke={strokeColor}
-                            stroke-width={strokeW}
+                            stroke="#0284c7"
+                            stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
                           <circle
@@ -785,94 +1142,46 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             cy={o.endCy}
                             r={O_MARK_R}
                             fill="none"
-                            stroke={strokeColor}
-                            stroke-width={strokeW}
+                            stroke="#0284c7"
+                            stroke-width={REL_STROKE_HOVER}
                             style={{ pointerEvents: "none" }}
                           />
                         </g>
-                      </g>
-                    );
-                  }
-                  const tick = oneToManyParentTickGeometry(g);
-                  return (
-                    <g key={gk}>
-                      <path
-                        d={g.path}
-                        fill="none"
-                        stroke={HIT_STROKE}
-                        stroke-width={REL_HIT_STROKE_WIDTH}
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        class="cursor-pointer"
-                        style={{ pointerEvents: "stroke" }}
-                        onMouseEnter={() => onRelationHoverEnter(index)}
-                        onMouseLeave={onRelationHoverLeave}
-                      >
-                        <title>{tip}</title>
-                      </path>
-                      <line
-                        x1={tick.x}
-                        y1={tick.y1}
-                        x2={tick.x}
-                        y2={tick.y2}
-                        stroke={HIT_STROKE}
-                        stroke-width={12}
-                        stroke-linecap="round"
-                        class="cursor-pointer"
-                        style={{ pointerEvents: "stroke" }}
-                        onMouseEnter={() => onRelationHoverEnter(index)}
-                        onMouseLeave={onRelationHoverLeave}
-                      />
-                      {crow.map(([x1, y1, x2, y2], i) => (
-                        <line
-                          key={`${gk}-crow-hit-${i}`}
-                          x1={x1}
-                          y1={y1}
-                          x2={x2}
-                          y2={y2}
-                          stroke={HIT_STROKE}
-                          stroke-width={CROW_HIT_STROKE_WIDTH}
-                          stroke-linecap="round"
-                          class="cursor-pointer"
-                          style={{ pointerEvents: "stroke" }}
-                          onMouseEnter={() => onRelationHoverEnter(index)}
-                          onMouseLeave={onRelationHoverLeave}
-                        />
-                      ))}
-                      <g mask="url(#diagram-rel-mask)">
+                      );
+                    }
+                    const tick = oneToManyParentTickGeometry(g);
+                    const crow = crowFootLines(g.endX, g.endY, g.enterFrom);
+                    return (
+                      <g key={gk}>
                         <path
                           d={g.path}
                           fill="none"
-                          stroke={strokeColor}
-                          stroke-width={strokeW}
+                          stroke="#0284c7"
+                          stroke-width={REL_STROKE_HOVER}
                           style={{ pointerEvents: "none" }}
                         />
-                        {isHover ? (
-                          <>
-                            <path
-                              d={g.path}
-                              fill="none"
-                              stroke={strokeColor}
-                              stroke-width={2.1}
-                              class={REL_FLOW_CLASS}
-                              style={{ pointerEvents: "none" }}
-                            />
-                            <path
-                              d={g.path}
-                              fill="none"
-                              stroke={strokeColor}
-                              class={REL_FLOW_PARTICLE_CLASS}
-                              style={{ pointerEvents: "none" }}
-                            />
-                          </>
-                        ) : null}
+                        <path
+                          d={g.path}
+                          fill="none"
+                          stroke="#0284c7"
+                          stroke-width={2.1}
+                          class={REL_FLOW_CLASS}
+                          style={{ pointerEvents: "none" }}
+                        />
+                        <path
+                          d={g.path}
+                          fill="none"
+                          stroke="#0284c7"
+                          class={REL_FLOW_PARTICLE_CLASS}
+                          style={{ pointerEvents: "none" }}
+                        />
                         <line
                           x1={tick.x}
                           y1={tick.y1}
                           x2={tick.x}
                           y2={tick.y2}
-                          stroke={strokeColor}
-                          stroke-width={strokeW}
+                          stroke="#0284c7"
+                          stroke-width={REL_STROKE_HOVER}
                           stroke-linecap="round"
                           style={{ pointerEvents: "none" }}
                         />
@@ -883,16 +1192,16 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                             y1={y1}
                             x2={x2}
                             y2={y2}
-                            stroke={strokeColor}
-                            stroke-width={strokeW}
+                            stroke="#0284c7"
+                            stroke-width={REL_STROKE_HOVER}
                             stroke-linecap="round"
                             style={{ pointerEvents: "none" }}
                           />
                         ))}
                       </g>
-                    </g>
-                  );
-                })}
+                    );
+                  })}
+                </g>
               </svg>
             </div>
           </div>
