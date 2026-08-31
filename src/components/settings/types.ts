@@ -1,4 +1,8 @@
 import { isUiFontPreference, type UiFontPreference } from "src/lib/uiFont";
+import {
+  isUiDensityPreference,
+  type UiDensityPreference,
+} from "src/lib/density";
 
 export type SettingsDialogSection =
   | "general"
@@ -12,7 +16,7 @@ export type SettingsDialogSection =
 export type AppSettings = {
   theme: "system" | "light" | "dark";
   uiFont: UiFontPreference;
-  density: "comfortable" | "compact";
+  density: UiDensityPreference;
   defaultRowLimit: string;
   queryTimeoutSeconds: string;
   autosaveSqlDrafts: boolean;
@@ -48,6 +52,9 @@ export function loadAppSettings(): AppSettings {
       ...DEFAULT_SETTINGS,
       ...parsed,
       uiFont: isUiFontPreference(parsed.uiFont) ? parsed.uiFont : "inter",
+      density: isUiDensityPreference(parsed.density)
+        ? parsed.density
+        : "comfortable",
     };
   } catch {
     return DEFAULT_SETTINGS;

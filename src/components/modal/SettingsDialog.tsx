@@ -22,6 +22,7 @@ import {
 } from "src/components/settings/types";
 import { applyThemePreference } from "src/lib/theme";
 import { applyUiFontPreference } from "src/lib/uiFont";
+import { applyUiDensityPreference } from "src/lib/density";
 
 export type { SettingsDialogSection } from "src/components/settings/types";
 
@@ -82,12 +83,16 @@ export function SettingsDialog(props: Props) {
     if (key === "uiFont") {
       applyUiFontPreference(value as AppSettings["uiFont"]);
     }
+    if (key === "density") {
+      applyUiDensityPreference(value as AppSettings["density"]);
+    }
   }
 
   function resetSettings() {
     setSettings(DEFAULT_SETTINGS);
     applyThemePreference(DEFAULT_SETTINGS.theme);
     applyUiFontPreference(DEFAULT_SETTINGS.uiFont);
+    applyUiDensityPreference(DEFAULT_SETTINGS.density);
   }
 
   function renderSection() {

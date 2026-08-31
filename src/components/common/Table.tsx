@@ -293,6 +293,7 @@ export function Table<T = any>({
       >
         <table
           ref={tableRef}
+          data-density-table
           class={cn(
             "w-full border-collapse border border-t-0 border-neutral-200",
             className

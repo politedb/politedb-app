@@ -12,6 +12,7 @@ import {
   installSystemThemeListener,
 } from "src/lib/theme";
 import { applyStoredUiFontPreference } from "src/lib/uiFont";
+import { applyStoredUiDensityPreference } from "src/lib/density";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -20,6 +21,7 @@ function isTauriRuntime() {
 async function boot() {
   applyStoredThemePreference();
   applyStoredUiFontPreference();
+  applyStoredUiDensityPreference();
   installSystemThemeListener();
   initAnalytics();
 

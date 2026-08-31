@@ -413,6 +413,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
   return (
     <div
+      data-density-card
       role="button"
       tabIndex={0}
       onClick={onSelectProfile}
@@ -439,7 +440,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     >
       {/* LEFT */}
       <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+        <div
+          data-density-card-icon
+          class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700"
+        >
           <DbIcon engine={engine} px={28} className="h-7 w-7" />
         </div>
 
@@ -488,7 +492,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
           </div>
 
           {/* Subtitle row */}
-          <div class="mt-1 flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <div
+            data-density-card-subtitle
+            class="mt-1 flex min-w-0 items-center gap-2 text-xs text-slate-500 dark:text-slate-400"
+          >
             {subtitle ? (
               <span class="min-w-0 truncate" title={subtitle}>
                 {subtitle}

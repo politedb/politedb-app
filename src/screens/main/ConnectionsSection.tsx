@@ -73,7 +73,10 @@ function ConnectionCards(props: {
 
   if (viewMode === "grid") {
     return (
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <div
+        data-density-list
+        class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+      >
         {profiles.map((p) => (
           <div key={p.id} class="min-w-0">
             <ConnectionCard
@@ -94,7 +97,7 @@ function ConnectionCards(props: {
   }
 
   return (
-    <div class="space-y-2">
+    <div data-density-list class="space-y-2">
       {profiles.map((p) => (
         <ConnectionCard
           key={p.id}

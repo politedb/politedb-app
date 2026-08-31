@@ -31,9 +31,12 @@ import {
 import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 import { getResolvedTheme, type ResolvedTheme } from "src/lib/theme";
 import { getAppliedUiFontStack } from "src/lib/uiFont";
+import { getAppliedUiDensity, type UiDensityPreference } from "src/lib/density";
 
-const ROW_HEIGHT = 28;
-const HEADER_HEIGHT = 28;
+const COMFORTABLE_ROW_HEIGHT = 28;
+const COMFORTABLE_HEADER_HEIGHT = 28;
+const COMPACT_ROW_HEIGHT = 24;
+const COMPACT_HEADER_HEIGHT = 26;
 const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
 const BOOLEAN_CONTROL_WIDTH = 18;
 
@@ -474,6 +477,13 @@ export function CanvasTable({
   }));
   const [theme, setTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
   const [uiFontStack, setUiFontStack] = useState(() => getAppliedUiFontStack());
+  const [density, setDensity] = useState<UiDensityPreference>(() =>
+    getAppliedUiDensity()
+  );
+  const ROW_HEIGHT =
+    density === "compact" ? COMPACT_ROW_HEIGHT : COMFORTABLE_ROW_HEIGHT;
+  const HEADER_HEIGHT =
+    density === "compact" ? COMPACT_HEADER_HEIGHT : COMFORTABLE_HEADER_HEIGHT;
 
   useEffect(() => {
     const onThemeChange = (event: Event) => {
@@ -494,6 +504,18 @@ export function CanvasTable({
     window.addEventListener("politedb:fontchange", onFontChange);
     return () =>
       window.removeEventListener("politedb:fontchange", onFontChange);
+  }, []);
+
+  useEffect(() => {
+    const onDensityChange = (event: Event) => {
+      const nextDensity = (
+        event as CustomEvent<{ density?: UiDensityPreference }>
+      ).detail?.density;
+      setDensity(nextDensity ?? getAppliedUiDensity());
+    };
+    window.addEventListener("politedb:densitychange", onDensityChange);
+    return () =>
+      window.removeEventListener("politedb:densitychange", onDensityChange);
   }, []);
 
   // Sync widthByName if prop changes (optional)
@@ -781,6 +803,7 @@ export function CanvasTable({
     foreignKeyMap,
     theme,
     uiFontStack,
+    ROW_HEIGHT,
   ]);
 
   useEffect(() => {
@@ -865,7 +888,7 @@ export function CanvasTable({
 
       return { x, y, w, h };
     },
-    [columns, colLefts, colWidths]
+    [columns, colLefts, colWidths, ROW_HEIGHT]
   );
 
   useEffect(() => {
@@ -903,7 +926,7 @@ export function CanvasTable({
 
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
-  }, [draw]);
+  }, [draw, ROW_HEIGHT, HEADER_HEIGHT]);
 
   // --------------------------------------------------------------------------
   // Resize Handlers (Logic)
@@ -1102,7 +1125,7 @@ export function CanvasTable({
       }
     }
     prevTotalRows.current = totalRows;
-  }, [totalRows, isNewRow, onSelect]);
+  }, [totalRows, isNewRow, onSelect, ROW_HEIGHT, HEADER_HEIGHT]);
 
   // --------------------------------------------------------------------------
   // Header click: sort toggling
@@ -1612,6 +1635,8 @@ export function CanvasTable({
       onSelect,
       commitAndExit,
       onClearSelection,
+      ROW_HEIGHT,
+      HEADER_HEIGHT,
     ]
   );
 
@@ -1661,7 +1686,17 @@ export function CanvasTable({
         value,
       });
     },
-    [columns, colLefts, colWidths, totalRows, selectedRows, getRowAt, onSelect]
+    [
+      columns,
+      colLefts,
+      colWidths,
+      totalRows,
+      selectedRows,
+      getRowAt,
+      onSelect,
+      ROW_HEIGHT,
+      HEADER_HEIGHT,
+    ]
   );
 
   const handleDblClick = useCallback(
@@ -1692,7 +1727,16 @@ export function CanvasTable({
 
       openCellEditor(rowIdx, colIdx);
     },
-    [columns, colLefts, colWidths, totalRows, onAddRow, openCellEditor]
+    [
+      columns,
+      colLefts,
+      colWidths,
+      totalRows,
+      onAddRow,
+      openCellEditor,
+      ROW_HEIGHT,
+      HEADER_HEIGHT,
+    ]
   );
 
   // Sync editor position when widths change or scrolling

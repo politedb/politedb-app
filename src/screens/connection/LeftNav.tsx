@@ -65,6 +65,7 @@ function SectionHeader(props: {
 
   return (
     <Button
+      data-density-item
       variant="ghost"
       class="w-full justify-start rounded-md border-none px-2 py-1.5 hover:bg-neutral-200/60 active:bg-neutral-200/80"
       onClick={onOpen ?? onToggle}
@@ -293,13 +294,14 @@ export function LeftNav({
 
   return (
     <aside
+      data-density-region="sidebar"
       class={cn(
         "flex h-full w-full flex-col",
         "border-r border-neutral-200 bg-neutral-100 dark:border-slate-800 dark:bg-slate-950"
       )}
     >
       {/* Top: Search */}
-      <div class="p-2">
+      <div data-density-sidebar-header class="p-2">
         <div class="relative">
           <Input
             type="text"
@@ -349,6 +351,7 @@ export function LeftNav({
 
                       return (
                         <button
+                          data-density-item
                           type="button"
                           key={key}
                           onClick={() =>
@@ -412,6 +415,7 @@ export function LeftNav({
 
                     return (
                       <Button
+                        data-density-item
                         variant={isActive ? "default" : "ghost"}
                         key={key}
                         onClick={() => void actions.selectTable(table)}

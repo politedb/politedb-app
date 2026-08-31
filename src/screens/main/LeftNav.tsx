@@ -72,11 +72,12 @@ export function LeftNav(props: {
   return (
     <>
       <aside
+        data-density-region="sidebar"
         class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
         style={{ width: "var(--sidebar-width)" }}
       >
         {/* Top padding / subtle header */}
-        <div class="p-3">
+        <div data-density-sidebar-header class="p-3">
           <div class="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
             NAVIGATION
           </div>
@@ -89,6 +90,7 @@ export function LeftNav(props: {
 
               return (
                 <button
+                  data-density-item
                   key={item.id}
                   type="button"
                   onClick={() => onChange(item.id)}
@@ -106,6 +108,7 @@ export function LeftNav(props: {
                 >
                   {/* Icon pill */}
                   <span
+                    data-density-icon
                     class={[
                       "flex h-8 w-8 items-center justify-center rounded-lg",
                       isActive
