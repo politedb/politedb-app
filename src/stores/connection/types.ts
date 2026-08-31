@@ -119,6 +119,12 @@ export type TableRowState = {
   receivedAnyChunk?: boolean;
 };
 
+export type TableRowCache = {
+  map: Map<number, unknown[]>;
+  order: number[];
+  orderHead: number;
+};
+
 export type ConnectionState = {
   tables: Record<string, TableState>;
   schemas: Record<string, SchemaState>;
@@ -139,10 +145,7 @@ export type ConnectionState = {
   tableSortByKey: Record<string, TableSort | null>;
 
   tableRowsByKey: Record<string, TableRowState>;
-  tableRowCacheByKey: Record<
-    string,
-    { map: Map<number, unknown[]>; order: number[] }
-  >;
+  tableRowCacheByKey: Record<string, TableRowCache>;
   selectedRowByKey: Record<string, SelectedRowDetail | null>;
   rowFieldEditHandlerByKey: Record<string, RowFieldEditHandler | undefined>;
 

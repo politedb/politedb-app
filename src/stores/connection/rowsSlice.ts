@@ -314,7 +314,11 @@ export function createRowsUiActions(args: {
         let cacheChanged = false;
 
         if (!cache) {
-          cache = { map: new Map<number, unknown[]>(), order: [] };
+          cache = {
+            map: new Map<number, unknown[]>(),
+            order: [],
+            orderHead: 0,
+          };
           cacheChanged = true;
         }
 

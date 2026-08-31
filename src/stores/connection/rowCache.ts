@@ -1,30 +1,34 @@
 import type { TableConstraint } from "src/types";
-import type { TableRowState } from "./types";
+import type { TableRowCache, TableRowState } from "./types";
 
 const ROW_CACHE_LIMIT = 100000;
 const ROW_CACHE_EVICT_BATCH = 512;
 
-export function cachePut(
-  cache: { map: Map<number, unknown[]>; order: number[] },
-  idx: number,
-  row: unknown[]
-) {
+export function cachePut(cache: TableRowCache, idx: number, row: unknown[]) {
   if (!cache.map.has(idx)) cache.order.push(idx);
   cache.map.set(idx, row);
 
-  if (cache.order.length > ROW_CACHE_LIMIT + ROW_CACHE_EVICT_BATCH) {
+  if (
+    cache.order.length - cache.orderHead >
+    ROW_CACHE_LIMIT + ROW_CACHE_EVICT_BATCH
+  ) {
     for (let i = 0; i < ROW_CACHE_EVICT_BATCH; i++) {
-      const oldest = cache.order.shift();
+      const oldest = cache.order[cache.orderHead++];
       if (oldest === undefined) break;
       cache.map.delete(oldest);
+    }
+
+    if (
+      cache.orderHead >= ROW_CACHE_EVICT_BATCH * 8 &&
+      cache.orderHead * 2 >= cache.order.length
+    ) {
+      cache.order = cache.order.slice(cache.orderHead);
+      cache.orderHead = 0;
     }
   }
 }
 
-export function cacheGet(
-  cache: { map: Map<number, unknown[]>; order: number[] } | undefined,
-  idx: number
-) {
+export function cacheGet(cache: TableRowCache | undefined, idx: number) {
   if (!cache) return undefined;
   return cache.map.get(idx);
 }
