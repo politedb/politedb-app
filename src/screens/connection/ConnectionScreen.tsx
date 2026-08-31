@@ -586,7 +586,6 @@ export function ConnectionScreen() {
   }, [profile]);
 
   const onInsertSqlIntoActiveEditor = useInsertSqlIntoActiveEditor({
-    activeProfileScreen,
     activeSqlWindow,
     openSqlEditor,
   });

@@ -40,6 +40,60 @@ const COMPACT_HEADER_HEIGHT = 26;
 const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
 const BOOLEAN_CONTROL_WIDTH = 18;
 
+function readDevicePixelRatio() {
+  return Math.max(1, window.devicePixelRatio || 1);
+}
+
+function useDevicePixelRatio() {
+  const [devicePixelRatio, setDevicePixelRatio] =
+    useState(readDevicePixelRatio);
+
+  useEffect(() => {
+    let mediaQuery: MediaQueryList | null = null;
+    let observedRatio: number | null = null;
+
+    const removeMediaListener = () => {
+      if (!mediaQuery) return;
+      if (typeof mediaQuery.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", onChange);
+      } else {
+        mediaQuery.removeListener(onChange);
+      }
+    };
+
+    const addMediaListener = () => {
+      if (!mediaQuery) return;
+      if (typeof mediaQuery.addEventListener === "function") {
+        mediaQuery.addEventListener("change", onChange);
+      } else {
+        mediaQuery.addListener(onChange);
+      }
+    };
+
+    function onChange() {
+      const next = readDevicePixelRatio();
+      setDevicePixelRatio((current) => (current === next ? current : next));
+      if (mediaQuery && observedRatio === next) return;
+      removeMediaListener();
+      observedRatio = next;
+      mediaQuery =
+        typeof window.matchMedia === "function"
+          ? window.matchMedia(`(resolution: ${next}dppx)`)
+          : null;
+      addMediaListener();
+    }
+
+    onChange();
+    window.addEventListener("resize", onChange, { passive: true });
+    return () => {
+      window.removeEventListener("resize", onChange);
+      removeMediaListener();
+    };
+  }, []);
+
+  return devicePixelRatio;
+}
+
 type EditingCell = { rowIdx: number; colIdx: number };
 type HeaderMenuState = { x: number; y: number; colName: string };
 type BooleanMenuState = {
@@ -463,6 +517,7 @@ export function CanvasTable({
   onChangeSort,
   onCellActivate,
 }: Props) {
+  const devicePixelRatio = useDevicePixelRatio();
   // --- Refs for DOM elements ---
   const { ref: rootCallbackRef, rootRef, isFocused } = useTableFocusState();
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -855,7 +910,7 @@ export function CanvasTable({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = devicePixelRatio;
     canvas.style.width = `${viewport.w}px`;
     canvas.style.height = `${bodyH}px`;
     const pixelWidth = Math.floor(viewport.w * dpr);
@@ -866,7 +921,7 @@ export function CanvasTable({
     const ctx = canvas.getContext("2d");
     ctxRef.current = ctx;
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }, [viewport.w, bodyH]);
+  }, [viewport.w, bodyH, devicePixelRatio]);
 
   // --------------------------------------------------------------------------
   // Helper: Get Cell Rect
@@ -893,7 +948,7 @@ export function CanvasTable({
 
   useLayoutEffect(() => {
     draw();
-  }, [draw, dataVersion]);
+  }, [draw, dataVersion, devicePixelRatio]);
 
   // --------------------------------------------------------------------------
   // Scroll Handler

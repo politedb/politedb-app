@@ -14,7 +14,10 @@ import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
 import { PatchData } from "src/utils/generateSql";
-import { getLiveSqlEditorContent } from "src/components/editor/liveSqlEditorRegistry";
+import {
+  consumeUndrainedSqlForLiveEditor,
+  getLiveSqlEditorContent,
+} from "src/components/editor/liveSqlEditorRegistry";
 import { clearSqlRunnerWindowState } from "./useSqlRunner";
 
 /* =============================================================================
@@ -303,8 +306,13 @@ export function useConnectionWindows(
       // If you still keep legacy sqlResults store, clear it here
       if (toClose?.type === "sql") {
         const liveContent = getLiveSqlEditorContent(windowId);
+        const pendingSql = consumeUndrainedSqlForLiveEditor(windowId);
+        let content = liveContent ?? toClose.content ?? "";
+        for (const sql of pendingSql) {
+          content = content.trim() ? `${content.trim()}\n\n${sql}` : sql;
+        }
         const lastClosed = {
-          content: liveContent ?? toClose.content ?? "",
+          content,
           title: toClose.title ?? "SQL Query",
         };
         lastClosedSqlByTab.set(activeProfileScreen, lastClosed);

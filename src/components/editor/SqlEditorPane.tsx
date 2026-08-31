@@ -9,10 +9,7 @@ import type { ComponentChildren } from "preact";
 import "src/monacoEnv";
 
 import * as monaco from "monaco-editor";
-import {
-  registerLiveSqlEditor,
-  unregisterLiveSqlEditor,
-} from "src/components/editor/liveSqlEditorRegistry";
+import { registerLiveSqlEditor } from "src/components/editor/liveSqlEditorRegistry";
 import type { DatabaseEngine, SqlEditorWindow, TableItem } from "src/types";
 import {
   registerSqlCompletionSmart,
@@ -552,7 +549,7 @@ export function SqlEditorPane(props: Props) {
       };
       window.addEventListener("politedb:themechange", onThemeChange);
 
-      registerLiveSqlEditor(win.id, {
+      const unregisterLiveEditor = registerLiveSqlEditor(win.id, {
         getValue: () => editor.getModel()?.getValue() ?? "",
         appendSql: appendSqlToEditor,
       });
@@ -638,7 +635,7 @@ export function SqlEditorPane(props: Props) {
         blurSub.dispose();
         completionDisposable.dispose();
         clearRunHighlight();
-        unregisterLiveSqlEditor(win.id);
+        unregisterLiveEditor();
         editor.dispose();
         editorRef.current = null;
         lastCursorPositionRef.current = null;

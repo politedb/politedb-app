@@ -91,6 +91,22 @@ describe("getCanvasRowBackground", () => {
 });
 
 describe("CanvasTable cell editor", () => {
+  it("updates canvas backing resolution when device pixel ratio changes", async () => {
+    vi.stubGlobal("devicePixelRatio", 1);
+    render(h(CanvasTableHarness, { onCommitEdit: vi.fn() }));
+
+    const canvas = document.querySelector<HTMLCanvasElement>(
+      "[data-canvas-table-viewport]"
+    );
+    if (!canvas) throw new Error("Canvas viewport not found");
+    expect(canvas.width).toBe(1);
+
+    vi.stubGlobal("devicePixelRatio", 2);
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => expect(canvas.width).toBe(2));
+  });
+
   it("keeps the viewport canvas outside scroll content", () => {
     render(
       h(CanvasTableHarness, {

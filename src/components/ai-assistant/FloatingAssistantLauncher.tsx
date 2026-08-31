@@ -5,8 +5,8 @@ import {
   useRef,
   useState,
 } from "preact/hooks";
-import { lazy, Suspense } from "preact/compat";
 import { SparklesIcon } from "src/components/icons";
+import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
@@ -15,11 +15,14 @@ import { pickHostDbUser } from "src/utils/connection";
 import { profileConnectionHost } from "src/utils/connectionLog";
 import { Button } from "../common/Button";
 
-const AiAssistantPanel = lazy(() =>
+const loadAiAssistantPanel = () =>
   import("src/components/ai-assistant/AiAssistantPanel").then((module) => ({
     default: module.AiAssistantPanel,
-  }))
-);
+  }));
+
+const AiAssistantPanel = createRetryableLazy(loadAiAssistantPanel, {
+  label: "AI assistant",
+});
 
 export const OPEN_FLOATING_ASSISTANT_EVENT = "politedb-open-floating-assistant";
 export const FLOATING_ASSISTANT_CHAT_SESSION_KEY = "global-ai-assistant";
@@ -122,24 +125,22 @@ export function FloatingAssistantLauncher() {
           aria-label="AI assistant"
         >
           <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
-            <Suspense fallback={null}>
-              <AiAssistantPanel
-                presentation="floating"
-                onClose={() => setOpen(false)}
-                chatSessionKey={chatSessionKey}
-                engine={context?.engine ?? "postgres"}
-                runtimeConnectionId={context?.runtimeConnectionId}
-                activeSchema={context?.activeSchema}
-                activeTable={context?.activeTable}
-                tables={context?.tables ?? []}
-                columnsByTable={context?.columnsByTable}
-                columnDetailsByTable={context?.columnDetailsByTable}
-                currentSql={context?.currentSql}
-                querySafetyMode={context?.querySafetyMode}
-                savedConnections={savedConnections}
-                onInsertSql={context?.onInsertSql}
-              />
-            </Suspense>
+            <AiAssistantPanel
+              presentation="floating"
+              onClose={() => setOpen(false)}
+              chatSessionKey={chatSessionKey}
+              engine={context?.engine ?? "postgres"}
+              runtimeConnectionId={context?.runtimeConnectionId}
+              activeSchema={context?.activeSchema}
+              activeTable={context?.activeTable}
+              tables={context?.tables ?? []}
+              columnsByTable={context?.columnsByTable}
+              columnDetailsByTable={context?.columnDetailsByTable}
+              currentSql={context?.currentSql}
+              querySafetyMode={context?.querySafetyMode}
+              savedConnections={savedConnections}
+              onInsertSql={context?.onInsertSql}
+            />
           </div>
         </div>
       ) : null}
