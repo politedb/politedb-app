@@ -177,11 +177,6 @@ fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
     state
 }
 
-pub fn blocks_app_update(state: &LicenseState) -> bool {
-    let _ = state;
-    false
-}
-
 pub fn blocks_ai_feature(state: &LicenseState) -> bool {
     let status = state.status.trim().to_lowercase();
     if status == "active" {

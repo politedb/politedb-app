@@ -1,15 +1,31 @@
+#[cfg(target_os = "linux")]
+use std::process::Command;
+
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
-use crate::license;
+#[cfg(target_os = "linux")]
+const DOWNLOAD_PAGE_URL: &str = "https://politedb.com/download?os=linux";
+
+#[cfg(any(target_os = "linux", test))]
+fn should_open_download_page(target_os: &str, appimage_is_present: bool) -> bool {
+    target_os == "linux" && !appimage_is_present
+}
+
+#[cfg(target_os = "linux")]
+fn open_download_page() -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(DOWNLOAD_PAGE_URL)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open update download page: {error}"))
+}
 
 #[tauri::command]
 pub async fn updater_install_if_allowed(app: AppHandle) -> Result<(), String> {
-    let license_state = license::license_state_load(&app)?;
-    if license::blocks_app_update(&license_state) {
-        return Err(
-            "App updates are disabled because the free trial or license has expired.".to_string(),
-        );
+    #[cfg(target_os = "linux")]
+    if should_open_download_page(std::env::consts::OS, std::env::var_os("APPIMAGE").is_some()) {
+        return open_download_page();
     }
 
     let updater = app
@@ -29,4 +45,25 @@ pub async fn updater_install_if_allowed(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to download and install update: {e}"))?;
 
     app.restart();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_open_download_page;
+
+    #[test]
+    fn linux_package_install_opens_download_page() {
+        assert!(should_open_download_page("linux", false));
+    }
+
+    #[test]
+    fn linux_appimage_uses_runtime_updater() {
+        assert!(!should_open_download_page("linux", true));
+    }
+
+    #[test]
+    fn other_platforms_use_runtime_updater() {
+        assert!(!should_open_download_page("macos", false));
+        assert!(!should_open_download_page("windows", false));
+    }
 }
