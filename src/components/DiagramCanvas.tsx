@@ -17,6 +17,10 @@ import {
   isDiagramRectVisible,
   shouldRenderDiagramTableDetails,
 } from "src/components/diagram/diagramViewport";
+import {
+  buildDiagramSpatialIndex,
+  getDiagramSpatialCandidates,
+} from "src/components/diagram/diagramSpatialIndex";
 import { KeyIcon, MinusIcon, PlusIcon } from "src/components/icons";
 
 type DiagramColumn = {
@@ -682,6 +686,19 @@ export function DiagramCanvas(props: { state: DiagramState }) {
     [itemByKey, relationMiddleYByIndex, state.relations]
   );
 
+  const cardSpatialIndex = useMemo(
+    () => buildDiagramSpatialIndex(layout.items.map((item) => [item] as const)),
+    [layout.items]
+  );
+
+  const relationSpatialIndex = useMemo(
+    () =>
+      buildDiagramSpatialIndex(
+        relationRenderItems.map((item) => item.geometry.segments)
+      ),
+    [relationRenderItems]
+  );
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -725,11 +742,14 @@ export function DiagramCanvas(props: { state: DiagramState }) {
   const visibleCards = useMemo(() => {
     const rangeStart = viewport.top - DIAGRAM_VIEWPORT_OVERSCAN;
     const rangeEnd = viewport.top + viewport.height + DIAGRAM_VIEWPORT_OVERSCAN;
-    return layout.items.flatMap((item) => {
-      if (!isDiagramRectVisible(item, viewport)) return [];
-      if (!showDetails) {
-        return [{ item, columnStart: 0, columnEnd: 0 }];
-      }
+    return getDiagramSpatialCandidates(
+      cardSpatialIndex,
+      viewport,
+      DIAGRAM_VIEWPORT_OVERSCAN
+    ).flatMap((index) => {
+      const item = layout.items[index];
+      if (!item || !isDiagramRectVisible(item, viewport)) return [];
+      if (!showDetails) return [{ item, columnStart: 0, columnEnd: 0 }];
       const columnWindow = getVisibleIndexWindow(
         item.y + HEADER_HEIGHT,
         ROW_HEIGHT,
@@ -745,16 +765,27 @@ export function DiagramCanvas(props: { state: DiagramState }) {
         },
       ];
     });
-  }, [layout.items, showDetails, viewport]);
+  }, [cardSpatialIndex, layout.items, showDetails, viewport]);
 
   const visibleRelations = useMemo(
     () =>
-      relationRenderItems.filter(({ geometry }) =>
-        geometry.segments.some((segment) =>
-          isDiagramRectVisible(segment, viewport)
-        )
-      ),
-    [relationRenderItems, viewport]
+      getDiagramSpatialCandidates(
+        relationSpatialIndex,
+        viewport,
+        DIAGRAM_VIEWPORT_OVERSCAN
+      ).flatMap((index) => {
+        const item = relationRenderItems[index];
+        if (
+          !item ||
+          !item.geometry.segments.some((segment) =>
+            isDiagramRectVisible(segment, viewport)
+          )
+        ) {
+          return [];
+        }
+        return [item];
+      }),
+    [relationRenderItems, relationSpatialIndex, viewport]
   );
 
   const hoveredRelation =

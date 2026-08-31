@@ -1,11 +1,13 @@
+use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use std::{fs, io::Write};
 
 use serde::Serialize;
 use tauri::Manager;
+use tokio::fs as async_fs;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::time::sleep;
@@ -792,7 +794,8 @@ pub async fn ai_runtime_download_default_model(
             runtime.model_total_bytes = total_bytes;
         }
 
-        let mut file = fs::File::create(&temp_path)
+        let mut file = async_fs::File::create(&temp_path)
+            .await
             .map_err(|e| format!("Failed to create temp model file: {e}"))?;
         let mut response = response;
         let mut downloaded_bytes: u64 = 0;
@@ -824,6 +827,7 @@ pub async fn ai_runtime_download_default_model(
 
             downloaded_bytes = downloaded_bytes.saturating_add(chunk.len() as u64);
             file.write_all(&chunk)
+                .await
                 .map_err(|e| format!("Failed to write downloaded model chunk: {e}"))?;
             let mut runtime = state.ai_runtime.lock().await;
             runtime.model_downloaded_bytes = Some(downloaded_bytes);
@@ -841,6 +845,7 @@ pub async fn ai_runtime_download_default_model(
         }
 
         file.flush()
+            .await
             .map_err(|e| format!("Failed to flush downloaded model file: {e}"))?;
         drop(file);
 
@@ -854,7 +859,8 @@ pub async fn ai_runtime_download_default_model(
             }
         }
 
-        fs::rename(&temp_path, &destination)
+        async_fs::rename(&temp_path, &destination)
+            .await
             .map_err(|e| format!("Failed to finalize downloaded model: {e}"))?;
 
         let mut runtime = state.ai_runtime.lock().await;

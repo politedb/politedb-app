@@ -43,7 +43,7 @@ describe("connection form engine config", () => {
     const postgres = getConnectionFormEngineConfig("postgres");
 
     expect(getCredentialInputPlaceholder(sheets, true)).toBe(
-      "Google API key or OAuth access token (ya29...)"
+      "API key or OAuth access token"
     );
     expect(getCredentialInputPlaceholder(postgres, true)).toBe(
       "Enter password (save in Keychain)"

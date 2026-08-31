@@ -181,6 +181,8 @@ export function useAiChatSession(chatSessionKey: string) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const userAwayFromBottomRef = useRef(false);
   const streamingFrameRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const pendingScrollBehaviorRef = useRef<ScrollBehavior>("auto");
   const pendingStreamingTextRef = useRef<{ id: string; text: string } | null>(
     null
   );
@@ -216,15 +218,28 @@ export function useAiChatSession(chatSessionKey: string) {
       if (streamingFrameRef.current != null) {
         cancelAnimationFrame(streamingFrameRef.current);
       }
+      if (scrollFrameRef.current != null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+      }
     },
     []
   );
 
   useEffect(() => {
     if (userAwayFromBottomRef.current) return;
-    messagesEndRef.current?.scrollIntoView({
-      block: "end",
-      behavior: "smooth",
+    pendingScrollBehaviorRef.current = messages.some(
+      (message) => message.streaming
+    )
+      ? "auto"
+      : "smooth";
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (userAwayFromBottomRef.current) return;
+      messagesEndRef.current?.scrollIntoView({
+        block: "end",
+        behavior: pendingScrollBehaviorRef.current,
+      });
     });
   }, [messages]);
 

@@ -107,29 +107,40 @@ export function OverlayScrollbars({
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(updateThumbs);
-    const observeSize = () => {
-      resizeObserver?.disconnect();
-      resizeObserver?.observe(scroller);
-      Array.from(scroller.children).forEach((child) =>
-        resizeObserver?.observe(child)
-      );
-      updateThumbs();
-    };
-    const mutationObserver = new MutationObserver(observeSize);
+        : new ResizeObserver(scheduleThumbUpdate);
+    resizeObserver?.observe(scroller);
+    Array.from(scroller.children).forEach((child) =>
+      resizeObserver?.observe(child)
+    );
 
-    observeSize();
+    const mutationObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        record.removedNodes.forEach((node) => {
+          if (node instanceof Element) resizeObserver?.unobserve(node);
+        });
+        record.addedNodes.forEach((node) => {
+          if (node instanceof Element) resizeObserver?.observe(node);
+        });
+      }
+      scheduleThumbUpdate();
+    });
+
+    updateThumbs();
     mutationObserver.observe(scroller, { childList: true });
     scroller.addEventListener("scroll", scheduleThumbUpdate, {
       passive: true,
     });
-    window.addEventListener("resize", scheduleThumbUpdate, { passive: true });
+    if (!resizeObserver) {
+      window.addEventListener("resize", scheduleThumbUpdate, { passive: true });
+    }
 
     return () => {
       mutationObserver.disconnect();
       resizeObserver?.disconnect();
       scroller.removeEventListener("scroll", scheduleThumbUpdate);
-      window.removeEventListener("resize", scheduleThumbUpdate);
+      if (!resizeObserver) {
+        window.removeEventListener("resize", scheduleThumbUpdate);
+      }
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
