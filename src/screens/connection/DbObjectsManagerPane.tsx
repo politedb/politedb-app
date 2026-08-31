@@ -19,6 +19,7 @@ import { Spinner } from "src/components/common/Spinner";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useLoadDbObjectDefinition } from "./hooks/useLoadDbObjectDefinition";
 import type {
   DatabaseObjectItem,
   DatabaseObjectKind,
@@ -30,7 +31,6 @@ import {
   buildDropDatabaseObjectSql,
   buildSaveStatements,
   getDatabaseObjectCapability,
-  loadDatabaseObjectDefinition,
   objectKindLabel,
   objectKindSingular,
 } from "src/lib/databaseObjects";
@@ -120,7 +120,7 @@ function ObjectListItem(props: {
   );
 }
 
-export function DatabaseObjectsManagerPane(props: {
+export function DbObjectsManagerPane(props: {
   win: DatabaseObjectManagerWindow;
 }) {
   const { win } = props;
@@ -139,15 +139,12 @@ export function DatabaseObjectsManagerPane(props: {
     name: "",
     tableName: "",
   });
-  const [editorSql, setEditorSql] = useState("");
-  const [loadingDefinition, setLoadingDefinition] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent | null>(
     null
   );
-  const requestSeqRef = useRef(0);
   const pendingSelectionRef = useRef<{
     kind: DatabaseObjectKind;
     schema: string;
@@ -223,6 +220,18 @@ export function DatabaseObjectsManagerPane(props: {
     return allObjects.find((item) => item.id === selectedObjectId) ?? null;
   }, [allObjects, selectedObjectId]);
 
+  const {
+    sql: editorSql,
+    setSql: setEditorSql,
+    loading: loadingDefinition,
+    loadError,
+  } = useLoadDbObjectDefinition({
+    selectedObject,
+    isCreateMode,
+    engine: rt.engine,
+    connectionId: rt.runtimeConnectionId,
+  });
+
   const editorStorageId = useMemo(() => {
     if (selectedObject) {
       return `db-object:${rt.profileId}:${selectedObject.id}`;
@@ -242,37 +251,6 @@ export function DatabaseObjectsManagerPane(props: {
     setInfo(null);
     await rt.refreshSchemaAndTables();
   };
-
-  const loadSelectedObjectDefinition = async (item: DatabaseObjectItem) => {
-    if (!rt.runtimeConnectionId || !item.capability.canReadDefinition) return;
-    const seq = ++requestSeqRef.current;
-    setLoadingDefinition(true);
-    setError(null);
-    setInfo(null);
-    try {
-      const result = await loadDatabaseObjectDefinition({
-        engine: rt.engine,
-        connectionId: rt.runtimeConnectionId,
-        item,
-      });
-      if (requestSeqRef.current !== seq) return;
-      setEditorSql(result.sql);
-    } catch (err) {
-      if (requestSeqRef.current !== seq) return;
-      setEditorSql("");
-      setError(err instanceof Error ? err.message : String(err ?? ""));
-    } finally {
-      if (requestSeqRef.current === seq) {
-        setLoadingDefinition(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (isCreateMode || !selectedObject) return;
-    void loadSelectedObjectDefinition(selectedObject);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedObject?.id, isCreateMode, loadSelectedObjectDefinition]);
 
   const startCreateMode = () => {
     setError(null);
@@ -554,7 +532,7 @@ export function DatabaseObjectsManagerPane(props: {
             {loadingDefinition ? (
               <div class="flex items-center gap-2 text-sm text-neutral-500">
                 <Spinner className="size-4 text-neutral-500" />
-                Loading definition...
+                Loading...
               </div>
             ) : null}
           </div>
@@ -629,9 +607,9 @@ export function DatabaseObjectsManagerPane(props: {
 
         {toolbar}
 
-        {error ? (
+        {error || loadError ? (
           <div class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-            {error}
+            {error || loadError}
           </div>
         ) : null}
         {info ? (
