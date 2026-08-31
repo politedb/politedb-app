@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { lazy, Suspense } from "preact/compat";
 import { Button } from "src/components/common/Button";
 import {
   Dialog,
@@ -10,7 +11,6 @@ import {
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
-import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import {
   SearchIcon,
   SquareFunctionIcon,
@@ -36,6 +36,12 @@ import {
 } from "src/lib/databaseObjects";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { operationExecuteTransaction } from "src/lib/tauri";
+
+const SqlEditorPane = lazy(() =>
+  import("src/components/editor/SqlEditorPane").then((module) => ({
+    default: module.SqlEditorPane,
+  }))
+);
 
 type ConfirmIntent =
   | { kind: "save"; statements: string[] }
@@ -645,27 +651,35 @@ export function DatabaseObjectsManagerPane(props: {
         ) : null}
 
         <div class="min-h-0 flex-1">
-          <SqlEditorPane
-            key={editorStorageId}
-            win={{
-              id: `${win.id}-editor`,
-              type: "sql",
-              title: win.title,
-              content: editorSql,
-            }}
-            storageId={editorStorageId}
-            onCommitContent={(_, next) => setEditorSql(next)}
-            onRunSql={undefined}
-            onExplainSql={undefined}
-            onCancelSql={undefined}
-            isExecuting={running}
-            schemas={meta.schemas ?? []}
-            activeSchema={schemaFilter}
-            tables={meta.tables ?? []}
-            columnsByTable={meta.columnsByTable}
-            engine={rt.engine}
-            toolbar={null}
-          />
+          <Suspense
+            fallback={
+              <div class="flex h-full items-center justify-center">
+                <Spinner className="text-blue-600" />
+              </div>
+            }
+          >
+            <SqlEditorPane
+              key={editorStorageId}
+              win={{
+                id: `${win.id}-editor`,
+                type: "sql",
+                title: win.title,
+                content: editorSql,
+              }}
+              storageId={editorStorageId}
+              onCommitContent={(_, next) => setEditorSql(next)}
+              onRunSql={undefined}
+              onExplainSql={undefined}
+              onCancelSql={undefined}
+              isExecuting={running}
+              schemas={meta.schemas ?? []}
+              activeSchema={schemaFilter}
+              tables={meta.tables ?? []}
+              columnsByTable={meta.columnsByTable}
+              engine={rt.engine}
+              toolbar={null}
+            />
+          </Suspense>
         </div>
       </div>
 

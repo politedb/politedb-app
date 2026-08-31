@@ -1,14 +1,21 @@
 import { useMemo } from "preact/hooks";
+import { lazy, Suspense } from "preact/compat";
 
 import type { SqlEditorWindow, DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 
 import { SplitPane } from "src/components/SplitPane";
-import { SqlEditorPane } from "src/components/editor/SqlEditorPane";
 import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
+import { Spinner } from "src/components/common/Spinner";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
 import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
+
+const SqlEditorPane = lazy(() =>
+  import("src/components/editor/SqlEditorPane").then((module) => ({
+    default: module.SqlEditorPane,
+  }))
+);
 
 function makeSqlWindowScopeId(metaKey: string, windowId: string) {
   return `${metaKey || "sql"}:${windowId}`.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -95,24 +102,32 @@ export function SqlWindowPane(props: {
         fixedPaneOnResize="second"
         first={
           <div class="h-full min-h-0">
-            <SqlEditorPane
-              win={win}
-              schemas={meta.schemas}
-              tables={meta.tables}
-              columnsByTable={meta.columnsByTable}
-              engine={engine}
-              storageId={scopedWindowId}
-              onRunSql={(payload) =>
-                startRun({ windowId: scopedWindowId, sql: payload.sql })
+            <Suspense
+              fallback={
+                <div class="flex h-full items-center justify-center">
+                  <Spinner className="text-blue-600" />
+                </div>
               }
-              onExplainSql={(payload) =>
-                startExplain({ windowId: scopedWindowId, sql: payload.sql })
-              }
-              onCancelSql={() => {
-                if (activeRun?.id) cancelRun(activeRun.id);
-              }}
-              isExecuting={isExecutingSql}
-            />
+            >
+              <SqlEditorPane
+                win={win}
+                schemas={meta.schemas}
+                tables={meta.tables}
+                columnsByTable={meta.columnsByTable}
+                engine={engine}
+                storageId={scopedWindowId}
+                onRunSql={(payload) =>
+                  startRun({ windowId: scopedWindowId, sql: payload.sql })
+                }
+                onExplainSql={(payload) =>
+                  startExplain({ windowId: scopedWindowId, sql: payload.sql })
+                }
+                onCancelSql={() => {
+                  if (activeRun?.id) cancelRun(activeRun.id);
+                }}
+                isExecuting={isExecutingSql}
+              />
+            </Suspense>
 
             {!runtimeConnectionId ? (
               <div class="border-t border-neutral-200 bg-white px-3 py-2">

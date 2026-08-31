@@ -1,12 +1,18 @@
 import { MainScreen } from "src/screens/main/MainScreen";
 import { useScreenStore } from "src/stores/screen";
 import { AppHeader } from "src/components/AppHeader";
-import { ConnectionScreen } from "src/screens/connection/ConnectionScreen";
 import { useEffect } from "preact/hooks";
+import { lazy, Suspense } from "preact/compat";
 import { useLicenseStore } from "src/stores/license";
 import { trackScreenView } from "src/lib/analytics";
 import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
 import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
+
+const ConnectionScreen = lazy(() =>
+  import("src/screens/connection/ConnectionScreen").then((module) => ({
+    default: module.ConnectionScreen,
+  }))
+);
 
 export function MainLayout() {
   const { activeProfileScreen, setActiveProfileScreen, profileTabs } =
@@ -39,7 +45,11 @@ export function MainLayout() {
       />
       <div class="flex-1 overflow-hidden bg-white">
         {activeProfileScreen === "main" && <MainScreen />}
-        {activeTab && <ConnectionScreen />}
+        {activeTab && (
+          <Suspense fallback={null}>
+            <ConnectionScreen />
+          </Suspense>
+        )}
       </div>
       <FloatingAssistantLauncher />
       <UnsavedChangesDialogHost />
