@@ -504,6 +504,9 @@ pub async fn ai_runtime_start(
     let batch_size = resolved_batch_size();
 
     let mut command = Command::new(&server_bin);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+
     command
         .arg("-m")
         .arg(&model_path)
