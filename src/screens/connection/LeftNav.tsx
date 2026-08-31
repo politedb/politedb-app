@@ -170,7 +170,7 @@ export function LeftNav({
   const actions = useConnectionActionsCtx();
   const rt = useConnectionRuntimeCtx();
   const connectionChromeBlocked = !rt.runtimeConnectionId;
-  const { dataPatchMap } = useConnectionStore();
+  const dataPatchMap = useConnectionStore((state) => state.dataPatchMap);
   const isProfileLocked = useScreenStore(
     (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
   );
