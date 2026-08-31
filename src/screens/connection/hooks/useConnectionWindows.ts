@@ -14,7 +14,7 @@ import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
 import { PatchData } from "src/utils/generateSql";
-import { getLiveSqlEditorContent } from "src/components/editor/SqlEditorPane";
+import { getLiveSqlEditorContent } from "src/components/editor/liveSqlEditorRegistry";
 import { clearSqlRunnerWindowState } from "./useSqlRunner";
 
 /* =============================================================================

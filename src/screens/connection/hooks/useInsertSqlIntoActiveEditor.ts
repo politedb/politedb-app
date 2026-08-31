@@ -3,7 +3,7 @@ import type { SqlEditorWindow } from "src/types";
 import {
   appendSqlIntoLiveEditor,
   getLiveSqlEditorContent,
-} from "src/components/editor/SqlEditorPane";
+} from "src/components/editor/liveSqlEditorRegistry";
 import { useScreenStore } from "src/stores/screen";
 
 function sleep(ms: number) {

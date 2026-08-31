@@ -6,7 +6,13 @@ import {
   useState,
 } from "preact/hooks";
 import type { ComponentChildren } from "preact";
+import "src/monacoEnv";
+
 import * as monaco from "monaco-editor";
+import {
+  registerLiveSqlEditor,
+  unregisterLiveSqlEditor,
+} from "src/components/editor/liveSqlEditorRegistry";
 import type { DatabaseEngine, SqlEditorWindow, TableItem } from "src/types";
 import {
   registerSqlCompletionSmart,
@@ -52,27 +58,6 @@ type Props = {
 
 interface ExtendedEditor extends monaco.editor.IStandaloneCodeEditor {
   __disposeAll?: () => void;
-}
-
-type LiveSqlEditorApi = {
-  getValue: () => string;
-  appendSql: (sql: string) => Promise<void>;
-};
-
-const liveSqlEditors = new Map<string, LiveSqlEditorApi>();
-
-export function getLiveSqlEditorContent(windowId: string): string | null {
-  return liveSqlEditors.get(windowId)?.getValue() ?? null;
-}
-
-export async function appendSqlIntoLiveEditor(
-  windowId: string,
-  sql: string
-): Promise<boolean> {
-  const api = liveSqlEditors.get(windowId);
-  if (!api) return false;
-  await api.appendSql(sql);
-  return true;
 }
 
 function normalizeEol(s: string) {
@@ -567,7 +552,7 @@ export function SqlEditorPane(props: Props) {
       };
       window.addEventListener("politedb:themechange", onThemeChange);
 
-      liveSqlEditors.set(win.id, {
+      registerLiveSqlEditor(win.id, {
         getValue: () => editor.getModel()?.getValue() ?? "",
         appendSql: appendSqlToEditor,
       });
@@ -653,7 +638,7 @@ export function SqlEditorPane(props: Props) {
         blurSub.dispose();
         completionDisposable.dispose();
         clearRunHighlight();
-        liveSqlEditors.delete(win.id);
+        unregisterLiveSqlEditor(win.id);
         editor.dispose();
         editorRef.current = null;
         lastCursorPositionRef.current = null;
