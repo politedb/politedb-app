@@ -94,40 +94,8 @@ export function LicenseKeySettings(props: { active: boolean }) {
         </div>
       ) : null}
 
-      {lostKeyHelp ? (
-        <div class="space-y-3 text-sm text-slate-700">
-          <SettingCard>
-            <ol class="list-decimal space-y-2 pl-5">
-              <li>
-                Send email{" "}
-                <strong class="text-slate-900">
-                  from same purchase address
-                </strong>
-                .
-              </li>
-              <li>
-                Address it to{" "}
-                <button
-                  type="button"
-                  class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                  onClick={() => void openRecoveryMail()}
-                >
-                  {LICENSE_SUPPORT_EMAIL}
-                </button>
-                . Ask to recover license key.
-              </li>
-              <li>We verify purchase and reply with license key.</li>
-            </ol>
-          </SettingCard>
-
-          <div class="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => void openRecoveryMail()}>
-              Open mail app
-            </Button>
-          </div>
-        </div>
-      ) : !isActive ? (
-        <div class="space-y-0">
+      {!isActive ? (
+        <div class="space-y-3">
           <SettingCard>
             <FieldRow
               class="border-b-0"
@@ -145,10 +113,10 @@ export function LicenseKeySettings(props: { active: boolean }) {
             {trialExpiresAt ? (
               <div
                 class={cn(
-                  "rounded-xl px-3 py-2 text-sm",
+                  "rounded-b-xl px-3 py-2 text-sm",
                   isTrialExpired
                     ? "bg-amber-50 text-amber-700"
-                    : "bg-slate-50 text-slate-600"
+                    : "bg-slate-50 text-slate-700"
                 )}
               >
                 {isTrialExpired
@@ -228,6 +196,40 @@ export function LicenseKeySettings(props: { active: boolean }) {
               disabled={licenseBusy}
             >
               Deactivate
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {lostKeyHelp && (
+        <div class="space-y-3 text-sm text-slate-700">
+          <SettingCard class="px-4 py-3">
+            <ol class="list-decimal space-y-2 pl-5">
+              <li>
+                Send email{" "}
+                <strong class="text-slate-900">
+                  from same purchase address
+                </strong>
+                .
+              </li>
+              <li>
+                Address it to{" "}
+                <button
+                  type="button"
+                  class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
+                  onClick={() => void openRecoveryMail()}
+                >
+                  {LICENSE_SUPPORT_EMAIL}
+                </button>
+                . Ask to recover license key.
+              </li>
+              <li>We verify purchase and reply with license key.</li>
+            </ol>
+          </SettingCard>
+
+          <div class="flex justify-end">
+            <Button variant="shadow" onClick={() => void openRecoveryMail()}>
+              Open Mail
             </Button>
           </div>
         </div>
