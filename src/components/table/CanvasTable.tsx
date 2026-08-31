@@ -858,15 +858,15 @@ export function CanvasTable({
     const dpr = window.devicePixelRatio || 1;
     canvas.style.width = `${viewport.w}px`;
     canvas.style.height = `${bodyH}px`;
-    canvas.width = Math.floor(viewport.w * dpr);
-    canvas.height = Math.floor(bodyH * dpr);
+    const pixelWidth = Math.floor(viewport.w * dpr);
+    const pixelHeight = Math.floor(bodyH * dpr);
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
 
     const ctx = canvas.getContext("2d");
     ctxRef.current = ctx;
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    draw();
-  }, [viewport.w, viewport.h, bodyH, draw]);
+  }, [viewport.w, bodyH]);
 
   // --------------------------------------------------------------------------
   // Helper: Get Cell Rect
@@ -891,7 +891,7 @@ export function CanvasTable({
     [columns, colLefts, colWidths, ROW_HEIGHT]
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     draw();
   }, [draw, dataVersion]);
 
