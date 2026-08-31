@@ -1,3 +1,5 @@
+import { isUiFontPreference, type UiFontPreference } from "src/lib/uiFont";
+
 export type SettingsDialogSection =
   | "general"
   | "appearance"
@@ -9,6 +11,7 @@ export type SettingsDialogSection =
 
 export type AppSettings = {
   theme: "system" | "light" | "dark";
+  uiFont: UiFontPreference;
   density: "comfortable" | "compact";
   defaultRowLimit: string;
   queryTimeoutSeconds: string;
@@ -26,6 +29,7 @@ export const SETTINGS_STORAGE_KEY = "politedb:app-settings:v1";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
+  uiFont: "inter",
   density: "comfortable",
   defaultRowLimit: "100",
   queryTimeoutSeconds: "60",
@@ -39,7 +43,12 @@ export function loadAppSettings(): AppSettings {
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      uiFont: isUiFontPreference(parsed.uiFont) ? parsed.uiFont : "inter",
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }

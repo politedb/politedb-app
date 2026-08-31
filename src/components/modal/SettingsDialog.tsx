@@ -21,6 +21,7 @@ import {
   type SettingsDialogSection,
 } from "src/components/settings/types";
 import { applyThemePreference } from "src/lib/theme";
+import { applyUiFontPreference } from "src/lib/uiFont";
 
 export type { SettingsDialogSection } from "src/components/settings/types";
 
@@ -35,7 +36,11 @@ const SECTIONS: Array<{
   label: string;
   caption: string;
 }> = [
-  { id: "appearance", label: "Appearance", caption: "Theme and density" },
+  {
+    id: "appearance",
+    label: "Appearance",
+    caption: "Theme, font and density",
+  },
   {
     id: "analytics",
     label: "Privacy & Analytics",
@@ -74,6 +79,15 @@ export function SettingsDialog(props: Props) {
     if (key === "theme") {
       applyThemePreference(value as AppSettings["theme"]);
     }
+    if (key === "uiFont") {
+      applyUiFontPreference(value as AppSettings["uiFont"]);
+    }
+  }
+
+  function resetSettings() {
+    setSettings(DEFAULT_SETTINGS);
+    applyThemePreference(DEFAULT_SETTINGS.theme);
+    applyUiFontPreference(DEFAULT_SETTINGS.uiFont);
   }
 
   function renderSection() {
@@ -100,7 +114,7 @@ export function SettingsDialog(props: Props) {
         return (
           <DiagnosticsSettings
             settings={settings}
-            onResetSettings={() => setSettings(DEFAULT_SETTINGS)}
+            onResetSettings={resetSettings}
           />
         );
     }

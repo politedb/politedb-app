@@ -21,6 +21,7 @@ export function DiagnosticsSettings(props: {
       devicePixelRatio: window.devicePixelRatio,
       settings: {
         theme: props.settings.theme,
+        uiFont: props.settings.uiFont,
         density: props.settings.density,
         defaultRowLimit: props.settings.defaultRowLimit,
         queryTimeoutSeconds: props.settings.queryTimeoutSeconds,

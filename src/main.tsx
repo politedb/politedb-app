@@ -11,6 +11,7 @@ import {
   applyStoredThemePreference,
   installSystemThemeListener,
 } from "src/lib/theme";
+import { applyStoredUiFontPreference } from "src/lib/uiFont";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -18,6 +19,7 @@ function isTauriRuntime() {
 
 async function boot() {
   applyStoredThemePreference();
+  applyStoredUiFontPreference();
   installSystemThemeListener();
   initAnalytics();
 

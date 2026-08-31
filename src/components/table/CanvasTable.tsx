@@ -30,6 +30,7 @@ import {
 } from "./tableCellBackground";
 import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 import { getResolvedTheme, type ResolvedTheme } from "src/lib/theme";
+import { getAppliedUiFontStack } from "src/lib/uiFont";
 
 const ROW_HEIGHT = 28;
 const HEADER_HEIGHT = 28;
@@ -472,6 +473,7 @@ export function CanvasTable({
     ...widthByName,
   }));
   const [theme, setTheme] = useState<ResolvedTheme>(() => getResolvedTheme());
+  const [uiFontStack, setUiFontStack] = useState(() => getAppliedUiFontStack());
 
   useEffect(() => {
     const onThemeChange = (event: Event) => {
@@ -482,6 +484,16 @@ export function CanvasTable({
     window.addEventListener("politedb:themechange", onThemeChange);
     return () =>
       window.removeEventListener("politedb:themechange", onThemeChange);
+  }, []);
+
+  useEffect(() => {
+    const onFontChange = (event: Event) => {
+      const stack = (event as CustomEvent<{ stack?: string }>).detail?.stack;
+      setUiFontStack(stack || getAppliedUiFontStack());
+    };
+    window.addEventListener("politedb:fontchange", onFontChange);
+    return () =>
+      window.removeEventListener("politedb:fontchange", onFontChange);
   }, []);
 
   // Sync widthByName if prop changes (optional)
@@ -623,7 +635,7 @@ export function CanvasTable({
     ctx.stroke();
 
     // 4. Content
-    ctx.font = "400 13px system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.font = `400 13px ${uiFontStack}`;
     ctx.textBaseline = "middle";
 
     for (let r = firstRow; r < lastRow; r++) {
@@ -768,6 +780,7 @@ export function CanvasTable({
     isFocused,
     foreignKeyMap,
     theme,
+    uiFontStack,
   ]);
 
   useEffect(() => {
