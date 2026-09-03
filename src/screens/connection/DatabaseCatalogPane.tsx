@@ -15,6 +15,7 @@ import type {
   TableItem,
 } from "src/types";
 import { cn } from "src/utils/cn";
+import { normalizeByteSizeLabel } from "src/utils/convert";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
@@ -53,19 +54,19 @@ const TABLE_COLUMNS: CatalogColumn<TableItem>[] = [
     key: "total_size",
     label: "total_size",
     className: "text-right",
-    render: (row) => row.totalSize ?? "--",
+    render: (row) => normalizeByteSizeLabel(row.totalSize),
   },
   {
     key: "data_size",
     label: "data_size",
     className: "text-right",
-    render: (row) => row.dataSize ?? "--",
+    render: (row) => normalizeByteSizeLabel(row.dataSize),
   },
   {
     key: "index_size",
     label: "index_size",
     className: "text-right",
-    render: (row) => row.indexSize ?? "--",
+    render: (row) => normalizeByteSizeLabel(row.indexSize),
   },
   { key: "comment", label: "comment", render: (row) => row.comment ?? "" },
 ];
@@ -118,15 +119,21 @@ function CatalogTable<T>(props: {
   onOpen: (row: T) => void;
 }) {
   return (
-    <OverlayScrollArea className="min-h-0 flex-1 bg-white" horizontal vertical>
+    <OverlayScrollArea
+      className="min-h-0 flex-1 bg-neutral-50"
+      horizontal
+      vertical
+    >
       <table class="w-full min-w-max border-separate border-spacing-0 text-sm">
-        <thead class="sticky top-0 z-10 bg-neutral-50">
+        <thead class="bg-neutral-50">
           <tr>
             {props.columns.map((column) => (
               <th
                 key={column.key}
                 class={cn(
-                  "border-r border-b border-neutral-200 px-3 py-2 text-left text-xs font-semibold text-neutral-600",
+                  "border-r border-b border-neutral-200",
+                  "px-3 py-2 text-left text-sm font-semibold text-neutral-600",
+                  "sticky top-0 z-10 bg-neutral-50 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.05)]",
                   column.className
                 )}
               >
@@ -254,8 +261,8 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           </div>
           <div class="mt-0.5 text-xs text-neutral-500">
             {schemaScope
-              ? `${rowsCount} objects in schema ${schemaScope}`
-              : `${rowsCount} objects in current metadata`}
+              ? `${rowsCount} ${isFunctions ? "functions" : "tables"} in schema ${schemaScope}`
+              : `${rowsCount} ${isFunctions ? "functions" : "tables"} in current metadata`}
           </div>
         </div>
 
@@ -266,7 +273,7 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
               onValueChange={setSearch}
               placeholder={`Search ${title.toLowerCase()}...`}
               left={<SearchIcon className="size-4 text-neutral-400" />}
-              className="h-7 border border-neutral-200! pl-8 text-xs!"
+              className="h-7 border border-neutral-200 pl-8"
             />
           </div>
 

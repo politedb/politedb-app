@@ -12,7 +12,8 @@ const PG: MetadataQueries = {
   schemasQuery: `
     SELECT schema_name
     FROM information_schema.schemata
-    WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
+    WHERE schema_name <> 'information_schema'
+      AND schema_name !~ '^pg_'
     ORDER BY schema_name;
   `,
   routinesQuery: `
@@ -28,7 +29,8 @@ const PG: MetadataQueries = {
       '' AS enabled
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+    WHERE n.nspname <> 'information_schema'
+      AND n.nspname !~ '^pg_'
       AND p.prokind IN ('f', 'p')
     ORDER BY n.nspname, p.proname;
   `,
@@ -47,34 +49,73 @@ const PG: MetadataQueries = {
     JOIN pg_class c ON c.oid = t.tgrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE NOT t.tgisinternal
-      AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname <> 'information_schema'
+      AND n.nspname !~ '^pg_'
     ORDER BY n.nspname, c.relname, t.tgname;
   `,
   tablesQuery: `
+    WITH RECURSIVE visible_relations AS (
+      SELECT c.oid, c.relname, c.relkind, c.relowner, c.relnamespace
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname <> 'information_schema'
+        AND n.nspname !~ '^pg_'
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+    ),
+    relation_tree AS (
+      SELECT c.oid AS root_oid, c.oid AS rel_oid
+      FROM visible_relations c
+      WHERE c.relkind IN ('r', 'p', 'm')
+
+      UNION
+
+      SELECT tree.root_oid, inheritance.inhrelid
+      FROM relation_tree tree
+      JOIN pg_inherits inheritance ON inheritance.inhparent = tree.rel_oid
+    ),
+    relation_stats AS (
+      SELECT
+        tree.root_oid,
+        CASE
+          WHEN bool_or(
+            relation.relkind <> 'p' AND relation.reltuples < 0
+          ) THEN NULL
+          ELSE COALESCE(
+            SUM(relation.reltuples) FILTER (WHERE relation.relkind <> 'p'),
+            0
+          )::bigint
+        END AS estimated_row,
+        SUM(pg_total_relation_size(tree.rel_oid)) AS total_size,
+        SUM(pg_table_size(tree.rel_oid)) AS data_size,
+        SUM(pg_indexes_size(tree.rel_oid)) AS index_size
+      FROM relation_tree tree
+      JOIN pg_class relation ON relation.oid = tree.rel_oid
+      GROUP BY tree.root_oid
+    )
     SELECT
       n.nspname AS table_schema,
       c.relname AS table_name,
       CASE
-        WHEN c.relkind = 'v' THEN 'VIEW'
+        WHEN c.relkind IN ('v', 'm') THEN 'VIEW'
         ELSE 'BASE TABLE'
       END AS table_type,
       pg_catalog.pg_get_userbyid(c.relowner) AS owner,
-      c.reltuples::bigint AS estimated_row,
-      pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
-      pg_size_pretty(pg_relation_size(c.oid)) AS data_size,
-      pg_size_pretty(pg_indexes_size(c.oid)) AS index_size,
+      stats.estimated_row,
+      stats.total_size,
+      stats.data_size,
+      stats.index_size,
       COALESCE(obj_description(c.oid, 'pg_class'), '') AS comment
-    FROM pg_class c
+    FROM visible_relations c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-      AND c.relkind IN ('r', 'p', 'v')
+    LEFT JOIN relation_stats stats ON stats.root_oid = c.oid
     ORDER BY n.nspname, c.relkind, c.relname;
   `,
   columnsQuery: `
     SELECT table_schema, table_name, column_name, data_type, is_nullable,
            COALESCE(column_default, ''), '' AS column_comment
     FROM information_schema.columns
-    WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+    WHERE table_schema <> 'information_schema'
+      AND table_schema !~ '^pg_'
     ORDER BY table_schema, table_name, ordinal_position;
   `,
 };

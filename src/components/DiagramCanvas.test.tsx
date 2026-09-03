@@ -113,6 +113,8 @@ describe("DiagramCanvas", () => {
     expect(
       container.querySelectorAll("[data-diagram-column]").length
     ).toBeGreaterThan(0);
-    expect(container.querySelector("[data-diagram-column='id']")).not.toBeNull();
+    expect(
+      container.querySelector("[data-diagram-column='id']")
+    ).not.toBeNull();
   });
 });

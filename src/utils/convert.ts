@@ -145,6 +145,14 @@ export function formatBytesSize(
   }
 }
 
+export function normalizeByteSizeLabel(value?: string | number): string {
+  if (value === undefined || value === "") return "--";
+  if (typeof value === "number") return formatBytesSize(value);
+  const trimmed = value.trim();
+  const rawBytes = trimmed.match(/^(\d+(?:\.\d+)?)(?:\s*(?:bytes?|b))?$/i);
+  return rawBytes ? formatBytesSize(Number(rawBytes[1])) : trimmed;
+}
+
 export function normalizeTag(s: string) {
   return s
     .trim()

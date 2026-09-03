@@ -3,6 +3,7 @@ import {
   cellToBinaryHexString,
   cellToString,
   formatBytesB64AsHex,
+  normalizeByteSizeLabel,
 } from "./convert";
 
 describe("cell conversion", () => {
@@ -20,5 +21,19 @@ describe("cell conversion", () => {
   it("preserves null semantics for both converters", () => {
     expect(cellToString({ t: "Null" }, true)).toBeNull();
     expect(cellToBinaryHexString({ t: "Null" }, true)).toBeNull();
+  });
+});
+
+describe("normalizeByteSizeLabel", () => {
+  it("converts raw byte labels to larger binary units", () => {
+    expect(normalizeByteSizeLabel("8192 bytes")).toBe("8 KB");
+    expect(normalizeByteSizeLabel("1024 B")).toBe("1 KB");
+    expect(normalizeByteSizeLabel("65536")).toBe("64 KB");
+    expect(normalizeByteSizeLabel(0)).toBe("0 Bytes");
+  });
+
+  it("preserves values already formatted by database", () => {
+    expect(normalizeByteSizeLabel("2840 kB")).toBe("2840 kB");
+    expect(normalizeByteSizeLabel("13 GB")).toBe("13 GB");
   });
 });
