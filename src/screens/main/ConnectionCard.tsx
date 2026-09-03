@@ -453,7 +453,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
             {/* Indicator */}
             <span
               class={cn(
-                "h-2.5 w-2.5 shrink-0 rounded-full",
+                "size-2.5 shrink-0 rounded-full",
                 hasCustomIndicator ? "" : "opacity-60"
               )}
               style={{ backgroundColor: indicatorColor }}
@@ -473,22 +473,14 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
                   size="sm"
                 />
               </div>
-            ) : null}
-
-            {currentGroups.slice(0, 1).map((group) => (
-              <span
-                key={group.id}
-                class="inline-flex max-w-32 items-center truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:border-blue-500/40 dark:bg-blue-950/50 dark:text-blue-200"
-                title={group.name}
-              >
-                {group.name}
-              </span>
-            ))}
-            {currentGroups.length > 1 ? (
-              <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                +{currentGroups.length - 1}
-              </span>
-            ) : null}
+            ) : (
+              <TagChips
+                className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap"
+                tags={currentGroups.map((group) => group.name)}
+                max={1}
+                size="sm"
+              />
+            )}
           </div>
 
           {/* Subtitle row */}

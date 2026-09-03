@@ -1,6 +1,8 @@
 import { cn } from "src/utils/cn";
-import { normalizeEngineName, normalizeTags } from "src/utils/convert";
+import { normalizeEngineName } from "src/utils/convert";
 import { DbIcon } from "src/components/icons/DbIcon";
+import { MetaPill } from "src/components/common/MetaPill";
+import { TagChips } from "src/components/common/TagChips";
 
 type Props = {
   label: string;
@@ -9,33 +11,6 @@ type Props = {
   tags?: string[] | string | null;
   className?: string;
 };
-
-function MetaPill({
-  text,
-  tone = "neutral",
-}: {
-  text: string;
-  tone?: "neutral" | "blue";
-}) {
-  if (!text) return null;
-
-  const cls =
-    tone === "blue"
-      ? "border-blue-200/70 bg-blue-50 text-blue-700"
-      : "border-neutral-200 bg-neutral-50 text-neutral-700";
-
-  return (
-    <span
-      class={cn(
-        "inline-flex h-6 items-center rounded-lg border px-2",
-        "text-[11px] font-semibold",
-        cls
-      )}
-    >
-      {text}
-    </span>
-  );
-}
 
 function SpinningDbIcon({
   engine,
@@ -61,8 +36,6 @@ function SpinningDbIcon({
 
 export function ConnectingPanel(props: Props) {
   const { label, engine, viaSsh, tags, className } = props;
-
-  const tagList = normalizeTags(tags).slice(0, 2);
 
   const engineText = normalizeEngineName(engine || "postgres", { upper: true });
 
@@ -93,18 +66,16 @@ export function ConnectingPanel(props: Props) {
         </div>
 
         <div class="mt-3 flex items-center gap-2 border-t border-neutral-200 pt-3">
-          <MetaPill text={engineText} />
-          {viaSsh ? <MetaPill text="SSH" tone="blue" /> : null}
+          <MetaPill className="h-6 px-2" text={engineText} />
+          {viaSsh ? (
+            <MetaPill className="h-6 px-2" text="SSH" tone="blue" />
+          ) : null}
 
-          {tagList.map((t) => (
-            <span
-              key={t}
-              title={t}
-              class="inline-flex h-6 max-w-32 items-center truncate rounded-lg border border-neutral-200 bg-white px-2 text-[11px] font-semibold text-neutral-600"
-            >
-              {t}
-            </span>
-          ))}
+          <TagChips
+            className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap"
+            tags={tags}
+            size="md"
+          />
         </div>
 
         <div class="mt-3 h-1 overflow-hidden rounded-full bg-neutral-100">

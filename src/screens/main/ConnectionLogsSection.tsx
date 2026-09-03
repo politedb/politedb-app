@@ -88,7 +88,7 @@ export function ConnectionLogsSection({
                         )}
                       >
                         <td class="px-3 py-2 align-middle whitespace-nowrap text-slate-700 tabular-nums dark:text-slate-300">
-                          <div class="font-medium whitespace-nowrap text-slate-900 dark:text-slate-100">
+                          <div class="w-60 font-medium whitespace-nowrap text-slate-900 dark:text-slate-100">
                             {formatConnectionLogDateRange(
                               entry.openedAt,
                               entry.closedAt
