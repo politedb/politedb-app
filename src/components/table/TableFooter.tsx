@@ -282,7 +282,7 @@ export function TableFooter({
           </Button>
           <div class="flex items-center gap-0.5">
             <Button
-              variant="outline"
+              variant="shadow"
               onClick={() => handlePageChange(offset - limit)}
               disabled={offset === 0}
               className="h-6.75 px-3 py-1"
@@ -290,7 +290,7 @@ export function TableFooter({
               <ChevronLeftIcon className="size-4" />
             </Button>
             <Button
-              variant="outline"
+              variant="shadow"
               onClick={() => handlePageChange(offset + limit)}
               disabled={offset + limit >= pagination.totalRows}
               className="h-6.75 px-3 py-1"

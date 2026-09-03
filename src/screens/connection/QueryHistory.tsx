@@ -133,7 +133,7 @@ export function QueryHistory({ activeProfileId }: Props) {
         )}
       </div>
 
-      <OverlayScrollArea className="min-h-0 flex-1">
+      <OverlayScrollArea className="min-h-0 flex-1" contentClassName="h-full">
         {queries.length === 0 ? (
           <Box className="text-center">
             <ClockIcon className="mx-auto mb-2 size-8 text-neutral-300" />
