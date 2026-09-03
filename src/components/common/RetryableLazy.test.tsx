@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import type { ComponentChildren } from "preact";
+import { useErrorBoundary } from "preact/hooks";
 import { describe, expect, it, vi } from "vitest";
 import { createRetryableLazy } from "./RetryableLazy";
+
+function ParentBoundary(props: { children: ComponentChildren }) {
+  const [error] = useErrorBoundary();
+  return error ? <div>Runtime render failed</div> : <>{props.children}</>;
+}
 
 describe("createRetryableLazy", () => {
   it("recreates the lazy component when a failed import is retried", async () => {
@@ -25,5 +32,31 @@ describe("createRetryableLazy", () => {
       expect(screen.getByText("Loaded content")).toBeInTheDocument()
     );
     expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows component render errors to the parent boundary", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const LazyContent = createRetryableLazy(
+      async () => ({
+        default: () => {
+          throw new Error("render failed");
+        },
+      }),
+      { label: "test content" }
+    );
+
+    render(
+      <ParentBoundary>
+        <LazyContent />
+      </ParentBoundary>
+    );
+
+    expect(
+      await screen.findByText("Runtime render failed")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Failed to load test content.")).toBeNull();
+    consoleError.mockRestore();
   });
 });

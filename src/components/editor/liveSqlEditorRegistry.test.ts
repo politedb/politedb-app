@@ -68,7 +68,7 @@ describe("live SQL editor registry", () => {
       getValue: () => "old",
       appendSql: () => oldAppend,
     });
-    enqueueSqlIntoLiveEditor("failed-editor", "SELECT retry");
+    const queued = enqueueSqlIntoLiveEditor("failed-editor", "SELECT retry");
 
     const newAppend = vi.fn(async () => {});
     const unregisterNew = registerLiveSqlEditor("failed-editor", {
@@ -78,9 +78,26 @@ describe("live SQL editor registry", () => {
     rejectOld?.(new Error("old editor disposed"));
 
     await vi.waitFor(() => expect(newAppend).toHaveBeenCalledTimes(1));
+    await queued;
     expect(newAppend).toHaveBeenCalledWith("SELECT retry");
     unregisterOld();
     unregisterNew();
+  });
+
+  it("retries the same editor and reports a terminal append failure", async () => {
+    const appendSql = vi.fn(async () => {
+      throw new Error("editor unavailable");
+    });
+    const unregister = registerLiveSqlEditor("terminal-error-editor", {
+      getValue: () => "",
+      appendSql,
+    });
+
+    await expect(
+      enqueueSqlIntoLiveEditor("terminal-error-editor", "SELECT fail")
+    ).rejects.toThrow("editor unavailable");
+    expect(appendSql).toHaveBeenCalledTimes(3);
+    unregister();
   });
 
   it("consumes queued SQL when its window closes before registration", async () => {

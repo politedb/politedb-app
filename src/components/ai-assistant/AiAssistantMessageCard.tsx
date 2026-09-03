@@ -228,7 +228,7 @@ export function AiAssistantMessageCard({
           sqlRunState={sqlRunState}
           sqlRunMessage={sqlRunMessage}
           previewColumns={previewColumns}
-          onInsertSql={onInsertSql}
+          onInsertSql={onInsertSql ? handleInsertSql : undefined}
           onCopySql={() => void handleCopySql()}
           onCopySqlText={(sql) => void handleCopySqlText(sql)}
           onInsertSqlPreview={(sql) => void handleInsertSql(sql)}

@@ -421,11 +421,19 @@ export function DbObjectsManagerPane(props: {
           onClick={openSavePreview}
           disabled={
             running ||
+            loadingDefinition ||
             (!isCreateMode && !selectedObject?.capability.canEdit) ||
             (isCreateMode && !kindCapability.canCreate)
           }
         >
-          Save
+          {loadingDefinition ? (
+            <div class="flex items-center gap-2">
+              <Spinner className="size-3.5 text-white" />
+              Loading
+            </div>
+          ) : (
+            <>Save</>
+          )}
         </Button>
       </div>
     </div>
@@ -529,12 +537,6 @@ export function DbObjectsManagerPane(props: {
                     : "Browse functions, procedures, and triggers, then edit their DDL directly."}
               </div>
             </div>
-            {loadingDefinition ? (
-              <div class="flex items-center gap-2 text-sm text-neutral-500">
-                <Spinner className="size-4 text-neutral-500" />
-                Loading...
-              </div>
-            ) : null}
           </div>
         </div>
 
@@ -646,6 +648,7 @@ export function DbObjectsManagerPane(props: {
               content: editorSql,
             }}
             storageId={editorStorageId}
+            controlledContent
             onCommitContent={(_, next) => setEditorSql(next)}
             onRunSql={undefined}
             onExplainSql={undefined}

@@ -125,6 +125,7 @@ describe("useLoadDatabaseObjectDefinition", () => {
 
     rerender(<Harness selectedObject={second} />);
     await waitFor(() => expect(loadMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("sql").textContent).toBe("");
 
     resolveFirst?.({ sql: "CREATE FUNCTION alpha()" });
     resolveSecond?.({ sql: "CREATE FUNCTION beta()" });
@@ -134,6 +135,22 @@ describe("useLoadDatabaseObjectDefinition", () => {
         "CREATE FUNCTION beta()"
       )
     );
+    expect(screen.getByTestId("loading").textContent).toBe("false");
+  });
+
+  it("clears the loaded definition when selection is removed", async () => {
+    loadMock.mockResolvedValue({ sql: "CREATE FUNCTION demo_fn()" });
+    const { rerender } = render(<Harness selectedObject={item()} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sql").textContent).toBe(
+        "CREATE FUNCTION demo_fn()"
+      )
+    );
+
+    rerender(<Harness selectedObject={null} />);
+
+    await waitFor(() => expect(screen.getByTestId("sql").textContent).toBe(""));
     expect(screen.getByTestId("loading").textContent).toBe("false");
   });
 

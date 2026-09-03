@@ -12,17 +12,34 @@ type RetryableLazyOptions = {
   renderFallback?: () => ComponentChildren;
 };
 
+class LazyImportError extends Error {
+  readonly originalError: unknown;
+
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error ?? ""));
+    this.name = "LazyImportError";
+    this.originalError = error;
+  }
+}
+
 export function createRetryableLazy<Props extends object>(
   loader: () => Promise<{ default: FunctionComponent<Props> }>,
   options: RetryableLazyOptions
 ) {
+  const load = () =>
+    loader().catch((error: unknown) => {
+      throw new LazyImportError(error);
+    });
+
   return function RetryableLazyComponent(props: Props) {
     const [error, resetError] = useErrorBoundary();
     const [LazyComponent, setLazyComponent] = useState(() =>
-      lazy<FunctionComponent<Props>>(loader)
+      lazy<FunctionComponent<Props>>(load)
     );
 
     if (error) {
+      if (!(error instanceof LazyImportError)) throw error;
+
       return (
         <div
           role="alert"
@@ -35,7 +52,7 @@ export function createRetryableLazy<Props extends object>(
             type="button"
             variant="shadow"
             onClick={() => {
-              setLazyComponent(() => lazy<FunctionComponent<Props>>(loader));
+              setLazyComponent(() => lazy<FunctionComponent<Props>>(load));
               resetError();
             }}
           >

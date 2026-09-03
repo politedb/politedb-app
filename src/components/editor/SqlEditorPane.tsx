@@ -30,6 +30,7 @@ import { splitSqlStatements } from "./splitSqlStatements";
 type Props = {
   win: SqlEditorWindow;
   storageId?: string;
+  controlledContent?: boolean;
 
   onCommitContent?: (windowId: string, next: string) => void;
 
@@ -150,6 +151,7 @@ export function SqlEditorPane(props: Props) {
   const {
     win,
     storageId,
+    controlledContent = false,
     onCommitContent,
     onRunSql,
     onExplainSql,
@@ -654,14 +656,18 @@ export function SqlEditorPane(props: Props) {
 
     (async () => {
       try {
-        const draft = loadedDraftRef.current
-          ? null
-          : await loadSqlDraft(draftId);
+        const draft =
+          controlledContent || loadedDraftRef.current
+            ? null
+            : await loadSqlDraft(draftId);
         if (disposed) return;
 
         loadedDraftRef.current = true;
 
-        const initial = normalizeEol((draft ?? win.content ?? "") || "");
+        const initial = normalizeEol(
+          ((controlledContent ? win.content : (draft ?? win.content)) ?? "") ||
+            ""
+        );
         model = monaco.editor.createModel(initial, "sql", modelUri);
         createEditor(model);
       } catch {
@@ -678,6 +684,7 @@ export function SqlEditorPane(props: Props) {
     };
   }, [
     appendSqlToEditor,
+    controlledContent,
     draftId,
     flushDraft,
     modelUri,
@@ -694,9 +701,10 @@ export function SqlEditorPane(props: Props) {
 
     const next = normalizeEol(win.content || "");
     const curr = normalizeEol(model.getValue());
-    if (!next || next === curr) return;
+    if (next === curr) return;
 
-    if (editorRef.current?.hasTextFocus()) return;
+    if (!controlledContent && (!next || editorRef.current?.hasTextFocus()))
+      return;
 
     applyingExternalCounterRef.current += 1;
     const currentCounter = applyingExternalCounterRef.current;
@@ -715,7 +723,7 @@ export function SqlEditorPane(props: Props) {
         }
       });
     }
-  }, [win.content, modelUri]);
+  }, [controlledContent, win.content, modelUri]);
 
   return (
     <div class="flex h-full min-h-0 w-full flex-col bg-white">

@@ -23,6 +23,7 @@ export function useLoadDbObjectDefinition(args: {
       requestSeqRef.current += 1;
       setLoading(false);
       setLoadError(null);
+      if (!isCreateMode) setSql("");
       return;
     }
 
@@ -30,11 +31,14 @@ export function useLoadDbObjectDefinition(args: {
     if (!connectionId || !item?.capability.canReadDefinition) {
       requestSeqRef.current += 1;
       setLoading(false);
+      setSql("");
+      setLoadError(null);
       return;
     }
 
     const seq = ++requestSeqRef.current;
     setLoading(true);
+    setSql("");
     setLoadError(null);
 
     void loadDatabaseObjectDefinition({

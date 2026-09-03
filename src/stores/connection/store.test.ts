@@ -78,3 +78,36 @@ describe("connection edit patches", () => {
     ).toBeUndefined();
   });
 });
+
+describe("row cache reset", () => {
+  it("hydrates a cap-sized row buffer at the current base", () => {
+    const rowState = makeRowsState(200);
+    rowState.base = 10;
+    rowState.rows[0] = ["stale"];
+    useConnectionStore.setState({
+      tableRowsByKey: { [key]: rowState },
+      tableRowCacheByKey: {
+        [key]: {
+          map: new Map([
+            [9, ["before"]],
+            [10, ["first"]],
+            [12, ["third"]],
+            [210, ["after"]],
+          ]),
+          order: [9, 10, 12, 210],
+          orderHead: 0,
+        },
+      },
+    });
+
+    useConnectionStore.getState().resetRows(key);
+
+    const reset = useConnectionStore.getState().tableRowsByKey[key]!;
+    expect(reset.rows).toHaveLength(200);
+    expect(reset.rows[0]).toEqual(["first"]);
+    expect(reset.rows[1]).toBeUndefined();
+    expect(reset.rows[2]).toEqual(["third"]);
+    expect(reset.rows).not.toContainEqual([10, ["first"]]);
+    expect(reset.version).toBe(rowState.version + 1);
+  });
+});

@@ -9,13 +9,13 @@ export function useInsertSqlIntoActiveEditor(args: {
   const { activeSqlWindow, openSqlEditor } = args;
 
   return useCallback(
-    (sql: string) => {
+    async (sql: string) => {
       const next = sql.trim();
       if (!next) return;
 
       const targetWindowId = activeSqlWindow?.id ?? openSqlEditor();
       if (!targetWindowId) return;
-      enqueueSqlIntoLiveEditor(targetWindowId, next);
+      await enqueueSqlIntoLiveEditor(targetWindowId, next);
     },
     [activeSqlWindow?.id, openSqlEditor]
   );

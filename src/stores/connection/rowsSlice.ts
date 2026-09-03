@@ -63,13 +63,27 @@ export function createRowsUiActions(args: {
 
     resetRows: (key) =>
       set((s: ConnectionState) => {
-        if (!s.tableRowCacheByKey[key] && !s.tableRowsByKey[key]) return s;
+        const cache = s.tableRowCacheByKey[key];
+        const previous = s.tableRowsByKey[key];
+        if (!cache && !previous) return s;
+
+        const next = previous ?? makeRowsState(DEFAULT_ROWS_CAP);
+        const rows = new Array<unknown[] | undefined>(next.cap).fill(undefined);
+        if (cache) {
+          const end = next.base + next.cap;
+          for (const [rowIndex, row] of cache.map) {
+            if (rowIndex < next.base || rowIndex >= end) continue;
+            rows[rowIndex - next.base] = row;
+          }
+        }
+
         return {
           tableRowsByKey: {
             ...s.tableRowsByKey,
             [key]: {
-              ...s.tableRowsByKey[key],
-              rows: Array.from(s.tableRowCacheByKey[key]?.map),
+              ...next,
+              rows,
+              version: next.version + 1,
             },
           },
         };
