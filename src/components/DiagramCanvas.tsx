@@ -22,37 +22,11 @@ import {
   getDiagramSpatialCandidates,
 } from "src/components/diagram/diagramSpatialIndex";
 import { KeyIcon, MinusIcon, PlusIcon } from "src/components/icons";
-
-type DiagramColumn = {
-  name: string;
-  type: string;
-  isPrimaryKey?: boolean;
-};
-
-type DiagramTable = {
-  schema: string;
-  name: string;
-  columns: DiagramColumn[];
-};
-
-type RelationCardinality = "one-to-one" | "one-to-many";
-
-type DiagramRelation = {
-  fromTable: string;
-  toTable: string;
-  label: string;
-  fromColumn?: string;
-  toColumn?: string;
-  cardinality: RelationCardinality;
-};
-
-type DiagramState = {
-  mermaid: string;
-  tableCount: number;
-  relationshipCount: number;
-  tables: DiagramTable[];
-  relations: DiagramRelation[];
-};
+import type {
+  DiagramRelation,
+  DiagramState,
+  DiagramTable,
+} from "src/components/diagram/diagramTypes";
 
 type LayoutItem = {
   key: string;
@@ -519,11 +493,10 @@ function diagramTableKeyFromTarget(target: EventTarget | null): string | null {
 const DiagramTableCard = memo(function DiagramTableCard(props: {
   item: LayoutItem;
   highlighted: boolean;
-  showDetails: boolean;
   columnStart: number;
   columnEnd: number;
 }) {
-  const { item, highlighted, showDetails, columnStart, columnEnd } = props;
+  const { item, highlighted, columnStart, columnEnd } = props;
   const columns = item.table.columns;
 
   return (
@@ -542,48 +515,40 @@ const DiagramTableCard = memo(function DiagramTableCard(props: {
       <div class="border-b border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-semibold text-slate-800">
         {item.table.name}
       </div>
-      {showDetails ? (
-        <div>
-          {columnStart > 0 ? (
-            <div style={{ height: `${columnStart * ROW_HEIGHT}px` }} />
-          ) : null}
-          <div class="divide-y divide-slate-200">
-            {columns.slice(columnStart, columnEnd).map((column) => (
-              <div
-                key={column.name}
-                data-diagram-column={column.name}
-                class="flex items-center justify-between gap-3 px-4 py-2 text-xs"
-              >
-                <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate text-slate-700">
-                  <span class="min-w-0 truncate">{column.name}</span>
-                  {column.isPrimaryKey ? (
-                    <KeyIcon
-                      className="size-3 shrink-0 text-slate-500"
-                      aria-label="Primary key"
-                    />
-                  ) : null}
-                </span>
-                <span class="shrink-0 font-medium text-slate-400">
-                  {column.type || "unknown"}
-                </span>
-              </div>
-            ))}
-          </div>
-          {columnEnd < columns.length ? (
+      <div>
+        {columnStart > 0 ? (
+          <div style={{ height: `${columnStart * ROW_HEIGHT}px` }} />
+        ) : null}
+        <div class="divide-y divide-slate-200">
+          {columns.slice(columnStart, columnEnd).map((column) => (
             <div
-              style={{
-                height: `${(columns.length - columnEnd) * ROW_HEIGHT}px`,
-              }}
-            />
-          ) : null}
+              key={column.name}
+              data-diagram-column={column.name}
+              class="flex items-center justify-between gap-3 px-4 py-2 text-xs"
+            >
+              <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate text-slate-700">
+                <span class="min-w-0 truncate">{column.name}</span>
+                {column.isPrimaryKey ? (
+                  <KeyIcon
+                    className="size-3 shrink-0 text-slate-500"
+                    aria-label="Primary key"
+                  />
+                ) : null}
+              </span>
+              <span class="shrink-0 font-medium text-slate-400">
+                {column.type || "unknown"}
+              </span>
+            </div>
+          ))}
         </div>
-      ) : (
-        <div
-          data-diagram-table-compact
-          class="bg-slate-50"
-          style={{ height: `${Math.max(0, item.height - HEADER_HEIGHT)}px` }}
-        />
-      )}
+        {columnEnd < columns.length ? (
+          <div
+            style={{
+              height: `${(columns.length - columnEnd) * ROW_HEIGHT}px`,
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   );
 });
@@ -749,7 +714,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
     ).flatMap((index) => {
       const item = layout.items[index];
       if (!item || !isDiagramRectVisible(item, viewport)) return [];
-      if (!showDetails) return [{ item, columnStart: 0, columnEnd: 0 }];
       const columnWindow = getVisibleIndexWindow(
         item.y + HEADER_HEIGHT,
         ROW_HEIGHT,
@@ -765,7 +729,7 @@ export function DiagramCanvas(props: { state: DiagramState }) {
         },
       ];
     });
-  }, [cardSpatialIndex, layout.items, showDetails, viewport]);
+  }, [cardSpatialIndex, layout.items, viewport]);
 
   const visibleRelations = useMemo(
     () =>
@@ -915,7 +879,6 @@ export function DiagramCanvas(props: { state: DiagramState }) {
                   key={item.key}
                   item={item}
                   highlighted={highlightedTableKeys.has(item.key)}
-                  showDetails={showDetails}
                   columnStart={columnStart}
                   columnEnd={columnEnd}
                 />

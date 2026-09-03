@@ -95,7 +95,7 @@ describe("DiagramCanvas", () => {
     ).toBeNull();
   });
 
-  it("drops column rows when zoomed out past the detail threshold", () => {
+  it("keeps column rows visible when zoomed out past the detail threshold", () => {
     const tables = Array.from({ length: 12 }, (_, index) => ({
       schema: "public",
       name: `table_${index}`,
@@ -110,9 +110,9 @@ describe("DiagramCanvas", () => {
     expect(zoomOut).not.toBeNull();
     for (let i = 0; i < 6; i++) fireEvent.click(zoomOut!);
 
-    expect(container.querySelectorAll("[data-diagram-column]").length).toBe(0);
     expect(
-      container.querySelectorAll("[data-diagram-table-compact]").length
+      container.querySelectorAll("[data-diagram-column]").length
     ).toBeGreaterThan(0);
+    expect(container.querySelector("[data-diagram-column='id']")).not.toBeNull();
   });
 });

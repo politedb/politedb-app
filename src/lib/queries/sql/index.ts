@@ -7,3 +7,4 @@ export * from "./tableData";
 export * from "./tableStructure";
 export * from "./mysqlStructure";
 export * from "./ddl";
+export * from "./diagram";
