@@ -336,12 +336,12 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
   ],
   colors: {
     // Editor base
-    "editor.background": "#1c1c1c",
+    "editor.background": "#181818",
     "editor.foreground": "#E8E8E8",
 
     // Cursor
     "editorCursor.foreground": "#F9FAFB",
-    "editorCursor.background": "#1c1c1c",
+    "editorCursor.background": "#181818",
 
     // Selection
     "editor.selectionBackground": "#264F78",
@@ -358,7 +358,7 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editor.findMatchBorder": "#FACC15",
 
     // Line
-    "editor.lineHighlightBackground": "#262626",
+    "editor.lineHighlightBackground": "#242424",
     "editor.lineHighlightBorder": "#00000000",
     "editorLineNumber.foreground": "#737373",
     "editorLineNumber.activeForeground": "#A3A3A3",
@@ -378,7 +378,7 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editorBracketHighlight.foreground4": "#FBBF24",
 
     // Gutter
-    "editorGutter.background": "#141414",
+    "editorGutter.background": "#181818",
     "editorGutter.modifiedBackground": "#3B82F6",
     "editorGutter.addedBackground": "#22C55E",
     "editorGutter.deletedBackground": "#EF4444",
@@ -390,8 +390,8 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "scrollbarSlider.activeBackground": "#FFFFFF38",
 
     // Suggest widget
-    "editorSuggestWidget.background": "#262626",
-    "editorSuggestWidget.border": "#2E2E2E",
+    "editorSuggestWidget.background": "#242424",
+    "editorSuggestWidget.border": "#353535",
     "editorSuggestWidget.foreground": "#E8E8E8",
     "editorSuggestWidget.selectedBackground": "#264F78",
     "editorSuggestWidget.selectedForeground": "#F9FAFB",
@@ -399,8 +399,8 @@ const darkTheme: monaco.editor.IStandaloneThemeData = {
     "editorSuggestWidget.focusHighlightForeground": "#93C5FD",
 
     // Hover widget
-    "editorHoverWidget.background": "#262626",
-    "editorHoverWidget.border": "#2E2E2E",
+    "editorHoverWidget.background": "#242424",
+    "editorHoverWidget.border": "#353535",
     "editorHoverWidget.foreground": "#E8E8E8",
 
     // Errors and warnings

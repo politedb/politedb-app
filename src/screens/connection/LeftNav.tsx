@@ -373,7 +373,7 @@ export function LeftNav({
                           }
                           class={cn(
                             "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5",
-                            "text-left text-sm text-neutral-700 hover:bg-neutral-200/60"
+                            "text-left text-sm text-neutral-700 hover:bg-neutral-100/60"
                           )}
                           title={key}
                         >
@@ -453,7 +453,7 @@ export function LeftNav({
                           "overflow-hidden text-ellipsis select-none",
                           "transition-none",
                           !isActive &&
-                            "hover:border-neutral-200/60! hover:bg-neutral-200/60 active:bg-neutral-200/60",
+                            "hover:border-neutral-200/60! hover:bg-neutral-200/60 active:bg-neutral-200/60 dark:hover:border-neutral-800/60!",
                           isNewTable &&
                             !isActive &&
                             "bg-green-200 text-emerald-900 hover:border-green-200! hover:bg-green-200/80 active:border-green-200! active:bg-green-200/90",

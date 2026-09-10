@@ -426,7 +426,7 @@ export function AiAssistantPanel(props: Props) {
   };
 
   return (
-    <div class="flex h-full min-h-0 max-w-full min-w-0 flex-col overflow-hidden bg-white">
+    <div class="flex h-full min-h-0 max-w-full min-w-0 flex-col overflow-hidden bg-slate-50">
       {presentation === "panel" ? (
         <AiAssistantPanelHeader
           settingsOpen={settingsOpen}

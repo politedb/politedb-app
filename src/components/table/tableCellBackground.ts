@@ -41,9 +41,9 @@ export const TABLE_CANVAS_PALETTE: Record<ResolvedTheme, TableCanvasPalette> = {
     dirty: "#fdf0bb",
   },
   dark: {
-    background: "#1c1c1c",
-    zebra: "#141414",
-    grid: "#2e2e2e",
+    background: "#242424",
+    zebra: "#202020",
+    grid: "#353535",
     text: "#e8e8e8",
     textMuted: "#a3a3a3",
     textSelectedUnfocused: "#a3a3a3",

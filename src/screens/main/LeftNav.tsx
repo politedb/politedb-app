@@ -20,6 +20,7 @@ import {
   type SettingsDialogSection,
 } from "src/components/modal/SettingsDialog";
 import { useState } from "preact/hooks";
+import { cn } from "src/utils/cn";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 const REQUEST_FEATURE_URL =
@@ -73,10 +74,9 @@ export function LeftNav(props: {
     <>
       <aside
         data-density-region="sidebar"
-        class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+        class="flex shrink-0 flex-col border-r border-slate-200 bg-slate-50"
         style={{ width: "var(--sidebar-width)" }}
       >
-        {/* Top padding / subtle header */}
         <div data-density-sidebar-header class="p-3">
           <div class="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
             NAVIGATION
@@ -94,38 +94,36 @@ export function LeftNav(props: {
                   key={item.id}
                   type="button"
                   onClick={() => onChange(item.id)}
-                  class={[
-                    "group w-full",
-                    "flex items-center gap-2.5",
-                    "rounded-xl px-2.5 py-2",
-                    "text-left",
-                    "transition-colors",
+                  class={cn(
+                    "group flex w-full items-center gap-2.5",
+                    "rounded-xl px-2.5 py-2 text-left transition-colors",
                     isActive
                       ? "bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04)] ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
-                  ].join(" ")}
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+                  )}
                   aria-current={isActive ? "page" : undefined}
                 >
                   {/* Icon pill */}
                   <span
                     data-density-icon
-                    class={[
+                    class={cn(
                       "flex h-8 w-8 items-center justify-center rounded-lg",
+                      "bg-slate-100",
                       isActive
-                        ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                        : "bg-transparent text-slate-500 group-hover:bg-slate-100/70 dark:text-slate-500 dark:group-hover:bg-slate-800",
-                      "transition-colors",
-                    ].join(" ")}
+                        ? "text-slate-700"
+                        : "text-slate-500 group-hover:bg-slate-100/70",
+                      "transition-colors"
+                    )}
                   >
                     {item.icon}
                   </span>
 
                   <div class="min-w-0 flex-1">
-                    <div class="truncate text-[13px] leading-tight font-semibold">
+                    <div class="truncate text-sm leading-tight font-semibold">
                       {item.label}
                     </div>
                     {/* optional small description line (comment out if you don’t want it) */}
-                    <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
+                    <div class="mt-0.5 truncate text-[11px] text-slate-500">
                       {item.id === "connections"
                         ? "Saved profiles"
                         : item.id === "logs"
@@ -148,7 +146,7 @@ export function LeftNav(props: {
 
         {/* Bottom spacer */}
         <div class="mt-auto space-y-2.5 px-3 pb-3">
-          <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400">
+          <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
             Tips:
             <ul class="list-decimal pl-4.5">
               <li>Right-click a connection for actions.</li>

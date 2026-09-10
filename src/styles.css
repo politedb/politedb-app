@@ -149,7 +149,7 @@ body,
 html.dark,
 html.dark body,
 html.dark #root {
-  background: #141414;
+  background: #181818;
   color: #e8e8e8;
   color-scheme: dark;
   --color-new: #14532d;
@@ -157,19 +157,19 @@ html.dark #root {
   --color-deleted: #7f1d1d;
   --color-selected: #264f78;
   --color-selected-unfocused: #2e2e2e;
-  --color-slate-950: #0d0d0d;
-  --color-slate-900: #141414;
-  --color-slate-800: #1e1e1e;
-  --color-slate-700: #2e2e2e;
+  --color-slate-950: #181818;
+  --color-slate-900: #242424;
+  --color-slate-800: #2f2f2f;
+  --color-slate-700: #353535;
   --color-slate-600: #525252;
   --color-slate-500: #737373;
   --color-slate-400: #a3a3a3;
-  --color-gray-950: #0d0d0d;
-  --color-gray-900: #141414;
-  --color-gray-800: #1e1e1e;
-  --color-neutral-950: #0d0d0d;
-  --color-neutral-900: #141414;
-  --color-neutral-800: #1e1e1e;
+  --color-gray-950: #181818;
+  --color-gray-900: #242424;
+  --color-gray-800: #2f2f2f;
+  --color-neutral-950: #181818;
+  --color-neutral-900: #242424;
+  --color-neutral-800: #2f2f2f;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -189,38 +189,38 @@ html.dark .bg-white,
 html.dark .bg-white\!,
 html.dark .focus\:bg-white:focus,
 html.dark .focus\:bg-white\!:focus {
-  background-color: #1c1c1c !important;
+  background-color: #242424 !important;
 }
 
 html.dark .bg-white\/50,
 html.dark .bg-white\/60,
 html.dark .bg-white\/80,
 html.dark .hover\:bg-white\/60:hover {
-  background-color: rgb(20 20 20 / 0.82) !important;
+  background-color: rgb(36 36 36 / 0.88) !important;
 }
 
 html.dark .bg-neutral-50,
 html.dark .bg-neutral-100,
 html.dark .bg-neutral-100\/50,
 html.dark .bg-slate-50 {
-  background-color: #141414 !important;
+  background-color: #181818 !important;
 }
 
 html.dark .bg-neutral-300,
 html.dark .hover\:bg-neutral-300\/80:hover,
 html.dark .hover\:bg-neutral-200\/40:hover {
-  background-color: #2e2e2e !important;
+  background-color: #353535 !important;
 }
 
 html.dark .bg-slate-50\/80,
 html.dark .bg-neutral-50\/80,
 html.dark .hover\:bg-slate-50\/80:hover {
-  background-color: rgb(20 20 20 / 0.88) !important;
+  background-color: rgb(24 24 24 / 0.9) !important;
 }
 
 html.dark .hover\:bg-slate-100\/70:hover,
 html.dark .hover\:bg-slate-100\/80:hover {
-  background-color: #262626 !important;
+  background-color: #2f2f2f !important;
 }
 
 html.dark .bg-blue-100,
@@ -289,7 +289,7 @@ html.dark .active\:bg-neutral-200:active,
 html.dark .active\:bg-neutral-200\/60:active,
 html.dark .active\:bg-neutral-200\/80:active,
 html.dark .active\:bg-neutral-200\/90:active {
-  background-color: #262626 !important;
+  background-color: #2f2f2f !important;
 }
 
 html.dark .bg-amber-50,
@@ -388,7 +388,7 @@ html.dark .border-neutral-100,
 html.dark .border-neutral-200,
 html.dark .border-neutral-300,
 html.dark .border-neutral-400 {
-  border-color: #2e2e2e !important;
+  border-color: #353535 !important;
 }
 
 html.dark .border-amber-200,
@@ -419,7 +419,7 @@ html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
 html.dark .divide-neutral-100 > :not([hidden]) ~ :not([hidden]),
 html.dark .divide-neutral-200 > :not([hidden]) ~ :not([hidden]) {
-  border-color: #2e2e2e !important;
+  border-color: #353535 !important;
 }
 
 html.dark .table-focus-root.is-unfocused .bg-selected\! {
@@ -427,7 +427,7 @@ html.dark .table-focus-root.is-unfocused .bg-selected\! {
 }
 
 html.dark .split-pane__divider::before {
-  --divider-color: #2e2e2e;
+  --divider-color: #353535;
 }
 
 html.dark .split-pane__divider:hover::before {
@@ -436,15 +436,15 @@ html.dark .split-pane__divider:hover::before {
 html.dark .ring-slate-200,
 html.dark .ring-neutral-200,
 html.dark .ring-blue-200 {
-  --tw-ring-color: #2e2e2e;
+  --tw-ring-color: #353535;
 }
 
 html.dark input,
 html.dark select,
 html.dark textarea {
-  background-color: #1c1c1c;
+  background-color: #242424;
   color: #e8e8e8;
-  border-color: #2e2e2e;
+  border-color: #353535;
 }
 
 html.dark input::placeholder,
@@ -453,7 +453,13 @@ html.dark textarea::placeholder {
 }
 
 html.dark table tr:nth-child(even) {
-  background-color: #1c1c1c;
+  background-color: #202020;
+}
+
+html.dark aside,
+html.dark .theme-sidebar-surface {
+  background-color: #212121 !important;
+  border-color: #353535 !important;
 }
 
 html.dark * {
@@ -703,10 +709,10 @@ table {
 }
 
 html.dark .diagram-surface {
-  background-color: #141414;
+  background-color: #181818;
   background-image:
-    radial-gradient(#2a2a2a 1px, transparent 1px),
-    radial-gradient(#2a2a2a 1px, transparent 1px);
+    radial-gradient(#353535 1px, transparent 1px),
+    radial-gradient(#353535 1px, transparent 1px);
 }
 
 .diagram-table-card {
@@ -723,7 +729,7 @@ html.dark .diagram-surface {
 }
 
 html.dark .diagram-table-card {
-  border-color: #2e2e2e;
+  border-color: #353535;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
 }
 

@@ -23,6 +23,7 @@ import {
 import { applyThemePreference } from "src/lib/theme";
 import { applyUiFontPreference } from "src/lib/uiFont";
 import { applyUiDensityPreference } from "src/lib/density";
+import { cn } from "src/utils/cn";
 
 export type { SettingsDialogSection } from "src/components/settings/types";
 
@@ -147,20 +148,20 @@ export function SettingsDialog(props: Props) {
                 <button
                   key={section.id}
                   type="button"
-                  class={[
+                  class={cn(
                     "w-full rounded-lg px-3 py-2 text-left transition-colors",
                     selected
                       ? "bg-blue-600 text-white shadow-sm"
-                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
-                  ].join(" ")}
+                      : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                  )}
                   onClick={() => setActiveSection(section.id)}
                 >
                   <div class="text-sm font-semibold">{section.label}</div>
                   <div
-                    class={[
+                    class={cn(
                       "mt-0.5 truncate text-xs",
-                      selected ? "text-white" : "text-slate-500",
-                    ].join(" ")}
+                      selected ? "text-white" : "text-slate-500"
+                    )}
                   >
                     {section.caption}
                   </div>

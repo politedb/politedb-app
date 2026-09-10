@@ -46,9 +46,12 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("html.dark .bg-rose-50\\/80");
   });
 
-  it("uses a Cursor-like charcoal page background", () => {
-    expect(css).toContain("background: #141414");
-    expect(css).toContain("--color-slate-950: #0d0d0d");
+  it("uses the Codex charcoal surface hierarchy", () => {
+    expect(css).toContain("background: #181818");
+    expect(css).toContain("--color-slate-950: #181818");
+    expect(css).toContain("--color-slate-900: #242424");
+    expect(css).toContain("html.dark aside");
+    expect(css).toContain("background-color: #212121 !important");
   });
 });
 
