@@ -498,6 +498,14 @@ html.dark table tr:nth-child(even) {
   border-color: var(--table-grid);
 }
 
+.common-data-table .table-cell-editor:not(.bg-dirty) {
+  background-color: transparent;
+}
+
+html.dark .common-data-table .table-cell-editor:focus {
+  background-color: transparent !important;
+}
+
 html.dark aside,
 html.dark .theme-sidebar-surface {
   background-color: #212121 !important;

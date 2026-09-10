@@ -73,6 +73,12 @@ describe("global dark theme remaps", () => {
     expect(css).toContain(`--table-grid: ${palette.grid}`);
     expect(css).toContain("--table-header: #181818");
     expect(css).toContain(`--table-text: ${palette.text}`);
+    expect(css).toContain(
+      ".common-data-table .table-cell-editor:not(.bg-dirty)"
+    );
+    expect(css).toContain(
+      "html.dark .common-data-table .table-cell-editor:focus"
+    );
   });
 });
 
