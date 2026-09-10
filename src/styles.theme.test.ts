@@ -46,6 +46,11 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("html.dark .bg-rose-50\\/80");
   });
 
+  it("keeps focused table editors on a dark surface", () => {
+    expect(css).toContain("html.dark .table-cell-editor:focus");
+    expect(css).toContain("background-color: #242424 !important");
+  });
+
   it("uses the Codex charcoal surface hierarchy", () => {
     expect(css).toContain("background: #181818");
     expect(css).toContain("--color-slate-950: #181818");
@@ -61,9 +66,10 @@ describe("remaining dark-theme spots", () => {
     expect(leftNav).toContain("dark:bg-rose-950/50");
   });
 
-  it("uses a Cursor-like Databases chip in dark mode", () => {
-    expect(header).toContain("dark:bg-white/10");
-    expect(header).toContain("dark:text-zinc-100");
+  it("maps the Databases chip through the global dark palette", () => {
+    expect(header).toContain("bg-blue-100");
+    expect(css).toContain("html.dark .bg-blue-100");
+    expect(css).toContain("html.dark .text-blue-600");
   });
 
   it("does not force the table search input to stay white", () => {

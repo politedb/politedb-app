@@ -10,7 +10,10 @@ import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
-import { selectionRowClass } from "./selectionClasses";
+import {
+  EDITABLE_TABLE_CELL_CLASS,
+  selectionRowClass,
+} from "./selectionClasses";
 import { getDbConfig } from "src/utils/dbConfig";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
@@ -208,7 +211,8 @@ export function TableConstraints({
           return (
             <Input
               className={cn(
-                "h-8 cursor-default! rounded-xs text-sm text-ellipsis focus:bg-white!",
+                "h-8 cursor-default! rounded-xs text-sm text-ellipsis",
+                !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
                 isDirtyCell && !isNewRow && "bg-dirty",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
                 selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)

@@ -447,6 +447,15 @@ html.dark textarea {
   border-color: #353535;
 }
 
+.table-cell-editor:focus {
+  background-color: #ffffff !important;
+}
+
+html.dark .table-cell-editor:focus {
+  background-color: #242424 !important;
+  color: #e8e8e8 !important;
+}
+
 html.dark input::placeholder,
 html.dark textarea::placeholder {
   color: #737373;

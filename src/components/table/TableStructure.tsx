@@ -16,7 +16,10 @@ import { getDbConfig, supportsForeignKeyEditing } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
-import { selectionRowClass } from "./selectionClasses";
+import {
+  EDITABLE_TABLE_CELL_CLASS,
+  selectionRowClass,
+} from "./selectionClasses";
 import { ArrowRightIcon } from "src/components/icons";
 import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 
@@ -273,7 +276,8 @@ export function TableStructure({
             <div class="relative">
               <Input
                 className={cn(
-                  "h-8 cursor-default! rounded-xs text-sm text-ellipsis focus:bg-white!",
+                  "h-8 cursor-default! rounded-xs text-sm text-ellipsis",
+                  !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
                   isDirtyCell && !isNewRow && "bg-dirty",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
                   selectionRowClass(

@@ -4,6 +4,7 @@ import { cn } from "src/utils/cn";
 import { cellToString } from "src/utils/convert";
 import type { DataAction, DataKey } from "src/stores/connection";
 import type { EditingCell } from "./tableUtils";
+import { EDITABLE_TABLE_CELL_CLASS } from "./selectionClasses";
 
 // ============================================================================
 // Types
@@ -132,7 +133,11 @@ const EditCell = ({
       type="text"
       value={editValue}
       disabled={isDeleted}
-      className={cn(CELL_CLASS, "bg-white focus:outline-none")}
+      className={cn(
+        CELL_CLASS,
+        EDITABLE_TABLE_CELL_CLASS,
+        "bg-white focus:outline-none"
+      )}
       style={INPUT_STYLE}
       onInput={handleInput}
       onBlur={handleBlur}

@@ -14,7 +14,10 @@ import { getDbConfig } from "src/utils/dbConfig";
 import { cn } from "src/utils/cn";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
-import { selectionRowClass } from "./selectionClasses";
+import {
+  EDITABLE_TABLE_CELL_CLASS,
+  selectionRowClass,
+} from "./selectionClasses";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -132,9 +135,10 @@ export function NewTablePane({
             <Input
               className={cn(
                 "h-8 cursor-default! rounded-none text-sm",
+                !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
-                  : "bg-new! focus:bg-white!",
+                  : "bg-new!",
                 selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)
               )}
               showSelect={!isEmptyRow && showSelect}
