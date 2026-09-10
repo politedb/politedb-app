@@ -13,6 +13,7 @@ import { useTableFocusState } from "src/hooks/useTableFocusState";
 import {
   EDITABLE_TABLE_CELL_CLASS,
   selectionRowClass,
+  tableMutationRowClass,
 } from "./selectionClasses";
 import { getDbConfig } from "src/utils/dbConfig";
 
@@ -315,7 +316,10 @@ export function TableConstraints({
         selectedRow={selectedRowIndex}
         selectedRows={selectedRows}
         rowClassName={(_row, index) => {
-          return deletedRows.has(index) ? "bg-deleted!" : "";
+          return tableMutationRowClass(
+            deletedRows.has(index),
+            !initData || index >= initData.length
+          );
         }}
         onSelectRow={(_row, index, multi, range) => {
           handleRowSelect(index, multi, range);

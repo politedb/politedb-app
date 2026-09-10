@@ -498,12 +498,37 @@ html.dark table tr:nth-child(even) {
   border-color: var(--table-grid);
 }
 
-.common-data-table .table-cell-editor:not(.bg-dirty) {
-  background-color: transparent;
+.common-data-table input {
+  background-color: transparent !important;
 }
 
-html.dark .common-data-table .table-cell-editor:focus {
-  background-color: transparent !important;
+.common-data-table input.bg-dirty {
+  background-color: var(--color-dirty) !important;
+}
+
+.common-data-table tr.bg-new\! > td,
+.common-data-table tr.bg-new\! input {
+  background-color: var(--color-new) !important;
+}
+
+.common-data-table tr.bg-deleted\! > td,
+.common-data-table tr.bg-deleted\! input {
+  background-color: var(--color-deleted) !important;
+}
+
+.common-data-table tr.bg-selected\! > td,
+.common-data-table tr.bg-selected\! input {
+  background-color: var(--color-selected) !important;
+}
+
+.common-data-table tr.bg-selected-unfocused\! > td,
+.common-data-table tr.bg-selected-unfocused\! input {
+  background-color: var(--color-selected-unfocused) !important;
+}
+
+.common-data-table input.table-cell-editor:focus {
+  background-color: var(--table-surface) !important;
+  color: var(--table-text) !important;
 }
 
 html.dark aside,

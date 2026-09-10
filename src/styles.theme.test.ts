@@ -73,12 +73,17 @@ describe("global dark theme remaps", () => {
     expect(css).toContain(`--table-grid: ${palette.grid}`);
     expect(css).toContain("--table-header: #181818");
     expect(css).toContain(`--table-text: ${palette.text}`);
+    expect(css).toContain(".common-data-table input");
+    expect(css).toContain(".common-data-table input.bg-dirty");
+    expect(css).toContain("background-color: var(--color-dirty) !important");
+    expect(css).toContain(".common-data-table tr.bg-new\\! > td");
+    expect(css).toContain(".common-data-table tr.bg-deleted\\! input");
+    expect(css).toContain(".common-data-table tr.bg-selected\\! input");
     expect(css).toContain(
-      ".common-data-table .table-cell-editor:not(.bg-dirty)"
+      ".common-data-table tr.bg-selected-unfocused\\! input"
     );
-    expect(css).toContain(
-      "html.dark .common-data-table .table-cell-editor:focus"
-    );
+    expect(css).toContain(".common-data-table input.table-cell-editor:focus");
+    expect(css).toContain("background-color: var(--table-surface) !important");
   });
 });
 
