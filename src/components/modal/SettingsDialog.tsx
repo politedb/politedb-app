@@ -78,7 +78,7 @@ export function SettingsDialog(props: Props) {
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setSettings((current) => ({ ...current, [key]: value }));
     if (key === "theme") {
-      applyThemePreference(value as AppSettings["theme"]);
+      applyThemePreference(value as AppSettings["theme"], { animate: true });
     }
     if (key === "uiFont") {
       applyUiFontPreference(value as AppSettings["uiFont"]);
@@ -90,7 +90,7 @@ export function SettingsDialog(props: Props) {
 
   function resetSettings() {
     setSettings(DEFAULT_SETTINGS);
-    applyThemePreference(DEFAULT_SETTINGS.theme);
+    applyThemePreference(DEFAULT_SETTINGS.theme, { animate: true });
     applyUiFontPreference(DEFAULT_SETTINGS.uiFont);
     applyUiDensityPreference(DEFAULT_SETTINGS.density);
   }

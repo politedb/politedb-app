@@ -2,6 +2,10 @@ export type ThemePreference = "system" | "light" | "dark";
 export type ResolvedTheme = "light" | "dark";
 
 const SETTINGS_STORAGE_KEY = "politedb:app-settings:v1";
+const THEME_TRANSITION_CLASS = "theme-transition";
+const THEME_TRANSITION_DURATION_MS = 180;
+
+let themeTransitionTimer: ReturnType<typeof setTimeout> | undefined;
 
 function systemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
@@ -30,10 +34,24 @@ export function getStoredThemePreference(): ThemePreference {
   }
 }
 
-export function applyThemePreference(preference: ThemePreference) {
+export function applyThemePreference(
+  preference: ThemePreference,
+  options: { animate?: boolean } = {}
+) {
   if (typeof document === "undefined") return;
   const resolved = resolveThemePreference(preference);
   const root = document.documentElement;
+  const shouldAnimate = options.animate && getResolvedTheme() !== resolved;
+
+  if (themeTransitionTimer) clearTimeout(themeTransitionTimer);
+  root.classList.toggle(THEME_TRANSITION_CLASS, Boolean(shouldAnimate));
+  if (shouldAnimate) {
+    themeTransitionTimer = setTimeout(() => {
+      root.classList.remove(THEME_TRANSITION_CLASS);
+      themeTransitionTimer = undefined;
+    }, THEME_TRANSITION_DURATION_MS);
+  }
+
   root.dataset.themePreference = preference;
   root.dataset.theme = resolved;
   root.classList.toggle("dark", resolved === "dark");
@@ -53,7 +71,7 @@ export function installSystemThemeListener() {
   const media = window.matchMedia("(prefers-color-scheme: dark)");
   const onChange = () => {
     if (getStoredThemePreference() === "system") {
-      applyStoredThemePreference();
+      applyThemePreference("system", { animate: true });
     }
   };
   media.addEventListener("change", onChange);
