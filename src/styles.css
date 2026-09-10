@@ -25,6 +25,11 @@
   --color-deleted: #fbbdbd;
   --color-selected: #bedbff;
   --color-selected-unfocused: #dbdbdb;
+  --table-surface: #ffffff;
+  --table-zebra: #fafafa;
+  --table-grid: #e5e5e5;
+  --table-header: #fafafa;
+  --table-text: #111827;
 }
 
 html[data-density="compact"] [data-density-sidebar-header] {
@@ -157,6 +162,11 @@ html.dark #root {
   --color-deleted: #7f1d1d;
   --color-selected: #264f78;
   --color-selected-unfocused: #2e2e2e;
+  --table-surface: #242424;
+  --table-zebra: #202020;
+  --table-grid: #353535;
+  --table-header: #181818;
+  --table-text: #e8e8e8;
   --color-slate-950: #181818;
   --color-slate-900: #242424;
   --color-slate-800: #2f2f2f;
@@ -463,6 +473,29 @@ html.dark textarea::placeholder {
 
 html.dark table tr:nth-child(even) {
   background-color: #202020;
+}
+
+.common-data-table {
+  background-color: var(--table-surface);
+  color: var(--table-text);
+}
+
+.common-data-table thead,
+.common-data-table th {
+  background-color: var(--table-header);
+}
+
+.common-data-table tbody tr {
+  background-color: var(--table-surface);
+}
+
+.common-data-table tbody tr:nth-child(even) {
+  background-color: var(--table-zebra);
+}
+
+.common-data-table th,
+.common-data-table td {
+  border-color: var(--table-grid);
 }
 
 html.dark aside,

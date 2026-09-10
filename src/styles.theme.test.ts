@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { TABLE_CANVAS_PALETTE } from "./components/table/tableCellBackground";
 
 const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 const leftNav = readFileSync(
@@ -13,6 +14,10 @@ const header = readFileSync(
 );
 const searchNav = readFileSync(
   resolve(process.cwd(), "src/screens/connection/LeftNav.tsx"),
+  "utf8"
+);
+const commonTable = readFileSync(
+  resolve(process.cwd(), "src/components/common/Table.tsx"),
   "utf8"
 );
 
@@ -57,6 +62,17 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("--color-slate-900: #242424");
     expect(css).toContain("html.dark aside");
     expect(css).toContain("background-color: #212121 !important");
+  });
+
+  it("shares the canvas table palette with regular tables", () => {
+    const palette = TABLE_CANVAS_PALETTE.dark;
+
+    expect(commonTable).toContain("common-data-table");
+    expect(css).toContain(`--table-surface: ${palette.background}`);
+    expect(css).toContain(`--table-zebra: ${palette.zebra}`);
+    expect(css).toContain(`--table-grid: ${palette.grid}`);
+    expect(css).toContain("--table-header: #181818");
+    expect(css).toContain(`--table-text: ${palette.text}`);
   });
 });
 
