@@ -15,6 +15,7 @@ import { cn } from "src/utils/cn";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
 import {
+  ACTIVE_TABLE_CELL_CLASS,
   EDITABLE_TABLE_CELL_CLASS,
   selectionRowClass,
 } from "./selectionClasses";
@@ -71,13 +72,18 @@ export function NewTablePane({
   });
 
   // Use row selection hook
-  const { selectedRowIndex, selectedRows, handleRowSelect } =
-    useTableRowSelection({
-      onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
-      containerRef: rootRef,
-      totalRows: tableState.columns.length,
-      isTableFocused,
-    });
+  const {
+    selectedRowIndex,
+    selectedRows,
+    selectedColIndex,
+    handleRowSelect,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
+    containerRef: rootRef,
+    totalRows: tableState.columns.length,
+    isTableFocused,
+  });
 
   useEffect(() => {
     if (!activeProfileScreen || !tableWindowId) return;
@@ -121,7 +127,7 @@ export function NewTablePane({
 
   const tableColumns = useMemo<CommonColumn<TableColumn>[]>(
     () =>
-      COLUMN_PROPERTIES.map((colKey) => ({
+      COLUMN_PROPERTIES.map((colKey, colIndex) => ({
         key: colKey,
         label: colKey,
         className: "px-0",
@@ -139,7 +145,10 @@ export function NewTablePane({
                 isEmptyRow
                   ? "focus:bg-transparent focus:outline-none"
                   : "bg-new!",
-                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)
+                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
+                selectedRowIndex === index &&
+                  selectedColIndex === colIndex &&
+                  ACTIVE_TABLE_CELL_CLASS
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions[colKey]}
@@ -166,7 +175,9 @@ export function NewTablePane({
                 }
               }}
               onClick={(e) => {
-                if (isProfileLocked) return;
+                if (isProfileLocked || isEmptyRow) return;
+
+                handleColSelect(colIndex);
 
                 const multi = e.metaKey || e.ctrlKey;
                 const range = e.shiftKey;
@@ -191,6 +202,7 @@ export function NewTablePane({
                   handleRowSelect(index);
                 }
 
+                handleColSelect(colIndex);
                 const input = e.currentTarget as HTMLInputElement;
                 input.focus();
                 input.select();
@@ -204,11 +216,14 @@ export function NewTablePane({
     [
       tableState,
       selectedRows,
+      selectedRowIndex,
+      selectedColIndex,
       columnOptions,
       isTableFocused,
       busy,
       isProfileLocked,
       handleRowSelect,
+      handleColSelect,
     ]
   );
 

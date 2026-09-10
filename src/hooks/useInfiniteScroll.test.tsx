@@ -56,6 +56,8 @@ describe("useInfiniteScroll", () => {
       );
     });
 
-    expect(view.container.querySelectorAll("[data-list-item]")).toHaveLength(20);
+    expect(view.container.querySelectorAll("[data-list-item]")).toHaveLength(
+      20
+    );
   });
 });

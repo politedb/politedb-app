@@ -82,8 +82,19 @@ describe("global dark theme remaps", () => {
     expect(css).toContain(
       ".common-data-table tr.bg-selected-unfocused\\! input"
     );
-    expect(css).toContain(".common-data-table input.table-cell-editor:focus");
-    expect(css).toContain("background-color: var(--table-surface) !important");
+    expect(css).toContain(
+      ".common-data-table tbody tr input.table-cell-editor:focus"
+    );
+    expect(css).toContain(
+      "background-color: var(--table-editor-surface) !important"
+    );
+    expect(css).toContain(
+      ".common-data-table tbody tr input.table-cell-active"
+    );
+    expect(css).toContain("--table-editor-surface: #181818");
+    expect(css).toContain(
+      `--table-active-stroke: ${palette.activeStrokeFocused}`
+    );
   });
 });
 

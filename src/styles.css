@@ -30,6 +30,8 @@
   --table-grid: #e5e5e5;
   --table-header: #fafafa;
   --table-text: #111827;
+  --table-active-stroke: #0000ff;
+  --table-editor-surface: #ffffff;
 }
 
 html[data-density="compact"] [data-density-sidebar-header] {
@@ -167,6 +169,8 @@ html.dark #root {
   --table-grid: #353535;
   --table-header: #181818;
   --table-text: #e8e8e8;
+  --table-active-stroke: #60a5fa;
+  --table-editor-surface: #181818;
   --color-slate-950: #181818;
   --color-slate-900: #242424;
   --color-slate-800: #2f2f2f;
@@ -443,6 +447,7 @@ html.dark .split-pane__divider::before {
 html.dark .split-pane__divider:hover::before {
   background: #737373;
 }
+
 html.dark .ring-slate-200,
 html.dark .ring-neutral-200,
 html.dark .ring-blue-200 {
@@ -526,8 +531,16 @@ html.dark table tr:nth-child(even) {
   background-color: var(--color-selected-unfocused) !important;
 }
 
-.common-data-table input.table-cell-editor:focus {
-  background-color: var(--table-surface) !important;
+.common-data-table tbody tr input.table-cell-active {
+  position: relative;
+  z-index: 1;
+  background-color: var(--table-editor-surface) !important;
+  box-shadow: inset 0 0 0 1px var(--table-active-stroke);
+  outline: none;
+}
+
+.common-data-table tbody tr input.table-cell-editor:focus {
+  background-color: var(--table-editor-surface) !important;
   color: var(--table-text) !important;
 }
 

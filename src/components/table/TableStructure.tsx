@@ -17,6 +17,7 @@ import { useTableStructureOperations } from "src/screens/connection/hooks/useTab
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
 import {
+  ACTIVE_TABLE_CELL_CLASS,
   EDITABLE_TABLE_CELL_CLASS,
   selectionRowClass,
   tableMutationRowClass,
@@ -168,15 +169,20 @@ export function TableStructure({
     [filteredTableData]
   );
 
-  const { selectedRowIndex, selectedRows, handleRowSelect, handleColSelect } =
-    useTableRowSelection({
-      onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
-      deletedRows,
-      containerRef: rootRef,
-      totalRows: tableData.length,
-      selectableRowIndices,
-      isTableFocused,
-    });
+  const {
+    selectedRowIndex,
+    selectedRows,
+    selectedColIndex,
+    handleRowSelect,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
+    deletedRows,
+    containerRef: rootRef,
+    totalRows: tableData.length,
+    selectableRowIndices,
+    isTableFocused,
+  });
 
   useEffect(() => {
     if (!allowForeignKeyEditing && fkRowIndex !== null) {
@@ -285,6 +291,9 @@ export function TableStructure({
                     isRowSelected && !isEmptyRow,
                     isTableFocused
                   ),
+                  selectedRowIndex === sourceIndex &&
+                    selectedColIndex === colIndex &&
+                    ACTIVE_TABLE_CELL_CLASS,
                   isFkColumn && !isEmptyRow && "pr-6"
                 )}
                 showSelect={!isEmptyRow && showSelect}
@@ -312,7 +321,9 @@ export function TableStructure({
                   }
                 }}
                 onClick={(e) => {
-                  if (readOnly) return;
+                  if (readOnly || isEmptyRow || isDeleted) return;
+
+                  handleColSelect(colIndex);
 
                   const multi = e.metaKey || e.ctrlKey;
                   const range = e.shiftKey;
@@ -382,6 +393,8 @@ export function TableStructure({
       initData,
       deletedRows,
       selectedRows,
+      selectedRowIndex,
+      selectedColIndex,
       columnInputOptions,
       findFkForColumn,
       foreignKeys,

@@ -11,6 +11,7 @@ import { useTableConstraintOperations } from "src/screens/connection/hooks/useTa
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
 import {
+  ACTIVE_TABLE_CELL_CLASS,
   EDITABLE_TABLE_CELL_CLASS,
   selectionRowClass,
   tableMutationRowClass,
@@ -141,15 +142,20 @@ export function TableConstraints({
   );
 
   // Use row selection hook
-  const { selectedRowIndex, selectedRows, handleRowSelect, handleColSelect } =
-    useTableRowSelection({
-      onDeleteRow: handleDeleteRecord,
-      deletedRows,
-      containerRef: rootRef,
-      totalRows: tableData.length,
-      selectableRowIndices,
-      isTableFocused,
-    });
+  const {
+    selectedRowIndex,
+    selectedRows,
+    selectedColIndex,
+    handleRowSelect,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: handleDeleteRecord,
+    deletedRows,
+    containerRef: rootRef,
+    totalRows: tableData.length,
+    selectableRowIndices,
+    isTableFocused,
+  });
 
   const handleDoubleClickRow = useCallback(
     (_row: any, index: number) => {
@@ -216,7 +222,10 @@ export function TableConstraints({
                 !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
                 isDirtyCell && !isNewRow && "bg-dirty",
                 isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused)
+                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
+                selectedRowIndex === sourceIndex &&
+                  selectedColIndex === colIndex &&
+                  ACTIVE_TABLE_CELL_CLASS
               )}
               showSelect={!isEmptyRow && showSelect}
               options={columnOptions}
@@ -239,7 +248,9 @@ export function TableConstraints({
                 }
               }}
               onClick={(e) => {
-                if (readOnly) return;
+                if (readOnly || isEmptyRow || isDeleted) return;
+
+                handleColSelect(colIndex);
 
                 const multi = e.metaKey || e.ctrlKey;
                 const range = e.shiftKey;
@@ -281,6 +292,8 @@ export function TableConstraints({
       initData,
       deletedRows,
       selectedRows,
+      selectedRowIndex,
+      selectedColIndex,
       columnInputOptions,
       isTableFocused,
       busy,

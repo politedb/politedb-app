@@ -24,23 +24,23 @@ describe("getResolvedTheme", () => {
     applyThemePreference("dark", { animate: true });
 
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(document.documentElement.classList.contains("theme-transition")).toBe(
-      true
-    );
+    expect(
+      document.documentElement.classList.contains("theme-transition")
+    ).toBe(true);
 
     vi.advanceTimersByTime(180);
 
-    expect(document.documentElement.classList.contains("theme-transition")).toBe(
-      false
-    );
+    expect(
+      document.documentElement.classList.contains("theme-transition")
+    ).toBe(false);
   });
 
   it("applies the startup theme without animation", () => {
     applyThemePreference("dark");
 
     expect(document.documentElement.classList.contains("dark")).toBe(true);
-    expect(document.documentElement.classList.contains("theme-transition")).toBe(
-      false
-    );
+    expect(
+      document.documentElement.classList.contains("theme-transition")
+    ).toBe(false);
   });
 });

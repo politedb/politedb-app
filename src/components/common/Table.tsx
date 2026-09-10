@@ -461,6 +461,7 @@ export function Table<T = any>({
                         key={col.key}
                         class={cn(
                           "min-h-10 border-r border-b border-neutral-200 px-1",
+                          "&>input:focus:outline-none!",
                           colIndex === 0 && "border-l",
                           col.className
                         )}
