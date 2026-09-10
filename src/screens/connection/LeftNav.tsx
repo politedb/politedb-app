@@ -26,6 +26,9 @@ import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
+import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
+
+const FUNCTION_LIST_PAGE_SIZE = 20;
 
 interface Props {
   engine?: DatabaseEngine;
@@ -182,6 +185,14 @@ export function LeftNav({
   const isMongo = engine === "mongo";
   const isRedis = engine === "redis";
   const supportsTableMutations = !isMongo && !isRedis;
+  const {
+    visibleItems: visibleFunctions,
+    sentinelRef: functionListSentinelRef,
+    hasMore: hasMoreFunctions,
+  } = useInfiniteScroll(filteredFunctions, {
+    pageSize: FUNCTION_LIST_PAGE_SIZE,
+    resetKey: `${currSchema}\0${tableSearchQuery}`,
+  });
 
   const [tableMenu, setTableMenu] = useState<{
     x: number;
@@ -317,7 +328,7 @@ export function LeftNav({
       </div>
 
       {/* Middle: Sections */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
         {/* Functions (hidden for Mongo; schema = database, no SQL functions) */}
         {!isMongo && !isRedis && (
           <div class="mb-2">
@@ -346,7 +357,7 @@ export function LeftNav({
                   </div>
                 ) : (
                   <div class="space-y-1 pl-3">
-                    {filteredFunctions.map((fn) => {
+                    {visibleFunctions.map((fn) => {
                       const key = `${fn.schema}.${fn.name}(${fn.signature ?? ""})`;
 
                       return (
@@ -367,10 +378,19 @@ export function LeftNav({
                           title={key}
                         >
                           <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
-                          <TableName name={fn.name} />
+                          <span class="min-w-0 flex-1 truncate select-none">
+                            {fn.name}
+                          </span>
                         </button>
                       );
                     })}
+                    {hasMoreFunctions ? (
+                      <div
+                        ref={functionListSentinelRef}
+                        class="h-px"
+                        aria-hidden="true"
+                      />
+                    ) : null}
                   </div>
                 )}
               </div>

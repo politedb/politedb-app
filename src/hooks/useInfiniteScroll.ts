@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "preact/hooks";
 
@@ -16,7 +15,10 @@ export function useInfiniteScroll<T>(
   const resetKey = opts?.resetKey ?? items.length;
 
   const [visibleCount, setVisibleCount] = useState(pageSize);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [sentinel, setSentinel] = useState<HTMLDivElement | null>(null);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    setSentinel(node);
+  }, []);
 
   useEffect(() => {
     setVisibleCount(pageSize);
@@ -34,7 +36,6 @@ export function useInfiniteScroll<T>(
   }, [items.length, pageSize]);
 
   useEffect(() => {
-    const sentinel = sentinelRef.current;
     if (!sentinel || !hasMore) return;
 
     const scrollRoot =
@@ -49,7 +50,7 @@ export function useInfiniteScroll<T>(
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadMore, visibleCount]);
+  }, [hasMore, loadMore, sentinel, visibleCount]);
 
   return {
     visibleItems,

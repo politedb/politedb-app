@@ -19,6 +19,9 @@ import { normalizeByteSizeLabel } from "src/utils/convert";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
+
+const CATALOG_PAGE_SIZE = 100;
 
 type CatalogColumn<T> = {
   key: string;
@@ -114,13 +117,25 @@ const FUNCTION_COLUMNS: CatalogColumn<DatabaseObjectItem>[] = [
 function CatalogTable<T>(props: {
   columns: CatalogColumn<T>[];
   rows: T[];
+  resetKey: string;
+  getRowKey: (row: T) => string;
   emptyLabel: string;
   renderNameIcon: (row: T) => ComponentChildren;
   onOpen: (row: T) => void;
 }) {
+  const {
+    visibleItems: visibleRows,
+    sentinelRef,
+    hasMore,
+  } = useInfiniteScroll(props.rows, {
+    pageSize: CATALOG_PAGE_SIZE,
+    resetKey: props.resetKey,
+  });
+
   return (
     <OverlayScrollArea
       className="min-h-0 flex-1 bg-neutral-50"
+      dataScrollRoot
       horizontal
       vertical
     >
@@ -153,9 +168,10 @@ function CatalogTable<T>(props: {
               </td>
             </tr>
           ) : (
-            props.rows.map((row, rowIndex) => (
+            visibleRows.map((row) => (
               <tr
-                key={rowIndex}
+                key={props.getRowKey(row)}
+                data-catalog-row
                 onDblClick={() => props.onOpen(row)}
                 class="cursor-default odd:bg-white even:bg-neutral-50 hover:bg-blue-100!"
               >
@@ -185,6 +201,9 @@ function CatalogTable<T>(props: {
           )}
         </tbody>
       </table>
+      {hasMore ? (
+        <div ref={sentinelRef} class="h-px" aria-hidden="true" />
+      ) : null}
     </OverlayScrollArea>
   );
 }
@@ -298,6 +317,8 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         <CatalogTable
           columns={FUNCTION_COLUMNS}
           rows={functionRows}
+          resetKey={`functions\0${schemaScope}\0${search}\0${functionRows.length}`}
+          getRowKey={(item) => item.id}
           emptyLabel="No functions found."
           renderNameIcon={() => (
             <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
@@ -310,6 +331,8 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         <CatalogTable
           columns={TABLE_COLUMNS}
           rows={tableRows}
+          resetKey={`tables\0${schemaScope}\0${search}\0${tableRows.length}`}
+          getRowKey={(table) => `${table.schema}.${table.name}`}
           emptyLabel="No tables found."
           renderNameIcon={(table) => (
             <TableIcon
