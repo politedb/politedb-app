@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { memo } from "preact/compat";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import {
   Dialog,
@@ -36,6 +43,9 @@ import {
 } from "src/lib/databaseObjects";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { operationExecuteTransaction } from "src/lib/tauri";
+import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
+
+const OBJECT_LIST_PAGE_SIZE = 50;
 
 const loadSqlEditorPane = () =>
   import("src/components/editor/SqlEditorPane").then((module) => ({
@@ -85,15 +95,16 @@ function ObjectKindTab(props: {
   );
 }
 
-function ObjectListItem(props: {
+const ObjectListItem = memo(function ObjectListItem(props: {
   item: DatabaseObjectItem;
   active: boolean;
-  onClick: () => void;
+  onSelect: (id: string) => void;
 }) {
   return (
     <button
       type="button"
-      onClick={props.onClick}
+      data-db-object-id={props.item.id}
+      onClick={() => props.onSelect(props.item.id)}
       class={cn(
         "flex w-full items-start gap-2 rounded-md border px-2 py-2 text-left transition-colors",
         props.active
@@ -118,7 +129,7 @@ function ObjectListItem(props: {
       </div>
     </button>
   );
-}
+});
 
 export function DbObjectsManagerPane(props: {
   win: DatabaseObjectManagerWindow;
@@ -157,7 +168,6 @@ export function DbObjectsManagerPane(props: {
         metaKey: rt.metaKey,
         engine: rt.engine,
         connectionId: rt.runtimeConnectionId,
-        includeColumns: true,
         lazy: true,
       }),
     [rt]
@@ -214,6 +224,22 @@ export function DbObjectsManagerPane(props: {
         );
       });
   }, [allObjects, kind, schemaFilter, search]);
+
+  const {
+    visibleItems: visibleObjects,
+    sentinelRef: objectListSentinelRef,
+    hasMore: hasMoreObjects,
+  } = useInfiniteScroll(filteredObjects, {
+    pageSize: OBJECT_LIST_PAGE_SIZE,
+    resetKey: `${kind}\0${schemaFilter}\0${search}`,
+  });
+
+  const selectObject = useCallback((id: string) => {
+    setSelectedObjectId(id);
+    setIsCreateMode(false);
+    setError(null);
+    setInfo(null);
+  }, []);
 
   const selectedObject = useMemo(() => {
     if (!selectedObjectId) return null;
@@ -491,6 +517,7 @@ export function DbObjectsManagerPane(props: {
         <OverlayScrollArea
           className="min-h-0 flex-1"
           contentClassName="space-y-1 p-3"
+          dataScrollRoot
         >
           {!kindCapability.canList ? (
             <div class="rounded-md border border-dashed border-neutral-300 bg-white px-3 py-4 text-sm text-neutral-500">
@@ -501,19 +528,23 @@ export function DbObjectsManagerPane(props: {
               No {objectKindLabel(kind).toLowerCase()} found.
             </div>
           ) : (
-            filteredObjects.map((item) => (
-              <ObjectListItem
-                key={item.id}
-                item={item}
-                active={selectedObjectId === item.id && !isCreateMode}
-                onClick={() => {
-                  setSelectedObjectId(item.id);
-                  setIsCreateMode(false);
-                  setError(null);
-                  setInfo(null);
-                }}
-              />
-            ))
+            <>
+              {visibleObjects.map((item) => (
+                <ObjectListItem
+                  key={item.id}
+                  item={item}
+                  active={selectedObjectId === item.id && !isCreateMode}
+                  onSelect={selectObject}
+                />
+              ))}
+              {hasMoreObjects ? (
+                <div
+                  ref={objectListSentinelRef}
+                  class="h-px"
+                  aria-hidden="true"
+                />
+              ) : null}
+            </>
           )}
         </OverlayScrollArea>
       </div>
