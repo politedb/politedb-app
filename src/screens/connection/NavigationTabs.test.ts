@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTabRevealScrollLeft } from "./NavigationTabs";
+import { getTabRevealScrollLeft, navigationTabClass } from "./NavigationTabs";
 
 describe("getTabRevealScrollLeft", () => {
   it("moves a clipped left-edge tab fully into view", () => {
@@ -36,5 +36,19 @@ describe("getTabRevealScrollLeft", () => {
         tabRight: 200,
       })
     ).toBeNull();
+  });
+});
+
+describe("navigationTabClass", () => {
+  it("lifts the active tab and keeps idle tabs near the chrome", () => {
+    const active = navigationTabClass(true);
+    const idle = navigationTabClass(false);
+
+    expect(active).toContain("bg-white");
+    expect(active).toContain("dark:bg-[#242424]!");
+    expect(idle).toContain("bg-transparent");
+    expect(idle).toContain("dark:bg-transparent!");
+    expect(idle).not.toContain("bg-neutral-200/70");
+    expect(idle).not.toContain("dark:bg-slate-800");
   });
 });

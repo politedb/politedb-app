@@ -62,6 +62,16 @@ function getWindowSubtitle(w: OpenWindow) {
   return "SQL Editor";
 }
 
+export function navigationTabClass(active: boolean) {
+  return cn(
+    "group flex shrink-0 items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
+    "ring-1 ring-black/5 dark:ring-white/10",
+    active
+      ? "bg-white text-neutral-800 dark:bg-neutral-700 dark:text-neutral-200!"
+      : "bg-transparent text-neutral-600 hover:bg-black/[0.05] hover:text-neutral-700 dark:hover:bg-neutral-900"
+  );
+}
+
 export function NavigationTabs({
   openWindows,
   setActiveWindowId,
@@ -205,15 +215,17 @@ export function NavigationTabs({
                   });
                 }}
                 title={getWindowSubtitle(w)}
-                class={cn(
-                  "group flex shrink-0 items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
-                  active
-                    ? "bg-white text-neutral-800 ring-1 ring-black/5 dark:bg-slate-900 dark:text-slate-100 dark:ring-white/10"
-                    : "bg-neutral-200/70 text-neutral-600 hover:bg-neutral-300/80 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                )}
+                class={navigationTabClass(active)}
               >
                 {w.type === "table" && (
-                  <TableIcon className="size-4 text-neutral-500" />
+                  <TableIcon
+                    className={cn(
+                      "size-4",
+                      active
+                        ? "text-neutral-500 dark:text-[#a3a3a3]"
+                        : "text-neutral-400 dark:text-[#525252]"
+                    )}
+                  />
                 )}
 
                 {w.type === "db-catalog" &&
@@ -235,9 +247,8 @@ export function NavigationTabs({
 
                 <span
                   class={cn(
-                    "max-w-40 truncate text-sm font-medium select-none",
-                    w.type === "db-object-manager" && "text-[12px]",
-                    active && "font-semibold"
+                    "max-w-40 truncate text-sm font-semibold select-none",
+                    w.type === "db-object-manager" && "text-[12px]"
                   )}
                 >
                   {getWindowTitle(w)}
