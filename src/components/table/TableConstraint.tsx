@@ -1,21 +1,12 @@
-import { useMemo, useCallback } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import type { DatabaseEngine, TableConstraint } from "src/types";
 import {
-  Table,
-  type TableColumn as CommonTableColumn,
-} from "src/components/common/Table";
-import { Input, InputOption } from "src/components/common/Input";
-import { cn } from "src/utils/cn";
+  SchemaCanvasTable,
+  type SchemaCanvasColumn,
+} from "./SchemaCanvasTable";
+import type { InputOption } from "src/components/common/Input";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
-import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
-import { useTableFocusState } from "src/hooks/useTableFocusState";
-import {
-  ACTIVE_TABLE_CELL_CLASS,
-  EDITABLE_TABLE_CELL_CLASS,
-  selectionRowClass,
-  tableMutationRowClass,
-} from "./selectionClasses";
 import { getDbConfig } from "src/utils/dbConfig";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
@@ -82,12 +73,6 @@ export function TableConstraints({
   engine,
   searchQuery = "",
 }: Props) {
-  const {
-    ref: containerRef,
-    rootRef,
-    isFocused: isTableFocused,
-  } = useTableFocusState();
-
   // Use constraint operations hook
   const { handleDataChange, handleDeleteRecord } = useTableConstraintOperations(
     {
@@ -106,67 +91,6 @@ export function TableConstraints({
     if (editedData.length > 0) return editedData;
     return initData ?? [];
   }, [editedData, initData, error]);
-
-  const searchableTableData = useMemo(
-    () =>
-      tableData.map(
-        (row, index) =>
-          ({ ...row, _sourceIndex: index }) as TableConstraint & {
-            _sourceIndex: number;
-          }
-      ),
-    [tableData]
-  );
-
-  const filteredTableData = useMemo(() => {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    if (!normalizedQuery) return searchableTableData;
-
-    return searchableTableData.filter((row) =>
-      COLUMNS_NAME[engine].some((column) =>
-        String(row[column] ?? "")
-          .toLowerCase()
-          .includes(normalizedQuery)
-      )
-    );
-  }, [searchQuery, searchableTableData, engine]);
-
-  const selectableRowIndices = useMemo(
-    () =>
-      filteredTableData
-        .map((row) => row._sourceIndex)
-        .filter(
-          (index): index is number => typeof index === "number" && index >= 0
-        ),
-    [filteredTableData]
-  );
-
-  // Use row selection hook
-  const {
-    selectedRowIndex,
-    selectedRows,
-    selectedColIndex,
-    handleRowSelect,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: handleDeleteRecord,
-    deletedRows,
-    containerRef: rootRef,
-    totalRows: tableData.length,
-    selectableRowIndices,
-    isTableFocused,
-  });
-
-  const handleDoubleClickRow = useCallback(
-    (_row: any, index: number) => {
-      if (readOnly) return;
-      if (searchQuery.trim()) return;
-      if (index >= tableData.length) {
-        onAddNewRecord();
-      }
-    },
-    [readOnly, searchQuery, tableData.length, onAddNewRecord]
-  );
 
   const dbConfig = getDbConfig(engine);
 
@@ -189,157 +113,31 @@ export function TableConstraints({
     [columnNames, dbConfig.indexAlgorithms]
   );
 
-  const tableColumns = useMemo<
-    CommonTableColumn<TableConstraint & { _sourceIndex: number }>[]
-  >(
-    () => [
-      ...COLUMNS_NAME[engine].map((name) => ({
-        key: name,
-        label: name,
-        sortable: true,
-        sortKey: name,
-        className: "px-0",
-        render: (_value: any, row: any, _index: number) => {
-          const hasSourceIndex = typeof row._sourceIndex === "number";
-          const sourceIndex = hasSourceIndex ? row._sourceIndex : -1;
-          const initValue = initData?.[sourceIndex]?.[name] ?? "";
-          const fieldValue = row[name] ?? "";
-          const isEmptyRow = !hasSourceIndex;
-          const isNewRow =
-            hasSourceIndex && (!initData || sourceIndex >= initData.length);
-          const isDeleted = deletedRows.has(sourceIndex);
-          const placeholder = isEmptyRow ? "" : "NULL";
-          const isRowSelected = selectedRows.has(sourceIndex);
-          const colIndex = COLUMNS_NAME[engine].indexOf(name);
-          const showSelect = Object.keys(columnInputOptions).includes(name);
-          const columnOptions = columnInputOptions[name];
-          const isDirtyCell = initValue !== fieldValue;
-
-          return (
-            <Input
-              className={cn(
-                "h-8 cursor-default! rounded-xs text-sm text-ellipsis",
-                !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
-                isDirtyCell && !isNewRow && "bg-dirty",
-                isEmptyRow && "focus:bg-transparent! focus:outline-none",
-                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
-                selectedRowIndex === sourceIndex &&
-                  selectedColIndex === colIndex &&
-                  ACTIVE_TABLE_CELL_CLASS
-              )}
-              showSelect={!isEmptyRow && showSelect}
-              options={columnOptions}
-              onValueChange={
-                showSelect
-                  ? (value) => handleDataChange(sourceIndex, name, value)
-                  : undefined
-              }
-              value={String(fieldValue)}
-              placeholder={placeholder}
-              onInput={
-                !showSelect
-                  ? (e) =>
-                      handleDataChange(sourceIndex, name, e.currentTarget.value)
-                  : undefined
-              }
-              onMouseDown={(e) => {
-                if (!isEmptyRow && !isDeleted) {
-                  e.preventDefault();
-                }
-              }}
-              onClick={(e) => {
-                if (readOnly || isEmptyRow || isDeleted) return;
-
-                handleColSelect(colIndex);
-
-                const multi = e.metaKey || e.ctrlKey;
-                const range = e.shiftKey;
-                if (
-                  !multi &&
-                  !range &&
-                  selectedRows.size > 1 &&
-                  isRowSelected
-                ) {
-                  handleRowSelect(sourceIndex);
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-              }}
-              onDblClick={(e) => {
-                if (readOnly || isEmptyRow || isDeleted) return;
-
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (!isRowSelected) {
-                  handleRowSelect(sourceIndex);
-                }
-
-                handleColSelect(colIndex);
-                const input = e.currentTarget as HTMLInputElement;
-                input.focus();
-                input.select();
-              }}
-              disabled={busy || isDeleted || readOnly}
-              readOnly={isEmptyRow || isDeleted || readOnly}
-            />
-          );
-        },
+  const tableColumns = useMemo<SchemaCanvasColumn<TableConstraint>[]>(
+    () =>
+      COLUMNS_NAME[engine].map((key) => ({
+        key,
+        options: columnInputOptions[key]?.map((option) =>
+          typeof option === "string" ? { label: option, value: option } : option
+        ),
       })),
-    ],
-    [
-      engine,
-      initData,
-      deletedRows,
-      selectedRows,
-      selectedRowIndex,
-      selectedColIndex,
-      columnInputOptions,
-      isTableFocused,
-      busy,
-      readOnly,
-      handleDataChange,
-      handleRowSelect,
-      handleColSelect,
-    ]
+    [engine, columnInputOptions]
   );
 
   return (
-    <div
-      ref={containerRef}
-      class="table-focus-root h-full w-full outline-none"
-      tabIndex={0}
-      onMouseDown={(e) => {
-        // Focus container when clicking to enable keyboard events
-        if (
-          e.target === e.currentTarget ||
-          (e.target as HTMLElement).closest("table")
-        ) {
-          rootRef.current?.focus();
-        }
-      }}
-    >
-      <Table
-        columns={tableColumns}
-        data={filteredTableData}
-        rowIndexExtractor={(row) => row._sourceIndex}
-        stickyHeader
-        fillViewport
-        showEmptyMessage={false}
-        selectedRow={selectedRowIndex}
-        selectedRows={selectedRows}
-        rowClassName={(_row, index) => {
-          return tableMutationRowClass(
-            deletedRows.has(index),
-            !initData || index >= initData.length
-          );
-        }}
-        onSelectRow={(_row, index, multi, range) => {
-          handleRowSelect(index, multi, range);
-        }}
-        onDoubleClickRow={handleDoubleClickRow}
-        selectionFocused={isTableFocused}
-      />
-    </div>
+    <SchemaCanvasTable
+      rows={tableData}
+      columns={tableColumns}
+      searchQuery={searchQuery}
+      readOnly={readOnly || busy}
+      deletedRows={deletedRows}
+      isNewRow={(index) => !initData || index >= initData.length}
+      isCellDirty={(index, name) =>
+        (initData?.[index]?.[name] ?? "") !== (tableData[index]?.[name] ?? "")
+      }
+      onChange={handleDataChange}
+      onDelete={handleDeleteRecord}
+      onAdd={onAddNewRecord}
+    />
   );
 }

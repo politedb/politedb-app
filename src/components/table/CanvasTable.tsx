@@ -95,7 +95,9 @@ function useDevicePixelRatio() {
   return devicePixelRatio;
 }
 
-type EditingCell = { rowIdx: number; colIdx: number };
+export type CanvasEditingCell = { rowIdx: number; colIdx: number };
+type EditingCell = CanvasEditingCell;
+export type CanvasCellOption = { label: string; value: string };
 type HeaderMenuState = { x: number; y: number; colName: string };
 type BooleanMenuState = {
   x: number;
@@ -123,6 +125,21 @@ export function getCanvasRowBackground(
   if (isNewRow) return palette.newRow;
   if (!isSelected) return null;
   return isFocused ? palette.selected : palette.selectedUnfocused;
+}
+
+export function getCanvasEditorOverlayBox(args: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  headerHeight: number;
+}) {
+  return {
+    left: args.x,
+    top: args.y + args.headerHeight,
+    width: args.w,
+    height: args.h,
+  };
 }
 
 type Props = {
@@ -158,6 +175,9 @@ type Props = {
   onExitEdit?: () => void;
 
   onCellActivate?: (cell: EditingCell) => boolean | void;
+  cellOptions?: Record<string, CanvasCellOption[]>;
+  actionColumns?: string[];
+  viewKey?: string;
 
   // Called when user clicks a column header to change sort.
   onChangeSort?: (
@@ -517,6 +537,9 @@ export function CanvasTable({
   isNewRow,
   onChangeSort,
   onCellActivate,
+  cellOptions,
+  actionColumns,
+  viewKey,
 }: Props) {
   const devicePixelRatio = useDevicePixelRatio();
   // --- Refs for DOM elements ---
@@ -615,6 +638,11 @@ export function CanvasTable({
   const [headerMenu, setHeaderMenu] = useState<HeaderMenuState | null>(null);
   const [rowMenu, setRowMenu] = useState<RowMenuState | null>(null);
   const [booleanMenu, setBooleanMenu] = useState<BooleanMenuState | null>(null);
+  useEffect(() => {
+    setRowMenu(null);
+    setBooleanMenu(null);
+    setHeaderMenu(null);
+  }, [viewKey]);
   const nativeEditorKind = editing
     ? getCellEditorKind(columns[editing.colIdx])
     : "text";
@@ -769,8 +797,11 @@ export function CanvasTable({
         }
 
         if (s) {
-          const isFkCol = !!foreignKeyMap && !!foreignKeyMap[col.name];
-          const isBooleanCol = getCellEditorKind(col) === "bool";
+          const isFkCol =
+            !!foreignKeyMap?.[col.name] || !!actionColumns?.includes(col.name);
+          const isBooleanCol =
+            getCellEditorKind(col) === "bool" ||
+            !!cellOptions?.[col.name]?.length;
           const rightControlWidth = isBooleanCol
             ? BOOLEAN_CONTROL_WIDTH
             : isFkCol
@@ -795,7 +826,11 @@ export function CanvasTable({
                 : palette.text;
 
           // Draw FK arrow on the right side of the cell (thin right arrow)
-          if (isFkCol && !isBooleanCol && s !== "NULL") {
+          if (
+            isFkCol &&
+            !isBooleanCol &&
+            (s !== "NULL" || actionColumns?.includes(col.name))
+          ) {
             const centerY = y + ROW_HEIGHT / 2;
             const arrowRight = x + w - 8;
             const arrowLeft = arrowRight - 8;
@@ -857,6 +892,8 @@ export function CanvasTable({
     selected,
     isFocused,
     foreignKeyMap,
+    cellOptions,
+    actionColumns,
     theme,
     uiFontStack,
     ROW_HEIGHT,
@@ -1530,6 +1567,16 @@ export function CanvasTable({
 
   const booleanMenuItems = useMemo<MenuItem[]>(() => {
     const column = booleanMenu ? columns[booleanMenu.colIdx] : undefined;
+    const options = column && cellOptions?.[column.name];
+    if (options) {
+      return options.map((option) => ({
+        type: "item",
+        label: option.label,
+        onClick: () => {
+          if (booleanMenu) onCommitEdit?.(booleanMenu, option.value);
+        },
+      }));
+    }
     const hasDefault =
       column?.column_default != null && column.column_default !== "";
     const commit = (value: boolean | null) => {
@@ -1560,12 +1607,18 @@ export function CanvasTable({
       });
     }
     return items;
-  }, [booleanMenu, columns, onCommitEdit]);
+  }, [booleanMenu, columns, onCommitEdit, cellOptions]);
 
   const openCellEditor = useCallback(
     (rowIdx: number, colIdx: number) => {
       const column = columns[colIdx];
       if (!column) return;
+      if (column.readonly || deletedRows?.has(rowIdx) || !onStartEdit) return;
+      if (
+        actionColumns?.includes(column.name) &&
+        onCellActivate?.({ rowIdx, colIdx })
+      )
+        return;
 
       const kind = getCellEditorKind(column);
       onStartEdit?.({ rowIdx, colIdx });
@@ -1596,7 +1649,15 @@ export function CanvasTable({
         }
       });
     },
-    [columns, getRowAt, getRect, onStartEdit]
+    [
+      columns,
+      getRowAt,
+      getRect,
+      onStartEdit,
+      deletedRows,
+      actionColumns,
+      onCellActivate,
+    ]
   );
 
   // --------------------------------------------------------------------------
@@ -1641,7 +1702,11 @@ export function CanvasTable({
       const relX = x - colLeft;
 
       if (
-        getCellEditorKind(col) === "bool" &&
+        (getCellEditorKind(col) === "bool" ||
+          !!cellOptions?.[col.name]?.length) &&
+        !col.readonly &&
+        !deletedRows?.has(rowIdx) &&
+        !!onCommitEdit &&
         relX >= colWidth - BOOLEAN_CONTROL_WIDTH
       ) {
         e.preventDefault();
@@ -1661,10 +1726,12 @@ export function CanvasTable({
 
       // If this is an FK column and click is on the arrow area (right ~16px),
       // trigger navigation instead of normal select.
-      if (foreignKeyMap && onCellActivate) {
-        const fk = foreignKeyMap[col.name];
+      if ((foreignKeyMap || actionColumns) && onCellActivate) {
+        const fk =
+          foreignKeyMap?.[col.name] || actionColumns?.includes(col.name);
         if (fk) {
           if (relX >= colWidth - 18 && relX <= colWidth) {
+            if (editing) commitAndExit();
             const handled = onCellActivate({ rowIdx, colIdx });
             if (handled) return;
           }
@@ -1685,6 +1752,10 @@ export function CanvasTable({
       colLefts,
       colWidths,
       foreignKeyMap,
+      actionColumns,
+      cellOptions,
+      deletedRows,
+      onCommitEdit,
       onCellActivate,
       editing,
       rootRef,
@@ -1807,6 +1878,13 @@ export function CanvasTable({
   // Render
   // --------------------------------------------------------------------------
 
+  const editorOverlayBox = editorRect
+    ? getCanvasEditorOverlayBox({
+        ...editorRect,
+        headerHeight: HEADER_HEIGHT,
+      })
+    : null;
+
   return (
     <div
       ref={rootCallbackRef}
@@ -1816,6 +1894,13 @@ export function CanvasTable({
       )}
       tabIndex={0}
       onKeyDown={(e) => {
+        const target = e.target as HTMLElement;
+        if (
+          target.closest(
+            "input, textarea, select, [contenteditable='true'], [role='menu']"
+          )
+        )
+          return;
         // When editing a cell, let the input handle Backspace/Delete
         // instead of triggering row delete at the table level.
         if (editing) return;
@@ -1843,6 +1928,53 @@ export function CanvasTable({
         const hasSelection =
           (selectedRows && selectedRows.size > 0) || selected;
         if (!hasSelection) return;
+
+        if (selected && (e.key === "Enter" || e.key === "F2")) {
+          e.preventDefault();
+          openCellEditor(selected.rowIdx, selected.colIdx);
+          return;
+        }
+        if (
+          selected &&
+          ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(
+            e.key
+          )
+        ) {
+          e.preventDefault();
+          let rowIdx = selected.rowIdx;
+          let colIdx = selected.colIdx;
+          if (e.key === "ArrowUp") rowIdx--;
+          if (e.key === "ArrowDown") rowIdx++;
+          if (e.key === "ArrowLeft") colIdx--;
+          if (e.key === "ArrowRight") colIdx++;
+          if (e.key === "Tab") {
+            colIdx += e.shiftKey ? -1 : 1;
+            if (colIdx >= columns.length) {
+              colIdx = 0;
+              rowIdx++;
+            }
+            if (colIdx < 0) {
+              colIdx = columns.length - 1;
+              rowIdx--;
+            }
+          }
+          rowIdx = Math.max(0, Math.min(totalRows - 1, rowIdx));
+          colIdx = Math.max(0, Math.min(columns.length - 1, colIdx));
+          onSelect?.(rowIdx, colIdx, false, e.shiftKey && e.key !== "Tab");
+          const host = scrollerRef.current;
+          if (host) {
+            const top = rowIdx * ROW_HEIGHT;
+            const left = colLefts[colIdx] ?? 0;
+            const width = colWidths[columns[colIdx].name] ?? 140;
+            if (top < host.scrollTop) host.scrollTop = top;
+            else if (top + ROW_HEIGHT > host.scrollTop + bodyH)
+              host.scrollTop = top + ROW_HEIGHT - bodyH;
+            if (left < host.scrollLeft) host.scrollLeft = left;
+            else if (left + width > host.scrollLeft + viewport.w)
+              host.scrollLeft = left + width - viewport.w;
+          }
+          return;
+        }
 
         if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
@@ -1970,26 +2102,22 @@ export function CanvasTable({
       />
 
       {/* Editor Overlay */}
-      {editorRect && editing && !isResizing && (
+      {editorOverlayBox && editing && !isResizing && (
         <div
           class="absolute z-60"
           style={{
-            left: editorRect.x + 2,
-            top: editorRect.y + HEADER_HEIGHT + 4,
-            width: Math.max(
-              editorRect.w - 4,
-              editorKind === "json" ? 260 : 116
-            ),
+            left: editorOverlayBox.left,
+            top: editorOverlayBox.top,
+            width: editorOverlayBox.width,
           }}
         >
           {editorKind === "json" ? (
             <textarea
               ref={editorRef as any}
               class={cn(
-                "min-h-24 w-full resize bg-white px-2 py-1 font-mono text-xs shadow-sm outline-none",
+                "box-border min-h-24 w-full resize border-2 border-blue-500 bg-white px-2 py-1 font-mono text-xs shadow-none outline-none",
                 EDITABLE_TABLE_CELL_CLASS,
-                "ring-2 ring-blue-500",
-                editorError && "ring-red-500"
+                editorError && "border-red-500"
               )}
               value={editorValue}
               onInput={(e) =>
@@ -2009,10 +2137,10 @@ export function CanvasTable({
             <input
               ref={editorRef as any}
               class={cn(
-                "h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500",
-                EDITABLE_TABLE_CELL_CLASS,
-                "ring-2 ring-blue-500"
+                "box-border w-full border-2 border-blue-500! bg-white px-2 text-sm shadow-none outline-none disabled:text-neutral-500",
+                EDITABLE_TABLE_CELL_CLASS
               )}
+              style={{ height: editorOverlayBox.height }}
               type={editorKind === "date" ? "date" : "text"}
               placeholder={
                 editorKind === "blob"
@@ -2034,8 +2162,15 @@ export function CanvasTable({
                 updateEditorValue((e.currentTarget as HTMLInputElement).value)
               }
               onKeyDown={(e) => {
-                if (e.key === "Enter") commitAndExit();
-                if (e.key === "Escape") cancelExit();
+                if (e.key === "Enter" || e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (e.key === "Enter") commitAndExit();
+                  else cancelExit();
+                  queueMicrotask(() => {
+                    if (!editorRef.current) rootRef.current?.focus();
+                  });
+                }
               }}
               onBlur={editorKind === "blob" ? cancelExit : commitAndExit}
             />
@@ -2073,7 +2208,7 @@ export function CanvasTable({
         onClose={() => setRowMenu(null)}
       />
       <ContextMenu
-        class="min-w-20"
+        class="max-h-60 min-w-20 overflow-y-auto"
         open={booleanMenu !== null}
         x={booleanMenu?.x ?? 0}
         y={booleanMenu?.y ?? 0}

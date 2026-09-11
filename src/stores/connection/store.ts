@@ -304,6 +304,64 @@ export const useConnectionStore = create<ConnectionState>()(
           };
         }),
 
+      removeNewStructureRow: (tabId, tableWindowId, rowIndex) =>
+        set((s) => {
+          const rows = s.tableStructure[tabId]?.[tableWindowId];
+          if (
+            !rows ||
+            !Number.isInteger(rowIndex) ||
+            rowIndex < 0 ||
+            rowIndex >= rows.length
+          )
+            return s;
+          const windowData = s.dataPatchMap[tabId]?.[tableWindowId];
+          const patches = { ...windowData?.patches };
+          // Splicing a draft shifts the positional keys of all later draft patches.
+          for (const action of ["create", "update", "delete"] as const) {
+            const byAction = patches[action];
+            if (!byAction?.structure) continue;
+            const structure = Object.fromEntries(
+              Object.entries(byAction.structure).flatMap(([key, value]) => {
+                const index = Number(key);
+                if (index === rowIndex) return [];
+                return [
+                  [
+                    Number.isInteger(index) && index > rowIndex
+                      ? String(index - 1)
+                      : key,
+                    value,
+                  ],
+                ];
+              })
+            );
+            const next = { ...byAction };
+            if (Object.keys(structure).length) next.structure = structure;
+            else delete next.structure;
+            if (Object.keys(next).length) patches[action] = next;
+            else delete patches[action];
+          }
+          return {
+            tableStructure: {
+              ...s.tableStructure,
+              [tabId]: {
+                ...s.tableStructure[tabId],
+                [tableWindowId]: rows.filter((_, index) => index !== rowIndex),
+              },
+            },
+            ...(windowData
+              ? {
+                  dataPatchMap: dataPatchMapWithWindowPatches(
+                    s,
+                    tabId,
+                    tableWindowId,
+                    windowData,
+                    patches
+                  ),
+                }
+              : {}),
+          };
+        }),
+
       setTableConstraints: (tabId, tableWindowId, constraints) =>
         set((s) => ({
           tableConstraints: {

@@ -27,6 +27,7 @@ import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
+import { tableSidebarNameClass } from "./tableSidebarNameClass";
 
 const FUNCTION_LIST_PAGE_SIZE = 20;
 
@@ -479,10 +480,11 @@ export function LeftNav({
                           />
                         )}
                         <TableName
-                          className={cn(
-                            isNewTable && "bg-green-200 text-emerald-900",
-                            hasChanges && "bg-amber-200 text-neutral-600"
-                          )}
+                          className={tableSidebarNameClass({
+                            isActive,
+                            isNewTable,
+                            hasChanges,
+                          })}
                           name={table.name}
                         />
                       </Button>

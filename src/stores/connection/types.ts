@@ -181,6 +181,12 @@ export type ConnectionState = {
     value: string | boolean
   ) => void;
 
+  removeNewStructureRow: (
+    tabId: string,
+    tableWindowId: string,
+    rowIndex: number
+  ) => void;
+
   setTableConstraints: (
     tabId: string,
     tableWindowId: string,
