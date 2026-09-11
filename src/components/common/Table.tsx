@@ -295,7 +295,7 @@ export function Table<T = any>({
           ref={tableRef}
           data-density-table
           class={cn(
-            "w-full border-collapse border border-t-0 border-neutral-200",
+            "common-data-table w-full border-collapse border border-t-0 border-neutral-200",
             className
           )}
           style={TABLE_STYLE}
@@ -461,6 +461,7 @@ export function Table<T = any>({
                         key={col.key}
                         class={cn(
                           "min-h-10 border-r border-b border-neutral-200 px-1",
+                          "&>input:focus:outline-none!",
                           colIndex === 0 && "border-l",
                           col.className
                         )}

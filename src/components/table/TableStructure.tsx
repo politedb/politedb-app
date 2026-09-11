@@ -16,7 +16,12 @@ import { getDbConfig, supportsForeignKeyEditing } from "src/utils/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
-import { selectionRowClass } from "./selectionClasses";
+import {
+  ACTIVE_TABLE_CELL_CLASS,
+  EDITABLE_TABLE_CELL_CLASS,
+  selectionRowClass,
+  tableMutationRowClass,
+} from "./selectionClasses";
 import { ArrowRightIcon } from "src/components/icons";
 import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 
@@ -164,15 +169,20 @@ export function TableStructure({
     [filteredTableData]
   );
 
-  const { selectedRowIndex, selectedRows, handleRowSelect, handleColSelect } =
-    useTableRowSelection({
-      onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
-      deletedRows,
-      containerRef: rootRef,
-      totalRows: tableData.length,
-      selectableRowIndices,
-      isTableFocused,
-    });
+  const {
+    selectedRowIndex,
+    selectedRows,
+    selectedColIndex,
+    handleRowSelect,
+    handleColSelect,
+  } = useTableRowSelection({
+    onDeleteRow: (rowIndex) => handleDeleteRecord(rowIndex, deletedRows),
+    deletedRows,
+    containerRef: rootRef,
+    totalRows: tableData.length,
+    selectableRowIndices,
+    isTableFocused,
+  });
 
   useEffect(() => {
     if (!allowForeignKeyEditing && fkRowIndex !== null) {
@@ -273,13 +283,17 @@ export function TableStructure({
             <div class="relative">
               <Input
                 className={cn(
-                  "h-8 cursor-default! rounded-xs text-sm text-ellipsis focus:bg-white!",
+                  "h-8 cursor-default! rounded-xs text-sm text-ellipsis",
+                  !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
                   isDirtyCell && !isNewRow && "bg-dirty",
                   isEmptyRow && "focus:bg-transparent! focus:outline-none",
                   selectionRowClass(
                     isRowSelected && !isEmptyRow,
                     isTableFocused
                   ),
+                  selectedRowIndex === sourceIndex &&
+                    selectedColIndex === colIndex &&
+                    ACTIVE_TABLE_CELL_CLASS,
                   isFkColumn && !isEmptyRow && "pr-6"
                 )}
                 showSelect={!isEmptyRow && showSelect}
@@ -307,7 +321,9 @@ export function TableStructure({
                   }
                 }}
                 onClick={(e) => {
-                  if (readOnly) return;
+                  if (readOnly || isEmptyRow || isDeleted) return;
+
+                  handleColSelect(colIndex);
 
                   const multi = e.metaKey || e.ctrlKey;
                   const range = e.shiftKey;
@@ -377,6 +393,8 @@ export function TableStructure({
       initData,
       deletedRows,
       selectedRows,
+      selectedRowIndex,
+      selectedColIndex,
       columnInputOptions,
       findFkForColumn,
       foreignKeys,
@@ -416,7 +434,10 @@ export function TableStructure({
         selectedRow={selectedRowIndex}
         selectedRows={selectedRows}
         rowClassName={(_row, index) => {
-          return deletedRows.has(index) ? "bg-deleted!" : "";
+          return tableMutationRowClass(
+            deletedRows.has(index),
+            !initData || index >= initData.length
+          );
         }}
         onSelectRow={(_row, index, multi, range) => {
           handleRowSelect(index, multi, range);

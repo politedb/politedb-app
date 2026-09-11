@@ -193,24 +193,18 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   onNavChange?.(nav.id);
                   setActiveProfileScreen(nav.id);
                 }}
-                class={[
+                class={cn(
                   "inline-flex items-center gap-1.5",
                   "rounded-lg px-2.5 py-1.25 shadow-sm",
                   "border text-sm font-medium transition-colors",
                   isActive
-                    ? "border-blue-300 bg-blue-100 text-blue-600 dark:border-white/20 dark:bg-white/10 dark:text-zinc-100"
-                    : "border-slate-300 bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-800 dark:border-white/12 dark:text-zinc-400 dark:hover:bg-white/6 dark:hover:text-zinc-100",
-                ].join(" ")}
+                    ? "border-blue-300 bg-blue-100 text-blue-600"
+                    : "border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+                )}
                 aria-current={isActive ? "page" : undefined}
                 data-tauri-drag-region="false"
               >
-                <span
-                  class={
-                    isActive
-                      ? "text-blue-600 dark:text-zinc-100"
-                      : "text-neutral-600 dark:text-zinc-400"
-                  }
-                >
+                <span class={isActive ? "text-blue-600" : "text-neutral-600"}>
                   {nav.icon}
                 </span>
                 <span class="leading-none">Databases</span>
@@ -244,17 +238,17 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     });
                   }}
                   data-tauri-drag-region="false"
-                  class={[
-                    "group w-48 shrink-0",
+                  class={cn(
+                    "group w-48 shadow-xs",
                     "flex items-center justify-between gap-2",
                     "rounded-md border px-2 py-1 transition-all",
                     isActive
-                      ? "border-slate-300 bg-white text-slate-900 shadow-[0_1px_0_rgba(0,0,0,0.04),0_2px_8px_rgba(0,0,0,0.06)]"
-                      : "border-transparent bg-slate-100 text-slate-600 shadow-sm hover:border-slate-200 hover:bg-slate-50 dark:hover:border-slate-200/10",
-                  ].join(" ")}
+                      ? "border-slate-300 bg-white text-slate-900"
+                      : "border-transparent bg-slate-50 text-slate-600 shadow-sm hover:border-slate-200/20 hover:bg-slate-100"
+                  )}
                 >
                   <div class="flex min-w-0 items-center gap-2">
-                    <span class="flex size-5 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+                    <span class="flex size-5 items-center justify-center text-slate-600">
                       <DbIcon engine={tab.engine} px={16} />
                     </span>
 

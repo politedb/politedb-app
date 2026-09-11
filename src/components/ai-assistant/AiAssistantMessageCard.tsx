@@ -213,7 +213,7 @@ export function AiAssistantMessageCard({
       <div
         class={
           floatingUser
-            ? "max-w-full rounded-2xl bg-neutral-100 px-4 py-2 text-base leading-relaxed text-neutral-900"
+            ? "max-w-full rounded-2xl bg-neutral-200 px-4 py-2 text-base leading-relaxed text-neutral-900"
             : floatingAssistant
               ? "w-full min-w-0 overflow-hidden text-base leading-relaxed text-neutral-900"
               : ""

@@ -32,6 +32,7 @@ import { OverlayScrollbars } from "src/components/common/OverlayScrollArea";
 import { getResolvedTheme, type ResolvedTheme } from "src/lib/theme";
 import { getAppliedUiFontStack } from "src/lib/uiFont";
 import { getAppliedUiDensity, type UiDensityPreference } from "src/lib/density";
+import { EDITABLE_TABLE_CELL_CLASS } from "./selectionClasses";
 
 const COMFORTABLE_ROW_HEIGHT = 28;
 const COMFORTABLE_HEADER_HEIGHT = 28;
@@ -1986,6 +1987,7 @@ export function CanvasTable({
               ref={editorRef as any}
               class={cn(
                 "min-h-24 w-full resize bg-white px-2 py-1 font-mono text-xs shadow-sm outline-none",
+                EDITABLE_TABLE_CELL_CLASS,
                 "ring-2 ring-blue-500",
                 editorError && "ring-red-500"
               )}
@@ -2008,6 +2010,7 @@ export function CanvasTable({
               ref={editorRef as any}
               class={cn(
                 "h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500",
+                EDITABLE_TABLE_CELL_CLASS,
                 "ring-2 ring-blue-500"
               )}
               type={editorKind === "date" ? "date" : "text"}

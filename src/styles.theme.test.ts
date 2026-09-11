@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { TABLE_CANVAS_PALETTE } from "./components/table/tableCellBackground";
 
 const css = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
 const leftNav = readFileSync(
@@ -13,6 +14,10 @@ const header = readFileSync(
 );
 const searchNav = readFileSync(
   resolve(process.cwd(), "src/screens/connection/LeftNav.tsx"),
+  "utf8"
+);
+const commonTable = readFileSync(
+  resolve(process.cwd(), "src/components/common/Table.tsx"),
   "utf8"
 );
 
@@ -46,9 +51,50 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("html.dark .bg-rose-50\\/80");
   });
 
-  it("uses a Cursor-like charcoal page background", () => {
-    expect(css).toContain("background: #141414");
-    expect(css).toContain("--color-slate-950: #0d0d0d");
+  it("keeps focused table editors on a dark surface", () => {
+    expect(css).toContain("html.dark .table-cell-editor:focus");
+    expect(css).toContain("background-color: #242424 !important");
+  });
+
+  it("uses the Codex charcoal surface hierarchy", () => {
+    expect(css).toContain("background: #181818");
+    expect(css).toContain("--color-slate-950: #181818");
+    expect(css).toContain("--color-slate-900: #242424");
+    expect(css).toContain("html.dark aside");
+    expect(css).toContain("background-color: #212121 !important");
+  });
+
+  it("shares the canvas table palette with regular tables", () => {
+    const palette = TABLE_CANVAS_PALETTE.dark;
+
+    expect(commonTable).toContain("common-data-table");
+    expect(css).toContain(`--table-surface: ${palette.background}`);
+    expect(css).toContain(`--table-zebra: ${palette.zebra}`);
+    expect(css).toContain(`--table-grid: ${palette.grid}`);
+    expect(css).toContain("--table-header: #181818");
+    expect(css).toContain(`--table-text: ${palette.text}`);
+    expect(css).toContain(".common-data-table input");
+    expect(css).toContain(".common-data-table input.bg-dirty");
+    expect(css).toContain("background-color: var(--color-dirty) !important");
+    expect(css).toContain(".common-data-table tr.bg-new\\! > td");
+    expect(css).toContain(".common-data-table tr.bg-deleted\\! input");
+    expect(css).toContain(".common-data-table tr.bg-selected\\! input");
+    expect(css).toContain(
+      ".common-data-table tr.bg-selected-unfocused\\! input"
+    );
+    expect(css).toContain(
+      ".common-data-table tbody tr input.table-cell-editor:focus"
+    );
+    expect(css).toContain(
+      "background-color: var(--table-editor-surface) !important"
+    );
+    expect(css).toContain(
+      ".common-data-table tbody tr input.table-cell-active"
+    );
+    expect(css).toContain("--table-editor-surface: #181818");
+    expect(css).toContain(
+      `--table-active-stroke: ${palette.activeStrokeFocused}`
+    );
   });
 });
 
@@ -58,9 +104,10 @@ describe("remaining dark-theme spots", () => {
     expect(leftNav).toContain("dark:bg-rose-950/50");
   });
 
-  it("uses a Cursor-like Databases chip in dark mode", () => {
-    expect(header).toContain("dark:bg-white/10");
-    expect(header).toContain("dark:text-zinc-100");
+  it("maps the Databases chip through the global dark palette", () => {
+    expect(header).toContain("bg-blue-100");
+    expect(css).toContain("html.dark .bg-blue-100");
+    expect(css).toContain("html.dark .text-blue-600");
   });
 
   it("does not force the table search input to stay white", () => {

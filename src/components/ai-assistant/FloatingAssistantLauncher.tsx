@@ -117,7 +117,7 @@ export function FloatingAssistantLauncher() {
       {open ? (
         <div
           class={cn(
-            "flex overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900",
+            "flex overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl",
             "h-[min(660px,calc(100vh-48px))] w-130",
             "max-sm:fixed max-sm:inset-3 max-sm:h-auto max-sm:w-auto"
           )}
