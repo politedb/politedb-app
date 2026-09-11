@@ -107,6 +107,19 @@ fn encode_uri_component(value: &str) -> String {
     urlencoding::encode(value).into_owned()
 }
 
+/// Port-forward / SSH bind addresses advertise replica-set members the client
+/// cannot reach (internal K8s DNS). Direct connection stays on the seed host.
+fn should_use_direct_connection(host: &str) -> bool {
+    let host = host
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_ascii_lowercase();
+    matches!(
+        host.as_str(),
+        "127.0.0.1" | "localhost" | "localhost." | "::1" | "0.0.0.0"
+    )
+}
+
 fn mongo_uri(input: &MongoConnectInput, password: &str) -> String {
     let host = input.host.trim();
     let port = input.port;
@@ -133,10 +146,14 @@ fn mongo_uri(input: &MongoConnectInput, password: &str) -> String {
     let mut params: Vec<String> = Vec::new();
 
     // Default to admin database for authentication
-    params.push(format!("authSource=admin"));
+    params.push("authSource=admin".to_string());
     // Avoid driver creating sessions on config.system.sessions, which can fail
     // with Unauthorized for restricted users.
     params.push("retryWrites=false".to_string());
+
+    if should_use_direct_connection(host) {
+        params.push("directConnection=true".to_string());
+    }
 
     if matches!(
         input.ssl_mode.as_deref(),
@@ -221,4 +238,42 @@ async fn test_mongo_direct(
         .map_err(|e| format!("MONGO_TEST_FAILED: {e}"))?;
     smoke_mongo(&client).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{mongo_uri, should_use_direct_connection};
+    use crate::types::{MongoConnectInput, SecretRef, SecretRefKind};
+
+    fn input(host: &str) -> MongoConnectInput {
+        MongoConnectInput {
+            host: host.to_string(),
+            port: 27017,
+            database: Some("tracking".to_string()),
+            user: Some("root".to_string()),
+            password: SecretRef {
+                kind: SecretRefKind::Inline,
+                value: "secret".to_string(),
+            },
+            ssl_mode: None,
+            connect_timeout_ms: None,
+        }
+    }
+
+    #[test]
+    fn loopback_hosts_use_direct_connection() {
+        assert!(should_use_direct_connection("127.0.0.1"));
+        assert!(should_use_direct_connection("localhost"));
+        assert!(should_use_direct_connection("::1"));
+        assert!(mongo_uri(&input("127.0.0.1"), "secret").contains("directConnection=true"));
+    }
+
+    #[test]
+    fn remote_hosts_keep_replica_set_discovery() {
+        assert!(!should_use_direct_connection(
+            "mongodb-0.mongodb-headless.tracking.svc.app.zz"
+        ));
+        assert!(!mongo_uri(&input("cluster0.abc.mongodb.net"), "secret")
+            .contains("directConnection=true"));
+    }
 }
