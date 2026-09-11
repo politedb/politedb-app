@@ -240,7 +240,7 @@ export function OverlayScrollArea({
       <div
         ref={scrollerRef}
         class={cn(
-          "no-scrollbar min-h-0 min-w-0 [grid-area:1/1]",
+          "no-scrollbar h-full max-h-[inherit] min-h-0 min-w-0 [grid-area:1/1]",
           horizontal && vertical
             ? "overflow-auto"
             : horizontal
