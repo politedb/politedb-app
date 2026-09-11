@@ -1,24 +1,18 @@
 import { useEffect, useMemo } from "preact/hooks";
 import { Input, InputOption } from "src/components/common/Input";
 import { Button } from "src/components/common/Button";
-import { Table } from "src/components/common/Table";
+import {
+  SchemaCanvasTable,
+  type SchemaCanvasColumn,
+} from "./SchemaCanvasTable";
 import { PlusIcon } from "src/components/icons";
 import type { TableItem, DatabaseEngine, TableColumn } from "src/types";
-import type { TableColumn as CommonColumn } from "src/components/common/Table";
 import { useCreateSchemaTable } from "src/hooks/useCreateSchemaTable";
 import { useConnectionStore } from "src/stores/connection";
 import { TableViewToggle } from "./TableViewToggle";
 import { TagSelect } from "src/components/common/TagSelect";
 import { useNewTableState } from "src/hooks/useNewTableState";
 import { getDbConfig } from "src/utils/dbConfig";
-import { cn } from "src/utils/cn";
-import { useTableRowSelection } from "src/screens/connection/hooks/useTableRowSelection";
-import { useTableFocusState } from "src/hooks/useTableFocusState";
-import {
-  ACTIVE_TABLE_CELL_CLASS,
-  EDITABLE_TABLE_CELL_CLASS,
-  selectionRowClass,
-} from "./selectionClasses";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -47,12 +41,6 @@ export function NewTablePane({
   onSuccess,
   onSaveRef,
 }: Props) {
-  const {
-    ref: containerRef,
-    rootRef,
-    isFocused: isTableFocused,
-  } = useTableFocusState();
-
   const { busy } = useCreateSchemaTable();
   const setNewTableData = useConnectionStore((s) => s.setNewTableData);
 
@@ -69,20 +57,6 @@ export function NewTablePane({
     activeWindowId: tableWindowId,
     isProfileLocked,
     onSuccess,
-  });
-
-  // Use row selection hook
-  const {
-    selectedRowIndex,
-    selectedRows,
-    selectedColIndex,
-    handleRowSelect,
-    handleColSelect,
-  } = useTableRowSelection({
-    onDeleteRow: (rowIndex) => tableState.removeColumn(rowIndex),
-    containerRef: rootRef,
-    totalRows: tableState.columns.length,
-    isTableFocused,
   });
 
   useEffect(() => {
@@ -125,106 +99,15 @@ export function NewTablePane({
     [dbConfig]
   );
 
-  const tableColumns = useMemo<CommonColumn<TableColumn>[]>(
+  const tableColumns = useMemo<SchemaCanvasColumn<TableColumn>[]>(
     () =>
-      COLUMN_PROPERTIES.map((colKey, colIndex) => ({
-        key: colKey,
-        label: colKey,
-        className: "px-0",
-        render: (_, row, index) => {
-          const isEmptyRow = index + 1 > tableState.columns.length;
-          const isRowSelected = selectedRows.has(index);
-          const placeholder = isEmptyRow ? "" : "NULL";
-          const showSelect = Object.keys(columnOptions).includes(colKey);
-
-          return (
-            <Input
-              className={cn(
-                "h-8 cursor-default! rounded-none text-sm",
-                !isEmptyRow && EDITABLE_TABLE_CELL_CLASS,
-                isEmptyRow
-                  ? "focus:bg-transparent focus:outline-none"
-                  : "bg-new!",
-                selectionRowClass(isRowSelected && !isEmptyRow, isTableFocused),
-                selectedRowIndex === index &&
-                  selectedColIndex === colIndex &&
-                  ACTIVE_TABLE_CELL_CLASS
-              )}
-              showSelect={!isEmptyRow && showSelect}
-              options={columnOptions[colKey]}
-              value={row[colKey]}
-              placeholder={placeholder}
-              onValueChange={
-                !isEmptyRow && showSelect
-                  ? (value) => tableState.updateColumn(index, colKey, value)
-                  : undefined
-              }
-              onInput={
-                !showSelect
-                  ? (e) =>
-                      tableState.updateColumn(
-                        index,
-                        colKey,
-                        e.currentTarget.value
-                      )
-                  : undefined
-              }
-              onMouseDown={(e) => {
-                if (!isEmptyRow) {
-                  e.preventDefault();
-                }
-              }}
-              onClick={(e) => {
-                if (isProfileLocked || isEmptyRow) return;
-
-                handleColSelect(colIndex);
-
-                const multi = e.metaKey || e.ctrlKey;
-                const range = e.shiftKey;
-                if (
-                  !multi &&
-                  !range &&
-                  selectedRows.size > 1 &&
-                  isRowSelected
-                ) {
-                  handleRowSelect(index);
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-              }}
-              onDblClick={(e) => {
-                if (isEmptyRow || isProfileLocked) return;
-
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (!isRowSelected) {
-                  handleRowSelect(index);
-                }
-
-                handleColSelect(colIndex);
-                const input = e.currentTarget as HTMLInputElement;
-                input.focus();
-                input.select();
-              }}
-              disabled={busy || isProfileLocked}
-              readOnly={isEmptyRow || isProfileLocked}
-            />
-          );
-        },
+      COLUMN_PROPERTIES.map((key) => ({
+        key,
+        options: columnOptions[key]?.map((option) =>
+          typeof option === "string" ? { label: option, value: option } : option
+        ),
       })),
-    [
-      tableState,
-      selectedRows,
-      selectedRowIndex,
-      selectedColIndex,
-      columnOptions,
-      isTableFocused,
-      busy,
-      isProfileLocked,
-      handleRowSelect,
-      handleColSelect,
-    ]
+    [columnOptions]
   );
 
   return (
@@ -258,37 +141,16 @@ export function NewTablePane({
         </div>
       </div>
 
-      {/* Column Definition Table */}
-      <div class="flex-1 overflow-hidden">
-        <div
-          ref={containerRef}
-          class="table-focus-root h-full w-full outline-none"
-          tabIndex={0}
-          onMouseDown={(e) => {
-            // Focus container when clicking to enable keyboard events
-            if (
-              e.target === e.currentTarget ||
-              (e.target as HTMLElement).closest("table")
-            ) {
-              rootRef.current?.focus();
-            }
-          }}
-        >
-          <Table
-            columns={tableColumns}
-            data={tableState.columns}
-            fillViewport
-            stickyHeader
-            showEmptyMessage={false}
-            selectedRow={selectedRowIndex}
-            selectedRows={selectedRows}
-            selectionFocused={isTableFocused}
-            onDoubleClickRow={tableState.addColumn}
-            onSelectRow={(_row, index, multi, range) =>
-              handleRowSelect(index, multi, range)
-            }
-          />
-        </div>
+      <div class="min-h-0 flex-1 overflow-hidden">
+        <SchemaCanvasTable
+          rows={tableState.columns}
+          columns={tableColumns}
+          readOnly={busy || isProfileLocked}
+          isNewRow={() => true}
+          onChange={tableState.updateColumn}
+          onDelete={tableState.removeColumn}
+          onAdd={() => tableState.addColumn(null, tableState.columns.length)}
+        />
       </div>
 
       {/* Footer */}

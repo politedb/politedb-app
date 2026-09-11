@@ -33,7 +33,9 @@ export function useTableStructureOperations({
 
   const setEditedData = useConnectionStore((s) => s.updateTableStructure);
   const setTableStructure = useConnectionStore((s) => s.setTableStructure);
-  const removeDataPatch = useConnectionStore((s) => s.removeDataPatch);
+  const removeNewStructureRow = useConnectionStore(
+    (s) => s.removeNewStructureRow
+  );
 
   const handleDataChange = useCallback(
     (
@@ -74,24 +76,10 @@ export function useTableStructureOperations({
       const isNewRow = !initData || rowIndex >= initData.length;
 
       if (isNewRow) {
-        // For new rows, remove from editedData directly without storing delete action
-        const newEditedData = editedData.filter(
-          (_, index) => index !== rowIndex
-        );
-        setTableStructure(
+        removeNewStructureRow(
           activeProfileScreen,
           activeTableWindowId,
-          newEditedData
-        );
-
-        // Remove the create patch for this row since it was never actually created
-        const rowKey = String(rowIndex);
-        removeDataPatch(
-          activeProfileScreen,
-          activeTableWindowId,
-          "create",
-          DATA_KEYS.structure,
-          rowKey
+          rowIndex
         );
       } else {
         // For existing rows, mark as deleted (will create a delete patch)
@@ -101,11 +89,9 @@ export function useTableStructureOperations({
     [
       isLocked,
       initData,
-      editedData,
       activeProfileScreen,
       activeTableWindowId,
-      setTableStructure,
-      removeDataPatch,
+      removeNewStructureRow,
       onDeleteRecord,
     ]
   );

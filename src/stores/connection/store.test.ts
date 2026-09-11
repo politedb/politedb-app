@@ -38,6 +38,56 @@ function seedOriginalRow(value: unknown) {
 beforeEach(() => seedOriginalRow(""));
 
 describe("connection edit patches", () => {
+  it("removes multiple draft columns without restoring stale rows or misaligning patches", () => {
+    const store = useConnectionStore.getState();
+    const rows = ["original", "draft_a", "draft_b", "draft_c"].map(
+      (column_name) => ({
+        column_name,
+        data_type: "text",
+        is_nullable: "true",
+        check: "",
+        column_default: "",
+        foreign_key: "",
+        comment: "",
+      })
+    );
+    store.setTableStructure(tabId, windowId, rows);
+    for (let index = 1; index < rows.length; index++) {
+      store.setDataPatchMap(tabId, {
+        dataKey: "structure",
+        action: "create",
+        tableData,
+        tableWindow,
+        rowKey: String(index),
+        data: rows[index],
+      });
+    }
+    store.setDataPatchMap(tabId, {
+      dataKey: "constraints",
+      action: "create",
+      tableData,
+      tableWindow,
+      rowKey: "0",
+      data: { index_name: "keep_index" },
+    });
+    store.removeNewStructureRow(tabId, windowId, 2);
+    store.removeNewStructureRow(tabId, windowId, 1);
+    const state = useConnectionStore.getState();
+    expect(
+      state.tableStructure[tabId][windowId].map((row) => row.column_name)
+    ).toEqual(["original", "draft_c"]);
+    expect(
+      state.dataPatchMap[tabId][windowId].patches.create?.structure
+    ).toEqual({ "1": rows[3] });
+    expect(
+      state.dataPatchMap[tabId][windowId].patches.create?.constraints
+    ).toEqual({ "0": { index_name: "keep_index" } });
+    store.removeNewStructureRow(tabId, windowId, 1);
+    expect(
+      useConnectionStore.getState().dataPatchMap[tabId][windowId].patches.create
+        ?.structure
+    ).toBeUndefined();
+  });
   it.each([
     ["empty string to NULL", "", null],
     ["NULL to empty string", { t: "Null" }, ""],
