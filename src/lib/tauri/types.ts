@@ -450,6 +450,7 @@ export type QueryResult = {
   columns: ColumnMeta[];
   rows: any[][];
   rowCount: number;
+  rowCountIsEstimated?: boolean;
 };
 
 export type MongoCollectionOverview = {

@@ -14,6 +14,7 @@ import {
   isRangeFilterOperator,
   tableDataQuery,
 } from "src/lib/queries/sql";
+import { formatMongoFindPreview } from "src/lib/queries/mongo";
 import { cn } from "src/utils/cn";
 import { sqlForDisplay } from "src/utils/sqlDialect";
 import { Input } from "src/components/common/Input";
@@ -147,6 +148,16 @@ export function TableFilterBar({
   const currentSql = useMemo(() => {
     const enabled = filters.filter((f) => f.enabled && (f.column ?? "").trim());
     if (enabled.length === 0) return null;
+    if (engine === "mongo") {
+      return formatMongoFindPreview({
+        collection: tableName,
+        filters,
+        combine: filterCombine,
+        sortBy: sortState,
+        limit,
+        offset,
+      });
+    }
     return sqlForDisplay(
       tableDataQuery(
         schema,
@@ -259,8 +270,10 @@ export function TableFilterBar({
                     "min-w-35 flex-1 px-3 py-px text-sm outline-none",
                     "border border-neutral-300 bg-white focus:border-blue-400",
                     queryError &&
-                      "border-red-300 bg-red-100! focus:border-red-400",
-                    !queryError && isAppliedFilter && "bg-green-100!"
+                      "border-red-300 bg-red-100! dark:border-red-800! dark:bg-red-900/50! dark:focus:bg-red-900/50!",
+                    !queryError &&
+                      isAppliedFilter &&
+                      "border-green-300 bg-green-100! dark:border-green-800! dark:bg-green-900/50! dark:focus:bg-green-900/50!"
                   )}
                 />
               </div>
@@ -316,7 +329,7 @@ export function TableFilterBar({
               className="px-3 py-0.75 text-xs"
               onClick={() => onShowSql(currentSql)}
             >
-              SQL
+              {engine === "mongo" ? "Query" : "SQL"}
             </Button>
           )}
         </div>

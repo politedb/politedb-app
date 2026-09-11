@@ -41,23 +41,31 @@ export async function mongoFindDocuments(args: {
   collection: string;
   limit?: number;
   offset?: number;
+  filter?: Record<string, unknown> | null;
+  sort?: Record<string, 1 | -1> | null;
+  exactCount?: boolean;
 }): Promise<QueryResult> {
   const res = await invoke<{
     columns: QueryResult["columns"];
     rows: QueryResult["rows"];
     row_count: number;
+    row_count_is_estimated?: boolean;
   }>(CMD.mongoFindDocuments, {
     connectionId: args.connectionId,
     database: args.database ?? null,
     collection: args.collection,
     limit: args.limit ?? null,
     offset: args.offset ?? null,
+    filter: args.filter ?? null,
+    sort: args.sort ?? null,
+    exactCount: args.exactCount ?? null,
   });
 
   return {
     columns: res.columns ?? [],
     rows: res.rows ?? [],
     rowCount: Number(res.row_count ?? 0),
+    rowCountIsEstimated: !!res.row_count_is_estimated,
   };
 }
 

@@ -256,7 +256,7 @@ export function ConnectionFormDialog({
   return (
     <div
       class={cn(
-        "mx-auto flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl",
+        "mx-auto flex h-fit w-full max-w-5xl flex-col overflow-hidden rounded-2xl",
         "border border-neutral-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]"
       )}
     >

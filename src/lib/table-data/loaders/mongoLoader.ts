@@ -6,7 +6,14 @@ import {
   mongoListIndexes,
   type TableChunk,
 } from "src/lib/tauri";
+import {
+  buildMongoFilter,
+  buildMongoSort,
+  formatMongoFindPreview,
+} from "src/lib/queries/mongo";
+import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
+import type { DatabaseEngine } from "src/types";
 import type { ColumnRow } from "../types";
 
 export async function loadMongoOverview(params: {
@@ -87,6 +94,40 @@ export async function loadMongoSizeInfo(params: {
   };
 }
 
+export async function loadMongoRowCount(params: {
+  connId: string;
+  schema: string;
+  tableName: string;
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
+  addLogQuery?: (sql: string, engine?: DatabaseEngine) => void;
+}): Promise<{ rowCount: number; estimated: boolean }> {
+  const { connId, schema, tableName, filters, filterCombine, addLogQuery } =
+    params;
+  const filter = buildMongoFilter(filters, filterCombine ?? "AND");
+  addLogQuery?.(
+    formatMongoFindPreview({
+      collection: tableName,
+      filters,
+      combine: filterCombine,
+    }) + ".count()",
+    "mongo"
+  );
+  const result = await mongoFindDocuments({
+    connectionId: connId,
+    database: schema,
+    collection: tableName,
+    limit: 0,
+    offset: 0,
+    filter,
+    exactCount: true,
+  });
+  return {
+    rowCount: Number(result.rowCount ?? 0),
+    estimated: !!result.rowCountIsEstimated,
+  };
+}
+
 export async function loadMongoRows(params: {
   key: string;
   connId: string;
@@ -96,7 +137,16 @@ export async function loadMongoRows(params: {
   offset: number;
   resetCache?: boolean;
   forceRefresh?: boolean;
-}): Promise<{ columns: ColumnRow[]; rowCount: number }> {
+  filters?: TableFilterCondition[];
+  filterCombine?: "AND" | "OR";
+  sortBy?: TableSort | null;
+  exactCount?: boolean;
+  addLogQuery?: (sql: string, engine?: DatabaseEngine) => void;
+}): Promise<{
+  columns: ColumnRow[];
+  rowCount: number;
+  rowCountIsEstimated: boolean;
+}> {
   const {
     key,
     connId,
@@ -106,13 +156,34 @@ export async function loadMongoRows(params: {
     offset,
     resetCache,
     forceRefresh,
+    filters,
+    filterCombine,
+    sortBy,
+    exactCount,
+    addLogQuery,
   } = params;
+  const filter = buildMongoFilter(filters, filterCombine ?? "AND");
+  const sort = buildMongoSort(sortBy);
+  addLogQuery?.(
+    formatMongoFindPreview({
+      collection: tableName,
+      filters,
+      combine: filterCombine,
+      sortBy,
+      limit,
+      offset,
+    }),
+    "mongo"
+  );
   const result = await mongoFindDocuments({
     connectionId: connId,
     database: schema,
     collection: tableName,
     limit,
     offset,
+    filter,
+    sort,
+    exactCount: !!exactCount || Object.keys(filter).length > 0,
   });
 
   const store = useConnectionStore.getState();
@@ -134,5 +205,6 @@ export async function loadMongoRows(params: {
       db_type: col.db_type,
     })),
     rowCount: Number(result.rowCount ?? 0),
+    rowCountIsEstimated: !!result.rowCountIsEstimated,
   };
 }

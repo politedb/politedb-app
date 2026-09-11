@@ -6,6 +6,7 @@ use serde_json::Value as JsonValue;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::engines::mongo::query::{json_to_document, json_to_sort_document};
 use crate::engines::EngineConnection;
 use crate::state::AppState;
 use crate::types::{CellValue, ColumnMeta};
@@ -22,6 +23,7 @@ pub struct MongoQueryResult {
     pub columns: Vec<ColumnMeta>,
     pub rows: Vec<Vec<CellValue>>,
     pub row_count: u64,
+    pub row_count_is_estimated: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -283,15 +285,63 @@ async fn sample_documents(
     limit: i64,
     skip: u64,
 ) -> Result<Vec<Document>, String> {
+    find_documents(
+        client,
+        database,
+        collection,
+        Document::new(),
+        None,
+        limit,
+        skip,
+    )
+    .await
+}
+
+async fn find_documents(
+    client: &mongodb::Client,
+    database: &str,
+    collection: &str,
+    filter: Document,
+    sort: Option<Document>,
+    limit: i64,
+    skip: u64,
+) -> Result<Vec<Document>, String> {
     let coll = client.database(database).collection::<Document>(collection);
-    let options = FindOptions::builder().limit(limit).skip(skip).build();
-    coll.find(mongodb::bson::doc! {})
+    let options = FindOptions::builder()
+        .skip(skip)
+        .limit(if limit > 0 { Some(limit) } else { None })
+        .sort(sort)
+        .build();
+    coll.find(filter)
         .with_options(options)
         .await
         .map_err(|e| format!("MONGO_QUERY_FAILED: {e}"))?
         .try_collect::<Vec<Document>>()
         .await
         .map_err(|e| format!("MONGO_QUERY_FAILED: {e}"))
+}
+
+async fn count_documents(
+    client: &mongodb::Client,
+    database: &str,
+    collection: &str,
+    filter: &Document,
+    exact: bool,
+) -> Result<(u64, bool), String> {
+    let coll = client.database(database).collection::<Document>(collection);
+    let estimated = filter.is_empty() && !exact;
+    if estimated {
+        let count = coll
+            .estimated_document_count()
+            .await
+            .map_err(|e| format!("MONGO_COUNT_FAILED: {e}"))?;
+        return Ok((count, true));
+    }
+    let count = coll
+        .count_documents(filter.clone())
+        .await
+        .map_err(|e| format!("MONGO_COUNT_FAILED: {e}"))?;
+    Ok((count, false))
 }
 
 #[tauri::command]
@@ -372,27 +422,53 @@ pub async fn mongo_find_documents(
     collection: String,
     limit: Option<u32>,
     offset: Option<u64>,
+    filter: Option<JsonValue>,
+    sort: Option<JsonValue>,
+    exact_count: Option<bool>,
 ) -> Result<MongoQueryResult, String> {
     let conn = mongo_conn(&state, connection_id)?;
     let (client, default_database) = as_mongo_client(&conn)?;
     let database = normalize_database_arg(database, default_database)?;
-    let limit = limit.unwrap_or(300).clamp(1, 5_000) as i64;
+    let requested_limit = limit.unwrap_or(300);
+    let fetch_docs = requested_limit > 0;
+    let limit = requested_limit.clamp(0, 5_000) as i64;
     let offset = offset.unwrap_or(0);
+    let filter_doc = json_to_document(filter.as_ref())?;
+    let sort_doc = json_to_sort_document(sort.as_ref())?;
+    let exact = exact_count.unwrap_or(false);
 
-    let docs = sample_documents(&client, &database, &collection, limit, offset).await?;
-    let columns = derive_columns(&docs);
-    let rows = docs_to_rows(&docs, &columns);
-    let row_count = client
-        .database(&database)
-        .collection::<Document>(&collection)
-        .estimated_document_count()
-        .await
-        .map_err(|e| format!("MONGO_COUNT_FAILED: {e}"))?;
+    let docs = if fetch_docs {
+        find_documents(
+            &client,
+            &database,
+            &collection,
+            filter_doc.clone(),
+            sort_doc,
+            limit,
+            offset,
+        )
+        .await?
+    } else {
+        Vec::new()
+    };
+    let columns = if fetch_docs {
+        derive_columns(&docs)
+    } else {
+        Vec::new()
+    };
+    let rows = if fetch_docs {
+        docs_to_rows(&docs, &columns)
+    } else {
+        Vec::new()
+    };
+    let (row_count, row_count_is_estimated) =
+        count_documents(&client, &database, &collection, &filter_doc, exact).await?;
 
     Ok(MongoQueryResult {
         columns,
         rows,
         row_count,
+        row_count_is_estimated,
     })
 }
 
