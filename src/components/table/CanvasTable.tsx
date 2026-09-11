@@ -127,6 +127,21 @@ export function getCanvasRowBackground(
   return isFocused ? palette.selected : palette.selectedUnfocused;
 }
 
+export function getCanvasEditorOverlayBox(args: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  headerHeight: number;
+}) {
+  return {
+    left: args.x,
+    top: args.y + args.headerHeight,
+    width: args.w,
+    height: args.h,
+  };
+}
+
 type Props = {
   columns: ColumnMeta[];
   totalRows: number;
@@ -1863,6 +1878,13 @@ export function CanvasTable({
   // Render
   // --------------------------------------------------------------------------
 
+  const editorOverlayBox = editorRect
+    ? getCanvasEditorOverlayBox({
+        ...editorRect,
+        headerHeight: HEADER_HEIGHT,
+      })
+    : null;
+
   return (
     <div
       ref={rootCallbackRef}
@@ -2080,26 +2102,22 @@ export function CanvasTable({
       />
 
       {/* Editor Overlay */}
-      {editorRect && editing && !isResizing && (
+      {editorOverlayBox && editing && !isResizing && (
         <div
           class="absolute z-60"
           style={{
-            left: editorRect.x + 2,
-            top: editorRect.y + HEADER_HEIGHT + 4,
-            width: Math.max(
-              editorRect.w - 4,
-              editorKind === "json" ? 260 : 116
-            ),
+            left: editorOverlayBox.left,
+            top: editorOverlayBox.top,
+            width: editorOverlayBox.width,
           }}
         >
           {editorKind === "json" ? (
             <textarea
               ref={editorRef as any}
               class={cn(
-                "min-h-24 w-full resize bg-white px-2 py-1 font-mono text-xs shadow-sm outline-none",
+                "box-border min-h-24 w-full resize border-2 border-blue-500 bg-white px-2 py-1 font-mono text-xs shadow-none outline-none",
                 EDITABLE_TABLE_CELL_CLASS,
-                "ring-2 ring-blue-500",
-                editorError && "ring-red-500"
+                editorError && "border-red-500"
               )}
               value={editorValue}
               onInput={(e) =>
@@ -2119,10 +2137,10 @@ export function CanvasTable({
             <input
               ref={editorRef as any}
               class={cn(
-                "h-7 w-full bg-white px-2 text-sm shadow-sm outline-none disabled:text-neutral-500",
-                EDITABLE_TABLE_CELL_CLASS,
-                "ring-2 ring-blue-500"
+                "box-border w-full border-2 border-blue-500! bg-white px-2 text-sm shadow-none outline-none disabled:text-neutral-500",
+                EDITABLE_TABLE_CELL_CLASS
               )}
+              style={{ height: editorOverlayBox.height }}
               type={editorKind === "date" ? "date" : "text"}
               placeholder={
                 editorKind === "blob"

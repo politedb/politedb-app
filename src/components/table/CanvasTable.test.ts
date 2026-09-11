@@ -9,7 +9,11 @@ import {
 } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
-import { CanvasTable, getCanvasRowBackground } from "./CanvasTable";
+import {
+  CanvasTable,
+  getCanvasRowBackground,
+  getCanvasEditorOverlayBox,
+} from "./CanvasTable";
 
 class ResizeObserverMock {
   observe() {}
@@ -87,6 +91,20 @@ describe("getCanvasRowBackground", () => {
   it("uses dark canvas colors when theme is dark", () => {
     expect(getCanvasRowBackground(false, true, true, "dark")).toBe("#264f78");
     expect(getCanvasRowBackground(true, false, false, "dark")).toBe("#14532d");
+  });
+});
+
+describe("getCanvasEditorOverlayBox", () => {
+  it("places the editor on the cell, not inset from it", () => {
+    expect(
+      getCanvasEditorOverlayBox({
+        x: 80,
+        y: 28,
+        w: 160,
+        h: 28,
+        headerHeight: 28,
+      })
+    ).toEqual({ left: 80, top: 56, width: 160, height: 28 });
   });
 });
 
@@ -187,6 +205,23 @@ describe("CanvasTable cell editor", () => {
 
     const value = onCommitEdit.mock.calls[0]?.[1];
     expect(isDefaultCellEditValue(value)).toBe(true);
+  });
+
+  it("sizes the text editor to the cell box", () => {
+    render(
+      h(CanvasTableHarness, {
+        onCommitEdit: vi.fn(),
+        cellValue: "bob@example.com",
+      })
+    );
+
+    const editor = openNullCellEditor() as HTMLInputElement;
+    const overlay = editor.parentElement;
+    expect(overlay).not.toBeNull();
+    expect(overlay?.style.left).toBe("0px");
+    expect(overlay?.style.top).toBe("28px");
+    expect(overlay?.style.width).toBe("140px");
+    expect(editor.style.height).toBe("28px");
   });
 
   it("selects all text when double-click opens an editor", async () => {
