@@ -68,11 +68,78 @@ describe("SQL plan result integration", () => {
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     expect(screen.queryByText("Table footer")).toBeNull();
     view.rerender(<SqlResultsPane {...base} engine="mysql" runs={[run()]} />);
-    expect(screen.getByText("Raw result table")).toBeInTheDocument();
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    const mysql = run();
+    mysql.slots[0].result!.columns[0] = { name: "EXPLAIN", db_type: "json" };
+    mysql.slots[0].result!.rows = [
+      [
+        {
+          t: "Json",
+          v: JSON.stringify({
+            query_block: {
+              table: { table_name: "t", access_type: "ALL", rows: 10 },
+            },
+          }),
+        },
+      ],
+    ];
+    view.rerender(<SqlResultsPane {...base} engine="mysql" runs={[mysql]} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     const normal = run();
-    normal.slots[0].result!.columns[0] = { name: "payload", db_type: "json" };
+    normal.kind = "query";
+    normal.title = "Query";
     view.rerender(<SqlResultsPane {...base} runs={[normal]} />);
     expect(screen.queryByText("Query Analyzer")).toBeNull();
+    expect(screen.getByText("Raw result table")).toBeInTheDocument();
+    const twoCol = run();
+    twoCol.kind = "query";
+    twoCol.title = "Query";
+    twoCol.slots[0].result!.columns = [
+      { name: "id", db_type: "int" },
+      { name: "parent", db_type: "int" },
+    ];
+    twoCol.slots[0].result!.rows = [
+      [
+        { t: "I64", v: 1 },
+        { t: "I64", v: 0 },
+      ],
+    ];
+    view.rerender(<SqlResultsPane {...base} engine="sqlite" runs={[twoCol]} />);
+    expect(screen.queryByText("Query Analyzer")).toBeNull();
+    expect(screen.getByText("Raw result table")).toBeInTheDocument();
+    const duckdb = run();
+    duckdb.slots[0].result!.columns = [
+      { name: "physical_plan", db_type: "text" },
+    ];
+    duckdb.slots[0].result!.rows = [
+      [{ t: "Str", v: "PROJECTION" }],
+      [{ t: "Str", v: "  SEQ_SCAN t" }],
+    ];
+    view.rerender(<SqlResultsPane {...base} engine="duckdb" runs={[duckdb]} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /SEQ_SCAN t/ })
+    ).toBeInTheDocument();
+    const sqlite = run();
+    sqlite.slots[0].result!.columns = [
+      { name: "id", db_type: "int" },
+      { name: "parent", db_type: "int" },
+      { name: "notused", db_type: "int" },
+      { name: "detail", db_type: "text" },
+    ];
+    sqlite.slots[0].result!.rows = [
+      [
+        { t: "I64", v: 2 },
+        { t: "I64", v: 0 },
+        { t: "I64", v: 0 },
+        { t: "Str", v: "SCAN users" },
+      ],
+    ];
+    view.rerender(<SqlResultsPane {...base} engine="sqlite" runs={[sqlite]} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /SCAN users/ })
+    ).toBeInTheDocument();
   });
   it("uses the active stream immediately when switching runs", () => {
     const streamRun = run();

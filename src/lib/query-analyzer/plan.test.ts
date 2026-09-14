@@ -3,10 +3,11 @@ import { queryPlanFixture } from "src/test/fixtures/queryPlan";
 import {
   formatPlanNumber,
   parseQueryPlan,
-  planFromResult,
+  planBarShare,
   planMetrics,
   planNumber,
 } from "./plan";
+import { planFromResult } from "./fromResult";
 import { analyzeQueryPlan } from "./findings";
 import { queryPlanReport } from "./report";
 
@@ -24,7 +25,11 @@ describe("PostgreSQL query plans", () => {
         },
       },
     ]);
-    const plan = planFromResult([{ name: "QUERY PLAN" }], [{ t, v: value }], 1);
+    const plan = planFromResult(
+      "postgres",
+      [{ name: "QUERY PLAN" }],
+      [[{ t, v: value }]]
+    );
     expect(plan?.nodes[0].label).toBe("Seq Scan on Category");
     expect(plan?.actual).toBe(false);
   });
@@ -34,7 +39,9 @@ describe("PostgreSQL query plans", () => {
     { t: "Json" },
     { t: "Bool", v: true },
   ])("rejects invalid tagged cells without throwing", (cell) => {
-    expect(planFromResult([{ name: "QUERY PLAN" }], [cell], 1)).toBeNull();
+    expect(
+      planFromResult("postgres", [{ name: "QUERY PLAN" }], [cell])
+    ).toBeNull();
   });
   it("accepts JSON strings and structured documents with stable preorder node IDs", () => {
     const plan = parseQueryPlan(JSON.stringify(queryPlanFixture))!;
@@ -71,21 +78,27 @@ describe("PostgreSQL query plans", () => {
       })
     ).toBeNull();
   });
-  it("only treats a single QUERY PLAN cell as a plan", () => {
+  it("only treats a single JSON plan cell as a Postgres plan", () => {
     expect(
       planFromResult(
+        "postgres",
         [{ name: "QUERY PLAN" }],
-        [JSON.stringify(queryPlanFixture)],
-        1
+        [[JSON.stringify(queryPlanFixture)]]
       )
     ).not.toBeNull();
     expect(
-      planFromResult([{ name: "payload" }], [queryPlanFixture], 1)
+      planFromResult("postgres", [{ name: "payload" }], [[queryPlanFixture]])
+    ).not.toBeNull();
+    expect(
+      planFromResult(
+        "postgres",
+        [{ name: "QUERY PLAN" }],
+        [[queryPlanFixture], [queryPlanFixture]]
+      )
     ).toBeNull();
     expect(
-      planFromResult([{ name: "QUERY PLAN" }], [queryPlanFixture], 2)
+      planFromResult("postgres", [{ name: "QUERY PLAN" }], undefined)
     ).toBeNull();
-    expect(planFromResult([{ name: "QUERY PLAN" }], undefined, 1)).toBeNull();
   });
   it("rejects excessively nested metadata outside the plan tree", () => {
     let metadata: unknown = "leaf";
@@ -93,6 +106,52 @@ describe("PostgreSQL query plans", () => {
     expect(
       parseQueryPlan({ Plan: { "Node Type": "Result" }, metadata })
     ).toBeNull();
+  });
+  it("sizes the plan bar from actual time on measured plans, cost otherwise", () => {
+    const measured = parseQueryPlan({
+      Plan: {
+        "Node Type": "Nested Loop",
+        "Total Cost": 100,
+        "Actual Total Time": 100,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Seq Scan",
+            "Relation Name": "cheap_but_slow",
+            "Total Cost": 10,
+            "Actual Total Time": 90,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "Index Scan",
+            "Relation Name": "costly_but_fast",
+            "Total Cost": 90,
+            "Actual Total Time": 10,
+            "Actual Loops": 1,
+          },
+        ],
+      },
+    })!;
+    expect(planBarShare(measured.nodes[2], measured)).toEqual({
+      kind: "time",
+      ratio: 0.1,
+    });
+    const estimated = parseQueryPlan({
+      Plan: {
+        "Node Type": "Nested Loop",
+        "Total Cost": 100,
+        Plans: [
+          {
+            "Node Type": "Index Scan",
+            "Total Cost": 90,
+          },
+        ],
+      },
+    })!;
+    expect(planBarShare(estimated.nodes[1], estimated)).toEqual({
+      kind: "cost",
+      ratio: 0.9,
+    });
   });
   it("does not invent execution metrics for estimated plans", () => {
     const plan = parseQueryPlan([

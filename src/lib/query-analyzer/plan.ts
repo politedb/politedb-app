@@ -1,5 +1,3 @@
-import { cellToString } from "src/utils/convert";
-
 export type PlanRecord = Record<string, unknown>;
 
 export type PlanNode = {
@@ -15,12 +13,13 @@ export type QueryPlan = {
   document: PlanRecord;
   nodes: PlanNode[];
   actual: boolean;
+  analyzeHint?: string;
 };
 
 export const MAX_PLAN_BYTES = 5 * 1024 * 1024;
-const MAX_PLAN_NODES = 5000;
+export const MAX_PLAN_NODES = 5000;
 
-function record(value: unknown): value is PlanRecord {
+export function isPlanRecord(value: unknown): value is PlanRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -66,7 +65,7 @@ export function parseQueryPlan(value: unknown): QueryPlan | null {
     }
     const document =
       Array.isArray(value) && value.length === 1 ? value[0] : value;
-    if (!record(document) || !record(document.Plan)) return null;
+    if (!isPlanRecord(document) || !isPlanRecord(document.Plan)) return null;
     // Bound untrusted imports, including nested metadata outside the Plans tree.
     if (!boundedDocument(document)) return null;
     const nodes: PlanNode[] = [];
@@ -94,7 +93,7 @@ export function parseQueryPlan(value: unknown): QueryPlan | null {
         if (children.length + pending.length + nodes.length > MAX_PLAN_NODES)
           return null;
         for (let i = children.length - 1; i >= 0; i--) {
-          if (!record(children[i])) return null;
+          if (!isPlanRecord(children[i])) return null;
           // LIMIT/EXISTS and parallel workers can make estimate comparisons misleading.
           pending.push({
             data: children[i],
@@ -118,30 +117,30 @@ export function parseQueryPlan(value: unknown): QueryPlan | null {
   }
 }
 
-export function planFromResult(
-  columns: { name: string }[],
-  row: unknown[] | undefined,
-  rowCount: number
-) {
-  if (
-    columns.length !== 1 ||
-    columns[0].name !== "QUERY PLAN" ||
-    rowCount !== 1
-  )
-    return null;
-  const cell = row?.[0];
-  // Tauri transports JSON/text cells as tagged values; imported plans are unwrapped.
-  const value =
-    record(cell) && (cell.t === "Json" || cell.t === "Str")
-      ? cellToString(cell, true)
-      : cell;
-  return parseQueryPlan(value);
-}
-
 export function formatPlanNumber(value: number | undefined, suffix = "") {
   return value === undefined
     ? "Not available"
     : `${value.toLocaleString("en-US", { maximumFractionDigits: 3 })}${suffix}`;
+}
+
+export type PlanBarShare = {
+  ratio: number;
+  kind: "time" | "cost";
+};
+
+/** Inclusive share of the root node. Measured plans use actual time, not cost. */
+export function planBarShare(node: PlanNode, plan: QueryPlan): PlanBarShare {
+  const root = plan.nodes[0];
+  const hasActualTime =
+    plan.actual && planNumber(root.data, "Actual Total Time") !== undefined;
+  const kind = hasActualTime ? "time" : "cost";
+  const key = kind === "time" ? "Actual Total Time" : "Total Cost";
+  const max = planNumber(root.data, key) ?? 0;
+  const value = planNumber(node.data, key) ?? 0;
+  return {
+    kind,
+    ratio: max > 0 ? Math.min(1, value / max) : 0,
+  };
 }
 
 export function planMetrics(

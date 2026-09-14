@@ -11,7 +11,11 @@ export function analyzeQueryPlan(plan: QueryPlan): PlanFinding[] {
       findings.push({ nodeId: node.id, title, detail });
     const actual = n("Actual Rows");
     const removed = n("Rows Removed by Filter");
-    if (node.type === "Seq Scan" && planText(node.data, "Filter")) {
+    const seqLike =
+      /seq scan|table scan|table access full|^all$|scan table|readfrommergetree/i.test(
+        node.type
+      );
+    if (seqLike && planText(node.data, "Filter")) {
       if (
         removed !== undefined &&
         actual !== undefined &&

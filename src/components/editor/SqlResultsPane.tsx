@@ -9,7 +9,8 @@ import { Button } from "../common/Button";
 import { Spinner } from "../common/Spinner";
 import { OverlayScrollArea } from "../common/OverlayScrollArea";
 import type { DatabaseEngine } from "src/types";
-import { planFromResult } from "src/lib/query-analyzer/plan";
+import { MAX_PLAN_NODES } from "src/lib/query-analyzer/plan";
+import { planFromResult } from "src/lib/query-analyzer/fromResult";
 import { QueryAnalyzer } from "./query-analyzer/QueryAnalyzer";
 
 /* =============================================================================
@@ -327,28 +328,37 @@ export function SqlResultsPane(props: {
     getRowAt,
     totalRows: streamRowCount,
   } = stream;
-  const streamFirstRow = streamStatus === "done" ? getRowAt(0) : undefined;
   const plan = useMemo(() => {
-    if (props.engine !== "postgres" || !slot || slot.status === "error")
-      return null;
+    if (activeRun?.kind !== "explain") return null;
+    if (!props.engine || !slot || slot.status === "error") return null;
     if (slot.mode === "direct" && slot.status === "done" && slot.result) {
       return planFromResult(
+        props.engine,
         slot.result.columns,
-        slot.result.rows[0],
-        slot.result.rows.length
+        slot.result.rows,
+        { fallback: true }
       );
     }
     if (slot.mode === "stream" && streamStatus === "done") {
-      return planFromResult(streamColumns, streamFirstRow, streamRowCount);
+      const rows: unknown[][] = [];
+      const limit = Math.min(streamRowCount, MAX_PLAN_NODES);
+      for (let i = 0; i < limit; i++) {
+        const row = getRowAt(i);
+        if (row) rows.push(row);
+      }
+      return planFromResult(props.engine, streamColumns, rows, {
+        fallback: true,
+      });
     }
     return null;
   }, [
+    activeRun?.kind,
     props.engine,
     slot,
     streamStatus,
     streamColumns,
-    streamFirstRow,
     streamRowCount,
+    getRowAt,
   ]);
 
   if (!activeRun || !slot) {

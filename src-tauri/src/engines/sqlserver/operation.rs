@@ -17,8 +17,12 @@ fn looks_like_query(sql: &str) -> bool {
     if s.is_empty() {
         return false;
     }
-    let up = s.chars().take(24).collect::<String>().to_uppercase();
-    up.starts_with("SELECT") || up.starts_with("WITH")
+    let up = s.to_uppercase();
+    up.starts_with("SELECT")
+        || up.starts_with("WITH")
+        || up.starts_with("EXPLAIN")
+        || up.starts_with("SET SHOWPLAN")
+        || up.starts_with("SET STATISTICS")
 }
 
 fn col_to_cell(v: &tiberius::ColumnData<'static>) -> CellValue {

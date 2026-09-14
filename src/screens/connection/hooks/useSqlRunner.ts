@@ -201,13 +201,13 @@ export function useSqlRunner(args: {
   );
 
   const appendRun = useCallback(
-    (winId: string, run: SqlResultRun) => {
+    (winId: string, run: SqlResultRun, activeSlotIndex = 0) => {
       const previous = stateByWindowId.get(winId) ?? emptyWindowState();
       const runs = pruneRuns([...previous.runs, run]);
       saveWindowState(winId, {
         runs,
         activeRunId: run.id,
-        activeSlotIndex: 0,
+        activeSlotIndex,
       });
     },
     [saveWindowState]
@@ -248,6 +248,7 @@ export function useSqlRunner(args: {
       sourceSql: string;
       statements: string[];
       validateBeforeRun: boolean;
+      sequential?: boolean;
     }) => {
       const winId = args.windowId;
       if (!runtimeConnectionId) return;
@@ -271,7 +272,11 @@ export function useSqlRunner(args: {
       };
 
       const runId = bumpRunId(winId);
-      appendRun(winId, resultRun);
+      appendRun(
+        winId,
+        resultRun,
+        args.kind === "explain" ? Math.max(0, args.statements.length - 1) : 0
+      );
 
       const runOne = async (i: number) => {
         if (currentRunId(winId) !== runId) return;
@@ -370,7 +375,10 @@ export function useSqlRunner(args: {
       };
 
       const workers: Promise<void>[] = [];
-      for (let k = 0; k < Math.min(CONCURRENCY, args.statements.length); k++) {
+      const workerCount = args.sequential
+        ? 1
+        : Math.min(CONCURRENCY, args.statements.length);
+      for (let k = 0; k < workerCount; k++) {
         workers.push(worker());
       }
 
@@ -519,7 +527,7 @@ export function useSqlRunner(args: {
 
       try {
         const explain = buildExplainSql(engine, payload.sql);
-        if (explain.error || !explain.sql) {
+        if (explain.error || !explain.statements?.length) {
           appendRun(
             winId,
             createErrorRun({
@@ -535,13 +543,13 @@ export function useSqlRunner(args: {
           return;
         }
 
-        const explainSql: string = explain.sql;
         await runStatements({
           windowId: winId,
           kind: "explain",
           sourceSql: payload.sql,
-          statements: [explainSql],
+          statements: explain.statements,
           validateBeforeRun: false,
+          sequential: true,
         });
       } finally {
         inflightByWindow.set(winId, false);

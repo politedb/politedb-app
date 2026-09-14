@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryAnalyzer } from "./QueryAnalyzer";
 import { parseQueryPlan } from "src/lib/query-analyzer/plan";
+import { planFromResult } from "src/lib/query-analyzer/fromResult";
 import { queryPlanFixture } from "src/test/fixtures/queryPlan";
 import { confirmDialog, saveDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
@@ -23,12 +24,46 @@ beforeEach(() => vi.resetAllMocks());
 describe("Query Analyzer", () => {
   it("selects nodes and displays their details without executing SQL", () => {
     mount();
+    expect(
+      screen.getAllByTitle("Actual inclusive time relative to root").length
+    ).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /2. Seq Scan/ }));
     expect(screen.getByLabelText("Selected node")).toHaveTextContent(
       "customer_id = 8421"
     );
     fireEvent.click(screen.getByRole("button", { name: /Recommendations/ }));
     expect(screen.getByText("Sort spilled to disk")).toBeInTheDocument();
+    expect(screen.getByText("Execution time")).toBeInTheDocument();
+    expect(screen.getByText("2,840 ms")).toBeInTheDocument();
+  });
+  it("shows extra engine fields on selected MySQL nodes", () => {
+    const plan = planFromResult(
+      "mysql",
+      [
+        { name: "id" },
+        { name: "select_type" },
+        { name: "table" },
+        { name: "type" },
+        { name: "key" },
+        { name: "Extra" },
+      ],
+      [
+        [
+          { t: "I64", v: 1 },
+          { t: "Str", v: "SIMPLE" },
+          { t: "Str", v: "User" },
+          { t: "Str", v: "ALL" },
+          { t: "Null" },
+          { t: "Str", v: "Using where" },
+        ],
+      ]
+    )!;
+    render(<QueryAnalyzer plan={plan} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Selected node")).toHaveTextContent(
+      "Using where"
+    );
+    expect(screen.getByLabelText("Selected node")).toHaveTextContent("SIMPLE");
   });
   it("filters nodes and exposes every page for large plans", () => {
     const plan = parseQueryPlan({
@@ -41,6 +76,9 @@ describe("Query Analyzer", () => {
       },
     })!;
     render(<QueryAnalyzer plan={plan} />);
+    expect(
+      screen.getAllByTitle("Estimated inclusive cost relative to root").length
+    ).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /table_119/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(
@@ -53,6 +91,24 @@ describe("Query Analyzer", () => {
       screen.getByRole("button", { name: /table_119/ })
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Next page" })).toBeNull();
+  });
+  it("hides PostgreSQL-omitted metrics on estimated plans", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Seq Scan",
+        "Relation Name": "User",
+        "Total Cost": 8.88,
+        "Plan Rows": 188,
+      },
+    })!;
+    render(<QueryAnalyzer plan={plan} />);
+    expect(screen.getByText("Estimated total cost")).toBeInTheDocument();
+    expect(screen.getAllByText("8.88").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Not available")).toBeNull();
+    expect(screen.queryByText("Execution time")).toBeNull();
+    expect(
+      screen.getByText(/omitted when the database did not return them/)
+    ).toBeInTheDocument();
   });
   it("imports a baseline and rejects invalid replacements", async () => {
     mount();

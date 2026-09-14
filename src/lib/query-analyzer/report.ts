@@ -7,9 +7,11 @@ export function queryPlanReport(plan: QueryPlan): string {
     "",
     plan.actual ? "Measured plan" : "Estimated plan (not execution timing)",
     "",
-    ...planMetrics(plan).map(
-      ([label, value, unit]) => `- ${label}: ${formatPlanNumber(value, unit)}`
-    ),
+    ...planMetrics(plan)
+      .filter(([, value]) => value !== undefined)
+      .map(
+        ([label, value, unit]) => `- ${label}: ${formatPlanNumber(value, unit)}`
+      ),
     "",
     "## Review findings",
     "",

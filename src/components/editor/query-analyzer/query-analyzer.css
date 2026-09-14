@@ -15,6 +15,7 @@
   color: var(--qa-text);
   font-size: 12px;
 }
+
 html.dark .query-analyzer {
   --qa-bg: #181818;
   --qa-panel: #232323;
@@ -24,6 +25,7 @@ html.dark .query-analyzer {
   --qa-accent: #87b4ff;
   --qa-selected: #293d56;
 }
+
 .qa-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -32,17 +34,20 @@ html.dark .query-analyzer {
   padding: 8px 12px;
   border-bottom: 1px solid var(--qa-line);
 }
+
 .qa-badge {
   color: var(--qa-muted);
   border: 1px solid var(--qa-line);
   padding: 2px 6px;
   border-radius: 4px;
 }
+
 .qa-actions {
   display: flex;
   margin-left: auto;
   gap: 4px;
 }
+
 .qa-views {
   display: flex;
   flex-wrap: wrap;
@@ -50,29 +55,36 @@ html.dark .query-analyzer {
   padding: 0 12px;
   border-bottom: 1px solid var(--qa-line);
 }
+
 .qa-views button {
   padding: 8px 0;
   border-bottom: 2px solid transparent;
   color: var(--qa-muted);
 }
+
 .qa-views button[aria-pressed="true"] {
   color: var(--qa-text);
   border-color: var(--qa-accent);
 }
+
 .query-analyzer button {
   cursor: pointer;
 }
+
 .query-analyzer button:disabled {
   cursor: default;
 }
+
 .query-analyzer button:focus-visible,
 .query-analyzer input:focus-visible {
   outline: 2px solid var(--qa-accent);
   outline-offset: 2px;
 }
+
 .qa-content {
   padding: 12px;
 }
+
 .qa-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -80,22 +92,26 @@ html.dark .query-analyzer {
   padding-bottom: 12px;
   border-bottom: 1px solid var(--qa-line);
 }
+
 .qa-metrics span,
 .qa-note,
 .qa-node span,
 .qa-details dt,
-.qa-expression > span {
+.qa-expression>span {
   color: var(--qa-muted);
 }
+
 .qa-metrics strong {
   display: block;
   font-size: 16px;
   font-weight: 600;
 }
+
 .qa-note {
   margin: 12px 0;
   line-height: 1.6;
 }
+
 .qa-search {
   width: 100%;
   background: var(--qa-panel);
@@ -104,15 +120,18 @@ html.dark .query-analyzer {
   padding: 7px 10px;
   margin: 12px 0;
 }
+
 .qa-plan {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 30%);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 40%);
   gap: 16px;
 }
+
 .qa-nodes,
 .qa-details {
   min-width: 0;
 }
+
 .qa-node {
   display: block;
   text-align: left;
@@ -123,70 +142,86 @@ html.dark .query-analyzer {
   margin-bottom: 8px;
   overflow-wrap: anywhere;
 }
+
 .qa-node[aria-pressed="true"] {
   border-color: var(--qa-accent);
   background: var(--qa-selected);
 }
+
 .qa-node strong,
 .qa-node span {
   display: block;
 }
-.qa-node > span {
+
+.qa-node>span {
   margin-top: 4px;
 }
+
 .qa-track {
   height: 4px;
   background: var(--qa-line);
   overflow: hidden;
   border-radius: 2px;
 }
+
 .qa-track span {
   height: 100%;
   background: #bd8b35;
 }
+
 .qa-details {
   border-left: 1px solid var(--qa-line);
   padding-left: 16px;
   overflow-wrap: anywhere;
 }
+
 .qa-details h3,
 .qa-finding h3 {
   font-size: 13px;
   font-weight: 600;
   margin: 0 0 8px;
 }
-.qa-details dl > div {
+
+.qa-details dl>div {
   margin-bottom: 8px;
 }
+
 .qa-details dd {
   margin: 0;
 }
+
 .qa-expression {
   margin-top: 10px;
 }
+
 .qa-expression pre,
 .qa-json {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12px;
 }
+
 .qa-json {
   margin-top: 12px;
 }
+
 .qa-finding {
   border-bottom: 1px solid var(--qa-line);
   padding: 14px 0;
 }
+
 .qa-finding button {
   color: var(--qa-accent);
   text-align: left;
   margin-bottom: 6px;
   overflow-wrap: anywhere;
 }
+
 .qa-finding p {
   line-height: 1.6;
   color: var(--qa-muted);
 }
+
 .qa-pagination {
   display: flex;
   align-items: center;
@@ -194,6 +229,7 @@ html.dark .query-analyzer {
   gap: 10px;
   margin: 12px 0;
 }
+
 .qa-import {
   display: flex;
   flex-wrap: wrap;
@@ -201,14 +237,17 @@ html.dark .query-analyzer {
   align-items: center;
   margin: 16px 0;
 }
+
 .qa-import input {
   max-width: 100%;
 }
+
 .qa-comparison table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
+
 .qa-comparison th,
 .qa-comparison td {
   text-align: left;
@@ -216,10 +255,12 @@ html.dark .query-analyzer {
   border-bottom: 1px solid var(--qa-line);
   overflow-wrap: anywhere;
 }
+
 @media (max-width: 700px) {
   .qa-plan {
     grid-template-columns: 1fr;
   }
+
   .qa-details {
     border-left: 0;
     border-top: 1px solid var(--qa-line);

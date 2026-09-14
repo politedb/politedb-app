@@ -9,20 +9,68 @@ import {
 import { saveDialog, confirmDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { analyzeQueryPlan } from "src/lib/query-analyzer/findings";
+import { parseImportedPlan } from "src/lib/query-analyzer/fromResult";
 import { queryPlanReport } from "src/lib/query-analyzer/report";
 import {
   MAX_PLAN_BYTES,
   formatPlanNumber,
-  parseQueryPlan,
+  planBarShare,
   planMetrics,
   planNumber,
+  type PlanRecord,
   type QueryPlan,
 } from "src/lib/query-analyzer/plan";
 import "./query-analyzer.css";
+import { Input } from "../../form";
 
 const PAGE_SIZE = 80;
 const views = ["Plan", "Recommendations", "Compare", "JSON"] as const;
 type View = (typeof views)[number];
+
+const HIDDEN_NODE_FIELDS = new Set([
+  "Plans",
+  "Plan",
+  "query_block",
+  "nested_loop",
+  "Operations",
+  "lines",
+  "rows",
+  "columns",
+  "text",
+  "Node Type",
+  "Relation Name",
+  "Index Name",
+]);
+
+const METRIC_NODE_FIELDS = new Set([
+  "Startup Cost",
+  "Total Cost",
+  "Plan Rows",
+  "Actual Startup Time",
+  "Actual Total Time",
+  "Actual Rows",
+  "Actual Loops",
+  "Rows Removed by Filter",
+  "Shared Hit Blocks",
+  "Shared Read Blocks",
+  "Temp Read Blocks",
+  "Temp Written Blocks",
+]);
+
+function nodeDetailFields(data: PlanRecord): [string, string][] {
+  return Object.entries(data)
+    .filter(([key, value]) => {
+      if (HIDDEN_NODE_FIELDS.has(key) || METRIC_NODE_FIELDS.has(key))
+        return false;
+      if (value === undefined || value === null) return false;
+      if (typeof value === "object" && !Array.isArray(value)) return false;
+      return true;
+    })
+    .map(([key, value]) => [
+      key,
+      typeof value === "string" ? value : JSON.stringify(value),
+    ]);
+}
 
 function Pagination({
   page,
@@ -81,6 +129,7 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
   );
   const node = plan.nodes[selected] ?? plan.nodes[0];
   const metrics = planMetrics(plan);
+  const visibleMetrics = metrics.filter(([, value]) => value !== undefined);
   const baselineMetrics = baseline ? planMetrics(baseline) : [];
   const changeView = (next: View) => {
     setView(next);
@@ -132,7 +181,7 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
       return;
     }
     try {
-      const parsed = parseQueryPlan(await file.text());
+      const parsed = parseImportedPlan(await file.text());
       if (version !== importVersion.current) return;
       if (!parsed) {
         setMessage(
@@ -193,24 +242,33 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
         contentClassName="qa-content"
         vertical
       >
-        <div class="qa-metrics">
-          {metrics.map(([label, value, unit]) => (
-            <div key={label}>
-              <span>{label}</span>
-              <strong>{formatPlanNumber(value, unit)}</strong>
-            </div>
-          ))}
-        </div>
+        {visibleMetrics.length > 0 && (
+          <div class="qa-metrics">
+            {visibleMetrics.map(([label, value, unit]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{formatPlanNumber(value, unit)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
         {!plan.actual && (
           <p class="qa-note">
-            Estimates only. Execution time, actual rows and runtime I/O are
-            unavailable.
+            Estimated plan from EXPLAIN. Execution time, actual rows, and buffer
+            I/O are omitted when the database did not return them
+            {plan.analyzeHint ? (
+              <>
+                . To measure, run <code>{plan.analyzeHint}</code> — that can
+                execute the statement
+              </>
+            ) : null}
+            .
           </p>
         )}
         {view === "Plan" && (
           <>
-            <input
-              class="qa-search"
+            <Input
+              class="qa-search outline-1!"
               aria-label="Filter plan nodes"
               placeholder="Filter plan nodes..."
               value={search}
@@ -225,8 +283,18 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
                   .slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
                   .map((item) => {
                     const cost = planNumber(item.data, "Total Cost");
-                    const maxCost =
-                      planNumber(plan.nodes[0].data, "Total Cost") ?? 0;
+                    const rows = planNumber(item.data, "Plan Rows");
+                    const bar = planBarShare(item, plan);
+                    const summary = [
+                      cost !== undefined
+                        ? `Estimated cost: ${formatPlanNumber(cost)}`
+                        : null,
+                      rows !== undefined
+                        ? `Rows: ${formatPlanNumber(rows)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" | ");
                     return (
                       <button
                         key={item.id}
@@ -241,10 +309,7 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
                         <strong>
                           {item.id + 1}. {item.label}
                         </strong>
-                        <span>
-                          Estimated cost: {formatPlanNumber(cost)} | Rows:{" "}
-                          {formatPlanNumber(planNumber(item.data, "Plan Rows"))}
-                        </span>
+                        {summary ? <span>{summary}</span> : null}
                         {plan.actual && (
                           <span>
                             Actual:{" "}
@@ -260,11 +325,15 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
                         )}
                         <span
                           class="qa-track"
-                          title="Estimated inclusive cost relative to root"
+                          title={
+                            bar.kind === "time"
+                              ? "Actual inclusive time relative to root"
+                              : "Estimated inclusive cost relative to root"
+                          }
                         >
                           <span
                             style={{
-                              width: `${maxCost > 0 ? Math.min(100, ((cost ?? 0) / maxCost) * 100) : 0}%`,
+                              width: `${bar.ratio * 100}%`,
                             }}
                           />
                         </span>
@@ -313,34 +382,19 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
                       </div>
                     ))}
                 </dl>
-                {[
-                  "Filter",
-                  "Index Cond",
-                  "Hash Cond",
-                  "Join Filter",
-                  "Sort Key",
-                  "Sort Method",
-                  "Sort Space Type",
-                  "Workers Planned",
-                  "Workers Launched",
-                ]
-                  .filter((key) => node.data[key] !== undefined)
-                  .map((key) => (
-                    <div class="qa-expression" key={key}>
-                      <span>{key}</span>
-                      <pre>
-                        {typeof node.data[key] === "string"
-                          ? node.data[key]
-                          : JSON.stringify(node.data[key])}
-                      </pre>
-                    </div>
-                  ))}
+                {nodeDetailFields(node.data).map(([key, value]) => (
+                  <div class="qa-expression" key={key}>
+                    <span>{key}</span>
+                    <pre>{value}</pre>
+                  </div>
+                ))}
               </section>
             </div>
             <p class="qa-note">
               Costs are planner units, not milliseconds. Parent timings and
-              buffers include children; do not sum nodes. Actual rows and times
-              are per-loop averages. Parallel worker timings overlap.
+              buffers include children; do not sum nodes.
+              <br /> Actual rows and times are per-loop averages. Parallel
+              worker timings overlap.
             </p>
           </>
         )}
@@ -409,15 +463,26 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {metrics.map(([label, value, unit], index) => (
-                        <tr key={label}>
-                          <td>{label}</td>
-                          <td>
-                            {formatPlanNumber(baselineMetrics[index][1], unit)}
-                          </td>
-                          <td>{formatPlanNumber(value, unit)}</td>
-                        </tr>
-                      ))}
+                      {metrics
+                        .filter(
+                          ([, value], index) =>
+                            value !== undefined ||
+                            baselineMetrics[index][1] !== undefined
+                        )
+                        .map(([label, value, unit]) => (
+                          <tr key={label}>
+                            <td>{label}</td>
+                            <td>
+                              {formatPlanNumber(
+                                baselineMetrics.find(
+                                  (entry) => entry[0] === label
+                                )?.[1],
+                                unit
+                              )}
+                            </td>
+                            <td>{formatPlanNumber(value, unit)}</td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
