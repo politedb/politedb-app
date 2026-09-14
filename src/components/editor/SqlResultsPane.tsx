@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
 import { TableFooter } from "src/components/table/TableFooter";
@@ -8,6 +8,9 @@ import { XIcon } from "src/components/icons";
 import { Button } from "../common/Button";
 import { Spinner } from "../common/Spinner";
 import { OverlayScrollArea } from "../common/OverlayScrollArea";
+import type { DatabaseEngine } from "src/types";
+import { planFromResult } from "src/lib/query-analyzer/plan";
+import { QueryAnalyzer } from "./query-analyzer/QueryAnalyzer";
 
 /* =============================================================================
  * UI blocks
@@ -290,6 +293,7 @@ function ResultsContent(props: {
  * ============================================================================= */
 
 export function SqlResultsPane(props: {
+  engine?: DatabaseEngine;
   windowId: string;
   runs: SqlResultRun[];
   activeRunId: string | null;
@@ -308,33 +312,52 @@ export function SqlResultsPane(props: {
     onCloseRun,
   } = props;
 
-  if (!runs.length) {
+  const activeRun =
+    runs.find((run) => run.id === activeRunId) ?? runs[runs.length - 1];
+  const safeIndex = Math.min(
+    Math.max(activeIndex, 0),
+    (activeRun?.slots.length ?? 0) - 1
+  );
+  const slot = activeRun?.slots[safeIndex];
+  const streamOpId = slot?.mode === "stream" ? (slot.opId ?? null) : null;
+  const stream = useSqlStreamResult(streamOpId);
+  const {
+    status: streamStatus,
+    columns: streamColumns,
+    getRowAt,
+    totalRows: streamRowCount,
+  } = stream;
+  const streamFirstRow = streamStatus === "done" ? getRowAt(0) : undefined;
+  const plan = useMemo(() => {
+    if (props.engine !== "postgres" || !slot || slot.status === "error")
+      return null;
+    if (slot.mode === "direct" && slot.status === "done" && slot.result) {
+      return planFromResult(
+        slot.result.columns,
+        slot.result.rows[0],
+        slot.result.rows.length
+      );
+    }
+    if (slot.mode === "stream" && streamStatus === "done") {
+      return planFromResult(streamColumns, streamFirstRow, streamRowCount);
+    }
+    return null;
+  }, [
+    props.engine,
+    slot,
+    streamStatus,
+    streamColumns,
+    streamFirstRow,
+    streamRowCount,
+  ]);
+
+  if (!activeRun || !slot) {
     return (
       <div class="flex h-full min-h-0 flex-col bg-white">
         <EmptyResults />
       </div>
     );
   }
-
-  const activeRun =
-    runs.find((run) => run.id === activeRunId) ?? runs[runs.length - 1];
-  const safeIndex = Math.min(
-    Math.max(activeIndex, 0),
-    activeRun.slots.length - 1
-  );
-  const slot = activeRun.slots[safeIndex];
-
-  const [streamOpId, setStreamOpId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (slot?.mode === "stream" && slot.opId) {
-      setStreamOpId(slot.opId);
-    } else {
-      setStreamOpId(null);
-    }
-  }, [slot?.mode, slot?.opId]);
-
-  const stream = useSqlStreamResult(streamOpId);
 
   const footerTotalRows =
     slot.mode === "direct" && slot.status === "done" && slot.result
@@ -372,7 +395,11 @@ export function SqlResultsPane(props: {
         onSelect={setActiveIndex}
       />
 
-      {shouldShowTable ? (
+      {plan ? (
+        <div class="min-h-0 flex-1">
+          <QueryAnalyzer key={`${activeRun.id}:${slot.index}`} plan={plan} />
+        </div>
+      ) : shouldShowTable ? (
         <div class="min-h-0 flex-1 bg-white">
           <ResultsContent
             windowId={windowId}
@@ -398,28 +425,30 @@ export function SqlResultsPane(props: {
         </OverlayScrollArea>
       )}
 
-      <TableFooter
-        className="justify-center"
-        viewMode="data"
-        onViewModeChange={() => {}}
-        structPaneTab="columns"
-        filterBarVisible={false}
-        limit={footerLimit}
-        offset={footerOffset}
-        loadedMax={footerLoadedMax}
-        totalRows={footerTotalRows}
-        rowCountIsEstimated={false}
-        onCountExact={undefined}
-        onPageChange={() => {}}
-        onAddRow={() => {}}
-        onAddColumn={() => {}}
-        onAddIndex={() => {}}
-        onFilters={() => {}}
-        readOnly
-        showViewToggle={false}
-        showActions={false}
-        showFiltersAndPaging={false}
-      />
+      {!plan && (
+        <TableFooter
+          className="justify-center"
+          viewMode="data"
+          onViewModeChange={() => {}}
+          structPaneTab="columns"
+          filterBarVisible={false}
+          limit={footerLimit}
+          offset={footerOffset}
+          loadedMax={footerLoadedMax}
+          totalRows={footerTotalRows}
+          rowCountIsEstimated={false}
+          onCountExact={undefined}
+          onPageChange={() => {}}
+          onAddRow={() => {}}
+          onAddColumn={() => {}}
+          onAddIndex={() => {}}
+          onFilters={() => {}}
+          readOnly
+          showViewToggle={false}
+          showActions={false}
+          showFiltersAndPaging={false}
+        />
+      )}
     </div>
   );
 }
