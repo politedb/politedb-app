@@ -175,6 +175,8 @@ type Props = {
   onExitEdit?: () => void;
 
   onCellActivate?: (cell: EditingCell) => boolean | void;
+  /** Double-click / Enter opens this row instead of the cell editor. */
+  onActivateRow?: (rowIdx: number) => void;
   cellOptions?: Record<string, CanvasCellOption[]>;
   actionColumns?: string[];
   viewKey?: string;
@@ -537,6 +539,7 @@ export function CanvasTable({
   isNewRow,
   onChangeSort,
   onCellActivate,
+  onActivateRow,
   cellOptions,
   actionColumns,
   viewKey,
@@ -1852,6 +1855,11 @@ export function CanvasTable({
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
       if (colIdx < 0) return;
 
+      if (onActivateRow) {
+        onActivateRow(rowIdx);
+        return;
+      }
+
       openCellEditor(rowIdx, colIdx);
     },
     [
@@ -1860,6 +1868,7 @@ export function CanvasTable({
       colWidths,
       totalRows,
       onAddRow,
+      onActivateRow,
       openCellEditor,
       ROW_HEIGHT,
       HEADER_HEIGHT,
@@ -1931,6 +1940,10 @@ export function CanvasTable({
 
         if (selected && (e.key === "Enter" || e.key === "F2")) {
           e.preventDefault();
+          if (e.key === "Enter" && onActivateRow) {
+            onActivateRow(selected.rowIdx);
+            return;
+          }
           openCellEditor(selected.rowIdx, selected.colIdx);
           return;
         }

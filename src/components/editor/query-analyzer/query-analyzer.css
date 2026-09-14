@@ -97,7 +97,7 @@ html.dark .query-analyzer {
 .qa-note,
 .qa-node span,
 .qa-details dt,
-.qa-expression>span {
+.qa-expression > span {
   color: var(--qa-muted);
 }
 
@@ -153,7 +153,7 @@ html.dark .query-analyzer {
   display: block;
 }
 
-.qa-node>span {
+.qa-node > span {
   margin-top: 4px;
 }
 
@@ -182,7 +182,7 @@ html.dark .query-analyzer {
   margin: 0 0 8px;
 }
 
-.qa-details dl>div {
+.qa-details dl > div {
   margin-bottom: 8px;
 }
 

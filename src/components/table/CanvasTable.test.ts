@@ -275,6 +275,53 @@ describe("CanvasTable cell editor", () => {
 
     expect(onCommitEdit).toHaveBeenCalledWith({ rowIdx: 0, colIdx: 0 }, "");
   });
+
+  it("activates a row on double-click instead of opening the editor", () => {
+    const onActivateRow = vi.fn();
+    const onStartEdit = vi.fn();
+    render(
+      h(CanvasTable, {
+        columns: [{ name: "name", db_type: "text" }],
+        totalRows: 1,
+        getRowAt: () => ["users"],
+        widthByName: { name: 140 },
+        emptyColumnWidth: 0,
+        dataVersion: 0,
+        onActivateRow,
+        onStartEdit,
+      })
+    );
+
+    const scroller = document.querySelector(".overflow-auto");
+    if (!scroller) throw new Error("Canvas scroller not found");
+    fireEvent.dblClick(scroller, { clientX: 20, clientY: 40 });
+
+    expect(onActivateRow).toHaveBeenCalledWith(0);
+    expect(onStartEdit).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText("NULL")).toBeNull();
+  });
+
+  it("activates the selected row on Enter", () => {
+    const onActivateRow = vi.fn();
+    render(
+      h(CanvasTable, {
+        columns: [{ name: "name", db_type: "text" }],
+        totalRows: 1,
+        getRowAt: () => ["users"],
+        widthByName: { name: 140 },
+        emptyColumnWidth: 0,
+        dataVersion: 0,
+        selected: { rowIdx: 0, colIdx: 0 },
+        selectedRows: new Set([0]),
+        onActivateRow,
+      })
+    );
+
+    fireEvent.keyDown(document.querySelector(".table-focus-root")!, {
+      key: "Enter",
+    });
+    expect(onActivateRow).toHaveBeenCalledWith(0);
+  });
 });
 
 describe("CanvasTable column resize", () => {

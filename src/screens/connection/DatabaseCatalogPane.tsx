@@ -1,53 +1,56 @@
-import type { ComponentChildren } from "preact";
-import { useMemo, useState } from "preact/hooks";
+import { useCallback, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
-import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import {
+  CanvasTable,
+  type CanvasEditingCell,
+} from "src/components/table/CanvasTable";
+import { useContainerWidth } from "src/components/table/tableHooks";
 import {
   RefreshCwIcon,
   SearchIcon,
   SquareFunctionIcon,
   TableIcon,
 } from "src/components/icons";
+import type { ColumnMeta } from "src/lib/tauri/types";
 import type {
   DatabaseCatalogWindow,
   DatabaseObjectItem,
   TableItem,
 } from "src/types";
-import { cn } from "src/utils/cn";
 import { normalizeByteSizeLabel } from "src/utils/convert";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
-import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
 
-const CATALOG_PAGE_SIZE = 100;
+type CatalogSort = { colName: string; direction: "asc" | "desc" } | null;
 
-type CatalogColumn<T> = {
+export type CatalogColumn<T> = {
   key: string;
   label: string;
-  className?: string;
+  width?: number;
   render: (row: T) => string;
 };
 
-const TABLE_COLUMNS: CatalogColumn<TableItem>[] = [
-  {
-    key: "name",
-    label: "name",
-    className: "min-w-56",
-    render: (row) => row.name,
-  },
-  { key: "schema", label: "schema", render: (row) => row.schema },
+export const TABLE_COLUMNS: CatalogColumn<TableItem>[] = [
+  { key: "name", label: "name", width: 220, render: (row) => row.name },
+  { key: "schema", label: "schema", width: 120, render: (row) => row.schema },
   {
     key: "kind",
     label: "kind",
+    width: 90,
     render: (row) => (row.kind === "view" ? "VIEW" : "TABLE"),
   },
-  { key: "owner", label: "owner", render: (row) => row.owner ?? "--" },
+  {
+    key: "owner",
+    label: "owner",
+    width: 140,
+    render: (row) => row.owner ?? "--",
+  },
   {
     key: "estimated_row",
     label: "estimated_row",
-    className: "text-right",
+    width: 130,
     render: (row) =>
       row.estimatedRow === undefined || row.estimatedRow === ""
         ? "--"
@@ -56,155 +59,216 @@ const TABLE_COLUMNS: CatalogColumn<TableItem>[] = [
   {
     key: "total_size",
     label: "total_size",
-    className: "text-right",
+    width: 110,
     render: (row) => normalizeByteSizeLabel(row.totalSize),
   },
   {
     key: "data_size",
     label: "data_size",
-    className: "text-right",
+    width: 110,
     render: (row) => normalizeByteSizeLabel(row.dataSize),
   },
   {
     key: "index_size",
     label: "index_size",
-    className: "text-right",
+    width: 110,
     render: (row) => normalizeByteSizeLabel(row.indexSize),
   },
-  { key: "comment", label: "comment", render: (row) => row.comment ?? "" },
+  {
+    key: "comment",
+    label: "comment",
+    width: 240,
+    render: (row) => row.comment ?? "",
+  },
 ];
 
-const FUNCTION_COLUMNS: CatalogColumn<DatabaseObjectItem>[] = [
-  {
-    key: "name",
-    label: "name",
-    className: "min-w-56",
-    render: (row) => row.name,
-  },
-  { key: "schema", label: "schema", render: (row) => row.schema },
+export const FUNCTION_COLUMNS: CatalogColumn<DatabaseObjectItem>[] = [
+  { key: "name", label: "name", width: 220, render: (row) => row.name },
+  { key: "schema", label: "schema", width: 120, render: (row) => row.schema },
   {
     key: "kind",
     label: "kind",
+    width: 110,
     render: (row) => row.kind.toUpperCase(),
   },
   {
     key: "signature",
     label: "signature",
+    width: 280,
     render: (row) => row.signature ?? "",
   },
   {
     key: "read_definition",
     label: "read_definition",
+    width: 140,
     render: (row) => (row.capability.canReadDefinition ? "YES" : "NO"),
   },
   {
     key: "edit",
     label: "edit",
+    width: 80,
     render: (row) => (row.capability.canEdit ? "YES" : "NO"),
   },
   {
     key: "delete",
     label: "delete",
+    width: 80,
     render: (row) => (row.capability.canDelete ? "YES" : "NO"),
   },
   {
     key: "reason",
     label: "comment",
+    width: 240,
     render: (row) => row.capability.reason ?? "",
   },
 ];
 
-function CatalogTable<T>(props: {
+export function catalogRowValues<T>(
+  row: T,
+  columns: CatalogColumn<T>[]
+): unknown[] {
+  return columns.map((column) => column.render(row));
+}
+
+export function sortCatalogRows<T>(
+  rows: T[],
+  columns: CatalogColumn<T>[],
+  sort: CatalogSort
+): T[] {
+  if (!sort) return rows;
+  const column = columns.find((item) => item.label === sort.colName);
+  if (!column) return rows;
+  const next = [...rows];
+  next.sort((a, b) => {
+    const result = String(column.render(a) ?? "").localeCompare(
+      String(column.render(b) ?? ""),
+      undefined,
+      { numeric: true }
+    );
+    return sort.direction === "asc" ? result : -result;
+  });
+  return next;
+}
+
+function CatalogCanvasTable<T>(props: {
   columns: CatalogColumn<T>[];
   rows: T[];
   resetKey: string;
-  getRowKey: (row: T) => string;
   emptyLabel: string;
-  renderNameIcon: (row: T) => ComponentChildren;
   onOpen: (row: T) => void;
+  onRefresh: () => void;
 }) {
-  const {
-    visibleItems: visibleRows,
-    sentinelRef,
-    hasMore,
-  } = useInfiniteScroll(props.rows, {
-    pageSize: CATALOG_PAGE_SIZE,
-    resetKey: props.resetKey,
-  });
+  const [sort, setSort] = useState<CatalogSort>(null);
+  const [selected, setSelected] = useState<CanvasEditingCell | null>(null);
+  const [selectedRows, setSelectedRows] = useState(new Set<number>());
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const { containerRef, containerWidth } = useContainerWidth();
+
+  const canvasColumns = useMemo<ColumnMeta[]>(
+    () =>
+      props.columns.map((column) => ({
+        name: column.label,
+        db_type: "text",
+        readonly: true,
+      })),
+    [props.columns]
+  );
+
+  const sortedRows = useMemo(
+    () => sortCatalogRows(props.rows, props.columns, sort),
+    [props.columns, props.rows, sort]
+  );
+
+  const widthByName = useMemo(() => {
+    const widths: Record<string, number> = {};
+    for (const column of props.columns) {
+      widths[column.label] = column.width ?? 160;
+    }
+    return widths;
+  }, [props.columns]);
+
+  const columnsWidth = useMemo(
+    () => Object.values(widthByName).reduce((sum, width) => sum + width, 0),
+    [widthByName]
+  );
+  const emptyColumnWidth = Math.max(
+    0,
+    Math.max(1, containerWidth) - columnsWidth
+  );
+
+  const getRowAt = useCallback(
+    (index: number) => {
+      const row = sortedRows[index];
+      return row ? catalogRowValues(row, props.columns) : undefined;
+    },
+    [props.columns, sortedRows]
+  );
+
+  const projection = `${props.resetKey}\0${sort?.colName ?? ""}\0${sort?.direction ?? ""}`;
+  const [previousProjection, setPreviousProjection] = useState(projection);
+  if (projection !== previousProjection) {
+    setPreviousProjection(projection);
+    setSelected(null);
+    setSelectedRows(new Set());
+    setAnchor(null);
+  }
+
+  const clearSelection = () => {
+    setSelected(null);
+    setSelectedRows(new Set());
+    setAnchor(null);
+  };
 
   return (
-    <OverlayScrollArea
-      className="min-h-0 flex-1 bg-neutral-50"
-      dataScrollRoot
-      horizontal
-      vertical
-    >
-      <table class="w-full min-w-max border-separate border-spacing-0 text-sm">
-        <thead class="bg-neutral-50">
-          <tr>
-            {props.columns.map((column) => (
-              <th
-                key={column.key}
-                class={cn(
-                  "border-r border-b border-neutral-200",
-                  "px-3 py-2 text-left text-sm font-semibold text-neutral-600",
-                  "sticky top-0 z-10 bg-neutral-50 shadow-[0_1px_0_0_rgba(0,0,0,0.05)] dark:shadow-[0_1px_0_0_rgba(255,255,255,0.05)]",
-                  column.className
-                )}
-              >
-                {column.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {props.rows.length === 0 ? (
-            <tr>
-              <td
-                colSpan={props.columns.length}
-                class="px-4 py-10 text-center text-sm text-neutral-500"
-              >
-                {props.emptyLabel}
-              </td>
-            </tr>
-          ) : (
-            visibleRows.map((row) => (
-              <tr
-                key={props.getRowKey(row)}
-                data-catalog-row
-                onDblClick={() => props.onOpen(row)}
-                class="cursor-default odd:bg-white even:bg-neutral-50 hover:bg-blue-100!"
-              >
-                {props.columns.map((column, columnIndex) => (
-                  <td
-                    key={column.key}
-                    class={cn(
-                      "max-w-80 truncate border-r border-b border-neutral-200 px-3 py-2 text-neutral-800",
-                      column.className
-                    )}
-                    title={column.render(row)}
-                  >
-                    {columnIndex === 0 ? (
-                      <div class="flex min-w-0 items-center gap-2">
-                        {props.renderNameIcon(row)}
-                        <span class="min-w-0 truncate">
-                          {column.render(row)}
-                        </span>
-                      </div>
-                    ) : (
-                      column.render(row)
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-      {hasMore ? (
-        <div ref={sentinelRef} class="h-px" aria-hidden="true" />
+    <div ref={containerRef} class="relative min-h-0 flex-1 bg-white">
+      <CanvasTable
+        viewKey={projection}
+        columns={canvasColumns}
+        totalRows={sortedRows.length}
+        getRowAt={getRowAt}
+        widthByName={widthByName}
+        emptyColumnWidth={emptyColumnWidth}
+        dataVersion={sortedRows.length}
+        sortState={sort}
+        onChangeSort={setSort}
+        selected={selected}
+        selectedRows={selectedRows}
+        onSelect={(rowIdx, colIdx, multi, range) => {
+          if (!sortedRows[rowIdx]) return;
+          setSelected({ rowIdx, colIdx });
+          setSelectedRows((previous) => {
+            const next = multi || range ? new Set(previous) : new Set<number>();
+            if (range && anchor !== null) {
+              for (
+                let i = Math.min(anchor, rowIdx);
+                i <= Math.max(anchor, rowIdx);
+                i++
+              )
+                next.add(i);
+            } else if (multi && next.has(rowIdx)) next.delete(rowIdx);
+            else next.add(rowIdx);
+            return next;
+          });
+          if (!range) setAnchor(rowIdx);
+        }}
+        onClearSelection={clearSelection}
+        onSelectAllRows={() => {
+          setSelectedRows(new Set(sortedRows.map((_, index) => index)));
+          setSelected(sortedRows.length ? { rowIdx: 0, colIdx: 0 } : null);
+          setAnchor(0);
+        }}
+        onActivateRow={(rowIdx) => {
+          const row = sortedRows[rowIdx];
+          if (row) props.onOpen(row);
+        }}
+        onRefresh={props.onRefresh}
+      />
+      {props.rows.length === 0 ? (
+        <div class="pointer-events-none absolute inset-x-0 top-7 px-4 text-center text-sm text-neutral-500">
+          {props.emptyLabel}
+        </div>
       ) : null}
-    </OverlayScrollArea>
+    </div>
   );
 }
 
@@ -314,35 +378,24 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           {meta.error}
         </div>
       ) : isFunctions ? (
-        <CatalogTable
+        <CatalogCanvasTable
           columns={FUNCTION_COLUMNS}
           rows={functionRows}
           resetKey={`functions\0${schemaScope}\0${search}\0${functionRows.length}`}
-          getRowKey={(item) => item.id}
           emptyLabel="No functions found."
-          renderNameIcon={() => (
-            <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
-          )}
           onOpen={(item) =>
             openDatabaseObjectsManager({ kind: "function", object: item })
           }
+          onRefresh={() => void refresh()}
         />
       ) : (
-        <CatalogTable
+        <CatalogCanvasTable
           columns={TABLE_COLUMNS}
           rows={tableRows}
           resetKey={`tables\0${schemaScope}\0${search}\0${tableRows.length}`}
-          getRowKey={(table) => `${table.schema}.${table.name}`}
           emptyLabel="No tables found."
-          renderNameIcon={(table) => (
-            <TableIcon
-              className={cn(
-                "size-4 shrink-0",
-                table.kind === "view" ? "text-emerald-500" : "text-blue-500"
-              )}
-            />
-          )}
           onOpen={(table) => void actions.selectTable(table)}
+          onRefresh={() => void refresh()}
         />
       )}
     </div>

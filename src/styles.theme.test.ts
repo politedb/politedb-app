@@ -73,6 +73,8 @@ describe("global dark theme remaps", () => {
     expect(css).toContain(`--table-grid: ${palette.grid}`);
     expect(css).toContain("--table-header: #181818");
     expect(css).toContain(`--table-text: ${palette.text}`);
+    expect(css).toContain(".common-data-table tbody tr:hover > td");
+    expect(css).toContain("background-color: var(--color-selected)");
     expect(css).toContain(".common-data-table input");
     expect(css).toContain(".common-data-table input.bg-dirty");
     expect(css).toContain("background-color: var(--color-dirty) !important");

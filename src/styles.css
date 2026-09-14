@@ -476,7 +476,7 @@ html.dark textarea::placeholder {
   color: #737373;
 }
 
-html.dark table tr:nth-child(even) {
+html.dark table:not(.common-data-table) tr:nth-child(even) {
   background-color: #202020;
 }
 
@@ -496,6 +496,11 @@ html.dark table tr:nth-child(even) {
 
 .common-data-table tbody tr:nth-child(even) {
   background-color: var(--table-zebra);
+}
+
+.common-data-table tbody tr:hover,
+.common-data-table tbody tr:hover > td {
+  background-color: var(--color-selected);
 }
 
 .common-data-table th,
