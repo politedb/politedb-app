@@ -279,4 +279,73 @@ describe("sqlCompletionSmart", () => {
     expect(labels).toContain("AND");
     expect(labels).toContain("OR");
   });
+
+  it("after semicolon: second statement gets statement keywords, not previous FROM tables", () => {
+    const tables: TableItem[] = [
+      { schema: "public", name: "SequelizeMeta" },
+      { schema: "public", name: "Setting" },
+      { schema: "public", name: "User" },
+    ];
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: {},
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+
+    const afterSemi = provide(provider, 'SELECT * FROM public."User"; ');
+    expect(afterSemi.suggestions.map((s: any) => s.label)).toContain("SELECT");
+    expect(afterSemi.suggestions.map((s: any) => s.label)).not.toContain(
+      "SequelizeMeta"
+    );
+
+    const partial = provide(provider, 'SELECT * FROM public."User"; SE');
+    const partialLabels = partial.suggestions.map((s: any) => s.label);
+    expect(partialLabels).toContain("SELECT");
+    expect(partialLabels).not.toContain("SequelizeMeta");
+    expect(partialLabels).not.toContain("Setting");
+  });
+
+  it("after semicolon: SELECT clause is parsed from the current statement only", () => {
+    const tables: TableItem[] = [{ schema: "public", name: "users" }];
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables,
+      columnsByTable: { "public.users": ["id"] },
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+    const res = provide(provider, "SELECT * FROM users; SELECT ");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("*");
+    expect(labels).toContain("FROM");
+    expect(labels).toContain("COUNT");
+    expect(labels).not.toContain("users");
+  });
+
+  it("semicolon inside a string does not start a new statement", () => {
+    const getCtx = () => ({
+      schemas: ["public"],
+      activeSchema: "public",
+      tables: [{ schema: "public", name: "users" }],
+      columnsByTable: {},
+      engine: "postgres" as DatabaseEngine,
+    });
+
+    const disposable: any = registerSqlCompletionSmart(getCtx);
+    const provider = disposable.__provider;
+    const res = provide(provider, "SELECT * FROM users WHERE name = ';'; SE");
+    const labels = res.suggestions.map((s: any) => s.label);
+
+    expect(labels).toContain("SELECT");
+    expect(labels).not.toContain("users");
+  });
 });

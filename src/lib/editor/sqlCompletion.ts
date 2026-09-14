@@ -223,18 +223,75 @@ function normalizeContext(sql: string): string {
   return result.trim();
 }
 
+function lastUnquotedSemicolon(sql: string): number {
+  let last = -1;
+  let i = 0;
+  let inSingle = false;
+  let inDouble = false;
+  let inBacktick = false;
+
+  while (i < sql.length) {
+    const ch = sql[i]!;
+    const next = sql[i + 1] ?? "";
+
+    if (!inSingle && !inDouble && !inBacktick && ch === "-" && next === "-") {
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick && ch === "/" && next === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      i = end === -1 ? sql.length : end + 2;
+      continue;
+    }
+    if (!inSingle && !inDouble && !inBacktick && ch === "#") {
+      const nl = sql.indexOf("\n", i);
+      i = nl === -1 ? sql.length : nl + 1;
+      continue;
+    }
+
+    if (ch === "'" && !inDouble && !inBacktick) {
+      if (inSingle && next === "'") {
+        i += 2;
+        continue;
+      }
+      inSingle = !inSingle;
+    } else if (ch === '"' && !inSingle && !inBacktick) {
+      if (inDouble && next === '"') {
+        i += 2;
+        continue;
+      }
+      inDouble = !inDouble;
+    } else if (ch === "`" && !inSingle && !inDouble) {
+      if (inBacktick && next === "`") {
+        i += 2;
+        continue;
+      }
+      inBacktick = !inBacktick;
+    } else if (ch === ";" && !inSingle && !inDouble && !inBacktick) {
+      last = i;
+    }
+
+    i++;
+  }
+
+  return last;
+}
+
+function currentStatement(sql: string): string {
+  const idx = lastUnquotedSemicolon(sql);
+  if (idx === -1) return sql;
+  return sql.slice(idx + 1);
+}
+
 /**
  * Check if we're at statement boundary (after ; outside strings)
  */
 function isStatementStart(ctx: string): boolean {
   const trimmed = ctx.trimEnd();
   if (!trimmed) return true;
-
-  const lastSemi = trimmed.lastIndexOf(";");
-  if (lastSemi === -1) return false;
-
-  const after = trimmed.slice(lastSemi + 1).trim();
-  return after === "";
+  if (detectDotContext(trimmed)) return false;
+  return findLastKeyword(trimmed) === "";
 }
 
 /**
@@ -542,7 +599,7 @@ function parseContext(
   rawCtx: string,
   completionCtx: CompletionCtx
 ): ParsedContext {
-  const ctx = normalizeContext(rawCtx);
+  const ctx = normalizeContext(currentStatement(rawCtx));
   const { tables, aliasMap } = extractTableRefs(ctx);
   const ctes = extractCtes(ctx);
 
