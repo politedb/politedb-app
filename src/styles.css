@@ -153,6 +153,15 @@ body,
   color-scheme: light;
 }
 
+html.dark img[data-db-engine="mysql"] {
+  /* Official dolphin fill is #00618A — too dark on charcoal. */
+  filter: brightness(1.9) saturate(1.15);
+}
+
+html.dark img[data-db-engine="mariadb"] {
+  filter: brightness(2.2) saturate(1.15);
+}
+
 html.dark,
 html.dark body,
 html.dark #root {

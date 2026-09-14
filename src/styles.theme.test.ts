@@ -116,4 +116,9 @@ describe("remaining dark-theme spots", () => {
     expect(searchNav).not.toContain("bg-white!");
     expect(searchNav).toContain("bg-white");
   });
+
+  it("brightens the MySQL dolphin on dark surfaces", () => {
+    expect(css).toContain('html.dark img[data-db-engine="mysql"]');
+    expect(css).toContain("filter: brightness(1.9) saturate(1.15)");
+  });
 });

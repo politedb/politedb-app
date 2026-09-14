@@ -133,6 +133,8 @@ export function DbIcon(props: {
 }) {
   const { engine, abbreviation, size = "md", px, className, alt } = props;
 
+  const engineKey =
+    normalizeEngine(engine) ?? engineFromAbbr(abbreviation) ?? undefined;
   const src = getDbIconSrc(engine, abbreviation);
   const dim = Math.max(8, Math.round(px ?? SIZE_PX[size]));
 
@@ -154,6 +156,7 @@ export function DbIcon(props: {
       <img
         src={src}
         alt={alt ?? (typeof engine === "string" ? engine : "database")}
+        data-db-engine={engineKey}
         draggable={false}
         loading="lazy"
         class="h-full w-full object-contain select-none"
