@@ -1,0 +1,223 @@
+import { describe, expect, it } from "vitest";
+import { queryPlanFixture } from "src/test/fixtures/queryPlan";
+import {
+  formatPlanNumber,
+  parseQueryPlan,
+  planBarShare,
+  planMetrics,
+  planNumber,
+} from "./plan";
+import { planFromResult } from "./fromResult";
+import { analyzeQueryPlan } from "./findings";
+import { queryPlanReport } from "./report";
+
+describe("PostgreSQL query plans", () => {
+  it.each(["Json", "Str"])("decodes Tauri %s cells before parsing", (t) => {
+    const value = JSON.stringify([
+      {
+        Plan: {
+          "Node Type": "Seq Scan",
+          "Relation Name": "Category",
+          "Startup Cost": 0,
+          "Total Cost": 1.07,
+          "Plan Rows": 7,
+          "Plan Width": 57,
+        },
+      },
+    ]);
+    const plan = planFromResult(
+      "postgres",
+      [{ name: "QUERY PLAN" }],
+      [[{ t, v: value }]]
+    );
+    expect(plan?.nodes[0].label).toBe("Seq Scan on Category");
+    expect(plan?.actual).toBe(false);
+  });
+  it.each([
+    { t: "Null" },
+    { t: "Json", v: "invalid" },
+    { t: "Json" },
+    { t: "Bool", v: true },
+  ])("rejects invalid tagged cells without throwing", (cell) => {
+    expect(
+      planFromResult("postgres", [{ name: "QUERY PLAN" }], [cell])
+    ).toBeNull();
+  });
+  it("accepts JSON strings and structured documents with stable preorder node IDs", () => {
+    const plan = parseQueryPlan(JSON.stringify(queryPlanFixture))!;
+    expect(plan).toEqual(parseQueryPlan(queryPlanFixture[0]));
+    expect(plan.actual).toBe(true);
+    expect(plan.nodes.map((n) => [n.id, n.depth, n.type])).toEqual([
+      [0, 0, "Sort"],
+      [1, 1, "Seq Scan"],
+    ]);
+  });
+  it.each([
+    null,
+    "not JSON",
+    [],
+    [{}, {}],
+    { Plan: {} },
+    { Plan: { "Node Type": "Sort", Plans: [null] } },
+  ])("rejects malformed data: %j", (value) => {
+    expect(parseQueryPlan(value)).toBeNull();
+  });
+  it("rejects oversized and cyclic plans without throwing", () => {
+    const root: Record<string, unknown> = { "Node Type": "Sort" };
+    root.Plans = [root];
+    expect(parseQueryPlan({ Plan: root })).toBeNull();
+    expect(parseQueryPlan(" ".repeat(5 * 1024 * 1024 + 1))).toBeNull();
+    expect(
+      parseQueryPlan({
+        Plan: {
+          "Node Type": "Append",
+          Plans: Array.from({ length: 5001 }, () => ({
+            "Node Type": "Result",
+          })),
+        },
+      })
+    ).toBeNull();
+  });
+  it("only treats a single JSON plan cell as a Postgres plan", () => {
+    expect(
+      planFromResult(
+        "postgres",
+        [{ name: "QUERY PLAN" }],
+        [[JSON.stringify(queryPlanFixture)]]
+      )
+    ).not.toBeNull();
+    expect(
+      planFromResult("postgres", [{ name: "payload" }], [[queryPlanFixture]])
+    ).not.toBeNull();
+    expect(
+      planFromResult(
+        "postgres",
+        [{ name: "QUERY PLAN" }],
+        [[queryPlanFixture], [queryPlanFixture]]
+      )
+    ).toBeNull();
+    expect(
+      planFromResult("postgres", [{ name: "QUERY PLAN" }], undefined)
+    ).toBeNull();
+  });
+  it("rejects excessively nested metadata outside the plan tree", () => {
+    let metadata: unknown = "leaf";
+    for (let i = 0; i < 150; i++) metadata = { nested: metadata };
+    expect(
+      parseQueryPlan({ Plan: { "Node Type": "Result" }, metadata })
+    ).toBeNull();
+  });
+  it("sizes the plan bar from actual time on measured plans, cost otherwise", () => {
+    const measured = parseQueryPlan({
+      Plan: {
+        "Node Type": "Nested Loop",
+        "Total Cost": 100,
+        "Actual Total Time": 100,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Seq Scan",
+            "Relation Name": "cheap_but_slow",
+            "Total Cost": 10,
+            "Actual Total Time": 90,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "Index Scan",
+            "Relation Name": "costly_but_fast",
+            "Total Cost": 90,
+            "Actual Total Time": 10,
+            "Actual Loops": 1,
+          },
+        ],
+      },
+    })!;
+    expect(planBarShare(measured.nodes[2], measured)).toEqual({
+      kind: "time",
+      ratio: 0.1,
+    });
+    const estimated = parseQueryPlan({
+      Plan: {
+        "Node Type": "Nested Loop",
+        "Total Cost": 100,
+        Plans: [
+          {
+            "Node Type": "Index Scan",
+            "Total Cost": 90,
+          },
+        ],
+      },
+    })!;
+    expect(planBarShare(estimated.nodes[1], estimated)).toEqual({
+      kind: "cost",
+      ratio: 0.9,
+    });
+  });
+  it("does not invent execution metrics for estimated plans", () => {
+    const plan = parseQueryPlan([
+      { Plan: { "Node Type": "Result", "Total Cost": 1 } },
+    ])!;
+    expect(plan.actual).toBe(false);
+    expect(planMetrics(plan)[0][1]).toBeUndefined();
+    expect(formatPlanNumber(undefined)).toBe("Not available");
+    expect(formatPlanNumber(0, " ms")).toBe("0 ms");
+  });
+  it("keeps zero values but rejects nonfinite, negative and string metrics", () => {
+    for (const value of [-1, NaN, Infinity, "100"])
+      expect(planNumber({ n: value }, "n")).toBeUndefined();
+    expect(planNumber({ n: 0 }, "n")).toBe(0);
+  });
+  it("does not sum inclusive buffer counts", () => {
+    expect(planMetrics(parseQueryPlan(queryPlanFixture)!)[4][1]).toBe(18420);
+  });
+  it("reports selective scans, spills and estimate mismatch", () => {
+    const findings = analyzeQueryPlan(parseQueryPlan(queryPlanFixture)!);
+    expect(findings.map((f) => f.title)).toEqual([
+      "Sort spilled to disk",
+      "Selective filter after sequential scan",
+      "Row estimate differs by at least 10x",
+    ]);
+  });
+  it("avoids estimate findings beneath LIMIT and parallel gathers", () => {
+    for (const type of ["Limit", "Gather", "Gather Merge"]) {
+      const document = structuredClone(queryPlanFixture[0]);
+      document.Plan["Node Type"] = type;
+      expect(
+        analyzeQueryPlan(parseQueryPlan(document)!).some((f) =>
+          f.title.includes("estimate differs")
+        )
+      ).toBe(false);
+    }
+  });
+  it("ignores unexecuted nodes and unfiltered sequential scans", () => {
+    const node = {
+      "Node Type": "Seq Scan",
+      "Actual Loops": 0,
+      Filter: "x = 1",
+      "Rows Removed by Filter": 9000,
+      "Actual Rows": 1,
+    };
+    expect(analyzeQueryPlan(parseQueryPlan({ Plan: node })!)).toEqual([]);
+    expect(
+      analyzeQueryPlan(parseQueryPlan({ Plan: { "Node Type": "Seq Scan" } })!)
+    ).toEqual([]);
+  });
+  it("keeps per-loop actual rows comparable to per-loop estimated rows", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Index Scan",
+        "Plan Rows": 100,
+        "Actual Rows": 100,
+        "Actual Loops": 1000,
+      },
+    })!;
+    expect(analyzeQueryPlan(plan)).toEqual([]);
+  });
+  it("exports real plan data with interpretation and privacy caveats", () => {
+    const report = queryPlanReport(parseQueryPlan(queryPlanFixture)!);
+    expect(report).toContain("2,840 ms");
+    expect(report).toContain("Parent metrics include children");
+    expect(report).toContain("literal values");
+    expect(report).toContain('"Relation Name": "orders"');
+  });
+});

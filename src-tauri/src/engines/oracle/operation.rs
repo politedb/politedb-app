@@ -22,7 +22,7 @@ fn looks_like_query(sql: &str) -> bool {
         return false;
     }
     let up = s.chars().take(24).collect::<String>().to_uppercase();
-    up.starts_with("SELECT") || up.starts_with("WITH")
+    up.starts_with("SELECT") || up.starts_with("WITH") || up.starts_with("EXPLAIN")
 }
 
 fn oracle_string_to_cell(s: String) -> CellValue {

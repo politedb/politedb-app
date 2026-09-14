@@ -22,6 +22,7 @@ fn looks_like_query(sql: &str) -> bool {
         || up.starts_with("WITH")
         || up.starts_with("SHOW")
         || up.starts_with("DESCRIBE")
+        || up.starts_with("EXPLAIN")
 }
 
 fn snowflake_string_to_cell(s: String) -> CellValue {

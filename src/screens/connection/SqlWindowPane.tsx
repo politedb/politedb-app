@@ -140,6 +140,7 @@ export function SqlWindowPane(props: {
         }
         second={
           <SqlResultsPane
+            engine={engine}
             windowId={scopedWindowId}
             runs={sqlRuns}
             activeRunId={activeRunId}
