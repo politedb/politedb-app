@@ -40,7 +40,7 @@ describe("PostgreSQL query plans", () => {
     { t: "Bool", v: true },
   ])("rejects invalid tagged cells without throwing", (cell) => {
     expect(
-      planFromResult("postgres", [{ name: "QUERY PLAN" }], [cell])
+      planFromResult("postgres", [{ name: "QUERY PLAN" }], [[cell]])
     ).toBeNull();
   });
   it("accepts JSON strings and structured documents with stable preorder node IDs", () => {

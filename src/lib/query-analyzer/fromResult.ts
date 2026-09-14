@@ -498,6 +498,7 @@ function parseOracleXplan(rows: unknown[][]): QueryPlan | null {
       depth,
       type,
       label: labelOf(type, relation),
+      partial: false,
       data: attachNormalized(
         { Id: Number(match[1]), Operation: type, Name: relation },
         {

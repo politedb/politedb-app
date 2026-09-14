@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import packageJson from "@root/package.json";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { trackEssentialEvent } from "src/lib/analytics";
 import {
   checkForRuntimeUpdate,
@@ -8,6 +9,17 @@ import {
   isTauriRuntime,
   type RuntimeUpdate,
 } from "src/lib/updater/runtimeUpdater";
+
+let trackedUpdateVersion: string | null = null;
+
+function trackUpdateIfNew(currentVersion: string, update: RuntimeUpdate) {
+  if (trackedUpdateVersion === update.version) return;
+  trackedUpdateVersion = update.version;
+  trackEssentialEvent("app_update_available", {
+    current_version: currentVersion,
+    next_version: update.version,
+  });
+}
 
 export function useAppUpdater() {
   const [appVersion, setAppVersion] = useState<string>(packageJson.version);
@@ -35,16 +47,51 @@ export function useAppUpdater() {
   }, []);
 
   useEffect(() => {
-    (async () => {
+    let isMounted = true;
+    let unlistenFocus: (() => void) | undefined;
+
+    const runCheck = async () => {
       const update = await checkForRuntimeUpdate();
-      if (update) {
-        setPendingUpdate(update);
-        trackEssentialEvent("app_update_available", {
-          current_version: appVersion,
-          next_version: update.version,
+      if (!isMounted) return;
+      setPendingUpdate(update);
+      if (update) trackUpdateIfNew(appVersion, update);
+    };
+
+    void runCheck();
+
+    const onWindowFocus = () => {
+      void runCheck();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void runCheck();
+    };
+
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    if (isTauriRuntime()) {
+      void getCurrentWindow()
+        .onFocusChanged(({ payload: focused }) => {
+          if (focused) void runCheck();
+        })
+        .then((unlisten) => {
+          if (!isMounted) {
+            unlisten();
+            return;
+          }
+          unlistenFocus = unlisten;
+        })
+        .catch(() => {
+          // Browser focus / visibility listeners still cover the home screen.
         });
-      }
-    })();
+    }
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener("focus", onWindowFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      unlistenFocus?.();
+    };
   }, [appVersion]);
 
   const canInstallUpdate = true;
