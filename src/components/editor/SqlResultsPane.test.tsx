@@ -42,7 +42,7 @@ function run(id = "a"): SqlResultRun {
         mode: "direct",
         result: {
           columns: columns.map((c) => ({ ...c })),
-          rows: [[JSON.stringify(queryPlanFixture)]],
+          rows: [[{ t: "Json", v: JSON.stringify(queryPlanFixture) }]],
           rowCount: 1,
         },
       },
@@ -90,7 +90,7 @@ describe("SQL plan result integration", () => {
       columns: [{ name: "QUERY PLAN" }],
       totalRows: 1,
       rowsVersion: 1,
-      getRowAt: () => [JSON.stringify(queryPlanFixture)],
+      getRowAt: () => [{ t: "Json", v: JSON.stringify(queryPlanFixture) }],
     };
     const view = render(<SqlResultsPane {...base} runs={[streamRun]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();

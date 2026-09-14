@@ -11,6 +11,31 @@ import { analyzeQueryPlan } from "./findings";
 import { queryPlanReport } from "./report";
 
 describe("PostgreSQL query plans", () => {
+  it.each(["Json", "Str"])("decodes Tauri %s cells before parsing", (t) => {
+    const value = JSON.stringify([
+      {
+        Plan: {
+          "Node Type": "Seq Scan",
+          "Relation Name": "Category",
+          "Startup Cost": 0,
+          "Total Cost": 1.07,
+          "Plan Rows": 7,
+          "Plan Width": 57,
+        },
+      },
+    ]);
+    const plan = planFromResult([{ name: "QUERY PLAN" }], [{ t, v: value }], 1);
+    expect(plan?.nodes[0].label).toBe("Seq Scan on Category");
+    expect(plan?.actual).toBe(false);
+  });
+  it.each([
+    { t: "Null" },
+    { t: "Json", v: "invalid" },
+    { t: "Json" },
+    { t: "Bool", v: true },
+  ])("rejects invalid tagged cells without throwing", (cell) => {
+    expect(planFromResult([{ name: "QUERY PLAN" }], [cell], 1)).toBeNull();
+  });
   it("accepts JSON strings and structured documents with stable preorder node IDs", () => {
     const plan = parseQueryPlan(JSON.stringify(queryPlanFixture))!;
     expect(plan).toEqual(parseQueryPlan(queryPlanFixture[0]));

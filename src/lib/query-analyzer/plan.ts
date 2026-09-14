@@ -1,3 +1,5 @@
+import { cellToString } from "src/utils/convert";
+
 export type PlanRecord = Record<string, unknown>;
 
 export type PlanNode = {
@@ -127,7 +129,13 @@ export function planFromResult(
     rowCount !== 1
   )
     return null;
-  return parseQueryPlan(row?.[0]);
+  const cell = row?.[0];
+  // Tauri transports JSON/text cells as tagged values; imported plans are unwrapped.
+  const value =
+    record(cell) && (cell.t === "Json" || cell.t === "Str")
+      ? cellToString(cell, true)
+      : cell;
+  return parseQueryPlan(value);
 }
 
 export function formatPlanNumber(value: number | undefined, suffix = "") {
