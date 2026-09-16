@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getTabRevealScrollLeft, navigationTabClass } from "./NavigationTabs";
+import {
+  getTabRevealScrollLeft,
+  navigationTabClass,
+  navigationTabCloseClass,
+} from "./NavigationTabs";
 
 describe("getTabRevealScrollLeft", () => {
   it("moves a clipped left-edge tab fully into view", () => {
@@ -40,15 +44,20 @@ describe("getTabRevealScrollLeft", () => {
 });
 
 describe("navigationTabClass", () => {
-  it("lifts the active tab and keeps idle tabs near the chrome", () => {
+  it("renders the active table tab as a white card with a blue top edge", () => {
     const active = navigationTabClass(true);
     const idle = navigationTabClass(false);
 
+    expect(active).toContain("rounded-lg");
     expect(active).toContain("bg-white");
-    expect(active).toContain("dark:bg-[#242424]!");
+    expect(active).toContain("before:bg-blue-600");
+    expect(active).toContain("before:h-[2.5px]");
     expect(idle).toContain("bg-transparent");
-    expect(idle).toContain("dark:bg-transparent!");
+    expect(idle).not.toContain("before:bg-blue-600");
     expect(idle).not.toContain("bg-neutral-200/70");
-    expect(idle).not.toContain("dark:bg-slate-800");
+  });
+
+  it("keeps the close control visible", () => {
+    expect(navigationTabCloseClass()).not.toContain("opacity-0");
   });
 });

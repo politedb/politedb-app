@@ -64,11 +64,27 @@ function getWindowSubtitle(w: OpenWindow) {
 
 export function navigationTabClass(active: boolean) {
   return cn(
-    "group flex shrink-0 items-center gap-2 rounded-t-md px-2.5 py-1.5 text-xs transition-colors",
-    "ring-1 ring-black/5 dark:ring-white/10",
+    "group relative flex shrink-0 items-center gap-2 overflow-hidden rounded-md px-2.5 py-1.5 text-xs transition-colors",
+    "border-1",
     active
-      ? "bg-white text-neutral-800 dark:bg-neutral-700 dark:text-neutral-200!"
-      : "bg-transparent text-neutral-600 hover:bg-black/[0.05] hover:text-neutral-700 dark:hover:bg-neutral-900"
+      ? cn(
+          "bg-white text-slate-800 shadow-sm border-slate-200 hover:shadow-sm",
+          "before:absolute before:inset-x-0 before:top-0 before:h-[2.5px] before:bg-blue-600",
+          "dark:bg-slate-900 dark:text-slate-100 dark:border-slate-700 dark:before:bg-blue-400"
+        )
+      : cn(
+          "bg-transparent text-slate-600 border-transparent",
+          "hover:bg-white/70 hover:text-slate-700 hover:border-slate-200/80",
+          "dark:text-slate-400 dark:hover:bg-slate-900/70 dark:hover:text-slate-200 dark:hover:border-slate-700"
+        )
+  );
+}
+
+export function navigationTabCloseClass() {
+  return cn(
+    "rounded-full border-none p-0.5 text-slate-400",
+    "hover:bg-slate-100 hover:text-slate-700",
+    "dark:hover:bg-slate-800 dark:hover:text-slate-200"
   );
 }
 
@@ -171,8 +187,8 @@ export function NavigationTabs({
     : [];
 
   return (
-    <div class={cn("flex shrink-0 items-end overflow-hidden pt-1")}>
-      <div class="flex w-full items-stretch bg-neutral-100 dark:bg-slate-950">
+    <div class={cn("flex shrink-0 items-center overflow-hidden")}>
+      <div class="flex w-full items-center bg-neutral-100 py-1">
         {/* Left */}
         <div class="flex shrink-0 items-center px-1">
           <Button
@@ -188,7 +204,7 @@ export function NavigationTabs({
         {/* Tabs scroller */}
         <div
           ref={scrollerRef}
-          class="flex min-w-0 flex-1 items-end gap-1 overflow-hidden px-1 pt-1"
+          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden px-1"
           onWheel={onWheel}
         >
           {openWindows.map((w, idx) => {
@@ -221,9 +237,7 @@ export function NavigationTabs({
                   <TableIcon
                     className={cn(
                       "size-4",
-                      active
-                        ? "text-neutral-500 dark:text-[#a3a3a3]"
-                        : "text-neutral-400 dark:text-[#525252]"
+                      active ? "text-blue-600" : "text-blue-500/80"
                     )}
                   />
                 )}
@@ -247,7 +261,7 @@ export function NavigationTabs({
 
                 <span
                   class={cn(
-                    "max-w-40 truncate text-sm font-semibold select-none",
+                    "max-w-40 truncate text-sm font-medium select-none",
                     w.type === "db-object-manager" && "text-[12px]"
                   )}
                 >
@@ -260,10 +274,10 @@ export function NavigationTabs({
                     e.stopPropagation();
                     closeNow(w.id);
                   }}
-                  class="ml-1 rounded-full border-none p-0.5 opacity-0 group-hover:opacity-100 hover:bg-neutral-100"
+                  class={navigationTabCloseClass()}
                   title="Close"
                 >
-                  <XIcon className="size-3.5 text-neutral-500 hover:text-neutral-700" />
+                  <XIcon className="size-3" />
                 </Button>
               </div>
             );
