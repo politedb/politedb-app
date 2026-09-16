@@ -28,7 +28,11 @@ import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
-import { tableSidebarNameClass } from "./tableSidebarNameClass";
+import {
+  tableSidebarButtonClass,
+  tableSidebarIconClass,
+  tableSidebarNameClass,
+} from "./tableSidebarNameClass";
 
 const FUNCTION_LIST_PAGE_SIZE = 20;
 
@@ -434,11 +438,14 @@ export function LeftNav({
                       dataPatchMap[profileId]?.[`table:${key}`]
                     );
                     const isNewTable = !!table.new;
+                    const useDefaultActive =
+                      isActive && !isNewTable && !hasChanges;
 
                     return (
                       <Button
                         data-density-item
-                        variant={isActive ? "default" : "ghost"}
+                        variant={useDefaultActive ? "default" : "ghost"}
+                        active={useDefaultActive}
                         key={key}
                         onClick={() => void actions.selectTable(table)}
                         onContextMenu={(e: MouseEvent) => {
@@ -446,22 +453,13 @@ export function LeftNav({
                           e.stopPropagation();
                           setTableMenu({ x: e.clientX, y: e.clientY, table });
                         }}
-                        active={isActive}
                         className={cn(
-                          "w-full justify-start",
-                          "rounded-md px-2.5 py-1.5",
-                          "gap-2",
-                          "text-left text-sm font-medium",
-                          "overflow-hidden text-ellipsis select-none",
-                          "transition-none",
-                          !isActive &&
-                            "hover:border-neutral-200/60! hover:bg-neutral-200/60 active:bg-neutral-200/60 dark:hover:border-neutral-800/60!",
-                          isNewTable &&
-                            !isActive &&
-                            "bg-green-200 text-emerald-900 hover:border-green-200! hover:bg-green-200/80 active:border-green-200! active:bg-green-200/90",
-                          hasChanges &&
-                            !isActive &&
-                            "border-amber-200 bg-amber-200 text-neutral-600 hover:border-amber-200! hover:bg-amber-200/80 active:bg-amber-200/90"
+                          tableSidebarButtonClass({
+                            isActive,
+                            isNewTable,
+                            hasChanges,
+                          }),
+                          useDefaultActive && "font-medium"
                         )}
                         title={key}
                       >
@@ -469,14 +467,17 @@ export function LeftNav({
                           <KeyIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-white" : "text-amber-500"
+                              tableSidebarIconClass({ isActive, isRedis: true })
                             )}
                           />
                         ) : (
                           <TableIcon
                             className={cn(
                               "size-4 shrink-0",
-                              isActive ? "text-white" : "text-blue-500"
+                              tableSidebarIconClass({
+                                isActive,
+                                isRedis: false,
+                              })
                             )}
                           />
                         )}

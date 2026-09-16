@@ -114,7 +114,7 @@ export function useAppUpdater() {
     appVersion,
     updateAvailable: !!pendingUpdate && canInstallUpdate,
     updateVersion: pendingUpdate?.version ?? null,
-    isInstallingUpdate: isUpdating,
+    isUpdating,
     canInstallUpdate,
     installUpdate,
   };

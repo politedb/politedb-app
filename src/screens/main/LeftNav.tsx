@@ -1,6 +1,7 @@
 import {
   ChatPlusIcon,
   ClockIcon,
+  CloudOffIcon,
   DatabaseIcon,
   DownloadIcon,
   HeartIcon,
@@ -45,14 +46,11 @@ export function LeftNav(props: {
 }) {
   const { active, onChange } = props;
 
-  const { appVersion, updateAvailable, isInstallingUpdate, installUpdate } =
-    useAppUpdater();
+  const { updateAvailable, isUpdating, installUpdate } = useAppUpdater();
   const [openSettings, setOpenSettings] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsDialogSection>("appearance");
-
-  const envSuffix = import.meta.env.DEV ? "-dev" : "";
 
   async function handleSponsor() {
     await openExternalUrl(SPONSOR_URL);
@@ -190,19 +188,16 @@ export function LeftNav(props: {
 
                 {updateAvailable ? (
                   <Button
-                    class={cn(
-                      "rounded-full p-1",
-                      isInstallingUpdate && "py-0.5"
-                    )}
-                    title={isInstallingUpdate ? "Installing..." : "Download"}
-                    aria-label={isInstallingUpdate ? "Installing" : "Download"}
-                    disabled={isInstallingUpdate}
+                    class={cn("rounded-full p-1", isUpdating && "py-0.5")}
+                    title={isUpdating ? "Installing..." : "Download"}
+                    aria-label={isUpdating ? "Installing" : "Download"}
+                    disabled={isUpdating}
                     onClick={(e) => {
                       e.stopPropagation();
                       void installUpdate();
                     }}
                   >
-                    {isInstallingUpdate ? (
+                    {isUpdating ? (
                       <span class="px-1 text-[11px]">Installing</span>
                     ) : (
                       <DownloadIcon className="size-3.5" />
@@ -215,13 +210,14 @@ export function LeftNav(props: {
               {
                 label: (
                   <div className="flex w-full items-center justify-between gap-4">
-                    <span className="text-[13.5px] font-bold tracking-tight text-slate-600">
-                      PoliteDB
-                    </span>
-                    <span className="rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
-                      v{appVersion}
-                      {envSuffix}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold tracking-tight text-slate-800">
+                        Personal
+                      </span>
+                      <CloudOffIcon className="size-4 text-slate-400" />
+                    </div>
+
+                    <span className="text-slate-500">Free plan</span>
                   </div>
                 ),
                 className:

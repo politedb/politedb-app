@@ -64,16 +64,15 @@ function getWindowSubtitle(w: OpenWindow) {
 
 export function navigationTabClass(active: boolean) {
   return cn(
-    "group relative flex shrink-0 items-center gap-2 overflow-hidden rounded-md px-2.5 py-1.5 text-xs transition-colors",
-    "border-1",
+    "group relative flex shrink-0 items-center gap-2 overflow-hidden rounded-md border px-2.5 py-1.5 text-xs transition-colors",
     active
       ? cn(
-          "bg-white text-slate-800 shadow-sm border-slate-200 hover:shadow-sm",
+          "border-slate-200 bg-white text-slate-800 shadow-sm",
           "before:absolute before:inset-x-0 before:top-0 before:h-[2.5px] before:bg-blue-600",
-          "dark:bg-slate-900 dark:text-slate-100 dark:border-slate-700 dark:before:bg-blue-400"
+          "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:before:bg-blue-400"
         )
       : cn(
-          "bg-transparent text-slate-600 border-transparent",
+          "border-transparent bg-transparent text-slate-600",
           "hover:bg-white/70 hover:text-slate-700 hover:border-slate-200/80",
           "dark:text-slate-400 dark:hover:bg-slate-900/70 dark:hover:text-slate-200 dark:hover:border-slate-700"
         )

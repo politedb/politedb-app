@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { tableSidebarNameClass } from "./tableSidebarNameClass";
+import {
+  tableSidebarButtonClass,
+  tableSidebarIconClass,
+  tableSidebarNameClass,
+} from "./tableSidebarNameClass";
 
 describe("tableSidebarNameClass", () => {
   it("forces dirty and new colors on the active table", () => {
@@ -44,5 +48,43 @@ describe("tableSidebarNameClass", () => {
         hasChanges: true,
       })
     ).toBe("bg-amber-200! text-neutral-600!");
+  });
+});
+
+describe("tableSidebarButtonClass", () => {
+  it("uses a solid blue highlight for a normal active table", () => {
+    const cls = tableSidebarButtonClass({
+      isActive: true,
+      isNewTable: false,
+      hasChanges: false,
+    });
+
+    expect(cls).toContain("bg-blue-600");
+    expect(cls).toContain("text-white");
+  });
+
+  it("keeps dirty and new active colors", () => {
+    expect(
+      tableSidebarButtonClass({
+        isActive: true,
+        isNewTable: true,
+        hasChanges: false,
+      })
+    ).toContain("bg-green-200");
+    expect(
+      tableSidebarButtonClass({
+        isActive: true,
+        isNewTable: false,
+        hasChanges: true,
+      })
+    ).toContain("bg-amber-200");
+  });
+});
+
+describe("tableSidebarIconClass", () => {
+  it("uses white icons on the active table row", () => {
+    expect(tableSidebarIconClass({ isActive: true, isRedis: false })).toBe(
+      "text-white"
+    );
   });
 });

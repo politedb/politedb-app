@@ -243,7 +243,7 @@ export function ConnectionModal(props: {
   return (
     <OverlayModal open onClose={onClose}>
       <div
-        class="flex h-[85vh] max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        class="flex h-[85vh] max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();

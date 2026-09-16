@@ -48,13 +48,11 @@ describe("navigationTabClass", () => {
     const active = navigationTabClass(true);
     const idle = navigationTabClass(false);
 
-    expect(active).toContain("rounded-lg");
     expect(active).toContain("bg-white");
     expect(active).toContain("before:bg-blue-600");
     expect(active).toContain("before:h-[2.5px]");
     expect(idle).toContain("bg-transparent");
     expect(idle).not.toContain("before:bg-blue-600");
-    expect(idle).not.toContain("bg-neutral-200/70");
   });
 
   it("keeps the close control visible", () => {

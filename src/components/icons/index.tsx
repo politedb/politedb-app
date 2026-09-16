@@ -60,3 +60,5 @@ export * from "./Keyboard";
 export * from "./ShieldAnalytics";
 export * from "./CheckMark";
 export * from "./LightBulb";
+export * from "./CloudCheck";
+export * from "./CloudOff";
