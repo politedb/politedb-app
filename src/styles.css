@@ -342,6 +342,7 @@ html.dark .bg-green-50 {
   background-color: rgb(2 44 34 / 0.45) !important;
 }
 
+html.dark .bg-sky-50,
 html.dark .bg-sky-100 {
   background-color: rgb(8 47 73 / 0.45) !important;
 }

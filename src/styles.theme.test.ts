@@ -31,6 +31,7 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("html.dark .bg-blue-50");
     expect(css).toContain("html.dark .bg-rose-50");
     expect(css).toContain("html.dark .bg-emerald-50");
+    expect(css).toContain("html.dark .bg-sky-50");
   });
 
   it("inverts remaining light text and borders", () => {

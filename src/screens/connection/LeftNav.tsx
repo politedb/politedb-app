@@ -7,6 +7,7 @@ import {
   SquareFunctionIcon,
   SearchIcon,
   TableIcon,
+  LightBulbIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
@@ -573,9 +574,18 @@ export function LeftNav({
         />
       )}
 
-      <div class="m-2 rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400">
-        Tips:
-        <ul class="list-decimal pl-4.5">
+      <div
+        class={cn(
+          "m-2 rounded-xl p-2 text-xs text-blue-600",
+          "border border-blue-300 bg-blue-100",
+          "shadow-md"
+        )}
+      >
+        <div class="flex items-center gap-1">
+          <LightBulbIcon className="inline-block size-4" />
+          <span>Quick tips:</span>
+        </div>
+        <ul class="list-disc pl-5">
           <li>Right-click a table for actions.</li>
           <li>Shift+Click to select multiple rows.</li>
         </ul>

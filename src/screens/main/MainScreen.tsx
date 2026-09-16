@@ -453,7 +453,7 @@ export function MainScreen() {
   }
 
   return (
-    <div class="flex h-full flex-col bg-neutral-50 dark:bg-slate-950">
+    <div class="flex h-full flex-col bg-slate-50 dark:bg-slate-950">
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <LeftNav active={activeNav} onChange={setActiveNav} />
 
@@ -479,7 +479,7 @@ export function MainScreen() {
 
           {/* Content canvas (scroll only here) */}
           <OverlayScrollArea
-            className="min-h-0 flex-1 bg-neutral-100 dark:bg-slate-950"
+            className="min-h-0 flex-1 bg-slate-50 dark:bg-slate-950"
             dataScrollRoot
           >
             {activeNav === "logs" ? (

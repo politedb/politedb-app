@@ -6,6 +6,7 @@ import {
   HeartIcon,
   KeyboardIcon,
   KeyIcon,
+  LightBulbIcon,
   SettingsIcon,
   ShieldAnalyticsIcon,
   SparklesIcon,
@@ -79,7 +80,7 @@ export function LeftNav(props: {
       >
         <div data-density-sidebar-header class="p-3">
           <div class="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
-            NAVIGATION
+            EXPLORER
           </div>
         </div>
 
@@ -146,9 +147,18 @@ export function LeftNav(props: {
 
         {/* Bottom spacer */}
         <div class="mt-auto space-y-2.5 px-3 pb-3">
-          <div class="rounded-xl border border-slate-200 bg-white/60 p-2 text-xs text-slate-600">
-            Tips:
-            <ul class="list-decimal pl-4.5">
+          <div
+            class={cn(
+              "rounded-xl p-2 text-xs text-blue-600",
+              "border border-blue-300 bg-blue-100",
+              "shadow-md"
+            )}
+          >
+            <div class="flex items-center gap-1">
+              <LightBulbIcon className="inline-block size-4" />
+              <span>Tips:</span>
+            </div>
+            <ul class="list-disc pl-5">
               <li>Right-click a connection for actions.</li>
               <li>Double-click a connection to open it.</li>
               <li>Pin connections to keep it at the top.</li>
@@ -164,7 +174,11 @@ export function LeftNav(props: {
               <div className="flex w-full items-center gap-2">
                 <Button
                   variant="ghost"
-                  className="w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm hover:border-slate-100 hover:bg-slate-100 dark:text-slate-300 dark:hover:border-slate-800 dark:hover:bg-slate-900"
+                  className={cn(
+                    "w-full justify-between gap-2 rounded-xl px-2 py-1 text-sm",
+                    "hover:border-slate-100 hover:bg-slate-100",
+                    "dark:text-slate-300 dark:hover:border-slate-800 dark:hover:bg-slate-900"
+                  )}
                   title="Settings"
                   onClick={() => setOpenSettings((v) => !v)}
                 >
@@ -186,7 +200,7 @@ export function LeftNav(props: {
                     }}
                   >
                     {isInstallingUpdate ? (
-                      <span class="px-1">Installing</span>
+                      <span class="px-1 text-sm">Installing</span>
                     ) : (
                       <DownloadIcon className="size-3.5" />
                     )}
