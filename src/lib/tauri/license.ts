@@ -38,6 +38,20 @@ export type LicenseState = {
   message?: string | null;
 };
 
+/** UI label from backend `plan_name` (e.g. "ultimate" → "Ultimate plan"). */
+export function formatLicensePlanLabel(planName?: string | null): string {
+  const raw = String(planName ?? "").trim();
+  if (!raw) return "Free plan";
+
+  const withoutSuffix = raw.replace(/\s*plan$/i, "").trim();
+  if (!withoutSuffix) return "Free plan";
+
+  const label =
+    withoutSuffix.charAt(0).toUpperCase() +
+    withoutSuffix.slice(1).toLowerCase();
+  return `${label} plan`;
+}
+
 export async function licenseDeviceInfo() {
   return invoke<LicenseDeviceInfo>(CMD.licenseDeviceInfo);
 }

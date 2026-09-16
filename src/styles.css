@@ -836,6 +836,18 @@ html.dark .diagram-table-card {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
 }
 
+.diagram-table-rows > * + * {
+  border-top: 1px solid #e2e8f0;
+}
+
+html.dark .diagram-table-rows > * + * {
+  border-top-color: rgb(255 255 255 / 0.08);
+}
+
+html.dark .diagram-table-card .border-b {
+  border-bottom-color: rgb(255 255 255 / 0.08) !important;
+}
+
 html.dark .diagram-table-card:hover,
 html.dark .diagram-table-card-active {
   border-color: #38bdf8;

@@ -14,7 +14,7 @@ import {
 } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
-import { licenseOpenExternalUrl } from "src/lib/tauri";
+import { formatLicensePlanLabel, licenseOpenExternalUrl } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import {
@@ -22,6 +22,7 @@ import {
   type SettingsDialogSection,
 } from "src/components/modal/SettingsDialog";
 import { useState } from "preact/hooks";
+import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
@@ -47,6 +48,9 @@ export function LeftNav(props: {
   const { active, onChange } = props;
 
   const { updateAvailable, isUpdating, installUpdate } = useAppUpdater();
+  const planLabel = useLicenseStore((s) =>
+    formatLicensePlanLabel(s.state?.plan_name)
+  );
   const [openSettings, setOpenSettings] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
@@ -217,7 +221,7 @@ export function LeftNav(props: {
                       <CloudOffIcon className="size-4 text-slate-400" />
                     </div>
 
-                    <span className="text-slate-500">Free plan</span>
+                    <span className="text-slate-500">{planLabel}</span>
                   </div>
                 ),
                 className:

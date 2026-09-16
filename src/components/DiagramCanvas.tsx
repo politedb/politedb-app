@@ -11,6 +11,7 @@ import {
   areDiagramViewportsEqual,
   DEFAULT_DIAGRAM_VIEWPORT,
   DIAGRAM_VIEWPORT_OVERSCAN,
+  getDiagramSurfaceSize,
   getDiagramSvgViewBox,
   getDiagramViewport,
   getVisibleIndexWindow,
@@ -519,7 +520,7 @@ const DiagramTableCard = memo(function DiagramTableCard(props: {
         {columnStart > 0 ? (
           <div style={{ height: `${columnStart * ROW_HEIGHT}px` }} />
         ) : null}
-        <div class="divide-y divide-slate-200">
+        <div class="diagram-table-rows">
           {columns.slice(columnStart, columnEnd).map((column) => (
             <div
               key={column.name}
@@ -789,9 +790,16 @@ export function DiagramCanvas(props: { state: DiagramState }) {
     [isRelationActive, visibleRelations]
   );
 
-  const scaledW = layout.width * zoom;
-  const scaledH = layout.height * zoom;
+  const surface = getDiagramSurfaceSize(
+    layout.width,
+    layout.height,
+    viewport.width,
+    viewport.height
+  );
+  const scaledW = surface.width * zoom;
+  const scaledH = surface.height * zoom;
   const contentMinW = `max(100%, ${scaledW}px)`;
+  const contentMinH = `max(100%, ${scaledH}px)`;
 
   return (
     <div class="relative flex h-full min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -834,21 +842,22 @@ export function DiagramCanvas(props: { state: DiagramState }) {
       </div>
       <div ref={scrollRef} class="no-scrollbar min-h-0 flex-1 overflow-auto">
         <div
-          class="inline-block min-w-full align-top"
+          class="inline-block min-h-full min-w-full align-top"
           style={{
             width: contentMinW,
+            height: contentMinH,
           }}
         >
           <div
-            class="relative mx-auto shrink-0 overflow-hidden"
+            class="relative shrink-0 overflow-hidden"
             style={{ width: `${scaledW}px`, height: `${scaledH}px` }}
           >
             <div
               class={`diagram-surface absolute top-0 left-0 antialiased ${USE_CSS_ZOOM ? "" : "origin-top-left"}`}
               style={
                 {
-                  width: `${layout.width}px`,
-                  height: `${layout.height}px`,
+                  width: `${surface.width}px`,
+                  height: `${surface.height}px`,
                   ...(USE_CSS_ZOOM
                     ? { zoom }
                     : {

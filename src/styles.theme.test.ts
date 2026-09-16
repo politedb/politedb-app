@@ -117,13 +117,18 @@ describe("remaining dark-theme spots", () => {
     expect(css).toContain("html.dark .text-blue-600");
   });
 
-  it("maps the app status bar through the global dark palette", () => {
-    expect(statusBar).toContain("bg-sky-50");
-    expect(statusBar).toContain("text-sky-700");
-    expect(statusBar).toContain("border-sky-200");
-    expect(css).toContain("html.dark .bg-sky-50");
-    expect(css).toContain("html.dark .text-sky-700");
-    expect(css).toContain("html.dark .border-sky-200");
+  it("maps the app status bar through the dark slate chrome", () => {
+    expect(statusBar).toContain("bg-slate-100");
+    expect(statusBar).toContain("text-slate-700");
+    expect(statusBar).toContain("border-slate-200");
+    expect(statusBar).toContain("dark:bg-slate-900");
+    expect(statusBar).toContain("dark:text-slate-300");
+  });
+
+  it("softens diagram card dividers in dark mode", () => {
+    expect(css).toContain(".diagram-table-rows > * + *");
+    expect(css).toContain("html.dark .diagram-table-rows > * + *");
+    expect(css).toContain("border-top-color: rgb(255 255 255 / 0.08)");
   });
 
   it("does not force the table search input to stay white", () => {

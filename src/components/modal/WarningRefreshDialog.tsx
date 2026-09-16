@@ -15,12 +15,7 @@ interface Props {
 
 export function WarningRefreshDialog({ open, onClose, onDiscard }: Props) {
   return (
-    <Dialog
-      className="max-w-xs"
-      showCloseButton={false}
-      open={open}
-      onClose={onClose}
-    >
+    <Dialog size="xs" showCloseButton={false} open={open} onClose={onClose}>
       <DialogContent>
         <DialogHeader className="p-0">
           <DialogTitle className="text-base">Warning</DialogTitle>

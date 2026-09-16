@@ -15,8 +15,8 @@ export type DiagramRect = {
 export const DEFAULT_DIAGRAM_VIEWPORT: DiagramViewport = {
   left: 0,
   top: 0,
-  width: 1200,
-  height: 800,
+  width: 0,
+  height: 0,
 };
 
 export const DIAGRAM_VIEWPORT_OVERSCAN = 420;
@@ -113,5 +113,18 @@ export function getDiagramSvgViewBox(
     y: top,
     width: Math.max(0, right - left),
     height: Math.max(0, bottom - top),
+  };
+}
+
+/** Keep the dotted canvas at least as large as the visible viewport. */
+export function getDiagramSurfaceSize(
+  layoutWidth: number,
+  layoutHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): { width: number; height: number } {
+  return {
+    width: Math.max(layoutWidth, Math.ceil(Math.max(0, viewportWidth))),
+    height: Math.max(layoutHeight, Math.ceil(Math.max(0, viewportHeight))),
   };
 }

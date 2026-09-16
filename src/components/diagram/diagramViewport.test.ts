@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DIAGRAM_DETAIL_ZOOM,
   DIAGRAM_VIEWPORT_BUCKET,
+  getDiagramSurfaceSize,
   getDiagramSvgViewBox,
   getDiagramViewport,
   getVisibleIndexWindow,
@@ -84,6 +85,17 @@ describe("diagram viewport", () => {
       y: 600,
       width: 900,
       height: 800,
+    });
+  });
+
+  it("grows the dotted surface to at least the visible viewport", () => {
+    expect(getDiagramSurfaceSize(400, 300, 900, 700)).toEqual({
+      width: 900,
+      height: 700,
+    });
+    expect(getDiagramSurfaceSize(1200, 1000, 800, 600)).toEqual({
+      width: 1200,
+      height: 1000,
     });
   });
 });
