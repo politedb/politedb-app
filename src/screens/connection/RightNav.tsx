@@ -345,8 +345,8 @@ function DataInfoSearch(props: {
     <Input
       value={props.value}
       placeholder="Search fields..."
-      className="border border-neutral-200 bg-white py-1.5 text-xs"
-      left={<SearchIcon className="size-3.5 text-neutral-500" />}
+      className="rounded-lg border border-neutral-200 bg-white py-1.5 text-sm"
+      left={<SearchIcon className="size-4 text-neutral-500" />}
       onValueChange={props.onValueChange}
     />
   );

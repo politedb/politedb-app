@@ -1,6 +1,7 @@
 import { MainScreen } from "src/screens/main/MainScreen";
 import { useScreenStore } from "src/stores/screen";
 import { AppHeader } from "src/components/AppHeader";
+import { AppStatusBar } from "src/components/AppStatusBar";
 import { useEffect } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
 import { trackScreenView } from "src/lib/analytics";
@@ -56,6 +57,7 @@ export function MainLayout() {
         {activeProfileScreen === "main" && <MainScreen />}
         {activeTab && <ConnectionScreen />}
       </div>
+      <AppStatusBar />
       <FloatingAssistantLauncher />
       <UnsavedChangesDialogHost />
     </div>

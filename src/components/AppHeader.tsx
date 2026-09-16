@@ -207,14 +207,14 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                 <span class={isActive ? "text-blue-600" : "text-neutral-600"}>
                   {nav.icon}
                 </span>
-                <span class="leading-none">Databases</span>
+                <span class="leading-none">{nav.label}</span>
               </button>
             );
           })}
         </div>
 
         <div class="flex min-w-0 flex-1 items-center">
-          <div class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg p-1 pr-2">
+          <div class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg py-1 pr-2 pl-0">
             {profileTabs.map((tab, tabIndex) => {
               const isActive = activeProfileScreen === tab.id;
 
@@ -239,12 +239,12 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                   }}
                   data-tauri-drag-region="false"
                   class={cn(
-                    "group w-48 shadow-xs",
+                    "group w-48 shadow-sm",
                     "flex items-center justify-between gap-2",
                     "rounded-md border px-2 py-1 transition-all",
                     isActive
                       ? "border-slate-300 bg-white text-slate-900"
-                      : "border-transparent bg-slate-50 text-slate-600 shadow-sm hover:border-slate-200/20 hover:bg-slate-100"
+                      : "border-transparent bg-slate-100 text-slate-600 hover:border-slate-200/20 hover:bg-slate-50"
                   )}
                 >
                   <div class="flex min-w-0 items-center gap-2">

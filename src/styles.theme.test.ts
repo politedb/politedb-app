@@ -12,6 +12,10 @@ const header = readFileSync(
   resolve(process.cwd(), "src/components/AppHeader.tsx"),
   "utf8"
 );
+const statusBar = readFileSync(
+  resolve(process.cwd(), "src/components/AppStatusBar.tsx"),
+  "utf8"
+);
 const searchNav = readFileSync(
   resolve(process.cwd(), "src/screens/connection/LeftNav.tsx"),
   "utf8"
@@ -111,6 +115,15 @@ describe("remaining dark-theme spots", () => {
     expect(header).toContain("bg-blue-100");
     expect(css).toContain("html.dark .bg-blue-100");
     expect(css).toContain("html.dark .text-blue-600");
+  });
+
+  it("maps the app status bar through the global dark palette", () => {
+    expect(statusBar).toContain("bg-sky-50");
+    expect(statusBar).toContain("text-sky-700");
+    expect(statusBar).toContain("border-sky-200");
+    expect(css).toContain("html.dark .bg-sky-50");
+    expect(css).toContain("html.dark .text-sky-700");
+    expect(css).toContain("html.dark .border-sky-200");
   });
 
   it("does not force the table search input to stay white", () => {

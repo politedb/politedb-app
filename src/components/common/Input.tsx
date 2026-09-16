@@ -105,7 +105,7 @@ export function Input(
       {label && <label class="mb-1 block text-sm font-medium">{label}</label>}
       <div class="relative">
         {props.left && (
-          <div class="absolute top-1/2 left-2 z-10 -translate-y-1/2">
+          <div class="absolute top-1/2 left-3 z-10 -translate-y-1/2">
             {props.left}
           </div>
         )}
@@ -122,7 +122,7 @@ export function Input(
           onBlur={handleBlur}
           class={cn(
             "w-full rounded-md p-2 text-sm focus:bg-white focus:outline-2 focus:outline-blue-500 dark:focus:bg-neutral-900!",
-            props.left && "pl-7",
+            props.left && "pl-8.5",
             (showSelect || props.right) && "pr-8",
             className
           )}
