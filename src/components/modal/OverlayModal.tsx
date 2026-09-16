@@ -15,7 +15,7 @@ export function OverlayModal(props: {
       }}
     >
       <div
-        class="flex max-h-[85vh] w-full items-center justify-center overflow-hidden px-4"
+        class="flex h-full w-full items-center justify-center overflow-hidden p-4"
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => {
           e.preventDefault();
