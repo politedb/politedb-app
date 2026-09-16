@@ -17,7 +17,7 @@ vi.mock("src/lib/updater/runtimeUpdater", () => ({
 }));
 
 vi.mock("@tauri-apps/api/app", () => ({
-  getVersion: () => Promise.resolve("1.2.8"),
+  getVersion: () => Promise.resolve("1.2.9"),
 }));
 
 vi.mock("src/lib/analytics", () => ({
