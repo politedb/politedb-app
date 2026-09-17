@@ -904,6 +904,7 @@ export function MenuBar({
           error={opError}
           onClose={() => setOpError(null)}
           size="md"
+          showRevertNote={false}
         />
       )}
     </>

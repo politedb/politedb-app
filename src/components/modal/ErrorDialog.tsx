@@ -87,9 +87,14 @@ export function ErrorDialog({
               </OverlayScrollArea>
             </>
           ) : (
-            <p class="max-h-48 overflow-hidden text-ellipsis text-red-600">
+            <OverlayScrollArea
+              className="max-h-64 rounded-lg border border-red-100 bg-red-50/40"
+              contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-red-600"
+              horizontal
+              vertical
+            >
               ERROR: {detail}
-            </p>
+            </OverlayScrollArea>
           )}
           {showRevert ? (
             <p>All changes were reverted (DDL statements can't be reverted).</p>

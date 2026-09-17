@@ -8,6 +8,7 @@ import { trackScreenView } from "src/lib/analytics";
 import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
 import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
 import { Spinner } from "src/components/common/Spinner";
+import { Toast } from "@root/src/components/common/Toast";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
 
 const loadConnectionScreen = () =>
@@ -60,6 +61,7 @@ export function MainLayout() {
       <AppStatusBar />
       <FloatingAssistantLauncher />
       <UnsavedChangesDialogHost />
+      <Toast />
     </div>
   );
 }

@@ -15,12 +15,8 @@ import { cellToString } from "src/utils/convert";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../ConnectionRuntimeContext";
-
-function sqlEscape(value: unknown): string {
-  if (value == null) return "NULL";
-  const s = String(value);
-  return `'${s.replace(/'/g, "''").replace(/\\/g, "\\\\")}'`;
-}
+import { formatSqlInsertChunk } from "./sqlInsertLiteral";
+import { showToast } from "src/stores/toast";
 
 function cellToBool(cell: unknown): boolean {
   if (typeof cell === "boolean") return cell;
@@ -101,10 +97,10 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   );
 }
 
-function shortSql(sql: string, max = 260): string {
+function shortSql(sql: string, max = 2_000): string {
   const s = sql.replace(/\s+/g, " ").trim();
   if (s.length <= max) return s;
-  return `${s.slice(0, max)}...`;
+  return `${s.slice(0, max)}…`;
 }
 
 function parsePgAlterAddConstraint(sql: string): {
@@ -322,28 +318,6 @@ async function sortTablesByForeignKeys(args: {
   return orderedKeys.map((k) => byKey.get(k)).filter(Boolean) as BackupTable[];
 }
 
-function formatSqlInsertChunk(args: {
-  engine: ConnectionCreateInput["engine"];
-  schema: string;
-  tableName: string;
-  columnNames: string[];
-  rows: unknown[][];
-}): string {
-  const { engine, schema, tableName, columnNames, rows } = args;
-  if (!rows.length) return "";
-
-  const tableIdent = `${qIdent(schema, engine)}.${qIdent(tableName, engine)}`;
-  const colList = columnNames.map((c) => qIdent(c, engine)).join(", ");
-  const values = rows
-    .map((row) => {
-      const cells = row.map((cell) => sqlEscape(cellToString(cell, true)));
-      return `  (${cells.join(", ")})`;
-    })
-    .join(",\n");
-
-  return `INSERT INTO ${tableIdent} (${colList}) VALUES\n${values};\n`;
-}
-
 async function exportTableToSqlFile(args: {
   path: string;
   connectionId: string;
@@ -370,6 +344,8 @@ async function exportTableToSqlFile(args: {
   await new Promise<void>((resolve, reject) => {
     let writeQueue = Promise.resolve();
     let completed = false;
+    let columnNames = columns;
+    let columnTypes: string[] = columns.map(() => "");
 
     const done = () => {
       if (completed) return;
@@ -388,14 +364,19 @@ async function exportTableToSqlFile(args: {
         const rows = chunk.rows ?? [];
         if (!rows.length) return;
 
-        const chunkColumns =
-          chunk.columns?.map((c) => c.name).filter(Boolean) ?? columns;
+        if (chunk.columns?.length) {
+          columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
+          columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
+        }
+
         const content = formatSqlInsertChunk({
           engine,
           schema,
           tableName,
-          columnNames: chunkColumns,
+          columnNames,
+          columnTypes,
           rows,
+          qIdent: (name, eng) => qIdent(name, eng as any),
         });
         if (!content) return;
 
@@ -774,6 +755,8 @@ export function useDatabaseBackup() {
             append: true,
           });
         }
+
+        showToast("Database backup completed.", { tone: "success" });
       } catch (err) {
         setOpError(
           err instanceof Error ? err.message : "Backup database failed."
@@ -870,6 +853,7 @@ export function useDatabaseBackup() {
 
         await rt.refreshSchemaAndTables();
         onRefresh?.();
+        showToast("Database restore completed.", { tone: "success" });
       } catch (err) {
         setOpError(
           err instanceof Error ? err.message : "Restore database failed."
