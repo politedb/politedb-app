@@ -34,7 +34,7 @@ describe("coalesceUpdaterCheck", () => {
   });
 
   it("returns the cached result inside the min interval", async () => {
-    const update = updateStub("1.2.9");
+    const update = updateStub("1.2.10");
     const run = vi.fn(async (): Promise<RuntimeUpdate | null> => update);
     const firstAt = 1_000;
 
@@ -47,7 +47,7 @@ describe("coalesceUpdaterCheck", () => {
 
   it("checks again after the min interval", async () => {
     const run = vi.fn(
-      async (): Promise<RuntimeUpdate | null> => updateStub("1.2.9")
+      async (): Promise<RuntimeUpdate | null> => updateStub("1.2.10")
     );
     const firstAt = 1_000;
 
@@ -57,7 +57,7 @@ describe("coalesceUpdaterCheck", () => {
   });
 
   it("retries after a failed check", async () => {
-    const update = updateStub("1.2.9");
+    const update = updateStub("1.2.10");
     const run = vi
       .fn<() => Promise<RuntimeUpdate | null>>()
       .mockRejectedValueOnce(new Error("offline"))
