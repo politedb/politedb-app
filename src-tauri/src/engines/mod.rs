@@ -39,6 +39,6 @@ pub enum EngineConnection {
     Redis(redis::connection::RedisConn),
     Snowflake(snowflake::connection::SnowflakeConn),
     Duckdb(duckdb::connection::DuckdbConn),
-    Clickhouse(clickhouse::connection::ClickhouseConn),
+    Clickhouse(Box<clickhouse::connection::ClickhouseConn>),
     GoogleSheets(google_sheets::connection::GoogleSheetsConn),
 }

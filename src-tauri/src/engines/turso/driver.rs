@@ -106,14 +106,10 @@ pub fn normalize_turso_url(raw: &str) -> Result<String, String> {
 
     let mut normalized = if lower.starts_with("libsql://") {
         url.replacen("libsql://", "https://", 1)
-    } else if lower.starts_with("https://") {
-        url.to_string()
-    } else if lower.starts_with("http://") {
+    } else if lower.starts_with("https://") || lower.starts_with("http://") {
         url.to_string()
     } else if url.contains("://") {
-        return Err(format!(
-            "TURSO_URL_INVALID: unsupported URL scheme (use libsql://, https://, or http:// for local dev)"
-        ));
+        return Err("TURSO_URL_INVALID: unsupported URL scheme (use libsql://, https://, or http:// for local dev)".to_string());
     } else {
         format!("https://{url}")
     };
@@ -129,43 +125,6 @@ pub fn normalize_turso_url(raw: &str) -> Result<String, String> {
     }
 
     Ok(normalized)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_turso_url;
-
-    #[test]
-    fn host_only_gets_https() {
-        assert_eq!(
-            normalize_turso_url("my-db-myorg.turso.io").unwrap(),
-            "https://my-db-myorg.turso.io"
-        );
-    }
-
-    #[test]
-    fn libsql_scheme_becomes_https() {
-        assert_eq!(
-            normalize_turso_url("libsql://my-db-myorg.turso.io").unwrap(),
-            "https://my-db-myorg.turso.io"
-        );
-    }
-
-    #[test]
-    fn cloud_http_upgraded_to_https() {
-        assert_eq!(
-            normalize_turso_url("http://my-db-myorg.turso.io").unwrap(),
-            "https://my-db-myorg.turso.io"
-        );
-    }
-
-    #[test]
-    fn local_http_stays_http() {
-        assert_eq!(
-            normalize_turso_url("http://127.0.0.1:8080").unwrap(),
-            "http://127.0.0.1:8080"
-        );
-    }
 }
 
 fn turso_test_error(url: &str, err: &impl std::fmt::Display) -> String {
@@ -238,4 +197,41 @@ pub async fn test_turso(
         .map_err(|e| turso_test_error(&url, &e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_turso_url;
+
+    #[test]
+    fn host_only_gets_https() {
+        assert_eq!(
+            normalize_turso_url("my-db-myorg.turso.io").unwrap(),
+            "https://my-db-myorg.turso.io"
+        );
+    }
+
+    #[test]
+    fn libsql_scheme_becomes_https() {
+        assert_eq!(
+            normalize_turso_url("libsql://my-db-myorg.turso.io").unwrap(),
+            "https://my-db-myorg.turso.io"
+        );
+    }
+
+    #[test]
+    fn cloud_http_upgraded_to_https() {
+        assert_eq!(
+            normalize_turso_url("http://my-db-myorg.turso.io").unwrap(),
+            "https://my-db-myorg.turso.io"
+        );
+    }
+
+    #[test]
+    fn local_http_stays_http() {
+        assert_eq!(
+            normalize_turso_url("http://127.0.0.1:8080").unwrap(),
+            "http://127.0.0.1:8080"
+        );
+    }
 }

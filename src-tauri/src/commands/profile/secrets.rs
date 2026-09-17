@@ -11,7 +11,7 @@ pub fn persist_input_with_secrets(
     input: ConnectionCreateInput,
 ) -> Result<ConnectionCreateInput, String> {
     let state = app.state::<AppState>();
-    let engine = input.engine.clone();
+    let engine = input.engine;
     let driver = state.engines.get(engine).ok_or("ENGINE_NOT_SUPPORTED")?;
     driver.persist_profile_secrets(app, profile_id, persist_secrets, input)
 }

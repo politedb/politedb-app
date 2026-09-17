@@ -7,8 +7,7 @@ pub(crate) enum SqlStatementKind {
 }
 
 fn first_sql_token(sql: &str) -> String {
-    sql.trim_start()
-        .split_whitespace()
+    sql.split_whitespace()
         .next()
         .unwrap_or("")
         .trim_matches(|c: char| !c.is_ascii_alphabetic())

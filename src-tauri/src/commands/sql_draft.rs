@@ -144,7 +144,7 @@ pub async fn sql_draft_save(
     let meta = SqlDraftMeta {
         window_id: window_id.clone(),
         last_touched_at_ms: now_ms(),
-        size_bytes: content.as_bytes().len() as u64,
+        size_bytes: content.len() as u64,
     };
     storage::json_write_atomic(&meta_path, &meta)?;
 

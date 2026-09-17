@@ -63,7 +63,7 @@ pub fn ensure_oracle_client_initialized() -> Result<(), String> {
         }
 
         let p = oracle::InitParams::new();
-        if let Ok(_) = p.init() {
+        if p.init().is_ok() {
             return Ok(());
         }
 

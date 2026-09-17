@@ -130,7 +130,6 @@ pub fn build_client_config(input: &SnowflakeConnectInput) -> SnowflakeClientConf
         timeout: input
             .connect_timeout_ms
             .map(|ms| Duration::from_millis(ms.clamp(100, 300_000))),
-        ..Default::default()
     }
 }
 

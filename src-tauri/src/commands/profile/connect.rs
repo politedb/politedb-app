@@ -69,13 +69,11 @@ pub async fn profile_save_and_connect(
     })?;
 
     // 3) Save profile (disk)
-    let profile = (|| -> Result<ConnectionProfile, String> {
-        if is_update {
-            profile_store::profile_update(&app, profile_id, input.clone())
-        } else {
-            profile_store::profile_create_with_id(&app, profile_id, input.clone())
-        }
-    })()
+    let profile = (if is_update {
+        profile_store::profile_update(&app, profile_id, input.clone())
+    } else {
+        profile_store::profile_create_with_id(&app, profile_id, input.clone())
+    })
     .map_err(|e| {
         tracing::error!(
             step = "save_profile",
@@ -171,13 +169,11 @@ pub async fn profile_save(
     })?;
 
     // 3) Save profile (disk)
-    let profile = (|| -> Result<ConnectionProfile, String> {
-        if is_update {
-            profile_store::profile_update(&app, profile_id, input.clone())
-        } else {
-            profile_store::profile_create_with_id(&app, profile_id, input.clone())
-        }
-    })()
+    let profile = (if is_update {
+        profile_store::profile_update(&app, profile_id, input.clone())
+    } else {
+        profile_store::profile_create_with_id(&app, profile_id, input.clone())
+    })
     .map_err(|e| {
         tracing::error!(
             step = "save_profile",
@@ -292,7 +288,7 @@ pub async fn profile_connect_test(
     let secrets = payload.secrets;
 
     // 2) Resolve driver by base.engine (source of truth)
-    let driver = state.engines.get(base.engine.clone()).ok_or_else(|| {
+    let driver = state.engines.get(base.engine).ok_or_else(|| {
         tracing::error!(
             step = "resolve_driver",
             profile_id = %profile_id,

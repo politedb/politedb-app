@@ -226,10 +226,7 @@ fn parse_database_url(value: &str) -> Result<ParsedUrl, String> {
     let (authority, path) = authority_and_path
         .split_once('/')
         .unwrap_or((authority_and_path, ""));
-    let (userinfo, host_port) = authority
-        .rsplit_once('@')
-        .map(|(userinfo, host)| (userinfo, host))
-        .unwrap_or(("", authority));
+    let (userinfo, host_port) = authority.rsplit_once('@').unwrap_or(("", authority));
     let (user, password) = userinfo
         .split_once(':')
         .map(|(user, password)| (percent_decode(user), percent_decode(password)))

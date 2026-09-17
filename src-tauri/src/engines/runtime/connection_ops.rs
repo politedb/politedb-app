@@ -99,7 +99,6 @@ impl ConnectionOps for EngineConnection {
     }
 
     #[allow(dead_code)]
-
     async fn close(self) {
         match self {
             EngineConnection::Postgres(pg) => drop(pg.pool),
@@ -244,8 +243,7 @@ impl ConnectionOps for EngineConnection {
                 Ok(())
             }
             EngineConnection::Turso(turso) => {
-                crate::engines::turso::operation::execute_turso_statements(&turso, &statements)
-                    .await
+                crate::engines::turso::operation::execute_turso_statements(turso, &statements).await
             }
             EngineConnection::SqlServer(ss) => {
                 let mut client = crate::engines::sqlserver::operation::make_client(
@@ -646,7 +644,7 @@ impl ConnectionOps for EngineConnection {
             }
 
             EngineConnection::Clickhouse(ch) => {
-                let conn = ch.clone();
+                let conn = (**ch).clone();
                 let default_timeout = ch.default_statement_timeout_ms;
 
                 let handle = tokio::spawn(async move {

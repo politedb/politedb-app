@@ -8,14 +8,14 @@ pub fn unwrap_clickhouse_type_str(db_type: &str) -> String {
     for _ in 0..8 {
         let lower = t.to_ascii_lowercase();
         if let Some(inner) = lower.strip_prefix("nullable(") {
-            if inner.ends_with(')') {
-                t = inner[..inner.len() - 1].trim().to_string();
+            if let Some(inner) = inner.strip_suffix(')') {
+                t = inner.trim().to_string();
                 continue;
             }
         }
         if let Some(inner) = lower.strip_prefix("lowcardinality(") {
-            if inner.ends_with(')') {
-                t = inner[..inner.len() - 1].trim().to_string();
+            if let Some(inner) = inner.strip_suffix(')') {
+                t = inner.trim().to_string();
                 continue;
             }
         }

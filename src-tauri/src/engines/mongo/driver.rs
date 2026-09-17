@@ -141,7 +141,7 @@ fn mongo_uri(input: &MongoConnectInput, password: &str) -> String {
     uri.push(':');
     uri.push_str(&port.to_string());
     uri.push('/');
-    uri.push_str(&database.as_deref().unwrap_or(""));
+    uri.push_str(database.as_deref().unwrap_or(""));
 
     let mut params: Vec<String> = Vec::new();
 

@@ -82,8 +82,7 @@ pub fn parse_jdbc_url(url: &str) -> Option<(String, u16, String)> {
         .trim_start_matches("mongodb:")
         .trim_start_matches("redis:");
 
-    if without_scheme.starts_with("//") {
-        let rest = &without_scheme[2..];
+    if let Some(rest) = without_scheme.strip_prefix("//") {
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
         let database = path.trim_start_matches('/').to_string();
 

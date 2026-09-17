@@ -106,7 +106,7 @@ pub fn profile_update(
         .find(|p| p.id == profile_id)
         .ok_or("PROFILE_NOT_FOUND")?;
 
-    p.engine = input.engine.clone();
+    p.engine = input.engine;
     p.label = input.label.clone();
     p.input = input;
     p.updated_at = now;
@@ -164,7 +164,7 @@ pub fn profile_create_with_id(
 
     let profile = ConnectionProfile {
         id,
-        engine: input.engine.clone(),
+        engine: input.engine,
         label: input.label.clone(),
         tags: input.tags.clone(),
         indicator_color: input.indicator_color.clone(),

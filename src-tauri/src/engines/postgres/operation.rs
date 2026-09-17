@@ -40,7 +40,6 @@ fn is_explainable(sql: &str) -> bool {
 
 fn is_non_transactional_database_ddl(sql: &str) -> bool {
     let normalized = sql
-        .trim_start()
         .split_whitespace()
         .take(3)
         .collect::<Vec<_>>()
@@ -88,7 +87,7 @@ pub async fn run_pg_sql_query(
         }
     };
     // Register cancel handle (token + backend_pid)
-    let cancel_token = (&*client).cancel_token();
+    let cancel_token = &client.cancel_token();
     let backend_pid: i32 = match client.query_one("SELECT pg_backend_pid()", &[]).await {
         Ok(row) => row.get::<usize, i32>(0),
         Err(_) => -1,

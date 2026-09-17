@@ -51,7 +51,7 @@ impl EngineDriver for ClickhouseDriver {
         let conn = connect_clickhouse(conn_id, label, ch, password)
             .await
             .map_err(|e| format!("CLICKHOUSE_CONNECT_FAILED: {e}"))?;
-        Ok(EngineConnection::Clickhouse(conn))
+        Ok(EngineConnection::Clickhouse(Box::new(conn)))
     }
 
     async fn test(
@@ -137,7 +137,7 @@ pub async fn connect_clickhouse(
     let client = if uses_http(&input) {
         let http = build_http_client(&input, &password);
         ping_http(&http, input.connect_timeout_ms).await?;
-        ClickhouseClient::Http(http)
+        ClickhouseClient::Http(Box::new(http))
     } else {
         let native = connect_native(&input, &password).await?;
         ping_native(&native, input.connect_timeout_ms).await?;

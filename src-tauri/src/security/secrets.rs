@@ -13,7 +13,7 @@ pub fn keychain_set(app: &AppHandle, key: &str, value: &str) -> Result<(), Strin
 
     #[cfg(target_os = "macos")]
     {
-        return crate::security::keychain_macos::set_password(&service, key, value);
+        crate::security::keychain_macos::set_password(&service, key, value)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -32,7 +32,7 @@ pub fn keychain_get(app: &AppHandle, key: &str) -> Result<String, String> {
 
     #[cfg(target_os = "macos")]
     {
-        return crate::security::keychain_macos::get_password(&service, key);
+        crate::security::keychain_macos::get_password(&service, key)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -50,7 +50,7 @@ pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        return crate::security::keychain_macos::delete_password(&service, key);
+        crate::security::keychain_macos::delete_password(&service, key)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -69,7 +69,7 @@ pub fn keychain_list(app: &AppHandle) -> Result<Vec<String>, String> {
 
     #[cfg(target_os = "macos")]
     {
-        return crate::security::keychain_macos::list_accounts(&service);
+        crate::security::keychain_macos::list_accounts(&service)
     }
 
     #[cfg(not(target_os = "macos"))]

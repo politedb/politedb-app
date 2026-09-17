@@ -149,7 +149,7 @@ async fn ping_pool(pool: &deadpool_redis::Pool, timeout_ms: u64) -> Result<(), S
         .map_err(|_| format!("REDIS_PING_TIMEOUT after {timeout_ms}ms"))?
         .map_err(|e| format!("REDIS_PING_FAILED: {e}"))?;
 
-    if pong.to_ascii_uppercase() != "PONG" {
+    if !pong.eq_ignore_ascii_case("PONG") {
         return Err("REDIS_PING_INVALID".into());
     }
 
@@ -188,7 +188,7 @@ pub async fn connect_redis(
         id: conn_id,
         label,
         pool,
-        default_command_timeout_ms: input.connect_timeout_ms.clone(),
+        default_command_timeout_ms: input.connect_timeout_ms,
     })
 }
 

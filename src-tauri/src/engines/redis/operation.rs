@@ -208,7 +208,7 @@ pub async fn run_redis_command(
                 },
             ]);
 
-            let key = input.args.get(0).cloned().unwrap_or_default();
+            let key = input.args.first().cloned().unwrap_or_default();
             if key.is_empty() {
                 emit_error(
                     &ctx.app,
@@ -309,7 +309,7 @@ pub async fn run_redis_command(
                 },
             ]);
 
-            let key = input.args.get(0).cloned().unwrap_or_default();
+            let key = input.args.first().cloned().unwrap_or_default();
             if key.is_empty() {
                 emit_error(
                     &ctx.app,

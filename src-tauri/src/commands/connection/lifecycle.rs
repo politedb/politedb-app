@@ -16,7 +16,7 @@ pub async fn connection_create(
 ) -> Result<ConnectionInfo, String> {
     let id = Uuid::new_v4();
 
-    let engine = input.engine.clone();
+    let engine = input.engine;
     let label = input.label.clone();
 
     tracing::info!(
@@ -26,10 +26,7 @@ pub async fn connection_create(
         "connection_create: start"
     );
 
-    let driver = state
-        .engines
-        .get(engine.clone())
-        .ok_or("ENGINE_NOT_SUPPORTED")?;
+    let driver = state.engines.get(engine).ok_or("ENGINE_NOT_SUPPORTED")?;
 
     let mut acquired_key: Option<crate::state::app_state::TunnelKey> = None;
 
@@ -68,10 +65,10 @@ pub async fn connection_create(
             tracing::error!(conn_id=%id, engine=?engine, error=%e, "connection_create: connect failed");
 
             // rollback tunnel ref if acquired
-            if acquired_key.is_some() {
+            if let Some(key) = acquired_key {
                 // temporarily register mapping so release can find it
                 // (or you can write a release_by_key() helper)
-                state.conn_to_tunnel.insert(id, acquired_key.unwrap());
+                state.conn_to_tunnel.insert(id, key);
                 release_shared_tunnel_by_conn(&state, id).await;
             }
 
@@ -105,16 +102,13 @@ pub async fn connection_test(
     let mut input = payload.input;
     let secrets = payload.secrets;
 
-    let engine = input.engine.clone();
+    let engine = input.engine;
     let label = input.label.clone();
     let has_ssh = input.ssh.is_some();
 
     tracing::info!(engine = ?engine, label = %label, ssh = %has_ssh, "connection_test: start");
 
-    let driver = state
-        .engines
-        .get(engine.clone())
-        .ok_or("ENGINE_NOT_SUPPORTED")?;
+    let driver = state.engines.get(engine).ok_or("ENGINE_NOT_SUPPORTED")?;
 
     // ---------------------------------------------------------------------
     // TEST-ONLY: inject plaintext secrets (NO persist, NO logging)

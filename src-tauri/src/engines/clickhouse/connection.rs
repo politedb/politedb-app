@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub enum ClickhouseClient {
     Native(NativeClient),
-    Http(HttpClient),
+    Http(Box<HttpClient>),
 }
 
 #[derive(Clone)]

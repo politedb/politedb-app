@@ -70,11 +70,12 @@ pub fn build_native_address(input: &ClickhouseConnectInput) -> String {
 }
 
 pub fn build_native_options(input: &ClickhouseConnectInput, password: &str) -> ClientOptions {
-    let mut options = ClientOptions::default();
-    options.username = input.user.trim().to_string();
-    options.password = password.to_string();
-    options.default_database = input.database.trim().to_string();
-    options
+    ClientOptions {
+        username: input.user.trim().to_string(),
+        password: password.to_string(),
+        default_database: input.database.trim().to_string(),
+        ..Default::default()
+    }
 }
 
 pub async fn connect_native(

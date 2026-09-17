@@ -966,9 +966,11 @@ mod tests {
 
     #[test]
     fn current_start_requires_matching_generation_and_port() {
-        let mut runtime = AiRuntimeHandle::default();
-        runtime.start_generation = 3;
-        runtime.port = Some(1234);
+        let runtime = AiRuntimeHandle {
+            start_generation: 3,
+            port: Some(1234),
+            ..Default::default()
+        };
 
         assert!(is_current_start(&runtime, 1234, 3));
         assert!(!is_current_start(&runtime, 1234, 2));
@@ -977,8 +979,10 @@ mod tests {
 
     #[test]
     fn download_in_progress_requires_starting_and_bytes() {
-        let mut runtime = AiRuntimeHandle::default();
-        runtime.phase = AiRuntimePhase::Starting;
+        let mut runtime = AiRuntimeHandle {
+            phase: AiRuntimePhase::Starting,
+            ..Default::default()
+        };
         assert!(!is_model_download_in_progress(&runtime));
 
         runtime.model_downloaded_bytes = Some(0);
@@ -987,11 +991,13 @@ mod tests {
 
     #[test]
     fn dead_child_clears_stale_endpoint() {
-        let mut runtime = AiRuntimeHandle::default();
-        runtime.endpoint = Some("http://127.0.0.1:1234/v1".to_string());
-        runtime.port = Some(1234);
-        runtime.managed_by_app = true;
-        runtime.phase = AiRuntimePhase::Error;
+        let mut runtime = AiRuntimeHandle {
+            endpoint: Some("http://127.0.0.1:1234/v1".to_string()),
+            port: Some(1234),
+            managed_by_app: true,
+            phase: AiRuntimePhase::Error,
+            ..Default::default()
+        };
 
         clear_inactive_endpoint(&mut runtime);
 

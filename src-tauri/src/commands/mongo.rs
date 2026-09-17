@@ -415,6 +415,7 @@ pub async fn mongo_collection_overview(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn mongo_find_documents(
     state: State<'_, AppState>,
     connection_id: Uuid,

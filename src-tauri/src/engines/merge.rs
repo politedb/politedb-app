@@ -117,16 +117,14 @@ pub fn merge_ssh_for_test(
 
         // merge auth
         merge_ssh_auth_for_test(&mut ssh_base.auth, ssh_ov.auth, secrets);
-    } else {
-        if let SshAuth::Password { password } = &mut ssh_base.auth {
-            if let Some(pw) = secrets
-                .as_ref()
-                .and_then(|s| s.ssh_password.as_ref())
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-            {
-                *password = pw.to_string();
-            }
+    } else if let SshAuth::Password { password } = &mut ssh_base.auth {
+        if let Some(pw) = secrets
+            .as_ref()
+            .and_then(|s| s.ssh_password.as_ref())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            *password = pw.to_string();
         }
     }
 

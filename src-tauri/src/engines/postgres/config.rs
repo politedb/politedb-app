@@ -13,7 +13,7 @@ pub fn build_pg_config(input: &PgConnectInput, password: &str) -> anyhow::Result
     // Required fields
     // ---------------------------------------------------------------------
     cfg.host(&input.host);
-    cfg.port(input.port as u16);
+    cfg.port(input.port);
     cfg.user(&input.user);
     cfg.password(password);
     let db = input.database.trim();
@@ -34,7 +34,7 @@ pub fn build_pg_config(input: &PgConnectInput, password: &str) -> anyhow::Result
     // ---------------------------------------------------------------------
     if let Some(ms) = input.statement_timeout_ms {
         if ms > 0 {
-            cfg.options(&format!("-c statement_timeout={}", ms));
+            cfg.options(format!("-c statement_timeout={}", ms));
         }
     }
 
