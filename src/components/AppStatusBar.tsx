@@ -65,8 +65,7 @@ export function AppStatusBar() {
       role="contentinfo"
       class={cn(
         "flex h-8 shrink-0 items-center justify-between gap-3 px-3 text-[11px] font-medium",
-        "border-t border-slate-200 bg-slate-100 text-slate-700",
-        "dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+        "border-t border-slate-200 bg-slate-100 text-slate-700"
       )}
     >
       <div class="flex min-w-0 items-center gap-2">

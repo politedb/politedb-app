@@ -25,7 +25,7 @@ export function GroupsSection(props: {
   return (
     <div class="mb-5">
       <div class="mb-3 flex items-center">
-        <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase dark:text-slate-400">
+        <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
           Groups ({groups.length})
         </h3>
       </div>
@@ -34,10 +34,10 @@ export function GroupsSection(props: {
         <Button
           variant="outline"
           onClick={() => onPickGroup(undefined)}
-          class={`rounded-full px-3 py-0.75 text-sm font-semibold ${
+          class={`rounded-full border px-3 py-0.75 text-sm font-semibold ${
             !selectedGroupId
-              ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/60 dark:bg-blue-950/50 dark:text-blue-200"
-              : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              ? "border-blue-300 bg-blue-50 text-blue-700"
+              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
           }`}
         >
           All
@@ -47,8 +47,8 @@ export function GroupsSection(props: {
             key={group.id}
             class={`flex items-center gap-1 rounded-full border py-0.75 pr-2 pl-3 text-sm font-semibold ${
               selectedGroupId === group.id
-                ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/60 dark:bg-blue-950/50 dark:text-blue-200"
-                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                ? "border-blue-300 bg-blue-50 text-blue-700"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
             <button
@@ -65,7 +65,7 @@ export function GroupsSection(props: {
                 e.stopPropagation();
                 onDelete(group);
               }}
-              class="rounded-full p-0.5 text-slate-400 transition-all hover:bg-red-50 hover:text-red-600 dark:text-slate-500 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+              class="rounded-full p-0.5 text-slate-400 transition-all hover:bg-red-50 hover:text-red-600"
               aria-label={`Delete group ${group.name}`}
               title="Delete group"
             >

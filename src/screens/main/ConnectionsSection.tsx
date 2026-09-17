@@ -16,11 +16,11 @@ function EmptyState(props: {
   const { hasSearch, profilesEmpty, onUseTemplate, templateSaving } = props;
 
   return (
-    <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div class="font-semibold text-slate-900 dark:text-slate-100">
+    <div class="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+      <div class="font-semibold text-slate-900">
         {hasSearch ? "No matching connections" : "No connections yet"}
       </div>
-      <div class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+      <div class="mt-1 text-sm text-slate-500">
         {hasSearch
           ? "Try a different keyword."
           : "Create a connection to start querying databases."}
@@ -185,7 +185,7 @@ export function ConnectionsSection(props: {
       {profiles.length === 0 ? (
         <div class="space-y-3">
           <div class="flex items-center justify-between">
-            <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase dark:text-slate-400">
+            <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
               All Connections ({profiles.length})
             </h3>
           </div>
@@ -203,7 +203,7 @@ export function ConnectionsSection(props: {
             <section class="space-y-3">
               <div class="flex items-center gap-2">
                 <PinFilledIcon className="size-4.5 text-amber-500" />
-                <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase dark:text-slate-400">
+                <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
                   Favorites ({favoriteProfiles.length})
                 </h2>
               </div>
@@ -213,7 +213,7 @@ export function ConnectionsSection(props: {
 
           {otherProfiles.length > 0 ? (
             <section class="space-y-3">
-              <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase dark:text-slate-400">
+              <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
                 All connections ({otherProfiles.length})
               </h2>
               <ConnectionCards profiles={otherProfiles} {...cardProps} />

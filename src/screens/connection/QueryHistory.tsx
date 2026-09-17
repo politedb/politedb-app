@@ -151,7 +151,7 @@ export function QueryHistory({ activeProfileId }: Props) {
                   class={cn(
                     "group flex items-start gap-3 px-3 py-2",
                     "border-b border-neutral-100",
-                    "hover:bg-neutral-50"
+                    "hover:bg-slate-50"
                   )}
                   onClick={() => void onCopy(sqlRaw)}
                   title="Click to copy"

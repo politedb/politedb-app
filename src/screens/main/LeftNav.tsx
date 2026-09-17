@@ -158,10 +158,9 @@ export function LeftNav(props: {
           >
             <div class="flex items-center gap-1">
               <LightBulbIcon className="inline-block size-4" />
-              <span>Tips:</span>
+              <span>Quick tips:</span>
             </div>
             <ul class="list-disc pl-5">
-              <li>Right-click a connection for actions.</li>
               <li>Double-click a connection to open it.</li>
               <li>Pin connections to keep it at the top.</li>
             </ul>

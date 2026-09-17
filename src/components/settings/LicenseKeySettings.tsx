@@ -191,7 +191,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
             </Button>
             <Button
               variant="outline"
-              className="border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-500/40 dark:text-rose-300"
+              className="border-rose-200 text-rose-700 hover:bg-rose-50"
               onClick={() => void deactivateLicense()}
               disabled={licenseBusy}
             >

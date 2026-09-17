@@ -383,7 +383,7 @@ function DataInfoPane({
   if (!hasRow) {
     return (
       <OverlayScrollArea
-        className="theme-sidebar-surface h-full bg-neutral-100"
+        className="theme-sidebar-surface h-full bg-slate-50"
         contentClassName="flex flex-col gap-2 px-3 py-2"
       >
         <DataInfoSearch value={search} onValueChange={setSearch} />
@@ -396,7 +396,7 @@ function DataInfoPane({
 
   return (
     <OverlayScrollArea
-      className="theme-sidebar-surface h-full bg-neutral-100"
+      className="theme-sidebar-surface h-full bg-slate-50"
       contentClassName="flex flex-col gap-2 px-3 py-2"
     >
       <DataInfoSearch value={search} onValueChange={setSearch} />
@@ -417,7 +417,7 @@ export function RightNav({
   dataReadOnly,
 }: Props) {
   return (
-    <div class="theme-sidebar-surface flex h-full min-h-0 flex-col bg-neutral-100">
+    <div class="theme-sidebar-surface flex h-full min-h-0 flex-col bg-slate-50">
       <div class="min-h-0 flex-1 overflow-hidden">
         <DataInfoPane
           sizeInfo={sizeInfo}

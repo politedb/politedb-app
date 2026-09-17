@@ -150,7 +150,7 @@ function EmptyItemsState(props: {
         : "This schema does not contain any tables yet.";
 
   return (
-    <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-none">
+    <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
       <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
         {icon}
       </div>
@@ -314,7 +314,7 @@ export function LeftNav({
       data-density-region="sidebar"
       class={cn(
         "flex h-full w-full flex-col",
-        "border-r border-neutral-200 bg-neutral-100 dark:border-slate-800 dark:bg-slate-950"
+        "border-r border-neutral-200 bg-slate-50"
       )}
     >
       {/* Top: Search */}
@@ -353,7 +353,7 @@ export function LeftNav({
             {expandedSections.functions && (
               <div class="mt-1">
                 {filteredFunctions.length === 0 ? (
-                  <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-slate-700 dark:bg-slate-900/80 dark:shadow-none">
+                  <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
                     <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
                       <SquareFunctionIcon className="size-4 text-blue-500" />
                     </div>

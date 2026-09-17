@@ -38,24 +38,24 @@ export function ConnectionLogsSection({
   );
 
   return (
-    <div class="h-full w-full bg-neutral-100 dark:bg-slate-950">
+    <div class="h-full w-full bg-slate-50">
       <div class="mx-auto w-full max-w-400 px-6 py-5">
         <div class="mb-3 flex justify-between">
-          <h2 class="text-sm font-semibold tracking-wide text-slate-800 dark:text-slate-300">
+          <h2 class="text-sm font-semibold tracking-wide text-slate-800">
             Connection history ({totalCount})
           </h2>
         </div>
 
-        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {filteredEntries.length === 0 ? (
             <div class="px-6 py-14 text-center">
-              <ClockIcon className="mx-auto mb-3 size-10 text-slate-300 dark:text-slate-600" />
-              <p class="text-sm font-medium text-slate-800 dark:text-slate-200">
+              <ClockIcon className="mx-auto mb-3 size-10 text-slate-400" />
+              <p class="text-sm font-medium text-slate-800">
                 {searchQuery.trim()
                   ? "No matching sessions"
                   : "No connection history yet"}
               </p>
-              <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              <p class="mt-1 text-sm text-slate-500">
                 {searchQuery.trim()
                   ? "Try another search term."
                   : "Open a saved connection to record a session here."}
@@ -84,11 +84,11 @@ export function ConnectionLogsSection({
                         key={entry.id}
                         class={cn(
                           "border-b border-slate-100 transition-colors",
-                          "hover:bg-slate-50/80 dark:border-slate-800 dark:hover:bg-slate-800/70"
+                          "hover:bg-slate-50/80"
                         )}
                       >
-                        <td class="px-3 py-2 align-middle whitespace-nowrap text-slate-700 tabular-nums dark:text-slate-300">
-                          <div class="w-60 font-medium whitespace-nowrap text-slate-900 dark:text-slate-100">
+                        <td class="px-3 py-2 align-middle whitespace-nowrap text-slate-700 tabular-nums">
+                          <div class="w-60 font-medium whitespace-nowrap text-slate-900">
                             {formatConnectionLogDateRange(
                               entry.openedAt,
                               entry.closedAt
@@ -101,10 +101,7 @@ export function ConnectionLogsSection({
                               "inline-flex rounded-md px-2 py-0.5 text-xs font-semibold capitalize",
                               isFailed
                                 ? "bg-red-50 text-red-700"
-                                : "bg-emerald-50 text-emerald-700",
-                              isFailed
-                                ? "dark:bg-red-950/40 dark:text-red-300"
-                                : "dark:bg-emerald-950/40 dark:text-emerald-300"
+                                : "bg-emerald-50 text-emerald-700"
                             )}
                           >
                             {displayStatus}
@@ -121,8 +118,7 @@ export function ConnectionLogsSection({
                             class={cn(
                               "flex w-full items-start gap-2 text-left",
                               "-mx-1 rounded-lg px-1 py-0.5",
-                              onShowConnection &&
-                                "hover:bg-slate-100/80 dark:hover:bg-slate-800"
+                              onShowConnection && "hover:bg-slate-100/80"
                             )}
                             onClick={() => onShowConnection?.(entry.profileId)}
                             disabled={!onShowConnection}
@@ -137,10 +133,10 @@ export function ConnectionLogsSection({
                               className="mt-0.5 size-8! shrink-0"
                             />
                             <span class="min-w-0">
-                              <span class="block truncate font-medium text-slate-900 dark:text-slate-100">
+                              <span class="block truncate font-medium text-slate-900">
                                 {entry.profileLabel}
                               </span>
-                              <span class="mt-0.5 block truncate text-xs text-slate-500 dark:text-slate-400">
+                              <span class="mt-0.5 block truncate text-xs text-slate-500">
                                 {entry.host}
                               </span>
                             </span>
@@ -154,11 +150,9 @@ export function ConnectionLogsSection({
               {hasMore ? (
                 <div
                   ref={sentinelRef}
-                  class="flex items-center justify-center border-t border-slate-100 px-4 py-3 dark:border-slate-800"
+                  class="flex items-center justify-center border-t border-slate-100 px-4 py-3"
                 >
-                  <span class="text-xs text-slate-500 dark:text-slate-400">
-                    Loading more…
-                  </span>
+                  <span class="text-xs text-slate-500">Loading more…</span>
                 </div>
               ) : null}
             </OverlayScrollArea>
