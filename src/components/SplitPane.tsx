@@ -46,6 +46,7 @@ export function SplitPane(props: Props) {
   const draggingRef = useRef(false);
   const sizeRef = useRef<number | null>(null);
   const lastTotalRef = useRef<number | null>(null);
+  const layoutIntentRef = useRef({ initialRatio, fixedPaneOnResize });
 
   const [dragging, setDragging] = useState(false);
   const [, force] = useState(0);
@@ -61,7 +62,7 @@ export function SplitPane(props: Props) {
   const clampSize = useCallback(
     (px: number, total: number) => {
       const maxFirst = total - splitterPx - Math.max(minSecondPx, 0);
-      return Math.min(Math.max(px, minFirstPx), maxFirst);
+      return Math.min(Math.max(px, minFirstPx), Math.max(maxFirst, minFirstPx));
     },
     [minFirstPx, minSecondPx, splitterPx]
   );
@@ -69,6 +70,19 @@ export function SplitPane(props: Props) {
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    // Preact may reuse this instance when parent swaps layout modes
+    // (e.g. left+right ↔ right-only). Drop the old pixel size so we
+    // re-apply initialRatio for the new intent.
+    const prevIntent = layoutIntentRef.current;
+    if (
+      prevIntent.initialRatio !== initialRatio ||
+      prevIntent.fixedPaneOnResize !== fixedPaneOnResize
+    ) {
+      sizeRef.current = null;
+      lastTotalRef.current = null;
+      layoutIntentRef.current = { initialRatio, fixedPaneOnResize };
+    }
 
     // Initialize synchronously to avoid first-paint flicker
     // (second pane taking full size before observer callback runs).

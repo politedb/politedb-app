@@ -128,9 +128,10 @@ export function ConnectionWorkspaceLayout(props: {
     return (
       <div class="flex h-full flex-1 overflow-hidden">
         <SplitPane
+          key="workspace-with-left"
           direction="horizontal"
           initialRatio={0.15}
-          minFirstPx={200}
+          minFirstPx={245}
           minSecondPx={300}
           splitterPx={2}
           fixedPaneOnResize="first"
@@ -158,6 +159,7 @@ export function ConnectionWorkspaceLayout(props: {
             <div class="flex h-full flex-1 flex-col overflow-hidden bg-neutral-100 dark:bg-slate-950">
               {viewMode.includes("right") ? (
                 <SplitPane
+                  key="workspace-main-right-nested"
                   direction="horizontal"
                   initialRatio={0.75}
                   minFirstPx={300}
@@ -181,6 +183,7 @@ export function ConnectionWorkspaceLayout(props: {
     <div class="flex h-full flex-1 overflow-hidden bg-neutral-100 dark:bg-slate-950">
       {viewMode.includes("right") ? (
         <SplitPane
+          key="workspace-main-right"
           direction="horizontal"
           initialRatio={0.75}
           minFirstPx={300}
