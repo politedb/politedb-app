@@ -12,9 +12,7 @@ function qIdent(name: string, _engine: string) {
 
 describe("jsonArrayToPgArraySql", () => {
   it("converts JSON string array to ARRAY[]::text[]", () => {
-    expect(jsonArrayToPgArraySql('["*"]', "_text")).toBe(
-      "ARRAY['*']::text[]"
-    );
+    expect(jsonArrayToPgArraySql('["*"]', "_text")).toBe("ARRAY['*']::text[]");
     expect(
       jsonArrayToPgArraySql('["view_category","edit_post"]', "text[]")
     ).toBe("ARRAY['view_category', 'edit_post']::text[]");

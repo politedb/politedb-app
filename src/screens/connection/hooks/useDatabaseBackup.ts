@@ -1,8 +1,7 @@
 import { useCallback, useState } from "preact/hooks";
 import { openDialog, saveDialog } from "src/lib/system-dialog";
-import { readTextFile } from "src/lib/system-fs";
+import { writeFile, readFile } from "src/lib/system-fs";
 
-import { exportAppendToFile } from "src/lib/tauri/export";
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
 import {
@@ -17,6 +16,10 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../ConnectionRuntimeContext";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
+import {
+  packSqlToDumb,
+  unpackDumpBytes,
+} from "src/lib/dump/politedbDumbFormat";
 
 function cellToBool(cell: unknown): boolean {
   if (typeof cell === "boolean") return cell;
@@ -318,15 +321,15 @@ async function sortTablesByForeignKeys(args: {
   return orderedKeys.map((k) => byKey.get(k)).filter(Boolean) as BackupTable[];
 }
 
-async function exportTableToSqlFile(args: {
-  path: string;
+async function exportTableToSqlParts(args: {
+  append: (content: string) => void;
   connectionId: string;
   engine: ConnectionCreateInput["engine"];
   schema: string;
   tableName: string;
   columns: string[];
 }) {
-  const { path, connectionId, engine, schema, tableName, columns } = args;
+  const { append, connectionId, engine, schema, tableName, columns } = args;
 
   const query = tableExportQuery(
     schema,
@@ -342,7 +345,6 @@ async function exportTableToSqlFile(args: {
   });
 
   await new Promise<void>((resolve, reject) => {
-    let writeQueue = Promise.resolve();
     let completed = false;
     let columnNames = columns;
     let columnTypes: string[] = columns.map(() => "");
@@ -379,23 +381,9 @@ async function exportTableToSqlFile(args: {
           qIdent: (name, eng) => qIdent(name, eng as any),
         });
         if (!content) return;
-
-        writeQueue = writeQueue.then(() =>
-          exportAppendToFile({
-            path,
-            content,
-            append: true,
-          })
-        );
+        append(content);
       },
-      onDone: async () => {
-        try {
-          await writeQueue;
-          done();
-        } catch (e) {
-          fail(e);
-        }
-      },
+      onDone: () => done(),
       onError: (err) => {
         fail(
           typeof err === "string" ? new Error(err) : (err ?? "EXPORT_FAILED")
@@ -628,10 +616,15 @@ export function useDatabaseBackup() {
         const dbName = databaseName || "database";
         const path = await saveDialog({
           title: "Backup database",
-          defaultPath: `${dbName}-backup-${stamp}.sql`,
-          filters: [{ name: "SQL", extensions: ["sql"] }],
+          defaultPath: `${dbName}-backup-${stamp}.dumb`,
+          filters: [{ name: "PoliteDB dump", extensions: ["dumb"] }],
         });
         if (!path) return;
+
+        const sqlParts: string[] = [];
+        const appendSql = (content: string) => {
+          if (content) sqlParts.push(content);
+        };
 
         const header = [
           "-- PoliteDB database backup",
@@ -641,22 +634,14 @@ export function useDatabaseBackup() {
           "",
         ].join("\n");
 
-        await exportAppendToFile({
-          path,
-          content: header,
-          append: false,
-        });
+        appendSql(header);
 
         const postDataSqlChunks: string[] = [];
         const preDataByTable = new Map<string, string>();
         const columnsByTable = new Map<string, string[]>();
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await exportAppendToFile({
-            path,
-            content: "\nSET FOREIGN_KEY_CHECKS = 0;\n",
-            append: true,
-          });
+          appendSql("\nSET FOREIGN_KEY_CHECKS = 0;\n");
         }
 
         for (const table of orderedTables) {
@@ -711,11 +696,9 @@ export function useDatabaseBackup() {
           const key = `${table.schema}.${table.name}`;
           const structureSql = preDataByTable.get(key) ?? "";
           if (!structureSql) continue;
-          await exportAppendToFile({
-            path,
-            content: `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`,
-            append: true,
-          });
+          appendSql(
+            `\n-- Structure ${table.schema}.${table.name}\n${structureSql}`
+          );
         }
 
         // Phase 2: insert data for all tables
@@ -724,14 +707,10 @@ export function useDatabaseBackup() {
           const columns = columnsByTable.get(key) ?? [];
           if (!columns.length) continue;
 
-          await exportAppendToFile({
-            path,
-            content: `\n-- Data ${table.schema}.${table.name}\n`,
-            append: true,
-          });
+          appendSql(`\n-- Data ${table.schema}.${table.name}\n`);
 
-          await exportTableToSqlFile({
-            path,
+          await exportTableToSqlParts({
+            append: appendSql,
             connectionId: rt.runtimeConnectionId,
             engine: rt.engine,
             schema: table.schema,
@@ -741,20 +720,21 @@ export function useDatabaseBackup() {
         }
 
         if (postDataSqlChunks.length > 0) {
-          await exportAppendToFile({
-            path,
-            content: `\n-- Post-data constraints/indexes\n${postDataSqlChunks.join("\n")}`,
-            append: true,
-          });
+          appendSql(
+            `\n-- Post-data constraints/indexes\n${postDataSqlChunks.join("\n")}`
+          );
         }
 
         if (rt.engine === "mysql" || rt.engine === "mariadb") {
-          await exportAppendToFile({
-            path,
-            content: "\nSET FOREIGN_KEY_CHECKS = 1;\n",
-            append: true,
-          });
+          appendSql("\nSET FOREIGN_KEY_CHECKS = 1;\n");
         }
+
+        const sql = sqlParts.join("");
+        const dumbBytes = await packSqlToDumb({
+          sql,
+          engine: rt.engine,
+        });
+        await writeFile(path, dumbBytes);
 
         showToast("Database backup completed.", { tone: "success" });
       } catch (err) {
@@ -775,10 +755,13 @@ export function useDatabaseBackup() {
       setOpError(null);
 
       const path = await openDialog({
-        title: "Restore database from SQL",
+        title: "Restore database from dump",
         multiple: false,
         directory: false,
-        filters: [{ name: "SQL", extensions: ["sql"] }],
+        filters: [
+          { name: "PoliteDB dump", extensions: ["dumb"] },
+          { name: "SQL", extensions: ["sql"] },
+        ],
       });
 
       if (!path || typeof path !== "string") return;
@@ -786,8 +769,11 @@ export function useDatabaseBackup() {
       setDbRestoreRunning(true);
 
       try {
-        const sql = await readTextFile(path);
-        const backupEngine = parseBackupEngine(sql);
+        const fileBytes = await readFile(path);
+        const unpacked = await unpackDumpBytes(fileBytes);
+        const sql = unpacked.sql;
+
+        const backupEngine = unpacked.engine ?? parseBackupEngine(sql) ?? null;
         if (backupEngine) {
           const dumpEngine = normalizeEngineNameForCompare(backupEngine);
           const currentEngine = normalizeEngineNameForCompare(rt.engine);
