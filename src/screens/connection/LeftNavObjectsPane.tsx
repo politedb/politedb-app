@@ -9,9 +9,23 @@ import {
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "src/components/common/Dialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseObjectItem, DatabaseObjectKind } from "src/types";
-import { objectKindLabel } from "src/lib/databaseObjects";
+import {
+  buildDropDatabaseObjectSql,
+  objectKindLabel,
+  objectKindSingular,
+} from "src/lib/databaseObjects";
+import { runSqlQuery } from "src/lib/tauri/query";
+import { showToast } from "src/stores/toast";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import {
@@ -78,6 +92,13 @@ export function LeftNavObjectsPane({ profileId }: Props) {
       trigger: false,
     }
   );
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    item: DatabaseObjectItem;
+  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<DatabaseObjectItem | null>(null);
+  const [dropping, setDropping] = useState(false);
 
   const meta = useMemo(
     () =>
@@ -157,6 +178,74 @@ export function LeftNavObjectsPane({ profileId }: Props) {
     openDatabaseObjectsManager({ kind: "function" });
   };
 
+  const openObject = (item: DatabaseObjectItem) => {
+    openDatabaseObjectsManager({ kind: item.kind, object: item });
+  };
+
+  const openCatalogForItem = (item: DatabaseObjectItem) => {
+    const catalogKind =
+      item.kind === "function"
+        ? ("functions" as const)
+        : item.kind === "procedure"
+          ? ("procedures" as const)
+          : ("triggers" as const);
+    openDatabaseCatalog(catalogKind, item.schema);
+  };
+
+  const menuItems: MenuItem[] = menu
+    ? [
+        {
+          type: "item",
+          label: "Open",
+          onClick: () => openObject(menu.item),
+        },
+        {
+          type: "item",
+          label: "Copy name",
+          onClick: () => void navigator.clipboard.writeText(menu.item.name),
+        },
+        {
+          type: "item",
+          label: "Open in catalog",
+          onClick: () => openCatalogForItem(menu.item),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Drop…",
+          color: "red",
+          disabled: !menu.item.capability.canDelete || !rt.runtimeConnectionId,
+          onClick: () => setDropTarget(menu.item),
+        },
+      ]
+    : [];
+
+  const confirmDrop = async () => {
+    if (!dropTarget || !rt.runtimeConnectionId) return;
+    setDropping(true);
+    try {
+      const sql = buildDropDatabaseObjectSql({
+        engine: rt.engine,
+        item: dropTarget,
+      });
+      await runSqlQuery(rt.runtimeConnectionId, sql);
+      await rt.refreshSchemaAndTables();
+      showToast(
+        `Dropped ${objectKindSingular(dropTarget.kind)} “${dropTarget.name}”.`,
+        {
+          tone: "success",
+        }
+      );
+      setDropTarget(null);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err ?? ""), {
+        tone: "error",
+      });
+    } finally {
+      setDropping(false);
+    }
+  };
+
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div data-density-sidebar-header class="p-2">
@@ -215,12 +304,16 @@ export function LeftNavObjectsPane({ profileId }: Props) {
                               data-density-item
                               variant="ghost"
                               title={`${item.schema}.${item.name}`}
-                              onClick={() =>
-                                openDatabaseObjectsManager({
-                                  kind: item.kind,
-                                  object: item,
-                                })
-                              }
+                              onClick={() => openObject(item)}
+                              onContextMenu={(e: MouseEvent) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setMenu({
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                  item,
+                                });
+                              }}
                               className={cn(
                                 tableSidebarButtonClass({
                                   isActive: false,
@@ -299,6 +392,51 @@ export function LeftNavObjectsPane({ profileId }: Props) {
           </Select>
         </div>
       </div>
+
+      <ContextMenu
+        open={!!menu}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        items={menuItems}
+        onClose={() => setMenu(null)}
+      />
+
+      <Dialog
+        open={!!dropTarget}
+        onClose={() => (dropping ? null : setDropTarget(null))}
+        size="sm"
+      >
+        <DialogHeader>
+          <DialogTitle>
+            Drop {dropTarget ? objectKindSingular(dropTarget.kind) : "object"}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogContent>
+          <p class="text-sm text-neutral-600">
+            Drop{" "}
+            {dropTarget
+              ? `${dropTarget.schema}.${dropTarget.name}`
+              : "this object"}
+            ? This cannot be undone.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            disabled={dropping}
+            onClick={() => setDropTarget(null)}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            loading={dropping}
+            onClick={() => void confirmDrop()}
+          >
+            Drop
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

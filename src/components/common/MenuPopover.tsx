@@ -132,7 +132,7 @@ export function MenuPopover(props: {
       ref={panelRef}
       style={style}
       class={cn(
-        "z-1000 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg",
+        "z-1000 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg",
         "text-sm",
         className
       )}
@@ -157,7 +157,7 @@ export function MenuItem(props: {
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
       class={cn(
-        "flex w-full items-center justify-between gap-3 px-3 py-2 text-left",
+        "flex w-full items-center justify-between gap-3 px-2.5 py-1.5 text-left",
         danger
           ? "text-rose-700 hover:bg-rose-50"
           : "text-slate-700 hover:bg-slate-50",
