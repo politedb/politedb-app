@@ -115,7 +115,11 @@ export type DatabaseObjectManagerWindow = OpenWindowBase & {
   initialObjectId?: string;
 };
 
-export type DatabaseCatalogKind = "tables" | "functions";
+export type DatabaseCatalogKind =
+  | "tables"
+  | "functions"
+  | "procedures"
+  | "triggers";
 
 export type DatabaseCatalogWindow = OpenWindowBase & {
   type: "db-catalog";

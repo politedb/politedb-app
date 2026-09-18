@@ -301,10 +301,20 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
     });
   }, [meta.tables, schemaScope, search]);
 
-  const functionRows = useMemo(() => {
+  const objectKind =
+    win.catalogKind === "functions"
+      ? ("function" as const)
+      : win.catalogKind === "procedures"
+        ? ("procedure" as const)
+        : win.catalogKind === "triggers"
+          ? ("trigger" as const)
+          : null;
+
+  const objectRows = useMemo(() => {
+    if (!objectKind) return [] as DatabaseObjectItem[];
     const q = search.trim().toLowerCase();
     return (meta.objects ?? [])
-      .filter((item): item is DatabaseObjectItem => item.kind === "function")
+      .filter((item): item is DatabaseObjectItem => item.kind === objectKind)
       .filter((item) => {
         const effectiveSchema = schemaScope;
         if (effectiveSchema !== "all" && item.schema !== effectiveSchema)
@@ -314,11 +324,27 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(q));
       });
-  }, [meta.objects, schemaScope, search]);
+  }, [meta.objects, objectKind, schemaScope, search]);
 
-  const isFunctions = win.catalogKind === "functions";
-  const title = win.title?.trim() || (isFunctions ? "Functions" : "Tables");
-  const rowsCount = isFunctions ? functionRows.length : tableRows.length;
+  const isObjectCatalog = objectKind !== null;
+  const objectLabel =
+    win.catalogKind === "functions"
+      ? "functions"
+      : win.catalogKind === "procedures"
+        ? "procedures"
+        : win.catalogKind === "triggers"
+          ? "triggers"
+          : "tables";
+  const title =
+    win.title?.trim() ||
+    (win.catalogKind === "tables"
+      ? "Tables"
+      : win.catalogKind === "functions"
+        ? "Functions"
+        : win.catalogKind === "procedures"
+          ? "Procedures"
+          : "Triggers");
+  const rowsCount = isObjectCatalog ? objectRows.length : tableRows.length;
 
   const refresh = async () => {
     if (!rt.runtimeConnectionId) return;
@@ -335,7 +361,7 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
       <div class="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-200 bg-white px-4 py-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            {isFunctions ? (
+            {isObjectCatalog ? (
               <SquareFunctionIcon className="size-4 text-blue-500" />
             ) : (
               <TableIcon className="size-4 text-blue-500" />
@@ -344,8 +370,8 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           </div>
           <div class="mt-0.5 text-xs text-neutral-500">
             {schemaScope
-              ? `${rowsCount} ${isFunctions ? "functions" : "tables"} in schema ${schemaScope}`
-              : `${rowsCount} ${isFunctions ? "functions" : "tables"} in current metadata`}
+              ? `${rowsCount} ${objectLabel} in schema ${schemaScope}`
+              : `${rowsCount} ${objectLabel} in current metadata`}
           </div>
         </div>
 
@@ -377,14 +403,14 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         <div class="m-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {meta.error}
         </div>
-      ) : isFunctions ? (
+      ) : isObjectCatalog && objectKind ? (
         <CatalogCanvasTable
           columns={FUNCTION_COLUMNS}
-          rows={functionRows}
-          resetKey={`functions\0${schemaScope}\0${search}\0${functionRows.length}`}
-          emptyLabel="No functions found."
+          rows={objectRows}
+          resetKey={`${win.catalogKind}\0${schemaScope}\0${search}\0${objectRows.length}`}
+          emptyLabel={`No ${objectLabel} found.`}
           onOpen={(item) =>
-            openDatabaseObjectsManager({ kind: "function", object: item })
+            openDatabaseObjectsManager({ kind: objectKind, object: item })
           }
           onRefresh={() => void refresh()}
         />

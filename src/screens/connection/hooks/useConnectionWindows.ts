@@ -244,7 +244,14 @@ export function useConnectionWindows(
       const id = schemaName
         ? `db-catalog:${catalogKind}:${schemaName}`
         : `db-catalog:${catalogKind}`;
-      const baseTitle = catalogKind === "tables" ? "Tables" : "Functions";
+      const baseTitle =
+        catalogKind === "tables"
+          ? "Tables"
+          : catalogKind === "functions"
+            ? "Functions"
+            : catalogKind === "procedures"
+              ? "Procedures"
+              : "Triggers";
       const title = schemaName ? `${baseTitle}.${schemaName}` : baseTitle;
       const existing = windows.find(
         (w) =>

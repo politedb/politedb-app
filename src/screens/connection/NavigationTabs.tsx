@@ -242,10 +242,10 @@ export function NavigationTabs({
                 )}
 
                 {w.type === "db-catalog" &&
-                  (w.catalogKind === "functions" ? (
-                    <SquareFunctionIcon className="size-4 text-blue-500" />
-                  ) : (
+                  (w.catalogKind === "tables" ? (
                     <TableIcon className="size-4 text-blue-500" />
+                  ) : (
+                    <SquareFunctionIcon className="size-4 text-blue-500" />
                   ))}
 
                 {w.type === "sql" && (
