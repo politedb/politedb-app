@@ -15,7 +15,7 @@ export function Input(
   const { class: classProp, error, left, right, disabled, ...rest } = props;
 
   const cls = cn(
-    "h-10 w-full rounded-lg border px-3 text-sm font-medium outline-none",
+    "h-10 w-full rounded-xl border px-3 text-sm font-medium outline-none",
     "text-slate-900 placeholder:text-slate-400",
     disabled ? "cursor-not-allowed opacity-60" : "",
     error

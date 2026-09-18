@@ -121,7 +121,9 @@ export function Input(
           onFocus={handleFocus}
           onBlur={handleBlur}
           class={cn(
-            "w-full rounded-md p-2 text-sm focus:bg-white focus:outline-2 focus:outline-blue-500/60 dark:focus:bg-neutral-900!",
+            "h-9 w-full rounded-lg px-3 text-sm",
+            "border border-neutral-300",
+            "focus:bg-white focus:outline-2 focus:outline-blue-500/60 dark:focus:bg-neutral-900!",
             props.left && "pl-8.5",
             (showSelect || props.right) && "pr-8",
             className
