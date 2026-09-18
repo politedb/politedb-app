@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type ShortcutActionId =
   | "openSearch"
   | "openSql"
+  | "openSnippets"
   | "saveChanges"
   | "refresh"
   | "closeCurrent";
@@ -30,6 +31,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     label: "New SQL editor",
     description: "Open a new SQL editor in the active connection tab.",
     defaultBinding: "Mod+T",
+  },
+  {
+    id: "openSnippets",
+    label: "Open snippets",
+    description: "Open the snippet picker and insert SQL at the cursor.",
+    defaultBinding: "Mod+Shift+S",
   },
   {
     id: "saveChanges",

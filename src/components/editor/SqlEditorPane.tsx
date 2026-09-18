@@ -341,6 +341,58 @@ export function SqlEditorPane(props: Props) {
     [draftId, win.id]
   );
 
+  const insertSqlAtCursor = useCallback(
+    async (sql: string) => {
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      const next = sql.trim();
+      if (!editor || !model || !next) return;
+
+      const sel = editor.getSelection();
+      const range =
+        sel && !sel.isEmpty()
+          ? sel
+          : (() => {
+              const pos = editor.getPosition() ?? model.getPositionAt(0);
+              return new monaco.Range(
+                pos.lineNumber,
+                pos.column,
+                pos.lineNumber,
+                pos.column
+              );
+            })();
+
+      applyingExternalCounterRef.current += 1;
+      const currentCounter = applyingExternalCounterRef.current;
+
+      try {
+        editor.executeEdits("insert-snippet", [{ range, text: next }]);
+        dirtyRef.current = true;
+      } finally {
+        queueMicrotask(() => {
+          if (applyingExternalCounterRef.current === currentCounter) {
+            applyingExternalCounterRef.current = 0;
+          }
+        });
+      }
+
+      clearRunHighlight();
+      const merged = model.getValue();
+      savingRef.current = true;
+      try {
+        await saveSqlDraft(draftId, merged);
+        callbacksRef.current.onCommitContent?.(win.id, merged);
+        dirtyRef.current = false;
+      } catch {
+        dirtyRef.current = true;
+      } finally {
+        savingRef.current = false;
+      }
+      editor.focus();
+    },
+    [draftId, win.id]
+  );
+
   // Apply transformation to selection (if any) or whole doc; preserve selection.
   const applyTransform = async (
     transform: (input: string) => string,
@@ -554,6 +606,7 @@ export function SqlEditorPane(props: Props) {
       const unregisterLiveEditor = registerLiveSqlEditor(win.id, {
         getValue: () => editor.getModel()?.getValue() ?? "",
         appendSql: appendSqlToEditor,
+        insertSqlAtCursor,
       });
 
       const completionDisposable = registerSqlCompletionSmart(
@@ -684,6 +737,7 @@ export function SqlEditorPane(props: Props) {
     };
   }, [
     appendSqlToEditor,
+    insertSqlAtCursor,
     controlledContent,
     draftId,
     flushDraft,

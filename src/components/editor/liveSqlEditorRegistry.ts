@@ -1,6 +1,9 @@
+type InsertMode = "append" | "cursor";
+
 type LiveSqlEditorApi = {
   getValue: () => string;
   appendSql: (sql: string) => Promise<void>;
+  insertSqlAtCursor: (sql: string) => Promise<void>;
 };
 
 const MAX_APPEND_ATTEMPTS = 3;
@@ -8,6 +11,7 @@ const APPEND_RETRY_DELAY_MS = 40;
 
 type PendingSql = {
   sql: string;
+  mode: InsertMode;
   attempts: number;
   resolve: () => void;
   reject: (error: Error) => void;
@@ -31,6 +35,14 @@ function getOrCreateEntry(windowId: string) {
   return entry;
 }
 
+async function applyPendingSql(api: LiveSqlEditorApi, pending: PendingSql) {
+  if (pending.mode === "cursor") {
+    await api.insertSqlAtCursor(pending.sql);
+    return;
+  }
+  await api.appendSql(pending.sql);
+}
+
 async function drainPendingSql(windowId: string, entry: LiveSqlEditorEntry) {
   if (entry.draining || entry.retryTimer || !entry.api) return;
   let failedApi: LiveSqlEditorApi | undefined;
@@ -41,7 +53,7 @@ async function drainPendingSql(windowId: string, entry: LiveSqlEditorEntry) {
       const api: LiveSqlEditorApi = entry.api;
       entry.activePending = pending;
       try {
-        await api.appendSql(pending.sql);
+        await applyPendingSql(api, pending);
       } catch (error) {
         entry.activePending = undefined;
         if (entry.api !== api) {
@@ -112,14 +124,21 @@ export function registerLiveSqlEditor(windowId: string, api: LiveSqlEditorApi) {
 
 export function enqueueSqlIntoLiveEditor(
   windowId: string,
-  sql: string
+  sql: string,
+  opts?: { mode?: InsertMode }
 ): Promise<void> {
   const next = sql.trim();
   if (!next) return Promise.resolve();
 
   return new Promise<void>((resolve, reject) => {
     const entry = getOrCreateEntry(windowId);
-    entry.pendingSql.push({ sql: next, attempts: 0, resolve, reject });
+    entry.pendingSql.push({
+      sql: next,
+      mode: opts?.mode ?? "append",
+      attempts: 0,
+      resolve,
+      reject,
+    });
     void drainPendingSql(windowId, entry);
   });
 }

@@ -6,6 +6,8 @@ import {
   registerLiveSqlEditor,
 } from "./liveSqlEditorRegistry";
 
+const noopInsert = async () => {};
+
 describe("live SQL editor registry", () => {
   it("drains SQL queued before the editor registers exactly once", async () => {
     const appendSql = vi.fn(async () => {});
@@ -14,6 +16,7 @@ describe("live SQL editor registry", () => {
     const unregister = registerLiveSqlEditor("queued-editor", {
       getValue: () => "",
       appendSql,
+      insertSqlAtCursor: noopInsert,
     });
 
     await vi.waitFor(() => expect(appendSql).toHaveBeenCalledTimes(1));
@@ -33,6 +36,7 @@ describe("live SQL editor registry", () => {
         appended.push(sql);
         if (sql === "first") await firstAppend;
       },
+      insertSqlAtCursor: noopInsert,
     });
 
     enqueueSqlIntoLiveEditor("ordered-editor", "first");
@@ -44,14 +48,33 @@ describe("live SQL editor registry", () => {
     unregister();
   });
 
+  it("inserts at cursor when mode is cursor", async () => {
+    const insertSqlAtCursor = vi.fn(async () => {});
+    const appendSql = vi.fn(async () => {});
+    const unregister = registerLiveSqlEditor("cursor-editor", {
+      getValue: () => "",
+      appendSql,
+      insertSqlAtCursor,
+    });
+
+    await enqueueSqlIntoLiveEditor("cursor-editor", "SELECT cursor", {
+      mode: "cursor",
+    });
+    expect(insertSqlAtCursor).toHaveBeenCalledWith("SELECT cursor");
+    expect(appendSql).not.toHaveBeenCalled();
+    unregister();
+  });
+
   it("does not let stale cleanup unregister a newer editor", () => {
     const unregisterOld = registerLiveSqlEditor("replaced-editor", {
       getValue: () => "old",
       appendSql: async () => {},
+      insertSqlAtCursor: noopInsert,
     });
     const unregisterNew = registerLiveSqlEditor("replaced-editor", {
       getValue: () => "new",
       appendSql: async () => {},
+      insertSqlAtCursor: noopInsert,
     });
 
     unregisterOld();
@@ -67,6 +90,7 @@ describe("live SQL editor registry", () => {
     const unregisterOld = registerLiveSqlEditor("failed-editor", {
       getValue: () => "old",
       appendSql: () => oldAppend,
+      insertSqlAtCursor: noopInsert,
     });
     const queued = enqueueSqlIntoLiveEditor("failed-editor", "SELECT retry");
 
@@ -74,6 +98,7 @@ describe("live SQL editor registry", () => {
     const unregisterNew = registerLiveSqlEditor("failed-editor", {
       getValue: () => "new",
       appendSql: newAppend,
+      insertSqlAtCursor: noopInsert,
     });
     rejectOld?.(new Error("old editor disposed"));
 
@@ -91,6 +116,7 @@ describe("live SQL editor registry", () => {
     const unregister = registerLiveSqlEditor("terminal-error-editor", {
       getValue: () => "",
       appendSql,
+      insertSqlAtCursor: noopInsert,
     });
 
     await expect(
@@ -110,6 +136,7 @@ describe("live SQL editor registry", () => {
     const unregister = registerLiveSqlEditor("closed-editor", {
       getValue: () => "",
       appendSql,
+      insertSqlAtCursor: noopInsert,
     });
 
     await Promise.resolve();
@@ -125,6 +152,7 @@ describe("live SQL editor registry", () => {
     const unregisterOld = registerLiveSqlEditor("reopened-editor", {
       getValue: () => "old",
       appendSql: () => oldAppend,
+      insertSqlAtCursor: noopInsert,
     });
     enqueueSqlIntoLiveEditor("reopened-editor", "SELECT old");
 
@@ -134,6 +162,7 @@ describe("live SQL editor registry", () => {
     const unregisterNew = registerLiveSqlEditor("reopened-editor", {
       getValue: () => "new",
       appendSql: newAppend,
+      insertSqlAtCursor: noopInsert,
     });
     enqueueSqlIntoLiveEditor("reopened-editor", "SELECT new");
     releaseOld?.();
@@ -152,6 +181,7 @@ describe("live SQL editor registry", () => {
       getValue: () => "SELECT active",
       appendSql: (sql) =>
         sql === "SELECT active" ? activeAppend : Promise.resolve(),
+      insertSqlAtCursor: noopInsert,
     });
     enqueueSqlIntoLiveEditor("closing-editor", "SELECT active");
     enqueueSqlIntoLiveEditor("closing-editor", "SELECT queued");
