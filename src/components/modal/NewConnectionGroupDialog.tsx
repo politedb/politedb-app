@@ -85,7 +85,7 @@ export function NewConnectionGroupDialog(props: {
             loading={saving}
             onClick={() => void handleCreate()}
           >
-            {saving ? "Creating..." : "Create Group"}
+            {saving ? "Creating..." : "Create group"}
           </Button>
         </DialogFooter>
       </Dialog>
