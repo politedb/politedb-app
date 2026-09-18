@@ -26,6 +26,18 @@ type Props = {
   // hit area thickness (keep >= 6 for usability)
   splitterPx?: number;
 
+  /**
+   * Keep the first pane mounted but collapsed (no splitter, second fills).
+   * Used so toggling the left panel does not remount the main content.
+   */
+  firstCollapsed?: boolean;
+
+  /**
+   * Keep the second pane mounted but collapsed (no splitter, first fills).
+   * Used so toggling bottom/right panels does not remount `first`.
+   */
+  secondCollapsed?: boolean;
+
   className?: string;
 };
 
@@ -39,6 +51,8 @@ export function SplitPane(props: Props) {
     minFirstPx = 120,
     minSecondPx = 120,
     splitterPx = 8,
+    firstCollapsed = false,
+    secondCollapsed = false,
     className,
   } = props;
 
@@ -46,12 +60,15 @@ export function SplitPane(props: Props) {
   const draggingRef = useRef(false);
   const sizeRef = useRef<number | null>(null);
   const lastTotalRef = useRef<number | null>(null);
+  const savedFirstSizeRef = useRef<number | null>(null);
+  const savedSecondSizeRef = useRef<number | null>(null);
   const layoutIntentRef = useRef({ initialRatio, fixedPaneOnResize });
 
   const [dragging, setDragging] = useState(false);
   const [, force] = useState(0);
 
   const isVertical = direction === "vertical";
+  const eitherCollapsed = firstCollapsed || secondCollapsed;
 
   const getContainerSize = useCallback(() => {
     const el = containerRef.current;
@@ -87,7 +104,7 @@ export function SplitPane(props: Props) {
     // Initialize synchronously to avoid first-paint flicker
     // (second pane taking full size before observer callback runs).
     const initialTotal = getContainerSize();
-    if (initialTotal && sizeRef.current == null) {
+    if (initialTotal && sizeRef.current == null && !eitherCollapsed) {
       sizeRef.current = clampSize(
         Math.floor(initialTotal * initialRatio),
         initialTotal
@@ -99,6 +116,12 @@ export function SplitPane(props: Props) {
     const ro = new ResizeObserver(() => {
       const total = getContainerSize();
       if (!total) return;
+
+      if (firstCollapsed || secondCollapsed) {
+        lastTotalRef.current = total;
+        force((v) => v + 1);
+        return;
+      }
 
       if (sizeRef.current == null) {
         sizeRef.current = clampSize(Math.floor(total * initialRatio), total);
@@ -140,11 +163,75 @@ export function SplitPane(props: Props) {
     minFirstPx,
     minSecondPx,
     fixedPaneOnResize,
+    firstCollapsed,
+    secondCollapsed,
+    eitherCollapsed,
     getContainerSize,
     clampSize,
   ]);
 
+  useLayoutEffect(() => {
+    const total = getContainerSize();
+    if (!total) return;
+
+    if (firstCollapsed) {
+      if (sizeRef.current != null) {
+        savedFirstSizeRef.current = sizeRef.current;
+      }
+      lastTotalRef.current = total;
+      force((v) => v + 1);
+      return;
+    }
+
+    if (secondCollapsed) {
+      if (sizeRef.current != null) {
+        savedSecondSizeRef.current = Math.max(
+          0,
+          total - splitterPx - sizeRef.current
+        );
+      }
+      sizeRef.current = total;
+      lastTotalRef.current = total;
+      force((v) => v + 1);
+      return;
+    }
+
+    // Restoring from a collapsed side.
+    if (savedFirstSizeRef.current != null) {
+      sizeRef.current = clampSize(savedFirstSizeRef.current, total);
+      savedFirstSizeRef.current = null;
+      lastTotalRef.current = total;
+      force((v) => v + 1);
+      return;
+    }
+
+    if (savedSecondSizeRef.current != null) {
+      sizeRef.current = clampSize(
+        total - splitterPx - savedSecondSizeRef.current,
+        total
+      );
+      savedSecondSizeRef.current = null;
+      lastTotalRef.current = total;
+      force((v) => v + 1);
+      return;
+    }
+
+    if (sizeRef.current == null) {
+      sizeRef.current = clampSize(Math.floor(total * initialRatio), total);
+      lastTotalRef.current = total;
+      force((v) => v + 1);
+    }
+  }, [
+    firstCollapsed,
+    secondCollapsed,
+    getContainerSize,
+    clampSize,
+    splitterPx,
+    initialRatio,
+  ]);
+
   function onPointerDown(e: PointerEvent) {
+    if (eitherCollapsed) return;
     e.preventDefault();
     draggingRef.current = true;
     setDragging(true);
@@ -187,9 +274,12 @@ export function SplitPane(props: Props) {
 
   const firstSize = sizeRef.current ?? 0;
 
-  const firstStyle = isVertical
-    ? { height: `${firstSize}px` }
-    : { width: `${firstSize}px` };
+  const firstStyle =
+    firstCollapsed || secondCollapsed
+      ? undefined
+      : isVertical
+        ? { height: `${firstSize}px` }
+        : { width: `${firstSize}px` };
 
   // Hit area stays thick, visual line stays thin
   const splitterStyle = isVertical
@@ -208,50 +298,72 @@ export function SplitPane(props: Props) {
       ].join(" ")}
     >
       {/* First pane */}
-      <div class="flex min-h-0 min-w-0 shrink-0 flex-col" style={firstStyle}>
+      <div
+        class={
+          firstCollapsed
+            ? "hidden"
+            : [
+                "flex min-h-0 min-w-0 flex-col",
+                secondCollapsed ? "min-h-0 flex-1" : "shrink-0",
+              ].join(" ")
+        }
+        style={firstCollapsed ? undefined : firstStyle}
+        aria-hidden={firstCollapsed ? "true" : undefined}
+      >
         {first}
       </div>
 
       {/* Splitter (thick hit area, thin line) */}
+      {!eitherCollapsed ? (
+        <div
+          class={["relative shrink-0 select-none", splitterCursor].join(" ")}
+          style={splitterStyle}
+          onPointerDown={onPointerDown as any}
+          onPointerMove={onPointerMove as any}
+          onPointerUp={onPointerUp as any}
+        >
+          {/* thin line */}
+          <div
+            class={[
+              "pointer-events-none absolute",
+              // center line
+              isVertical
+                ? "top-1/2 right-0 left-0 h-px -translate-y-1/2"
+                : "top-0 bottom-0 left-1/2 w-px -translate-x-1/2",
+              // color states
+              dragging ? "bg-blue-500" : "bg-neutral-200",
+              // subtle hover via parent group is harder; do it with opacity overlay
+            ].join(" ")}
+          />
+
+          {/* subtle hover affordance (still thin, but visible) */}
+          <div
+            class={[
+              "pointer-events-none absolute inset-0",
+              dragging ? "bg-blue-500/5" : "hover:bg-neutral-500/5",
+            ].join(" ")}
+          />
+        </div>
+      ) : null}
+
+      {/* Second pane — stay mounted when collapsed to avoid remounting siblings */}
       <div
-        class={["relative shrink-0 select-none", splitterCursor].join(" ")}
-        style={splitterStyle}
-        onPointerDown={onPointerDown as any}
-        onPointerMove={onPointerMove as any}
-        onPointerUp={onPointerUp as any}
+        class={
+          secondCollapsed
+            ? "hidden"
+            : "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        }
+        aria-hidden={secondCollapsed ? "true" : undefined}
       >
-        {/* thin line */}
-        <div
-          class={[
-            "pointer-events-none absolute",
-            // center line
-            isVertical
-              ? "top-1/2 right-0 left-0 h-px -translate-y-1/2"
-              : "top-0 bottom-0 left-1/2 w-px -translate-x-1/2",
-            // color states
-            dragging ? "bg-blue-500" : "bg-neutral-200",
-            // subtle hover via parent group is harder; do it with opacity overlay
-          ].join(" ")}
-        />
-
-        {/* subtle hover affordance (still thin, but visible) */}
-        <div
-          class={[
-            "pointer-events-none absolute inset-0",
-            dragging ? "bg-blue-500/5" : "hover:bg-neutral-500/5",
-          ].join(" ")}
-        />
+        <OverlayScrollArea
+          className="min-h-0 min-w-0 flex-1"
+          contentClassName="h-full min-h-0"
+          horizontal
+          vertical
+        >
+          {second}
+        </OverlayScrollArea>
       </div>
-
-      {/* Second pane */}
-      <OverlayScrollArea
-        className="min-h-0 min-w-0 flex-1"
-        contentClassName="h-full min-h-0"
-        horizontal
-        vertical
-      >
-        {second}
-      </OverlayScrollArea>
     </div>
   );
 }

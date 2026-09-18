@@ -10,6 +10,7 @@ export function useConnectionScreenState() {
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
+  const [snippetPickerOpen, setSnippetPickerOpen] = useState(false);
   const [diagramOpen, setDiagramOpen] = useState(false);
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
 
@@ -26,6 +27,8 @@ export function useConnectionScreenState() {
     setShowSaveDialog,
     searchDialogOpen,
     setSearchDialogOpen,
+    snippetPickerOpen,
+    setSnippetPickerOpen,
     diagramOpen,
     setDiagramOpen,
     errorDialogOpen,

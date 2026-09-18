@@ -212,10 +212,17 @@ export function useConnectionWindows(
     (opts?: { kind?: DatabaseObjectKind; object?: DatabaseObjectItem }) => {
       const id = "db-object-manager";
       const existing = windows.find((w) => w.type === "db-object-manager");
+      const createTitle =
+        opts?.kind === "trigger"
+          ? "new_trigger"
+          : opts?.kind
+            ? `new_${opts.kind}`
+            : "Database Objects";
       const patch = {
-        initialKind: opts?.kind,
-        initialObjectId: opts?.object?.id,
-        title: "Database Objects",
+        initialKind: opts?.kind ?? opts?.object?.kind,
+        // Use "" so create mode clears a previous object id (undefined can be dropped on merge/persist).
+        initialObjectId: opts?.object?.id ?? "",
+        title: opts?.object?.name ?? createTitle,
       } satisfies Partial<DatabaseObjectManagerWindow>;
 
       if (existing && existing.type === "db-object-manager") {
@@ -227,9 +234,9 @@ export function useConnectionWindows(
       const win: DatabaseObjectManagerWindow = {
         id,
         type: "db-object-manager",
-        title: "Database Objects",
-        initialKind: opts?.kind,
-        initialObjectId: opts?.object?.id,
+        title: opts?.object?.name ?? createTitle,
+        initialKind: opts?.kind ?? opts?.object?.kind,
+        initialObjectId: opts?.object?.id ?? "",
       };
       addWindow(activeProfileScreen, win);
       setActiveWindowId(activeProfileScreen, win.id);

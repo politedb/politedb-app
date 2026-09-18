@@ -234,7 +234,11 @@ export function ActiveWindowContent() {
   }
 
   if (activeObjectManagerWindow) {
-    return <DbObjectsManagerPane win={activeObjectManagerWindow} />;
+    return (
+      <div class="h-full min-h-0 w-full min-w-0 overflow-hidden">
+        <DbObjectsManagerPane win={activeObjectManagerWindow} />
+      </div>
+    );
   }
 
   if (activeCatalogWindow) {

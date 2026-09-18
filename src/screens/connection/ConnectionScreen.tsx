@@ -1,4 +1,10 @@
-import { useMemo, useEffect, useRef, useCallback } from "preact/hooks";
+import {
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+  useState,
+} from "preact/hooks";
 
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
@@ -21,10 +27,15 @@ import { resolveDefaultSchema } from "src/lib/engines";
 import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
+import { SnippetPickerDialog } from "src/components/modal/SnippetPickerDialog";
+import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
+import type { SavedSnippet } from "src/lib/snippets/types";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";
+import { findSnippetByHotkey } from "src/lib/snippets/library";
+import { useSnippetsStore } from "src/stores/snippets";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
@@ -136,12 +147,20 @@ export function ConnectionScreen() {
     setShowSaveDialog,
     searchDialogOpen,
     setSearchDialogOpen,
+    snippetPickerOpen,
+    setSnippetPickerOpen,
     diagramOpen,
     setDiagramOpen,
     errorDialogOpen,
     setErrorDialogOpen,
   } = useConnectionScreenState();
   const { discardAndQuitApp } = useConnectionQuitGuard();
+  const [snippetEditorOpen, setSnippetEditorOpen] = useState(false);
+  const [snippetEditorInitial, setSnippetEditorInitial] = useState<
+    (Partial<SavedSnippet> & { sql?: string }) | undefined
+  >(undefined);
+  const snippetLibrary = useSnippetsStore((s) => s.library);
+  const ensureSnippetsLoaded = useSnippetsStore((s) => s.ensureLoaded);
 
   const { viewMode, toggleViewMode } = useViewMode(["left", "bottom"]);
 
@@ -157,7 +176,6 @@ export function ConnectionScreen() {
     selectWindow,
     openSqlEditor,
     openTable,
-    openDatabaseObjectsManager,
     closeWindow,
   } = useConnectionWindows(activeProfileScreen, sqlScopeKey);
 
@@ -512,6 +530,24 @@ export function ConnectionScreen() {
     activeTab?.querySafetyMode ?? (activeTab?.isLocked ? "lock" : "default");
   const isProfileLocked = sqlSafetyMode === "lock";
 
+  const onInsertSqlIntoActiveEditor = useInsertSqlIntoActiveEditor({
+    activeSqlWindow,
+    openSqlEditor,
+  });
+
+  const connectionProfileId = activeProfileTab?.profileId ?? null;
+
+  const insertSnippetSql = useCallback(
+    async (sql: string) => {
+      await onInsertSqlIntoActiveEditor(sql, { mode: "cursor" });
+    },
+    [onInsertSqlIntoActiveEditor]
+  );
+
+  useEffect(() => {
+    void ensureSnippetsLoaded();
+  }, [ensureSnippetsLoaded]);
+
   const actions = useMemo(() => {
     return {
       openSql: () => actionsRef.current.openSql(),
@@ -562,12 +598,27 @@ export function ConnectionScreen() {
       deleteRedisKey: (table: TableItem) =>
         actionsRef.current.deleteRedisKey(table),
       openSearch: () => setSearchDialogOpen(true),
+      openSnippets: () => setSnippetPickerOpen(true),
+      insertSnippetByHotkey: (binding: string) => {
+        const snippet = findSnippetByHotkey(
+          snippetLibrary,
+          connectionProfileId,
+          binding
+        );
+        if (!snippet) return false;
+        void insertSnippetSql(snippet.sql);
+        return true;
+      },
     };
   }, [
     isProfileLocked,
     setPendingTableAction,
     setSearchDialogOpen,
+    setSnippetPickerOpen,
     triggerRefresh,
+    snippetLibrary,
+    connectionProfileId,
+    insertSnippetSql,
   ]);
 
   const patchMap = useMemo(() => {
@@ -584,11 +635,6 @@ export function ConnectionScreen() {
     if (!profile) return "";
     return pickHostDbUser(profile).database || "";
   }, [profile]);
-
-  const onInsertSqlIntoActiveEditor = useInsertSqlIntoActiveEditor({
-    activeSqlWindow,
-    openSqlEditor,
-  });
 
   useEffect(() => {
     if (!activeTab || !engine) return;
@@ -632,12 +678,6 @@ export function ConnectionScreen() {
   const openDiagram = useMemo(() => {
     return () => setDiagramOpen(true);
   }, [setDiagramOpen]);
-
-  const openDatabaseObjects = useMemo(() => {
-    return () => {
-      openDatabaseObjectsManager();
-    };
-  }, [openDatabaseObjectsManager]);
 
   /* =============================================================================
    * Keyboard shortcuts (uses stable actions)
@@ -737,7 +777,6 @@ export function ConnectionScreen() {
             onSearchOpen={() => setSearchDialogOpen(true)}
             onOpenAiAssistant={openAiAssistant}
             onOpenDiagram={openDiagram}
-            onOpenDatabaseObjects={openDatabaseObjects}
           />
 
           <ConnectionWorkspaceLayout
@@ -746,6 +785,8 @@ export function ConnectionScreen() {
             activeWindowId={activeWindowId}
             selectWindow={selectWindow}
             activeProfileScreen={activeProfileScreen}
+            connectionProfileId={connectionProfileId}
+            onInsertSnippet={insertSnippetSql}
             engine={engine}
             schemasForEditor={schemasForEditor}
             activeSchema={activeSchema}
@@ -808,6 +849,32 @@ export function ConnectionScreen() {
           }
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}
+        />
+
+        <SnippetPickerDialog
+          open={snippetPickerOpen}
+          onClose={() => setSnippetPickerOpen(false)}
+          profileId={connectionProfileId}
+          onInsert={insertSnippetSql}
+          onCreate={() => {
+            setSnippetEditorInitial(undefined);
+            setSnippetEditorOpen(true);
+          }}
+          onEdit={(snippet) => {
+            setSnippetEditorInitial(snippet);
+            setSnippetEditorOpen(true);
+          }}
+        />
+
+        <SnippetEditorDialog
+          open={snippetEditorOpen}
+          onClose={() => {
+            setSnippetEditorOpen(false);
+            setSnippetEditorInitial(undefined);
+          }}
+          onSaved={() => setSnippetPickerOpen(true)}
+          profileId={connectionProfileId}
+          initial={snippetEditorInitial}
         />
 
         <DiagramGeneratorDialog

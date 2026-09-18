@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import {
+  keyboardEventToShortcut,
   matchesShortcut,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
@@ -12,6 +13,8 @@ type ShortcutActions = {
   closeWindow: (id: string, e: MouseEvent) => Promise<void> | void;
   closeTab: (tabId: string, skipCheck?: boolean) => Promise<void> | void;
   openSearch?: () => void;
+  openSnippets?: () => void;
+  insertSnippetByHotkey?: (binding: string) => boolean;
 };
 
 export function useConnectionShortcuts(params: {
@@ -64,6 +67,20 @@ export function useConnectionShortcuts(params: {
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
         target.isContentEditable;
+
+      if (matchesShortcut(e, shortcuts.openSnippets)) {
+        e.preventDefault();
+        e.stopPropagation();
+        actionsRef.current.openSnippets?.();
+        return;
+      }
+
+      const pressed = keyboardEventToShortcut(e);
+      if (pressed && actionsRef.current.insertSnippetByHotkey?.(pressed)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
 
       if (inEditable) {
         if (matchesShortcut(e, shortcuts.saveChanges)) {

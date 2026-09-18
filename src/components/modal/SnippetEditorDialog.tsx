@@ -43,6 +43,8 @@ export function SnippetEditorDialog({
   const [sql, setSql] = useState("");
   const [scope, setScope] = useState<SnippetScope>("global");
   const [hotkey, setHotkey] = useState("");
+  const [recordingHotkey, setRecordingHotkey] = useState(false);
+  const [hotkeyHint, setHotkeyHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,15 +55,37 @@ export function SnippetEditorDialog({
     setScope(initial?.scope ?? (profileId ? "profile" : "global"));
     setHotkey(initial?.hotkey ?? "");
     setError(null);
+    setRecordingHotkey(false);
+    setHotkeyHint(null);
   }, [open, initial, profileId]);
 
-  const onCaptureHotkey = (event: KeyboardEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const binding = keyboardEventToShortcut(event);
-    if (!binding) return;
-    setHotkey(normalizeShortcutBinding(binding));
-  };
+  useEffect(() => {
+    if (!open || !recordingHotkey) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "Escape") {
+        setRecordingHotkey(false);
+        setHotkeyHint(null);
+        return;
+      }
+
+      const binding = keyboardEventToShortcut(event);
+      if (!binding) {
+        setHotkeyHint("Use at least one modifier (Cmd/Ctrl, Alt, or Shift).");
+        return;
+      }
+
+      setHotkey(normalizeShortcutBinding(binding));
+      setRecordingHotkey(false);
+      setHotkeyHint(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [open, recordingHotkey]);
 
   const onSave = async () => {
     const nextName = name.trim();
@@ -119,6 +143,7 @@ export function SnippetEditorDialog({
       </DialogHeader>
       <DialogContent className="gap-3">
         <Input
+          className="h-9"
           label="Name"
           value={name}
           onValueChange={setName}
@@ -157,24 +182,51 @@ export function SnippetEditorDialog({
             </select>
           </div>
 
-          <Input
-            label="Insert hotkey (optional)"
-            value={hotkey ? formatShortcutLabel(hotkey) : "Press keys to bind…"}
-            readOnly
-            onKeyDown={onCaptureHotkey}
-            className="w-full"
-            right={
-              hotkey && (
-                <Button
-                  variant="ghost"
-                  class="p-1 text-xs"
-                  onClick={() => setHotkey("")}
-                >
-                  <XIcon className="size-3" />
-                </Button>
-              )
-            }
-          />
+          <div class="flex flex-col gap-1">
+            <Input
+              label="Insert hotkey (optional)"
+              value={
+                recordingHotkey
+                  ? "Press keys…"
+                  : hotkey
+                    ? formatShortcutLabel(hotkey)
+                    : ""
+              }
+              placeholder="Click, then press keys to bind…"
+              readOnly
+              onFocus={() => {
+                setRecordingHotkey(true);
+                setHotkeyHint(null);
+              }}
+              onClick={() => {
+                setRecordingHotkey(true);
+                setHotkeyHint(null);
+              }}
+              className="h-9 w-full cursor-pointer"
+              right={
+                hotkey && !recordingHotkey ? (
+                  <Button
+                    variant="ghost"
+                    class="p-1 text-xs"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setHotkey("");
+                      setRecordingHotkey(false);
+                      setHotkeyHint(null);
+                    }}
+                  >
+                    <XIcon className="size-3" />
+                  </Button>
+                ) : null
+              }
+            />
+            <p class="text-xs text-neutral-500">
+              {hotkeyHint ??
+                (recordingHotkey
+                  ? "Recording… Esc to cancel. Needs a modifier key."
+                  : "Needs Cmd/Ctrl, Alt, or Shift plus a key.")}
+            </p>
+          </div>
         </div>
 
         {error ? <p class="text-sm text-red-600">{error}</p> : null}

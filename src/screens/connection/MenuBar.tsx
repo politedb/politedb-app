@@ -21,7 +21,6 @@ import {
   RestoreIcon,
   LockIcon,
   SchemaIcon,
-  SquareFunctionIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import {
@@ -62,6 +61,7 @@ interface Props {
   onRefresh?: () => void;
   isRefreshing?: boolean;
   onSearchOpen?: () => void;
+  onOpenSnippets?: () => void;
   onOpenAiAssistant?: () => void;
   onOpenDiagram?: () => void;
   onOpenDatabaseObjects?: () => void;
@@ -291,7 +291,6 @@ export function MenuBar({
   openSQLWindow,
   onSearchOpen,
   onOpenDiagram,
-  onOpenDatabaseObjects,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
   const health = useConnectionHealthCheck({
@@ -818,19 +817,6 @@ export function MenuBar({
           </IconButton>
 
           <ToolbarDivider />
-
-          <IconButton
-            title="Database Objects"
-            onClick={onOpenDatabaseObjects}
-            disabled={
-              !rt.runtimeConnectionId ||
-              rt.engine === "mongo" ||
-              rt.engine === "redis" ||
-              rt.engine === "cassandra"
-            }
-          >
-            <SquareFunctionIcon className="size-5 text-neutral-700" />
-          </IconButton>
 
           <IconButton
             title="Generate Diagram"

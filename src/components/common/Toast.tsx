@@ -3,9 +3,11 @@ import { CheckMarkIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
 const toneClass: Record<ToastTone, string> = {
-  success: "border-emerald-200 bg-emerald-50 text-emerald-900",
-  error: "border-red-200 bg-red-50 text-red-900",
-  info: "border-neutral-200 bg-white text-neutral-900",
+  success:
+    "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100",
+  error:
+    "border-red-200 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-50",
+  info: "border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100",
 };
 
 const iconWrapClass: Record<ToastTone, string> = {
@@ -22,7 +24,7 @@ export function Toast() {
 
   return (
     <div
-      class="pointer-events-none fixed top-18 right-3 z-100 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2"
+      class="pointer-events-none fixed top-20 right-3 z-200 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2"
       aria-live="polite"
       aria-relevant="additions"
     >
@@ -30,7 +32,7 @@ export function Toast() {
         <div
           key={toast.id}
           class={cn(
-            "animate-slide-in-left pointer-events-auto flex items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-md",
+            "animate-slide-in-left pointer-events-auto flex items-start gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 shadow-md",
             toneClass[toast.tone]
           )}
           role="status"

@@ -2,8 +2,8 @@ import { SplitPane } from "src/components/SplitPane";
 import { NavigationTabs } from "./NavigationTabs";
 import { LeftNav } from "./LeftNav";
 import { RightNav } from "./RightNav";
-import { QueryHistory } from "./QueryHistory";
 import { ActiveWindowContent } from "./ActiveWindowContent";
+import { ConnectionBottomPanel } from "./ConnectionBottomPanel";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import type {
   DatabaseEngine,
@@ -23,6 +23,8 @@ export function ConnectionWorkspaceLayout(props: {
   activeWindowId: string | null;
   selectWindow: (id: string) => void;
   activeProfileScreen: string;
+  connectionProfileId: string | null;
+  onInsertSnippet: (sql: string) => void | Promise<void>;
   engine: DatabaseEngine | undefined;
   schemasForEditor: string[];
   activeSchema: string;
@@ -46,6 +48,8 @@ export function ConnectionWorkspaceLayout(props: {
     activeWindowId,
     selectWindow,
     activeProfileScreen,
+    connectionProfileId,
+    onInsertSnippet,
     engine,
     schemasForEditor,
     activeSchema,
@@ -105,97 +109,86 @@ export function ConnectionWorkspaceLayout(props: {
     </div>
   );
 
-  const mainContent = viewMode.includes("bottom") ? (
+  const showBottom = viewMode.includes("bottom");
+  const showLeft = viewMode.includes("left");
+  const showRight = viewMode.includes("right");
+
+  // Always keep SplitPanes mounted so toggling left/right/bottom does not
+  // remount the main editor content (Objects / SQL state).
+  const mainContent = (
     <SplitPane
+      key="workspace-main-bottom"
       direction="vertical"
       initialRatio={0.7}
       minFirstPx={200}
       minSecondPx={150}
       splitterPx={2}
       fixedPaneOnResize="second"
+      secondCollapsed={!showBottom}
       first={contentArea}
       second={
         <div class="h-full overflow-hidden border-t border-neutral-200">
-          <QueryHistory activeProfileId={activeProfileScreen} />
+          <ConnectionBottomPanel
+            activeProfileScreen={activeProfileScreen}
+            connectionProfileId={connectionProfileId}
+          />
         </div>
       }
     />
-  ) : (
-    contentArea
   );
 
-  if (viewMode.includes("left")) {
-    return (
-      <div class="flex h-full flex-1 overflow-hidden">
-        <SplitPane
-          key="workspace-with-left"
-          direction="horizontal"
-          initialRatio={0.15}
-          minFirstPx={245}
-          minSecondPx={300}
-          splitterPx={2}
-          fixedPaneOnResize="first"
-          first={
-            <div class="h-full overflow-hidden">
-              <LeftNav
-                engine={engine}
-                profileId={activeProfileScreen}
-                schemas={schemasForEditor}
-                currSchema={activeSchema}
-                onSchemaChange={onSchemaChange}
-                schemaLabel={schemaLabel}
-                tablesSectionTitle={tablesSectionTitle}
-                tableSearchQuery={tableSearchQuery}
-                setTableSearchQuery={setTableSearchQuery}
-                expandedSections={expandedSections}
-                setExpandedSections={setExpandedSections}
-                filteredTables={sidebarTables}
-                filteredFunctions={filteredFunctions}
-                activeWindowId={activeWindowId}
-              />
-            </div>
-          }
-          second={
-            <div class="flex h-full flex-1 flex-col overflow-hidden bg-neutral-100">
-              {viewMode.includes("right") ? (
-                <SplitPane
-                  key="workspace-main-right-nested"
-                  direction="horizontal"
-                  initialRatio={0.75}
-                  minFirstPx={300}
-                  minSecondPx={200}
-                  splitterPx={2}
-                  fixedPaneOnResize="second"
-                  first={mainContent}
-                  second={rightPane}
-                />
-              ) : (
-                mainContent
-              )}
-            </div>
-          }
-        />
-      </div>
-    );
-  }
+  const leftPane = (
+    <div class="h-full overflow-hidden">
+      <LeftNav
+        engine={engine}
+        profileId={activeProfileScreen}
+        schemas={schemasForEditor}
+        currSchema={activeSchema}
+        onSchemaChange={onSchemaChange}
+        schemaLabel={schemaLabel}
+        tablesSectionTitle={tablesSectionTitle}
+        tableSearchQuery={tableSearchQuery}
+        setTableSearchQuery={setTableSearchQuery}
+        expandedSections={expandedSections}
+        setExpandedSections={setExpandedSections}
+        filteredTables={sidebarTables}
+        filteredFunctions={filteredFunctions}
+        activeWindowId={activeWindowId}
+        connectionProfileId={connectionProfileId}
+        onInsertSnippet={onInsertSnippet}
+      />
+    </div>
+  );
 
   return (
     <div class="flex h-full flex-1 overflow-hidden bg-neutral-100">
-      {viewMode.includes("right") ? (
-        <SplitPane
-          key="workspace-main-right"
-          direction="horizontal"
-          initialRatio={0.75}
-          minFirstPx={300}
-          minSecondPx={200}
-          splitterPx={2}
-          fixedPaneOnResize="second"
-          first={mainContent}
-          second={rightPane}
-        />
-      ) : (
-        mainContent
-      )}
+      <SplitPane
+        key="workspace-with-left"
+        direction="horizontal"
+        initialRatio={0.15}
+        minFirstPx={245}
+        minSecondPx={300}
+        splitterPx={2}
+        fixedPaneOnResize="first"
+        firstCollapsed={!showLeft}
+        first={leftPane}
+        second={
+          <div class="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-neutral-100">
+            <SplitPane
+              key="workspace-main-right"
+              direction="horizontal"
+              initialRatio={0.75}
+              minFirstPx={300}
+              minSecondPx={200}
+              splitterPx={2}
+              fixedPaneOnResize="second"
+              secondCollapsed={!showRight}
+              first={mainContent}
+              second={rightPane}
+            />
+          </div>
+        }
+      />
     </div>
   );
 }

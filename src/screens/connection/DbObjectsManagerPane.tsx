@@ -1,4 +1,3 @@
-import { memo } from "preact/compat";
 import {
   useCallback,
   useEffect,
@@ -17,22 +16,16 @@ import {
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
-import {
-  SearchIcon,
-  SquareFunctionIcon,
-  TableIcon,
-} from "src/components/icons";
 import { Spinner } from "src/components/common/Spinner";
-import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useLoadDbObjectDefinition } from "./hooks/useLoadDbObjectDefinition";
 import type {
-  DatabaseObjectItem,
   DatabaseObjectKind,
   DatabaseObjectManagerWindow,
 } from "src/types";
-import { cn } from "src/utils/cn";
 import {
   buildCreateDatabaseObjectTemplate,
   buildDropDatabaseObjectSql,
@@ -43,9 +36,7 @@ import {
 } from "src/lib/databaseObjects";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { operationExecuteTransaction } from "src/lib/tauri";
-import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
-
-const OBJECT_LIST_PAGE_SIZE = 50;
+import { showToast } from "src/stores/toast";
 
 const loadSqlEditorPane = () =>
   import("src/components/editor/SqlEditorPane").then((module) => ({
@@ -71,88 +62,26 @@ type DraftState = {
   tableName: string;
 };
 
-function ObjectKindTab(props: {
-  kind: DatabaseObjectKind;
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      onClick={props.onClick}
-      disabled={props.disabled}
-      className={cn(
-        "flex-1 rounded-md border-none px-2 py-0.5 text-sm font-semibold",
-        props.active
-          ? "bg-blue-600 text-white hover:bg-blue-600"
-          : "text-neutral-600 hover:bg-neutral-100"
-      )}
-    >
-      {objectKindLabel(props.kind)}
-    </Button>
-  );
-}
-
-const ObjectListItem = memo(function ObjectListItem(props: {
-  item: DatabaseObjectItem;
-  active: boolean;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-db-object-id={props.item.id}
-      onClick={() => props.onSelect(props.item.id)}
-      class={cn(
-        "flex w-full items-start gap-2 rounded-md border px-2 py-2 text-left transition-colors",
-        props.active
-          ? "border-blue-200 bg-blue-50"
-          : "border-transparent bg-white hover:border-neutral-200 hover:bg-neutral-50"
-      )}
-    >
-      {props.item.kind === "trigger" ? (
-        <TableIcon className="mt-0.5 size-4 shrink-0 text-blue-500" />
-      ) : (
-        <SquareFunctionIcon className="mt-0.5 size-4 shrink-0 text-blue-500" />
-      )}
-      <div class="min-w-0 flex-1">
-        <div class="truncate text-sm font-semibold text-neutral-900">
-          {props.item.name}
-        </div>
-        <div class="truncate text-[11px] text-neutral-500">
-          {props.item.kind === "trigger"
-            ? `${props.item.schema}.${props.item.tableName ?? ""}`
-            : `${props.item.schema}${props.item.signature ? `(${props.item.signature})` : ""}`}
-        </div>
-      </div>
-    </button>
-  );
-});
-
 export function DbObjectsManagerPane(props: {
   win: DatabaseObjectManagerWindow;
 }) {
   const { win } = props;
   const rt = useConnectionRuntimeCtx();
+  const { openDatabaseObjectsManager } = useConnectionWindows(rt.profileId);
   const [kind, setKind] = useState<DatabaseObjectKind>(
     win.initialKind ?? "function"
   );
-  const [search, setSearch] = useState("");
   const [schemaFilter, setSchemaFilter] = useState(rt.activeSchema || "public");
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(
     win.initialObjectId ?? null
   );
-  const [isCreateMode, setIsCreateMode] = useState(false);
+  const [isCreateMode, setIsCreateMode] = useState(!win.initialObjectId);
   const [draft, setDraft] = useState<DraftState>({
     schema: rt.activeSchema || "public",
     name: "",
     tableName: "",
   });
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
   const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent | null>(
     null
   );
@@ -188,9 +117,14 @@ export function DbObjectsManagerPane(props: {
   }, [availableSchemas, schemaFilter, rt.activeSchema]);
 
   useEffect(() => {
-    if (!win.initialObjectId) return;
-    setSelectedObjectId(win.initialObjectId);
-    setIsCreateMode(false);
+    const objectId = win.initialObjectId?.trim() || "";
+    if (objectId) {
+      setSelectedObjectId(objectId);
+      setIsCreateMode(false);
+      return;
+    }
+    setSelectedObjectId(null);
+    setIsCreateMode(true);
   }, [win.initialObjectId]);
 
   useEffect(() => {
@@ -209,42 +143,16 @@ export function DbObjectsManagerPane(props: {
     pendingSelectionRef.current = null;
   }, [allObjects]);
 
-  const filteredObjects = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return allObjects
-      .filter((item) => item.kind === kind)
-      .filter((item) => (schemaFilter ? item.schema === schemaFilter : true))
-      .filter((item) => {
-        if (!q) return true;
-        return (
-          item.name.toLowerCase().includes(q) ||
-          item.schema.toLowerCase().includes(q) ||
-          (item.signature ?? "").toLowerCase().includes(q) ||
-          (item.tableName ?? "").toLowerCase().includes(q)
-        );
-      });
-  }, [allObjects, kind, schemaFilter, search]);
-
-  const {
-    visibleItems: visibleObjects,
-    sentinelRef: objectListSentinelRef,
-    hasMore: hasMoreObjects,
-  } = useInfiniteScroll(filteredObjects, {
-    pageSize: OBJECT_LIST_PAGE_SIZE,
-    resetKey: `${kind}\0${schemaFilter}\0${search}`,
-  });
-
-  const selectObject = useCallback((id: string) => {
-    setSelectedObjectId(id);
-    setIsCreateMode(false);
-    setError(null);
-    setInfo(null);
-  }, []);
-
   const selectedObject = useMemo(() => {
     if (!selectedObjectId) return null;
     return allObjects.find((item) => item.id === selectedObjectId) ?? null;
   }, [allObjects, selectedObjectId]);
+
+  useEffect(() => {
+    if (!selectedObject) return;
+    setKind(selectedObject.kind);
+    setSchemaFilter(selectedObject.schema);
+  }, [selectedObject]);
 
   const {
     sql: editorSql,
@@ -257,6 +165,11 @@ export function DbObjectsManagerPane(props: {
     engine: rt.engine,
     connectionId: rt.runtimeConnectionId,
   });
+
+  useEffect(() => {
+    if (!loadError) return;
+    showToast(loadError, { tone: "error" });
+  }, [loadError]);
 
   const editorStorageId = useMemo(() => {
     if (selectedObject) {
@@ -273,37 +186,48 @@ export function DbObjectsManagerPane(props: {
   ]);
 
   const refreshObjects = async () => {
-    setError(null);
-    setInfo(null);
     await rt.refreshSchemaAndTables();
   };
 
-  const startCreateMode = () => {
-    setError(null);
-    setInfo(null);
-    setIsCreateMode(true);
-    setSelectedObjectId(null);
-    setDraft({
-      schema: schemaFilter || rt.activeSchema || "public",
-      name: kind === "trigger" ? "new_trigger" : `new_${kind}`,
-      tableName:
-        meta.tables?.find(
-          (table) => table.schema === (schemaFilter || rt.activeSchema)
-        )?.name ?? "",
-    });
-    setEditorSql(
-      buildCreateDatabaseObjectTemplate({
-        engine: rt.engine,
-        kind,
-        schema: schemaFilter || rt.activeSchema || "public",
-        name: kind === "trigger" ? "new_trigger" : `new_${kind}`,
-        tableName:
-          meta.tables?.find(
-            (table) => table.schema === (schemaFilter || rt.activeSchema)
-          )?.name ?? "",
-      })
-    );
-  };
+  const startCreateMode = useCallback(
+    (nextKind?: DatabaseObjectKind) => {
+      const createKind = nextKind ?? kind;
+      if (nextKind && nextKind !== kind) {
+        setKind(nextKind);
+      }
+      setIsCreateMode(true);
+      setSelectedObjectId(null);
+      const schema = schemaFilter || rt.activeSchema || "public";
+      const name =
+        createKind === "trigger" ? "new_trigger" : `new_${createKind}`;
+      const tableName =
+        meta.tables?.find((table) => table.schema === schema)?.name ?? "";
+      setDraft({ schema, name, tableName });
+      setEditorSql(
+        buildCreateDatabaseObjectTemplate({
+          engine: rt.engine,
+          kind: createKind,
+          schema,
+          name,
+          tableName,
+        })
+      );
+    },
+    [schemaFilter, rt.activeSchema, rt.engine, kind, meta.tables, setEditorSql]
+  );
+
+  const createSeedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const objectId = win.initialObjectId?.trim() || "";
+    if (objectId) {
+      createSeedKeyRef.current = null;
+      return;
+    }
+    const key = `${win.id}:${win.initialKind ?? "function"}:create`;
+    if (createSeedKeyRef.current === key) return;
+    createSeedKeyRef.current = key;
+    startCreateMode(win.initialKind ?? "function");
+  }, [win.id, win.initialObjectId, win.initialKind, startCreateMode]);
 
   const regenerateTemplate = () => {
     setEditorSql(
@@ -317,6 +241,44 @@ export function DbObjectsManagerPane(props: {
     );
   };
 
+  const changeCreateKind = (nextKind: DatabaseObjectKind) => {
+    if (nextKind === kind) return;
+    const schema = draft.schema || schemaFilter || rt.activeSchema || "public";
+    const defaultNames = {
+      function: "new_function",
+      procedure: "new_procedure",
+      trigger: "new_trigger",
+    } as const;
+    const prevDefault =
+      kind === "trigger" ? "new_trigger" : (`new_${kind}` as const);
+    const nextName =
+      !draft.name || draft.name === prevDefault
+        ? defaultNames[nextKind]
+        : draft.name;
+    const nextTable =
+      nextKind === "trigger"
+        ? draft.tableName ||
+          meta.tables?.find((table) => table.schema === schema)?.name ||
+          ""
+        : "";
+    setKind(nextKind);
+    setDraft((prev) => ({
+      ...prev,
+      schema,
+      name: nextName,
+      tableName: nextTable,
+    }));
+    setEditorSql(
+      buildCreateDatabaseObjectTemplate({
+        engine: rt.engine,
+        kind: nextKind,
+        schema,
+        name: nextName,
+        tableName: nextTable,
+      })
+    );
+  };
+
   const openSavePreview = () => {
     const statements = buildSaveStatements({
       engine: rt.engine,
@@ -324,7 +286,7 @@ export function DbObjectsManagerPane(props: {
       sql: editorSql,
     });
     if (statements.length === 0) {
-      setError("SQL definition is empty.");
+      showToast("SQL definition is empty.", { tone: "error" });
       return;
     }
     setConfirmIntent({ kind: "save", statements });
@@ -362,8 +324,6 @@ export function DbObjectsManagerPane(props: {
   const confirmAction = async () => {
     if (!confirmIntent) return;
     setRunning(true);
-    setError(null);
-    setInfo(null);
     try {
       await executeStatements(confirmIntent.statements);
       const wasDelete = confirmIntent.kind === "delete";
@@ -381,37 +341,34 @@ export function DbObjectsManagerPane(props: {
             }
           : null;
 
-      setConfirmIntent(null);
       await refreshObjects();
 
       if (wasDelete) {
-        setSelectedObjectId(null);
-        setEditorSql("");
-        setInfo("Object deleted.");
+        const deletedKind = createdTarget?.kind ?? kind;
+        showToast("Object deleted.", { tone: "success" });
+        // Enter create immediately, then sync window (clears initialObjectId).
+        startCreateMode(deletedKind);
+        createSeedKeyRef.current = `${win.id}:${deletedKind}:create`;
+        openDatabaseObjectsManager({ kind: deletedKind });
       } else {
         if (createdTarget) {
           pendingSelectionRef.current = createdTarget;
         }
         setIsCreateMode(false);
-        setInfo("Object saved.");
+        showToast("Object saved.", { tone: "success" });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err ?? ""));
+      showToast(err instanceof Error ? err.message : String(err ?? ""), {
+        tone: "error",
+      });
     } finally {
+      setConfirmIntent(null);
       setRunning(false);
     }
   };
 
   const toolbar = (
-    <div class="flex h-10 items-center gap-2 border-y border-neutral-200 bg-neutral-50 px-3">
-      <Button
-        variant="ghost"
-        className="px-2 py-0.5 text-sm"
-        onClick={startCreateMode}
-        disabled={!kindCapability.canCreate || running}
-      >
-        Create
-      </Button>
+    <div class="flex h-10 min-w-0 items-center gap-2 overflow-x-auto border-y border-neutral-200 bg-neutral-50 px-3">
       <Button
         variant="ghost"
         className="px-2 py-0.5 text-sm"
@@ -469,87 +426,8 @@ export function DbObjectsManagerPane(props: {
     selectedObject?.capability.reason || kindCapability.reason;
 
   return (
-    <div class="flex h-full min-h-0 border-t border-neutral-200 bg-neutral-100">
-      <div class="flex w-80 min-w-72 flex-col border-r border-neutral-200 bg-neutral-100">
-        <div class="border-b border-neutral-200 px-3 py-3">
-          <div class="mb-2 flex items-center gap-1">
-            {(["function", "procedure", "trigger"] as DatabaseObjectKind[]).map(
-              (value) => (
-                <ObjectKindTab
-                  key={value}
-                  kind={value}
-                  active={kind === value}
-                  onClick={() => {
-                    setKind(value);
-                    setSelectedObjectId(null);
-                    setIsCreateMode(false);
-                    setError(null);
-                    setInfo(null);
-                  }}
-                />
-              )
-            )}
-          </div>
-          <div class="space-y-2">
-            <Input
-              value={search}
-              placeholder={`Search ${objectKindLabel(kind).toLowerCase()}...`}
-              className="border border-neutral-200 bg-white py-1 text-sm"
-              left={<SearchIcon className="size-4 text-neutral-500" />}
-              onValueChange={setSearch}
-            />
-            <Select
-              value={schemaFilter}
-              onChange={(e) =>
-                setSchemaFilter((e.currentTarget as HTMLSelectElement).value)
-              }
-              className="h-8 border-neutral-200"
-            >
-              {availableSchemas.map((schema) => (
-                <option key={schema} value={schema}>
-                  {schema}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-
-        <OverlayScrollArea
-          className="min-h-0 flex-1"
-          contentClassName="space-y-1 p-3"
-          dataScrollRoot
-        >
-          {!kindCapability.canList ? (
-            <div class="rounded-md border border-dashed border-neutral-300 bg-white px-3 py-4 text-sm text-neutral-500">
-              {unsupportedText}
-            </div>
-          ) : filteredObjects.length === 0 ? (
-            <div class="rounded-md border border-dashed border-neutral-300 bg-white px-3 py-4 text-sm text-neutral-500">
-              No {objectKindLabel(kind).toLowerCase()} found.
-            </div>
-          ) : (
-            <>
-              {visibleObjects.map((item) => (
-                <ObjectListItem
-                  key={item.id}
-                  item={item}
-                  active={selectedObjectId === item.id && !isCreateMode}
-                  onSelect={selectObject}
-                />
-              ))}
-              {hasMoreObjects ? (
-                <div
-                  ref={objectListSentinelRef}
-                  class="h-px"
-                  aria-hidden="true"
-                />
-              ) : null}
-            </>
-          )}
-        </OverlayScrollArea>
-      </div>
-
-      <div class="flex min-h-0 flex-1 flex-col bg-white">
+    <div class="flex h-full min-h-0 w-full min-w-0 overflow-hidden border-t border-neutral-200 bg-neutral-100">
+      <div class="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-white">
         <div class="border-b border-neutral-200 px-4 py-3">
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0">
@@ -565,99 +443,82 @@ export function DbObjectsManagerPane(props: {
                   ? "Seed a DDL template, review it, then confirm before applying."
                   : selectedObject
                     ? `${selectedObject.schema}${selectedObject.tableName ? ` · ${selectedObject.tableName}` : ""}${selectedObject.signature ? `(${selectedObject.signature})` : ""}`
-                    : "Browse functions, procedures, and triggers, then edit their DDL directly."}
+                    : "Open an object from the Objects sidebar or catalog to inspect or edit it."}
               </div>
             </div>
           </div>
         </div>
 
         {isCreateMode ? (
-          <div class="grid grid-cols-3 gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
-            <div class="space-y-1">
-              <div class="text-sm font-medium text-neutral-500">Schema</div>
-              <Select
-                value={draft.schema}
-                onChange={(e) =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    schema: (e.currentTarget as HTMLSelectElement).value,
-                  }))
-                }
-                className="h-8 border-neutral-200"
-              >
-                {availableSchemas.map((schema) => (
-                  <option key={schema} value={schema}>
-                    {schema}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div class="space-y-1">
-              <div class="text-sm font-medium text-neutral-500">Name</div>
-              <Input
-                value={draft.name}
-                className="border border-neutral-200 bg-white py-1.25 text-sm"
-                onValueChange={(value) =>
-                  setDraft((prev) => ({ ...prev, name: value }))
-                }
-              />
-            </div>
-            <div class="space-y-1">
-              <div class="text-sm font-medium text-neutral-500">
-                {kind === "trigger" ? "Target table" : "Object type"}
-              </div>
-              {kind === "trigger" ? (
+          <div class="border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+            <div class="flex min-w-0 flex-1 flex-wrap gap-3">
+              <div class="min-w-0 flex-1 basis-40 space-y-1">
+                <div class="text-sm font-medium text-neutral-500">Schema</div>
                 <Select
-                  value={draft.tableName}
+                  value={draft.schema}
                   onChange={(e) =>
                     setDraft((prev) => ({
                       ...prev,
-                      tableName: (e.currentTarget as HTMLSelectElement).value,
+                      schema: (e.currentTarget as HTMLSelectElement).value,
                     }))
                   }
-                  className="h-8 border-neutral-200"
+                  className="h-8 w-full min-w-0 border-neutral-200"
                 >
-                  <option value="">Select table</option>
-                  {(meta.tables ?? [])
-                    .filter((table) => table.schema === draft.schema)
-                    .map((table) => (
-                      <option
-                        key={`${table.schema}.${table.name}`}
-                        value={table.name}
-                      >
-                        {table.name}
-                      </option>
-                    ))}
+                  {availableSchemas.map((schema) => (
+                    <option key={schema} value={schema}>
+                      {schema}
+                    </option>
+                  ))}
                 </Select>
-              ) : (
-                <div class="flex items-center rounded-md border border-neutral-200 bg-white px-2 py-1.25 text-sm font-medium text-neutral-600">
-                  {objectKindLabel(kind)}
+              </div>
+              <div class="min-w-0 flex-1 basis-40 space-y-1">
+                <div class="text-sm font-medium text-neutral-500">Name</div>
+                <Input
+                  value={draft.name}
+                  className="w-full min-w-0 border border-neutral-200 bg-white py-1.25 text-sm"
+                  onValueChange={(value) =>
+                    setDraft((prev) => ({ ...prev, name: value }))
+                  }
+                />
+              </div>
+              <div class="min-w-0 flex-1 basis-40 space-y-1">
+                <div class="text-sm font-medium text-neutral-500">
+                  Object type
                 </div>
-              )}
+                <Select
+                  value={kind}
+                  onChange={(e) =>
+                    changeCreateKind(
+                      (e.currentTarget as HTMLSelectElement)
+                        .value as DatabaseObjectKind
+                    )
+                  }
+                  className="h-8 w-full min-w-0 border-neutral-200"
+                >
+                  {(
+                    ["function", "procedure", "trigger"] as DatabaseObjectKind[]
+                  ).map((value) => (
+                    <option key={value} value={value}>
+                      {objectKindLabel(value)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
             </div>
           </div>
         ) : null}
 
         {toolbar}
 
-        {error || loadError ? (
-          <div class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-            {error || loadError}
-          </div>
-        ) : null}
-        {info ? (
-          <div class="border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">
-            {info}
-          </div>
-        ) : null}
         {!rt.runtimeConnectionId ? (
           <div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
             Connect to a profile to manage database objects.
           </div>
         ) : null}
-        {!isCreateMode && !selectedObject && kindCapability.canList ? (
+        {!isCreateMode && !selectedObject ? (
           <div class="border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-sm text-neutral-500">
-            Select a {objectKindSingular(kind)} to inspect or edit it.
+            Open a {objectKindSingular(kind)} from the Objects sidebar or
+            catalog to inspect or edit it.
           </div>
         ) : null}
         {(isCreateMode || selectedObject) &&
@@ -669,7 +530,7 @@ export function DbObjectsManagerPane(props: {
           </div>
         ) : null}
 
-        <div class="min-h-0 flex-1">
+        <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
           <SqlEditorPane
             key={editorStorageId}
             win={{

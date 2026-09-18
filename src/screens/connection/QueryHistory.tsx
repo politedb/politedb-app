@@ -4,6 +4,7 @@ import {
   TrashIcon,
   CopyIcon,
   CopyCheckIcon,
+  SaveIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Box } from "src/components/common/Box";
@@ -14,6 +15,7 @@ import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {
   activeProfileId: string;
+  onSaveAsSnippet?: (sql: string) => void;
 }
 
 function pad2(n: number) {
@@ -84,7 +86,7 @@ export function highlightSql(sql: string): ComponentChildren {
   return parts;
 }
 
-export function QueryHistory({ activeProfileId }: Props) {
+export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
   const queryHistory = useConnectionStore((s) => s.queryHistory);
   const clearHistory = useConnectionStore((s) => s.clearQueryHistory);
   const [copied, setCopied] = useState(false);
@@ -166,7 +168,20 @@ export function QueryHistory({ activeProfileId }: Props) {
                     </div>
                   </div>
 
-                  <div class="shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div class="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {onSaveAsSnippet ? (
+                      <Button
+                        variant="ghost"
+                        class="h-7 px-2 text-xs text-neutral-600 hover:bg-neutral-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSaveAsSnippet(sqlRaw);
+                        }}
+                        title="Save as snippet"
+                      >
+                        <SaveIcon className="size-4" />
+                      </Button>
+                    ) : null}
                     <Button
                       variant="ghost"
                       class="h-7 px-2 text-xs text-neutral-600 hover:bg-neutral-100"
