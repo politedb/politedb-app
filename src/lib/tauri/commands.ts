@@ -66,6 +66,10 @@ export const CMD = {
   draftSqlClear: "sql_draft_clear",
   draftSqlGC: "sql_draft_gc",
 
+  // Snippet library
+  snippetsLoad: "snippets_load",
+  snippetsSave: "snippets_save",
+
   // Persistent storage
   persistentLoad: "persistent_load",
   persistentSave: "persistent_save",

@@ -19,6 +19,9 @@ const PROFILES_FILE: &str = "profiles.json";
 const DRAFTS_DIR: &str = "drafts";
 const SQL_DRAFTS_DIR: &str = "sql";
 
+const SNIPPETS_DIR: &str = "snippets";
+const SNIPPETS_LIBRARY_FILE: &str = "library.json";
+
 fn app_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -102,6 +105,12 @@ pub fn dir_sql_drafts(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 pub fn path_sql_draft(app: &tauri::AppHandle, draft_id: &str) -> Result<PathBuf, String> {
     // draft_id should be safe for filenames (windowId/tabId); caller responsibility.
     Ok(dir_sql_drafts(app)?.join(format!("{draft_id}.sql")))
+}
+
+pub fn path_snippets_library(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?
+        .join(SNIPPETS_DIR)
+        .join(SNIPPETS_LIBRARY_FILE))
 }
 
 /* -------------------------------------------------------------------------- */

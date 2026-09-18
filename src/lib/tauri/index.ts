@@ -12,4 +12,5 @@ export * from "./redis";
 export * from "./ai";
 export * from "./license";
 export * from "./sql";
+export * from "./snippets";
 export * from "./security";

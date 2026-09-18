@@ -10,5 +10,6 @@ pub mod operation;
 pub mod persistent;
 pub mod profile;
 pub mod security;
+pub mod snippets;
 pub mod sql_draft;
 pub mod updater;

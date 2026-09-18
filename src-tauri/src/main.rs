@@ -209,6 +209,9 @@ fn main() {
             commands::sql_draft::sql_draft_load,
             commands::sql_draft::sql_draft_clear,
             commands::sql_draft::sql_draft_gc,
+            // snippets library
+            commands::snippets::snippets_load,
+            commands::snippets::snippets_save,
             // persistent
             commands::persistent::persistent_load,
             commands::persistent::persistent_save,
