@@ -22,6 +22,8 @@ import { buildPatchDiffs } from "src/utils/patchDiff";
 import { sqlForDisplay } from "src/utils/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
+import type { ObjectChangeSummary } from "src/lib/objectEditorDraftCache";
+import { emptyObjectChangeSummary } from "src/lib/objectEditorDraftCache";
 
 type ChangeSummary = {
   inserts: number;
@@ -86,6 +88,38 @@ function analyzePatches(
   };
 }
 
+function formatCountPart(
+  count: number,
+  singular: string,
+  plural = `${singular}s`
+) {
+  if (count <= 0) return null;
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function buildActionParts(parts: Array<string | null | undefined>): string[] {
+  return parts.filter((part): part is string => !!part);
+}
+
+interface ActionSummaryProps {
+  label: string;
+  color: string;
+  parts: string[];
+}
+
+function ActionSummary({ label, color, parts }: ActionSummaryProps) {
+  if (parts.length === 0) return null;
+
+  return (
+    <div class="flex items-start gap-2 sm:col-span-2">
+      <span class={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${color}`}>
+        {label}
+      </span>
+      <span class="text-neutral-700">{parts.join(", ")}</span>
+    </div>
+  );
+}
+
 interface SummaryItemProps {
   label: string;
   entity: string;
@@ -109,17 +143,36 @@ function SummaryItem({ label, entity, count, color }: SummaryItemProps) {
 }
 
 const SQL_BORDER_COLORS = {
+  // Prefer utilities that have html.dark remaps in styles.css (light text on tinted dark cards).
   create: "border-blue-300 bg-blue-100",
-  insert: "border-green-300 bg-green-100",
+  insert: "border-green-200 bg-green-50",
   update: "border-amber-300 bg-amber-100",
-  delete: "border-red-300 bg-red-100",
+  delete: "border-rose-300 bg-red-50",
   structure: "border-blue-300 bg-blue-100",
-  constraint: "border-purple-300 bg-purple-100",
+  constraint: "border-indigo-200 bg-indigo-100",
 };
 
 function getSqlType(sql: string): keyof typeof SQL_BORDER_COLORS {
   const upperSql = sql.trim().toUpperCase();
   if (upperSql.startsWith("CREATE TABLE")) return "create";
+  if (
+    upperSql.startsWith("CREATE FUNCTION") ||
+    upperSql.startsWith("CREATE OR REPLACE FUNCTION") ||
+    upperSql.startsWith("CREATE PROCEDURE") ||
+    upperSql.startsWith("CREATE OR REPLACE PROCEDURE") ||
+    upperSql.startsWith("CREATE TRIGGER") ||
+    upperSql.startsWith("CREATE OR REPLACE TRIGGER") ||
+    upperSql.startsWith("CREATE CONSTRAINT TRIGGER")
+  ) {
+    return "create";
+  }
+  if (
+    upperSql.startsWith("DROP FUNCTION") ||
+    upperSql.startsWith("DROP PROCEDURE") ||
+    upperSql.startsWith("DROP TRIGGER")
+  ) {
+    return "delete";
+  }
   if (upperSql.startsWith("INSERT")) return "insert";
   if (upperSql.startsWith("UPDATE")) return "update";
   if (upperSql.startsWith("DELETE")) return "delete";
@@ -150,6 +203,8 @@ interface Props {
   patchMap: PatchMap;
   engine: DatabaseEngine;
   newTableSql?: string[];
+  objectSql?: string[];
+  objectChangeSummary?: ObjectChangeSummary;
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
   getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
@@ -163,6 +218,8 @@ export function SaveChangesDialog({
   patchMap,
   engine,
   newTableSql = [],
+  objectSql = [],
+  objectChangeSummary,
   activeScreen,
   getRowAt,
   getOriginalRowAt,
@@ -184,8 +241,8 @@ export function SaveChangesDialog({
 
   const allSqlStatements = useMemo(() => {
     const patchSql = summary.sqlStatements;
-    return [...(newTableSql || []), ...patchSql];
-  }, [summary.sqlStatements, newTableSql]);
+    return [...(newTableSql || []), ...(objectSql || []), ...patchSql];
+  }, [summary.sqlStatements, newTableSql, objectSql]);
 
   const displaySqlStatements = useMemo(
     () => allSqlStatements.map((sql) => sqlForDisplay(sql, engine)),
@@ -203,13 +260,65 @@ export function SaveChangesDialog({
     [patchMap, activeScreen, getRowAt, getOriginalRowAt, offset]
   );
 
+  const objectSummary = objectChangeSummary ?? emptyObjectChangeSummary();
+
+  const rowEntity = isMongo ? "document" : "row";
+  const rowEntityPlural = isMongo ? "documents" : "rows";
+
+  const insertSummaryParts = useMemo(
+    () =>
+      buildActionParts([
+        formatCountPart(newTableSql?.length ?? 0, "table"),
+        formatCountPart(summary.inserts, rowEntity, rowEntityPlural),
+        formatCountPart(objectSummary.insertFunctions, "function"),
+        formatCountPart(objectSummary.insertProcedures, "procedure"),
+        formatCountPart(objectSummary.insertTriggers, "trigger"),
+      ]),
+    [
+      newTableSql,
+      summary.inserts,
+      rowEntity,
+      rowEntityPlural,
+      objectSummary.insertFunctions,
+      objectSummary.insertProcedures,
+      objectSummary.insertTriggers,
+    ]
+  );
+
+  const updateSummaryParts = useMemo(
+    () =>
+      buildActionParts([
+        formatCountPart(summary.updates, rowEntity, rowEntityPlural),
+        formatCountPart(objectSummary.updateFunctions, "function"),
+        formatCountPart(objectSummary.updateProcedures, "procedure"),
+        formatCountPart(objectSummary.updateTriggers, "trigger"),
+      ]),
+    [
+      summary.updates,
+      rowEntity,
+      rowEntityPlural,
+      objectSummary.updateFunctions,
+      objectSummary.updateProcedures,
+      objectSummary.updateTriggers,
+    ]
+  );
+
+  const deleteSummaryParts = useMemo(
+    () =>
+      buildActionParts([
+        formatCountPart(summary.deletes, rowEntity, rowEntityPlural),
+      ]),
+    [summary.deletes, rowEntity, rowEntityPlural]
+  );
+
   const hasChanges =
     summary.inserts > 0 ||
     summary.updates > 0 ||
     summary.deletes > 0 ||
     summary.structureChanges > 0 ||
     summary.constraintChanges > 0 ||
-    newTableSql?.length > 0;
+    newTableSql?.length > 0 ||
+    objectSql?.length > 0;
 
   const onCopyStatement = useCallback(async (sql: string, index: number) => {
     setCopiedIndex(index);
@@ -229,7 +338,7 @@ export function SaveChangesDialog({
       open={open}
       onClose={onClose}
       closeOnOutsideClick={false}
-      className="flex h-[min(90vh,48rem)] flex-col overflow-hidden"
+      className="flex max-h-[min(90vh,50rem)] flex-col overflow-hidden"
     >
       <DialogHeader className="shrink-0">
         <DialogTitle>Review changes before saving</DialogTitle>
@@ -244,36 +353,27 @@ export function SaveChangesDialog({
           contentClassName="space-y-4"
         >
           {/* Summary Section */}
-          <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-            <h3 class="mb-3 text-sm font-semibold text-neutral-900">
-              Summary of Changes
-            </h3>
-            <div class="grid grid-cols-2 gap-2 text-sm">
-              {newTableSql && newTableSql.length > 0 && (
-                <SummaryItem
-                  label="CREATE TABLE"
-                  entity="table"
-                  count={newTableSql.length}
-                  color="bg-blue-100 text-blue-800"
-                />
-              )}
-              <SummaryItem
+          <div class="w-full rounded-lg border border-neutral-200">
+            <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+              <h3 class="text-sm font-semibold text-neutral-900">
+                Summary of Changes
+              </h3>
+            </div>
+            <div class="grid grid-cols-1 gap-2 p-4 text-sm sm:grid-cols-2">
+              <ActionSummary
                 label="INSERT"
-                entity={isMongo ? "document" : "row"}
-                count={summary.inserts}
-                color="bg-green-100 text-green-800"
+                color="bg-green-50 text-green-700"
+                parts={insertSummaryParts}
               />
-              <SummaryItem
+              <ActionSummary
                 label="UPDATE"
-                entity={isMongo ? "document" : "row"}
-                count={summary.updates}
                 color="bg-amber-100 text-amber-800"
+                parts={updateSummaryParts}
               />
-              <SummaryItem
+              <ActionSummary
                 label="DELETE"
-                entity={isMongo ? "document" : "row"}
-                count={summary.deletes}
-                color="bg-red-100 text-red-800"
+                color="bg-red-50 text-red-700"
+                parts={deleteSummaryParts}
               />
               <SummaryItem
                 label="STRUCTURE"
@@ -291,14 +391,14 @@ export function SaveChangesDialog({
           </div>
 
           {rowDiffs.length > 0 && (
-            <div class="rounded-lg border border-neutral-200">
+            <div class="w-full rounded-lg border border-neutral-200">
               <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
                 <h3 class="text-sm font-semibold text-neutral-900">
                   Row & Column Diff ({rowDiffs.length})
                 </h3>
               </div>
               <OverlayScrollArea
-                className="max-h-52"
+                className="max-h-45 w-full"
                 contentClassName="space-y-3 p-4"
               >
                 {rowDiffs.map((diff, index) => (
@@ -319,7 +419,7 @@ export function SaveChangesDialog({
                         class={cn(
                           "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
                           diff.action === "insert" &&
-                            "bg-green-100 text-green-700",
+                            "bg-green-50 text-green-700",
                           diff.action === "update" &&
                             "bg-amber-100 text-amber-700",
                           diff.action === "delete" && "bg-red-100 text-red-700"
@@ -355,7 +455,7 @@ export function SaveChangesDialog({
           )}
 
           {/* SQL Statements Section */}
-          <div class="rounded-lg border border-neutral-200">
+          <div class="mb-1 w-full rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
               <h3 class="text-sm font-semibold text-neutral-900">
                 {isMongo
@@ -363,7 +463,10 @@ export function SaveChangesDialog({
                   : `SQL Statements to Execute (${allSqlStatements.length})`}
               </h3>
             </div>
-            <OverlayScrollArea className="max-h-60" contentClassName="p-4">
+            <OverlayScrollArea
+              className="max-h-52 w-full"
+              contentClassName="p-4"
+            >
               {allSqlStatements.length === 0 ? (
                 <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   {isMongo
@@ -420,7 +523,7 @@ export function SaveChangesDialog({
           Cancel
         </Button>
         <Button className="py-1.5" variant="default" onClick={onConfirm}>
-          Confirm & Save
+          Confirm & Apply
         </Button>
       </DialogFooter>
     </Dialog>

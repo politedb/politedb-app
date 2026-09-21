@@ -1,12 +1,27 @@
+import type { ObjectSaveHandler } from "../ConnectionRuntimeContext";
 import { useCallback, useRef } from "preact/hooks";
 
 import type {
   DatabaseEngine,
+  DatabaseObjectItem,
   OpenWindow,
   TableItem,
   TableWindow,
 } from "src/types";
 import { connectionRemove, operationExecuteTransaction } from "src/lib/tauri";
+import { runSqlQuery } from "src/lib/tauri/query";
+import {
+  clearObjectEditorDraft,
+  collectObjectChangeSummary,
+  collectPendingObjectSaveEntries,
+  collectPendingObjectSql,
+  emptyObjectChangeSummary,
+  objectCreateDraftCache,
+  objectEditDraftCache,
+  revertObjectEditDraft,
+  type ObjectChangeSummary,
+} from "src/lib/objectEditorDraftCache";
+import { showToast } from "src/stores/toast";
 import { runRedisCommand } from "src/lib/tauri/redis";
 import { tableKey } from "src/lib/table-data";
 import type { LoadFlags, TablePagination } from "src/lib/table-data";
@@ -96,6 +111,10 @@ export type UseConnectionActionsArgs = {
   setActiveProfileScreen: (tabId: string) => void;
 
   newTableSaveRef: Ref<(() => Promise<void>) | null>;
+  objectSaveRef: Ref<ObjectSaveHandler | null>;
+  /** Latest database objects after metadata refresh (for binding create windows). */
+  listDatabaseObjects?: () => DatabaseObjectItem[];
+  activeSchema?: string;
 };
 
 export type ConnectionActions = {
@@ -110,6 +129,8 @@ export type ConnectionActions = {
   discardChanges: () => Promise<void>;
   getPatchMap: () => PatchMap | null;
   getNewTableSql: () => { data: string[]; error: string | null };
+  getObjectSql: () => string[];
+  getObjectChangeSummary: () => ObjectChangeSummary;
   renameRedisKey: (table: TableItem, nextName: string) => Promise<void>;
   deleteRedisKey: (table: TableItem) => Promise<void>;
 };
@@ -351,6 +372,9 @@ export function useConnectionActions(
     removeTab,
     setActiveProfileScreen,
     refreshRuntimeConnection,
+    objectSaveRef,
+    listDatabaseObjects,
+    activeSchema,
   } = args;
 
   const clearChanges = useCallback((tabId: string, tableWindowId?: string) => {
@@ -493,6 +517,29 @@ export function useConnectionActions(
 
     return { data: drafts.data.map((draft) => draft.sql), error: null };
   }, [activeProfileScreen, openWindows, engine]);
+
+  const getObjectSql = useCallback(() => {
+    if (!engine) return objectSaveRef.current?.getPendingSql() ?? [];
+    const windows = openWindows[activeProfileScreen] ?? [];
+    const fromOpen = collectPendingObjectSql({
+      openWindows: windows,
+      engine,
+      defaultSchema: activeSchema,
+    });
+    // Fallback: active pane only (tests / cache not yet seeded).
+    if (fromOpen.length > 0) return fromOpen;
+    return objectSaveRef.current?.getPendingSql() ?? [];
+  }, [engine, openWindows, activeProfileScreen, objectSaveRef, activeSchema]);
+
+  const getObjectChangeSummary = useCallback((): ObjectChangeSummary => {
+    if (!engine) return emptyObjectChangeSummary();
+    const windows = openWindows[activeProfileScreen] ?? [];
+    return collectObjectChangeSummary({
+      openWindows: windows,
+      engine,
+      defaultSchema: activeSchema,
+    });
+  }, [engine, openWindows, activeProfileScreen, activeSchema]);
 
   const getPatchMap = useCallback((): PatchMap | null => {
     const patchMap = getTabPatchMap(activeProfileScreen);
@@ -711,18 +758,20 @@ export function useConnectionActions(
 
     const patchMap = getPatchMap();
     const hasPatches = patchMap && Object.keys(patchMap).length > 0;
+    const hasObjectSql = getObjectSql().length > 0;
 
     if (newTableSql.error) {
       setError(newTableSql.error);
       return;
     }
 
-    if (!hasPatches && !hasNewTable) return;
+    if (!hasPatches && !hasNewTable && !hasObjectSql) return;
 
     setShowSaveDialog(true);
   }, [
     isActiveTabLocked,
     getNewTableSql,
+    getObjectSql,
     getPatchMap,
     setShowSaveDialog,
     setError,
@@ -787,6 +836,103 @@ export function useConnectionActions(
     openTable,
   ]);
 
+  const saveObjectDrafts = useCallback(async () => {
+    if (!engine) return;
+
+    const windows = openWindows[activeProfileScreen] ?? [];
+    const entries = collectPendingObjectSaveEntries({
+      openWindows: windows,
+      engine,
+      defaultSchema: activeSchema,
+    });
+    if (!entries.length) return;
+
+    const connectionId =
+      runtimeConnectionId ?? (await refreshRuntimeConnection());
+    if (!connectionId) {
+      setError("No active connection.");
+      return;
+    }
+
+    const statements = entries.flatMap((entry) => entry.statements);
+    try {
+      if (statements.length === 1) {
+        await runSqlQuery(connectionId, statements[0]!);
+      } else {
+        await operationExecuteTransaction({
+          connectionId,
+          statements,
+        });
+      }
+
+      await refreshSchemaAndTables();
+
+      const objects = listDatabaseObjects?.() ?? [];
+      const screen = useScreenStore.getState();
+
+      for (const entry of entries) {
+        if (entry.mode === "create" && entry.create) {
+          const match = objects.find(
+            (item) =>
+              item.kind === entry.create!.kind &&
+              item.schema === entry.create!.draft.schema &&
+              item.name === entry.create!.draft.name
+          );
+          objectCreateDraftCache.delete(entry.windowId);
+          if (match) {
+            objectEditDraftCache.set(entry.windowId, {
+              item: match,
+              sql: entry.create.sql,
+              baselineSql: entry.create.sql,
+            });
+            screen.updateWindow(activeProfileScreen, entry.windowId, {
+              initialObjectId: match.id,
+              title: match.name,
+              initialKind: match.kind,
+              dirty: false,
+            });
+          } else {
+            clearObjectEditorDraft(entry.windowId);
+            screen.updateWindow(activeProfileScreen, entry.windowId, {
+              dirty: false,
+            });
+          }
+          continue;
+        }
+
+        if (entry.mode === "edit" && entry.edit) {
+          objectEditDraftCache.set(entry.windowId, {
+            item: entry.edit.item,
+            sql: entry.edit.sql,
+            baselineSql: entry.edit.sql,
+          });
+          screen.updateWindow(activeProfileScreen, entry.windowId, {
+            dirty: false,
+          });
+        }
+      }
+
+      showToast(entries.length === 1 ? "Object saved." : "Objects saved.", {
+        tone: "success",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err ?? "");
+      showToast(message, { tone: "error" });
+      setError(normalizeSqlError(err));
+      throw err;
+    }
+  }, [
+    engine,
+    openWindows,
+    activeProfileScreen,
+    runtimeConnectionId,
+    refreshRuntimeConnection,
+    refreshSchemaAndTables,
+    listDatabaseObjects,
+    activeSchema,
+    setError,
+  ]);
+
   const saveChanges = useCallback(async () => {
     if (isActiveTabLocked) return;
     const safetyMode =
@@ -813,6 +959,13 @@ export function useConnectionActions(
       jobs.push(saveNewTables());
     }
 
+    if (
+      getObjectSql().length > 0 &&
+      useUnsavedChangesDialogStore.getState().pendingCloseTabId === null
+    ) {
+      jobs.push(saveObjectDrafts());
+    }
+
     if (jobs.length) await Promise.all(jobs);
   }, [
     isActiveTabLocked,
@@ -822,6 +975,8 @@ export function useConnectionActions(
     applyPatchesForCurrentTab,
     setError,
     saveNewTables,
+    getObjectSql,
+    saveObjectDrafts,
   ]);
 
   const closeTab = useCallback(
@@ -837,6 +992,11 @@ export function useConnectionActions(
         }
 
         clearChanges(tabId);
+
+        const windowsForCache = openWindows[tabId] ?? [];
+        for (const w of windowsForCache) {
+          if (w.type === "db-object-manager") clearObjectEditorDraft(w.id);
+        }
 
         const currentTab = profileTabs.find((t) => t.id === tabId);
         const newTabs = profileTabs.filter((t) => t.id !== tabId);
@@ -911,15 +1071,47 @@ export function useConnectionActions(
     [openWindows, closeWindow]
   );
 
+  /** Discard unsaved object drafts: close creates, revert dirty edits. */
+  const discardObjectDrafts = useCallback(
+    async (tabId: string) => {
+      const windows = openWindows[tabId] ?? [];
+      if (!windows.length) return;
+
+      const screen = useScreenStore.getState();
+
+      for (const w of windows) {
+        if (w.type !== "db-object-manager") continue;
+        const isCreate = !(w.initialObjectId ?? "").trim();
+        if (isCreate) {
+          clearObjectEditorDraft(w.id);
+          await closeWindow(w.id, new MouseEvent("click"));
+          continue;
+        }
+        if (!w.dirty) {
+          clearObjectEditorDraft(w.id);
+          continue;
+        }
+        revertObjectEditDraft(w.id);
+        screen.updateWindow(tabId, w.id, { dirty: false });
+      }
+    },
+    [openWindows, closeWindow]
+  );
+
   const discardChanges = useCallback(async () => {
     const pendingCloseTabId =
       useUnsavedChangesDialogStore.getState().pendingCloseTabId;
 
     if (pendingCloseTabId) {
+      const windows = openWindows[pendingCloseTabId] ?? [];
+      for (const w of windows) {
+        if (w.type === "db-object-manager") clearObjectEditorDraft(w.id);
+      }
       clearChanges(pendingCloseTabId);
       await closeTab(pendingCloseTabId, true);
     } else {
       await closeNewWindows(activeProfileScreen);
+      await discardObjectDrafts(activeProfileScreen);
       clearChanges(activeProfileScreen);
     }
 
@@ -953,6 +1145,8 @@ export function useConnectionActions(
     clearChanges,
     closeTab,
     closeNewWindows,
+    discardObjectDrafts,
+    openWindows,
   ]);
 
   const renameRedisKey = useCallback(
@@ -1049,6 +1243,8 @@ export function useConnectionActions(
     discardChanges,
     getPatchMap,
     getNewTableSql,
+    getObjectSql,
+    getObjectChangeSummary,
     renameRedisKey,
     deleteRedisKey,
   };

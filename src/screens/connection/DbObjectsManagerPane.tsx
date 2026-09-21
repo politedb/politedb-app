@@ -6,21 +6,12 @@ import {
   useState,
 } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import { Spinner } from "src/components/common/Spinner";
-import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { useScreenStore } from "src/stores/screen";
 import { useLoadDbObjectDefinition } from "./hooks/useLoadDbObjectDefinition";
 import type {
   DatabaseObjectKind,
@@ -28,12 +19,18 @@ import type {
 } from "src/types";
 import {
   buildCreateDatabaseObjectTemplate,
-  buildDropDatabaseObjectSql,
   buildSaveStatements,
+  nextUniqueObjectDraftName,
   getDatabaseObjectCapability,
   objectKindLabel,
   objectKindSingular,
 } from "src/lib/databaseObjects";
+import {
+  consumeObjectEditorReset,
+  hasObjectEditorReset,
+  objectCreateDraftCache,
+  objectEditDraftCache,
+} from "src/lib/objectEditorDraftCache";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { operationExecuteTransaction } from "src/lib/tauri";
 import { showToast } from "src/stores/toast";
@@ -52,10 +49,6 @@ const SqlEditorPane = createRetryableLazy(loadSqlEditorPane, {
   ),
 });
 
-type ConfirmIntent =
-  | { kind: "save"; statements: string[] }
-  | { kind: "delete"; statements: string[] };
-
 type DraftState = {
   schema: string;
   name: string;
@@ -67,7 +60,6 @@ export function DbObjectsManagerPane(props: {
 }) {
   const { win } = props;
   const rt = useConnectionRuntimeCtx();
-  const { openDatabaseObjectsManager } = useConnectionWindows(rt.profileId);
   const [kind, setKind] = useState<DatabaseObjectKind>(
     win.initialKind ?? "function"
   );
@@ -82,9 +74,6 @@ export function DbObjectsManagerPane(props: {
     tableName: "",
   });
   const [running, setRunning] = useState(false);
-  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent | null>(
-    null
-  );
   const pendingSelectionRef = useRef<{
     kind: DatabaseObjectKind;
     schema: string;
@@ -107,8 +96,12 @@ export function DbObjectsManagerPane(props: {
   const kindCapability = getDatabaseObjectCapability(rt.engine, kind);
 
   useEffect(() => {
-    setKind(win.initialKind ?? "function");
-  }, [win.initialKind]);
+    // Only adopt kind from window when opening an existing object / external navigation.
+    // During create, local Select owns kind — echoing win.initialKind remount-loops the editor.
+    if (!(win.initialObjectId ?? "").trim() && isCreateMode) return;
+    const next = win.initialKind ?? "function";
+    setKind((prev) => (prev === next ? prev : next));
+  }, [win.initialKind, win.initialObjectId, isCreateMode]);
 
   useEffect(() => {
     if (!availableSchemas.length) return;
@@ -119,11 +112,11 @@ export function DbObjectsManagerPane(props: {
   useEffect(() => {
     const objectId = win.initialObjectId?.trim() || "";
     if (objectId) {
-      setSelectedObjectId(objectId);
+      setSelectedObjectId((prev) => (prev === objectId ? prev : objectId));
       setIsCreateMode(false);
       return;
     }
-    setSelectedObjectId(null);
+    setSelectedObjectId((prev) => (prev === null ? prev : null));
     setIsCreateMode(true);
   }, [win.initialObjectId]);
 
@@ -157,6 +150,8 @@ export function DbObjectsManagerPane(props: {
   const {
     sql: editorSql,
     setSql: setEditorSql,
+    baselineSql,
+    setBaselineSql,
     loading: loadingDefinition,
     loadError,
   } = useLoadDbObjectDefinition({
@@ -171,26 +166,64 @@ export function DbObjectsManagerPane(props: {
     showToast(loadError, { tone: "error" });
   }, [loadError]);
 
-  const editorStorageId = useMemo(() => {
-    if (selectedObject) {
-      return `db-object:${rt.profileId}:${selectedObject.id}`;
-    }
-    return `db-object:${rt.profileId}:new:${kind}:${draft.schema}:${draft.name}:${draft.tableName}`;
-  }, [
-    selectedObject,
-    rt.profileId,
-    kind,
-    draft.schema,
-    draft.name,
-    draft.tableName,
-  ]);
+  // Stable for the life of the window — do NOT include kind/name (remounts Monaco → reload loop).
+  const editorStorageId = `db-object:${win.id}`;
 
-  const refreshObjects = async () => {
+  const refreshObjects = useCallback(async () => {
     await rt.refreshSchemaAndTables();
-  };
+  }, [rt]);
+
+  const collectTakenDraftNames = useCallback(
+    (excludeWindowId?: string) => {
+      const taken = (meta.objects ?? []).map((item) => item.name);
+      const windows = useScreenStore.getState().openWindows[rt.profileId] ?? [];
+      for (const w of windows) {
+        if (w.type !== "db-object-manager") continue;
+        if (excludeWindowId && w.id === excludeWindowId) continue;
+        if ((w.initialObjectId ?? "").trim()) continue;
+        if (w.title?.trim()) taken.push(w.title.trim());
+      }
+      return taken;
+    },
+    [meta.objects, rt.profileId]
+  );
+
+  const winRef = useRef(win);
+  winRef.current = win;
+
+  const syncCreateWindowNav = useCallback(
+    (next: { title: string; kind: DatabaseObjectKind }) => {
+      const current = useScreenStore
+        .getState()
+        .openWindows[rt.profileId]?.find((w) => w.id === win.id);
+      if (
+        current?.type === "db-object-manager" &&
+        current.title === next.title &&
+        (current.initialKind ?? "function") === next.kind
+      ) {
+        return;
+      }
+      useScreenStore.getState().updateWindow(rt.profileId, win.id, {
+        title: next.title,
+        initialKind: next.kind,
+      });
+    },
+    [rt.profileId, win.id]
+  );
 
   const startCreateMode = useCallback(
     (nextKind?: DatabaseObjectKind) => {
+      const current = winRef.current;
+      const cached = objectCreateDraftCache.get(current.id);
+      if (cached && !nextKind) {
+        setKind(cached.kind);
+        setIsCreateMode(true);
+        setSelectedObjectId(null);
+        setDraft(cached.draft);
+        setEditorSql(cached.sql);
+        syncCreateWindowNav({ title: cached.draft.name, kind: cached.kind });
+        return;
+      }
       const createKind = nextKind ?? kind;
       if (nextKind && nextKind !== kind) {
         setKind(nextKind);
@@ -198,36 +231,61 @@ export function DbObjectsManagerPane(props: {
       setIsCreateMode(true);
       setSelectedObjectId(null);
       const schema = schemaFilter || rt.activeSchema || "public";
+      const preferred =
+        !nextKind || nextKind === (current.initialKind ?? "function")
+          ? current.title?.trim() || ""
+          : "";
+      const taken = collectTakenDraftNames(current.id);
       const name =
-        createKind === "trigger" ? "new_trigger" : `new_${createKind}`;
+        preferred &&
+        !taken.some((n) => n.toLowerCase() === preferred.toLowerCase())
+          ? preferred
+          : nextUniqueObjectDraftName(createKind, taken);
       const tableName =
         meta.tables?.find((table) => table.schema === schema)?.name ?? "";
-      setDraft({ schema, name, tableName });
-      setEditorSql(
-        buildCreateDatabaseObjectTemplate({
-          engine: rt.engine,
-          kind: createKind,
-          schema,
-          name,
-          tableName,
-        })
-      );
+      const nextDraft = { schema, name, tableName };
+      const sql = buildCreateDatabaseObjectTemplate({
+        engine: rt.engine,
+        kind: createKind,
+        schema,
+        name,
+        tableName,
+      });
+      setDraft(nextDraft);
+      setEditorSql(sql);
+      objectCreateDraftCache.set(current.id, {
+        draft: nextDraft,
+        kind: createKind,
+        sql,
+      });
+      syncCreateWindowNav({ title: name, kind: createKind });
     },
-    [schemaFilter, rt.activeSchema, rt.engine, kind, meta.tables, setEditorSql]
+    [
+      schemaFilter,
+      rt.activeSchema,
+      rt.engine,
+      kind,
+      meta.tables,
+      setEditorSql,
+      collectTakenDraftNames,
+      syncCreateWindowNav,
+    ]
   );
 
-  const createSeedKeyRef = useRef<string | null>(null);
+  // Seed create template once per window id — never re-seed on callback identity / title sync.
+  const seededCreateWindowIdRef = useRef<string | null>(null);
   useEffect(() => {
     const objectId = win.initialObjectId?.trim() || "";
     if (objectId) {
-      createSeedKeyRef.current = null;
+      seededCreateWindowIdRef.current = null;
       return;
     }
-    const key = `${win.id}:${win.initialKind ?? "function"}:create`;
-    if (createSeedKeyRef.current === key) return;
-    createSeedKeyRef.current = key;
+    if (seededCreateWindowIdRef.current === win.id) return;
+    seededCreateWindowIdRef.current = win.id;
     startCreateMode(win.initialKind ?? "function");
-  }, [win.id, win.initialObjectId, win.initialKind, startCreateMode]);
+    // intentionally only win.id / create↔edit flips; startCreateMode read via latest closure once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win.id, win.initialObjectId]);
 
   const regenerateTemplate = () => {
     setEditorSql(
@@ -244,17 +302,16 @@ export function DbObjectsManagerPane(props: {
   const changeCreateKind = (nextKind: DatabaseObjectKind) => {
     if (nextKind === kind) return;
     const schema = draft.schema || schemaFilter || rt.activeSchema || "public";
-    const defaultNames = {
-      function: "new_function",
-      procedure: "new_procedure",
-      trigger: "new_trigger",
-    } as const;
     const prevDefault =
       kind === "trigger" ? "new_trigger" : (`new_${kind}` as const);
-    const nextName =
-      !draft.name || draft.name === prevDefault
-        ? defaultNames[nextKind]
-        : draft.name;
+    const looksDefault =
+      !draft.name ||
+      draft.name === prevDefault ||
+      draft.name.startsWith(`${prevDefault}_`);
+    const taken = collectTakenDraftNames(win.id);
+    const nextName = looksDefault
+      ? nextUniqueObjectDraftName(nextKind, taken)
+      : draft.name;
     const nextTable =
       nextKind === "trigger"
         ? draft.tableName ||
@@ -277,56 +334,60 @@ export function DbObjectsManagerPane(props: {
         tableName: nextTable,
       })
     );
+    syncCreateWindowNav({ title: nextName, kind: nextKind });
   };
 
-  const openSavePreview = () => {
+  const getPendingObjectSql = useCallback(() => {
+    if (loadingDefinition || running) return [] as string[];
+    if (isCreateMode) {
+      if (!kindCapability.canCreate) return [];
+    } else {
+      if (!selectedObject?.capability.canEdit) return [];
+      if (editorSql.trim() === baselineSql.trim()) return [];
+    }
     const statements = buildSaveStatements({
       engine: rt.engine,
       item: isCreateMode ? null : selectedObject,
       sql: editorSql,
     });
-    if (statements.length === 0) {
-      showToast("SQL definition is empty.", { tone: "error" });
-      return;
-    }
-    setConfirmIntent({ kind: "save", statements });
-  };
+    return statements;
+  }, [
+    loadingDefinition,
+    running,
+    isCreateMode,
+    kindCapability.canCreate,
+    selectedObject,
+    editorSql,
+    baselineSql,
+    rt.engine,
+  ]);
 
-  const openDeletePreview = () => {
-    if (!selectedObject) return;
-    setConfirmIntent({
-      kind: "delete",
-      statements: [
-        buildDropDatabaseObjectSql({
-          engine: rt.engine,
-          item: selectedObject,
-        }),
-      ],
-    });
-  };
+  const executeStatements = useCallback(
+    async (statements: string[]) => {
+      if (!rt.runtimeConnectionId) {
+        throw new Error("Connect to a profile first.");
+      }
 
-  const executeStatements = async (statements: string[]) => {
-    if (!rt.runtimeConnectionId) {
-      throw new Error("Connect to a profile first.");
-    }
+      if (statements.length === 1) {
+        await runSqlQuery(rt.runtimeConnectionId, statements[0]!);
+        return;
+      }
 
-    if (statements.length === 1) {
-      await runSqlQuery(rt.runtimeConnectionId, statements[0]!);
-      return;
-    }
+      await operationExecuteTransaction({
+        connectionId: rt.runtimeConnectionId,
+        statements,
+      });
+    },
+    [rt.runtimeConnectionId]
+  );
 
-    await operationExecuteTransaction({
-      connectionId: rt.runtimeConnectionId,
-      statements,
-    });
-  };
+  const saveObjectChanges = useCallback(async () => {
+    const statements = getPendingObjectSql();
+    if (statements.length === 0) return;
 
-  const confirmAction = async () => {
-    if (!confirmIntent) return;
     setRunning(true);
     try {
-      await executeStatements(confirmIntent.statements);
-      const wasDelete = confirmIntent.kind === "delete";
+      await executeStatements(statements);
       const createdTarget = isCreateMode
         ? {
             kind,
@@ -343,84 +404,152 @@ export function DbObjectsManagerPane(props: {
 
       await refreshObjects();
 
-      if (wasDelete) {
-        const deletedKind = createdTarget?.kind ?? kind;
-        showToast("Object deleted.", { tone: "success" });
-        // Enter create immediately, then sync window (clears initialObjectId).
-        startCreateMode(deletedKind);
-        createSeedKeyRef.current = `${win.id}:${deletedKind}:create`;
-        openDatabaseObjectsManager({ kind: deletedKind });
-      } else {
-        if (createdTarget) {
-          pendingSelectionRef.current = createdTarget;
-        }
-        setIsCreateMode(false);
-        showToast("Object saved.", { tone: "success" });
+      if (createdTarget) {
+        pendingSelectionRef.current = createdTarget;
       }
+      setIsCreateMode(false);
+      setBaselineSql(editorSql);
+      objectCreateDraftCache.delete(win.id);
+      if (!isCreateMode && selectedObject) {
+        objectEditDraftCache.set(win.id, {
+          item: selectedObject,
+          sql: editorSql,
+          baselineSql: editorSql,
+        });
+      } else {
+        objectEditDraftCache.delete(win.id);
+      }
+      useScreenStore
+        .getState()
+        .updateWindow(rt.profileId, win.id, { dirty: false });
+      showToast("Object saved.", { tone: "success" });
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err ?? ""), {
         tone: "error",
       });
+      throw err;
     } finally {
-      setConfirmIntent(null);
       setRunning(false);
     }
-  };
+  }, [
+    getPendingObjectSql,
+    executeStatements,
+    isCreateMode,
+    kind,
+    draft.schema,
+    draft.name,
+    selectedObject,
+    refreshObjects,
+    setBaselineSql,
+    editorSql,
+    win.id,
+    rt.profileId,
+  ]);
 
-  const toolbar = (
-    <div class="flex h-10 min-w-0 items-center gap-2 overflow-x-auto border-y border-neutral-200 bg-neutral-50 px-3">
-      <Button
-        variant="ghost"
-        className="px-2 py-0.5 text-sm"
-        onClick={() => void refreshObjects()}
-        disabled={running}
-      >
-        Refresh
-      </Button>
-      {isCreateMode ? (
-        <Button
-          variant="ghost"
-          className="px-2 py-0.5 text-sm"
-          onClick={regenerateTemplate}
-          disabled={running}
-        >
-          Regenerate
-        </Button>
-      ) : null}
-      <div class="ml-auto flex items-center gap-2">
-        <Button
-          variant="destructive"
-          className="px-4 py-0.5 text-sm"
-          onClick={openDeletePreview}
-          disabled={
-            !selectedObject?.capability.canDelete || isCreateMode || running
-          }
-        >
-          Delete
-        </Button>
-        <Button
-          variant="default"
-          className="px-4 py-0.5 text-sm"
-          onClick={openSavePreview}
-          disabled={
-            running ||
-            loadingDefinition ||
-            (!isCreateMode && !selectedObject?.capability.canEdit) ||
-            (isCreateMode && !kindCapability.canCreate)
-          }
-        >
-          {loadingDefinition ? (
-            <div class="flex items-center gap-2">
-              <Spinner className="size-3.5 text-white" />
-              Loading
-            </div>
-          ) : (
-            <>Save</>
-          )}
-        </Button>
-      </div>
-    </div>
-  );
+  // Register with global Cmd/Ctrl+S → SaveChangesDialog flow (like tables).
+  useEffect(() => {
+    const handler = {
+      getPendingSql: getPendingObjectSql,
+      save: saveObjectChanges,
+    };
+    rt.objectSaveRef.current = handler;
+    return () => {
+      if (rt.objectSaveRef.current === handler) {
+        rt.objectSaveRef.current = null;
+      }
+    };
+  }, [rt.objectSaveRef, getPendingObjectSql, saveObjectChanges]);
+
+  // LeftNav edit: amber when SQL differs from loaded definition.
+  // Guard with win.initialObjectId (not only local isCreateMode) so a reused
+  // component instance cannot stamp an existing object id onto a create draft.
+  useEffect(() => {
+    const winObjectId = (win.initialObjectId ?? "").trim();
+    if (isCreateMode || !winObjectId) return;
+    if (!selectedObject?.id) return;
+    const title = selectedObject.name || "Database Objects";
+    const dirty = !loadingDefinition && editorSql.trim() !== baselineSql.trim();
+    useScreenStore.getState().updateWindow(rt.profileId, win.id, {
+      title,
+      initialKind: kind,
+      initialObjectId: selectedObject.id,
+      dirty,
+    });
+  }, [
+    isCreateMode,
+    kind,
+    selectedObject?.id,
+    selectedObject?.name,
+    editorSql,
+    baselineSql,
+    loadingDefinition,
+    win.id,
+    win.initialObjectId,
+    rt.profileId,
+  ]);
+
+  // Keep create draft cache in sync so switching to an existing object and back restores it.
+  useEffect(() => {
+    if (!isCreateMode) return;
+    if ((win.initialObjectId ?? "").trim()) return;
+    objectCreateDraftCache.set(win.id, { draft, kind, sql: editorSql });
+    objectEditDraftCache.delete(win.id);
+  }, [isCreateMode, win.id, win.initialObjectId, draft, kind, editorSql]);
+
+  // Keep edit draft cache in sync so inactive dirty tabs still save via global Cmd/Ctrl+S.
+  useEffect(() => {
+    const winObjectId = (win.initialObjectId ?? "").trim();
+    if (isCreateMode || !winObjectId || !selectedObject) {
+      return;
+    }
+    // Discard sets baseline into the cache first; don't overwrite with stale editorSql.
+    if (hasObjectEditorReset(win.id)) return;
+    objectEditDraftCache.set(win.id, {
+      item: selectedObject,
+      sql: editorSql,
+      baselineSql,
+    });
+  }, [
+    isCreateMode,
+    win.id,
+    win.initialObjectId,
+    selectedObject,
+    editorSql,
+    baselineSql,
+  ]);
+
+  // Drop create cache once the window is bound to a real object (e.g. after global save).
+  useEffect(() => {
+    const objectId = (win.initialObjectId ?? "").trim();
+    if (!objectId) return;
+    objectCreateDraftCache.delete(win.id);
+  }, [win.id, win.initialObjectId]);
+
+  // After save: bump baseline to current SQL. After discard: restore editor to baseline.
+  const prevDirtyRef = useRef(!!win.dirty);
+  useEffect(() => {
+    const wasDirty = prevDirtyRef.current;
+    prevDirtyRef.current = !!win.dirty;
+    if (!wasDirty || win.dirty || isCreateMode) return;
+
+    if (consumeObjectEditorReset(win.id)) {
+      const cached = objectEditDraftCache.get(win.id);
+      const sql = cached?.baselineSql ?? baselineSql;
+      setEditorSql(sql);
+      setBaselineSql(sql);
+      return;
+    }
+
+    setBaselineSql(editorSql);
+  }, [
+    win.dirty,
+    win.id,
+    isCreateMode,
+    editorSql,
+    baselineSql,
+    setBaselineSql,
+    setEditorSql,
+  ]);
 
   const unsupportedText =
     selectedObject?.capability.reason || kindCapability.reason;
@@ -440,7 +569,7 @@ export function DbObjectsManagerPane(props: {
               </div>
               <div class="mt-1 text-sm text-neutral-500">
                 {isCreateMode
-                  ? "Seed a DDL template, review it, then confirm before applying."
+                  ? "Seed a DDL template, then save with Cmd/Ctrl+S to review and apply."
                   : selectedObject
                     ? `${selectedObject.schema}${selectedObject.tableName ? ` · ${selectedObject.tableName}` : ""}${selectedObject.signature ? `(${selectedObject.signature})` : ""}`
                     : "Open an object from the Objects sidebar or catalog to inspect or edit it."}
@@ -476,9 +605,13 @@ export function DbObjectsManagerPane(props: {
                 <Input
                   value={draft.name}
                   className="w-full min-w-0 border border-neutral-200 bg-white py-1.25 text-sm"
-                  onValueChange={(value) =>
-                    setDraft((prev) => ({ ...prev, name: value }))
-                  }
+                  onValueChange={(value) => {
+                    setDraft((prev) => ({ ...prev, name: value }));
+                    syncCreateWindowNav({
+                      title: value.trim() || draft.name,
+                      kind,
+                    });
+                  }}
                 />
               </div>
               <div class="min-w-0 flex-1 basis-40 space-y-1">
@@ -505,10 +638,19 @@ export function DbObjectsManagerPane(props: {
                 </Select>
               </div>
             </div>
+            <div class="mt-3 flex items-center gap-2">
+              <Button
+                variant="ghost"
+                className="px-2 py-0.5 text-sm"
+                onClick={regenerateTemplate}
+                disabled={running}
+              >
+                Regenerate
+              </Button>
+              <span class="text-xs text-neutral-500">Save with Cmd/Ctrl+S</span>
+            </div>
           </div>
         ) : null}
-
-        {toolbar}
 
         {!rt.runtimeConnectionId ? (
           <div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-700">
@@ -541,7 +683,9 @@ export function DbObjectsManagerPane(props: {
             }}
             storageId={editorStorageId}
             controlledContent
-            onCommitContent={(_, next) => setEditorSql(next)}
+            onCommitContent={(_, next) => {
+              if (next !== editorSql) setEditorSql(next);
+            }}
             onRunSql={undefined}
             onExplainSql={undefined}
             onCancelSql={undefined}
@@ -555,51 +699,6 @@ export function DbObjectsManagerPane(props: {
           />
         </div>
       </div>
-
-      <Dialog
-        open={!!confirmIntent}
-        onClose={() => (running ? null : setConfirmIntent(null))}
-        size="lg"
-      >
-        <DialogHeader>
-          <DialogTitle>
-            {confirmIntent?.kind === "delete"
-              ? "Delete object"
-              : "Apply object SQL"}
-          </DialogTitle>
-          <DialogDescription>
-            Review the SQL below. Nothing is executed until you confirm.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogContent className="pt-0">
-          <OverlayScrollArea
-            className="max-h-90 rounded-md border border-neutral-200 bg-neutral-50"
-            contentClassName="p-3 font-mono text-xs whitespace-pre-wrap text-neutral-900"
-            horizontal
-            vertical
-          >
-            {(confirmIntent?.statements ?? []).join("\n\n")}
-          </OverlayScrollArea>
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => setConfirmIntent(null)}
-            disabled={running}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant={
-              confirmIntent?.kind === "delete" ? "destructive" : "default"
-            }
-            onClick={() => void confirmAction()}
-            loading={running}
-          >
-            {confirmIntent?.kind === "delete" ? "Delete" : "Confirm & Apply"}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

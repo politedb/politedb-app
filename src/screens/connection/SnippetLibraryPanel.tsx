@@ -180,7 +180,7 @@ export function SnippetLibraryPanel({ profileId, onInsert }: Props) {
           >
             {snippets.length === 0 ? (
               <Box className="text-center">
-                <ConsoleIcon className="mx-auto mb-2 size-8 text-neutral-300" />
+                <ConsoleIcon className="mx-auto mb-2 size-8 text-blue-600" />
                 <p class="text-sm text-neutral-500">No snippets yet</p>
                 <Button
                   variant="ghost"

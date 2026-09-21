@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { useScreenStore } from "src/stores/screen";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -36,6 +37,7 @@ import {
 import { EmptyExpandSection } from "./EmptyExpandSection";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];
+const EMPTY_WINDOWS: import("src/types").OpenWindow[] = [];
 
 type Props = {
   profileId: string;
@@ -80,8 +82,26 @@ function SectionHeader(props: {
 
 export function LeftNavObjectsPane({ profileId }: Props) {
   const rt = useConnectionRuntimeCtx();
-  const { openDatabaseObjectsManager, openDatabaseCatalog } =
+  const { openDatabaseObjectsManager, openDatabaseCatalog, selectWindow } =
     useConnectionWindows(profileId);
+  const openWindows = useScreenStore(
+    (s) => s.openWindows[profileId] ?? EMPTY_WINDOWS
+  );
+  const activeWindowId = useScreenStore(
+    (s) => s.activeWindowId[profileId] ?? null
+  );
+
+  const createDrafts = useMemo(() => {
+    return openWindows.filter(
+      (w): w is Extract<typeof w, { type: "db-object-manager" }> =>
+        w.type === "db-object-manager" && !(w.initialObjectId ?? "").trim()
+    );
+  }, [openWindows]);
+
+  const activeObjectWindow = useMemo(() => {
+    const w = openWindows.find((win) => win.id === activeWindowId);
+    return w?.type === "db-object-manager" ? w : null;
+  }, [openWindows, activeWindowId]);
 
   const [query, setQuery] = useState("");
   const [schemaFilter, setSchemaFilter] = useState("");
@@ -156,6 +176,27 @@ export function LeftNavObjectsPane({ profileId }: Props) {
     objectsByKind.function.length +
     objectsByKind.procedure.length +
     objectsByKind.trigger.length;
+
+  const createDraftKindsKey = createDrafts
+    .map((d) => `${d.id}:${d.initialKind ?? "function"}`)
+    .join("|");
+
+  // When creating, land drafts in their matching sections (like new tables).
+  useEffect(() => {
+    if (!createDraftKindsKey) return;
+    const kinds = createDraftKindsKey
+      .split("|")
+      .map((part) => part.split(":")[1] as DatabaseObjectKind);
+    setExpanded((prev) => {
+      let next = prev;
+      for (const kind of kinds) {
+        if (kind && !next[kind]) {
+          next = { ...next, [kind]: true };
+        }
+      }
+      return next;
+    });
+  }, [createDraftKindsKey]);
 
   const toggleKind = (kind: DatabaseObjectKind) => {
     setExpanded((prev) => ({ ...prev, [kind]: !prev[kind] }));
@@ -291,62 +332,142 @@ export function LeftNavObjectsPane({ profileId }: Props) {
                   />
                   {isExpanded ? (
                     <div class="mt-1">
-                      {items.length === 0 ? (
-                        <EmptyExpandSection
-                          Icon={SquareFunctionIcon}
-                          description={`No ${objectKindLabel(kind).toLowerCase()} found`}
-                        />
-                      ) : (
-                        <div class="space-y-1 pl-3">
-                          {items.map((item) => (
-                            <Button
-                              key={item.id}
-                              data-density-item
-                              variant="ghost"
-                              title={`${item.schema}.${item.name}`}
-                              onClick={() => openObject(item)}
-                              onContextMenu={(e: MouseEvent) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setMenu({
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                  item,
-                                });
-                              }}
-                              className={cn(
-                                tableSidebarButtonClass({
-                                  isActive: false,
-                                  isNewTable: false,
-                                  hasChanges: false,
-                                })
-                              )}
-                            >
-                              <SquareFunctionIcon
-                                className={cn(
-                                  "size-4 shrink-0",
-                                  tableSidebarIconClass({
-                                    isActive: false,
-                                    isRedis: false,
-                                  })
-                                )}
-                              />
-                              <span
-                                class={cn(
-                                  "min-w-0 flex-1 truncate text-left select-none",
-                                  tableSidebarNameClass({
-                                    isActive: false,
-                                    isNewTable: false,
-                                    hasChanges: false,
-                                  })
-                                )}
-                              >
-                                {item.name}
-                              </span>
-                            </Button>
-                          ))}
-                        </div>
-                      )}
+                      {(() => {
+                        const draftsForKind = createDrafts.filter((draft) => {
+                          const draftKind = draft.initialKind ?? "function";
+                          if (draftKind !== kind) return false;
+                          const draftName =
+                            draft.title?.trim() ||
+                            (draftKind === "trigger"
+                              ? "new_trigger"
+                              : `new_${draftKind}`);
+                          const q = query.trim().toLowerCase();
+                          if (!q) return true;
+                          return draftName.toLowerCase().includes(q);
+                        });
+                        if (items.length === 0 && draftsForKind.length === 0) {
+                          return (
+                            <EmptyExpandSection
+                              Icon={SquareFunctionIcon}
+                              description={`No ${objectKindLabel(kind).toLowerCase()} found`}
+                            />
+                          );
+                        }
+                        return (
+                          <div class="space-y-1 pl-3">
+                            {draftsForKind.map((draft) => {
+                              const draftKind = draft.initialKind ?? "function";
+                              const draftName =
+                                draft.title?.trim() ||
+                                (draftKind === "trigger"
+                                  ? "new_trigger"
+                                  : `new_${draftKind}`);
+                              const isActive = activeWindowId === draft.id;
+                              return (
+                                <Button
+                                  key={draft.id}
+                                  data-density-item
+                                  variant="ghost"
+                                  title={draftName}
+                                  onClick={() => selectWindow(draft.id)}
+                                  className={cn(
+                                    tableSidebarButtonClass({
+                                      isActive,
+                                      isNewTable: true,
+                                      hasChanges: false,
+                                    }),
+                                    isActive && "font-medium"
+                                  )}
+                                >
+                                  <SquareFunctionIcon
+                                    className={cn(
+                                      "size-4 shrink-0",
+                                      tableSidebarIconClass({
+                                        isActive,
+                                        isRedis: false,
+                                      })
+                                    )}
+                                  />
+                                  <span
+                                    class={cn(
+                                      "min-w-0 flex-1 truncate text-left select-none",
+                                      tableSidebarNameClass({
+                                        isActive,
+                                        isNewTable: true,
+                                        hasChanges: false,
+                                      })
+                                    )}
+                                  >
+                                    {draftName}
+                                  </span>
+                                </Button>
+                              );
+                            })}
+                            {items.map((item) => {
+                              const isActive =
+                                !!activeObjectWindow &&
+                                !!(
+                                  activeObjectWindow.initialObjectId ?? ""
+                                ).trim() &&
+                                activeObjectWindow.initialObjectId === item.id;
+                              const hasChanges =
+                                isActive && !!activeObjectWindow?.dirty;
+                              const useDefaultActive = isActive && !hasChanges;
+                              return (
+                                <Button
+                                  key={item.id}
+                                  data-density-item
+                                  variant={
+                                    useDefaultActive ? "default" : "ghost"
+                                  }
+                                  active={useDefaultActive}
+                                  title={`${item.schema}.${item.name}`}
+                                  onClick={() => openObject(item)}
+                                  onContextMenu={(e: MouseEvent) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setMenu({
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                      item,
+                                    });
+                                  }}
+                                  className={cn(
+                                    tableSidebarButtonClass({
+                                      isActive,
+                                      isNewTable: false,
+                                      hasChanges,
+                                    }),
+                                    useDefaultActive && "font-medium"
+                                  )}
+                                >
+                                  <SquareFunctionIcon
+                                    className={cn(
+                                      "size-4 shrink-0",
+                                      tableSidebarIconClass({
+                                        isActive,
+                                        isRedis: false,
+                                      })
+                                    )}
+                                  />
+                                  <span
+                                    class={cn(
+                                      "min-w-0 flex-1 truncate text-left select-none",
+                                      tableSidebarNameClass({
+                                        isActive,
+                                        isNewTable: false,
+                                        hasChanges,
+                                      })
+                                    )}
+                                  >
+                                    {item.name}
+                                  </span>
+                                </Button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </div>

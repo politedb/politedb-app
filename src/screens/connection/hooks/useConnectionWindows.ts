@@ -10,6 +10,8 @@ import type {
   TableItem,
   TableWindow,
 } from "src/types";
+import { nextUniqueObjectDraftName } from "src/lib/databaseObjects";
+import { clearObjectEditorDraft } from "src/lib/objectEditorDraftCache";
 import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
@@ -210,33 +212,57 @@ export function useConnectionWindows(
 
   const openDatabaseObjectsManager = useCallback(
     (opts?: { kind?: DatabaseObjectKind; object?: DatabaseObjectItem }) => {
-      const id = "db-object-manager";
-      const existing = windows.find((w) => w.type === "db-object-manager");
-      const createTitle =
-        opts?.kind === "trigger"
-          ? "new_trigger"
-          : opts?.kind
-            ? `new_${opts.kind}`
-            : "Database Objects";
-      const patch = {
-        initialKind: opts?.kind ?? opts?.object?.kind,
-        // Use "" so create mode clears a previous object id (undefined can be dropped on merge/persist).
-        initialObjectId: opts?.object?.id ?? "",
-        title: opts?.object?.name ?? createTitle,
-      } satisfies Partial<DatabaseObjectManagerWindow>;
+      // Edit existing: one window per object id (reuse if already open).
+      if (opts?.object?.id) {
+        const id = `db-object-manager:obj:${opts.object.id}`;
+        const existing = windows.find(
+          (w) => w.type === "db-object-manager" && w.id === id
+        );
+        const patch = {
+          initialKind: opts.object.kind,
+          initialObjectId: opts.object.id,
+          title: opts.object.name,
+          dirty: false,
+        } satisfies Partial<DatabaseObjectManagerWindow>;
 
-      if (existing && existing.type === "db-object-manager") {
-        updateWindow(activeProfileScreen, existing.id, patch);
-        setActiveWindowId(activeProfileScreen, existing.id);
-        return existing.id;
+        if (existing && existing.type === "db-object-manager") {
+          updateWindow(activeProfileScreen, existing.id, patch);
+          setActiveWindowId(activeProfileScreen, existing.id);
+          return existing.id;
+        }
+
+        const win: DatabaseObjectManagerWindow = {
+          id,
+          type: "db-object-manager",
+          title: opts.object.name,
+          initialKind: opts.object.kind,
+          initialObjectId: opts.object.id,
+          dirty: false,
+        };
+        addWindow(activeProfileScreen, win);
+        setActiveWindowId(activeProfileScreen, win.id);
+        return win.id;
       }
 
+      // Create: always a new window so multiple drafts can exist at once.
+      const kind = opts?.kind ?? "function";
+      const takenNames: string[] = [];
+      for (const w of windows) {
+        if (w.type !== "db-object-manager") continue;
+        if ((w.initialObjectId ?? "").trim()) continue;
+        if (w.title?.trim()) takenNames.push(w.title.trim());
+      }
+      // Also avoid colliding with existing DB object names (any schema).
+      // Metadata is not in this hook — callers pass titles; LeftNav/pane refine.
+      const createTitle = nextUniqueObjectDraftName(kind, takenNames);
+      const id = `db-object-manager:new:${kind}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`;
       const win: DatabaseObjectManagerWindow = {
         id,
         type: "db-object-manager",
-        title: opts?.object?.name ?? createTitle,
-        initialKind: opts?.kind ?? opts?.object?.kind,
-        initialObjectId: opts?.object?.id ?? "",
+        title: createTitle,
+        initialKind: kind,
+        initialObjectId: "",
+        dirty: false,
       };
       addWindow(activeProfileScreen, win);
       setActiveWindowId(activeProfileScreen, win.id);
@@ -341,6 +367,10 @@ export function useConnectionWindows(
         const clearSqlResult = useConnectionStore.getState().clearSqlResult;
         clearSqlResult?.(windowId);
         clearSqlRunnerWindowState(windowId);
+      }
+
+      if (toClose?.type === "db-object-manager") {
+        clearObjectEditorDraft(windowId);
       }
 
       removeWindow(activeProfileScreen, windowId);

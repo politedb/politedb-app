@@ -1,4 +1,4 @@
-import { render } from "@testing-library/preact";
+import { render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import type { DatabaseObjectItem } from "src/types";
@@ -12,8 +12,10 @@ vi.mock("src/components/common/RetryableLazy", () => ({
 
 vi.mock("./hooks/useLoadDbObjectDefinition", () => ({
   useLoadDbObjectDefinition: () => ({
-    sql: "",
+    sql: "CREATE FUNCTION new_function() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;",
     setSql: vi.fn(),
+    baselineSql: "",
+    setBaselineSql: vi.fn(),
     loading: false,
     loadError: null,
   }),
@@ -56,7 +58,7 @@ describe("DbObjectsManagerPane", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("limits the initial function DOM and does not eagerly load columns", () => {
+  it("opens create mode without Save/Refresh toolbar and registers object save", () => {
     const get = vi.fn((_args: Parameters<MetadataApi["get"]>[0]) => ({
       schemas: ["public"],
       objects: functionItems(500),
@@ -73,6 +75,7 @@ describe("DbObjectsManagerPane", () => {
       engine: "postgres" as const,
     }));
     const metadata = { get } as unknown as MetadataApi;
+    const objectSaveRef: ConnectionRuntime["objectSaveRef"] = { current: null };
     const runtime = {
       profileId: "profile-1",
       engine: "postgres",
@@ -89,11 +92,12 @@ describe("DbObjectsManagerPane", () => {
       runSqlWithHistory: vi.fn(),
       refreshSchemaAndTables: vi.fn(),
       newTableSaveRef: { current: null },
+      objectSaveRef,
       pendingTableAction: null,
       setPendingTableAction: vi.fn(),
     } as unknown as ConnectionRuntime;
 
-    const { container } = render(
+    render(
       <ConnectionRuntimeProvider value={runtime}>
         <DbObjectsManagerPane
           win={{ id: "objects-1", type: "db-object-manager" }}
@@ -101,7 +105,12 @@ describe("DbObjectsManagerPane", () => {
       </ConnectionRuntimeProvider>
     );
 
-    expect(container.querySelectorAll("[data-db-object-id]")).toHaveLength(50);
+    expect(screen.getByText("New function")).toBeTruthy();
+    expect(screen.getByText("Regenerate")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(objectSaveRef.current).not.toBeNull();
+    expect(objectSaveRef.current?.getPendingSql().length).toBeGreaterThan(0);
     expect(get.mock.calls[0]?.[0]).not.toHaveProperty("includeColumns");
   });
 });

@@ -10,6 +10,7 @@ export function useLoadDbObjectDefinition(args: {
 }) {
   const { selectedObject, isCreateMode, engine, connectionId } = args;
   const [sql, setSql] = useState("");
+  const [baselineSql, setBaselineSql] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
@@ -23,7 +24,10 @@ export function useLoadDbObjectDefinition(args: {
       requestSeqRef.current += 1;
       setLoading(false);
       setLoadError(null);
-      if (!isCreateMode) setSql("");
+      if (!isCreateMode) {
+        setSql("");
+        setBaselineSql("");
+      }
       return;
     }
 
@@ -32,6 +36,7 @@ export function useLoadDbObjectDefinition(args: {
       requestSeqRef.current += 1;
       setLoading(false);
       setSql("");
+      setBaselineSql("");
       setLoadError(null);
       return;
     }
@@ -39,6 +44,7 @@ export function useLoadDbObjectDefinition(args: {
     const seq = ++requestSeqRef.current;
     setLoading(true);
     setSql("");
+    setBaselineSql("");
     setLoadError(null);
 
     void loadDatabaseObjectDefinition({
@@ -49,10 +55,12 @@ export function useLoadDbObjectDefinition(args: {
       .then((result) => {
         if (requestSeqRef.current !== seq) return;
         setSql(result.sql);
+        setBaselineSql(result.sql);
       })
       .catch((err) => {
         if (requestSeqRef.current !== seq) return;
         setSql("");
+        setBaselineSql("");
         setLoadError(err instanceof Error ? err.message : String(err ?? ""));
       })
       .finally(() => {
@@ -62,5 +70,5 @@ export function useLoadDbObjectDefinition(args: {
       });
   }, [selectedId, isCreateMode, engine, connectionId]);
 
-  return { sql, setSql, loading, loadError };
+  return { sql, setSql, baselineSql, setBaselineSql, loading, loadError };
 }

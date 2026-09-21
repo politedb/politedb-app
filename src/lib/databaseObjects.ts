@@ -434,6 +434,25 @@ export function buildSaveStatements(args: {
   return [body];
 }
 
+export function defaultNewObjectName(kind: DatabaseObjectKind): string {
+  return kind === "trigger" ? "new_trigger" : `new_${kind}`;
+}
+
+/** Prefer new_function, then new_function_2, … avoiding taken names (case-insensitive). */
+export function nextUniqueObjectDraftName(
+  kind: DatabaseObjectKind,
+  takenNames: Iterable<string>
+): string {
+  const taken = new Set(
+    [...takenNames].map((name) => name.trim().toLowerCase()).filter(Boolean)
+  );
+  const base = defaultNewObjectName(kind);
+  if (!taken.has(base.toLowerCase())) return base;
+  let n = 2;
+  while (taken.has(`${base}_${n}`.toLowerCase())) n += 1;
+  return `${base}_${n}`;
+}
+
 export function objectKindLabel(kind: DatabaseObjectKind) {
   if (kind === "function") return "Functions";
   if (kind === "procedure") return "Procedures";

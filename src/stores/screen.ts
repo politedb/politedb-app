@@ -149,8 +149,20 @@ export const useScreenStore = create<ScreenState>((set) => ({
       let changed = false;
       const next = prev.map((window) => {
         if (window.id !== windowId) return window;
+        const merged = { ...window, ...patch } as OpenWindow;
+        const patchKeys = Object.keys(patch) as (keyof typeof patch)[];
+        const same = patchKeys.every((key) => {
+          const before = (window as Record<string, unknown>)[key as string];
+          const after = (patch as Record<string, unknown>)[key as string];
+          // Treat undefined/null/false/"" as equivalent empty for no-op patches.
+          const empty = (v: unknown) =>
+            v === undefined || v === null || v === false || v === "";
+          if (empty(before) && empty(after)) return true;
+          return before === after;
+        });
+        if (same) return window;
         changed = true;
-        return { ...window, ...patch } as OpenWindow;
+        return merged;
       });
       if (!changed) return s;
       schedulePersistentSave();

@@ -39,7 +39,10 @@ import { useSnippetsStore } from "src/stores/snippets";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { ConnectionActionsProvider } from "./ConnectionActionsContext";
-import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
+import {
+  ConnectionRuntimeProvider,
+  type ObjectSaveHandler,
+} from "./ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
 import { registerConnectionTabCloseBridge } from "./connectionTabCloseBridge";
@@ -456,6 +459,7 @@ export function ConnectionScreen() {
    * New table save ref (runtime)
    * ============================================================================= */
   const newTableSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const objectSaveRef = useRef<ObjectSaveHandler | null>(null);
 
   /* =============================================================================
    * SQL history runner (depends on engine + metadata + profileId)
@@ -500,7 +504,16 @@ export function ConnectionScreen() {
     setActiveProfileScreen,
 
     newTableSaveRef,
+    objectSaveRef,
     refreshRuntimeConnection: reloadRuntime,
+    listDatabaseObjects: () =>
+      metadata.get({
+        metaKey,
+        engine: engine ?? "postgres",
+        connectionId: runtimeConnectionId,
+        lazy: true,
+      }).objects ?? [],
+    activeSchema,
   });
 
   // ✅ stable provider value (avoid context rerender cascades)
@@ -554,6 +567,8 @@ export function ConnectionScreen() {
       refresh: triggerRefresh,
       getPatchMap: () => actionsRef.current.getPatchMap(),
       getNewTableSql: () => actionsRef.current.getNewTableSql(),
+      getObjectSql: () => actionsRef.current.getObjectSql(),
+      getObjectChangeSummary: () => actionsRef.current.getObjectChangeSummary(),
       beforeSaveChanges: () => actionsRef.current.beforeSaveChanges(),
       saveChanges: () => actionsRef.current.saveChanges(),
       discardChanges: () => actionsRef.current.discardChanges(),
@@ -630,6 +645,16 @@ export function ConnectionScreen() {
     return actions.getNewTableSql().data;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions.getNewTableSql().data]);
+
+  const objectSql = useMemo(() => {
+    return actions.getObjectSql();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actions.getObjectSql(), showSaveDialog]);
+
+  const objectChangeSummary = useMemo(() => {
+    return actions.getObjectChangeSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actions.getObjectChangeSummary(), showSaveDialog]);
 
   const diagramDatabase = useMemo(() => {
     if (!profile) return "";
@@ -732,6 +757,7 @@ export function ConnectionScreen() {
       runSqlWithHistory,
       refreshSchemaAndTables,
       newTableSaveRef,
+      objectSaveRef,
       pendingTableAction,
       setPendingTableAction,
     }),
@@ -822,6 +848,8 @@ export function ConnectionScreen() {
               patchMap={patchMap}
               engine={engine ?? "postgres"}
               newTableSql={newTableSql}
+              objectSql={objectSql}
+              objectChangeSummary={objectChangeSummary}
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
               getOriginalRowAt={useConnectionStore.getState().getOriginalRowAt}

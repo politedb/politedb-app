@@ -113,6 +113,8 @@ export type DatabaseObjectManagerWindow = OpenWindowBase & {
   title?: string;
   initialKind?: DatabaseObjectKind;
   initialObjectId?: string;
+  /** Unsaved SQL edits (amber in LeftNav), like table patches. */
+  dirty?: boolean;
 };
 
 export type DatabaseCatalogKind =
