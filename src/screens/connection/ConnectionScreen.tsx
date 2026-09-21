@@ -34,7 +34,10 @@ import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDia
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";
-import { findSnippetByHotkey } from "src/lib/snippets/library";
+import {
+  findSnippetByHotkey,
+  listVisibleSnippets,
+} from "src/lib/snippets/library";
 import { useSnippetsStore } from "src/stores/snippets";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
@@ -180,6 +183,7 @@ export function ConnectionScreen() {
     openSqlEditor,
     openTable,
     closeWindow,
+    openDatabaseObjectsManager,
   } = useConnectionWindows(activeProfileScreen, sqlScopeKey);
 
   const activeTablePagination = useMemo(() => {
@@ -550,6 +554,11 @@ export function ConnectionScreen() {
 
   const connectionProfileId = activeProfileTab?.profileId ?? null;
 
+  const visibleSearchSnippets = useMemo(
+    () => listVisibleSnippets(snippetLibrary, connectionProfileId),
+    [snippetLibrary, connectionProfileId]
+  );
+
   const insertSnippetSql = useCallback(
     async (sql: string) => {
       await onInsertSqlIntoActiveEditor(sql, { mode: "cursor" });
@@ -883,11 +892,22 @@ export function ConnectionScreen() {
           onClose={() => setSearchDialogOpen(false)}
           tables={meta.tables ?? []}
           schemas={meta.schemas ?? []}
+          objects={meta.objects ?? []}
+          snippets={visibleSearchSnippets}
           schemaLabel={
             engine === "mongo" || engine === "redis" ? "Database" : "Schema"
           }
           onSelectTable={(table) => void actions.selectTable(table)}
           onSelectSchema={onSchemaChange}
+          onSelectObject={(object) => {
+            openDatabaseObjectsManager({
+              kind: object.kind,
+              object,
+            });
+          }}
+          onSelectSnippet={(snippet) => {
+            void insertSnippetSql(snippet.sql);
+          }}
         />
 
         <SnippetPickerDialog
