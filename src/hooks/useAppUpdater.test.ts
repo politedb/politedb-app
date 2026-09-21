@@ -17,7 +17,7 @@ vi.mock("src/lib/updater/runtimeUpdater", () => ({
 }));
 
 vi.mock("@tauri-apps/api/app", () => ({
-  getVersion: () => Promise.resolve("1.2.10"),
+  getVersion: () => Promise.resolve("1.3.0"),
 }));
 
 vi.mock("src/lib/analytics", () => ({
@@ -54,7 +54,7 @@ describe("useAppUpdater", () => {
   it("checks again when the home window is focused", async () => {
     checkForRuntimeUpdate
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(updateStub("1.2.10"));
+      .mockResolvedValueOnce(updateStub("1.3.0"));
 
     const view = render(h(Harness, {}));
     await waitFor(() => expect(checkForRuntimeUpdate).toHaveBeenCalledTimes(1));
@@ -74,7 +74,7 @@ describe("useAppUpdater", () => {
     );
     expect(view.container.firstElementChild).toHaveAttribute(
       "data-version",
-      "1.2.10"
+      "1.3.0"
     );
   });
 
