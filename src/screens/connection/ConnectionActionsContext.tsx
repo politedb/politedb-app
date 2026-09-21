@@ -16,10 +16,14 @@ export type ConnectionActions = {
   pageChange(limit: number, offset: number): Promise<void>;
   selectTable(table: TableItem): Promise<void>;
 
+  /** Open table tab then switch to Structure view (used from table context menu) */
+  openTableStructure(table: TableItem): void;
   /** Open table tab then trigger export data (used from table context menu) */
   exportTableData(table: TableItem): void;
-  /** Open table tab then trigger import data (used from table context menu) */
+  /** Open table tab then trigger CSV import (used from table context menu) */
   importTableData(table: TableItem): void;
+  /** Open table tab then trigger SQL dump import (used from table context menu) */
+  importTableSqlDump(table: TableItem): void;
   /** Open table tab then trigger clone table (used from table context menu) */
   cloneTable(table: TableItem): void;
   /** Open table tab then trigger truncate table (used from table context menu) */

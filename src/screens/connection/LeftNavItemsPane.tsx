@@ -241,11 +241,29 @@ export function LeftNavItemsPane({
       : [
           {
             type: "item",
-            label: "Open",
+            label: "Open data",
             onClick: () => {
               void actions.selectTable(tableMenu.table);
             },
           },
+          {
+            type: "item",
+            label: "Open structure",
+            onClick: () => actions.openTableStructure(tableMenu.table),
+          },
+          {
+            type: "item",
+            label: "Open overview",
+            onClick: () => {
+              const catalogKind =
+                tableMenu.table.kind === "view" ? "views" : "tables";
+              openDatabaseCatalog(
+                catalogKind,
+                tableMenu.table.schema || currSchema
+              );
+            },
+          },
+          { type: "sep" },
           {
             type: "item",
             label: "Copy name",
@@ -260,12 +278,23 @@ export function LeftNavItemsPane({
           },
           {
             type: "item",
-            label: "Import data from CSV",
+            label: "Import",
             disabled:
               !!tableMenu.table.new ||
               isProfileLocked ||
               !supportsTableMutations,
-            onClick: () => actions.importTableData(tableMenu.table),
+            submenu: [
+              {
+                type: "item",
+                label: "From CSV...",
+                onClick: () => actions.importTableData(tableMenu.table),
+              },
+              {
+                type: "item",
+                label: "From SQL Dump...",
+                onClick: () => actions.importTableSqlDump(tableMenu.table),
+              },
+            ],
           },
           { type: "sep" },
           {

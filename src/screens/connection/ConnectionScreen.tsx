@@ -578,6 +578,11 @@ export function ConnectionScreen() {
         actionsRef.current.closeTab(id, skip),
       pageChange: (l: number, o: number) => actionsRef.current.pageChange(l, o),
       selectTable: (t: TableItem) => actionsRef.current.selectTable(t),
+      openTableStructure: (table: TableItem) => {
+        void actionsRef.current.selectTable(table).then(() => {
+          setPendingTableAction("structure");
+        });
+      },
       exportTableData: (table: TableItem) => {
         if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
@@ -588,6 +593,12 @@ export function ConnectionScreen() {
         if (isProfileLocked) return;
         void actionsRef.current.selectTable(table).then(() => {
           setPendingTableAction("import");
+        });
+      },
+      importTableSqlDump: (table: TableItem) => {
+        if (isProfileLocked) return;
+        void actionsRef.current.selectTable(table).then(() => {
+          setPendingTableAction("importSqlDump");
         });
       },
       cloneTable: (table: TableItem) => {

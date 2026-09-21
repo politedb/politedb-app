@@ -4,7 +4,7 @@ import {
   TrashIcon,
   CopyIcon,
   CopyCheckIcon,
-  SaveIcon,
+  BookmarkIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Box } from "src/components/common/Box";
@@ -172,19 +172,19 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
                     {onSaveAsSnippet ? (
                       <Button
                         variant="ghost"
-                        class="h-7 px-2 text-xs text-neutral-600 hover:bg-neutral-100"
+                        class="h-7 px-1 text-xs text-neutral-600 hover:bg-neutral-100"
                         onClick={(e) => {
                           e.stopPropagation();
                           onSaveAsSnippet(sqlRaw);
                         }}
                         title="Save as snippet"
                       >
-                        <SaveIcon className="size-4" />
+                        <BookmarkIcon className="size-4" />
                       </Button>
                     ) : null}
                     <Button
                       variant="ghost"
-                      class="h-7 px-2 text-xs text-neutral-600 hover:bg-neutral-100"
+                      class="h-7 px-1 text-xs text-neutral-600 hover:bg-neutral-100"
                       onClick={(e) => {
                         e.stopPropagation();
                         void onCopy(sqlRaw);

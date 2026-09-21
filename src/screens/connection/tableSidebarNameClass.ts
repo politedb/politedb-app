@@ -53,7 +53,7 @@ export function tableSidebarButtonClass(opts: {
     "hover:border-neutral-200/60 hover:bg-neutral-200/60 active:bg-neutral-200/60",
     "dark:hover:border-neutral-800/60",
     opts.isNewTable && "bg-green-200 text-emerald-900 active:bg-green-200/90",
-    opts.hasChanges && "bg-amber-200 text-amber-500 active:bg-amber-200/90"
+    opts.hasChanges && "bg-amber-200 text-amber-900 active:bg-amber-200/90"
   );
 }
 

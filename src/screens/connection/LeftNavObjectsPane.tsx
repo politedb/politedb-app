@@ -237,18 +237,19 @@ export function LeftNavObjectsPane({ profileId }: Props) {
     ? [
         {
           type: "item",
-          label: "Open",
+          label: `Open ${objectKindSingular(menu.item.kind)}`,
           onClick: () => openObject(menu.item),
         },
         {
           type: "item",
-          label: "Copy name",
-          onClick: () => void navigator.clipboard.writeText(menu.item.name),
+          label: "Open overview",
+          onClick: () => openCatalogForItem(menu.item),
         },
+        { type: "sep" },
         {
           type: "item",
-          label: "Open in catalog",
-          onClick: () => openCatalogForItem(menu.item),
+          label: "Copy name",
+          onClick: () => void navigator.clipboard.writeText(menu.item.name),
         },
         { type: "sep" },
         {

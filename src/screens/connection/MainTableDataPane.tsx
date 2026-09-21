@@ -46,6 +46,7 @@ import type { TableForeignKey, TableItem } from "src/types";
 import { MainTableDialogs } from "./MainTableDialogs";
 import { useMainTablePaneState } from "./hooks/useMainTablePaneState";
 import { useMainTableDataLoading } from "./hooks/useMainTableDataLoading";
+import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 
 export type { StructPaneTab } from "./hooks/useMainTablePaneState";
 
@@ -132,6 +133,8 @@ export function MainTableDataPane(props: {
     reset: resetImport,
     loadDataImport,
   } = useImportTableData();
+
+  const { onImportSqlDump: importSqlDumpFile } = useDatabaseBackup();
 
   const [viewMode, setViewMode] = useState<TableViewMode>("data");
   const [, forceUpdate] = useState(0);
@@ -819,6 +822,22 @@ export function MainTableDataPane(props: {
     setImportDialogOpen(true);
   }, [isNewTable, isProfileLocked, loadDataImport, setImportDialogOpen]);
 
+  const onImportSqlDumpOpen = useCallback(async () => {
+    if (isNewTable || isProfileLocked) return;
+    const schema = activeTableWindow.table.schema;
+    const name = activeTableWindow.table.name;
+    await importSqlDumpFile(async () => {
+      await reloadTableData(schema, name);
+    });
+  }, [
+    isNewTable,
+    isProfileLocked,
+    importSqlDumpFile,
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name,
+    reloadTableData,
+  ]);
+
   const onImportClose = useCallback(() => {
     resetImport();
     setImportDialogOpen(false);
@@ -983,23 +1002,26 @@ export function MainTableDataPane(props: {
     ]
   );
 
-  // When user chose Export/Import/Clone/Truncate/Drop from table context menu in left nav
+  // When user chose Export/Import/Clone/Truncate/Drop/Structure from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
-    if (isProfileLocked) {
+    const action = rt.pendingTableAction;
+    // Structure is a view switch (read-only OK). Mutations still blocked when locked.
+    if (isProfileLocked && action !== "structure") {
       rt.setPendingTableAction(null);
       return;
     }
-    const action = rt.pendingTableAction;
-    const t = setTimeout(() => {
-      if (action === "export") onExportOpen();
+    const timer = setTimeout(() => {
+      if (action === "structure") setViewMode("structure");
+      else if (action === "export") onExportOpen();
       else if (action === "import") onImportOpen();
+      else if (action === "importSqlDump") void onImportSqlDumpOpen();
       else if (action === "clone") onCloneOpen();
       else if (action === "truncate") onTruncateOpen();
       else if (action === "drop") onDropOpen();
       rt.setPendingTableAction(null);
     }, 80);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isProfileLocked,
@@ -1007,6 +1029,7 @@ export function MainTableDataPane(props: {
     rt.setPendingTableAction,
     onExportOpen,
     onImportOpen,
+    onImportSqlDumpOpen,
     onCloneOpen,
     onTruncateOpen,
     onDropOpen,
@@ -1122,6 +1145,9 @@ export function MainTableDataPane(props: {
                 }
                 onImportData={
                   !hasError && !isDataReadOnly ? onImportOpen : undefined
+                }
+                onImportSqlDump={
+                  !hasError && !isDataReadOnly ? onImportSqlDumpOpen : undefined
                 }
                 onQuickFilter={handleQuickFilter}
                 schema={activeTableWindow.table.schema}

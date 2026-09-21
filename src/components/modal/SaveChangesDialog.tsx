@@ -101,13 +101,13 @@ function buildActionParts(parts: Array<string | null | undefined>): string[] {
   return parts.filter((part): part is string => !!part);
 }
 
-interface ActionSummaryProps {
+interface SummaryItemProps {
   label: string;
   color: string;
   parts: string[];
 }
 
-function ActionSummary({ label, color, parts }: ActionSummaryProps) {
+function SummaryItem({ label, color, parts }: SummaryItemProps) {
   if (parts.length === 0) return null;
 
   return (
@@ -116,28 +116,6 @@ function ActionSummary({ label, color, parts }: ActionSummaryProps) {
         {label}
       </span>
       <span class="text-neutral-700">{parts.join(", ")}</span>
-    </div>
-  );
-}
-
-interface SummaryItemProps {
-  label: string;
-  entity: string;
-  count: number;
-  color: string;
-}
-
-function SummaryItem({ label, entity, count, color }: SummaryItemProps) {
-  if (count <= 0) return null;
-
-  return (
-    <div class="flex items-center gap-2">
-      <span class={`rounded px-2 py-0.5 text-xs font-medium ${color}`}>
-        {label}
-      </span>
-      <span class="text-neutral-700">
-        {count} {count > 1 ? `${entity}s` : entity}
-      </span>
     </div>
   );
 }
@@ -264,6 +242,8 @@ export function SaveChangesDialog({
 
   const rowEntity = isMongo ? "document" : "row";
   const rowEntityPlural = isMongo ? "documents" : "rows";
+  const structureEntity = isMongo ? "field" : "column";
+  const structureEntityPlural = isMongo ? "fields" : "columns";
 
   const insertSummaryParts = useMemo(
     () =>
@@ -309,6 +289,24 @@ export function SaveChangesDialog({
         formatCountPart(summary.deletes, rowEntity, rowEntityPlural),
       ]),
     [summary.deletes, rowEntity, rowEntityPlural]
+  );
+
+  const structureSummaryParts = useMemo(
+    () =>
+      buildActionParts([
+        formatCountPart(
+          summary.structureChanges,
+          structureEntity,
+          structureEntityPlural
+        ),
+        formatCountPart(summary.constraintChanges, "constraint", "constraints"),
+      ]),
+    [
+      summary.structureChanges,
+      summary.constraintChanges,
+      structureEntity,
+      structureEntityPlural,
+    ]
   );
 
   const hasChanges =
@@ -360,32 +358,25 @@ export function SaveChangesDialog({
               </h3>
             </div>
             <div class="grid grid-cols-1 gap-2 p-4 text-sm sm:grid-cols-2">
-              <ActionSummary
+              <SummaryItem
                 label="INSERT"
                 color="bg-green-50 text-green-700"
                 parts={insertSummaryParts}
               />
-              <ActionSummary
+              <SummaryItem
                 label="UPDATE"
                 color="bg-amber-100 text-amber-800"
                 parts={updateSummaryParts}
               />
-              <ActionSummary
+              <SummaryItem
                 label="DELETE"
                 color="bg-red-50 text-red-700"
                 parts={deleteSummaryParts}
               />
               <SummaryItem
                 label="STRUCTURE"
-                entity="column"
-                count={summary.structureChanges}
                 color="bg-blue-100 text-blue-800"
-              />
-              <SummaryItem
-                label="CONSTRAINT"
-                entity="constraint"
-                count={summary.constraintChanges}
-                color="bg-purple-100 text-purple-800"
+                parts={structureSummaryParts}
               />
             </div>
           </div>

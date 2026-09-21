@@ -193,6 +193,7 @@ type Props = {
   onRefresh?: () => void;
   onExportCurrentPage?: () => void;
   onImportData?: () => void;
+  onImportSqlDump?: () => void;
   onPasteRows?: (rows: unknown[][], sourceColumns?: string[]) => void;
   onQuickFilter?: (colName: string, value: string) => void;
   schema?: string;
@@ -528,6 +529,7 @@ export function CanvasTable({
   onRefresh,
   onExportCurrentPage,
   onImportData,
+  onImportSqlDump,
   onPasteRows,
   onQuickFilter,
   schema,
@@ -1532,9 +1534,22 @@ export function CanvasTable({
       },
       {
         type: "item",
-        label: "Import data...",
-        disabled: !onImportData,
-        onClick: () => onImportData?.(),
+        label: "Import",
+        disabled: !onImportData && !onImportSqlDump,
+        submenu: [
+          {
+            type: "item",
+            label: "From CSV...",
+            disabled: !onImportData,
+            onClick: () => onImportData?.(),
+          },
+          {
+            type: "item",
+            label: "From SQL Dump...",
+            disabled: !onImportSqlDump,
+            onClick: () => onImportSqlDump?.(),
+          },
+        ],
       },
       { type: "sep" },
       {
@@ -1561,6 +1576,7 @@ export function CanvasTable({
     onDeleteRows,
     onExportCurrentPage,
     onImportData,
+    onImportSqlDump,
     onQuickFilter,
     copyCellValue,
     copyRowsAs,

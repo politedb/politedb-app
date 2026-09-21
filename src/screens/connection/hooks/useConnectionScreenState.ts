@@ -5,7 +5,14 @@ export function useConnectionScreenState() {
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [offset, setOffset] = useState(DEFAULT_OFFSET);
   const [pendingTableAction, setPendingTableAction] = useState<
-    "export" | "import" | "clone" | "truncate" | "drop" | null
+    | "export"
+    | "import"
+    | "importSqlDump"
+    | "clone"
+    | "truncate"
+    | "drop"
+    | "structure"
+    | null
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);

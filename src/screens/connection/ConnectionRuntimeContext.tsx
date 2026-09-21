@@ -45,16 +45,26 @@ export type ConnectionRuntime = {
   // database objects (functions/procedures/triggers)
   objectSaveRef: { current: ObjectSaveHandler | null };
 
-  /** When set by context menu, MainTableDataPane runs export/import/clone/truncate/delete then clears */
+  /** When set by context menu, MainTableDataPane runs export/import/clone/truncate/drop/structure then clears */
   pendingTableAction:
     | "export"
     | "import"
+    | "importSqlDump"
     | "clone"
     | "truncate"
     | "drop"
+    | "structure"
     | null;
   setPendingTableAction: (
-    action: "export" | "import" | "clone" | "truncate" | "drop" | null
+    action:
+      | "export"
+      | "import"
+      | "importSqlDump"
+      | "clone"
+      | "truncate"
+      | "drop"
+      | "structure"
+      | null
   ) => void;
 };
 

@@ -748,14 +748,17 @@ export function useDatabaseBackup() {
     [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine]
   );
 
-  const onRestoreDatabase = useCallback(
-    async (onRefresh?: () => void) => {
+  const runSqlDumpImport = useCallback(
+    async (
+      onRefresh?: () => void,
+      opts?: { dialogTitle?: string; successToast?: string }
+    ) => {
       if (!rt.runtimeConnectionId) return;
 
       setOpError(null);
 
       const path = await openDialog({
-        title: "Restore database from dump",
+        title: opts?.dialogTitle ?? "Restore database from dump",
         multiple: false,
         directory: false,
         filters: [
@@ -839,17 +842,40 @@ export function useDatabaseBackup() {
 
         await rt.refreshSchemaAndTables();
         onRefresh?.();
-        showToast("Database restore completed.", { tone: "success" });
+        showToast(opts?.successToast ?? "Database restore completed.", {
+          tone: "success",
+        });
       } catch (err) {
-        setOpError(
-          err instanceof Error ? err.message : "Restore database failed."
-        );
+        const message =
+          err instanceof Error ? err.message : "SQL dump import failed.";
+        setOpError(message);
+        showToast(message, { tone: "error" });
       } finally {
         setDbRestoreRunning(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rt.runtimeConnectionId, rt.refreshSchemaAndTables]
+  );
+
+  const onRestoreDatabase = useCallback(
+    async (onRefresh?: () => void) => {
+      await runSqlDumpImport(onRefresh, {
+        dialogTitle: "Restore database from dump",
+        successToast: "Database restore completed.",
+      });
+    },
+    [runSqlDumpImport]
+  );
+
+  const onImportSqlDump = useCallback(
+    async (onRefresh?: () => void) => {
+      await runSqlDumpImport(onRefresh, {
+        dialogTitle: "Import SQL dump",
+        successToast: "SQL dump imported.",
+      });
+    },
+    [runSqlDumpImport]
   );
 
   return {
@@ -859,5 +885,6 @@ export function useDatabaseBackup() {
     setOpError,
     onBackupDatabase,
     onRestoreDatabase,
+    onImportSqlDump,
   };
 }
