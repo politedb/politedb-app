@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
-import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
+import type { DatabaseEngine, TableItem } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { preferredSchemaFromList } from "src/lib/engines";
 
@@ -39,7 +39,7 @@ export function useSchemaTablesPanel(args: {
   const [tableSearchQuery, setTableSearchQuery] = useState("");
   const [activeSchema, setActiveSchema] = useState(defaultSchema);
   const [expandedSections, setExpandedSections] = useState({
-    functions: false,
+    views: false,
     tables: true,
   });
 
@@ -83,47 +83,37 @@ export function useSchemaTablesPanel(args: {
     });
   }, [metadata, metaKey, engine, connectionId, currentDatabase]);
 
-  // Filter tables for sidebar
-  const filteredTables = useMemo(() => {
-    const list = meta.tables ?? [];
-    const q = tableSearchQuery.trim().toLowerCase();
-
-    const bySchema = activeSchema
-      ? list.filter((t: TableItem) => t.schema === activeSchema)
-      : list;
-
-    if (!q) return bySchema;
-
-    return bySchema.filter(
-      (t: TableItem) =>
-        t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
-    );
-  }, [meta.tables, activeSchema, tableSearchQuery]);
-
   const isMongo = engine === "mongo";
 
-  const filteredFunctions = useMemo(() => {
-    // MongoDB has no SQL-style functions; keep empty for Mongo.
+  const filterSidebarTables = useCallback(
+    (list: TableItem[], kind: "table" | "view") => {
+      const q = tableSearchQuery.trim().toLowerCase();
+      const byKind = list.filter((t) =>
+        kind === "view" ? t.kind === "view" : t.kind !== "view"
+      );
+      const bySchema = activeSchema
+        ? byKind.filter((t) => t.schema === activeSchema)
+        : byKind;
+      if (!q) return bySchema;
+      return bySchema.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
+      );
+    },
+    [activeSchema, tableSearchQuery]
+  );
+
+  // Filter tables for sidebar (exclude views — those go under Table Views)
+  const filteredTables = useMemo(
+    () => filterSidebarTables(meta.tables ?? [], "table"),
+    [filterSidebarTables, meta.tables]
+  );
+
+  const filteredViews = useMemo(() => {
+    // Mongo/Redis-style engines don't surface SQL views here.
     if (isMongo) return [];
-
-    const list = (meta.objects ?? []).filter(
-      (item): item is DatabaseObjectItem => item.kind === "function"
-    );
-    const q = tableSearchQuery.trim().toLowerCase();
-
-    const bySchema = activeSchema
-      ? list.filter((f) => f.schema === activeSchema)
-      : list;
-
-    if (!q) return bySchema;
-
-    return bySchema.filter(
-      (f) =>
-        f.name.toLowerCase().includes(q) ||
-        (f.signature ?? "").toLowerCase().includes(q) ||
-        f.schema.toLowerCase().includes(q)
-    );
-  }, [meta.objects, activeSchema, tableSearchQuery, isMongo]);
+    return filterSidebarTables(meta.tables ?? [], "view");
+  }, [isMongo, filterSidebarTables, meta.tables]);
 
   // For editor autocomplete: use full metadata (not filtered).
   // For Mongo, schemas = databases (used for Database dropdown).
@@ -158,7 +148,7 @@ export function useSchemaTablesPanel(args: {
     setExpandedSections,
 
     filteredTables,
-    filteredFunctions,
+    filteredViews,
 
     schemasForEditor,
     tablesForEditor,

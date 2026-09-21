@@ -4,7 +4,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   KeyIcon,
-  SquareFunctionIcon,
+  EyeIcon,
   SearchIcon,
   TableIcon,
   LightBulbIcon,
@@ -18,7 +18,7 @@ import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog"
 import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { cn } from "src/utils/cn";
-import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
+import type { DatabaseEngine, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
@@ -35,7 +35,7 @@ import {
 } from "./tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 
-const FUNCTION_LIST_PAGE_SIZE = 20;
+const VIEW_LIST_PAGE_SIZE = 20;
 
 function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
   return `table:${table.schema}.${table.name}`;
@@ -149,12 +149,12 @@ export type LeftNavItemsPaneProps = {
   tablesSectionTitle?: string;
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<SetStateAction<string>>;
-  expandedSections: { functions: boolean; tables: boolean };
+  expandedSections: { views: boolean; tables: boolean };
   setExpandedSections: Dispatch<
-    SetStateAction<{ functions: boolean; tables: boolean }>
+    SetStateAction<{ views: boolean; tables: boolean }>
   >;
   filteredTables: TableItem[];
-  filteredFunctions: DatabaseObjectItem[];
+  filteredViews: TableItem[];
   activeWindowId: string | null;
 };
 
@@ -171,7 +171,7 @@ export function LeftNavItemsPane({
   expandedSections,
   setExpandedSections,
   filteredTables,
-  filteredFunctions,
+  filteredViews,
   activeWindowId,
 }: LeftNavItemsPaneProps) {
   const actions = useConnectionActionsCtx();
@@ -181,20 +181,17 @@ export function LeftNavItemsPane({
   const isProfileLocked = useScreenStore(
     (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
   );
-  const {
-    windowHasPatchChanges,
-    openDatabaseObjectsManager,
-    openDatabaseCatalog,
-  } = useConnectionWindows(profileId);
+  const { windowHasPatchChanges, openDatabaseCatalog } =
+    useConnectionWindows(profileId);
   const isMongo = engine === "mongo";
   const isRedis = engine === "redis";
   const supportsTableMutations = !isMongo && !isRedis;
   const {
-    visibleItems: visibleFunctions,
-    sentinelRef: functionListSentinelRef,
-    hasMore: hasMoreFunctions,
-  } = useInfiniteScroll(filteredFunctions, {
-    pageSize: FUNCTION_LIST_PAGE_SIZE,
+    visibleItems: visibleViews,
+    sentinelRef: viewListSentinelRef,
+    hasMore: hasMoreViews,
+  } = useInfiniteScroll(filteredViews, {
+    pageSize: VIEW_LIST_PAGE_SIZE,
     resetKey: `${currSchema}\0${tableSearchQuery}`,
   });
 
@@ -244,7 +241,7 @@ export function LeftNavItemsPane({
       : [
           {
             type: "item",
-            label: "Open table",
+            label: "Open",
             onClick: () => {
               void actions.selectTable(tableMenu.table);
             },
@@ -314,7 +311,7 @@ export function LeftNavItemsPane({
         <div class="relative">
           <Input
             type="text"
-            placeholder="Search tables, functions..."
+            placeholder="Search tables, views…"
             left={<SearchIcon className="size-4 text-neutral-500" />}
             value={tableSearchQuery}
             onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
@@ -327,60 +324,88 @@ export function LeftNavItemsPane({
 
       {/* Middle: Sections */}
       <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
-        {/* Functions (hidden for Mongo; schema = database, no SQL functions) */}
+        {/* Table Views (hidden for Mongo/Redis) */}
         {!isMongo && !isRedis && (
           <div class="mb-2">
             <SectionHeader
-              title="Functions"
-              expanded={expandedSections.functions}
-              onOpen={() => openDatabaseCatalog("functions", currSchema)}
+              title="Views"
+              expanded={expandedSections.views}
+              onOpen={() => openDatabaseCatalog("views", currSchema)}
               onToggle={() =>
                 setExpandedSections((prev) => ({
                   ...prev,
-                  functions: !prev.functions,
+                  views: !prev.views,
                 }))
               }
             />
 
-            {expandedSections.functions && (
+            {expandedSections.views && (
               <div class="mt-1">
-                {filteredFunctions.length === 0 ? (
+                {filteredViews.length === 0 ? (
                   <EmptyExpandSection
-                    Icon={SquareFunctionIcon}
-                    description="No functions found"
+                    Icon={EyeIcon}
+                    description="No views found"
                   />
                 ) : (
                   <div class="space-y-1 pl-3">
-                    {visibleFunctions.map((fn) => {
-                      const key = `${fn.schema}.${fn.name}(${fn.signature ?? ""})`;
+                    {visibleViews.map((view) => {
+                      const key = `${view.schema}.${view.name}`;
+                      const isActive = activeWindowId === `table:${key}`;
+                      const hasChanges = windowHasPatchChanges(
+                        dataPatchMap[profileId]?.[`table:${key}`]
+                      );
 
                       return (
-                        <button
+                        <Button
                           data-density-item
-                          type="button"
-                          key={key}
-                          onClick={() =>
-                            openDatabaseObjectsManager({
-                              kind: "function",
-                              object: fn,
-                            })
+                          variant={
+                            isActive && !hasChanges ? "default" : "ghost"
                           }
-                          class={cn(
-                            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5",
-                            "text-left text-sm text-neutral-700 hover:bg-neutral-100/60"
+                          active={isActive && !hasChanges}
+                          key={key}
+                          onClick={() => void actions.selectTable(view)}
+                          onContextMenu={(e: MouseEvent) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setTableMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              table: view,
+                            });
+                          }}
+                          className={cn(
+                            tableSidebarButtonClass({
+                              isActive,
+                              isNewTable: false,
+                              hasChanges,
+                            }),
+                            isActive && !hasChanges && "font-medium"
                           )}
                           title={key}
                         >
-                          <SquareFunctionIcon className="size-4 shrink-0 text-blue-500" />
-                          <span class="min-w-0 flex-1 truncate select-none">
-                            {fn.name}
-                          </span>
-                        </button>
+                          <EyeIcon
+                            className={cn(
+                              "size-4 shrink-0",
+                              tableSidebarIconClass({
+                                isActive,
+                                isRedis: false,
+                              })
+                            )}
+                          />
+                          <TableName
+                            className={tableSidebarNameClass({
+                              isActive,
+                              isNewTable: false,
+                              hasChanges,
+                            })}
+                            name={view.name}
+                          />
+                        </Button>
                       );
                     })}
-                    {hasMoreFunctions ? (
+                    {hasMoreViews ? (
                       <div
-                        ref={functionListSentinelRef}
+                        ref={viewListSentinelRef}
                         class="h-px"
                         aria-hidden="true"
                       />

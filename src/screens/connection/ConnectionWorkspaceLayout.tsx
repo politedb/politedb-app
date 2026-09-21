@@ -7,7 +7,6 @@ import { ConnectionBottomPanel } from "./ConnectionBottomPanel";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import type {
   DatabaseEngine,
-  DatabaseObjectItem,
   OpenWindow,
   TableItem,
   TableSizeInfo,
@@ -31,12 +30,12 @@ export function ConnectionWorkspaceLayout(props: {
   onSchemaChange: (schema: string) => void;
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<StateUpdater<string>>;
-  expandedSections: { functions: boolean; tables: boolean };
+  expandedSections: { views: boolean; tables: boolean };
   setExpandedSections: Dispatch<
-    StateUpdater<{ functions: boolean; tables: boolean }>
+    StateUpdater<{ views: boolean; tables: boolean }>
   >;
   sidebarTables: TableItem[];
-  filteredFunctions: DatabaseObjectItem[];
+  filteredViews: TableItem[];
   activeTableDataSizeInfo: TableSizeInfo | null;
   selectedRowDetail: SelectedRowDetail | null;
   activeTableLoadKey: string | null;
@@ -59,7 +58,7 @@ export function ConnectionWorkspaceLayout(props: {
     expandedSections,
     setExpandedSections,
     sidebarTables,
-    filteredFunctions,
+    filteredViews,
     activeTableDataSizeInfo,
     selectedRowDetail,
     activeTableLoadKey,
@@ -152,7 +151,7 @@ export function ConnectionWorkspaceLayout(props: {
         expandedSections={expandedSections}
         setExpandedSections={setExpandedSections}
         filteredTables={sidebarTables}
-        filteredFunctions={filteredFunctions}
+        filteredViews={filteredViews}
         activeWindowId={activeWindowId}
         connectionProfileId={connectionProfileId}
         onInsertSnippet={onInsertSnippet}

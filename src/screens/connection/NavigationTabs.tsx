@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import {
+  EyeIcon,
   TableIcon,
   XIcon,
   ChevronLeftIcon,
@@ -244,6 +245,8 @@ export function NavigationTabs({
                 {w.type === "db-catalog" &&
                   (w.catalogKind === "tables" ? (
                     <TableIcon className="size-4 text-blue-500" />
+                  ) : w.catalogKind === "views" ? (
+                    <EyeIcon className="size-4 text-blue-500" />
                   ) : (
                     <SquareFunctionIcon className="size-4 text-blue-500" />
                   ))}

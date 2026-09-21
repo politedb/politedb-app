@@ -7,6 +7,7 @@ import {
 } from "src/components/table/CanvasTable";
 import { useContainerWidth } from "src/components/table/tableHooks";
 import {
+  EyeIcon,
   RefreshCwIcon,
   SearchIcon,
   SquareFunctionIcon,
@@ -290,7 +291,10 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
 
   const tableRows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const wantViews = win.catalogKind === "views";
     return (meta.tables ?? []).filter((table) => {
+      const isView = table.kind === "view";
+      if (wantViews ? !isView : isView) return false;
       const effectiveSchema = schemaScope;
       if (effectiveSchema !== "all" && table.schema !== effectiveSchema)
         return false;
@@ -299,7 +303,7 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [meta.tables, schemaScope, search]);
+  }, [meta.tables, schemaScope, search, win.catalogKind]);
 
   const objectKind =
     win.catalogKind === "functions"
@@ -334,16 +338,20 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         ? "procedures"
         : win.catalogKind === "triggers"
           ? "triggers"
-          : "tables";
+          : win.catalogKind === "views"
+            ? "views"
+            : "tables";
   const title =
     win.title?.trim() ||
     (win.catalogKind === "tables"
       ? "Tables"
-      : win.catalogKind === "functions"
-        ? "Functions"
-        : win.catalogKind === "procedures"
-          ? "Procedures"
-          : "Triggers");
+      : win.catalogKind === "views"
+        ? "Views"
+        : win.catalogKind === "functions"
+          ? "Functions"
+          : win.catalogKind === "procedures"
+            ? "Procedures"
+            : "Triggers");
   const rowsCount = isObjectCatalog ? objectRows.length : tableRows.length;
 
   const refresh = async () => {
@@ -363,6 +371,8 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           <div class="flex items-center gap-2">
             {isObjectCatalog ? (
               <SquareFunctionIcon className="size-4 text-blue-500" />
+            ) : win.catalogKind === "views" ? (
+              <EyeIcon className="size-4 text-blue-500" />
             ) : (
               <TableIcon className="size-4 text-blue-500" />
             )}
@@ -418,8 +428,10 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
         <CatalogCanvasTable
           columns={TABLE_COLUMNS}
           rows={tableRows}
-          resetKey={`tables\0${schemaScope}\0${search}\0${tableRows.length}`}
-          emptyLabel="No tables found."
+          resetKey={`${win.catalogKind}\0${schemaScope}\0${search}\0${tableRows.length}`}
+          emptyLabel={
+            win.catalogKind === "views" ? "No views found." : "No tables found."
+          }
           onOpen={(table) => void actions.selectTable(table)}
           onRefresh={() => void refresh()}
         />

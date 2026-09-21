@@ -4,7 +4,7 @@ import { LeftNavSnippetsPane } from "./LeftNavSnippetsPane";
 import { LeftNavObjectsPane } from "./LeftNavObjectsPane";
 import { LeftNavItemsPane } from "./LeftNavItemsPane";
 import { cn } from "src/utils/cn";
-import type { DatabaseEngine, DatabaseObjectItem, TableItem } from "src/types";
+import type { DatabaseEngine, TableItem } from "src/types";
 
 interface Props {
   engine?: DatabaseEngine;
@@ -20,13 +20,13 @@ interface Props {
   tableSearchQuery: string;
   setTableSearchQuery: Dispatch<SetStateAction<string>>;
 
-  expandedSections: { functions: boolean; tables: boolean };
+  expandedSections: { views: boolean; tables: boolean };
   setExpandedSections: Dispatch<
-    SetStateAction<{ functions: boolean; tables: boolean }>
+    SetStateAction<{ views: boolean; tables: boolean }>
   >;
 
   filteredTables: TableItem[];
-  filteredFunctions: DatabaseObjectItem[];
+  filteredViews: TableItem[];
   activeWindowId: string | null;
   connectionProfileId: string | null;
   onInsertSnippet: (sql: string) => void | Promise<void>;
@@ -69,7 +69,7 @@ export function LeftNav({
   expandedSections,
   setExpandedSections,
   filteredTables,
-  filteredFunctions,
+  filteredViews,
   activeWindowId,
   connectionProfileId,
   onInsertSnippet,
@@ -118,7 +118,7 @@ export function LeftNav({
           expandedSections={expandedSections}
           setExpandedSections={setExpandedSections}
           filteredTables={filteredTables}
-          filteredFunctions={filteredFunctions}
+          filteredViews={filteredViews}
           activeWindowId={activeWindowId}
         />
       ) : leftTab === "snippets" ? (

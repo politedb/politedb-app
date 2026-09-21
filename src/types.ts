@@ -117,6 +117,7 @@ export type DatabaseObjectManagerWindow = OpenWindowBase & {
 
 export type DatabaseCatalogKind =
   | "tables"
+  | "views"
   | "functions"
   | "procedures"
   | "triggers";

@@ -337,7 +337,7 @@ export function ConnectionScreen() {
     expandedSections,
     setExpandedSections,
     filteredTables,
-    filteredFunctions,
+    filteredViews,
     schemasForEditor,
     isConnecting,
   } = useSchemaTablesPanel({
@@ -796,7 +796,7 @@ export function ConnectionScreen() {
             expandedSections={expandedSections}
             setExpandedSections={setExpandedSections}
             sidebarTables={sidebarTables}
-            filteredFunctions={filteredFunctions}
+            filteredViews={filteredViews}
             activeTableDataSizeInfo={activeTableData.sizeInfo}
             selectedRowDetail={selectedRowDetail}
             activeTableLoadKey={activeTableLoadKey}

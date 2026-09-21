@@ -254,11 +254,13 @@ export function useConnectionWindows(
       const baseTitle =
         catalogKind === "tables"
           ? "Tables"
-          : catalogKind === "functions"
-            ? "Functions"
-            : catalogKind === "procedures"
-              ? "Procedures"
-              : "Triggers";
+          : catalogKind === "views"
+            ? "Views"
+            : catalogKind === "functions"
+              ? "Functions"
+              : catalogKind === "procedures"
+                ? "Procedures"
+                : "Triggers";
       const title = schemaName ? `${baseTitle}.${schemaName}` : baseTitle;
       const existing = windows.find(
         (w) =>
