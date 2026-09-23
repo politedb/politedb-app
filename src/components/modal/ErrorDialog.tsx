@@ -61,25 +61,25 @@ export function ErrorDialog({
         <DialogHeader className="p-0">
           <div class="flex items-center justify-between gap-3">
             <DialogTitle
-              className={cn("text-base", isExecution && "text-red-600")}
+              className={cn("text-base", isExecution && "text-red-600 dark:text-red-400")}
             >
               {title}
             </DialogTitle>
             {isExecution ? (
-              <span class="shrink-0 rounded-md bg-red-50 px-2 py-0.5 text-sm font-semibold text-red-700">
+              <span class="shrink-0 rounded-md bg-red-50 px-2 py-0.5 text-sm font-semibold text-red-700 dark:border dark:border-red-700 dark:bg-red-950 dark:text-red-50">
                 ERROR
               </span>
             ) : null}
           </div>
         </DialogHeader>
 
-        <div class="space-y-2 text-sm text-neutral-800">
+        <div class="space-y-2 text-sm text-neutral-800 dark:text-neutral-200">
           {isExecution ? (
             <>
-              <div class="text-sm font-semibold text-neutral-500">Details</div>
+              <div class="text-sm font-semibold text-neutral-500 dark:text-neutral-400">Details</div>
               <OverlayScrollArea
-                className="max-h-64 rounded-lg border border-neutral-200 bg-neutral-50"
-                contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-neutral-900"
+                className="max-h-64 rounded-lg border border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900"
+                contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-neutral-900 dark:text-neutral-100"
                 horizontal
                 vertical
               >
@@ -88,8 +88,8 @@ export function ErrorDialog({
             </>
           ) : (
             <OverlayScrollArea
-              className="max-h-64 rounded-lg border border-red-100 bg-red-50/40"
-              contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-red-600"
+              className="max-h-64 rounded-lg border border-red-100 bg-red-50/40 dark:border-red-700 dark:bg-red-950"
+              contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-red-600 dark:text-red-50"
               horizontal
               vertical
             >
@@ -100,7 +100,7 @@ export function ErrorDialog({
             <p>All changes were reverted (DDL statements can't be reverted).</p>
           ) : null}
           {hint ? (
-            <p class="text-xs leading-5 text-neutral-500">{hint}</p>
+            <p class="text-xs leading-5 text-neutral-500 dark:text-neutral-400">{hint}</p>
           ) : null}
         </div>
       </DialogContent>

@@ -127,7 +127,7 @@ function EmptyItemsState(props: {
         : "This schema does not contain any tables yet.";
 
   return (
-    <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]">
+    <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center">
       <div class="mx-auto mb-2 flex size-8 items-center justify-center rounded-full bg-neutral-100">
         {icon}
       </div>

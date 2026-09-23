@@ -243,8 +243,8 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
                     "flex items-center justify-between gap-2",
                     "rounded-md border px-2 py-1 transition-all",
                     isActive
-                      ? "border-slate-300 bg-white text-slate-900"
-                      : "border-transparent bg-slate-100 text-slate-600 hover:border-slate-200/20 hover:bg-slate-50"
+                      ? "border-slate-300 bg-slate-100 text-slate-900"
+                      : "border-transparent bg-white text-slate-600 hover:bg-slate-50"
                   )}
                 >
                   <div class="flex min-w-0 items-center gap-2">

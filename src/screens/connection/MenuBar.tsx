@@ -643,7 +643,7 @@ export function MenuBar({
               class={cn(
                 "relative flex h-7.75 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white pr-2 pl-8",
                 loadTableError
-                  ? "border-red-300"
+                  ? "border-red-200 bg-red-50 dark:border-red-700"
                   : "border-neutral-200 hover:border-neutral-300",
                 "shadow-[0_1px_0_rgba(0,0,0,0.02)]"
               )}

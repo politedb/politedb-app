@@ -1,4 +1,4 @@
-import { useMemo } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
 import { TableFooter } from "src/components/table/TableFooter";
@@ -8,6 +8,7 @@ import { XIcon } from "src/components/icons";
 import { Button } from "../common/Button";
 import { Spinner } from "../common/Spinner";
 import { OverlayScrollArea } from "../common/OverlayScrollArea";
+import { ContextMenu, type MenuItem } from "../common/ContextMenu";
 import type { DatabaseEngine } from "src/types";
 import { MAX_PLAN_NODES } from "src/lib/query-analyzer/plan";
 import { planFromResult } from "src/lib/query-analyzer/fromResult";
@@ -108,48 +109,106 @@ function RunTabs(props: {
   onClose: (runId: string) => void;
 }) {
   const { runs, activeRunId, onSelect, onClose } = props;
+  const [ctx, setCtx] = useState<{
+    x: number;
+    y: number;
+    runId: string;
+    runIndex: number;
+  } | null>(null);
+
+  const menuItems: MenuItem[] = ctx
+    ? [
+        {
+          type: "item",
+          label: "Close",
+          onClick: () => onClose(ctx.runId),
+        },
+        {
+          type: "item",
+          label: "Close Others",
+          disabled: runs.length <= 1,
+          onClick: () =>
+            runs.forEach((run) => {
+              if (run.id !== ctx.runId) onClose(run.id);
+            }),
+        },
+        {
+          type: "item",
+          label: "Close to the Right",
+          disabled: ctx.runIndex >= runs.length - 1,
+          onClick: () =>
+            runs.slice(ctx.runIndex + 1).forEach((run) => onClose(run.id)),
+        },
+        { type: "sep" },
+        {
+          type: "item",
+          label: "Close All",
+          onClick: () => runs.forEach((run) => onClose(run.id)),
+        },
+      ]
+    : [];
 
   return (
-    <OverlayScrollArea
-      className="shrink-0 border-b border-neutral-200 bg-neutral-100"
-      contentClassName="flex items-center gap-1 px-2 py-1"
-      horizontal
-      vertical={false}
-    >
-      {runs.map((run) => {
-        const status = runStatus(run);
-        const active = run.id === activeRunId;
-        return (
-          <div
-            key={run.id}
-            onClick={() => onSelect(run.id)}
-            class={cn(
-              "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
-              active
-                ? "bg-white text-neutral-800 ring-1 ring-neutral-200"
-                : "bg-neutral-200/60 text-neutral-600 hover:bg-neutral-200/40"
-            )}
-          >
-            <span class={cn("mr-0.5 text-xs", statusTone(status))}>
-              {statusMark(status)}
-            </span>
-            <span>{run.title}</span>
-            <Button
-              variant="ghost"
-              class="invisible justify-center rounded-full p-px group-hover:visible"
-              aria-label={`Close ${run.title}`}
-              title={`Close ${run.title}`}
-              onClick={(e) => {
+    <div class="shrink-0 border-b border-neutral-200 bg-neutral-100">
+      <OverlayScrollArea
+        contentClassName="flex items-center gap-1 px-2 pb-1"
+        horizontal
+        vertical={false}
+      >
+        {runs.map((run, idx) => {
+          const status = runStatus(run);
+          const active = run.id === activeRunId;
+          return (
+            <div
+              key={run.id}
+              onClick={() => onSelect(run.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                onClose(run.id);
+                setCtx({
+                  x: e.clientX,
+                  y: e.clientY,
+                  runId: run.id,
+                  runIndex: idx,
+                });
               }}
+              class={cn(
+                "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
+                "border border-neutral-200 transition-colors",
+                active
+                  ? "bg-white text-neutral-800"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-100"
+              )}
             >
-              <XIcon className="size-3" />
-            </Button>
-          </div>
-        );
-      })}
-    </OverlayScrollArea>
+              <span class={cn("mr-0.5 text-xs", statusTone(status))}>
+                {statusMark(status)}
+              </span>
+              <span>{run.title}</span>
+              <Button
+                variant="ghost"
+                class="invisible justify-center rounded-full p-px group-hover:visible"
+                aria-label={`Close ${run.title}`}
+                title={`Close ${run.title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(run.id);
+                }}
+              >
+                <XIcon className="size-3" />
+              </Button>
+            </div>
+          );
+        })}
+      </OverlayScrollArea>
+
+      <ContextMenu
+        open={!!ctx}
+        x={ctx?.x ?? 0}
+        y={ctx?.y ?? 0}
+        items={menuItems}
+        onClose={() => setCtx(null)}
+      />
+    </div>
   );
 }
 

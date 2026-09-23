@@ -11,15 +11,15 @@ export function ConnectionFailedPlaceholder(props: {
   return (
     <div class="relative flex h-full w-full items-center justify-center px-6">
       <div class="relative w-full max-w-lg text-center">
-        <div class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 ring-1 ring-red-200">
+        <div class="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full border border-red-200 bg-red-50 dark:border-red-700">
           <DatabaseIcon className="size-5 text-red-600" />
         </div>
 
-        <div class="text-lg font-semibold text-red-700">Connection failed</div>
+        <div class="text-lg font-semibold text-red-600">Connection failed</div>
 
         <OverlayScrollArea
-          className="mt-4 max-h-52 rounded-xl border border-red-200 bg-red-50/90 text-left"
-          contentClassName="wrap-break-word whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-red-900"
+          className="mt-4 max-h-52 rounded-xl border border-red-200 bg-red-50 text-left dark:border-red-700"
+          contentClassName="wrap-break-word whitespace-pre-wrap p-4 font-mono text-[12px] leading-relaxed text-red-600"
           horizontal
           vertical
         >
