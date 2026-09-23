@@ -91,3 +91,12 @@ Apply SOLID when designing or refactoring code. Prefer extending existing bounda
 - For Rust/Tauri command changes, run the relevant Rust checks/tests from `src-tauri/` and verify the affected frontend integration when possible.
 - For UI changes, run the app or dev server and inspect the affected screen when feasible.
 - If a verification step cannot be run locally, document the reason and the risk in the handoff.
+
+## Dual-agent workflow (Codex + Grok Bot)
+
+PoliteDB uses a split agent workflow documented in [`.agent/WORKFLOW.md`](.agent/WORKFLOW.md):
+
+- **Codex** owns planning and review via `.agent/PLAN.md` and `.agent/REVIEW.md`.
+- **Grok Bot** owns implementation and fix-ups from an `APPROVED` plan / `CHANGES REQUIRED` review.
+- Hand off through those files and the Grok Bot webhooks described in `WORKFLOW.md`. Do not require the human to re-explain the same task to both agents.
+- While `PLAN.md` is `DRAFT` or still contains `TBD` requirements, do not implement the planned task.

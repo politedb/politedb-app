@@ -1,7 +1,7 @@
 # Implementation Plan
 
 > Task plan for the implementation agent (Grok or another coding agent).
-> Read `AGENTS.md` first. This template is not an approved implementation task.
+> Read `AGENTS.md` and `.agent/WORKFLOW.md` first. This task awaits plan approval.
 > Fill task-specific sections from the user's request and verified repository evidence.
 > Never invent requirements or treat `TBD` as permission to change code.
 
@@ -21,7 +21,7 @@
    add regression tests, rerun affected checks, and review the resulting diff again.
 7. Mark IMPLEMENTED only when acceptance criteria are satisfied and review has no
    unresolved blocking findings. Document unavailable checks; never claim they passed.
-8. Commit only task-owned changes with a Conventional Commit message. Do not push,
+8. Per `.agent/WORKFLOW.md`, commit only when the human asks, and only task-owned changes. Do not push,
    merge, rebase, amend, or create a PR unless requested.
 
 ## Engineering Constraints
