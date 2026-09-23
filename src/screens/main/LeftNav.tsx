@@ -191,7 +191,7 @@ export function LeftNav(props: {
 
                 {updateAvailable ? (
                   <Button
-                    class={cn("rounded-full p-1", isUpdating && "py-0.5")}
+                    class="rounded-full p-1"
                     title={isUpdating ? "Installing..." : "Download"}
                     aria-label={isUpdating ? "Installing" : "Download"}
                     disabled={isUpdating}
@@ -201,9 +201,9 @@ export function LeftNav(props: {
                     }}
                   >
                     {isUpdating ? (
-                      <span class="px-1 text-[11px]">Installing</span>
+                      <span class="px-1 text-xs">Installing</span>
                     ) : (
-                      <DownloadIcon className="size-3.5" />
+                      <DownloadIcon className="size-4" />
                     )}
                   </Button>
                 ) : null}
