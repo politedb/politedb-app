@@ -12,8 +12,8 @@ const hookState = {
   supported: true,
 };
 
-vi.mock("src/hooks/useDatabaseHealthInspector", () => ({
-  useDatabaseHealthInspector: () => hookState,
+vi.mock("@root/src/hooks/useDbHealthInspector", () => ({
+  useDbHealthInspector: () => hookState,
 }));
 
 beforeEach(() => {

@@ -24,7 +24,7 @@ const variantStyles: Record<ButtonVariant, string> = {
     "bg-blue-600 text-white hover:bg-blue-600/90 active:bg-blue-700 font-bold",
   shadow: "shadow-sm hover:bg-neutral-100 active:bg-neutral-200",
   primary:
-    "bg-neutral-500/90 text-neutral-50 hover:bg-neutral-600/90 hover:text-white active:bg-neutral-600",
+    "bg-neutral-500 text-neutral-50 hover:bg-neutral-600/90 hover:text-white active:bg-neutral-600",
   outline:
     "text-neutral-600 bg-transparent hover:bg-neutral-100 active:bg-neutral-100",
   ghost:
@@ -49,7 +49,7 @@ const borderStyles: Record<ButtonVariant, string> = {
   default: "border-blue-600 hover:border-blue-600/90 active:border-blue-700",
   shadow: "border-neutral-300",
   primary:
-    "border-neutral-500/90 hover:border-neutral-600/90 active:border-neutral-600",
+    "border-neutral-500 hover:border-neutral-600/90 active:border-neutral-600",
   outline: "border-neutral-400",
   ghost:
     "border-transparent hover:border-neutral-200 active:border-neutral-100 dark:hover:border-transparent",

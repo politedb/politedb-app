@@ -2,7 +2,7 @@
 
 ## Status
 
-CHANGES REQUIRED
+VERIFIED WITH LIMITATIONS
 
 ## Task
 
@@ -18,12 +18,11 @@ restricted activity detection, latest maintenance timestamps and physical partit
 The original age-format test now passes. PLAN now acknowledges native changes.
 
 ## Findings
-Commit-time verification (2026-09-29): subsequent hook rename invalidated the
-dialog test mock. DbHealthInspectorDialog imports useDbHealthInspector, but its
-test still mocks src/hooks/useDatabaseHealthInspector/useDatabaseHealthInspector.
-Update the mock path/export to the renamed module and rerun: current focused suite
-is 51 passed / 9 failed. Build passes. The previous 60-pass verdict applies to the
-pre-rename snapshot, not the current commit. Production changes not made here.
+Post-commit verification (2026-09-29): the working-tree dialog mock now matches
+@root/src/hooks/useDbHealthInspector and its renamed export. The fix was already
+present when this verification began. Independently reran the focused suite:
+60 passed / 9 files, including all 9 previously failing dialog tests. Build passes.
+Mock correction remains uncommitted; no production changes made in this pass.
 
 
 No unresolved actionable findings in the R5/R6 fix scope as of 2026-09-29.
@@ -87,3 +86,17 @@ Applied R5/R6 in working-tree `src/lib/tauri/query.ts` (not committed):
 - No new actionable findings in this fix scope. No production edits or commit.
 - Full suite, Rust tests and native/UI checks not rerun this pass; prior Rust
   result above is from the preceding review, not a new verification.
+
+## Fix pass (Grok, 2026-09-29 ~10:33 Asia/Saigon)
+
+Dialog test mock aligned with renamed hook (commit-time finding):
+
+- `DbHealthInspectorDialog.test.tsx`: `vi.mock` path/export
+  `src/hooks/useDatabaseHealthInspector` / `useDatabaseHealthInspector`
+  → `@root/src/hooks/useDbHealthInspector` / `useDbHealthInspector`
+  (matches dialog import module id).
+- No other leftover `useDatabaseHealthInspector` refs under `src/`.
+- Verification: focused Inspector/query suite (9 files): PASS (60/60).
+- `npm run build`: PASS (pre-existing chunk/externalization warnings only).
+- Touched only the dialog test + this note. Status left CHANGES REQUIRED
+  for Codex re-verify. No commit/push.
