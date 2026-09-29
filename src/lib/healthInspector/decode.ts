@@ -5,6 +5,7 @@ import {
   PG_INSUFFICIENT_PRIVILEGE_QUERY,
 } from "src/lib/queries/sql/healthInspector";
 import type {
+  HealthBlockerSummary,
   HealthInspectorCapabilities,
   HealthIndexRow,
   HealthOverview,
@@ -195,6 +196,53 @@ export function decodeCapabilities(
   };
 }
 
+export function decodeTopBlockers(value: unknown): HealthBlockerSummary[] {
+  const prim = cellPrimitive(value);
+  let parsed: unknown = prim;
+  if (typeof prim === "string") {
+    const trimmed = prim.trim();
+    if (!trimmed) return [];
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const rows: HealthBlockerSummary[] = [];
+  for (const item of parsed) {
+    if (item == null || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const pid = decodeUnknownNumber(obj.pid);
+    if (pid == null || !Number.isFinite(pid)) continue;
+    const blocked = decodeUnknownNumber(
+      obj.blocked_count ?? obj.blockedSessionCount
+    );
+    rows.push({
+      pid,
+      blockedSessionCount: blocked ?? 0,
+      inCurrentDatabase: decodeUnknownBool(
+        obj.in_current_database ?? obj.inCurrentDatabase
+      ),
+      isPreparedTransaction:
+        pid === 0 ||
+        decodeUnknownBool(
+          obj.is_prepared_transaction ?? obj.isPreparedTransaction
+        ),
+    });
+  }
+
+  // Deterministic: blocked desc, pid asc (SQL already orders; re-sort for safety).
+  rows.sort((a, b) => {
+    if (b.blockedSessionCount !== a.blockedSessionCount) {
+      return b.blockedSessionCount - a.blockedSessionCount;
+    }
+    return a.pid - b.pid;
+  });
+  return rows.slice(0, 5);
+}
+
 export function decodeOverview(result: QueryResult): HealthOverview {
   const row = result.rows[0] ?? [];
   const cols = result.columns;
@@ -213,6 +261,20 @@ export function decodeOverview(result: QueryResult): HealthOverview {
   const longest = decodeUnknownNumber(
     cellAt(row, cols, "longest_xact_age_seconds")
   );
+  const idleInXact = decodeUnknownNumber(
+    cellAt(row, cols, "idle_in_transaction_count")
+  );
+  const idleInXactOldest = decodeUnknownNumber(
+    cellAt(row, cols, "idle_in_xact_oldest_xact_age_seconds")
+  );
+  const idleInXactLongestIdle = decodeUnknownNumber(
+    cellAt(row, cols, "idle_in_xact_longest_idle_seconds")
+  );
+
+  const topBlockers = decodeTopBlockers(cellAt(row, cols, "top_blockers"));
+  const hasUnresolvedBlockers = topBlockers.some(
+    (b) => b.isPreparedTransaction || !b.inCurrentDatabase
+  );
 
   return {
     databaseName: decodeUnknownString(cellAt(row, cols, "database_name")),
@@ -228,6 +290,35 @@ export function decodeOverview(result: QueryResult): HealthOverview {
     databaseBytes: decodeUnknownNumber(cellAt(row, cols, "database_bytes")),
     statsReset: decodeUnknownString(cellAt(row, cols, "stats_reset")),
     restrictedVisibility,
+    idleInTransactionCount: restrictedVisibility ? null : idleInXact,
+    idleInTransactionOldestXactAgeSeconds: restrictedVisibility
+      ? null
+      : idleInXactOldest,
+    idleInTransactionLongestIdleSeconds: restrictedVisibility
+      ? null
+      : idleInXactLongestIdle,
+    topBlockers,
+    hasUnresolvedBlockers,
+    lockWaitDurationAvailable: false,
+    // Visible client counts only. backend_type is NULL for sessions the caller
+    // cannot inspect (pg_stat_get_activity field 17); those are tracked separately
+    // and must not be assumed to be clients or omitted from capacity disclosure.
+    clientBackendCountDatabase: decodeUnknownNumber(
+      cellAt(row, cols, "client_backend_count_db")
+    ),
+    clientBackendCountServer: decodeUnknownNumber(
+      cellAt(row, cols, "client_backend_count_server")
+    ),
+    hiddenBackendTypeCountDatabase: decodeUnknownNumber(
+      cellAt(row, cols, "hidden_backend_type_count_db")
+    ),
+    hiddenBackendTypeCountServer: decodeUnknownNumber(
+      cellAt(row, cols, "hidden_backend_type_count_server")
+    ),
+    maxConnections: decodeUnknownNumber(cellAt(row, cols, "max_connections")),
+    tempFiles: decodeUnknownNumber(cellAt(row, cols, "temp_files")),
+    tempBytes: decodeUnknownNumber(cellAt(row, cols, "temp_bytes")),
+    deadlocks: decodeUnknownNumber(cellAt(row, cols, "deadlocks")),
   };
 }
 

@@ -30,7 +30,6 @@ import {
   PARTITION_SIZE_NOTE,
   formatAgeSeconds,
   formatOptionalNumber,
-  overviewVisibilityNote,
 } from "src/lib/healthInspector/signals";
 import type {
   HealthIndexRow,
@@ -40,6 +39,7 @@ import type {
   HealthStatementRow,
   HealthTableRow,
 } from "src/lib/healthInspector/types";
+import { DbHealthInspectorOverview } from "./DbHealthInspectorOverview";
 
 type SectionKey = "overview" | "sessions" | "statements" | "tables" | "indexes";
 
@@ -256,88 +256,6 @@ function SectionBanner(props: {
       {caveat ? <span class="text-neutral-500">{caveat}</span> : null}
     </div>
   ) : null;
-}
-
-function OverviewCards(props: {
-  snap: HealthInspectorSnapshot | null;
-  loading: boolean;
-}) {
-  const section = props.snap?.overview;
-  if (!section) {
-    return props.loading ? (
-      <div class="flex items-center gap-2 text-sm text-neutral-600">
-        <Spinner className="size-4" />
-        Loading…
-      </div>
-    ) : (
-      <div class="text-sm text-neutral-500">No overview yet.</div>
-    );
-  }
-  const data = section.data;
-  const note = overviewVisibilityNote(data);
-  const cards = [
-    {
-      label: "Sessions",
-      value: formatOptionalNumber(data?.sessionCount ?? null),
-    },
-    {
-      label: "Active",
-      value: formatOptionalNumber(data?.activeSessionCount ?? null),
-    },
-    {
-      label: "Idle",
-      value: formatOptionalNumber(data?.idleSessionCount ?? null),
-    },
-    {
-      label: "Blocked",
-      value: formatOptionalNumber(data?.blockedSessionCount ?? null),
-    },
-    {
-      label: "Longest txn",
-      value: formatAgeSeconds(data?.longestXactAgeSeconds ?? null),
-    },
-    {
-      label: "Database size",
-      value:
-        data?.databaseBytes == null
-          ? "—"
-          : formatBytesSize(data.databaseBytes, { fractionDigits: 1 }),
-    },
-  ];
-  return (
-    <div class="flex flex-col gap-3">
-      <SectionBanner section={section} loading={props.loading} />
-      {section.status === "ready" && data ? (
-        <>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {cards.map((c) => (
-              <div
-                key={c.label}
-                class="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
-              >
-                <div class="text-sm font-medium text-neutral-500">
-                  {c.label}
-                </div>
-                <div class="mt-0.5 text-base font-semibold text-neutral-900">
-                  {c.value}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div class="text-sm text-neutral-500">
-            {data.statsReset
-              ? `Stats reset: ${formatHealthInspectorTimestamp(data.statsReset)}`
-              : ""}
-          </div>
-          {note ? (
-            <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50">
-              {note}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
 }
 
 function QueryCell(props: { queryText: string | null; queryHidden: boolean }) {
@@ -717,11 +635,21 @@ export function DbHealthInspectorDialog(props: Props) {
     onClose();
   };
 
+  const openSessionsTab = () => {
+    setTab("sessions");
+  };
+
   const tabs = [
     {
       value: "overview" as const,
       label: "Overview",
-      children: <OverviewCards snap={snapshot} loading={loading} />,
+      children: (
+        <DbHealthInspectorOverview
+          snap={snapshot}
+          loading={loading}
+          onOpenSessions={openSessionsTab}
+        />
+      ),
     },
     {
       value: "sessions" as const,
@@ -821,7 +749,7 @@ export function DbHealthInspectorDialog(props: Props) {
             Cancel
           </span>
         </Button>
-        <Button type="button" variant="primary" onClick={handleClose}>
+        <Button type="button" variant="default" onClick={handleClose}>
           Close
         </Button>
       </DialogFooter>

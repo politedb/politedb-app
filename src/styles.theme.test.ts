@@ -66,7 +66,7 @@ describe("global dark theme remaps", () => {
     expect(css).toContain("--color-slate-950: #181818");
     expect(css).toContain("--color-slate-900: #242424");
     expect(css).toContain("html.dark aside");
-    expect(css).toContain("background-color: #212121 !important");
+    expect(css).toContain("border-color: #353535 !important");
   });
 
   it("shares the canvas table palette with regular tables", () => {
@@ -121,8 +121,9 @@ describe("remaining dark-theme spots", () => {
     expect(statusBar).toContain("bg-slate-100");
     expect(statusBar).toContain("text-slate-700");
     expect(statusBar).toContain("border-slate-200");
-    expect(statusBar).toContain("dark:bg-slate-900");
-    expect(statusBar).toContain("dark:text-slate-300");
+    // Status bar uses light slate classes; dark chrome comes from global remaps.
+    expect(css).toContain("html.dark .bg-slate-100");
+    expect(statusBar).not.toContain("dark:bg-slate-900");
   });
 
   it("softens diagram card dividers in dark mode", () => {

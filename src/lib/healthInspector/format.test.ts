@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatClientBackendCount,
+  formatExactCount,
   formatHealthInspectorTimestamp,
+  formatServerConnectionUsage,
   latestHealthTimestamp,
 } from "./format";
 
@@ -39,5 +42,39 @@ describe("latestHealthTimestamp", () => {
     expect(latestHealthTimestamp(only, null)).toBe(only);
     expect(latestHealthTimestamp(null, null)).toBeNull();
     expect(latestHealthTimestamp("not-a-date", only)).toBe(only);
+  });
+});
+
+describe("formatExactCount", () => {
+  it("keeps safe integers exact and approximates unsafe values", () => {
+    expect(formatExactCount(null)).toBe("—");
+    expect(formatExactCount(42)).toBe("42");
+    expect(formatExactCount(Number.MAX_SAFE_INTEGER + 2)).toMatch(/^≈/);
+  });
+});
+
+describe("formatClientBackendCount", () => {
+  it("labels visible-only lower bounds when backend_type is hidden", () => {
+    expect(formatClientBackendCount(10, 0)).toBe("10");
+    expect(formatClientBackendCount(1, 5)).toBe("≥1 visible");
+    expect(formatClientBackendCount(null, 5)).toBe("—");
+  });
+});
+
+describe("formatServerConnectionUsage", () => {
+  it("describes approximate usage without inventing available slots", () => {
+    expect(formatServerConnectionUsage(10, 100)).toContain("approx");
+    expect(formatServerConnectionUsage(10, null)).toMatch(/unavailable/i);
+    expect(formatServerConnectionUsage(null, 100)).toBe("—");
+  });
+
+  it("discloses incomplete classification instead of silent undercount", () => {
+    const incomplete = formatServerConnectionUsage(1, 100, 12);
+    expect(incomplete).toMatch(/≥1 visible/);
+    expect(incomplete).toMatch(/visible only|hide backend_type/i);
+    expect(incomplete).not.toMatch(/\b1 \/ 100 max \(approx\.\)/);
+    expect(formatServerConnectionUsage(1, null, 3)).toMatch(
+      /classification incomplete/i
+    );
   });
 });

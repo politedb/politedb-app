@@ -43,6 +43,20 @@ beforeEach(() => {
         databaseBytes: 2048,
         statsReset: null,
         restrictedVisibility: false,
+        idleInTransactionCount: 0,
+        idleInTransactionOldestXactAgeSeconds: null,
+        idleInTransactionLongestIdleSeconds: null,
+        topBlockers: [],
+        hasUnresolvedBlockers: false,
+        lockWaitDurationAvailable: false,
+        clientBackendCountDatabase: 2,
+        clientBackendCountServer: 3,
+        hiddenBackendTypeCountDatabase: 0,
+        hiddenBackendTypeCountServer: 0,
+        maxConnections: 100,
+        tempFiles: 0,
+        tempBytes: 0,
+        deadlocks: 0,
       },
     },
     sessions: {
@@ -379,5 +393,84 @@ describe("DbHealthInspectorDialog", () => {
 
     // Partition leaf labeled and visible with nonzero storage path.
     expect(screen.getByText(/events_2024 \(partition\)/)).toBeTruthy();
+  });
+
+  it("shows visible-only connection cards when backend_type is hidden elsewhere", () => {
+    // Other-database hidden sessions: DB classification complete, server incomplete.
+    hookState.snapshot.overview.data.clientBackendCountDatabase = 1;
+    hookState.snapshot.overview.data.clientBackendCountServer = 1;
+    hookState.snapshot.overview.data.hiddenBackendTypeCountDatabase = 0;
+    hookState.snapshot.overview.data.hiddenBackendTypeCountServer = 20;
+    hookState.snapshot.overview.data.maxConnections = 100;
+    hookState.snapshot.overview.data.restrictedVisibility = false;
+    const { unmount } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(
+      screen.getByText(
+        /≥1 visible \/ 100 max \(visible only; some sessions hide backend_type\)/i
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Incomplete client-backend classification")
+    ).toBeTruthy();
+    expect(screen.queryByText("1 / 100 max (approx.)")).toBeNull();
+    expect(
+      screen.getAllByText(/outside this database|visible-only lower bounds/i)
+        .length
+    ).toBeGreaterThan(0);
+    unmount();
+
+    // Also cover current-DB hidden backend_type on both cards.
+    hookState.snapshot.overview.data.hiddenBackendTypeCountDatabase = 5;
+    hookState.snapshot.overview.data.hiddenBackendTypeCountServer = 5;
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getAllByText("≥1 visible").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(
+        /Visible client backends only — some sessions hide backend_type/i
+      )
+    ).toBeTruthy();
+  });
+
+  it("opens Sessions from Attention without refresh", () => {
+    hookState.snapshot.overview.data.blockedSessionCount = 1;
+    hookState.snapshot.overview.data.topBlockers = [
+      {
+        pid: 99,
+        blockedSessionCount: 1,
+        inCurrentDatabase: true,
+        isPreparedTransaction: false,
+      },
+    ];
+    hookState.refresh.mockClear();
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    const buttons = screen.getAllByText("Open Sessions");
+    expect(buttons.length).toBeGreaterThan(0);
+    fireEvent.click(buttons[0]!);
+    expect(hookState.refresh).not.toHaveBeenCalled();
+    expect(screen.getByText("PID")).toBeTruthy();
   });
 });

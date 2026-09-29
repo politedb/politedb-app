@@ -39,7 +39,30 @@ describe("healthInspector SQL builders", () => {
     expect(sql).toContain("pg_database_size");
     expect(sql).toContain("pg_blocking_pids");
     expect(sql).toContain("longest_xact_age_seconds");
+    expect(sql).toContain("idle_in_transaction_count");
+    expect(sql).toContain("idle_in_xact_oldest_xact_age_seconds");
+    expect(sql).toContain("idle_in_xact_longest_idle_seconds");
+    expect(sql).toContain("idle in transaction%");
+    expect(sql).toContain("client_backend_count_db");
+    expect(sql).toContain("client_backend_count_server");
+    expect(sql).toContain("hidden_backend_type_count_db");
+    expect(sql).toContain("hidden_backend_type_count_server");
+    expect(sql).toContain("backend_type='client backend'");
+    expect(sql).toContain("backend_type IS NULL");
+    expect(sql).toContain("max_connections");
+    expect(sql).toContain("current_setting('max_connections', true)");
+    expect(sql).toContain("temp_files");
+    expect(sql).toContain("temp_bytes");
+    expect(sql).toContain("deadlocks");
+    expect(sql).toContain("top_blockers");
+    expect(sql).toContain("LIMIT 5");
+    expect(sql).toContain("pg_backend_pid()");
+    expect(sql).toContain("WITH act AS");
     expect(sql).not.toContain("pg_stat_user_tables");
+    // Capacity counts include this connection; workload indicators exclude it.
+    expect(sql).toMatch(
+      /client_backend_count_db[\s\S]*backend_type='client backend'/
+    );
   });
 
   it("adapts statement columns and quotes schema identifiers", () => {

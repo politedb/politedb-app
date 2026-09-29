@@ -5,6 +5,7 @@ import {
   decodeCapabilities,
   decodeIndexes,
   decodeOverview,
+  decodeTopBlockers,
   decodePidArray,
   decodeSessions,
   decodeStatements,
@@ -57,6 +58,18 @@ describe("healthInspector decode", () => {
         { name: "restricted_activity_count", db_type: "int8" },
         { name: "database_bytes", db_type: "int8" },
         { name: "stats_reset", db_type: "timestamptz" },
+        { name: "idle_in_transaction_count", db_type: "int8" },
+        { name: "idle_in_xact_oldest_xact_age_seconds", db_type: "float8" },
+        { name: "idle_in_xact_longest_idle_seconds", db_type: "float8" },
+        { name: "client_backend_count_db", db_type: "int8" },
+        { name: "client_backend_count_server", db_type: "int8" },
+        { name: "hidden_backend_type_count_db", db_type: "int8" },
+        { name: "hidden_backend_type_count_server", db_type: "int8" },
+        { name: "max_connections", db_type: "int4" },
+        { name: "temp_files", db_type: "int8" },
+        { name: "temp_bytes", db_type: "int8" },
+        { name: "deadlocks", db_type: "int8" },
+        { name: "top_blockers", db_type: "json" },
       ],
       rows: [
         [
@@ -70,6 +83,34 @@ describe("healthInspector decode", () => {
           { t: "I64", v: 3 },
           { t: "I64", v: 1024 },
           { t: "Null" },
+          { t: "I64", v: 2 },
+          { t: "F64", v: 40 },
+          { t: "F64", v: 12 },
+          { t: "I64", v: 10 },
+          { t: "I64", v: 20 },
+          { t: "I64", v: 0 },
+          { t: "I64", v: 0 },
+          { t: "I64", v: 100 },
+          { t: "I64", v: 0 },
+          { t: "I64", v: 0 },
+          { t: "I64", v: 0 },
+          {
+            t: "Str",
+            v: JSON.stringify([
+              {
+                pid: 7,
+                blocked_count: 2,
+                in_current_database: true,
+                is_prepared_transaction: false,
+              },
+              {
+                pid: 0,
+                blocked_count: 1,
+                in_current_database: false,
+                is_prepared_transaction: true,
+              },
+            ]),
+          },
         ],
       ],
       rowCount: 1,
@@ -80,7 +121,112 @@ describe("healthInspector decode", () => {
     expect(overview.activeSessionCount).toBeNull();
     expect(overview.idleSessionCount).toBeNull();
     expect(overview.longestXactAgeSeconds).toBeNull();
+    expect(overview.idleInTransactionCount).toBeNull();
+    expect(overview.idleInTransactionOldestXactAgeSeconds).toBeNull();
+    expect(overview.idleInTransactionLongestIdleSeconds).toBeNull();
     expect(overview.statsReset).toBeNull();
+    expect(overview.clientBackendCountDatabase).toBe(10);
+    expect(overview.clientBackendCountServer).toBe(20);
+    expect(overview.hiddenBackendTypeCountDatabase).toBe(0);
+    expect(overview.hiddenBackendTypeCountServer).toBe(0);
+    expect(overview.maxConnections).toBe(100);
+    expect(overview.topBlockers).toHaveLength(2);
+    expect(overview.topBlockers[0]?.pid).toBe(7);
+    expect(overview.hasUnresolvedBlockers).toBe(true);
+    expect(overview.lockWaitDurationAvailable).toBe(false);
+  });
+
+  it("decodes top blockers with deterministic ranking and PID 0", () => {
+    const blockers = decodeTopBlockers(
+      JSON.stringify([
+        {
+          pid: 5,
+          blocked_count: 1,
+          in_current_database: true,
+          is_prepared_transaction: false,
+        },
+        {
+          pid: 3,
+          blocked_count: 2,
+          in_current_database: false,
+          is_prepared_transaction: false,
+        },
+        {
+          pid: 0,
+          blocked_count: 2,
+          in_current_database: false,
+          is_prepared_transaction: true,
+        },
+      ])
+    );
+    expect(blockers.map((b) => b.pid)).toEqual([0, 3, 5]);
+    expect(blockers[0]?.isPreparedTransaction).toBe(true);
+    expect(blockers[1]?.inCurrentDatabase).toBe(false);
+  });
+
+  it("keeps idle-in-transaction metrics when visibility is complete", () => {
+    const overview = decodeOverview({
+      columns: [
+        { name: "database_name", db_type: "name" },
+        { name: "session_count", db_type: "int8" },
+        { name: "active_session_count", db_type: "int8" },
+        { name: "idle_session_count", db_type: "int8" },
+        { name: "blocked_session_count", db_type: "int8" },
+        { name: "longest_xact_age_seconds", db_type: "float8" },
+        { name: "hidden_query_count", db_type: "int8" },
+        { name: "restricted_activity_count", db_type: "int8" },
+        { name: "database_bytes", db_type: "int8" },
+        { name: "stats_reset", db_type: "timestamptz" },
+        { name: "idle_in_transaction_count", db_type: "int8" },
+        { name: "idle_in_xact_oldest_xact_age_seconds", db_type: "float8" },
+        { name: "idle_in_xact_longest_idle_seconds", db_type: "float8" },
+        { name: "client_backend_count_db", db_type: "int8" },
+        { name: "client_backend_count_server", db_type: "int8" },
+        { name: "hidden_backend_type_count_db", db_type: "int8" },
+        { name: "hidden_backend_type_count_server", db_type: "int8" },
+        { name: "max_connections", db_type: "int4" },
+        { name: "temp_files", db_type: "int8" },
+        { name: "temp_bytes", db_type: "int8" },
+        { name: "deadlocks", db_type: "int8" },
+        { name: "top_blockers", db_type: "json" },
+      ],
+      rows: [
+        [
+          "app",
+          4,
+          1,
+          2,
+          0,
+          9,
+          0,
+          0,
+          2048,
+          "2024-01-01T00:00:00Z",
+          1,
+          30,
+          5,
+          3,
+          5,
+          0,
+          0,
+          null,
+          2,
+          4096,
+          3,
+          "[]",
+        ],
+      ],
+      rowCount: 1,
+    });
+    expect(overview.restrictedVisibility).toBe(false);
+    expect(overview.idleInTransactionCount).toBe(1);
+    expect(overview.idleInTransactionOldestXactAgeSeconds).toBe(30);
+    expect(overview.idleInTransactionLongestIdleSeconds).toBe(5);
+    expect(overview.maxConnections).toBeNull();
+    expect(overview.tempFiles).toBe(2);
+    expect(overview.tempBytes).toBe(4096);
+    expect(overview.deadlocks).toBe(3);
+    expect(overview.statsReset).toBe("2024-01-01T00:00:00Z");
   });
 
   it("decodes capabilities for absent extension and custom schema", () => {
@@ -325,14 +471,146 @@ it("recognizes realistic restricted-role session rows", () => {
       { name: "restricted_activity_count", db_type: "int8" },
       { name: "database_bytes", db_type: "int8" },
       { name: "stats_reset", db_type: "timestamptz" },
+      { name: "idle_in_transaction_count", db_type: "int8" },
+      { name: "top_blockers", db_type: "json" },
     ],
     // hidden_query_count=0 if SQL only checked IS NULL; restricted_activity_count=1
-    rows: [["app", 5, 0, 0, 0, null, 0, 1, 2048, null]],
+    rows: [["app", 5, 0, 0, 0, null, 0, 1, 2048, null, 0, "[]"]],
     rowCount: 1,
   });
   expect(overview.restrictedVisibility).toBe(true);
   expect(overview.activeSessionCount).toBeNull();
   expect(overview.idleSessionCount).toBeNull();
+  expect(overview.idleInTransactionCount).toBeNull();
+});
+
+it("keeps visible client counts as lower bounds when other-role backend_type is hidden", () => {
+  // Own connection visible as client backend; other-role sessions hide backend_type.
+  const overview = decodeOverview({
+    columns: [
+      { name: "database_name", db_type: "name" },
+      { name: "session_count", db_type: "int8" },
+      { name: "active_session_count", db_type: "int8" },
+      { name: "idle_session_count", db_type: "int8" },
+      { name: "blocked_session_count", db_type: "int8" },
+      { name: "longest_xact_age_seconds", db_type: "float8" },
+      { name: "hidden_query_count", db_type: "int8" },
+      { name: "restricted_activity_count", db_type: "int8" },
+      { name: "database_bytes", db_type: "int8" },
+      { name: "stats_reset", db_type: "timestamptz" },
+      { name: "idle_in_transaction_count", db_type: "int8" },
+      { name: "idle_in_xact_oldest_xact_age_seconds", db_type: "float8" },
+      { name: "idle_in_xact_longest_idle_seconds", db_type: "float8" },
+      { name: "client_backend_count_db", db_type: "int8" },
+      { name: "client_backend_count_server", db_type: "int8" },
+      { name: "hidden_backend_type_count_db", db_type: "int8" },
+      { name: "hidden_backend_type_count_server", db_type: "int8" },
+      { name: "max_connections", db_type: "int4" },
+      { name: "temp_files", db_type: "int8" },
+      { name: "temp_bytes", db_type: "int8" },
+      { name: "deadlocks", db_type: "int8" },
+      { name: "top_blockers", db_type: "json" },
+    ],
+    rows: [
+      [
+        "app",
+        6,
+        0,
+        0,
+        0,
+        null,
+        5,
+        5,
+        2048,
+        null,
+        0,
+        null,
+        null,
+        1, // only the caller's visible client backend
+        1,
+        5, // other-role sessions in this DB with null backend_type
+        5,
+        100,
+        0,
+        0,
+        0,
+        "[]",
+      ],
+    ],
+    rowCount: 1,
+  });
+  expect(overview.clientBackendCountDatabase).toBe(1);
+  expect(overview.clientBackendCountServer).toBe(1);
+  expect(overview.hiddenBackendTypeCountDatabase).toBe(5);
+  expect(overview.hiddenBackendTypeCountServer).toBe(5);
+  // Must not treat the filtered visible count as a complete total via missing flags.
+  expect(overview.hiddenBackendTypeCountServer).toBeGreaterThan(0);
+});
+
+it("tracks server-only hidden backend_type without clearing current-DB restrictedVisibility", () => {
+  // Hidden other-role clients exist only in another database; current DB looks complete
+  // for query/state visibility, but server client classification is incomplete.
+  const overview = decodeOverview({
+    columns: [
+      { name: "database_name", db_type: "name" },
+      { name: "session_count", db_type: "int8" },
+      { name: "active_session_count", db_type: "int8" },
+      { name: "idle_session_count", db_type: "int8" },
+      { name: "blocked_session_count", db_type: "int8" },
+      { name: "longest_xact_age_seconds", db_type: "float8" },
+      { name: "hidden_query_count", db_type: "int8" },
+      { name: "restricted_activity_count", db_type: "int8" },
+      { name: "database_bytes", db_type: "int8" },
+      { name: "stats_reset", db_type: "timestamptz" },
+      { name: "idle_in_transaction_count", db_type: "int8" },
+      { name: "idle_in_xact_oldest_xact_age_seconds", db_type: "float8" },
+      { name: "idle_in_xact_longest_idle_seconds", db_type: "float8" },
+      { name: "client_backend_count_db", db_type: "int8" },
+      { name: "client_backend_count_server", db_type: "int8" },
+      { name: "hidden_backend_type_count_db", db_type: "int8" },
+      { name: "hidden_backend_type_count_server", db_type: "int8" },
+      { name: "max_connections", db_type: "int4" },
+      { name: "temp_files", db_type: "int8" },
+      { name: "temp_bytes", db_type: "int8" },
+      { name: "deadlocks", db_type: "int8" },
+      { name: "top_blockers", db_type: "json" },
+    ],
+    rows: [
+      [
+        "app",
+        1,
+        0,
+        0,
+        0,
+        null,
+        0,
+        0,
+        2048,
+        null,
+        0,
+        null,
+        null,
+        1, // current DB: only own visible client
+        1, // server visible clients (own) — other DBs' clients hidden
+        0, // no hidden backend_type in current DB
+        20, // many hidden sessions elsewhere on the server
+        100,
+        0,
+        0,
+        0,
+        "[]",
+      ],
+    ],
+    rowCount: 1,
+  });
+  expect(overview.restrictedVisibility).toBe(false);
+  expect(overview.hiddenBackendTypeCountDatabase).toBe(0);
+  expect(overview.hiddenBackendTypeCountServer).toBe(20);
+  expect(overview.clientBackendCountDatabase).toBe(1);
+  expect(overview.clientBackendCountServer).toBe(1);
+  // Workload metrics remain usable for current DB.
+  expect(overview.activeSessionCount).toBe(0);
+  expect(overview.idleInTransactionCount).toBe(0);
 });
 
 it("decodes partition leaf fixture with nonzero storage and maintenance", () => {

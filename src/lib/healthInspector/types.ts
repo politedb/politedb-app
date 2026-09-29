@@ -14,6 +14,20 @@ export type HealthSectionMeta = {
   unavailableReason: string | null;
 };
 
+/** Top blocker ranked from the full current-database activity set (not the UI row cap). */
+export type HealthBlockerSummary = {
+  pid: number;
+  /** Distinct sessions in this database blocked by this PID. */
+  blockedSessionCount: number;
+  /** Whether the blocker itself appears in current-database activity. */
+  inCurrentDatabase: boolean;
+  /**
+   * PostgreSQL represents a prepared-transaction blocker as PID 0 —
+   * not a live session.
+   */
+  isPreparedTransaction: boolean;
+};
+
 export type HealthOverview = {
   databaseName: string | null;
   sessionCount: number | null;
@@ -31,6 +45,51 @@ export type HealthOverview = {
    * (null query or PostgreSQL's `<insufficient privilege>` marker).
    */
   restrictedVisibility: boolean;
+
+  /** Idle-in-transaction (+ aborted), excluding the Inspector's own backend. */
+  idleInTransactionCount: number | null;
+  /** Oldest open transaction age among idle-in-transaction sessions (xact_start). */
+  idleInTransactionOldestXactAgeSeconds: number | null;
+  /** Longest time spent in the idle-in-transaction state (state_change). */
+  idleInTransactionLongestIdleSeconds: number | null;
+
+  /** Up to five blocker PIDs ranked by distinct blocked sessions (deterministic ties). */
+  topBlockers: HealthBlockerSummary[];
+  /**
+   * True when at least one top blocker is outside this database, privilege-hidden,
+   * or is the prepared-transaction sentinel PID 0.
+   */
+  hasUnresolvedBlockers: boolean;
+  /** Exact lock-wait duration has no verified supported source in this snapshot. */
+  lockWaitDurationAvailable: false;
+
+  /**
+   * Visible client backends connected to the current database (includes this app).
+   * When hiddenBackendTypeCountDatabase > 0 this is a lower bound, not a total.
+   */
+  clientBackendCountDatabase: number | null;
+  /**
+   * Visible client backends connected to the whole server (includes this app).
+   * When hiddenBackendTypeCountServer > 0 this is a lower bound, not a total.
+   */
+  clientBackendCountServer: number | null;
+  /**
+   * Current-database sessions whose backend_type is hidden (NULL).
+   * PostgreSQL nulls this field when the caller cannot read another role's
+   * session details — those rows cannot be classified as client vs worker.
+   */
+  hiddenBackendTypeCountDatabase: number | null;
+  /** Server-wide sessions with hidden (NULL) backend_type. */
+  hiddenBackendTypeCountServer: number | null;
+  /** Configured max_connections when readable; null if unavailable. */
+  maxConnections: number | null;
+
+  /** Cumulative temp file count for the current database since stats reset. */
+  tempFiles: number | null;
+  /** Cumulative temp file bytes for the current database since stats reset. */
+  tempBytes: number | null;
+  /** Cumulative deadlock count for the current database since stats reset. */
+  deadlocks: number | null;
 };
 
 export type HealthSessionRow = {
@@ -121,4 +180,20 @@ export type HealthInspectorCapabilities = {
   meanTimeColumn: "mean_exec_time" | "mean_time" | null;
   hasInfoView: boolean;
   unavailableReason: string | null;
+};
+
+export type HealthAttentionKind =
+  | "blocked"
+  | "idle_in_transaction"
+  | "deadlocks_history"
+  | "incomplete";
+
+export type HealthAttentionItem = {
+  kind: HealthAttentionKind;
+  /** Actionable current conditions vs informational history vs incomplete data. */
+  tone: "actionable" | "informational" | "incomplete";
+  title: string;
+  evidence: string;
+  /** Offer a Sessions tab switch without re-querying. */
+  openSessions: boolean;
 };

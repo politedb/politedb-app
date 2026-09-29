@@ -527,11 +527,7 @@ mod tests {
     fn annotate_sql_error_position_points_at_offset() {
         let sql = "SELECT bad_col FROM t";
         // Postgres positions are 1-based; point at 'b' in bad_col (offset 8).
-        let out = annotate_sql_error_position(
-            "ERROR: column \"bad_col\" does not exist",
-            sql,
-            8,
-        );
+        let out = annotate_sql_error_position("ERROR: column \"bad_col\" does not exist", sql, 8);
         assert!(out.starts_with("ERROR at Line 1:\n"));
         assert!(out.contains("ERROR: column \"bad_col\" does not exist"));
         assert!(out.contains("LINE 1: SELECT bad_col FROM t"));

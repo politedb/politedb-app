@@ -78,61 +78,171 @@ export function healthInspectorCapabilitiesSql(): string {
 /**
  * Overview aggregates for the current database.
  * Uses catalogs/statistics only; no application-table scans.
+ * One activity scan (CTE) feeds session, idle-in-xact, blocking, and client counts
+ * so summaries are not derived from the capped Sessions list.
+ * Client counts filter backend_type = 'client backend'; separately count rows
+ * where backend_type IS NULL (privilege-hidden; pg_stat_get_activity field 17)
+ * so incomplete classification is disclosed rather than silently undercounted.
  */
 export function healthInspectorOverviewSql(): string {
   const queryStr = `
+    WITH act AS (
+      SELECT
+        a.pid,
+        a.datname,
+        a.state,
+        a.backend_type,
+        a.xact_start,
+        a.state_change,
+        a.query,
+        pg_catalog.pg_blocking_pids(a.pid) AS blocker_pids
+      FROM pg_catalog.pg_stat_activity a
+    ),
+    db_act AS (
+      SELECT *
+      FROM act
+      WHERE datname = current_database()
+    ),
+    db_stats AS (
+      SELECT
+        d.temp_files,
+        d.temp_bytes,
+        d.deadlocks,
+        d.stats_reset
+      FROM pg_catalog.pg_stat_database d
+      WHERE d.datname = current_database()
+    ),
+    top_blockers AS (
+      SELECT
+        b.blocker_pid,
+        COUNT(DISTINCT b.blocked_pid)::bigint AS blocked_distinct,
+        EXISTS (
+          SELECT 1
+          FROM db_act d
+          WHERE d.pid = b.blocker_pid
+        ) AS in_current_database
+      FROM (
+        SELECT
+          d.pid AS blocked_pid,
+          UNNEST(d.blocker_pids) AS blocker_pid
+        FROM db_act d
+        WHERE cardinality(d.blocker_pids) > 0
+      ) b
+      GROUP BY b.blocker_pid
+    )
     SELECT
       current_database() AS database_name,
+      (SELECT COUNT(*)::bigint FROM db_act) AS session_count,
       (
         SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-      ) AS session_count,
-      (
-        SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND a.state = 'active'
+        FROM db_act a
+        WHERE a.state = 'active'
           AND a.pid <> pg_backend_pid()
       ) AS active_session_count,
       (
         SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND a.state IS NOT NULL
+        FROM db_act a
+        WHERE a.state IS NOT NULL
           AND a.state LIKE 'idle%'
+          AND a.pid <> pg_backend_pid()
       ) AS idle_session_count,
       (
         SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND cardinality(pg_catalog.pg_blocking_pids(a.pid)) > 0
+        FROM db_act a
+        WHERE cardinality(a.blocker_pids) > 0
       ) AS blocked_session_count,
       (
         SELECT MAX(EXTRACT(EPOCH FROM (now() - a.xact_start)))::float8
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND a.xact_start IS NOT NULL
+        FROM db_act a
+        WHERE a.xact_start IS NOT NULL
+          AND a.pid <> pg_backend_pid()
       ) AS longest_xact_age_seconds,
       (
         SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND (a.query IS NULL OR a.query = '<insufficient privilege>')
+        FROM db_act a
+        WHERE (a.query IS NULL OR a.query = '<insufficient privilege>')
       ) AS hidden_query_count,
       (
         SELECT COUNT(*)::bigint
-        FROM pg_catalog.pg_stat_activity a
-        WHERE a.datname = current_database()
-          AND a.state IS NULL
+        FROM db_act a
+        WHERE a.state IS NULL
           AND (a.query IS NULL OR a.query = '<insufficient privilege>')
       ) AS restricted_activity_count,
       pg_catalog.pg_database_size(current_database())::bigint AS database_bytes,
+      (SELECT s.stats_reset FROM db_stats s) AS stats_reset,
       (
-        SELECT stats_reset
-        FROM pg_catalog.pg_stat_database d
-        WHERE d.datname = current_database()
-      ) AS stats_reset
+        SELECT COUNT(*)::bigint
+        FROM db_act a
+        WHERE a.pid <> pg_backend_pid()
+          AND a.state IS NOT NULL
+          AND a.state LIKE 'idle in transaction%'
+      ) AS idle_in_transaction_count,
+      (
+        SELECT MAX(EXTRACT(EPOCH FROM (now() - a.xact_start)))::float8
+        FROM db_act a
+        WHERE a.pid <> pg_backend_pid()
+          AND a.state IS NOT NULL
+          AND a.state LIKE 'idle in transaction%'
+          AND a.xact_start IS NOT NULL
+      ) AS idle_in_xact_oldest_xact_age_seconds,
+      (
+        SELECT MAX(EXTRACT(EPOCH FROM (now() - a.state_change)))::float8
+        FROM db_act a
+        WHERE a.pid <> pg_backend_pid()
+          AND a.state IS NOT NULL
+          AND a.state LIKE 'idle in transaction%'
+          AND a.state_change IS NOT NULL
+      ) AS idle_in_xact_longest_idle_seconds,
+      (
+        SELECT COUNT(*)::bigint
+        FROM db_act a
+        WHERE a.backend_type = 'client backend'
+      ) AS client_backend_count_db,
+      (
+        SELECT COUNT(*)::bigint
+        FROM act a
+        WHERE a.backend_type = 'client backend'
+      ) AS client_backend_count_server,
+      (
+        SELECT COUNT(*)::bigint
+        FROM db_act a
+        WHERE a.backend_type IS NULL
+      ) AS hidden_backend_type_count_db,
+      (
+        SELECT COUNT(*)::bigint
+        FROM act a
+        WHERE a.backend_type IS NULL
+      ) AS hidden_backend_type_count_server,
+      (
+        SELECT CASE
+          WHEN pg_catalog.current_setting('max_connections', true) ~ '^[0-9]+$'
+          THEN pg_catalog.current_setting('max_connections', true)::int
+          ELSE NULL
+        END
+      ) AS max_connections,
+      (SELECT s.temp_files FROM db_stats s) AS temp_files,
+      (SELECT s.temp_bytes FROM db_stats s) AS temp_bytes,
+      (SELECT s.deadlocks FROM db_stats s) AS deadlocks,
+      (
+        SELECT COALESCE(
+          json_agg(
+            json_build_object(
+              'pid', t.blocker_pid,
+              'blocked_count', t.blocked_distinct,
+              'in_current_database', t.in_current_database,
+              'is_prepared_transaction', (t.blocker_pid = 0)
+            )
+            ORDER BY t.blocked_distinct DESC, t.blocker_pid ASC
+          ),
+          '[]'::json
+        )
+        FROM (
+          SELECT *
+          FROM top_blockers
+          ORDER BY blocked_distinct DESC, blocker_pid ASC
+          LIMIT 5
+        ) t
+      ) AS top_blockers
   `;
   return regexEscape(queryStr);
 }
