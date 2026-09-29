@@ -20,6 +20,7 @@ export function useConnectionScreenState() {
   const [snippetPickerOpen, setSnippetPickerOpen] = useState(false);
   const [diagramOpen, setDiagramOpen] = useState(false);
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [healthInspectorOpen, setHealthInspectorOpen] = useState(false);
 
   return {
     limit,
@@ -40,5 +41,7 @@ export function useConnectionScreenState() {
     setDiagramOpen,
     errorDialogOpen,
     setErrorDialogOpen,
+    healthInspectorOpen,
+    setHealthInspectorOpen,
   };
 }

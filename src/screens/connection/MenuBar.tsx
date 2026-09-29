@@ -20,7 +20,8 @@ import {
   BackupIcon,
   RestoreIcon,
   LockIcon,
-  SchemaIcon,
+  DbInspectorIcon,
+  DiagramIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import {
@@ -65,6 +66,7 @@ interface Props {
   onOpenAiAssistant?: () => void;
   onOpenDiagram?: () => void;
   onOpenDatabaseObjects?: () => void;
+  onOpenHealthInspector?: () => void;
 }
 
 function ToolbarDivider() {
@@ -291,6 +293,7 @@ export function MenuBar({
   openSQLWindow,
   onSearchOpen,
   onOpenDiagram,
+  onOpenHealthInspector,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
   const health = useConnectionHealthCheck({
@@ -563,11 +566,11 @@ export function MenuBar({
                 }}
               >
                 {querySafetyMode === "default" ? (
-                  <UnlockIcon className={cn("size-4", "text-neutral-600")} />
+                  <UnlockIcon className={cn("size-4.5", "text-neutral-600")} />
                 ) : (
                   <LockIcon
                     className={cn(
-                      "size-4",
+                      "size-4.5",
                       querySafetyMode === "safe"
                         ? "text-green-600"
                         : querySafetyMode === "production"
@@ -621,14 +624,14 @@ export function MenuBar({
               }
               onClick={() => setDbDialogOpen(true)}
             >
-              <DatabaseIcon className="size-4 text-neutral-600" />
+              <DatabaseIcon className="size-4.5 text-neutral-600" />
             </IconButton>
 
             <ToolbarDivider />
 
             <Button
               variant="ghost"
-              className="h-6 rounded-md border-none px-2 text-xs font-medium hover:bg-neutral-100 active:bg-neutral-200"
+              className="h-6 rounded-md border-none px-2 text-sm font-medium hover:bg-neutral-100 active:bg-neutral-200"
               disabled={!canOpenSql || connectionBlocked}
               onClick={openSQLWindow}
             >
@@ -779,7 +782,7 @@ export function MenuBar({
               !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
             }
           >
-            <BackupIcon className="size-4 text-neutral-700" />
+            <BackupIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <IconButton
@@ -792,7 +795,7 @@ export function MenuBar({
               dbRestoreRunning
             }
           >
-            <RestoreIcon className="size-4 text-neutral-700" />
+            <RestoreIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <ToolbarDivider />
@@ -808,22 +811,30 @@ export function MenuBar({
                 isRefreshing && "animate-spin"
               )}
             >
-              <RefreshCwIcon className="size-4.5 text-neutral-700" />
+              <RefreshCwIcon className="size-5.5 text-neutral-700" />
             </span>
           </IconButton>
 
           <IconButton title="Search" onClick={onSearchOpen}>
-            <SearchIcon className="size-4 text-neutral-700" />
+            <SearchIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <ToolbarDivider />
+
+          <IconButton
+            title="Database Health Inspector"
+            onClick={onOpenHealthInspector}
+            disabled={!rt.runtimeConnectionId || rt.engine !== "postgres"}
+          >
+            <DbInspectorIcon className="size-4.5 text-neutral-700" />
+          </IconButton>
 
           <IconButton
             title="Generate Diagram"
             onClick={onOpenDiagram}
             disabled={!rt.runtimeConnectionId || rt.engine === "redis"}
           >
-            <SchemaIcon className="size-4 text-neutral-700" />
+            <DiagramIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <div class="flex h-7 items-center rounded-lg border border-neutral-200 bg-neutral-50 p-0.5">

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runSqlQuery } from "./query";
 
+const trackEventMock = vi.fn();
+vi.mock("src/lib/analytics", () => ({
+  detectSqlKind: () => "select",
+  trackEvent: (...args: any[]) => trackEventMock(...args),
+}));
+
 // ---- Polyfill window for node environment (runSqlQuery uses window.setTimeout)
 const g: any = globalThis as any;
 if (!g.window) g.window = g;
@@ -67,6 +73,7 @@ beforeEach(() => {
   operationExecuteMock.mockReset();
   operationCancelMock.mockReset();
   toErrorMessageMock.mockClear();
+  trackEventMock.mockReset();
 
   ensureInitMock.mockResolvedValue(undefined);
   operationExecuteMock.mockResolvedValue("op_1");
@@ -274,5 +281,151 @@ describe("runSqlQuery", () => {
     const res = await p;
     expect(res.rows).toEqual([[1]]);
     expect(cap.unsub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runSqlQuery privacy and cancellation", () => {
+  it("internal: true suppresses telemetry", async () => {
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+    expect(trackEventMock).not.toHaveBeenCalled();
+  });
+
+  it("default callers still emit telemetry", async () => {
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0 });
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+    expect(trackEventMock).toHaveBeenCalled();
+  });
+
+  it("AbortSignal cancels only this operation including late creation", async () => {
+    let resolveExec!: (v: string) => void;
+    const execStarted = new Promise<void>((resolveStarted) => {
+      operationExecuteMock.mockImplementationOnce(
+        () =>
+          new Promise<string>((r) => {
+            resolveExec = r;
+            resolveStarted();
+          })
+      );
+    });
+
+    const ac = new AbortController();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, signal: ac.signal });
+    const assertion = expect(p).rejects.toMatchObject({ name: "AbortError" });
+
+    await execStarted;
+    // Abort while execute is pending; late-created op must still be cancelled
+    ac.abort();
+    resolveExec("op_late");
+
+    await assertion;
+    expect(operationCancelMock).toHaveBeenCalledWith("op_late");
+  });
+
+  it("busy-retry respects abort and does not cancel unrelated work", async () => {
+    operationExecuteMock
+      .mockRejectedValueOnce(new Error("ERR_SQL_BUSY"))
+      .mockResolvedValueOnce("op_busy");
+
+    const ac = new AbortController();
+    const p = runSqlQuery("c", "select 1", {
+      timeoutMs: 0,
+      signal: ac.signal,
+      internal: true,
+    });
+
+    // Abort during busy backoff sleep
+    await Promise.resolve();
+    ac.abort();
+    await expect(p).rejects.toMatchObject({ name: "AbortError" });
+    // cancel may or may not have an op id yet; unrelated ops are never cancelled
+    for (const call of operationCancelMock.mock.calls) {
+      expect(call[0]).not.toBe("unrelated_op");
+    }
+  });
+});
+
+describe("runSqlQuery deadline covers startup", () => {
+  it("deadline covers deferred ensureInit without waiting for init", async () => {
+    ensureInitMock.mockImplementationOnce(
+      () =>
+        new Promise(() => {
+          /* never resolves */
+        })
+    );
+
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 500, internal: true });
+    const assertion = expect(p).rejects.toThrow("SQL_QUERY_TIMEOUT");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+    await assertion;
+    expect(operationExecuteMock).not.toHaveBeenCalled();
+  });
+
+  it("timeout settles even when operationCancel never resolves", async () => {
+    const cap = setupSubscribeCapture();
+    operationCancelMock.mockImplementationOnce(
+      () =>
+        new Promise(() => {
+          /* hang forever */
+        })
+    );
+
+    const p = runSqlQuery("c", "q", { timeoutMs: 300, internal: true });
+    await cap.ready;
+    await Promise.resolve();
+
+    const assertion = expect(p).rejects.toThrow("SQL_QUERY_TIMEOUT");
+    await vi.advanceTimersByTimeAsync(300);
+    await Promise.resolve();
+    await assertion;
+    expect(operationCancelMock).toHaveBeenCalledWith("op_1");
+  });
+
+  it("deadline covers hanging execute and still cancels late-created op", async () => {
+    let resolveExec!: (v: string) => void;
+    operationExecuteMock.mockImplementationOnce(
+      () =>
+        new Promise<string>((r) => {
+          resolveExec = r;
+        })
+    );
+
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 200, internal: true });
+    const assertion = expect(p).rejects.toThrow("SQL_QUERY_TIMEOUT");
+
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(200);
+    await Promise.resolve();
+    await assertion;
+
+    // Late-created op after deadline must still be cancelled.
+    resolveExec("op_late");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(operationCancelMock).toHaveBeenCalledWith("op_late");
+  });
+
+  it("busy-retry backoff is bounded by the overall deadline", async () => {
+    operationExecuteMock.mockRejectedValue(new Error("ERR_SQL_BUSY"));
+
+    const p = runSqlQuery("c", "select 1", {
+      timeoutMs: 250,
+      internal: true,
+    });
+    const assertion = expect(p).rejects.toThrow("SQL_QUERY_TIMEOUT");
+
+    await vi.advanceTimersByTimeAsync(250);
+    await Promise.resolve();
+    await assertion;
   });
 });

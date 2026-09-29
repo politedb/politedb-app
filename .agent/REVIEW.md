@@ -1,97 +1,89 @@
-# Implementation Review
+# Database Health Inspector Review
 
-> Review contract and task report for Grok or another coding agent.
-> Read `AGENTS.md`, the user request, and `.agent/PLAN.md` first.
-> NOT REVIEWED by default. A template or passing tests alone do not prove correctness.
+## Status
 
-## Review Procedure
+CHANGES REQUIRED
 
-1. Identify the task branch, base commit, and exact diff. Include task-owned new files.
-   Do not assume all working-tree changes belong to this task.
-2. Compare the implementation with the approved plan and acceptance criteria.
-3. Trace changed behavior through callers, shared state, persistence, and engine
-   boundaries. Read relevant unchanged code; do not review the diff in isolation.
-4. Check the categories below. Report reproducible or evidence-backed issues,
-   not speculative style preferences. State assumptions when runtime evidence is missing.
-5. Run relevant checks from the plan. Record commands, outcomes, and skipped checks.
-   Distinguish pre-existing failures from regressions using evidence.
-6. Fix in-scope findings, add focused regression coverage, rerun affected checks,
-   and review the new diff for adjacent regressions. Record deferred issues explicitly.
-7. Report findings first, ordered by severity. Never promise that no bugs exist.
-   Use "No actionable findings in reviewed scope" when appropriate.
+## Task
 
-## Checklist
+- ID: database-health-inspector
+- Branch: feat/database-health-inspector
+- Reviewed current working tree, including staged implementation and unstaged fixes.
+- Procedure: AGENTS.md and .agent/WORKFLOW.md.
 
-- Correctness: acceptance criteria, edge cases, null/empty/error states, ordering,
-  cancellation, retries, stale async responses, and cleanup.
-- State: one authoritative representation; no duplicate mutations, lost updates,
-  stale caches, or disagreement between rendered and persisted data.
-- Editing: create, edit, delete, save, reload, filter, sort, selection, and undo
-  where supported. Preserve confirmations, transactions, and rollback behavior.
-- Database: dialect compatibility, identifier quoting, parameterization, permissions,
-  composite keys, result decoding, and connections/tunnels released appropriately.
-- Performance: bounded rendering and memory; no N+1 metadata queries, unbounded
-  concurrency, repeated full scans, expensive render work, or listener/timer leaks.
-  For large-data changes, verify representative scale rather than tiny fixtures only.
-- UI: preserve requested layout; shared DOM/canvas/editor colors, readable text,
-  focus/edit/selection states, keyboard navigation, scroll reachability, both themes.
-- Architecture: cohesive modules, typed contracts, existing adapters and helpers,
-  no scattered engine conditionals, unnecessary dependencies, or speculative abstractions.
-- Security: no secrets or customer data in logs, telemetry, fixtures, or commits;
-  input validation and existing authorization/safety boundaries remain intact.
-- Tests: reported regression and adjacent workflows covered; assertions verify behavior,
-  not merely an implementation detail. Mocks must reflect actual backend result shapes.
-- Portability: macOS/Windows/Linux and native-versus-browser assumptions documented.
-  Do not claim platform verification from source inspection alone.
-- Scope: no unrelated changes, broad formatting churn, generated output, or changed
-  tests merely to hide failures. Do not alter the approved plan to excuse missing behavior.
+## Resolved
 
-## Severity
+R1-R4 from the prior review are addressed: startup/deadline cancellation,
+restricted activity detection, latest maintenance timestamps and physical partitions.
+The original age-format test now passes. PLAN now acknowledges native changes.
 
-- P0: critical, immediate data loss/security/outage risk; block delivery.
-- P1: serious broken workflow, security issue, or substantial regression; block delivery.
-- P2: material correctness/performance/compatibility issue; fix or obtain explicit deferral.
-- P3: minor actionable improvement; document without disguising preference as a bug.
+## Findings
+Commit-time verification (2026-09-29): subsequent hook rename invalidated the
+dialog test mock. DbHealthInspectorDialog imports useDbHealthInspector, but its
+test still mocks src/hooks/useDatabaseHealthInspector/useDatabaseHealthInspector.
+Update the mock path/export to the renamed module and rerun: current focused suite
+is 51 passed / 9 failed. Build passes. The previous 60-pass verdict applies to the
+pre-rename snapshot, not the current commit. Production changes not made here.
 
-Each finding needs: severity, file and line, triggering conditions, impact,
-evidence, and a concrete fix direction. Do not include secrets or customer SQL.
 
-## Task Report
+No unresolved actionable findings in the R5/R6 fix scope as of 2026-09-29.
+The following descriptions are historical reproductions; both are now resolved.
 
-Status: NOT REVIEWED
+### R5 [P2] Timeout telemetry emitted twice
 
-Allowed statuses: NOT REVIEWED, CHANGES REQUIRED, VERIFIED, VERIFIED WITH LIMITATIONS.
-Use VERIFIED WITH LIMITATIONS when relevant checks cannot run; state the residual risk.
-Unresolved P0/P1 findings or unapproved P2 deferrals require CHANGES REQUIRED.
+`src/lib/tauri/query.ts:337,394-405`: finalizeErr emits sql_query_timeout and
+rejects; the outer catch receives the same rejection and emits it again. Ordinary
+query timeouts after subscription therefore double-count failures, while startup
+timeouts emit once. Keep telemetry emission in one terminal path; retain silence
+for internal queries. Confirmed by query.review.test.ts: expected 1, actual 2.
 
-### Scope
+### R6 [P2] Late subscription is not disposed
 
-- Task / approved plan: TBD
-- Branch / base commit / reviewed revision: TBD
-- Files and workflows inspected: TBD
+`src/lib/tauri/query.ts:376-389`: cancel/timeout can finalize before await subscribe
+returns its unsubscribe callback. cleanup sees null, then the callback is assigned
+after completion and never called. A late registered handler can retain query
+buffers after Inspector close, and the bus cleanup skips active subscribers.
+After subscribe resolves, immediately dispose if already finished; otherwise retain
+the callback. Cover abort, timeout and terminal replay before subscribe resolves.
+Confirmed by query.review.test.ts: expected unsubscribe once, actual zero.
+The missing cleanup pattern also existed before this fix pass; the new cancellation
+path remains affected, so the resource-lifecycle acceptance criterion is not met.
 
-### Findings
+## Verification
 
-TBD. Replace with numbered findings or "No actionable findings in reviewed scope."
+- Existing focused suite: PASS, 56 tests / 8 files.
+- Added src/lib/tauri/query.review.test.ts: 2 failing regression tests reproduce R5/R6.
+  Retained for the implementation agent; no production code changed by this review.
+- npm run build: PASS. Warnings: browser node:zlib externalization, chunk sizes and
+  ineffective dynamic imports.
+- cargo test annotate_sql_error_position --offline (src-tauri): PASS, 2 tests.
+- Full suite, native PostgreSQL role/extension smoke and visual inspection not run.
+- Passing mocked tests do not establish production PostgreSQL compatibility.
 
-### Verification
+## Next Step
 
-| Check                     | Command or procedure | Result / evidence |
-| ------------------------- | -------------------- | ----------------- |
-| Build/type check          | TBD                  | NOT RUN           |
-| Regression tests          | TBD                  | NOT RUN           |
-| Lint                      | TBD                  | NOT RUN           |
-| UI/native/platform checks | TBD                  | NOT RUN           |
+No further R5/R6 fix handoff required. Native PostgreSQL role/extension smoke and
+visual verification remain release checks; this verdict does not claim they passed.
 
-### Fixes And Re-review
+## Fix pass (Grok, 2026-09-29 ~09:46 Asia/Saigon)
 
-- Finding, fix, regression coverage, and recheck result: TBD
-- Explicitly deferred findings and approval: TBD
+Applied R5/R6 in working-tree `src/lib/tauri/query.ts` (not committed):
 
-### Remaining Risks
+- R5: timeout telemetry only in the outer catch; `finalizeErr` rejects without emitting.
+- R6: after `subscribe` resolves, dispose immediately if already finished.
+  `query.review.test.ts` covers ordinary timeout once, plus late unsub after abort,
+  timeout, and terminal error replay. Verification this pass:
+- `npm run test:run -- …query.review.test.ts`: PASS (4/4)
+- Focused Inspector/query suite (9 files incl. review tests): PASS (60/60)
+- `npm run build`: PASS (pre-existing chunk/externalization warnings only)
+  Status left CHANGES REQUIRED for Codex re-review. No commit/push.
 
-- Unverified assumptions, unavailable environments, and follow-up checks: TBD
+## Codex Re-review (2026-09-29)
 
-### Verdict
-
-TBD. Summarize readiness based on evidence, not confidence alone.
+- R5 resolved: timeout telemetry has one emission path in the outer catch.
+- R6 resolved: late unsubscribe disposed after abort, timeout or terminal replay.
+- Independently reran focused Inspector/query suite: PASS, 60 tests / 9 files.
+- Independently reran npm run build: PASS, same externalization/chunk warnings.
+- No new actionable findings in this fix scope. No production edits or commit.
+- Full suite, Rust tests and native/UI checks not rerun this pass; prior Rust
+  result above is from the preceding review, not a new verification.
