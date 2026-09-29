@@ -61,7 +61,10 @@ export function ErrorDialog({
         <DialogHeader className="p-0">
           <div class="flex items-center justify-between gap-3">
             <DialogTitle
-              className={cn("text-base", isExecution && "text-red-600 dark:text-red-400")}
+              className={cn(
+                "text-base",
+                isExecution && "text-red-600 dark:text-red-400"
+              )}
             >
               {title}
             </DialogTitle>
@@ -76,7 +79,9 @@ export function ErrorDialog({
         <div class="space-y-2 text-sm text-neutral-800 dark:text-neutral-200">
           {isExecution ? (
             <>
-              <div class="text-sm font-semibold text-neutral-500 dark:text-neutral-400">Details</div>
+              <div class="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
+                Details
+              </div>
               <OverlayScrollArea
                 className="max-h-64 rounded-lg border border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900"
                 contentClassName="wrap-break-word whitespace-pre-wrap p-3 font-mono text-sm leading-5 text-neutral-900 dark:text-neutral-100"
@@ -100,7 +105,9 @@ export function ErrorDialog({
             <p>All changes were reverted (DDL statements can't be reverted).</p>
           ) : null}
           {hint ? (
-            <p class="text-xs leading-5 text-neutral-500 dark:text-neutral-400">{hint}</p>
+            <p class="text-xs leading-5 text-neutral-500 dark:text-neutral-400">
+              {hint}
+            </p>
           ) : null}
         </div>
       </DialogContent>

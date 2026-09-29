@@ -31,6 +31,7 @@ import { SnippetPickerDialog } from "src/components/modal/SnippetPickerDialog";
 import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 import type { SavedSnippet } from "src/lib/snippets/types";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
+import { DbHealthInspectorDialog } from "@root/src/components/healthInspector/DbHealthInspectorDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";
@@ -159,6 +160,8 @@ export function ConnectionScreen() {
     setDiagramOpen,
     errorDialogOpen,
     setErrorDialogOpen,
+    healthInspectorOpen,
+    setHealthInspectorOpen,
   } = useConnectionScreenState();
   const { discardAndQuitApp } = useConnectionQuitGuard();
   const [snippetEditorOpen, setSnippetEditorOpen] = useState(false);
@@ -823,6 +826,7 @@ export function ConnectionScreen() {
             onSearchOpen={() => setSearchDialogOpen(true)}
             onOpenAiAssistant={openAiAssistant}
             onOpenDiagram={openDiagram}
+            onOpenHealthInspector={() => setHealthInspectorOpen(true)}
           />
 
           <ConnectionWorkspaceLayout
@@ -934,6 +938,15 @@ export function ConnectionScreen() {
           onSaved={() => setSnippetPickerOpen(true)}
           profileId={connectionProfileId}
           initial={snippetEditorInitial}
+        />
+
+        <DbHealthInspectorDialog
+          open={healthInspectorOpen}
+          onClose={() => setHealthInspectorOpen(false)}
+          engine={engine}
+          runtimeConnectionId={runtimeConnectionId}
+          profileId={connectionProfileId}
+          databaseLabel={diagramDatabase}
         />
 
         <DiagramGeneratorDialog

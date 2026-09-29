@@ -1,13 +1,13 @@
 # Dual-agent workflow (Codex + Grok Bot)
 
-Single entry point for the human: talk to **Codex** *or* **Grok Bot**. Agents hand off through this repo’s `.agent/` files — do not require the human to re-paste the task between tools.
+Single entry point for the human: talk to **Codex** _or_ **Grok Bot**. Agents hand off through this repo’s `.agent/` files — do not require the human to re-paste the task between tools.
 
 ## Roles
 
-| Agent | Owns | Must not |
-| --- | --- | --- |
-| **Codex** | Fill / update `.agent/PLAN.md`, mark approval with the user, fill `.agent/REVIEW.md` after implementation | Implement application code unless the user explicitly overrides this split |
-| **Grok Bot (Beaver)** | Implement and fix code from an approved plan / review findings | Redesign the plan; edit `.agent/PLAN.md` requirements; push/merge/PR unless asked |
+| Agent                 | Owns                                                                                                      | Must not                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Codex**             | Fill / update `.agent/PLAN.md`, mark approval with the user, fill `.agent/REVIEW.md` after implementation | Implement application code unless the user explicitly overrides this split        |
+| **Grok Bot (Beaver)** | Implement and fix code from an approved plan / review findings                                            | Redesign the plan; edit `.agent/PLAN.md` requirements; push/merge/PR unless asked |
 
 Both agents always read `AGENTS.md` first, then this file.
 
@@ -33,7 +33,7 @@ Allowed task-report statuses:
 
 ## Happy path
 
-1. **Human** describes the task in Codex *or* asks Grok Bot to start planning (Grok Bot then leaves plan drafting to Codex / asks the human to approve in Codex).
+1. **Human** describes the task in Codex _or_ asks Grok Bot to start planning (Grok Bot then leaves plan drafting to Codex / asks the human to approve in Codex).
 2. **Codex** inspects the repo, fills `.agent/PLAN.md` (goal, requirements, files, steps, verification). Status stays `DRAFT` until the human explicitly approves.
 3. **Human** approves → **Codex** sets Status to `APPROVED`.
 4. **Grok Bot** notices `APPROVED` on the next poll (or optional Implement PLAN webhook) and implements: branch `type/short-kebab` per plan, minimal diffs, run verification from the plan, update progress/evidence only in `PLAN.md`, set Status to `IMPLEMENTED` when done. Then notify the human.

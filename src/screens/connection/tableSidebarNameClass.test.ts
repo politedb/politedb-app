@@ -13,7 +13,7 @@ describe("tableSidebarNameClass", () => {
         isNewTable: false,
         hasChanges: true,
       })
-    ).toBe("bg-amber-200! text-neutral-600!");
+    ).toBe("bg-amber-200! text-neutral-900!");
     expect(
       tableSidebarNameClass({
         isActive: true,
@@ -47,7 +47,7 @@ describe("tableSidebarNameClass", () => {
         isNewTable: true,
         hasChanges: true,
       })
-    ).toBe("bg-amber-200! text-neutral-600!");
+    ).toBe("bg-amber-200! text-neutral-900!");
   });
 });
 
@@ -59,25 +59,25 @@ describe("tableSidebarButtonClass", () => {
       hasChanges: false,
     });
 
-    expect(cls).toContain("bg-blue-600");
-    expect(cls).toContain("text-white");
+    expect(cls).toContain("bg-blue-500");
+    expect(cls).toContain("border-blue-500");
   });
 
-  it("keeps dirty and new active colors", () => {
+  it("keeps blue active highlight; dirty/new live on the name chip", () => {
     expect(
       tableSidebarButtonClass({
         isActive: true,
         isNewTable: true,
         hasChanges: false,
       })
-    ).toContain("bg-green-200");
+    ).toContain("bg-blue-500");
     expect(
       tableSidebarButtonClass({
         isActive: true,
         isNewTable: false,
         hasChanges: true,
       })
-    ).toContain("bg-amber-200");
+    ).toContain("bg-blue-500");
   });
 });
 

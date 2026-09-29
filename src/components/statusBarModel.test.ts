@@ -36,8 +36,10 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("connected");
     expect(model.left).toEqual(["Connected: SQLite", "Query mode: Production"]);
-    expect(model.right[0]).toBe("Tips: Right-click a table for actions");
-    expect(model.right[2]).toBe("Telemetry: Off");
+    expect(model.right).toEqual([
+      "Tips: Right-click a table for actions",
+      "PoliteDB v1.3.0",
+    ]);
   });
 
   it("marks a connection tab without a runtime as connecting", () => {
@@ -52,8 +54,10 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("connecting");
     expect(model.left).toEqual(["Connecting: Postgres"]);
-    expect(model.right[1]).toBe("PoliteDB v1.3.0-dev");
-    expect(model.right[2]).toBe("Telemetry: Not set");
+    expect(model.right).toEqual([
+      "Tips: Right-click a table for actions",
+      "PoliteDB v1.3.0-dev",
+    ]);
   });
 });
 

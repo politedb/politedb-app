@@ -172,7 +172,7 @@ pub async fn run_pg_sql_query(
             emit_error(
                 &ctx.app,
                 op_id,
-                format!("SET_READ_ONLY_FAILED: {e}"),
+                format_pg_error(&e, &sql_input.sql),
                 started_at.elapsed().as_millis(),
             );
             return;
@@ -253,7 +253,7 @@ pub async fn run_pg_sql_query(
             emit_error(
                 &ctx.app,
                 op_id,
-                format!("TX_COMMIT_FAILED: {e}"),
+                format_pg_error(&e, &sql_input.sql),
                 started_at.elapsed().as_millis(),
             );
             return;
@@ -323,7 +323,9 @@ pub async fn run_pg_sql_query(
                 return;
             }
 
-            let _ = tx_chunk.send(Err(format!("QUERY_FAILED: {e}"))).await;
+            let _ = tx_chunk
+                .send(Err(format_pg_error(&e, &sql_input.sql)))
+                .await;
             drop(tx_chunk);
             let _ = emit_task.await;
             return;
@@ -356,7 +358,9 @@ pub async fn run_pg_sql_query(
                     return;
                 }
 
-                let _ = tx_chunk.send(Err(format!("ROW_STREAM_FAILED: {e}"))).await;
+                let _ = tx_chunk
+                    .send(Err(format_pg_error(&e, &sql_input.sql)))
+                    .await;
                 drop(tx_chunk);
                 let _ = emit_task.await;
                 return;
@@ -435,7 +439,9 @@ pub async fn run_pg_sql_query(
 
     // Commit (ends SET LOCAL scope cleanly)
     if let Err(e) = tx.commit().await {
-        let _ = tx_chunk.send(Err(format!("TX_COMMIT_FAILED: {e}"))).await;
+        let _ = tx_chunk
+            .send(Err(format_pg_error(&e, &sql_input.sql)))
+            .await;
         drop(tx_chunk);
         let _ = emit_task.await;
         return;
@@ -455,19 +461,36 @@ pub async fn run_pg_sql_query(
     );
 }
 
+/// Format a tokio-postgres error for the UI.
+///
+/// `tokio_postgres::Error`'s Display for database errors is the opaque label
+/// `"db error"`; the actionable Postgres text lives on the `DbError` source
+/// (`message`, `detail`, `hint`). Prefer that (and optional SQL caret) so
+/// callers — including Health Inspector — never surface `"ROW_STREAM_FAILED: db error"`.
 fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
     let Some(db) = e.as_db_error() else {
-        return format!("ERROR: {}", e);
+        // Non-db kinds have useful Display labels ("connection closed", …).
+        // Include the source when present (e.g. IO cause).
+        if let Some(src) = std::error::Error::source(e) {
+            return format!("ERROR: {e}: {src}");
+        }
+        return format!("ERROR: {e}");
     };
 
-    let msg = db.message();
+    // DbError Display = "{severity}: {message}" + optional DETAIL/HINT.
+    let core = db.to_string();
 
-    let pos_u32: u32 = match db.position() {
+    let pos_u32 = match db.position() {
         Some(ErrorPosition::Original(p)) => *p,
         Some(ErrorPosition::Internal { position, .. }) => *position,
-        None => return format!("ERROR: {}", msg),
+        None => return core,
     };
 
+    annotate_sql_error_position(&core, sql, pos_u32)
+}
+
+/// Attach `LINE n: …` + caret under `pos` (1-based byte offset into `sql`).
+fn annotate_sql_error_position(core: &str, sql: &str, pos_u32: u32) -> String {
     let pos = pos_u32 as usize;
 
     let mut line = 1usize;
@@ -484,15 +507,46 @@ fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
     }
 
     let line_text = sql.lines().nth(line - 1).unwrap_or("");
-
     let caret_pos = pos.saturating_sub(last_line_start).saturating_sub(1);
 
     format!(
-        "ERROR at Line {}:\nERROR: {}\nLINE {}: {}\n{}^",
+        "ERROR at Line {}:\n{}\nLINE {}: {}\n{}^",
         line,
-        msg,
+        core,
         line,
         line_text,
         " ".repeat(caret_pos)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::annotate_sql_error_position;
+
+    #[test]
+    fn annotate_sql_error_position_points_at_offset() {
+        let sql = "SELECT bad_col FROM t";
+        // Postgres positions are 1-based; point at 'b' in bad_col (offset 8).
+        let out = annotate_sql_error_position("ERROR: column \"bad_col\" does not exist", sql, 8);
+        assert!(out.starts_with("ERROR at Line 1:\n"));
+        assert!(out.contains("ERROR: column \"bad_col\" does not exist"));
+        assert!(out.contains("LINE 1: SELECT bad_col FROM t"));
+        assert!(out.ends_with("^") || out.contains("^"));
+        // Caret should sit under 'b' of bad_col (7 spaces after "LINE 1: " prefix is separate).
+        let caret_line = out.lines().last().unwrap();
+        assert_eq!(caret_line.chars().filter(|c| *c == ' ').count(), 7);
+    }
+
+    #[test]
+    fn annotate_sql_error_position_tracks_newlines() {
+        let sql = "SELECT 1\nFROM missing_table";
+        // Position at 'm' of missing_table: "SELECT 1\n" = 9 bytes, then FROM + space, m at 1-based 15.
+        let out = annotate_sql_error_position(
+            "ERROR: relation \"missing_table\" does not exist",
+            sql,
+            15,
+        );
+        assert!(out.starts_with("ERROR at Line 2:\n"));
+        assert!(out.contains("LINE 2: FROM missing_table"));
+    }
 }
