@@ -63,6 +63,9 @@ import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
+import { StandaloneTableExportHost } from "./StandaloneTableExportHost";
+import type { StandaloneExportTarget } from "./standaloneExport/types";
+import { canStandaloneExportTable } from "./standaloneExport/support";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
 import { OPEN_FLOATING_ASSISTANT_EVENT } from "src/components/ai-assistant/FloatingAssistantLauncher";
 
@@ -168,6 +171,11 @@ export function ConnectionScreen() {
   const [snippetEditorInitial, setSnippetEditorInitial] = useState<
     (Partial<SavedSnippet> & { sql?: string }) | undefined
   >(undefined);
+  const [standaloneExportTarget, setStandaloneExportTarget] =
+    useState<StandaloneExportTarget | null>(null);
+  const clearStandaloneExportTarget = useCallback(() => {
+    setStandaloneExportTarget(null);
+  }, []);
   const snippetLibrary = useSnippetsStore((s) => s.library);
   const ensureSnippetsLoaded = useSnippetsStore((s) => s.ensureLoaded);
 
@@ -597,8 +605,18 @@ export function ConnectionScreen() {
       },
       exportTableData: (table: TableItem) => {
         if (isProfileLocked) return;
-        void actionsRef.current.selectTable(table).then(() => {
-          setPendingTableAction("export");
+        if (table.new) return;
+        if (!canStandaloneExportTable(engine)) return;
+        const connectionId = runtimeConnectionId;
+        if (!connectionId || !engine) return;
+        // Single target slot per connection host — replaces any prior session.
+        setStandaloneExportTarget({
+          requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          connectionId,
+          engine,
+          schema: table.schema,
+          tableName: table.name,
+          kind: table.kind,
         });
       },
       importTableData: (table: TableItem) => {
@@ -657,6 +675,8 @@ export function ConnectionScreen() {
     snippetLibrary,
     connectionProfileId,
     insertSnippetSql,
+    engine,
+    runtimeConnectionId,
   ]);
 
   const patchMap = useMemo(() => {
@@ -947,6 +967,14 @@ export function ConnectionScreen() {
           runtimeConnectionId={runtimeConnectionId}
           profileId={connectionProfileId}
           databaseLabel={diagramDatabase}
+        />
+
+        <StandaloneTableExportHost
+          profileScreenId={activeProfileScreen}
+          runtimeConnectionId={runtimeConnectionId}
+          engine={engine}
+          target={standaloneExportTarget}
+          onClearTarget={clearStandaloneExportTarget}
         />
 
         <DiagramGeneratorDialog

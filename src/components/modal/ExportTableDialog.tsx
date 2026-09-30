@@ -43,7 +43,8 @@ interface Props {
   appliedFilterCombine: "AND" | "OR";
   pagination?: { limit: number; offset: number };
   sortState?: TableSort | null;
-  totalRows: number;
+  /** Known row total, or null when unknown (standalone whole-table export). */
+  totalRows: number | null;
   engine?: DatabaseEngine;
 }
 
@@ -96,10 +97,11 @@ export function ExportTableDialog({
     [columns]
   );
 
+  const totalKnown = typeof totalRows === "number" && totalRows >= 0;
   const progressPct = useMemo(() => {
-    if (!totalRows) return 0;
+    if (!totalKnown || !totalRows) return 0;
     return ((progress?.exported ?? 0) / totalRows) * 100;
-  }, [progress, totalRows]);
+  }, [progress, totalRows, totalKnown]);
 
   const masked = exportOptions.masked === true;
 
@@ -235,14 +237,17 @@ export function ExportTableDialog({
   );
 
   const suggestedName = exportOptions.fileName || tableName;
+  // Unknown totals: success is pipeline settlement (!exporting), not row math.
   const completed =
     !!progress &&
     !progress.error &&
     !exporting &&
-    (totalRows === 0 ||
-      progress.exported >= totalRows ||
-      !!progress.truncated ||
-      !!progress.warning);
+    (totalRows == null
+      ? true
+      : totalRows === 0 ||
+        progress.exported >= totalRows ||
+        !!progress.truncated ||
+        !!progress.warning);
 
   const tableIdentity = schema ? `${schema}.${tableName}` : tableName;
   const scopeLabel = pagination
@@ -379,14 +384,32 @@ export function ExportTableDialog({
                     {masked ? " · masked" : ""}
                   </p>
                   <span class="shrink-0 text-xs text-neutral-500 tabular-nums">
-                    {progress.exported} / {totalRows} rows
+                    {totalRows == null
+                      ? `${progress.exported} rows`
+                      : `${progress.exported} / ${totalRows} rows`}
                   </span>
                 </div>
-                <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200">
-                  <div
-                    class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
-                    style={{ width: `${Math.min(100, progressPct)}%` }}
-                  />
+                <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
+                  {totalRows == null ? (
+                    <div
+                      class={cn(
+                        "h-full w-1/3 rounded-full bg-blue-500",
+                        exporting && "animate-pulse"
+                      )}
+                      role="progressbar"
+                      aria-valuetext={`${progress.exported} rows exported`}
+                      aria-label="Export progress"
+                    />
+                  ) : (
+                    <div
+                      class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
+                      style={{ width: `${Math.min(100, progressPct)}%` }}
+                      role="progressbar"
+                      aria-valuenow={Math.min(100, progressPct)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    />
+                  )}
                 </div>
                 {completed && !progress.error && (
                   <p class="text-right text-green-600">Completed!</p>

@@ -18,7 +18,7 @@ export type ConnectionActions = {
 
   /** Open table tab then switch to Structure view (used from table context menu) */
   openTableStructure(table: TableItem): void;
-  /** Open table tab then trigger export data (used from table context menu) */
+  /** Start connection-owned standalone export (no tab open / selectTable) */
   exportTableData(table: TableItem): void;
   /** Open table tab then trigger CSV import (used from table context menu) */
   importTableData(table: TableItem): void;

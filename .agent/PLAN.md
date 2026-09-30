@@ -1,4 +1,4 @@
-# Export Dialog UX Redesign
+# Export Table Without Opening A Tab
 
 ## Status
 
@@ -6,80 +6,104 @@ IMPLEMENTED
 
 ## Task
 
-- ID: export-dialog-ux
-- User requested redesign from screenshot on 2026-09-30.
-- Codex owns design/plan/review; Grok implements after approval.
-- Implementation branch: feat/export-dialog-ux, created from ea23e47.
-- User approved continuation after committing previous work on 2026-09-30.
-- Masked Export committed as ea23e47. Preserve its behavior and regression tests.
-- Prior plan/review: .agent/archive/masked-export/2026-09-30/.
-- No implementation or webhook dispatch while DRAFT.
+- ID: standalone-table-export
+- User approved implementation on 2026-09-30 with "ok hay lam di".
+- Codex plans/reviews; Grok implements under WORKFLOW.md.
+- Create feat/standalone-table-export from the current verified checkout after checking git status. Do not switch to another old branch or discard changes.
+- No commit/push unless requested.
+- Prior design task archived under .agent/archive/export-dialog-ux/2026-09-30/.
 
 ## Goal
 
-Make column selection and masking readable in one place, with file format and export actions visible without scrolling through duplicated lists. Preserve export safety and current pipeline.
+Export directly from a table context menu without opening/selecting a data tab, loading grid rows or disturbing the user's current tab.
 
-## Design
+## Current Path
 
-- Desktop modal width approximately 760px, capped at viewport minus 32px; height capped at viewport minus 32px.
-- Stable header, compact configuration section, one flexible scrolling columns region, stable footer. Do not wrap this whole layout in another competing scroll container.
-- Header: Export data; secondary table identity and current-page/filtered scope. Truncate long identifiers with accessible full name.
-- First configuration row: filename input with extension suffix; compact format select beside it. CSV/JSON/SQL semantics unchanged.
-- Next row: Mask sensitive values toggle. Enabling defaults selected columns to Redact; SQL unavailable in masked mode. Preserve deliberate mode-switch behavior.
-- Search toolbar: Search columns; selected/output count; select-all checkbox with mixed state.
-- One columns table replaces the separate checklist and MaskedColumnRules list:
-  checkbox | Column | Treatment | Example
-- Unmasked mode: treatment/preview absent, not a second selection component.
-- Masked mode: Redact / Set null / Keep original using existing Select. User explicitly requested removing the Omit option on 2026-09-30. Example is synthetic via existing helpers, never live data.
-- Unchecked columns stay visible in the table, with rule control disabled. Deselecting must not silently turn a column into Keep; reselecting defaults to Redact.
-- Uncheck a column to exclude it; do not offer Omit in the treatment menu or explanatory copy. Keep internal omit compatibility/validation unchanged unless required; never reinterpret an existing omitted column as Keep. Disable export when output count is zero.
-- Select-all applies to ALL columns, independent of search; label/count must make scope clear. Filtering never changes rules or selection.
-- Neutral backgrounds and dividers from shared theme tokens. No amber background for the table or Redact rows.
-- Keep original rows receive a small amber indicator. Footer shows count of kept output columns and a compact warning, not a long unbounded list.
-- Brief synthetic label on Example column; retain masking limitations and CSV NULL semantics in accessible supplementary help, not repeated paragraphs.
-- Footer: output-column count / kept-original count, Cancel and primary Export CSV/JSON button.
-- Progress replaces the editable body; retains Cancel during export and completion/error/truncation feedback. Preserve actual completed-write progress and non-cancellable publication behavior.
-- For narrow windows: filename/format stack; hide inline Example column and expose synthetic preview per row through an accessible disclosure. Keep checkbox/name/treatment usable without horizontal page overflow.
-- At 1280x800, 6-column case must show all rows and footer. At 800x600 and 390x700, actions remain visible and every row/control reachable.
-- Light/dark parity, keyboard focus, labelled row controls, Escape/close behavior compatible with active-export lifecycle.
+- ConnectionScreen.tsx actions.exportTableData calls selectTable(table) then sets pendingTableAction("export").
+- LeftNavItemsPane.tsx already exposes this action in its table menu.
+- MainTableDataPane.tsx consumes the pending action and owns the current tab export dialog.
+- Reuse ExportTableDialog and the existing export pipeline/masking helpers.
+- Existing metadata loaders and per-engine query builders must be inspected before selecting the minimal metadata API.
 
-## Engineering Boundaries
+## Implementation
 
-- Primary files: src/components/modal/ExportTableDialog.tsx and src/components/modal/export/MaskedColumnRules.tsx.
-- Extract a focused shared export-column editor if needed; use one authoritative selection/rule state from existing hook/policy helpers.
-- Do not duplicate policy transformation or create a second selected-columns store.
-- No new packages, backend/file changes, real data sampling, or pipeline refactor.
-- Fix empty-selection rendering locally: masked empty selection must not fall back to all selected.
-- Reuse OverlayScrollArea with min-height:0 flex containment; avoid two vertically nested scrollbar regions.
-- Keep existing native Select behavior and shared controls. Use existing icon library.
-- Preserve filename rules, filters/sort/page scope, ordinary export formats, owned cancellation, temp-file safety, and fail-closed validation.
+- Replace the sidebar export action with a connection-owned standalone export target containing runtime connection ID, engine, schema and table identity.
+- Mount a focused standalone export host outside MainTableDataPane; do not render hidden data panes or call selectTable.
+- Add/reuse Export data in the Tables-list row context menu, routing to the SAME action. Resolve the actual clicked row, not the active data tab or global selected table.
+- Load only selected-table column metadata and sorting metadata genuinely required by existing export. Reuse valid connection/schema/table-scoped cache where available.
+- No grid SELECT, preview sampling, whole-schema metadata hydration or mandatory COUNT(\*) before the dialog opens.
+- Show cancellable metadata loading and sanitized error/retry states. Do not open a save dialog on metadata failure.
+- Direct export is always whole-table: no active-tab filters, pagination or sort accidentally inherited. Existing in-tab filtered/current-page export stays unchanged.
+- Support the same engines as the existing exporter. For engines without compatible standalone metadata, hide/disable with a reason rather than invent SQL or silently open a tab.
+- Preserve existing profile-lock/license/export capability checks; recheck connection validity at action time.
+- Capture immutable target identity for each request. Cancel/invalidate stale metadata when target changes, disconnects, host unmounts or user cancels. Late completion must not configure/export another table.
+- Only one owned standalone export dialog/session per connection host. Repeated clicks must not create concurrent sessions.
+- Reuse native save dialog, masking defaults, filename suggestion, three UI treatments (no Omit option), zero-column guard, temp-file safety and cancellation.
+- Do not clear or mutate active-tab patches, rows, filters, selection, tab ordering or query history with customer SQL.
+- Remove the old pending export dispatch path only if no callers remain; preserve unrelated pending actions.
 
-## Verification
+## Unknown Row Totals
 
-- Component tests: single column list; mode defaults; checkbox/omit/zero-output behavior; search and select-all; explicit Keep warning; format restrictions; cancel/progress.
-- Regression: existing masking/pipeline/hook lifecycle/operationBus tests.
-- npm run build; npm run test:run; focused ESLint.
-- Visually inspect light/dark at 1280x800, 800x600, 390x700 with 6 and 100 columns, long identifiers, zero search matches, progress/error.
-- Verify keyboard navigation and footer visibility; report native GUI limitations honestly.
+- Do not use a fake total to imply completion or show 0/0 or invalid percentages.
+- Extend the shared progress contract minimally if needed: unknown total shows exported rows with indeterminate progress; success is determined by pipeline settlement, not row-count comparison.
+- Preserve known-total progress for in-tab exports and capped-output warnings.
+
+## Boundaries
+
+- Expected areas: ConnectionScreen.tsx, LeftNavItemsPane.tsx, actual Tables-list/context-menu owner, focused standalone host/hook, ExportTableDialog progress integration, existing typed metadata wrappers.
+- Keep UI, metadata I/O and orchestration separate. No new dependency or parallel masking/export pipeline.
+- Tauri invocation remains in lib wrappers; SQL in existing dialect query builders.
+- Never send raw rows, SQL, database identifiers or sensitive paths to telemetry.
+
+## Acceptance And Verification
+
+- Sidebar and Tables-list export for a never-opened table: dialog opens; selectTable/tab creation/grid load not called.
+- Export table B while tab A has unsaved edits and filters: B exported fully; A unchanged.
+- Correct identity when schemas have same table name and when connections change.
+- Metadata error, empty metadata, cancel, disconnect, slow A response after selecting B, repeated click and unmount.
+- Unknown-total progress, success, failure, truncation and cancellation; no division by zero or false completion.
+- Ordinary CSV/JSON/SQL and masked CSV/JSON reuse existing serialization and lifecycle tests.
+- Tests prove unchecked columns excluded and Omit absent in UI.
+- npm run build, focused tests, full npm run test:run, changed-file ESLint.
+- Visually smoke-test direct context-menu flow in light/dark; report native/live-DB limitations.
+- Record exact results below; Codex reviews before a separately requested commit.
 
 ## Progress / Verification
 
-- Mode: fix (REVIEW Status CHANGES REQUIRED + approved Omit removal).
-- Branch: feat/export-dialog-ux @ ea23e47 (+ working tree; not committed).
-- Fix pass 2026-09-30 ~11:37 Asia/Saigon:
-  - P2 row height: ExportColumnEditor rows use `h-10` (+ py-1) so narrow Preview disclosure can grow.
-  - P2 dialog width: Dialog `size="default"` outer max-width is `max-w-xl` (only this size token); removed ineffective inner max-w override.
-  - P2 tests: updated count/help-copy assertions; added coverage for outer width, Omit absent, unchecked exclusion, zero-selected export block, preview min-height growth.
-  - Approved Omit removal: treatment options are Redact / Set null / Keep original; checkbox excludes columns; mask toggle copy updated; ZERO_OUTPUT_COLUMNS message no longer mentions Omit; internal omit rule/validation retained (fail-closed, not mapped to Keep).
-- Files touched this fix: Dialog.tsx, ExportTableDialog.tsx, ExportColumnEditor.tsx (+tests), exportMasking/policy.ts.
-- Verification (2026-09-30 ~11:37 Asia/Saigon):
-  - `npm run test:run -- src/components/modal/ExportTableDialog.test.tsx src/components/modal/export/ExportColumnEditor.test.tsx src/lib/exportMasking`: 3 files / 33 passed
-  - `npm run build`: passed (existing bundler warnings)
-  - focused ESLint on touched files: clean
-- Visual/native GUI at 1280x800 / 800x600 / 390x700: not exercised (no interactive Tauri session this pass).
-- Unrelated working-tree changes (Checkbox/Tooltip/SSLSection) preserved.
+- Mode: implement (PLAN Status was APPROVED).
+- Branch: `feat/standalone-table-export` from base `488bcd1350449abb9745c32963826af5b2126832` (`feat/masked-export`).
+- Implemented 2026-09-30 ~13:35 Asia/Saigon:
+  - Connection-owned `StandaloneExportTarget` + `StandaloneTableExportHost` / `useStandaloneTableExport` outside `MainTableDataPane` (no `selectTable`, no hidden data panes).
+  - Sidebar + Tables-list (`DatabaseCatalogPane`) Export data route to the same `actions.exportTableData`; clicked row identity; unsupported engines disabled with reason.
+  - Metadata via cache reuse (`tableDataMap` / `columnsCache`) or silent `loadColumns` only; no grid SELECT / COUNT(\*) / query-history writes; cancellable loading + ErrorDialog retry; save dialog only after ready.
+  - Whole-table export (empty filters, no pagination); in-tab filtered/page export unchanged.
+  - Removed pending `"export"` action path; other pending actions preserved.
+  - `ExportTableDialog` `totalRows: number | null` — unknown total shows `N rows` + indeterminate bar; completion by pipeline settlement.
+- Files (task-owned): ConnectionScreen/Actions/Runtime, LeftNavItemsPane, DatabaseCatalogPane, MainTableDataPane, useConnectionScreenState, StandaloneTableExportHost, useStandaloneTableExport, standaloneExport/\*, ExportTableDialog(+test), CanvasTable (`onRowContextMenu`), useExportTableData.
+- Verification (2026-09-30 ~13:35 Asia/Saigon):
+  - `npm run build`: passed (existing bundler chunk warnings)
+  - focused: `npm run test:run -- src/components/modal/ExportTableDialog.test.tsx src/components/modal/export/ExportColumnEditor.test.tsx src/lib/exportMasking src/lib/exportPipeline src/hooks/useExportTableData.lifecycle.test.ts src/screens/connection/standaloneExport` → 10 files / 56 passed
+  - `npm run test:run`: 101 files / 536 passed
+  - changed-file ESLint: clean
+- Visual/native/live-DB context-menu smoke (light/dark): not exercised (no interactive Tauri + live DB session this pass).
+- Unrelated working-tree preserved: `.agent/REVIEW.md` (NOT REVIEWED stub), `.agent/archive/export-dialog-ux/` (untracked archive).
 - No commit/push/PR.
+
+## Fix pass (REVIEW CHANGES REQUIRED)
+
+- Mode: fix (2026-09-30 ~13:53 Asia/Saigon). Addressed both P2 findings; left `.agent/REVIEW.md` for Codex re-review.
+- P2 exact column identifiers: `asColumnMeta` keeps nonempty names verbatim (still drops whitespace-only); cache write preserves them. Tests for columnsCache, tableDataMap, and loader paths.
+- P2 frozen context-menu target: `CatalogCanvasTable` stores clicked row snapshot (`CatalogRowMenuState`); menu items built from frozen row; menu closed on projection change. Helpers `openCatalogRowMenu` / `catalogRowMenuItems` + reorder regression test.
+- Lifecycle coverage (2026-09-30 ~13:56 Asia/Saigon): added `src/screens/connection/hooks/useStandaloneTableExport.test.tsx` (6 tests) for late metadata A→B / cancel, disconnect while loading/ready, unmount cancel, and active-tab preservation (mocked loader; hook never touches `useConnectionStore` / `selectTable` / query history).
+- Verification (2026-09-30 ~13:56 Asia/Saigon):
+  - focused: `useStandaloneTableExport.test.tsx` + `standaloneExport` + `DatabaseCatalogPane.test.ts` + `ExportTableDialog.test.tsx` → 5 files / 34 passed
+  - `npm run test:run`: 102 files / 547 passed
+  - `npm run build`: passed (existing bundler warnings)
+  - ESLint on new hook test + hook: clean
+- No commit/push/PR. Unrelated working-tree preserved. `.agent/REVIEW.md` left for Codex.
+- Re-verification (2026-09-30 ~14:03 Asia/Saigon): confirmed both P2 fixes still present; focused 5 files / 34 passed; `npm run test:run` 102 / 547; `npm run build` passed; ESLint clean on fix/test files. LeftNav already freezes `tableMenu.table` (no index retarget). REVIEW status left for Codex.
+- Re-verification (2026-09-30 ~14:18 Asia/Saigon): delegated fix task confirmed both P2 fixes + lifecycle tests already present; focused 5/34; `npm run test:run` 102/547; `npm run build` passed; ESLint clean. No further code changes this pass. REVIEW left CHANGES REQUIRED for Codex.
 
 ## Next Step
 
-Codex re-reviews the task-owned fix diff and updates `.agent/REVIEW.md`. No commit/push unless requested.
+Codex re-reviews the P2 fixes + new lifecycle tests and updates `.agent/REVIEW.md`. No commit/push unless requested.

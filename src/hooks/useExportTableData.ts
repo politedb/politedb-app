@@ -151,7 +151,11 @@ export function useExportTableData() {
   }, []);
 
   const handleExport = useCallback(
-    async (tableName: string, _totalRows: number, config: ExportConfig) => {
+    async (
+      tableName: string,
+      _totalRows: number | null,
+      config: ExportConfig
+    ) => {
       if (exporting || ownedRef.current) {
         setProgress({
           exported: 0,

@@ -260,4 +260,22 @@ describe("ExportTableDialog UX", () => {
     ) as HTMLInputElement;
     expect(noteBox.checked).toBe(false);
   });
+
+  it("shows indeterminate progress for unknown total without 0/0", () => {
+    hookState.progress = { exported: 7 };
+    hookState.exporting = true;
+    renderDialog({ totalRows: null });
+    expect(screen.getByText("7 rows")).toBeTruthy();
+    expect(screen.queryByText(/7 \/ /)).toBeNull();
+    expect(screen.queryByText("0 / 0 rows")).toBeNull();
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+  });
+
+  it("marks unknown-total export completed by settlement not row math", () => {
+    hookState.progress = { exported: 3 };
+    hookState.exporting = false;
+    renderDialog({ totalRows: null });
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByText("Completed!")).toBeTruthy();
+  });
 });

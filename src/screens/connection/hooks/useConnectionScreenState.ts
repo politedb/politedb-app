@@ -5,7 +5,6 @@ export function useConnectionScreenState() {
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [offset, setOffset] = useState(DEFAULT_OFFSET);
   const [pendingTableAction, setPendingTableAction] = useState<
-    | "export"
     | "import"
     | "importSqlDump"
     | "clone"

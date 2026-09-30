@@ -112,7 +112,7 @@ export function ExportColumnEditor({
             "grid shrink-0 gap-2 border-b border-neutral-200 bg-neutral-50 p-2 text-xs font-bold tracking-wide",
             "text-neutral-500 uppercase dark:bg-neutral-900/80",
             masked
-              ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,7rem)]"
+              ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
               : "grid-cols-[auto_minmax(0,1fr)]"
           )}
         >
@@ -128,7 +128,7 @@ export function ExportColumnEditor({
           {masked && <span>Treatment</span>}
           {masked && (
             <span
-              class="hidden text-right sm:block"
+              class="hidden truncate sm:block"
               title="Synthetic preview — not live data"
             >
               Example
@@ -160,7 +160,7 @@ export function ExportColumnEditor({
                   class={cn(
                     "grid h-10 items-center gap-2 px-2 py-1",
                     masked
-                      ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,7rem)]"
+                      ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
                       : "grid-cols-[auto_minmax(0,1fr)]"
                   )}
                 >
@@ -218,7 +218,7 @@ export function ExportColumnEditor({
                   )}
                   {masked && (
                     <span
-                      class="hidden truncate text-right font-mono text-xs text-neutral-500 sm:block"
+                      class="hidden truncate font-mono text-xs text-neutral-500 sm:block"
                       title="Synthetic preview (not live data)"
                     >
                       {selected ? preview : "—"}

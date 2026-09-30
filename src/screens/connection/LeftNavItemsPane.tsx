@@ -20,6 +20,7 @@ import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
+import { standaloneExportUnavailableReason } from "./standaloneExport/support";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
@@ -186,6 +187,7 @@ export function LeftNavItemsPane({
   const isMongo = engine === "mongo";
   const isRedis = engine === "redis";
   const supportsTableMutations = !isMongo && !isRedis;
+  const exportUnavailableReason = standaloneExportUnavailableReason(engine);
   const {
     visibleItems: visibleViews,
     sentinelRef: viewListSentinelRef,
@@ -272,8 +274,10 @@ export function LeftNavItemsPane({
           { type: "sep" },
           {
             type: "item",
-            label: "Export data...",
-            disabled: !!tableMenu.table.new,
+            label: exportUnavailableReason
+              ? `Export data... (${exportUnavailableReason})`
+              : "Export data...",
+            disabled: !!tableMenu.table.new || !!exportUnavailableReason,
             onClick: () => actions.exportTableData(tableMenu.table),
           },
           {

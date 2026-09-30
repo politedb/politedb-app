@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
+import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { Input } from "src/components/common/Input";
 import {
   CanvasTable,
@@ -23,6 +24,7 @@ import { normalizeByteSizeLabel } from "src/utils/convert";
 import { useConnectionActionsCtx } from "./ConnectionActionsContext";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { standaloneExportUnavailableReason } from "./standaloneExport/support";
 
 type CatalogSort = { colName: string; direction: "asc" | "desc" } | null;
 
@@ -151,6 +153,35 @@ export function sortCatalogRows<T>(
   return next;
 }
 
+/** Frozen context-menu target: stores the clicked row, not a live index. */
+export type CatalogRowMenuState<T> = {
+  x: number;
+  y: number;
+  row: T;
+};
+
+/** Capture the clicked row identity for an open context menu. */
+export function openCatalogRowMenu<T>(
+  rows: readonly T[],
+  rowIdx: number,
+  x: number,
+  y: number
+): CatalogRowMenuState<T> | null {
+  if (rowIdx < 0 || rowIdx >= rows.length) return null;
+  const row = rows[rowIdx];
+  if (row === undefined) return null;
+  return { x, y, row };
+}
+
+/** Build menu items from the frozen row; never re-indexes into live rows. */
+export function catalogRowMenuItems<T>(
+  menu: CatalogRowMenuState<T> | null,
+  build: (row: T) => MenuItem[] | null | undefined
+): MenuItem[] {
+  if (!menu) return [];
+  return build(menu.row) ?? [];
+}
+
 function CatalogCanvasTable<T>(props: {
   columns: CatalogColumn<T>[];
   rows: T[];
@@ -158,11 +189,13 @@ function CatalogCanvasTable<T>(props: {
   emptyLabel: string;
   onOpen: (row: T) => void;
   onRefresh: () => void;
+  buildRowMenuItems?: (row: T) => MenuItem[] | null;
 }) {
   const [sort, setSort] = useState<CatalogSort>(null);
   const [selected, setSelected] = useState<CanvasEditingCell | null>(null);
   const [selectedRows, setSelectedRows] = useState(new Set<number>());
   const [anchor, setAnchor] = useState<number | null>(null);
+  const [rowMenu, setRowMenu] = useState<CatalogRowMenuState<T> | null>(null);
   const { containerRef, containerWidth } = useContainerWidth();
 
   const canvasColumns = useMemo<ColumnMeta[]>(
@@ -212,6 +245,7 @@ function CatalogCanvasTable<T>(props: {
     setSelected(null);
     setSelectedRows(new Set());
     setAnchor(null);
+    setRowMenu(null);
   }
 
   const clearSelection = () => {
@@ -263,12 +297,33 @@ function CatalogCanvasTable<T>(props: {
           if (row) props.onOpen(row);
         }}
         onRefresh={props.onRefresh}
+        onRowContextMenu={
+          props.buildRowMenuItems
+            ? ({ rowIdx, x, y }) => {
+                setRowMenu(openCatalogRowMenu(sortedRows, rowIdx, x, y));
+                return true;
+              }
+            : undefined
+        }
       />
       {props.rows.length === 0 ? (
         <div class="pointer-events-none absolute inset-x-0 top-7 px-4 text-center text-sm text-neutral-500">
           {props.emptyLabel}
         </div>
       ) : null}
+      {props.buildRowMenuItems && (
+        <ContextMenu
+          open={rowMenu !== null}
+          x={rowMenu?.x ?? 0}
+          y={rowMenu?.y ?? 0}
+          items={
+            props.buildRowMenuItems
+              ? catalogRowMenuItems(rowMenu, props.buildRowMenuItems)
+              : []
+          }
+          onClose={() => setRowMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -434,6 +489,30 @@ export function DatabaseCatalogPane(props: { win: DatabaseCatalogWindow }) {
           }
           onOpen={(table) => void actions.selectTable(table)}
           onRefresh={() => void refresh()}
+          buildRowMenuItems={(table) => {
+            const unavailable = standaloneExportUnavailableReason(rt.engine);
+            return [
+              {
+                type: "item",
+                label: "Open data",
+                onClick: () => void actions.selectTable(table),
+              },
+              {
+                type: "item",
+                label: "Open structure",
+                onClick: () => actions.openTableStructure(table),
+              },
+              { type: "sep" },
+              {
+                type: "item",
+                label: unavailable
+                  ? `Export data... (${unavailable})`
+                  : "Export data...",
+                disabled: !!unavailable || !!table.new,
+                onClick: () => actions.exportTableData(table),
+              },
+            ];
+          }}
         />
       )}
     </div>

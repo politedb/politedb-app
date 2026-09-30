@@ -1002,7 +1002,7 @@ export function MainTableDataPane(props: {
     ]
   );
 
-  // When user chose Export/Import/Clone/Truncate/Drop/Structure from table context menu in left nav
+  // When user chose Import/Clone/Truncate/Drop/Structure from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
@@ -1013,7 +1013,6 @@ export function MainTableDataPane(props: {
     }
     const timer = setTimeout(() => {
       if (action === "structure") setViewMode("structure");
-      else if (action === "export") onExportOpen();
       else if (action === "import") onImportOpen();
       else if (action === "importSqlDump") void onImportSqlDumpOpen();
       else if (action === "clone") onCloneOpen();
@@ -1027,7 +1026,6 @@ export function MainTableDataPane(props: {
     isProfileLocked,
     rt.pendingTableAction,
     rt.setPendingTableAction,
-    onExportOpen,
     onImportOpen,
     onImportSqlDumpOpen,
     onCloneOpen,
