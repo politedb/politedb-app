@@ -6,9 +6,15 @@ import { CMD } from "./commands";
 type OpId = string;
 
 type OpHandlers = {
-  onChunk?: (chunk: TableChunk) => void;
-  onDone?: (done: OperationDone) => void;
-  onError?: (err: any) => void;
+  onChunk?: (chunk: TableChunk) => void | Promise<void>;
+  onDone?: (done: OperationDone) => void | Promise<void>;
+  onError?: (err: any) => void | Promise<void>;
+  /**
+   * Opt-in serial backpressure for slow consumers (e.g. file export).
+   * When true, chunk ACKs wait until onChunk settles, and onDone/onError
+   * wait for the per-op write queue to drain. Other consumers omit this.
+   */
+  awaitChunkHandlers?: boolean;
 };
 
 type CachedOp = {
@@ -182,6 +188,61 @@ function ackChunk(opId: OpId, count: number = 1) {
 }
 
 /* =============================================================================
+ * Opt-in serial chunk queue (awaitChunkHandlers)
+ * ============================================================================= */
+
+type OpQueue = {
+  chain: Promise<void>;
+  pending: number;
+};
+
+const serialQueueByOp = new Map<OpId, OpQueue>();
+
+function getSerialQueue(opId: OpId): OpQueue {
+  let q = serialQueueByOp.get(opId);
+  if (!q) {
+    q = { chain: Promise.resolve(), pending: 0 };
+    serialQueueByOp.set(opId, q);
+  }
+  return q;
+}
+
+function clearSerialQueue(opId: OpId) {
+  serialQueueByOp.delete(opId);
+}
+
+/**
+ * Enqueue work on the per-op serial chain. ACK runs only after onChunk settles
+ * when used from the chunk listener path.
+ */
+function enqueueSerial(
+  opId: OpId,
+  work: () => void | Promise<void>
+): Promise<void> {
+  const q = getSerialQueue(opId);
+  q.pending += 1;
+  const run = q.chain.then(async () => {
+    try {
+      await work();
+    } finally {
+      q.pending -= 1;
+      if (q.pending <= 0) {
+        // Keep map entry until terminal clear so late chunks still serialize.
+      }
+    }
+  });
+  // Swallow to keep the chain alive after consumer errors; callers handle errors.
+  q.chain = run.catch(() => {});
+  return run;
+}
+
+async function drainSerialQueue(opId: OpId): Promise<void> {
+  const q = serialQueueByOp.get(opId);
+  if (!q) return;
+  await q.chain;
+}
+
+/* =============================================================================
  * Event Listeners
  * ============================================================================= */
 
@@ -195,9 +256,23 @@ async function setupListeners(): Promise<UnlistenFn[]> {
     const handlers = state.handlersByOp.get(opId);
 
     if (handlers?.onChunk) {
-      // Direct delivery - ACK immediately
-      handlers.onChunk(chunk);
-      ackChunk(opId);
+      if (handlers.awaitChunkHandlers) {
+        // Serial backpressure: ACK only after onChunk settles.
+        void enqueueSerial(opId, async () => {
+          // Re-check subscription; unsubscribed ops must not ACK late work.
+          const current = state.handlersByOp.get(opId);
+          if (!current?.onChunk) return;
+          try {
+            await current.onChunk(chunk);
+          } finally {
+            ackChunk(opId);
+          }
+        });
+      } else {
+        // Direct delivery - ACK immediately (existing consumers)
+        void handlers.onChunk(chunk);
+        ackChunk(opId);
+      }
     } else {
       // Cache for later replay - only ACK if accepted
       const accepted = pushChunk(opId, chunk);
@@ -218,8 +293,22 @@ async function setupListeners(): Promise<UnlistenFn[]> {
 
     const handlers = state.handlersByOp.get(opId);
     if (handlers?.onDone) {
-      handlers.onDone(done);
-      state.handlersByOp.delete(opId);
+      if (handlers.awaitChunkHandlers) {
+        void (async () => {
+          await drainSerialQueue(opId);
+          const current = state.handlersByOp.get(opId);
+          if (!current?.onDone) return;
+          try {
+            await current.onDone(done);
+          } finally {
+            state.handlersByOp.delete(opId);
+            clearSerialQueue(opId);
+          }
+        })();
+      } else {
+        void handlers.onDone(done);
+        state.handlersByOp.delete(opId);
+      }
     }
     // Keep cache until subscriber calls unsubscribe or TTL expires
   });
@@ -235,8 +324,23 @@ async function setupListeners(): Promise<UnlistenFn[]> {
 
     const handlers = state.handlersByOp.get(opId);
     if (handlers?.onError) {
-      handlers.onError(error);
-      state.handlersByOp.delete(opId);
+      if (handlers.awaitChunkHandlers) {
+        void (async () => {
+          await drainSerialQueue(opId);
+          const current = state.handlersByOp.get(opId);
+          if (!current?.onError) return;
+          try {
+            await current.onError(error);
+          } finally {
+            state.handlersByOp.delete(opId);
+            clearSerialQueue(opId);
+          }
+        })();
+      } else {
+        void handlers.onError(error);
+        state.handlersByOp.delete(opId);
+        clearSerialQueue(opId);
+      }
     }
   });
 
@@ -300,29 +404,69 @@ export const operationBus = {
         // Clear cache BEFORE calling handlers to ensure logic order
         cache.chunks = [];
 
-        for (const chunk of sortedChunks) {
-          if (!active) break; // Stop if unsubscribed
-          handlers.onChunk(chunk);
+        if (handlers.awaitChunkHandlers) {
+          for (const chunk of sortedChunks) {
+            if (!active) break;
+            void enqueueSerial(opId, async () => {
+              if (!active) return;
+              const current = state.handlersByOp.get(opId);
+              if (!current?.onChunk) return;
+              await current.onChunk(chunk);
+            });
+          }
+        } else {
+          for (const chunk of sortedChunks) {
+            if (!active) break; // Stop if unsubscribed
+            void handlers.onChunk(chunk);
+          }
         }
       }
 
       // Replay terminal event (done takes precedence if both exist somehow)
       if (active) {
         if (cache.done && handlers.onDone) {
-          // Use queueMicrotask to ensure onChunk processing completes first
-          queueMicrotask(() => {
-            if (active && state.handlersByOp.has(opId)) {
-              handlers.onDone?.(cache.done!);
-              state.handlersByOp.delete(opId);
-            }
-          });
+          if (handlers.awaitChunkHandlers) {
+            void (async () => {
+              await drainSerialQueue(opId);
+              if (active && state.handlersByOp.has(opId)) {
+                try {
+                  await handlers.onDone?.(cache.done!);
+                } finally {
+                  state.handlersByOp.delete(opId);
+                  clearSerialQueue(opId);
+                }
+              }
+            })();
+          } else {
+            // Use queueMicrotask to ensure onChunk processing completes first
+            queueMicrotask(() => {
+              if (active && state.handlersByOp.has(opId)) {
+                void handlers.onDone?.(cache.done!);
+                state.handlersByOp.delete(opId);
+              }
+            });
+          }
         } else if (cache.error && handlers.onError) {
-          queueMicrotask(() => {
-            if (active && state.handlersByOp.has(opId)) {
-              handlers.onError?.(cache.error!);
-              state.handlersByOp.delete(opId);
-            }
-          });
+          if (handlers.awaitChunkHandlers) {
+            void (async () => {
+              await drainSerialQueue(opId);
+              if (active && state.handlersByOp.has(opId)) {
+                try {
+                  await handlers.onError?.(cache.error!);
+                } finally {
+                  state.handlersByOp.delete(opId);
+                  clearSerialQueue(opId);
+                }
+              }
+            })();
+          } else {
+            queueMicrotask(() => {
+              if (active && state.handlersByOp.has(opId)) {
+                void handlers.onError?.(cache.error!);
+                state.handlersByOp.delete(opId);
+              }
+            });
+          }
         }
       }
     }
@@ -332,6 +476,7 @@ export const operationBus = {
       active = false; // Mark inactive
       state.handlersByOp.delete(opId);
       clearCache(opId);
+      clearSerialQueue(opId);
     };
   },
 
@@ -424,6 +569,7 @@ export const operationBus = {
     state.unsubs = [];
     state.handlersByOp.clear();
     state.cacheByOp.clear();
+    serialQueueByOp.clear();
     pendingAcksByOp.clear();
     ackScheduled = false;
     state.inited = false;
