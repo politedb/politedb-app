@@ -75,8 +75,12 @@ export const CMD = {
   persistentSave: "persistent_save",
   persistentClear: "persistent_clear",
 
-  // Export (streaming append for large table export)
+  // Export (streaming append + scoped temp session)
   exportAppendToFile: "export_append_to_file",
+  exportSessionBegin: "export_session_begin",
+  exportSessionAppend: "export_session_append",
+  exportSessionPublish: "export_session_publish",
+  exportSessionAbort: "export_session_abort",
 
   // Mongo
   cassandraListKeyspaces: "cassandra_list_keyspaces",

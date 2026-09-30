@@ -177,6 +177,17 @@ type Props = {
   onCellActivate?: (cell: EditingCell) => boolean | void;
   /** Double-click / Enter opens this row instead of the cell editor. */
   onActivateRow?: (rowIdx: number) => void;
+  /**
+   * Optional row context-menu override. Return true to suppress the default
+   * data-grid menu (catalog panes use this for Open / Export actions).
+   */
+  onRowContextMenu?: (info: {
+    rowIdx: number;
+    colIdx: number;
+    x: number;
+    y: number;
+    event: MouseEvent;
+  }) => boolean | void;
   cellOptions?: Record<string, CanvasCellOption[]>;
   actionColumns?: string[];
   viewKey?: string;
@@ -542,6 +553,7 @@ export function CanvasTable({
   onChangeSort,
   onCellActivate,
   onActivateRow,
+  onRowContextMenu,
   cellOptions,
   actionColumns,
   viewKey,
@@ -1806,6 +1818,20 @@ export function CanvasTable({
       const colIdx = hitTestCol(x, columns, colLefts, colWidths);
 
       if (rowIdx < 0 || rowIdx >= totalRows || colIdx < 0) {
+        if (onRowContextMenu) {
+          const handled = onRowContextMenu({
+            rowIdx: -1,
+            colIdx: -1,
+            x: e.clientX,
+            y: e.clientY,
+            event: e,
+          });
+          if (handled) {
+            setHeaderMenu(null);
+            setRowMenu(null);
+            return;
+          }
+        }
         setHeaderMenu(null);
         setRowMenu({
           x: e.clientX,
@@ -1819,6 +1845,21 @@ export function CanvasTable({
 
       if (!selectedRows?.has(rowIdx)) {
         onSelect?.(rowIdx, colIdx);
+      }
+
+      if (onRowContextMenu) {
+        const handled = onRowContextMenu({
+          rowIdx,
+          colIdx,
+          x: e.clientX,
+          y: e.clientY,
+          event: e,
+        });
+        if (handled) {
+          setHeaderMenu(null);
+          setRowMenu(null);
+          return;
+        }
       }
 
       const row = getRowAt(rowIdx);
@@ -1840,6 +1881,7 @@ export function CanvasTable({
       selectedRows,
       getRowAt,
       onSelect,
+      onRowContextMenu,
       ROW_HEIGHT,
       HEADER_HEIGHT,
     ]

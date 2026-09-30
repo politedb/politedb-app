@@ -216,8 +216,12 @@ fn main() {
             commands::persistent::persistent_load,
             commands::persistent::persistent_save,
             commands::persistent::persistent_clear,
-            // export (streaming append for large table export)
+            // export (streaming append + scoped temp session)
             commands::export::export_append_to_file,
+            commands::export::export_session_begin,
+            commands::export::export_session_append,
+            commands::export::export_session_publish,
+            commands::export::export_session_abort,
             // cassandra
             commands::cassandra::cassandra_list_keyspaces,
             commands::cassandra::cassandra_list_tables,

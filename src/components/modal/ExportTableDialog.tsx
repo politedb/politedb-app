@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
@@ -17,9 +18,18 @@ import {
   useExportTableData,
 } from "src/hooks/useExportTableData";
 import { ErrorDialog } from "./ErrorDialog";
-import { Checkbox } from "src/components/common/Checkbox";
 import type { DatabaseEngine, TableConstraint } from "src/types";
-import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import { ExportColumnEditor } from "src/components/modal/export/ExportColumnEditor";
+import {
+  listKeepColumns,
+  listOutputColumns,
+  policyHasActiveMasking,
+  syncMaskedSelection,
+  validateMaskingPolicy,
+  withColumnRule,
+  type MaskRuleKind,
+} from "src/lib/exportMasking";
+import { cn } from "src/utils/cn";
 
 interface Props {
   open: boolean;
@@ -33,7 +43,8 @@ interface Props {
   appliedFilterCombine: "AND" | "OR";
   pagination?: { limit: number; offset: number };
   sortState?: TableSort | null;
-  totalRows: number;
+  /** Known row total, or null when unknown (standalone whole-table export). */
+  totalRows: number | null;
   engine?: DatabaseEngine;
 }
 
@@ -63,42 +74,75 @@ export function ExportTableDialog({
     handleChangeFormat,
     handleExport,
     loadExportOptions,
+    clearMaskState,
+    requestCancel,
   } = useExportTableData();
 
   useEffect(() => {
     if (!open) return;
     loadExportOptions(columns, tableName);
-  }, [open, columns, tableName, loadExportOptions]);
+  }, [open, columns, tableName, connectionId, loadExportOptions]);
+
+  useEffect(() => {
+    if (!open) {
+      void requestCancel();
+      clearMaskState();
+      setProgress(null);
+    }
+  }, [open, clearMaskState, setProgress, requestCancel]);
 
   const columnNames = useMemo(
     () => columns.map((c) => c.name).filter(Boolean),
     [columns]
   );
 
+  const totalKnown = typeof totalRows === "number" && totalRows >= 0;
   const progressPct = useMemo(() => {
+    if (!totalKnown || !totalRows) return 0;
     return ((progress?.exported ?? 0) / totalRows) * 100;
-  }, [progress, totalRows]);
+  }, [progress, totalRows, totalKnown]);
 
-  const [columnSearch, setColumnSearch] = useState("");
-  const filteredColumnNames = useMemo(() => {
-    const q = columnSearch.trim().toLowerCase();
-    if (!q) return columnNames;
-    return columnNames.filter((name) => name.toLowerCase().includes(q));
-  }, [columnNames, columnSearch]);
+  // Authoritative selection — never fall back empty → all.
+  const selectedColumns = exportOptions.columns;
 
-  const selectedColumns = useMemo(
-    () =>
-      exportOptions.columns.length > 0 ? exportOptions.columns : columnNames,
-    [exportOptions.columns, columnNames]
-  );
+  const maskingPolicy = exportOptions.maskingPolicy;
+
+  const maskValidation = useMemo(() => {
+    if (!maskingPolicy) return null;
+    return validateMaskingPolicy(maskingPolicy, columnNames);
+  }, [maskingPolicy, columnNames]);
+
+  const outputCount = useMemo(() => {
+    if (maskingPolicy) {
+      if (maskValidation?.ok) return maskValidation.outputColumns.length;
+      return listOutputColumns(maskingPolicy).length;
+    }
+    return selectedColumns.length;
+  }, [maskingPolicy, maskValidation, selectedColumns.length]);
+
+  const keepColumns = useMemo(() => {
+    if (!maskingPolicy) return [];
+    return listKeepColumns(maskingPolicy);
+  }, [maskingPolicy]);
+
+  const hasActiveMasking = useMemo(() => {
+    if (!maskingPolicy) return false;
+    return policyHasActiveMasking(maskingPolicy);
+  }, [maskingPolicy]);
 
   const setSelectedColumns = useCallback(
     (next: string[]) => {
-      const resolved =
-        next.length === 0 || next.length === columnNames.length ? [] : next;
-      setExportOptions((prev) => ({ ...prev, columns: resolved }));
+      setExportOptions((prev) => {
+        const nextPolicy = syncMaskedSelection(prev.maskingPolicy, next);
+        return {
+          ...prev,
+          masked: true,
+          columns: next,
+          maskingPolicy: nextPolicy,
+        };
+      });
     },
-    [columnNames, setExportOptions]
+    [setExportOptions]
   );
 
   const handleSelectColumn = useCallback(
@@ -107,21 +151,55 @@ export function ExportTableDialog({
       const next = has
         ? selectedColumns.filter((c) => c !== name)
         : [...selectedColumns, name];
-      const atLeastOne = next.length > 0 ? next : columnNames;
-      setSelectedColumns(atLeastOne);
+      setSelectedColumns(next);
     },
-    [columnNames, selectedColumns, setSelectedColumns]
+    [selectedColumns, setSelectedColumns]
   );
 
-  const selectAllColumns = useCallback(() => {
-    setSelectedColumns([]);
-  }, [setSelectedColumns]);
+  const handleToggleSelectAll = useCallback(() => {
+    if (selectedColumns.length === columnNames.length) {
+      setSelectedColumns([]);
+      return;
+    }
+    setSelectedColumns([...columnNames]);
+  }, [selectedColumns.length, columnNames, setSelectedColumns]);
+
+  const handleRuleChange = useCallback(
+    (name: string, rule: MaskRuleKind) => {
+      setExportOptions((prev) => {
+        if (!prev.maskingPolicy) return prev;
+        return {
+          ...prev,
+          masked: true,
+          maskingPolicy: withColumnRule(prev.maskingPolicy, name, rule),
+        };
+      });
+      const base = exportOptions.maskingPolicy;
+      if (
+        base &&
+        format === "sql" &&
+        policyHasActiveMasking(withColumnRule(base, name, rule))
+      ) {
+        handleChangeFormat("csv");
+      }
+    },
+    [setExportOptions, exportOptions.maskingPolicy, format, handleChangeFormat]
+  );
 
   const onClose = useCallback(() => {
     if (exporting) return;
     setProgress(null);
+    clearMaskState();
     handleClose();
-  }, [exporting, handleClose, setProgress]);
+  }, [exporting, handleClose, setProgress, clearMaskState]);
+
+  const onCancelOrClose = useCallback(() => {
+    if (exporting) {
+      void requestCancel();
+      return;
+    }
+    onClose();
+  }, [exporting, requestCancel, onClose]);
 
   const onExport = useCallback(async () => {
     const exportConfig: ExportConfig = {
@@ -152,143 +230,216 @@ export function ExportTableDialog({
     handleExport,
   ]);
 
+  const suggestedName = exportOptions.fileName || tableName;
+  // Unknown totals: success is pipeline settlement (!exporting), not row math.
+  const completed =
+    !!progress &&
+    !progress.error &&
+    !exporting &&
+    (totalRows == null
+      ? true
+      : totalRows === 0 ||
+        progress.exported >= totalRows ||
+        !!progress.truncated ||
+        !!progress.warning);
+
+  const tableIdentity = schema ? `${schema}.${tableName}` : tableName;
+  const scopeLabel = pagination
+    ? "Current page"
+    : appliedFilters.length > 0
+      ? "Filtered rows"
+      : "All rows";
+
+  const exportDisabled =
+    exporting ||
+    columnNames.length === 0 ||
+    outputCount === 0 ||
+    !maskingPolicy ||
+    !maskValidation?.ok;
+
+  const formatLabel = (format || "csv").toUpperCase();
+
   return (
     <>
-      <Dialog open={open} onClose={onClose} size="sm">
-        <DialogHeader>
-          <DialogTitle className="text-base">
-            {pagination ? "Export current page" : `Export table '${tableName}'`}
+      <Dialog
+        open={open}
+        onClose={onClose}
+        size="default"
+        closeOnOutsideClick={!exporting}
+        className={cn(
+          "mx-auto flex w-full flex-col overflow-hidden",
+          "max-h-[80vh]"
+        )}
+      >
+        <DialogHeader className="shrink-0 pr-10">
+          <DialogTitle className="text-base dark:text-neutral-100">
+            Export data
           </DialogTitle>
+          <DialogDescription className="truncate dark:text-neutral-400">
+            <span title={`${tableIdentity} · ${scopeLabel}`}>
+              <span class="font-mono text-neutral-700 dark:text-neutral-200">
+                {tableIdentity}
+              </span>
+              {hasActiveMasking ? (
+                <>
+                  <span class="text-neutral-400"> · </span>
+                  <span>Masked</span>
+                </>
+              ) : null}
+            </span>
+          </DialogDescription>
         </DialogHeader>
-        <DialogContent className="py-0">
-          <div class="space-y-4">
-            {!progress ? (
-              <>
-                <div>
-                  <label class="mb-1 block text-sm font-medium text-neutral-600">
-                    File name
-                  </label>
-                  <Input
-                    value={exportOptions.fileName || tableName}
-                    onValueChange={(value) => setFileName(value, tableName)}
-                    placeholder={tableName}
-                    className="rounded-md border border-neutral-300 px-2 py-[6.25px] font-mono text-sm"
-                    disabled={exporting}
-                  />
-                  <p class="mt-1 text-xs text-neutral-500">
-                    Export as .{format}
-                  </p>
-                </div>
-                <div>
-                  <div class="mb-1 flex items-center justify-between">
-                    <label class="block text-sm font-medium text-neutral-600">
-                      Select fields to export
+
+        <DialogContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden py-0">
+          {!progress ? (
+            <>
+              <div class="shrink-0 space-y-3">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div class="min-w-0 flex-1">
+                    <label class="mb-1 block text-sm font-medium text-neutral-600">
+                      File name
                     </label>
-                    <Button
-                      variant="ghost"
-                      onClick={selectAllColumns}
-                      class="px-0 text-xs text-blue-600 hover:bg-transparent hover:underline"
+                    <div class="flex min-w-0 items-stretch justify-between overflow-hidden rounded-md border border-neutral-300">
+                      <Input
+                        value={suggestedName}
+                        onValueChange={(value) => setFileName(value, tableName)}
+                        placeholder={tableName}
+                        className="rounded-none border-0 px-2 py-1.75 font-mono text-sm focus:outline-none"
+                        disabled={exporting}
+                        aria-label="Export file name"
+                      />
+                      <span
+                        class={cn(
+                          "flex shrink-0 items-center border-l border-neutral-300 bg-neutral-50 px-2 font-mono",
+                          "text-xs text-neutral-500"
+                        )}
+                      >
+                        .{format}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="min-w-0 flex-1 shrink-0">
+                    <label class="mb-1 block text-sm font-medium text-neutral-600 dark:text-neutral-300">
+                      Format
+                    </label>
+                    <Select
+                      value={format || "csv"}
+                      className="h-9 w-full"
+                      onChange={(e) =>
+                        handleChangeFormat(
+                          e.currentTarget.value as ExportFormat
+                        )
+                      }
                       disabled={exporting}
+                      aria-label="Export format"
                     >
-                      Select all ({columnNames.length})
-                    </Button>
-                  </div>
-                  <Input
-                    type="text"
-                    value={columnSearch}
-                    onValueChange={setColumnSearch}
-                    disabled={exporting}
-                    placeholder="Search columns..."
-                    className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
-                  />
-                  <OverlayScrollArea
-                    className="max-h-40 rounded-md border border-neutral-300 bg-white"
-                    contentClassName="space-y-1 p-2"
-                  >
-                    {filteredColumnNames.length > 0 ? (
-                      filteredColumnNames.map((name) => (
-                        <Checkbox
-                          key={name}
-                          checked={selectedColumns.includes(name)}
-                          onChange={() => handleSelectColumn(name)}
-                          label={name}
-                          disabled={exporting}
-                        />
-                      ))
-                    ) : (
-                      <div class="flex items-center justify-center p-2 text-sm text-neutral-500">
-                        No columns found. Try a different search.
-                      </div>
-                    )}
-                  </OverlayScrollArea>
-                  <p class="mt-1 text-xs text-neutral-500">
-                    {selectedColumns.length === columnNames.length
-                      ? "All fields selected"
-                      : `${selectedColumns.length} of ${columnNames.length} columns selected`}
-                  </p>
-                </div>
-                <div>
-                  <label class="mb-1 block text-sm font-medium text-neutral-600">
-                    Select format
-                  </label>
-                  <Select
-                    value={format || "csv"}
-                    className="w-full"
-                    onChange={(e) =>
-                      handleChangeFormat(e.currentTarget.value as ExportFormat)
-                    }
-                    disabled={exporting}
-                  >
-                    {["csv", "json", "sql"].map((name) => (
-                      <option value={name} disabled={exporting}>
-                        {name}
+                      <option value="csv">CSV</option>
+                      <option value="json">JSON</option>
+                      <option value="sql" disabled={hasActiveMasking}>
+                        SQL
+                        {hasActiveMasking ? " (unavailable when masking)" : ""}
                       </option>
-                    ))}
-                  </Select>
-                </div>
-              </>
-            ) : (
-              <div class="rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-xs">
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="min-w-0 truncate font-medium text-neutral-800">
-                      {exportOptions.fileName || tableName}.{format}
-                    </p>
-                    <span class="shrink-0 text-neutral-500 tabular-nums">
-                      {progress.exported} / {totalRows} rows
-                    </span>
+                    </Select>
                   </div>
-                  <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200">
+                </div>
+              </div>
+
+              <ExportColumnEditor
+                columnNames={columnNames}
+                selectedColumns={selectedColumns}
+                policy={maskingPolicy}
+                disabled={exporting}
+                selectedCount={selectedColumns.length}
+                outputCount={outputCount}
+                onToggleColumn={handleSelectColumn}
+                onToggleSelectAll={handleToggleSelectAll}
+                onRuleChange={handleRuleChange}
+              />
+            </>
+          ) : (
+            <div class="rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-sm dark:bg-neutral-900/60">
+              <div class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="min-w-0 truncate font-medium text-neutral-800">
+                    {suggestedName}.{format}
+                    {hasActiveMasking ? " · masked" : ""}
+                  </p>
+                  <span class="shrink-0 text-xs text-neutral-500 tabular-nums">
+                    {totalRows == null
+                      ? `${progress.exported} rows`
+                      : `${progress.exported} / ${totalRows} rows`}
+                  </span>
+                </div>
+                <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
+                  {totalRows == null ? (
+                    <div
+                      class={cn(
+                        "h-full w-1/3 rounded-full bg-blue-500",
+                        exporting && "animate-pulse"
+                      )}
+                      role="progressbar"
+                      aria-valuetext={`${progress.exported} rows exported`}
+                      aria-label="Export progress"
+                    />
+                  ) : (
                     <div
                       class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
                       style={{ width: `${Math.min(100, progressPct)}%` }}
+                      role="progressbar"
+                      aria-valuenow={Math.min(100, progressPct)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
                     />
-                  </div>
-                  {progress.exported === totalRows && (
-                    <p class="text-right text-green-600">Completed!</p>
                   )}
                 </div>
+                {completed && !progress.error && (
+                  <p class="text-right text-green-600">Completed!</p>
+                )}
+                {progress.warning && (
+                  <p class="text-amber-700">{progress.warning}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+
+        <DialogFooter className="shrink-0 flex-wrap items-center justify-between gap-2">
+          <div class="h-10 min-w-0 flex-1 text-sm text-neutral-600 dark:text-neutral-300">
+            {!progress && (
+              <div class="flex h-full flex-wrap items-center gap-x-3">
+                <span class="tabular-nums">
+                  {outputCount} / {columnNames.length} output column
+                  {outputCount === 1 ? "" : "s"}
+                </span>
+                {keepColumns.length > 0 && (
+                  <span
+                    class="inline-flex items-center text-amber-700"
+                    title={`Keeping original values: ${keepColumns.join(", ")}`}
+                  >
+                    {keepColumns.length} kept original — may contain sensitive
+                    data
+                  </span>
+                )}
               </div>
             )}
           </div>
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            variant={progress?.exported === totalRows ? "default" : "outline"}
-            onClick={onClose}
-            disabled={exporting}
-          >
-            {progress?.exported === totalRows ? "Close" : "Cancel"}
-          </Button>
-          {!progress && (
+          <div class="flex shrink-0 items-center gap-2">
             <Button
-              variant="default"
-              onClick={onExport}
-              disabled={exporting || columnNames.length === 0}
+              variant={completed && !progress?.error ? "default" : "outline"}
+              onClick={onCancelOrClose}
             >
-              {exporting ? "Exporting..." : "Export"}
+              {completed && !progress?.error ? "Close" : "Cancel"}
             </Button>
-          )}
+            {!progress && (
+              <Button
+                variant="default"
+                onClick={onExport}
+                disabled={exportDisabled}
+              >
+                {exporting ? "Exporting..." : `Export ${formatLabel}`}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </Dialog>
 

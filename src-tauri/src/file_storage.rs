@@ -173,3 +173,228 @@ pub fn export_append_to_file(path: &Path, content: &str, append: &bool) -> Resul
     f.sync_all().map_err(|e| format!("Sync failed: {e}"))?;
     Ok(())
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* Export sessions: exclusive temp sibling + publish / discard                */
+/* -------------------------------------------------------------------------- */
+
+/// Marker suffix for PoliteDB export temp files (session-owned only).
+pub const EXPORT_TEMP_SUFFIX: &str = ".politedb-export.tmp";
+
+pub fn export_temp_sibling_path(final_path: &Path, session_token: &str) -> Result<PathBuf, String> {
+    let file_name = final_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "Invalid export path".to_string())?;
+    let parent = final_path
+        .parent()
+        .ok_or_else(|| "Invalid export path (no parent)".to_string())?;
+    let token: String = session_token
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
+    if token.is_empty() {
+        return Err("Invalid export session token".to_string());
+    }
+    let temp_name = format!("{file_name}.{token}{EXPORT_TEMP_SUFFIX}");
+    Ok(parent.join(temp_name))
+}
+
+pub fn is_export_temp_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(|name| name.contains(EXPORT_TEMP_SUFFIX))
+        .unwrap_or(false)
+}
+
+/// Create an exclusive empty temp sibling. Does not touch final_path.
+pub fn export_create_temp(final_path: &Path, session_token: &str) -> Result<PathBuf, String> {
+    ensure_parent_dir(final_path)?;
+    let temp = export_temp_sibling_path(final_path, session_token)?;
+    if temp.exists() {
+        return Err("Export temp path already exists".to_string());
+    }
+    use std::fs::OpenOptions;
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|e| format!("Create export temp failed: {e}"))?;
+    Ok(temp)
+}
+
+/// Discard only a recognized PoliteDB export temp path. Never deletes arbitrary paths.
+pub fn export_discard_temp(temp_path: &Path) -> Result<(), String> {
+    if !is_export_temp_path(temp_path) {
+        return Err("Refusing to delete non-export temp path".to_string());
+    }
+    remove_file_if_exists(temp_path)
+}
+
+/// Atomically replace `final_path` with `temp_path` when the destination exists.
+/// Keeps the existing destination intact if replacement fails (no park-then-rename).
+fn export_replace_atomic(temp_path: &Path, final_path: &Path) -> Result<(), String> {
+    if !final_path.exists() {
+        return fs::rename(temp_path, final_path)
+            .map_err(|e| format!("Publish export failed: {e}"));
+    }
+
+    #[cfg(unix)]
+    {
+        // rename(2) replaces the destination atomically on the same filesystem.
+        // The previous inode remains reachable until the syscall returns, so a
+        // crash cannot leave the destination path missing.
+        fs::rename(temp_path, final_path).map_err(|e| format!("Publish export failed: {e}"))
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{ReplaceFileW, REPLACE_FILE_FLAGS};
+
+        fn wide(path: &Path) -> Vec<u16> {
+            path.as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        }
+
+        let replaced = wide(final_path);
+        let replacement = wide(temp_path);
+        // ReplaceFileW swaps in the new file without a window where the
+        // destination path is absent; on failure the original remains.
+        let ok = unsafe {
+            ReplaceFileW(
+                PCWSTR(replaced.as_ptr()),
+                PCWSTR(replacement.as_ptr()),
+                PCWSTR::null(),
+                REPLACE_FILE_FLAGS(0),
+                None,
+                None,
+            )
+        };
+        match ok {
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Publish export failed: {e}")),
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        Err("Atomic export replace is unsupported on this platform".to_string())
+    }
+}
+
+/// Publish temp over final. Preserves existing destination if replacement fails.
+pub fn export_publish_temp(temp_path: &Path, final_path: &Path) -> Result<(), String> {
+    if !is_export_temp_path(temp_path) {
+        return Err("Refusing to publish non-export temp path".to_string());
+    }
+    if !temp_path.exists() {
+        return Err("Export temp missing".to_string());
+    }
+    {
+        use std::fs::OpenOptions;
+        let f = OpenOptions::new()
+            .write(true)
+            .open(temp_path)
+            .map_err(|e| format!("Open export temp failed: {e}"))?;
+        f.sync_all()
+            .map_err(|e| format!("Sync export temp failed: {e}"))?;
+    }
+
+    export_replace_atomic(temp_path, final_path)
+}
+
+#[cfg(test)]
+mod export_session_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn discard_refuses_arbitrary_paths() {
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let victim = dir.join("important.csv");
+        fs::write(&victim, b"keep").unwrap();
+        assert!(export_discard_temp(&victim).is_err());
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_preserves_destination_on_missing_temp() {
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let final_path = dir.join("out.csv");
+        fs::write(&final_path, b"ORIGINAL").unwrap();
+        let fake_temp = dir.join(format!("out.csv.tok{EXPORT_TEMP_SUFFIX}"));
+        assert!(export_publish_temp(&fake_temp, &final_path).is_err());
+        assert_eq!(fs::read_to_string(&final_path).unwrap(), "ORIGINAL");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_preserves_destination_on_replace_failure() {
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let final_path = dir.join("out.csv");
+        fs::write(&final_path, b"ORIGINAL").unwrap();
+        let temp = export_create_temp(&final_path, "tok").unwrap();
+        fs::write(&temp, b"NEW").unwrap();
+
+        // After preflight (temp exists + synced), force replacement to fail by
+        // making the directory non-writable. Destination must remain untouched.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&dir).unwrap().permissions();
+            perms.set_mode(0o555);
+            fs::set_permissions(&dir, perms).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            let mut perms = fs::metadata(&dir).unwrap().permissions();
+            perms.set_readonly(true);
+            fs::set_permissions(&dir, perms).unwrap();
+        }
+
+        let result = export_publish_temp(&temp, &final_path);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&dir).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&dir, perms).unwrap();
+        }
+        #[cfg(not(unix))]
+        {
+            let mut perms = fs::metadata(&dir).unwrap().permissions();
+            perms.set_readonly(false);
+            fs::set_permissions(&dir, perms).unwrap();
+        }
+
+        assert!(result.is_err(), "expected replace failure, got {result:?}");
+        assert_eq!(fs::read_to_string(&final_path).unwrap(), "ORIGINAL");
+        assert!(temp.exists(), "temp should remain when replace fails");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn publish_replaces_existing_destination_atomically() {
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let final_path = dir.join("out.csv");
+        fs::write(&final_path, b"ORIGINAL").unwrap();
+        let temp = export_create_temp(&final_path, "tok").unwrap();
+        fs::write(&temp, b"NEWDATA").unwrap();
+        export_publish_temp(&temp, &final_path).unwrap();
+        assert_eq!(fs::read_to_string(&final_path).unwrap(), "NEWDATA");
+        assert!(!temp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}

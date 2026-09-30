@@ -1,14 +1,26 @@
 import { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { cn } from "src/utils/cn";
 
 export function Tooltip(props: {
+  className?: string;
   content: JSX.Element | string;
   children: JSX.Element;
   width?: number;
   align?: "left" | "right" | "center";
+  /** Prefer "top" near dialog bottoms — popover is not portaled and is clipped by overflow. */
+  side?: "top" | "bottom";
   delay?: number; // ms
 }) {
-  const { content, children, width = 320, align = "left", delay = 200 } = props;
+  const {
+    className,
+    content,
+    children,
+    width = 320,
+    align = "left",
+    side = "bottom",
+    delay = 200,
+  } = props;
 
   const [open, setOpen] = useState(false);
   const [realAlign, setRealAlign] = useState<"left" | "right" | "center">(
@@ -28,7 +40,7 @@ export function Tooltip(props: {
   function onEnter() {
     clearTimer();
     timerRef.current = window.setTimeout(() => {
-      // auto flip
+      // auto flip horizontal
       const rect = wrapperRef.current?.getBoundingClientRect();
       if (rect) {
         if (rect.left + width > window.innerWidth - 8) {
@@ -55,10 +67,12 @@ export function Tooltip(props: {
         ? "left-1/2 -translate-x-1/2"
         : "left-0";
 
+  const sideCls = side === "top" ? "bottom-full mb-1" : "top-full mt-1";
+
   return (
     <div
       ref={wrapperRef}
-      class="relative inline-block w-full"
+      class={cn("relative inline-block w-full", className)}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onMouseDown={onLeave}
@@ -68,8 +82,15 @@ export function Tooltip(props: {
 
       {open ? (
         <div
-          class={`pointer-events-none absolute top-full z-50 mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-snug text-slate-700 shadow-lg ${alignCls} `}
+          class={cn(
+            "pointer-events-none absolute z-50 rounded-xl",
+            "border border-slate-200 bg-white px-3 py-2",
+            "text-xs leading-snug text-slate-700 shadow-lg",
+            sideCls,
+            alignCls
+          )}
           style={{ width }}
+          role="tooltip"
         >
           {content}
         </div>

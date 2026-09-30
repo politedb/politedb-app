@@ -3,7 +3,9 @@ import type { DatabaseObjectItem, TableItem } from "src/types";
 import {
   FUNCTION_COLUMNS,
   TABLE_COLUMNS,
+  catalogRowMenuItems,
   catalogRowValues,
+  openCatalogRowMenu,
   sortCatalogRows,
 } from "./DatabaseCatalogPane";
 
@@ -77,5 +79,53 @@ describe("catalog canvas rows", () => {
       "NO",
       "",
     ]);
+  });
+});
+
+describe("catalog row context menu target", () => {
+  it("keeps Export targeted at the clicked row after live rows reorder", () => {
+    const tableA: TableItem = {
+      schema: "public",
+      name: "a",
+      kind: "table",
+    };
+    const tableB: TableItem = {
+      schema: "public",
+      name: "b",
+      kind: "table",
+    };
+    const initial = [tableA, tableB];
+    // Right-click B at index 1
+    const menu = openCatalogRowMenu(initial, 1, 10, 20);
+    expect(menu?.row.name).toBe("b");
+
+    // Metadata refresh reorders so A and B swap positions
+    const reordered = [tableB, tableA];
+    const exported: string[] = [];
+    const items = catalogRowMenuItems(menu, (table) => [
+      {
+        type: "item" as const,
+        label: "Export data...",
+        onClick: () => {
+          exported.push(table.name);
+        },
+      },
+    ]);
+
+    // Live index 1 would now be A — frozen menu must still export B
+    expect(reordered[1]?.name).toBe("a");
+    const exportItem = items.find(
+      (item) => item.type === "item" && item.label === "Export data..."
+    );
+    expect(exportItem && exportItem.type === "item").toBe(true);
+    if (exportItem && exportItem.type === "item") {
+      exportItem.onClick?.();
+    }
+    expect(exported).toEqual(["b"]);
+  });
+
+  it("returns null for an invalid row index", () => {
+    expect(openCatalogRowMenu(tables, -1, 0, 0)).toBeNull();
+    expect(openCatalogRowMenu(tables, 99, 0, 0)).toBeNull();
   });
 });

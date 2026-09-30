@@ -74,7 +74,7 @@ export function SSLSection(props: {
     <div class="space-y-2">
       <Field label="SSL mode">
         {/* Tooltip wrapper MUST be block/w-full so Select can be full width */}
-        <Tooltip content={SSL_MODE_META[sslMode].hint}>
+        <Tooltip width={268} content={SSL_MODE_META[sslMode].hint}>
           <div class="w-full">
             <Select
               value={sslMode}
