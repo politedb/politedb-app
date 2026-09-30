@@ -168,7 +168,7 @@ export function validateMaskingPolicy(
       error: {
         code: "ZERO_OUTPUT_COLUMNS",
         message:
-          "Masked export needs at least one output column. Change Omit on one or more columns.",
+          "Masked export needs at least one output column. Select at least one column to include.",
       },
     };
   }

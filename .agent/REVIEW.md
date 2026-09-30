@@ -1,4 +1,4 @@
-# Inspector Overview Metrics Review
+# Export Dialog UX Review
 
 ## Status
 
@@ -6,34 +6,37 @@ VERIFIED WITH LIMITATIONS
 
 ## Task
 
-- ID: inspector-overview-metrics
-- Branch: feat/inspector-overview-metrics
-- Scope: current staged implementation and unstaged O1 fixes.
-- Previous task evidence: .agent/archive/database-health-inspector/2026-09-29/
-  (reference only).
+- ID: export-dialog-ux
+- Reviewed: 2026-09-30.
+- Scope: previous three P2 findings and approved removal of the Omit UI option, current working tree.
 
 ## Findings
 
-No unresolved actionable findings in the O1 fix scope reviewed on 2026-09-29.
+No new actionable findings identified in the reviewed fix diff.
 
-O1 resolved: SQL separately counts hidden backend_type rows at database and server
-scope. Decoder preserves those counts; formatting and cards label incomplete client
-counts as visible-only lower bounds. Attention and visibility notices also cover
-hidden sessions only in other databases without marking current-DB workload hidden.
-Tests cover both same-database and server-only hidden classification.
+## Resolved
+
+- Preview rows use h-10 with vertical padding, allowing the disclosure to grow instead of overflowing a fixed-height row.
+- The 760px/viewport width cap now applies to the outer Dialog wrapper. Only ExportTableDialog currently uses size="default"; existing dialog sizes remain unchanged.
+- Stale label/help assertions are updated; new tests cover the intended outer width classes, preview growth classes, zero selection and output counts.
+- Omit is removed from selectable treatment options and mask-toggle copy. Choices are Redact, Set null, Keep original. Unchecking a column excludes it.
+- Internal omit validation/transformation remains for compatibility and is not converted to Keep. It is not exposed as a menu option.
 
 ## Verification
 
-- Independently reran focused Inspector/query suite: PASS, 74 tests / 9 files.
-  Includes SQL, decoding, formatting, signals, UI and prior query lifecycle regressions.
-- Independently reran npm run build: PASS. Browser node:zlib externalization,
-  chunk-size and ineffective dynamic-import warnings remain.
-- Native PostgreSQL/restricted-role smoke and visual light/dark inspection not run.
-- Full suite not rerun this pass; results in PLAN are implementation-agent evidence,
-  not independently baseline-verified here.
-- No production changes, commit, push or webhook during this review.
+Fresh Codex checks:
+
+- npm run test:run: 99 files, 528 tests passed.
+- npm run build: passed; existing bundler warnings remain for large chunks, mixed imports and node:zlib browser externalization.
+- git diff --check: passed for the unstaged fix diff.
+- Inspected changed source and regression assertions; no production code edited by this review.
+
+## Limitations
+
+- CSS-class assertions are not rendered-layout verification. Browser/native screenshots at 1280x800, 800x600 and 390x700 remain outstanding, including expanded previews, footer wrapping, long names and light/dark themes.
+- Live database export and native save-dialog interaction were not re-run in this pass.
+- Existing unrelated staged changes were preserved. No staging, commit, push or webhook dispatch performed.
 
 ## Next Step
 
-No further O1 fix handoff needed. Complete native role/extension and visual smoke
-checks before release; this verdict does not claim those checks passed.
+Run visual smoke checks before release. Commit only when requested by the user.

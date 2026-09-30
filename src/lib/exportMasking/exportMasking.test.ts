@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   REDACTED_TEXT,
+  SYNTHETIC_KEEP_VALUE,
   applyMaskRule,
   buildDefaultMaskedPolicy,
   buildSyntheticPreview,
@@ -181,9 +182,7 @@ describe("synthetic preview", () => {
     if (!preview.ok) return;
     expect(preview.columns).toEqual(["email", "id"]);
     expect(preview.rows[0]?.[0]).toEqual({ t: "Str", v: REDACTED_TEXT });
-    expect(JSON.stringify(preview.rows)).not.toContain(
-      "SENSITIVE_PREVIEW_VALUE_42"
-    );
+    expect(JSON.stringify(preview.rows)).not.toContain(SYNTHETIC_KEEP_VALUE);
   });
 
   it("keep shows synthetic sensitive marker only when explicit", () => {
@@ -194,7 +193,7 @@ describe("synthetic preview", () => {
     if (!preview.ok) return;
     expect(preview.rows[0]?.[0]).toEqual({
       t: "Str",
-      v: "SENSITIVE_PREVIEW_VALUE_42",
+      v: SYNTHETIC_KEEP_VALUE,
     });
   });
 });
