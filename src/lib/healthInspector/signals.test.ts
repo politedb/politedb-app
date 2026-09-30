@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAttentionItems,
-  clientBackendClassificationIncomplete,
   deadRowRatio,
   formatAgeSeconds,
   indexScanSignal,
@@ -28,11 +27,6 @@ function baseOverview(overrides: Partial<HealthOverview> = {}): HealthOverview {
     topBlockers: [],
     hasUnresolvedBlockers: false,
     lockWaitDurationAvailable: false,
-    clientBackendCountDatabase: 3,
-    clientBackendCountServer: 4,
-    hiddenBackendTypeCountDatabase: 0,
-    hiddenBackendTypeCountServer: 0,
-    maxConnections: 100,
     tempFiles: 0,
     tempBytes: 0,
     deadlocks: 0,
@@ -204,29 +198,5 @@ describe("healthInspector signals", () => {
     );
     expect(items.some((i) => i.kind === "incomplete")).toBe(true);
     expect(items.every((i) => i.kind !== "blocked" || true)).toBe(true);
-  });
-
-  it("flags incomplete client classification when hidden sessions are only in another database", () => {
-    const overview = baseOverview({
-      restrictedVisibility: false,
-      clientBackendCountDatabase: 1,
-      clientBackendCountServer: 1,
-      hiddenBackendTypeCountDatabase: 0,
-      hiddenBackendTypeCountServer: 20,
-      maxConnections: 100,
-    });
-    expect(clientBackendClassificationIncomplete(overview)).toBe(true);
-    expect(overviewVisibilityNote(overview)).toMatch(
-      /outside this database|visible-only lower bounds/i
-    );
-    const items = buildAttentionItems(overview);
-    const incomplete = items.find(
-      (i) => i.title === "Incomplete client-backend classification"
-    );
-    expect(incomplete).toBeTruthy();
-    expect(incomplete?.tone).toBe("incomplete");
-    expect(incomplete?.evidence).toMatch(/visible-only lower bounds/i);
-    // Sessions tab cannot show other-database rows.
-    expect(incomplete?.openSessions).toBe(false);
   });
 });

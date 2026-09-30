@@ -63,27 +63,6 @@ export type HealthOverview = {
   /** Exact lock-wait duration has no verified supported source in this snapshot. */
   lockWaitDurationAvailable: false;
 
-  /**
-   * Visible client backends connected to the current database (includes this app).
-   * When hiddenBackendTypeCountDatabase > 0 this is a lower bound, not a total.
-   */
-  clientBackendCountDatabase: number | null;
-  /**
-   * Visible client backends connected to the whole server (includes this app).
-   * When hiddenBackendTypeCountServer > 0 this is a lower bound, not a total.
-   */
-  clientBackendCountServer: number | null;
-  /**
-   * Current-database sessions whose backend_type is hidden (NULL).
-   * PostgreSQL nulls this field when the caller cannot read another role's
-   * session details — those rows cannot be classified as client vs worker.
-   */
-  hiddenBackendTypeCountDatabase: number | null;
-  /** Server-wide sessions with hidden (NULL) backend_type. */
-  hiddenBackendTypeCountServer: number | null;
-  /** Configured max_connections when readable; null if unavailable. */
-  maxConnections: number | null;
-
   /** Cumulative temp file count for the current database since stats reset. */
   tempFiles: number | null;
   /** Cumulative temp file bytes for the current database since stats reset. */

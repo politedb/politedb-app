@@ -44,17 +44,6 @@ export function formatOptionalNumber(value: number | null, digits = 0): string {
   return value.toFixed(digits);
 }
 
-/** True when some sessions hide backend_type so client counts are incomplete. */
-export function clientBackendClassificationIncomplete(
-  overview: HealthOverview | null
-): boolean {
-  if (!overview) return false;
-  return (
-    (overview.hiddenBackendTypeCountDatabase ?? 0) > 0 ||
-    (overview.hiddenBackendTypeCountServer ?? 0) > 0
-  );
-}
-
 export function overviewVisibilityNote(
   overview: HealthOverview | null
 ): string | null {
@@ -65,19 +54,6 @@ export function overviewVisibilityNote(
       "Role visibility is restricted: some sessions show " +
         "<insufficient privilege> (or null) query text with hidden state/timing. " +
         "Active, idle, idle-in-transaction, and longest-transaction metrics are incomplete for other roles."
-    );
-  }
-  if (clientBackendClassificationIncomplete(overview)) {
-    const dbHidden = overview.hiddenBackendTypeCountDatabase ?? 0;
-    const serverHidden = overview.hiddenBackendTypeCountServer ?? 0;
-    parts.push(
-      "Some sessions hide backend_type (role privileges), so client-backend counts " +
-        "are visible-only lower bounds — not complete database/server totals" +
-        (dbHidden > 0 && serverHidden > dbHidden
-          ? " (including sessions outside this database)."
-          : dbHidden === 0 && serverHidden > 0
-            ? " (hidden sessions are outside this database)."
-            : ".")
     );
   }
   return parts.length ? parts.join(" ") : null;
@@ -103,19 +79,6 @@ export function buildAttentionItems(
       evidence:
         "Some session state and timing are hidden for other roles; workload indicators may be partial or unknown.",
       openSessions: true,
-    });
-  }
-
-  if (clientBackendClassificationIncomplete(overview)) {
-    const dbHidden = overview.hiddenBackendTypeCountDatabase ?? 0;
-    items.push({
-      kind: "incomplete",
-      tone: "incomplete",
-      title: "Incomplete client-backend classification",
-      evidence:
-        "Some sessions hide backend_type (role privileges). Client counts are visible-only lower bounds, not full database/server totals.",
-      // Sessions tab only lists the current database; open it when DB-scope rows are hidden.
-      openSessions: dbHidden > 0,
     });
   }
 
@@ -193,9 +156,6 @@ export const TEMP_FILES_CAVEAT =
 
 export const DEADLOCKS_CAVEAT =
   "Deadlocks are cumulative historical events since the last statistics reset — not ongoing blocking.";
-
-export const CONNECTIONS_TOOLTIP =
-  "Client-backend counts include this application's connection and count only rows with backend_type = 'client backend'. When role privileges hide backend_type for other sessions, those rows cannot be classified and counts are shown as visible-only lower bounds — not complete totals. Database count is scoped to the current database and is not divided by the server-wide maximum. Server usage is approximate relative to configured max_connections — reserved slots, role/database limits, and poolers mean this is not available-slot capacity. Background workers are excluded.";
 
 export const BLOCKING_LIMITATION_NOTE =
   "Blocker PIDs outside this database or hidden by privileges remain unresolved; prepared-transaction blockers appear as PID 0. Exact lock-wait duration is unavailable.";
