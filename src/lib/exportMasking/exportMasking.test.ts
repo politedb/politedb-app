@@ -21,11 +21,11 @@ function cellStr(v: string) {
 }
 
 describe("export masking policy", () => {
-  it("defaults selected columns to redact when entering masked mode", () => {
+  it("defaults selected columns to keep (passthrough)", () => {
     const p = buildDefaultMaskedPolicy(["a", "b"]);
     expect(p.masked).toBe(true);
-    expect(p.rulesByColumn.a).toBe("redact");
-    expect(p.rulesByColumn.b).toBe("redact");
+    expect(p.rulesByColumn.a).toBe("keep");
+    expect(p.rulesByColumn.b).toBe("keep");
   });
 
   it("rejects empty selection and zero output columns in masked mode", () => {
@@ -56,11 +56,11 @@ describe("export masking policy", () => {
     if (!stale.ok) expect(stale.error.code).toBe("STALE_COLUMN");
   });
 
-  it("lists keep columns only when explicitly chosen", () => {
+  it("lists keep columns for Keep treatments", () => {
     let p = buildDefaultMaskedPolicy(["a", "b"]);
-    expect(listKeepColumns(p)).toEqual([]);
-    p = withColumnRule(p, "a", "keep");
-    expect(listKeepColumns(p)).toEqual(["a"]);
+    expect(listKeepColumns(p)).toEqual(["a", "b"]);
+    p = withColumnRule(p, "a", "redact");
+    expect(listKeepColumns(p)).toEqual(["b"]);
   });
 });
 
@@ -175,25 +175,25 @@ describe("applyMaskRule / transformExportChunk", () => {
 });
 
 describe("synthetic preview", () => {
-  it("uses production transform helper and never embeds live sentinel as keep by default", () => {
+  it("default Keep preview shows synthetic sensitive marker", () => {
     const policy = buildDefaultMaskedPolicy(["email", "id"]);
     const preview = buildSyntheticPreview({ policy, column: "email" });
     expect(preview.ok).toBe(true);
     if (!preview.ok) return;
     expect(preview.columns).toEqual(["email", "id"]);
-    expect(preview.rows[0]?.[0]).toEqual({ t: "Str", v: REDACTED_TEXT });
-    expect(JSON.stringify(preview.rows)).not.toContain(SYNTHETIC_KEEP_VALUE);
-  });
-
-  it("keep shows synthetic sensitive marker only when explicit", () => {
-    let policy = buildDefaultMaskedPolicy(["email"]);
-    policy = withColumnRule(policy, "email", "keep");
-    const preview = buildSyntheticPreview({ policy, column: "email" });
-    expect(preview.ok).toBe(true);
-    if (!preview.ok) return;
     expect(preview.rows[0]?.[0]).toEqual({
       t: "Str",
       v: SYNTHETIC_KEEP_VALUE,
     });
+  });
+
+  it("redact preview uses [REDACTED] without keep sentinel", () => {
+    let policy = buildDefaultMaskedPolicy(["email"]);
+    policy = withColumnRule(policy, "email", "redact");
+    const preview = buildSyntheticPreview({ policy, column: "email" });
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    expect(preview.rows[0]?.[0]).toEqual({ t: "Str", v: REDACTED_TEXT });
+    expect(JSON.stringify(preview.rows)).not.toContain(SYNTHETIC_KEEP_VALUE);
   });
 });

@@ -6,7 +6,7 @@
 export const REDACTED_TEXT = "[REDACTED]" as const;
 
 /** Synthetic marker used only in previews when Keep is explicit. */
-export const SYNTHETIC_KEEP_VALUE = "SENSITIVE_VALUE" as const;
+export const SYNTHETIC_KEEP_VALUE = "ORIGINAL_VALUE" as const;
 
 export type MaskRuleKind = "keep" | "redact" | "set_null" | "omit";
 

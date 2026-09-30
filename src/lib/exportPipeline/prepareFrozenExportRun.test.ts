@@ -41,8 +41,12 @@ describe("prepareFrozenExportRun", () => {
     expect(frozen.policy.selectedColumns).not.toBe(policy.selectedColumns);
   });
 
-  it("rejects masked SQL format", () => {
-    const policy = buildDefaultMaskedPolicy(["id"]);
+  it("rejects SQL format when a non-keep treatment is active", () => {
+    const policy = withColumnRule(
+      buildDefaultMaskedPolicy(["id"]),
+      "id",
+      "redact"
+    );
     expect(() =>
       prepareFrozenExportRun("/tmp/out.sql", config, {
         format: "sql",
@@ -54,6 +58,23 @@ describe("prepareFrozenExportRun", () => {
         maskingPolicy: policy,
       })
     ).toThrow(/SQL format is disabled/i);
+  });
+
+  it("allows SQL format when all treatments are Keep", () => {
+    const policy = buildDefaultMaskedPolicy(["id", "email"]);
+    const frozen = prepareFrozenExportRun("/tmp/out.sql", config, {
+      format: "sql",
+      fileName: "x",
+      columns: ["id", "email"],
+      csvOptions: {},
+      nullToEmpty: true,
+      masked: true,
+      maskingPolicy: policy,
+    });
+    expect(frozen.projectedColumns).toEqual(["id", "email"]);
+    expect(frozen.options.format).toBe("sql");
+    // All-Keep collapses to ordinary semantics for SQL/null handling.
+    expect(frozen.policy.masked).toBe(false);
   });
 
   it("ordinary export projects selected columns", () => {

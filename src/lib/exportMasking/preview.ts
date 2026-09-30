@@ -21,7 +21,7 @@ export function buildSyntheticPreview(args: {
   }
 
   const row = cols.map((name) => {
-    const rule = policy.rulesByColumn[name] ?? "redact";
+    const rule = policy.rulesByColumn[name] ?? "keep";
     if (rule === "keep") {
       return { t: "Str" as const, v: SYNTHETIC_KEEP_VALUE };
     }

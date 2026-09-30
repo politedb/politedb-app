@@ -1,6 +1,7 @@
 import {
   freezePolicy,
   ordinaryPolicy,
+  policyHasActiveMasking,
   transformExportChunk,
   validateMaskingPolicy,
   type MaskingPolicy,
@@ -71,8 +72,11 @@ function buildFrozenRun(
       throw new Error("Masked export is missing a masking policy.");
     }
     policy = freezePolicy(opts.maskingPolicy);
-    if (opts.format === "sql") {
-      throw new Error("SQL format is disabled for masked export.");
+    // All-Keep is passthrough: collapse to ordinary semantics (SQL + nulls).
+    if (!policyHasActiveMasking(policy)) {
+      policy = freezePolicy({ ...policy, masked: false });
+    } else if (opts.format === "sql") {
+      throw new Error("SQL format is disabled when column masking is applied.");
     }
   } else {
     const selected = opts.columns.length > 0 ? opts.columns : available;

@@ -18,12 +18,12 @@ import {
   useExportTableData,
 } from "src/hooks/useExportTableData";
 import { ErrorDialog } from "./ErrorDialog";
-import { Checkbox } from "src/components/common/Checkbox";
 import type { DatabaseEngine, TableConstraint } from "src/types";
 import { ExportColumnEditor } from "src/components/modal/export/ExportColumnEditor";
 import {
   listKeepColumns,
   listOutputColumns,
+  policyHasActiveMasking,
   syncMaskedSelection,
   validateMaskingPolicy,
   withColumnRule,
@@ -74,7 +74,6 @@ export function ExportTableDialog({
     handleChangeFormat,
     handleExport,
     loadExportOptions,
-    setMaskedMode,
     clearMaskState,
     requestCancel,
   } = useExportTableData();
@@ -103,52 +102,43 @@ export function ExportTableDialog({
     return ((progress?.exported ?? 0) / totalRows) * 100;
   }, [progress, totalRows, totalKnown]);
 
-  const masked = exportOptions.masked === true;
+  // Authoritative selection — never fall back empty → all.
+  const selectedColumns = exportOptions.columns;
 
-  // Authoritative selection — never fall back empty → all in masked mode.
-  const selectedColumns = useMemo(() => {
-    if (masked) return exportOptions.columns;
-    // Ordinary: empty stored list still means "all" for pipeline compatibility,
-    // but after loadExportOptions we keep an explicit list for accurate UX counts.
-    return exportOptions.columns;
-  }, [exportOptions.columns, masked]);
+  const maskingPolicy = exportOptions.maskingPolicy;
 
   const maskValidation = useMemo(() => {
-    if (!masked || !exportOptions.maskingPolicy) {
-      return null;
-    }
-    return validateMaskingPolicy(exportOptions.maskingPolicy, columnNames);
-  }, [masked, exportOptions.maskingPolicy, columnNames]);
+    if (!maskingPolicy) return null;
+    return validateMaskingPolicy(maskingPolicy, columnNames);
+  }, [maskingPolicy, columnNames]);
 
   const outputCount = useMemo(() => {
-    if (masked && exportOptions.maskingPolicy) {
+    if (maskingPolicy) {
       if (maskValidation?.ok) return maskValidation.outputColumns.length;
-      return listOutputColumns(exportOptions.maskingPolicy).length;
+      return listOutputColumns(maskingPolicy).length;
     }
     return selectedColumns.length;
-  }, [
-    masked,
-    exportOptions.maskingPolicy,
-    maskValidation,
-    selectedColumns.length,
-  ]);
+  }, [maskingPolicy, maskValidation, selectedColumns.length]);
 
   const keepColumns = useMemo(() => {
-    if (!masked || !exportOptions.maskingPolicy) return [];
-    return listKeepColumns(exportOptions.maskingPolicy);
-  }, [masked, exportOptions.maskingPolicy]);
+    if (!maskingPolicy) return [];
+    return listKeepColumns(maskingPolicy);
+  }, [maskingPolicy]);
+
+  const hasActiveMasking = useMemo(() => {
+    if (!maskingPolicy) return false;
+    return policyHasActiveMasking(maskingPolicy);
+  }, [maskingPolicy]);
 
   const setSelectedColumns = useCallback(
     (next: string[]) => {
       setExportOptions((prev) => {
-        if (!prev.masked) {
-          return { ...prev, columns: next };
-        }
-        const maskingPolicy = syncMaskedSelection(prev.maskingPolicy, next);
+        const nextPolicy = syncMaskedSelection(prev.maskingPolicy, next);
         return {
           ...prev,
+          masked: true,
           columns: next,
-          maskingPolicy,
+          maskingPolicy: nextPolicy,
         };
       });
     },
@@ -178,11 +168,22 @@ export function ExportTableDialog({
     (name: string, rule: MaskRuleKind) => {
       setExportOptions((prev) => {
         if (!prev.maskingPolicy) return prev;
-        const maskingPolicy = withColumnRule(prev.maskingPolicy, name, rule);
-        return { ...prev, maskingPolicy };
+        return {
+          ...prev,
+          masked: true,
+          maskingPolicy: withColumnRule(prev.maskingPolicy, name, rule),
+        };
       });
+      const base = exportOptions.maskingPolicy;
+      if (
+        base &&
+        format === "sql" &&
+        policyHasActiveMasking(withColumnRule(base, name, rule))
+      ) {
+        handleChangeFormat("csv");
+      }
     },
-    [setExportOptions]
+    [setExportOptions, exportOptions.maskingPolicy, format, handleChangeFormat]
   );
 
   const onClose = useCallback(() => {
@@ -229,13 +230,6 @@ export function ExportTableDialog({
     handleExport,
   ]);
 
-  const onToggleMasked = useCallback(
-    (checked: boolean) => {
-      setMaskedMode(checked, selectedColumns);
-    },
-    [setMaskedMode, selectedColumns]
-  );
-
   const suggestedName = exportOptions.fileName || tableName;
   // Unknown totals: success is pipeline settlement (!exporting), not row math.
   const completed =
@@ -260,7 +254,8 @@ export function ExportTableDialog({
     exporting ||
     columnNames.length === 0 ||
     outputCount === 0 ||
-    (masked && (!exportOptions.maskingPolicy || !maskValidation?.ok));
+    !maskingPolicy ||
+    !maskValidation?.ok;
 
   const formatLabel = (format || "csv").toUpperCase();
 
@@ -285,7 +280,7 @@ export function ExportTableDialog({
               <span class="font-mono text-neutral-700 dark:text-neutral-200">
                 {tableIdentity}
               </span>
-              {masked ? (
+              {hasActiveMasking ? (
                 <>
                   <span class="text-neutral-400"> · </span>
                   <span>Masked</span>
@@ -340,33 +335,19 @@ export function ExportTableDialog({
                     >
                       <option value="csv">CSV</option>
                       <option value="json">JSON</option>
-                      <option value="sql" disabled={masked}>
-                        SQL{masked ? " (unavailable when masked)" : ""}
+                      <option value="sql" disabled={hasActiveMasking}>
+                        SQL
+                        {hasActiveMasking ? " (unavailable when masking)" : ""}
                       </option>
                     </Select>
                   </div>
-                </div>
-
-                <div class="rounded-md border border-neutral-200 px-2 py-1.5 dark:border-neutral-700">
-                  <Checkbox
-                    checked={masked}
-                    onChange={(e) =>
-                      onToggleMasked(
-                        (e.currentTarget as HTMLInputElement).checked
-                      )
-                    }
-                    disabled={exporting}
-                    label="Mask sensitive values"
-                    description="Per-column redact / null / keep. Uncheck a column to exclude it. Does not modify the database."
-                  />
                 </div>
               </div>
 
               <ExportColumnEditor
                 columnNames={columnNames}
                 selectedColumns={selectedColumns}
-                masked={masked}
-                policy={exportOptions.maskingPolicy}
+                policy={maskingPolicy}
                 disabled={exporting}
                 selectedCount={selectedColumns.length}
                 outputCount={outputCount}
@@ -381,7 +362,7 @@ export function ExportTableDialog({
                 <div class="flex items-center justify-between gap-2">
                   <p class="min-w-0 truncate font-medium text-neutral-800">
                     {suggestedName}.{format}
-                    {masked ? " · masked" : ""}
+                    {hasActiveMasking ? " · masked" : ""}
                   </p>
                   <span class="shrink-0 text-xs text-neutral-500 tabular-nums">
                     {totalRows == null
@@ -425,23 +406,18 @@ export function ExportTableDialog({
         <DialogFooter className="shrink-0 flex-wrap items-center justify-between gap-2">
           <div class="h-10 min-w-0 flex-1 text-sm text-neutral-600 dark:text-neutral-300">
             {!progress && (
-              <div class="flex h-full flex-wrap items-center gap-x-3 gap-y-0.5">
+              <div class="flex h-full flex-wrap items-center gap-x-3">
                 <span class="tabular-nums">
-                  {outputCount} output column{outputCount === 1 ? "" : "s"}
+                  {outputCount} / {columnNames.length} output column
+                  {outputCount === 1 ? "" : "s"}
                 </span>
-                {masked && keepColumns.length > 0 && (
+                {keepColumns.length > 0 && (
                   <span
-                    class="inline-flex items-center gap-1.5 text-amber-800"
+                    class="inline-flex items-center text-amber-700"
                     title={`Keeping original values: ${keepColumns.join(", ")}`}
                   >
-                    <span
-                      class="inline-block size-1.5 rounded-full bg-amber-500"
-                      aria-hidden="true"
-                    />
-                    {keepColumns.length} kept original
-                    <span class="text-amber-700/80 dark:text-amber-300/80">
-                      — may contain sensitive data
-                    </span>
+                    {keepColumns.length} kept original — may contain sensitive
+                    data
                   </span>
                 )}
               </div>

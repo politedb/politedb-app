@@ -67,34 +67,24 @@ export function useExportTableData() {
   const setMaskedMode = useCallback(
     (masked: boolean, selectedColumns: string[]) => {
       setExportOptions((prev) => {
-        if (!masked) {
-          return {
-            ...prev,
-            masked: false,
-            maskingPolicy: null,
-            fileName: prev.fileName.replace(/\.masked$/i, ""),
-          };
-        }
         const cols =
           selectedColumns.length > 0
             ? selectedColumns
             : prev.columns.length > 0
               ? prev.columns
               : [];
-        const maskingPolicy = buildDefaultMaskedPolicy(cols);
-        let fileName = prev.fileName || "";
-        if (fileName && !/\.masked$/i.test(fileName)) {
-          fileName = `${fileName}.masked`;
+        if (!masked) {
+          return {
+            ...prev,
+            masked: false,
+            maskingPolicy: null,
+            columns: cols,
+          };
         }
-        const formatSafe: ExportFormat =
-          prev.format === "sql" ? "csv" : prev.format;
-        setFormat(formatSafe);
         return {
           ...prev,
           masked: true,
-          maskingPolicy,
-          format: formatSafe,
-          fileName,
+          maskingPolicy: buildDefaultMaskedPolicy(cols),
           columns: cols,
         };
       });
@@ -132,8 +122,8 @@ export function useExportTableData() {
         columns: columnNames,
         csvOptions: {},
         nullToEmpty: true,
-        masked: false,
-        maskingPolicy: null,
+        masked: true,
+        maskingPolicy: buildDefaultMaskedPolicy(columnNames),
       });
       setProgress(null);
       setFormat("csv");
@@ -187,7 +177,7 @@ export function useExportTableData() {
       const ext = opts.format;
       const defaultBase = opts.fileName || tableName;
       const path = await saveDialog({
-        title: opts.masked ? "Masked export table data" : "Export table data",
+        title: "Export table data",
         defaultPath: `${defaultBase}.${ext}`,
         filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
       });

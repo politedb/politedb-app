@@ -9,13 +9,13 @@ import {
 const columns = ["id", "email", "note", "created_at", "name", "role"];
 
 describe("ExportColumnEditor", () => {
-  it("renders a single column list with checkboxes in ordinary mode", () => {
+  it("renders column list with treatments and Preview by default (Keep)", () => {
+    const policy = buildDefaultMaskedPolicy(columns);
     render(
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={columns}
-        masked={false}
-        policy={null}
+        policy={policy}
         selectedCount={columns.length}
         outputCount={columns.length}
         onToggleColumn={vi.fn()}
@@ -28,25 +28,29 @@ describe("ExportColumnEditor", () => {
     expect(
       screen.getByLabelText(`Select all ${columns.length} columns`)
     ).toBeTruthy();
-    expect(
-      screen.getByText(`${columns.length} of ${columns.length} selected`)
-    ).toBeTruthy();
-    expect(screen.queryByText("Treatment")).toBeNull();
-    expect(screen.queryByText("Example")).toBeNull();
-    expect(screen.getByText("Null export notes")).toBeTruthy();
-    expect(screen.queryByText("Masking & null export notes")).toBeNull();
+    const selectAll = screen.getByLabelText(
+      `Select all ${columns.length} columns`
+    ) as HTMLInputElement;
+    expect(selectAll.checked).toBe(true);
+    expect(screen.getByText("Treatment")).toBeTruthy();
+    expect(screen.getByTitle("Synthetic preview — not live data")).toBeTruthy();
+    expect(screen.getByText("Masking & null export notes")).toBeTruthy();
     for (const name of columns) {
       expect(screen.getByLabelText(`Include column ${name}`)).toBeTruthy();
+      const treatment = screen.getByLabelText(
+        `Treatment for ${name}`
+      ) as HTMLSelectElement;
+      expect(treatment.value).toBe("keep");
     }
   });
 
-  it("shows treatment and synthetic example in masked mode", () => {
-    const policy = buildDefaultMaskedPolicy(columns);
+  it("shows synthetic Keep preview by default and Redact when chosen", () => {
+    let policy = buildDefaultMaskedPolicy(columns);
+    policy = withColumnRule(policy, "email", "redact");
     render(
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={columns}
-        masked
         policy={policy}
         selectedCount={columns.length}
         outputCount={columns.length}
@@ -57,10 +61,10 @@ describe("ExportColumnEditor", () => {
     );
 
     expect(screen.getByText("Treatment")).toBeTruthy();
-    expect(screen.getByText("Example")).toBeTruthy();
+    expect(screen.getByTitle("Synthetic preview — not live data")).toBeTruthy();
     expect(screen.getByLabelText("Treatment for email")).toBeTruthy();
-    // Synthetic redact preview text
     expect(screen.getAllByText("[REDACTED]").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("ORIGINAL_VALUE").length).toBeGreaterThan(0);
   });
 
   it("keeps unchecked columns visible with disabled treatment", () => {
@@ -69,7 +73,6 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={["id", "email"]}
-        masked
         policy={policy}
         selectedCount={2}
         outputCount={2}
@@ -96,8 +99,7 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={columns}
-        masked={false}
-        policy={null}
+        policy={buildDefaultMaskedPolicy(columns)}
         selectedCount={columns.length}
         outputCount={columns.length}
         onToggleColumn={onToggleColumn}
@@ -121,8 +123,7 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={["id"]}
-        masked={false}
-        policy={null}
+        policy={buildDefaultMaskedPolicy(["id"])}
         selectedCount={1}
         outputCount={1}
         onToggleColumn={vi.fn()}
@@ -146,7 +147,6 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={["email", "note"]}
         selectedColumns={["email", "note"]}
-        masked
         policy={policy}
         selectedCount={2}
         outputCount={1}
@@ -167,7 +167,6 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={["email", "note"]}
         selectedColumns={["email", "note"]}
-        masked
         policy={policy}
         selectedCount={2}
         outputCount={2}
@@ -200,7 +199,6 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={["email"]}
         selectedColumns={["email"]}
-        masked
         policy={policy}
         selectedCount={1}
         outputCount={1}
@@ -213,7 +211,7 @@ describe("ExportColumnEditor", () => {
       "Treatment for email"
     ) as HTMLSelectElement;
     const labels = Array.from(treatment.options).map((o) => o.textContent);
-    expect(labels).toEqual(["Redact", "Set null", "Keep original"]);
+    expect(labels).toEqual(["Keep original", "Redact", "Set null"]);
     expect(screen.queryByRole("option", { name: "Omit" })).toBeNull();
   });
 
@@ -224,7 +222,6 @@ describe("ExportColumnEditor", () => {
       <ExportColumnEditor
         columnNames={columns}
         selectedColumns={columns}
-        masked
         policy={policy}
         selectedCount={columns.length}
         outputCount={columns.length}

@@ -14,15 +14,14 @@ import { SearchIcon } from "src/components/icons";
 import { Tooltip } from "src/components/common/Tooltip";
 
 const RULE_OPTIONS: { value: MaskRuleKind; label: string }[] = [
+  { value: "keep", label: "Keep original" },
   { value: "redact", label: "Redact" },
   { value: "set_null", label: "Set null" },
-  { value: "keep", label: "Keep original" },
 ];
 
 export type ExportColumnEditorProps = {
   columnNames: string[];
   selectedColumns: string[];
-  masked: boolean;
   policy: MaskingPolicy | null;
   disabled?: boolean;
   selectedCount: number;
@@ -35,7 +34,6 @@ export type ExportColumnEditorProps = {
 export function ExportColumnEditor({
   columnNames,
   selectedColumns,
-  masked,
   policy,
   disabled,
   selectedCount,
@@ -64,7 +62,7 @@ export function ExportColumnEditor({
 
   const previewByColumn = useMemo(() => {
     const map: Record<string, string> = {};
-    if (!masked || !policy) return map;
+    if (!policy) return map;
     for (const col of policy.selectedColumns) {
       const result = buildSyntheticPreview({ policy, column: col });
       if (!result.ok) {
@@ -79,7 +77,7 @@ export function ExportColumnEditor({
       map[col] = formatPreviewCell(result.rows[0]?.[idx]);
     }
     return map;
-  }, [masked, policy]);
+  }, [policy]);
 
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
@@ -96,14 +94,6 @@ export function ExportColumnEditor({
             left={<SearchIcon className="size-4" />}
           />
         </div>
-        <div class="flex shrink-0 items-center gap-3 text-sm text-neutral-600">
-          <span
-            class="tabular-nums"
-            title="Selected columns / columns in output"
-          >
-            {selectedCount} of {columnNames.length} selected
-          </span>
-        </div>
       </div>
 
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-neutral-200">
@@ -111,9 +101,7 @@ export function ExportColumnEditor({
           class={cn(
             "grid shrink-0 gap-2 border-b border-neutral-200 bg-neutral-50 p-2 text-xs font-bold tracking-wide",
             "text-neutral-500 uppercase dark:bg-neutral-900/80",
-            masked
-              ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
-              : "grid-cols-[auto_minmax(0,1fr)]"
+            "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
           )}
         >
           <Checkbox
@@ -125,15 +113,13 @@ export function ExportColumnEditor({
             title="Applies to every column, not only search matches"
           />
           <span>Column</span>
-          {masked && <span>Treatment</span>}
-          {masked && (
-            <span
-              class="hidden truncate sm:block"
-              title="Synthetic preview — not live data"
-            >
-              Example
-            </span>
-          )}
+          <span>Treatment</span>
+          <span
+            class="hidden truncate sm:block"
+            title="Synthetic preview — not live data"
+          >
+            Preview
+          </span>
         </div>
 
         <OverlayScrollArea
@@ -149,8 +135,8 @@ export function ExportColumnEditor({
               const selected = selectedSet.has(name);
               const rule =
                 (policy?.rulesByColumn[name] as MaskRuleKind | undefined) ??
-                "redact";
-              const isKeep = masked && selected && rule === "keep";
+                "keep";
+              const isKeep = selected && rule === "keep";
               const preview = previewByColumn[name] ?? "—";
               const previewOpen = expandedPreview === name;
 
@@ -159,9 +145,7 @@ export function ExportColumnEditor({
                   key={name}
                   class={cn(
                     "grid h-10 items-center gap-2 px-2 py-1",
-                    masked
-                      ? "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
-                      : "grid-cols-[auto_minmax(0,1fr)]"
+                    "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
                   )}
                 >
                   <Checkbox
@@ -184,7 +168,7 @@ export function ExportColumnEditor({
                     >
                       {name}
                     </span>
-                    {masked && selected && (
+                    {selected && (
                       <button
                         type="button"
                         class="ml-auto text-xs text-neutral-500 underline sm:hidden"
@@ -198,33 +182,29 @@ export function ExportColumnEditor({
                       </button>
                     )}
                   </div>
-                  {masked && (
-                    <Select
-                      value={selected ? rule : "redact"}
-                      disabled={disabled || !selected}
-                      className="h-8 w-full"
-                      aria-label={`Treatment for ${name}`}
-                      onChange={(e) => {
-                        const nextRule = e.currentTarget.value as MaskRuleKind;
-                        onRuleChange(name, nextRule);
-                      }}
-                    >
-                      {RULE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                  {masked && (
-                    <span
-                      class="hidden truncate font-mono text-xs text-neutral-500 sm:block"
-                      title="Synthetic preview (not live data)"
-                    >
-                      {selected ? preview : "—"}
-                    </span>
-                  )}
-                  {masked && selected && previewOpen && (
+                  <Select
+                    value={selected ? rule : "keep"}
+                    disabled={disabled || !selected}
+                    className="h-8 w-full"
+                    aria-label={`Treatment for ${name}`}
+                    onChange={(e) => {
+                      const nextRule = e.currentTarget.value as MaskRuleKind;
+                      onRuleChange(name, nextRule);
+                    }}
+                  >
+                    {RULE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <span
+                    class="hidden truncate font-mono text-xs text-neutral-600 sm:block"
+                    title="Synthetic preview (not live data)"
+                  >
+                    {selected ? preview : "—"}
+                  </span>
+                  {selected && previewOpen && (
                     <div
                       class={cn(
                         "col-span-full rounded border border-neutral-200 bg-neutral-50 px-2 py-1 font-mono text-[10px]",
@@ -242,21 +222,19 @@ export function ExportColumnEditor({
         </OverlayScrollArea>
       </div>
 
-      <p className="flex gap-1 text-sm text-neutral-500 dark:text-neutral-400">
-        {masked && <span>Example uses synthetic values only.</span>}
-
+      <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-neutral-500 dark:text-neutral-400">
+        <span>
+          Per-column keep / redact / null. Uncheck a column to exclude it.
+        </span>
+        <span>Preview uses synthetic values only.</span>
         <Tooltip
           className="w-fit"
-          align={masked ? "center" : "left"}
+          align="center"
           side="top"
-          content={
-            masked
-              ? "Masking reduces data exposure but does not guarantee anonymization or regulatory compliance. Null values are exported as NULL in CSV and null in JSON."
-              : "Null values are exported as NULL in CSV and null in JSON."
-          }
+          content="Masking reduces data exposure but does not guarantee anonymization or regulatory compliance. Null values are exported as NULL in CSV and null in JSON. Does not modify the database."
         >
           <span className="cursor-help underline decoration-dotted">
-            {masked ? "Masking & null export notes" : "Null export notes"}
+            Masking & null export notes
           </span>
         </Tooltip>
       </p>

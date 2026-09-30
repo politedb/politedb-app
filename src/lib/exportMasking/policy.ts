@@ -30,13 +30,13 @@ export function freezePolicy(policy: MaskingPolicy): MaskingPolicy {
   };
 }
 
-/** Entering Masked Export: every selected column defaults to Redact. */
+/** Default export policy: every selected column Keep (passthrough). */
 export function buildDefaultMaskedPolicy(
   selectedColumns: string[]
 ): MaskingPolicy {
   const rulesByColumn: Record<string, MaskRuleKind> = {};
   for (const name of selectedColumns) {
-    rulesByColumn[name] = "redact";
+    rulesByColumn[name] = "keep";
   }
   return {
     masked: true,
@@ -199,7 +199,7 @@ export function listOutputColumns(policy: MaskingPolicy): string[] {
   );
 }
 
-/** Sync selected columns into a masked policy (new cols → redact). */
+/** Sync selected columns into a policy (new cols → keep). */
 export function syncMaskedSelection(
   policy: MaskingPolicy | null,
   selectedColumns: string[]
@@ -207,11 +207,19 @@ export function syncMaskedSelection(
   const prev = policy?.rulesByColumn ?? {};
   const rulesByColumn: Record<string, MaskRuleKind> = {};
   for (const name of selectedColumns) {
-    rulesByColumn[name] = prev[name] ?? "redact";
+    rulesByColumn[name] = prev[name] ?? "keep";
   }
   return {
     masked: true,
     selectedColumns: [...selectedColumns],
     rulesByColumn,
   };
+}
+
+/** True when any selected column applies a non-passthrough treatment. */
+export function policyHasActiveMasking(policy: MaskingPolicy): boolean {
+  return policy.selectedColumns.some((name) => {
+    const rule = policy.rulesByColumn[name];
+    return rule != null && rule !== "keep";
+  });
 }

@@ -21,8 +21,15 @@ const hookState = {
     columns: ["id", "email", "note", "a", "b", "c"],
     csvOptions: {},
     nullToEmpty: true,
-    masked: false,
-    maskingPolicy: null as ReturnType<typeof buildDefaultMaskedPolicy> | null,
+    masked: true,
+    maskingPolicy: buildDefaultMaskedPolicy([
+      "id",
+      "email",
+      "note",
+      "a",
+      "b",
+      "c",
+    ]) as ReturnType<typeof buildDefaultMaskedPolicy> | null,
   },
   setExportOptions: vi.fn(),
   setFileName: vi.fn(),
@@ -79,8 +86,15 @@ describe("ExportTableDialog UX", () => {
       columns: ["id", "email", "note", "a", "b", "c"],
       csvOptions: {},
       nullToEmpty: true,
-      masked: false,
-      maskingPolicy: null,
+      masked: true,
+      maskingPolicy: buildDefaultMaskedPolicy([
+        "id",
+        "email",
+        "note",
+        "a",
+        "b",
+        "c",
+      ]),
     };
     vi.clearAllMocks();
     // Functional updater support for selection changes in the dialog
@@ -129,16 +143,22 @@ describe("ExportTableDialog UX", () => {
     expect(screen.getByText(".csv")).toBeTruthy();
   });
 
-  it("enables masked mode via toggle", () => {
+  it("always shows per-column treatments defaulting to Keep", () => {
     renderDialog();
-    fireEvent.click(screen.getByText("Mask sensitive values"));
-    expect(hookState.setMaskedMode).toHaveBeenCalledWith(
-      true,
-      expect.arrayContaining(["id", "email"])
-    );
+    expect(screen.queryByText("Mask sensitive values")).toBeNull();
+    expect(screen.getByText("Treatment")).toBeTruthy();
+    const treatment = screen.getByLabelText(
+      "Treatment for email"
+    ) as HTMLSelectElement;
+    expect(treatment.value).toBe("keep");
+    expect(screen.getByRole("option", { name: /SQL/i })).toBeTruthy();
+    const sql = screen.getByRole("option", {
+      name: /^SQL$/i,
+    }) as HTMLOptionElement;
+    expect(sql.disabled).toBe(false);
   });
 
-  it("disables SQL option and export when masked with zero output", () => {
+  it("disables SQL when masking is applied and blocks zero-output export", () => {
     const policy = withColumnRule(
       withColumnRule(buildDefaultMaskedPolicy(["id", "email"]), "id", "omit"),
       "email",
@@ -161,7 +181,7 @@ describe("ExportTableDialog UX", () => {
 
     const exportBtn = screen.getByRole("button", { name: /Export CSV/i });
     expect((exportBtn as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/0 output column/)).toBeTruthy();
+    expect(screen.getByText(/0 \/ 6 output columns/)).toBeTruthy();
   });
 
   it("does not render empty masked selection as all selected", () => {
@@ -177,12 +197,17 @@ describe("ExportTableDialog UX", () => {
       "Include column id"
     ) as HTMLInputElement;
     expect(idBox.checked).toBe(false);
-    expect(screen.getByText(/0 of 6 selected/)).toBeTruthy();
+    const selectAll = screen.getByLabelText(
+      "Select all 6 columns"
+    ) as HTMLInputElement;
+    expect(selectAll.checked).toBe(false);
   });
 
-  it("shows compact kept-original warning in footer", () => {
+  it("shows compact kept-original warning when some columns stay Keep under masking", () => {
     let policy = buildDefaultMaskedPolicy(["id", "email", "note"]);
-    policy = withColumnRule(policy, "email", "keep");
+    policy = withColumnRule(policy, "id", "redact");
+    policy = withColumnRule(policy, "note", "set_null");
+    // email remains Keep
     hookState.exportOptions = {
       ...hookState.exportOptions,
       masked: true,
@@ -212,7 +237,7 @@ describe("ExportTableDialog UX", () => {
     expect(hookState.requestCancel).toHaveBeenCalled();
   });
 
-  it("does not offer Omit in treatment options when masked", () => {
+  it("does not offer Omit in treatment options", () => {
     hookState.exportOptions = {
       ...hookState.exportOptions,
       masked: true,
@@ -224,7 +249,7 @@ describe("ExportTableDialog UX", () => {
       "Treatment for id"
     ) as HTMLSelectElement;
     const labels = Array.from(treatment.options).map((o) => o.textContent);
-    expect(labels).toEqual(["Redact", "Set null", "Keep original"]);
+    expect(labels).toEqual(["Keep original", "Redact", "Set null"]);
     expect(labels).not.toContain("Omit");
   });
 
@@ -240,8 +265,11 @@ describe("ExportTableDialog UX", () => {
       name: /Export CSV/i,
     }) as HTMLButtonElement;
     expect(exportBtn.disabled).toBe(true);
-    expect(screen.getByText(/0 output column/)).toBeTruthy();
-    expect(screen.getByText(/0 of 6 selected/)).toBeTruthy();
+    expect(screen.getByText(/0 \/ 6 output columns/)).toBeTruthy();
+    const selectAll = screen.getByLabelText(
+      "Select all 6 columns"
+    ) as HTMLInputElement;
+    expect(selectAll.checked).toBe(false);
   });
 
   it("excludes unchecked columns from output count", () => {
@@ -253,8 +281,15 @@ describe("ExportTableDialog UX", () => {
       maskingPolicy: buildDefaultMaskedPolicy(["id", "email"]),
     };
     renderDialog();
-    expect(screen.getByText(/2 output columns/)).toBeTruthy();
-    expect(screen.getByText(/2 of 6 selected/)).toBeTruthy();
+    expect(screen.getByText(/2 \/ 6 output columns/)).toBeTruthy();
+    const idBox = screen.getByLabelText(
+      "Include column id"
+    ) as HTMLInputElement;
+    const emailBox = screen.getByLabelText(
+      "Include column email"
+    ) as HTMLInputElement;
+    expect(idBox.checked).toBe(true);
+    expect(emailBox.checked).toBe(true);
     const noteBox = screen.getByLabelText(
       "Include column note"
     ) as HTMLInputElement;
