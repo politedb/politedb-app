@@ -19,6 +19,8 @@ export interface TabsProps<T extends string = string> {
   listClassName?: string;
   /** Optional class for the content wrapper */
   contentClassName?: string;
+  /** When true, non-active tabs cannot be selected */
+  disabled?: boolean;
 }
 
 export function Tabs<T extends string = string>({
@@ -27,6 +29,7 @@ export function Tabs<T extends string = string>({
   tabs,
   listClassName,
   contentClassName,
+  disabled = false,
 }: TabsProps<T>) {
   const activeContent = tabs.find((t) => t.value === value)?.children ?? null;
 
@@ -38,22 +41,31 @@ export function Tabs<T extends string = string>({
           listClassName
         )}
       >
-        {tabs.map((tab) => (
-          <Button
-            key={tab.value}
-            variant="ghost"
-            type="button"
-            onClick={() => onValueChange(tab.value)}
-            class={cn(
-              "-mb-px rounded-none border-0 border-b-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-transparent",
-              value === tab.value
-                ? "border-blue-500 text-blue-600 hover:border-blue-500 active:border-blue-500"
-                : "border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900 active:border-neutral-300"
-            )}
-          >
-            {tab.label}
-          </Button>
-        ))}
+        {tabs.map((tab) => {
+          const isActive = value === tab.value;
+          const tabDisabled = disabled && !isActive;
+          return (
+            <Button
+              key={tab.value}
+              variant="ghost"
+              type="button"
+              disabled={tabDisabled}
+              onClick={() => {
+                if (tabDisabled) return;
+                onValueChange(tab.value);
+              }}
+              class={cn(
+                "-mb-px rounded-none border-0 border-b-2 px-3 py-2 text-sm font-semibold transition-colors hover:bg-transparent",
+                isActive
+                  ? "border-blue-500 text-blue-600 hover:border-blue-500 active:border-blue-500"
+                  : "border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900 active:border-neutral-300",
+                tabDisabled && "opacity-50"
+              )}
+            >
+              {tab.label}
+            </Button>
+          );
+        })}
       </div>
       <div class={cn("min-h-0 flex-1 overflow-hidden", contentClassName)}>
         {activeContent}

@@ -49,11 +49,6 @@ beforeEach(() => {
         topBlockers: [],
         hasUnresolvedBlockers: false,
         lockWaitDurationAvailable: false,
-        clientBackendCountDatabase: 2,
-        clientBackendCountServer: 3,
-        hiddenBackendTypeCountDatabase: 0,
-        hiddenBackendTypeCountServer: 0,
-        maxConnections: 100,
         tempFiles: 0,
         tempBytes: 0,
         deadlocks: 0,
@@ -395,41 +390,9 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.getByText(/events_2024 \(partition\)/)).toBeTruthy();
   });
 
-  it("shows visible-only connection cards when backend_type is hidden elsewhere", () => {
-    // Other-database hidden sessions: DB classification complete, server incomplete.
-    hookState.snapshot.overview.data.clientBackendCountDatabase = 1;
-    hookState.snapshot.overview.data.clientBackendCountServer = 1;
-    hookState.snapshot.overview.data.hiddenBackendTypeCountDatabase = 0;
-    hookState.snapshot.overview.data.hiddenBackendTypeCountServer = 20;
-    hookState.snapshot.overview.data.maxConnections = 100;
-    hookState.snapshot.overview.data.restrictedVisibility = false;
-    const { unmount } = render(
-      <DbHealthInspectorDialog
-        open
-        onClose={() => {}}
-        engine="postgres"
-        runtimeConnectionId="c1"
-        profileId="p1"
-      />
-    );
-    expect(
-      screen.getByText(
-        /≥1 visible \/ 100 max \(visible only; some sessions hide backend_type\)/i
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByText("Incomplete client-backend classification")
-    ).toBeTruthy();
-    expect(screen.queryByText("1 / 100 max (approx.)")).toBeNull();
-    expect(
-      screen.getAllByText(/outside this database|visible-only lower bounds/i)
-        .length
-    ).toBeGreaterThan(0);
-    unmount();
-
-    // Also cover current-DB hidden backend_type on both cards.
-    hookState.snapshot.overview.data.hiddenBackendTypeCountDatabase = 5;
-    hookState.snapshot.overview.data.hiddenBackendTypeCountServer = 5;
+  it("shows overview skeleton and locks other tabs while loading", () => {
+    hookState.snapshot = null;
+    hookState.loading = true;
     render(
       <DbHealthInspectorDialog
         open
@@ -439,12 +402,147 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    expect(screen.getAllByText("≥1 visible").length).toBeGreaterThan(0);
+
     expect(
-      screen.getByText(
-        /Visible client backends only — some sessions hide backend_type/i
-      )
+      screen.getByRole("status", { name: "Loading overview" })
     ).toBeTruthy();
+    expect(screen.queryByText("Loading…")).toBeNull();
+
+    const sessionsTab = screen.getByRole("button", { name: "Sessions" });
+    expect(sessionsTab).toBeDisabled();
+    fireEvent.click(sessionsTab);
+    // Still on overview skeleton — table skeleton / Sessions header absent
+    expect(screen.queryByRole("status", { name: "Loading table" })).toBeNull();
+    expect(screen.queryByText("PID")).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "Loading overview" })
+    ).toBeTruthy();
+  });
+
+  it("keeps Cancel available while loading and shows table skeleton on active tab", () => {
+    hookState.snapshot = null;
+    hookState.loading = true;
+    // Start would be overview; switch isn't possible while loading, so seed via
+    // re-render after setting loading false briefly is unnecessary — stay overview.
+    // Instead verify Cancel enabled, then simulate being on Sessions by toggling
+    // loading off, switching, then loading on again.
+    const { rerender } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+
+    const cancelBtn = screen.getByTitle("Cancel in-flight inspector queries");
+    expect(cancelBtn).not.toBeDisabled();
+    fireEvent.click(cancelBtn);
+    expect(hookState.cancel).toHaveBeenCalled();
+
+    // Allow tab switch, go to Sessions, then lock again with loading
+    hookState.loading = false;
+    hookState.snapshot = {
+      runtimeConnectionId: "c1",
+      profileId: "p1",
+      engine: "postgres",
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+      overallError: null,
+      cancelled: false,
+      overview: {
+        status: "ready",
+        collectedAt: Date.now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: {
+          databaseName: "app",
+          sessionCount: 1,
+          activeSessionCount: 1,
+          idleSessionCount: 0,
+          blockedSessionCount: 0,
+          longestXactAgeSeconds: 1,
+          hiddenQueryCount: 0,
+          restrictedActivityCount: 0,
+          databaseBytes: 1,
+          statsReset: null,
+          restrictedVisibility: false,
+          idleInTransactionCount: 0,
+          idleInTransactionOldestXactAgeSeconds: null,
+          idleInTransactionLongestIdleSeconds: null,
+          topBlockers: [],
+          hasUnresolvedBlockers: false,
+          lockWaitDurationAvailable: false,
+          tempFiles: 0,
+          tempBytes: 0,
+          deadlocks: 0,
+        },
+      },
+      sessions: {
+        status: "ready",
+        collectedAt: Date.now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: [],
+      },
+      statements: {
+        status: "empty",
+        collectedAt: Date.now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: [],
+        info: null,
+      },
+      tables: {
+        status: "empty",
+        collectedAt: Date.now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: [],
+      },
+      indexes: {
+        status: "empty",
+        collectedAt: Date.now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: [],
+      },
+    };
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    expect(screen.getByText("No sessions")).toBeTruthy();
+
+    hookState.loading = true;
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
+    expect(screen.queryByText("No sessions")).toBeNull();
+    expect(screen.getByRole("button", { name: "Overview" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sessions" })).not.toBeDisabled();
+    expect(
+      screen.getByTitle("Cancel in-flight inspector queries")
+    ).not.toBeDisabled();
   });
 
   it("opens Sessions from Attention without refresh", () => {

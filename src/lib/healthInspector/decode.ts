@@ -300,22 +300,6 @@ export function decodeOverview(result: QueryResult): HealthOverview {
     topBlockers,
     hasUnresolvedBlockers,
     lockWaitDurationAvailable: false,
-    // Visible client counts only. backend_type is NULL for sessions the caller
-    // cannot inspect (pg_stat_get_activity field 17); those are tracked separately
-    // and must not be assumed to be clients or omitted from capacity disclosure.
-    clientBackendCountDatabase: decodeUnknownNumber(
-      cellAt(row, cols, "client_backend_count_db")
-    ),
-    clientBackendCountServer: decodeUnknownNumber(
-      cellAt(row, cols, "client_backend_count_server")
-    ),
-    hiddenBackendTypeCountDatabase: decodeUnknownNumber(
-      cellAt(row, cols, "hidden_backend_type_count_db")
-    ),
-    hiddenBackendTypeCountServer: decodeUnknownNumber(
-      cellAt(row, cols, "hidden_backend_type_count_server")
-    ),
-    maxConnections: decodeUnknownNumber(cellAt(row, cols, "max_connections")),
     tempFiles: decodeUnknownNumber(cellAt(row, cols, "temp_files")),
     tempBytes: decodeUnknownNumber(cellAt(row, cols, "temp_bytes")),
     deadlocks: decodeUnknownNumber(cellAt(row, cols, "deadlocks")),

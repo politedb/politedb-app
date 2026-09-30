@@ -78,11 +78,8 @@ export function healthInspectorCapabilitiesSql(): string {
 /**
  * Overview aggregates for the current database.
  * Uses catalogs/statistics only; no application-table scans.
- * One activity scan (CTE) feeds session, idle-in-xact, blocking, and client counts
- * so summaries are not derived from the capped Sessions list.
- * Client counts filter backend_type = 'client backend'; separately count rows
- * where backend_type IS NULL (privilege-hidden; pg_stat_get_activity field 17)
- * so incomplete classification is disclosed rather than silently undercounted.
+ * One activity scan (CTE) feeds session, idle-in-xact, and blocking summaries
+ * so they are not derived from the capped Sessions list.
  */
 export function healthInspectorOverviewSql(): string {
   const queryStr = `
@@ -91,7 +88,6 @@ export function healthInspectorOverviewSql(): string {
         a.pid,
         a.datname,
         a.state,
-        a.backend_type,
         a.xact_start,
         a.state_change,
         a.query,
@@ -193,33 +189,6 @@ export function healthInspectorOverviewSql(): string {
           AND a.state LIKE 'idle in transaction%'
           AND a.state_change IS NOT NULL
       ) AS idle_in_xact_longest_idle_seconds,
-      (
-        SELECT COUNT(*)::bigint
-        FROM db_act a
-        WHERE a.backend_type = 'client backend'
-      ) AS client_backend_count_db,
-      (
-        SELECT COUNT(*)::bigint
-        FROM act a
-        WHERE a.backend_type = 'client backend'
-      ) AS client_backend_count_server,
-      (
-        SELECT COUNT(*)::bigint
-        FROM db_act a
-        WHERE a.backend_type IS NULL
-      ) AS hidden_backend_type_count_db,
-      (
-        SELECT COUNT(*)::bigint
-        FROM act a
-        WHERE a.backend_type IS NULL
-      ) AS hidden_backend_type_count_server,
-      (
-        SELECT CASE
-          WHEN pg_catalog.current_setting('max_connections', true) ~ '^[0-9]+$'
-          THEN pg_catalog.current_setting('max_connections', true)::int
-          ELSE NULL
-        END
-      ) AS max_connections,
       (SELECT s.temp_files FROM db_stats s) AS temp_files,
       (SELECT s.temp_bytes FROM db_stats s) AS temp_bytes,
       (SELECT s.deadlocks FROM db_stats s) AS deadlocks,

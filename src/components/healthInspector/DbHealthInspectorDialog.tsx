@@ -9,7 +9,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Tabs } from "src/components/common/Tabs";
 import { Table, type TableColumn } from "src/components/common/Table";
-import { Spinner } from "src/components/common/Spinner";
+import { Skeleton } from "src/components/common/Skeleton";
 import {
   CopyCheckIcon,
   CopyIcon,
@@ -198,12 +198,7 @@ function SectionBanner(props: {
 }) {
   const { section, loading, caveat, showPgStatStatementsGuide } = props;
   if (loading && section.status === "loading") {
-    return (
-      <div class="flex items-center gap-2 text-sm text-neutral-600">
-        <Spinner className="size-4" />
-        Loading…
-      </div>
-    );
+    return null;
   }
   if (section.status === "unavailable") {
     const showInstallGuide =
@@ -301,10 +296,45 @@ function QueryCell(props: { queryText: string | null; queryHidden: boolean }) {
   );
 }
 
+function TableSectionSkeleton(props: { columns?: number; rows?: number }) {
+  const columns = props.columns ?? 5;
+  const rows = props.rows ?? 8;
+  return (
+    <div
+      class="flex min-h-0 flex-1 flex-col gap-2"
+      role="status"
+      aria-label="Loading table"
+    >
+      <Skeleton className="h-4 w-48 max-w-full" />
+      <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200 dark:border-neutral-700">
+        <div class="border-b border-neutral-200 bg-neutral-50 px-2 py-2 dark:border-neutral-700 dark:bg-neutral-900/40">
+          <div class="flex gap-3">
+            {Array.from({ length: columns }, (_, i) => (
+              <Skeleton key={i} className="h-3.5 flex-1" />
+            ))}
+          </div>
+        </div>
+        <div class="space-y-2 p-2">
+          {Array.from({ length: rows }, (_, i) => (
+            <div key={i} class="flex gap-3">
+              {Array.from({ length: columns }, (_, j) => (
+                <Skeleton key={j} className="h-4 flex-1" />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionsTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
+  if (props.loading) {
+    return <TableSectionSkeleton columns={8} />;
+  }
   const section = props.snap?.sessions;
   const columns = useMemo<TableColumn<HealthSessionRow>[]>(
     () => [
@@ -388,6 +418,9 @@ function StatementsTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
+  if (props.loading) {
+    return <TableSectionSkeleton columns={5} />;
+  }
   const section = props.snap?.statements;
   const columns = useMemo<TableColumn<HealthStatementRow>[]>(
     () => [
@@ -469,6 +502,9 @@ function TablesTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
+  if (props.loading) {
+    return <TableSectionSkeleton columns={6} />;
+  }
   const section = props.snap?.tables;
   const columns = useMemo<TableColumn<HealthTableRow>[]>(
     () => [
@@ -554,6 +590,9 @@ function IndexesTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
+  if (props.loading) {
+    return <TableSectionSkeleton columns={4} />;
+  }
   const section = props.snap?.indexes;
   const columns = useMemo<TableColumn<HealthIndexRow>[]>(
     () => [
@@ -636,7 +675,13 @@ export function DbHealthInspectorDialog(props: Props) {
   };
 
   const openSessionsTab = () => {
+    if (loading) return;
     setTab("sessions");
+  };
+
+  const handleTabChange = (next: SectionKey) => {
+    if (loading) return;
+    setTab(next);
   };
 
   const tabs = [
@@ -714,8 +759,9 @@ export function DbHealthInspectorDialog(props: Props) {
         <div class="flex min-h-0 flex-1 flex-col">
           <Tabs
             value={tab}
-            onValueChange={setTab}
+            onValueChange={handleTabChange}
             tabs={tabs}
+            disabled={loading}
             listClassName="rounded-t-md"
             contentClassName="mt-2 flex min-h-0 flex-col"
           />

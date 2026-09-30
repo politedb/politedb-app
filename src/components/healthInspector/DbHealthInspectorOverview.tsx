@@ -1,20 +1,15 @@
-import { Spinner } from "src/components/common/Spinner";
+import { Skeleton } from "src/components/common/Skeleton";
 import { Button } from "src/components/common/Button";
-import { Tooltip } from "src/components/common/Tooltip";
 import { formatBytesSize } from "src/utils/convert";
 import {
-  formatClientBackendCount,
   formatExactCount,
   formatHealthInspectorTimestamp,
-  formatServerConnectionUsage,
 } from "src/lib/healthInspector/format";
 import {
   BLOCKING_LIMITATION_NOTE,
-  CONNECTIONS_TOOLTIP,
   DEADLOCKS_CAVEAT,
   TEMP_FILES_CAVEAT,
   buildAttentionItems,
-  clientBackendClassificationIncomplete,
   formatAgeSeconds,
   formatOptionalNumber,
   overviewVisibilityNote,
@@ -34,12 +29,7 @@ function SectionBanner(props: {
 }) {
   const { section, loading } = props;
   if (loading && section.status === "loading") {
-    return (
-      <div class="flex items-center gap-2 text-sm text-neutral-600">
-        <Spinner className="size-4" />
-        Loading…
-      </div>
-    );
+    return null;
   }
   if (section.status === "unavailable") {
     return (
@@ -66,10 +56,9 @@ function MetricCard(props: {
   label: string;
   value: string;
   detail?: string | null;
-  title?: string;
 }) {
-  const card = (
-    <div class="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/40">
+  return (
+    <div class="h-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/40">
       <div class="text-sm font-medium text-neutral-500 dark:text-neutral-400">
         {props.label}
       </div>
@@ -83,11 +72,36 @@ function MetricCard(props: {
       ) : null}
     </div>
   );
-  if (!props.title) return card;
+}
+
+const OVERVIEW_SKELETON_CARD_COUNT = 9;
+
+function OverviewSkeleton() {
   return (
-    <Tooltip content={props.title} width={360}>
-      {card}
-    </Tooltip>
+    <div
+      class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto"
+      role="status"
+      aria-label="Loading overview"
+    >
+      <Skeleton className="h-3 w-64 max-w-full" />
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {Array.from({ length: OVERVIEW_SKELETON_CARD_COUNT }, (_, i) => (
+          <div
+            key={i}
+            class="h-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/40"
+          >
+            <Skeleton className="h-3.5 w-20" />
+            <Skeleton className="mt-2 h-5 w-16" />
+            <Skeleton className="mt-1.5 h-3 w-full" />
+          </div>
+        ))}
+      </div>
+      <div class="mt-1 space-y-2">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-3 w-full max-w-md" />
+        <Skeleton className="h-3 w-48 max-w-sm" />
+      </div>
+    </div>
   );
 }
 
@@ -97,15 +111,11 @@ export function DbHealthInspectorOverview(props: {
   onOpenSessions: () => void;
 }) {
   const section = props.snap?.overview;
+  if (props.loading) {
+    return <OverviewSkeleton />;
+  }
   if (!section) {
-    return props.loading ? (
-      <div class="flex items-center gap-2 text-sm text-neutral-600">
-        <Spinner className="size-4 text-neutral-500" />
-        Loading…
-      </div>
-    ) : (
-      <div class="text-sm text-neutral-500">No overview yet.</div>
-    );
+    return <div class="text-sm text-neutral-500">No overview yet.</div>;
   }
 
   const data = section.data;
@@ -164,31 +174,6 @@ export function DbHealthInspectorOverview(props: {
           detail: "Excludes this Inspector connection",
         },
         {
-          label: "DB clients",
-          value: formatClientBackendCount(
-            data.clientBackendCountDatabase,
-            data.hiddenBackendTypeCountDatabase
-          ),
-          detail:
-            (data.hiddenBackendTypeCountDatabase ?? 0) > 0
-              ? "Visible client backends only — some sessions hide backend_type"
-              : "Client backends in this database (includes this app)",
-          title: CONNECTIONS_TOOLTIP,
-        },
-        {
-          label: "Server clients",
-          value: formatServerConnectionUsage(
-            data.clientBackendCountServer,
-            data.maxConnections,
-            data.hiddenBackendTypeCountServer
-          ),
-          detail:
-            (data.hiddenBackendTypeCountServer ?? 0) > 0
-              ? "Visible-only lower bound vs configured maximum — not a complete total"
-              : "Approximate vs configured maximum — not available slots",
-          title: CONNECTIONS_TOOLTIP,
-        },
-        {
           label: "Database size",
           value:
             data.databaseBytes == null
@@ -228,7 +213,6 @@ export function DbHealthInspectorOverview(props: {
                 label={c.label}
                 value={c.value}
                 detail={c.detail}
-                title={"title" in c ? c.title : undefined}
               />
             ))}
           </div>
@@ -263,8 +247,7 @@ export function DbHealthInspectorOverview(props: {
             </div>
             {attention.length === 0 ? (
               <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                {data.restrictedVisibility ||
-                clientBackendClassificationIncomplete(data)
+                {data.restrictedVisibility
                   ? "Visibility is incomplete — not reporting healthy."
                   : "No actionable current conditions in this snapshot."}
               </p>
