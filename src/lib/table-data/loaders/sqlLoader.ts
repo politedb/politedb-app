@@ -110,9 +110,11 @@ export async function loadRowCount(params: {
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   exact?: boolean;
+  /** Skip coalescing into an in-flight count (MenuBar force refresh). */
+  force?: boolean;
 }): Promise<{ value: number; estimated: boolean }> {
   const cacheKey = rowCountCacheKey(params);
-  const inflight = inflightRowCountByKey.get(cacheKey);
+  const inflight = params.force ? undefined : inflightRowCountByKey.get(cacheKey);
   if (inflight) return inflight;
 
   const task = loadRowCountOnce(params);
@@ -204,9 +206,12 @@ export async function loadSizeInfo(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
+  force?: boolean;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
-  const inflight = inflightSizeInfoByKey.get(cacheKey);
+  const inflight = params.force
+    ? undefined
+    : inflightSizeInfoByKey.get(cacheKey);
   if (inflight) {
     return inflight as Promise<{
       totalSize: string;
@@ -433,9 +438,12 @@ export async function loadForeignKeys(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
+  force?: boolean;
 }): Promise<any[]> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
-  const inflight = inflightForeignKeysByKey.get(cacheKey);
+  const inflight = params.force
+    ? undefined
+    : inflightForeignKeysByKey.get(cacheKey);
   if (inflight) return inflight;
 
   const task = loadForeignKeysOnce(params);
