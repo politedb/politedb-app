@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import type { DatabaseObjectItem } from "src/types";
-import type { ConnectionRuntime } from "./ConnectionRuntimeContext";
-import { ConnectionRuntimeProvider } from "./ConnectionRuntimeContext";
+import type { ConnectionRuntime } from "../workspace/ConnectionRuntimeContext";
+import { ConnectionRuntimeProvider } from "../workspace/ConnectionRuntimeContext";
 import { DbObjectsManagerPane } from "./DbObjectsManagerPane";
 
 vi.mock("src/components/common/RetryableLazy", () => ({

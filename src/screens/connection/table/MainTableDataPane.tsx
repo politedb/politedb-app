@@ -31,8 +31,8 @@ import {
 import { useTableDataOperations } from "src/screens/connection/hooks/useTableDataOperations";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
-import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
+import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
 import { useTableFilter } from "src/components/table/tableHooks";
 import { useImportTableData } from "src/hooks/useImportTableData";
 import {
@@ -44,11 +44,11 @@ import {
 } from "src/lib/queries/sql";
 import type { TableForeignKey, TableItem } from "src/types";
 import { MainTableDialogs } from "./MainTableDialogs";
-import { useMainTablePaneState } from "./hooks/useMainTablePaneState";
-import { useMainTableDataLoading } from "./hooks/useMainTableDataLoading";
-import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
+import { useMainTablePaneState } from "../hooks/useMainTablePaneState";
+import { useMainTableDataLoading } from "../hooks/useMainTableDataLoading";
+import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
 
-export type { StructPaneTab } from "./hooks/useMainTablePaneState";
+export type { StructPaneTab } from "../hooks/useMainTablePaneState";
 
 /* =============================================================================
  * Patch helpers

@@ -10,7 +10,7 @@ import {
 } from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
-import { useConnectionActionsCtx } from "./ConnectionActionsContext";
+import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import {
   formatShortcutLabel,

@@ -1,7 +1,7 @@
 import { SplitPane } from "src/components/SplitPane";
-import { NavigationTabs } from "./NavigationTabs";
-import { LeftNav } from "./LeftNav";
-import { RightNav } from "./RightNav";
+import { NavigationTabs } from "../nav/NavigationTabs";
+import { LeftNav } from "../nav/LeftNav";
+import { RightNav } from "../nav/RightNav";
 import { ActiveWindowContent } from "./ActiveWindowContent";
 import { ConnectionBottomPanel } from "./ConnectionBottomPanel";
 import type { Dispatch, StateUpdater } from "preact/hooks";

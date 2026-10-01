@@ -1,4 +1,4 @@
-import type { ObjectSaveHandler } from "../ConnectionRuntimeContext";
+import type { ObjectSaveHandler } from "../workspace/ConnectionRuntimeContext";
 import { useCallback, useRef } from "preact/hooks";
 
 import type {
@@ -33,7 +33,7 @@ import {
 import {
   clearTablePagination,
   setTablePagination,
-} from "src/screens/connection/tablePagination";
+} from "src/screens/connection/lib/tablePagination";
 import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
@@ -49,10 +49,10 @@ import {
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
-import { connectionTabHasChanges } from "src/screens/connection/tabDirty";
+import { connectionTabHasChanges } from "src/screens/connection/lib/tabDirty";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/lib/queries/sql";
-import { buildTableReloadQueryFlags } from "src/screens/connection/tableReloadQueryFlags";
+import { buildTableReloadQueryFlags } from "src/screens/connection/lib/tableReloadQueryFlags";
 
 /* =============================================================================
  * Types

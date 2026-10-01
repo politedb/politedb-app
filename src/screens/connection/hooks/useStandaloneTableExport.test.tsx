@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { StandaloneExportTarget } from "../standaloneExport/types";
+import type { StandaloneExportTarget } from "../export/standalone-export/types";
 import { useStandaloneTableExport } from "./useStandaloneTableExport";
 
 const loadStandaloneExportMetadata = vi.fn();
@@ -14,7 +14,7 @@ const getConnectionState = vi.fn(() => ({
   addLogQuery,
 }));
 
-vi.mock("../standaloneExport/loadStandaloneExportMetadata", () => ({
+vi.mock("../export/standalone-export/loadStandaloneExportMetadata", () => ({
   loadStandaloneExportMetadata: (...args: unknown[]) =>
     loadStandaloneExportMetadata(...args),
   sanitizeStandaloneExportError: (err: unknown) =>

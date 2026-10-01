@@ -18,7 +18,7 @@ import {
   listVisibleSnippets,
 } from "src/lib/snippets/library";
 import type { SavedSnippet, SnippetScope } from "src/lib/snippets/types";
-import { highlightSql } from "src/screens/connection/QueryHistory";
+import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 import { formatShortcutLabel } from "src/stores/keyboardShortcuts";
 import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 

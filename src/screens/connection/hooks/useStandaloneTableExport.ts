@@ -3,12 +3,12 @@ import type { DatabaseEngine } from "src/types";
 import {
   loadStandaloneExportMetadata,
   sanitizeStandaloneExportError,
-} from "../standaloneExport/loadStandaloneExportMetadata";
-import { canStandaloneExportTable } from "../standaloneExport/support";
+} from "../export/standalone-export/loadStandaloneExportMetadata";
+import { canStandaloneExportTable } from "../export/standalone-export/support";
 import type {
   StandaloneExportPhase,
   StandaloneExportTarget,
-} from "../standaloneExport/types";
+} from "../export/standalone-export/types";
 
 export type UseStandaloneTableExportArgs = {
   profileScreenId: string;

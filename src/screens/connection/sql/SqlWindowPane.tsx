@@ -8,7 +8,7 @@ import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { Spinner } from "src/components/common/Spinner";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
-import { RunSqlReturn } from "./hooks/useSqlHistoryRunner";
+import { RunSqlReturn } from "../hooks/useSqlHistoryRunner";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 const loadSqlEditorPane = () =>

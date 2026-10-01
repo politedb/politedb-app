@@ -10,9 +10,9 @@ import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import { Spinner } from "src/components/common/Spinner";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
-import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useScreenStore } from "src/stores/screen";
-import { useLoadDbObjectDefinition } from "./hooks/useLoadDbObjectDefinition";
+import { useLoadDbObjectDefinition } from "../hooks/useLoadDbObjectDefinition";
 import type {
   DatabaseObjectKind,
   DatabaseObjectManagerWindow,

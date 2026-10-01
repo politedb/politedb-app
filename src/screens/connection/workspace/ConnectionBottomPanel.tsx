@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import { QueryHistory } from "./QueryHistory";
+import { QueryHistory } from "../sql/QueryHistory";
 import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 
 type Props = {

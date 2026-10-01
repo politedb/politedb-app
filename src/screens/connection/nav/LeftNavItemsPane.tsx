@@ -20,20 +20,20 @@ import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
-import { standaloneExportUnavailableReason } from "./standaloneExport/support";
+import { standaloneExportUnavailableReason } from "../export/standalone-export/support";
 import { useMiddleEllipsisByWidth } from "src/hooks/useMiddleEllipsisByWidth";
-import { useConnectionActionsCtx } from "./ConnectionActionsContext";
-import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
+import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
-import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { useConnectionWindows } from "../hooks/useConnectionWindows";
 import { Input } from "src/components/common/Input";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
 import {
   tableSidebarButtonClass,
   tableSidebarIconClass,
   tableSidebarNameClass,
-} from "./tableSidebarNameClass";
+} from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 
 const VIEW_LIST_PAGE_SIZE = 20;

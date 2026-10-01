@@ -5,7 +5,7 @@ import { AppStatusBar } from "src/components/AppStatusBar";
 import { useEffect } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
 import { trackScreenView } from "src/lib/analytics";
-import { UnsavedChangesDialogHost } from "src/screens/connection/UnsavedChangesDialogHost";
+import { UnsavedChangesDialogHost } from "src/screens/connection/workspace/UnsavedChangesDialogHost";
 import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
 import { WelcomeDialogHost } from "src/components/modal/WelcomeDialogHost";
 import { Spinner } from "src/components/common/Spinner";

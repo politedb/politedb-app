@@ -21,7 +21,7 @@ import {
   tableSidebarButtonClass,
   tableSidebarIconClass,
   tableSidebarNameClass,
-} from "./tableSidebarNameClass";
+} from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 
 type ScopeFilter = "all" | SnippetScope;

@@ -15,7 +15,7 @@ import {
 } from "src/utils/generateSql";
 import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
-import { highlightSql } from "src/screens/connection/QueryHistory";
+import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
 import { buildPatchDiffs } from "src/utils/patchDiff";

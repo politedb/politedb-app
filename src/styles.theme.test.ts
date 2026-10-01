@@ -17,7 +17,7 @@ const statusBar = readFileSync(
   "utf8"
 );
 const searchNav = readFileSync(
-  resolve(process.cwd(), "src/screens/connection/LeftNav.tsx"),
+  resolve(process.cwd(), "src/screens/connection/nav/LeftNav.tsx"),
   "utf8"
 );
 const commonTable = readFileSync(

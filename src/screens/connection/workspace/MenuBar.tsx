@@ -42,8 +42,8 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
-import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
+import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
+import { useConnectionHealthCheck } from "../hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
 import { resolveMenuBarConnectionChrome } from "./menuBarConnectionChrome";
 

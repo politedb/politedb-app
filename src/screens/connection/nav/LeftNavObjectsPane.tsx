@@ -27,13 +27,13 @@ import {
 } from "src/lib/databaseObjects";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { showToast } from "src/stores/toast";
-import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useConnectionWindows } from "./hooks/useConnectionWindows";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
+import { useConnectionWindows } from "../hooks/useConnectionWindows";
 import {
   tableSidebarButtonClass,
   tableSidebarIconClass,
   tableSidebarNameClass,
-} from "./tableSidebarNameClass";
+} from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];

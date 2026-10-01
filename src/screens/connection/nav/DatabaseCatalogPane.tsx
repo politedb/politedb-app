@@ -21,10 +21,10 @@ import type {
   TableItem,
 } from "src/types";
 import { normalizeByteSizeLabel } from "src/utils/convert";
-import { useConnectionActionsCtx } from "./ConnectionActionsContext";
-import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { useConnectionWindows } from "./hooks/useConnectionWindows";
-import { standaloneExportUnavailableReason } from "./standaloneExport/support";
+import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
+import { useConnectionWindows } from "../hooks/useConnectionWindows";
+import { standaloneExportUnavailableReason } from "../export/standalone-export/support";
 
 type CatalogSort = { colName: string; direction: "asc" | "desc" } | null;
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const catalog = readFileSync(
-  resolve(process.cwd(), "src/screens/connection/DatabaseCatalogPane.tsx"),
+  resolve(process.cwd(), "src/screens/connection/nav/DatabaseCatalogPane.tsx"),
   "utf8"
 );
 

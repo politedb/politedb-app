@@ -11,8 +11,8 @@ import { Spinner } from "src/components/common/Spinner";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
 import { showMessage } from "src/lib/system-dialog";
 import type { DatabaseEngine } from "src/types";
-import { useStandaloneTableExport } from "./hooks/useStandaloneTableExport";
-import type { StandaloneExportTarget } from "./standaloneExport/types";
+import { useStandaloneTableExport } from "../hooks/useStandaloneTableExport";
+import type { StandaloneExportTarget } from "./standalone-export/types";
 
 export function StandaloneTableExportHost(props: {
   profileScreenId: string;

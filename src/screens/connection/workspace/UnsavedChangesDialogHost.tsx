@@ -1,6 +1,6 @@
 import { WarningRefreshDialog } from "src/components/modal/WarningRefreshDialog";
-import { discardPendingTabCloseFromDialog } from "./connectionTabClose";
-import { getConnectionTabCloseBridge } from "./connectionTabCloseBridge";
+import { discardPendingTabCloseFromDialog } from "../lib/connectionTabClose";
+import { getConnectionTabCloseBridge } from "../lib/connectionTabCloseBridge";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 
 export function UnsavedChangesDialogHost() {
