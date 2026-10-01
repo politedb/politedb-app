@@ -10,7 +10,7 @@ describe("app status bar model", () => {
     const model = buildAppStatusBarModel({
       isConnectionTab: false,
       connected: false,
-      appVersion: "1.3.0",
+      appVersion: "1.4.0",
       isDev: false,
       telemetryConsent: "granted",
     });
@@ -19,7 +19,7 @@ describe("app status bar model", () => {
     expect(model.left).toEqual(["No active connection"]);
     expect(model.right).toEqual([
       "Tips: Right-click a connection for actions",
-      "PoliteDB v1.3.0",
+      "PoliteDB v1.4.0",
     ]);
   });
 
@@ -29,7 +29,7 @@ describe("app status bar model", () => {
       engine: "sqlite",
       connected: true,
       querySafetyMode: "production",
-      appVersion: "1.3.0",
+      appVersion: "1.4.0",
       isDev: false,
       telemetryConsent: "denied",
     });
@@ -38,7 +38,7 @@ describe("app status bar model", () => {
     expect(model.left).toEqual(["Connected: SQLite", "Query mode: Production"]);
     expect(model.right).toEqual([
       "Tips: Right-click a table for actions",
-      "PoliteDB v1.3.0",
+      "PoliteDB v1.4.0",
     ]);
   });
 
@@ -47,7 +47,7 @@ describe("app status bar model", () => {
       isConnectionTab: true,
       engine: "postgres",
       connected: false,
-      appVersion: "1.3.0",
+      appVersion: "1.4.0",
       isDev: true,
       telemetryConsent: "unknown",
     });
@@ -56,7 +56,7 @@ describe("app status bar model", () => {
     expect(model.left).toEqual(["Connecting: Postgres"]);
     expect(model.right).toEqual([
       "Tips: Right-click a table for actions",
-      "PoliteDB v1.3.0-dev",
+      "PoliteDB v1.4.0-dev",
     ]);
   });
 });
