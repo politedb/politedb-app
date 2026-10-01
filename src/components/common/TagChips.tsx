@@ -49,13 +49,13 @@ export function TagChips(props: {
   return (
     <div class={cn("flex min-w-0 flex-wrap items-center gap-1", className)}>
       {shown.map((t) => (
-        <span
+        <div
           key={t}
           title={t}
-          class={cn("max-w-30 min-w-0 truncate", baseCls, chipCls, tagTone(t))}
+          class={cn("max-w-26 min-w-0", baseCls, chipCls, tagTone(t))}
         >
-          {t}
-        </span>
+          <span class="truncate overflow-hidden text-ellipsis">{t}</span>
+        </div>
       ))}
 
       {rest > 0 ? (
