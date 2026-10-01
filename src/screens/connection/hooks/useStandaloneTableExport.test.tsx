@@ -351,7 +351,11 @@ describe("useStandaloneTableExport lifecycle", () => {
       constraints: null,
     });
     const onClearTarget = vi.fn();
-    const targetA = target({ requestId: "req-a", tableName: "table_a" });
+    const targetA = target({
+      requestId: "req-a",
+      tableName: "table_a",
+      estimatedRow: 27,
+    });
 
     render(
       <Harness
@@ -374,6 +378,7 @@ describe("useStandaloneTableExport lifecycle", () => {
       connectionId: "conn-1",
       schema: "public",
       tableName: "table_a",
+      estimatedRow: 27,
     });
   });
 });

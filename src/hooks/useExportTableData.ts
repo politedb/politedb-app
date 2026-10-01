@@ -30,6 +30,7 @@ function defaultOptions(): ExportOptions {
 type OwnedExport = {
   runId: number;
   cancel: () => Promise<void>;
+  done: Promise<ExportProgress>;
 };
 
 export function useExportTableData() {
@@ -45,6 +46,9 @@ export function useExportTableData() {
     const owned = ownedRef.current;
     if (!owned) return;
     await owned.cancel();
+    // The pipeline's cancel waits for abort/temp cleanup, but also await its
+    // terminal promise here so callers never observe cancellation early.
+    await owned.done;
     // Do not erase ownership before cleanup completes; clear only if still ours.
     if (ownedRef.current === owned) {
       ownedRef.current = null;
@@ -197,7 +201,7 @@ export function useExportTableData() {
           }
         },
       });
-      const owned: OwnedExport = { runId, cancel };
+      const owned: OwnedExport = { runId, cancel, done };
       ownedRef.current = owned;
 
       try {

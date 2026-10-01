@@ -9,7 +9,23 @@ use crate::state::AppState;
 use crate::types::{OperationExecuteInput, OperationKind};
 
 pub async fn cancel_operation(state: State<'_, AppState>, op_id: Uuid) -> Result<(), String> {
-    if !state.active_ops.contains_key(&op_id) {
+    // Hard guarantee: free this op's sql_busy slot immediately on cancel,
+    // before abort/teardown. OpCleanup only drops after the aborted task
+    // finishes tearing down DB clients (can take many seconds). Without an
+    // early release, cancel → re-export hits ERR_SQL_BUSY until that Drop.
+    //
+    // Use release_op (by owner id), NOT release_if_owner via op_to_conn:
+    // mapping can already be cleared while the slot stays held. release_op
+    // must run even when the op is unknown to active/task maps so busy-retry
+    // cancel(holder) actually frees the slot (same ERR_SQL_BUSY uuid otherwise
+    // loops forever). Idempotent if a newer stream already owns the conn.
+    state.sql_busy.release_op(op_id);
+
+    let known = state.active_ops.contains_key(&op_id)
+        || state.op_tasks.contains_key(&op_id)
+        || state.running_ops.contains_key(&op_id)
+        || state.op_to_conn.contains_key(&op_id);
+    if !known {
         return Ok(());
     }
 
@@ -45,6 +61,7 @@ pub async fn dispatch_operation(
 
     /* ============================================================
      * SQL BUSY GUARD (ONLY FOR SQL QUERY)
+     * - Register op->conn BEFORE acquire so cancel can always resolve the op
      * - Acquire BEFORE marking active / emitting started / spawning
      * ============================================================ */
     // ✅ determine is_stream from payload (only for SqlQuery)
@@ -53,17 +70,28 @@ pub async fn dispatch_operation(
         _ => false,
     };
 
-    // ✅ acquire only for stream
-    if is_stream_sql {
-        state.sql_busy.try_acquire(conn_id, op_id)?;
-    }
-
     /* ============================================================
-     * OP REGISTRATION
+     * OP REGISTRATION (mapping first)
      * ============================================================ */
 
-    // Map op -> connection ASAP (so connection_remove can cancel correctly)
+    // Map op -> connection BEFORE busy acquire so a concurrent busy-retry
+    // cancel(holding_uuid) can find the op (and so cancel_requested races
+    // during dispatch still see a known op).
     state.op_to_conn.insert(op_id, conn_id);
+
+    // ✅ acquire only for stream
+    if is_stream_sql {
+        if let Err(e) = state.sql_busy.try_acquire(conn_id, op_id) {
+            // TEMP: diagnose cancel→re-export busy races (remove after verified).
+            eprintln!(
+                "[sql_busy] try_acquire BUSY conn={} new_op={} err={}",
+                conn_id, op_id, e
+            );
+            state.op_to_conn.remove(&op_id);
+            return Err(e);
+        }
+        eprintln!("[sql_busy] try_acquire OK conn={} op={}", conn_id, op_id);
+    }
 
     // Mark active
     state.active_ops.insert(op_id, ());
@@ -83,7 +111,7 @@ pub async fn dispatch_operation(
 
         // rollback busy lock
         if is_stream_sql {
-            state.sql_busy.release_if_owner(conn_id, op_id);
+            state.sql_busy.release_op(op_id);
         }
 
         return Err(e);
@@ -138,7 +166,7 @@ pub async fn dispatch_operation(
 
         // rollback busy lock
         if is_stream_sql {
-            state.sql_busy.release_if_owner(conn_id, op_id);
+            state.sql_busy.release_op(op_id);
         }
 
         return Err(e);

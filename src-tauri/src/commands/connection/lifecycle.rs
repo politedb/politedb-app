@@ -373,6 +373,10 @@ pub async fn connection_remove(
         .collect();
 
     for op_id in op_ids {
+        // Free stream-SQL busy before dropping op_to_conn; otherwise a cancelled
+        // heavy stream can leave ERR_SQL_BUSY orphaned on this connection.
+        state.sql_busy.release_op(op_id);
+
         if let Some(h) = state.running_ops.get(&op_id) {
             h.value().cancel(); // DB-level cancel
         }
@@ -386,6 +390,9 @@ pub async fn connection_remove(
         state.cancel_requested.remove(&op_id);
         state.op_to_conn.remove(&op_id);
     }
+
+    // Belt-and-suspenders: no stream should remain busy after the connection is gone.
+    state.sql_busy.force_release_conn(connection_id);
 
     // 2) close DB connection resources
     if let Some((_id, conn)) = state.connections.remove(&connection_id) {

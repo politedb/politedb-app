@@ -12,6 +12,8 @@ export type LoadStandaloneExportMetadataArgs = {
   engine: DatabaseEngine;
   schema: string;
   tableName: string;
+  /** Row estimate from the database catalog, when available. */
+  estimatedRow?: number | string | null;
   /** Optional abort: when true, result must be discarded by caller. */
   isCancelled?: () => boolean;
 };
@@ -38,6 +40,13 @@ function asColumnMeta(columns: ColumnLike[]): ColumnMeta[] {
     }));
 }
 
+function normalizeRowCount(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+}
+
 /**
  * Load only column (+ cached constraint) metadata needed for whole-table export.
  * Reuses connection/schema/table-scoped cache when present. Does not run grid
@@ -60,6 +69,12 @@ export async function loadStandaloneExportMetadata(
     store.columnsCache[key]!.length > 0
       ? store.columnsCache[key]
       : null);
+  // Use the best available count for determinate export progress. Both the
+  // catalog value and cached table value may be estimates; the label deliberately
+  // presents either one as a plain total without an estimate marker.
+  const cachedRowCount = normalizeRowCount(cachedMeta?.rowCount);
+  const catalogRowCount = normalizeRowCount(args.estimatedRow);
+  const totalRows = cachedRowCount ?? catalogRowCount;
 
   if (cachedColumns && cachedColumns.length > 0) {
     if (args.isCancelled?.()) {
@@ -69,6 +84,7 @@ export async function loadStandaloneExportMetadata(
       columns: asColumnMeta(cachedColumns),
       constraints:
         (cachedMeta?.constraints as TableConstraint[] | null) ?? null,
+      totalRows,
     };
   }
 
@@ -99,6 +115,7 @@ export async function loadStandaloneExportMetadata(
   return {
     columns: normalized,
     constraints: null,
+    totalRows,
   };
 }
 

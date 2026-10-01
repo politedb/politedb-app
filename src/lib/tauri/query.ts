@@ -73,14 +73,30 @@ export function isAbortError(err: unknown): boolean {
   );
 }
 
+function sqlBusyErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message || "";
+  if (err && typeof err === "object") {
+    const rec = err as Record<string, unknown>;
+    if (typeof rec.error === "string" && rec.error) return rec.error;
+    if (typeof rec.message === "string" && rec.message) return rec.message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* fall through */
+    }
+  }
+  return err == null ? "" : String(err);
+}
+
 function isSqlBusyError(err: unknown): boolean {
-  const msg =
-    typeof err === "string"
-      ? err
-      : err instanceof Error
-        ? err.message
-        : String(err ?? "");
-  return msg.includes("ERR_SQL_BUSY");
+  return sqlBusyErrorMessage(err).includes("ERR_SQL_BUSY");
+}
+
+/** Extract the holding op id from `ERR_SQL_BUSY:<uuid>` when present. */
+function parseSqlBusyOpId(err: unknown): string | null {
+  const m = /ERR_SQL_BUSY:([0-9a-f-]{36})/i.exec(sqlBusyErrorMessage(err));
+  return m?.[1] ?? null;
 }
 
 /** Reject as soon as `signal` aborts, without waiting for `promise` to settle. */
@@ -160,6 +176,24 @@ async function operationExecuteWithBusyRetry(
         throw err;
       }
 
+      // Same connection still held by a prior stream (often a just-cancelled
+      // export, or a grid/prefetch stream that snuck in after cancel released
+      // sql_busy). Ask that op to stop, then retry ASAP.
+      //
+      // Backend cancel_operation calls release_op synchronously, so sleeping
+      // here only widens the window for a competing stream (sqlLoader retry)
+      // to re-acquire and starve re-export until retries exhaust.
+      const busyOpId = parseSqlBusyOpId(err);
+      if (busyOpId) {
+        try {
+          await operationCancel(busyOpId);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+
+      // No holder id in the error — brief backoff before retrying.
       const delay = Math.min(
         SQL_BUSY_RETRY_BASE_MS * Math.pow(2, attempt),
         SQL_BUSY_RETRY_CAP_MS

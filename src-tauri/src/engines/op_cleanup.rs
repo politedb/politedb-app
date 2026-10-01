@@ -20,16 +20,19 @@ pub(crate) struct OpCleanup {
 
 impl Drop for OpCleanup {
     fn drop(&mut self) {
+        // Release busy BEFORE clearing op_to_conn so a concurrent cancel that
+        // still keys off the mapping cannot observe "mapping gone, busy held".
+        if self.kind == OperationKind::SqlQuery && self.is_stream_sql {
+            self.sql_busy.release_op(self.op_id);
+            // Keep conn-scoped release too (uses connection_id; idempotent).
+            self.sql_busy
+                .release_if_owner(self.connection_id, self.op_id);
+        }
+
         self.running_ops.remove(&self.op_id);
         self.cancel_requested.remove(&self.op_id);
         self.active_ops.remove(&self.op_id);
         self.op_to_conn.remove(&self.op_id);
         self.op_tasks.remove(&self.op_id);
-
-        // ✅ async release (Drop can't await)
-        if self.kind == OperationKind::SqlQuery && self.is_stream_sql {
-            self.sql_busy
-                .release_if_owner(self.connection_id, self.op_id);
-        }
     }
 }

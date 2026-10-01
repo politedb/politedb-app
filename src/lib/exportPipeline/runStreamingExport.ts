@@ -15,10 +15,11 @@ import {
 } from "src/lib/tauri/export";
 import { operationCancel } from "src/lib/tauri";
 import { operationBus } from "src/lib/tauri/operationBus";
-import { startSqlQueryStream } from "src/lib/tauri/query";
+import { isAbortError, startSqlQueryStream } from "src/lib/tauri/query";
 import { resolveDefaultTableSort } from "src/utils/tableSort";
 import { createSerialWriter } from "./serialWriter";
 import { serializeExportChunk, serializeExportTrailer } from "./serializeChunk";
+import type { TableChunk } from "src/lib/tauri/types";
 import type {
   ExportConfig,
   ExportOptions,
@@ -35,13 +36,32 @@ export type RunStreamingExportResult = {
   done: Promise<ExportProgress>;
 };
 
-function sanitizeExportError(err: unknown): string {
-  if (err instanceof Error) {
-    const msg = err.message || "Export failed";
-    if (msg.length > 400) return `${msg.slice(0, 400)}…`;
-    return msg;
+function exportErrorMessage(err: unknown): string {
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message || "";
+  if (err && typeof err === "object") {
+    const rec = err as Record<string, unknown>;
+    if (typeof rec.error === "string" && rec.error) return rec.error;
+    if (typeof rec.message === "string" && rec.message) return rec.message;
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* fall through */
+    }
   }
-  return "Export failed";
+  return err == null ? "" : String(err);
+}
+
+function sanitizeExportError(err: unknown): string {
+  // Tauri invoke often rejects with a bare string (e.g. "ERR_SQL_BUSY:<uuid>"),
+  // not an Error. The old instanceof-only path collapsed those to "Export failed".
+  const raw = exportErrorMessage(err).trim();
+  if (!raw) return "Export failed";
+  if (/ERR_SQL_BUSY/i.test(raw)) {
+    return "Connection is busy with another query. Wait a moment and try exporting again.";
+  }
+  if (raw.length > 400) return `${raw.slice(0, 400)}…`;
+  return raw;
 }
 
 function resolveProjectedColumns(
@@ -124,10 +144,18 @@ export function runStreamingExport(
   let unsub: (() => void) | null = null;
   let cancelled = false;
   let finished = false;
+  /** Aborts in-flight startSqlQueryStream busy-retry when the user cancels. */
+  const startAc = new AbortController();
   /** Non-cancellable publish/finalize window; cancel waits for settlement. */
   let committing = false;
   let fatal: string | null = null;
   let totalExported = 0;
+  // operationBus may already be executing a chunk callback when cancellation
+  // starts. Keep cancellation/abort behind those callbacks so no write can
+  // race temp-file cleanup.
+  const activeChunkHandlers = new Set<Promise<void>>();
+  // Keep early cancellation behind asynchronous session/operation setup.
+  let startPromise: Promise<void> = Promise.resolve();
 
   const finish = (progress: ExportProgress) => {
     if (finished) return;
@@ -166,11 +194,22 @@ export function runStreamingExport(
     }
   };
 
+  const waitForActiveChunkHandlers = async () => {
+    while (activeChunkHandlers.size > 0) {
+      await Promise.all([...activeChunkHandlers]);
+    }
+  };
+
   /** Terminal failure at the export boundary: cancel, cleanup temp, settle once. */
   const failTerminal = async (message: string) => {
     if (finished) return;
     fatal = message;
     cancelled = true;
+    try {
+      startAc.abort();
+    } catch {
+      /* ignore */
+    }
     detachSubscription();
     await cancelOwnedOperation();
     if (!committing) {
@@ -188,9 +227,39 @@ export function runStreamingExport(
       return;
     }
     cancelled = true;
-    detachSubscription();
+    // Stop startSqlQueryStream busy-retry so cancel is not blocked ~5s on a
+    // contested connection, and so we do not acquire a new op after cancel.
+    try {
+      startAc.abort();
+    } catch {
+      /* ignore */
+    }
+    // Keep the bus subscription until the cancelled stream terminals (or a
+    // short grace elapses). Detaching immediately would stop chunk ACKs while
+    // the aborted task is still unwinding.
+    // Backend cancel_operation must release sql_busy by op id immediately;
+    // re-invoke after the grace in case the first cancel raced registration.
     await cancelOwnedOperation();
-    await abortSession();
+    await startPromise.catch(() => undefined);
+    await waitForActiveChunkHandlers();
+
+    if (!finished) {
+      await Promise.race([
+        done,
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 500);
+        }),
+      ]);
+    }
+
+    // Second cancel: covers late opId assignment and reinforces busy release
+    // before the UI reports cancelled and the user can re-export.
+    await cancelOwnedOperation();
+
+    detachSubscription();
+    if (!committing) {
+      await abortSession();
+    }
     if (!finished) {
       finish({
         exported: totalExported,
@@ -286,9 +355,14 @@ export function runStreamingExport(
         maxRows: frozen.config.pagination
           ? frozen.config.pagination.limit
           : 10_000_000,
+        signal: startAc.signal,
       });
     } catch (e) {
       await abortSession();
+      if (cancelled || isAbortError(e)) {
+        finish({ exported: 0, error: "Export cancelled." });
+        return;
+      }
       finish({ exported: 0, error: sanitizeExportError(e) });
       return;
     }
@@ -306,59 +380,70 @@ export function runStreamingExport(
 
     handlers.onProgress({ exported: 0 });
 
-    unsub = await operationBus.subscribe(opId, {
-      awaitChunkHandlers: true,
-      onChunk: async (chunk) => {
-        if (cancelled || fatal || finished) return;
-        const rows = chunk.rows ?? [];
-        if (rows.length === 0) return;
+    const processChunk = async (chunk: TableChunk) => {
+      if (cancelled || fatal || finished) return;
+      const rows = chunk.rows ?? [];
+      if (rows.length === 0) return;
 
-        const cols =
-          chunk.columns?.map((c) => c.name) ?? frozen.projectedColumns;
+      const cols = chunk.columns?.map((c) => c.name) ?? frozen.projectedColumns;
 
-        const rowsCopy = rows.map((r) => r.slice());
+      const rowsCopy = rows.map((r) => r.slice());
 
-        const transformed = transformExportChunk({
-          policy: frozen.policy,
-          chunkColumns: cols,
-          rows: rowsCopy,
-          expectedProjectedColumns: frozen.projectedColumns,
+      const transformed = transformExportChunk({
+        policy: frozen.policy,
+        chunkColumns: cols,
+        rows: rowsCopy,
+        expectedProjectedColumns: frozen.projectedColumns,
+      });
+
+      if (!transformed.ok) {
+        boundedWriter.fail(new Error(transformed.error.message));
+        await failTerminal(transformed.error.message);
+        return;
+      }
+
+      try {
+        const content = serializeExportChunk({
+          format: frozen.options.format,
+          columns: transformed.columns,
+          rows: transformed.rows,
+          isFirstChunk,
+          csvOptions,
+          preserveJsonNulls: frozen.policy.masked,
+          schema,
+          tableName,
+          engine,
+          policy: frozen.policy.masked ? frozen.policy : null,
         });
 
-        if (!transformed.ok) {
-          boundedWriter.fail(new Error(transformed.error.message));
-          await failTerminal(transformed.error.message);
+        if (content.length === 0 && frozen.options.format !== "json") {
           return;
         }
 
-        try {
-          const content = serializeExportChunk({
-            format: frozen.options.format,
-            columns: transformed.columns,
-            rows: transformed.rows,
-            isFirstChunk,
-            csvOptions,
-            preserveJsonNulls: frozen.policy.masked,
-            schema,
-            tableName,
-            engine,
-            policy: frozen.policy.masked ? frozen.policy : null,
-          });
+        await boundedWriter.enqueue(content);
+        totalExported += transformed.rows.length;
+        isFirstChunk = false;
+        handlers.onProgress({ exported: totalExported });
+      } catch (e) {
+        const message = sanitizeExportError(e);
+        boundedWriter.fail(e instanceof Error ? e : new Error(message));
+        await failTerminal(message);
+      }
+    };
 
-          if (content.length === 0 && frozen.options.format !== "json") {
-            return;
-          }
+    const trackChunk = (chunk: TableChunk) => {
+      const task = processChunk(chunk);
+      activeChunkHandlers.add(task);
+      task.then(
+        () => activeChunkHandlers.delete(task),
+        () => activeChunkHandlers.delete(task)
+      );
+      return task;
+    };
 
-          await boundedWriter.enqueue(content);
-          totalExported += transformed.rows.length;
-          isFirstChunk = false;
-          handlers.onProgress({ exported: totalExported });
-        } catch (e) {
-          const message = sanitizeExportError(e);
-          boundedWriter.fail(e instanceof Error ? e : new Error(message));
-          await failTerminal(message);
-        }
-      },
+    unsub = await operationBus.subscribe(opId, {
+      awaitChunkHandlers: true,
+      onChunk: trackChunk,
       onDone: async (doneInfo) => {
         if (finished) return;
         if (cancelled || fatal) {
@@ -414,6 +499,18 @@ export function runStreamingExport(
       },
       onError: async (err) => {
         if (finished) return;
+        // User cancel requested: normalize to the cancel terminal so the UI
+        // shows "Export cancelled" and does not treat backend cancel noise as
+        // a hard failure.
+        if (cancelled) {
+          boundedWriter.fail(new Error("Export cancelled."));
+          await abortSession();
+          finish({
+            exported: totalExported,
+            error: fatal ?? "Export cancelled.",
+          });
+          return;
+        }
         const message =
           typeof err === "string"
             ? err
@@ -424,7 +521,8 @@ export function runStreamingExport(
     });
   };
 
-  void start().catch(async (e) => {
+  startPromise = start();
+  void startPromise.catch(async (e) => {
     fatal = sanitizeExportError(e);
     await abortSession();
     finish({ exported: totalExported, error: fatal });

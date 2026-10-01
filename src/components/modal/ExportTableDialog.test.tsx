@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { ExportTableDialog } from "./ExportTableDialog";
 import {
   buildDefaultMaskedPolicy,
@@ -45,6 +45,11 @@ const hookState = {
 
 vi.mock("src/hooks/useExportTableData", () => ({
   useExportTableData: () => hookState,
+}));
+
+const showMessage = vi.fn().mockResolvedValue(undefined);
+vi.mock("src/lib/system-dialog", () => ({
+  showMessage: (...args: unknown[]) => showMessage(...args),
 }));
 
 const columns = [
@@ -97,6 +102,8 @@ describe("ExportTableDialog UX", () => {
       ]),
     };
     vi.clearAllMocks();
+    showMessage.mockReset();
+    showMessage.mockResolvedValue(undefined);
     // Functional updater support for selection changes in the dialog
     hookState.setExportOptions.mockImplementation((updater: unknown) => {
       if (typeof updater === "function") {
@@ -296,14 +303,72 @@ describe("ExportTableDialog UX", () => {
     expect(noteBox.checked).toBe(false);
   });
 
-  it("shows indeterminate progress for unknown total without 0/0", () => {
-    hookState.progress = { exported: 7 };
+  it("does not fake a percentage when the total is unknown", () => {
+    hookState.progress = { exported: 18000 };
     hookState.exporting = true;
     renderDialog({ totalRows: null });
-    expect(screen.getByText("7 rows")).toBeTruthy();
-    expect(screen.queryByText(/7 \/ /)).toBeNull();
-    expect(screen.queryByText("0 / 0 rows")).toBeNull();
-    expect(screen.getByRole("progressbar")).toBeTruthy();
+    expect(screen.getByText("18,000 rows")).toBeTruthy();
+    expect(screen.queryByText(/18000 \/ /)).toBeNull();
+    const bar = screen.getByRole("progressbar");
+    expect(bar.style.width).toBe("0%");
+    expect(bar.getAttribute("aria-valuenow")).toBe("0");
+  });
+
+  it("fills an unknown-total export only when the pipeline settles", () => {
+    hookState.progress = { exported: 18000 };
+    hookState.exporting = false;
+    renderDialog({ totalRows: null });
+    const bar = screen.getByRole("progressbar");
+    expect(bar.style.width).toBe("100%");
+    expect(bar.getAttribute("aria-valuenow")).toBe("100");
+  });
+
+  it("scales a known total from 0% with rows written", () => {
+    hookState.progress = { exported: 0 };
+    hookState.exporting = true;
+    const view = renderDialog({ totalRows: 18000 });
+    const bar = screen.getByRole("progressbar");
+    expect(bar.style.width).toBe("0%");
+    expect(bar.getAttribute("aria-valuenow")).toBe("0");
+    view.unmount();
+
+    hookState.progress = { exported: 7200 };
+    hookState.exporting = true;
+    renderDialog({ totalRows: 18000 });
+    const mid = screen.getByRole("progressbar");
+    expect(mid.style.width).toBe("40%");
+    expect(screen.getByText("7,200 / 18,000 rows")).toBeTruthy();
+  });
+
+  it("shows an info window after export cancellation settles", async () => {
+    const handleClose = vi.fn();
+    hookState.progress = { exported: 12, error: "Export cancelled" };
+    hookState.exporting = false;
+    renderDialog({ handleClose, totalRows: null });
+    expect(screen.queryByText(/^Error$/)).toBeNull();
+    await waitFor(() =>
+      expect(showMessage).toHaveBeenCalledWith("Export is cancelled", {
+        title: "Aborted",
+        kind: "info",
+      })
+    );
+    expect(hookState.setProgress).toHaveBeenCalledWith(null);
+    expect(hookState.clearMaskState).toHaveBeenCalled();
+    expect(handleClose).toHaveBeenCalled();
+  });
+
+  it("shows a native error dialog for hard export failures", async () => {
+    const handleClose = vi.fn();
+    hookState.progress = { exported: 0, error: "Disk full" };
+    hookState.exporting = false;
+    renderDialog({ handleClose });
+    await waitFor(() =>
+      expect(showMessage).toHaveBeenCalledWith("Disk full", {
+        title: "Export error",
+        kind: "error",
+      })
+    );
+    expect(handleClose).toHaveBeenCalled();
   });
 
   it("marks unknown-total export completed by settlement not row math", () => {

@@ -17,7 +17,6 @@ import {
   type ExportFormat,
   useExportTableData,
 } from "src/hooks/useExportTableData";
-import { ErrorDialog } from "./ErrorDialog";
 import type { DatabaseEngine, TableConstraint } from "src/types";
 import { ExportColumnEditor } from "src/components/modal/export/ExportColumnEditor";
 import {
@@ -30,6 +29,7 @@ import {
   type MaskRuleKind,
 } from "src/lib/exportMasking";
 import { cn } from "src/utils/cn";
+import { showMessage } from "src/lib/system-dialog";
 
 interface Props {
   open: boolean;
@@ -43,7 +43,7 @@ interface Props {
   appliedFilterCombine: "AND" | "OR";
   pagination?: { limit: number; offset: number };
   sortState?: TableSort | null;
-  /** Known row total, or null when unknown (standalone whole-table export). */
+  /** Best available row estimate, or null when unavailable. */
   totalRows: number | null;
   engine?: DatabaseEngine;
 }
@@ -97,10 +97,58 @@ export function ExportTableDialog({
   );
 
   const totalKnown = typeof totalRows === "number" && totalRows >= 0;
+  const cancelled = !!progress?.error && /cancelled/i.test(progress.error);
+  const hardError = !!progress?.error && !cancelled;
+
   const progressPct = useMemo(() => {
-    if (!totalKnown || !totalRows) return 0;
-    return ((progress?.exported ?? 0) / totalRows) * 100;
-  }, [progress, totalRows, totalKnown]);
+    const exported = Math.max(0, progress?.exported ?? 0);
+
+    if (totalKnown) {
+      if (totalRows === 0) return exporting ? 0 : 100;
+      return Math.min(100, Math.max(0, (exported / totalRows) * 100));
+    }
+
+    // There is no honest percentage without a total. Keep the bar at its
+    // initial position instead of presenting an invented completion estimate.
+    if (exporting) return 0;
+    return cancelled || hardError ? 0 : 100;
+  }, [cancelled, exporting, hardError, progress, totalKnown, totalRows]);
+
+  // Cancellation is reported only after the pipeline has settled. At this
+  // point requestCancel has awaited operation cancellation and temp cleanup,
+  // and the hook has observed the final progress state.
+  useEffect(() => {
+    if (!cancelled || exporting) return;
+
+    // Close the export window before showing the app's native info dialog,
+    // matching the completed-export message flow elsewhere in the app.
+    setProgress(null);
+    clearMaskState();
+    void requestCancel();
+    handleClose();
+    void showMessage("Export is cancelled", {
+      title: "Aborted",
+      kind: "info",
+    });
+  }, [
+    cancelled,
+    exporting,
+    setProgress,
+    clearMaskState,
+    handleClose,
+    progress?.error,
+    requestCancel,
+  ]);
+
+  useEffect(() => {
+    if (!hardError || !progress?.error) return;
+    void requestCancel();
+    handleClose();
+    void showMessage(progress.error, {
+      title: "Export error",
+      kind: "error",
+    });
+  }, [hardError, progress?.error, requestCancel, handleClose]);
 
   // Authoritative selection — never fall back empty → all.
   const selectedColumns = exportOptions.columns;
@@ -231,17 +279,8 @@ export function ExportTableDialog({
   ]);
 
   const suggestedName = exportOptions.fileName || tableName;
-  // Unknown totals: success is pipeline settlement (!exporting), not row math.
-  const completed =
-    !!progress &&
-    !progress.error &&
-    !exporting &&
-    (totalRows == null
-      ? true
-      : totalRows === 0 ||
-        progress.exported >= totalRows ||
-        !!progress.truncated ||
-        !!progress.warning);
+  // Completion is based on pipeline settlement (not row-count math).
+  const completed = !!progress && !progress.error && !exporting;
 
   const tableIdentity = schema ? `${schema}.${tableName}` : tableName;
   const scopeLabel = pagination
@@ -366,34 +405,30 @@ export function ExportTableDialog({
                   </p>
                   <span class="shrink-0 text-xs text-neutral-500 tabular-nums">
                     {totalRows == null
-                      ? `${progress.exported} rows`
-                      : `${progress.exported} / ${totalRows} rows`}
+                      ? `${progress.exported.toLocaleString()} rows`
+                      : `${progress.exported.toLocaleString()} / ${totalRows.toLocaleString()} rows`}
                   </span>
                 </div>
                 <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
-                  {totalRows == null ? (
-                    <div
-                      class={cn(
-                        "h-full w-1/3 rounded-full bg-blue-500",
-                        exporting && "animate-pulse"
-                      )}
-                      role="progressbar"
-                      aria-valuetext={`${progress.exported} rows exported`}
-                      aria-label="Export progress"
-                    />
-                  ) : (
-                    <div
-                      class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
-                      style={{ width: `${Math.min(100, progressPct)}%` }}
-                      role="progressbar"
-                      aria-valuenow={Math.min(100, progressPct)}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                    />
-                  )}
+                  <div
+                    class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
+                    style={{ width: `${progressPct}%` }}
+                    role="progressbar"
+                    aria-valuetext={`${Math.round(progressPct)}% · ${progress.exported.toLocaleString()} rows exported`}
+                    aria-label="Export progress"
+                    aria-busy={exporting}
+                    aria-valuenow={progressPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  />
                 </div>
-                {completed && !progress.error && (
+
+                {completed && !progress.error ? (
                   <p class="text-right text-green-600">Completed!</p>
+                ) : (
+                  <p class="shrink-0 text-right font-medium text-blue-600 tabular-nums">
+                    Processing...
+                  </p>
                 )}
                 {progress.warning && (
                   <p class="text-amber-700">{progress.warning}</p>
@@ -442,15 +477,6 @@ export function ExportTableDialog({
           </div>
         </DialogFooter>
       </Dialog>
-
-      {progress?.error && (
-        <ErrorDialog
-          open={true}
-          error={progress.error}
-          onClose={handleClose}
-          size="md"
-        />
-      )}
     </>
   );
 }

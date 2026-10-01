@@ -617,6 +617,7 @@ export function ConnectionScreen() {
           schema: table.schema,
           tableName: table.name,
           kind: table.kind,
+          estimatedRow: table.estimatedRow,
         });
       },
       importTableData: (table: TableItem) => {

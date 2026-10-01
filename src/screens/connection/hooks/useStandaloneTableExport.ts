@@ -75,6 +75,7 @@ export function useStandaloneTableExport(args: UseStandaloneTableExportArgs) {
           engine: next.engine,
           schema: next.schema,
           tableName: next.tableName,
+          estimatedRow: next.estimatedRow,
           isCancelled: () =>
             cancelledRef.current || requestIdRef.current !== next.requestId,
         });

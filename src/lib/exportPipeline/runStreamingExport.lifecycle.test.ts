@@ -21,6 +21,10 @@ vi.mock("src/lib/tauri/export", () => ({
 
 vi.mock("src/lib/tauri/query", () => ({
   startSqlQueryStream: (...args: unknown[]) => mocks.startStream(...args),
+  isAbortError: (err: unknown) =>
+    !!err &&
+    typeof err === "object" &&
+    (err as { name?: string }).name === "AbortError",
 }));
 
 vi.mock("src/lib/tauri", () => ({
@@ -112,14 +116,83 @@ describe("runStreamingExport lifecycle", () => {
     );
     expect(mocks.append).toHaveBeenCalled();
 
-    await cancel();
+    const cancelPromise = cancel();
+    // Backend terminal after operationCancel — cancelOwned waits for this so
+    // sql_busy can release before the UI reports cancelled.
+    await handlers!.onError?.("query cancelled");
+    await cancelPromise;
     const result = await done;
 
     expect(result.error).toMatch(/cancelled/i);
     expect(mocks.cancel).toHaveBeenCalledWith("op-1");
+    expect(mocks.cancel.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(mocks.abort).toHaveBeenCalledWith("sess-1");
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(unsub).toHaveBeenCalled();
+  });
+
+  it("early cancel waits for session setup before reporting cancellation", async () => {
+    let releaseBegin!: (value: { sessionId: string }) => void;
+    const beginGate = new Promise<{ sessionId: string }>((resolve) => {
+      releaseBegin = resolve;
+    });
+    mocks.begin.mockReturnValueOnce(beginGate);
+
+    const { cancel, done } = runStreamingExport("/tmp/out.csv", config, opts, {
+      onProgress: () => {},
+    });
+    await vi.waitFor(() => expect(mocks.begin).toHaveBeenCalled());
+
+    const cancelPromise = cancel();
+    await Promise.resolve();
+    expect(mocks.abort).not.toHaveBeenCalled();
+
+    releaseBegin({ sessionId: "sess-early" });
+    await cancelPromise;
+    const result = await done;
+
+    expect(result.error).toMatch(/cancelled/i);
+    expect(mocks.abort).toHaveBeenCalledWith("sess-early");
+    expect(mocks.startStream).not.toHaveBeenCalled();
+  });
+
+  it("cancel waits for an in-flight chunk write before aborting the temp session", async () => {
+    let releaseAppend!: () => void;
+    const appendGate = new Promise<void>((resolve) => {
+      releaseAppend = resolve;
+    });
+    mocks.append.mockImplementationOnce(() => appendGate);
+
+    const { cancel, done } = runStreamingExport("/tmp/out.csv", config, opts, {
+      onProgress: () => {},
+    });
+
+    await vi.waitFor(() => expect(handlers).not.toBeNull());
+    const chunkPromise = handlers!.onChunk?.(
+      chunk([
+        [
+          { t: "Int", v: 1 },
+          { t: "Str", v: "a@x.com" },
+        ],
+      ])
+    );
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    const cancelPromise = cancel();
+    await Promise.resolve();
+    expect(mocks.abort).not.toHaveBeenCalled();
+
+    releaseAppend();
+    await chunkPromise;
+    await handlers!.onError?.("query cancelled");
+    await cancelPromise;
+    const result = await done;
+
+    expect(result.error).toMatch(/cancelled/i);
+    expect(mocks.abort).toHaveBeenCalledWith("sess-1");
+    expect(mocks.append.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.abort.mock.invocationCallOrder[0]
+    );
   });
 
   it("publish-in-flight cancel waits for commit and does not abort publication", async () => {
@@ -164,6 +237,143 @@ describe("runStreamingExport lifecycle", () => {
     expect(mocks.abort).not.toHaveBeenCalled();
     expect(mocks.publish).toHaveBeenCalledWith("sess-1");
     expect(progressEvents.some((e) => /cancelled/i.test(e))).toBe(false);
+  });
+
+  it("cancel waits for backend terminal before reporting cancelled", async () => {
+    let releaseError!: () => void;
+    const errorGate = new Promise<void>((resolve) => {
+      releaseError = resolve;
+    });
+
+    const { cancel, done } = runStreamingExport("/tmp/out.csv", config, opts, {
+      onProgress: () => {},
+    });
+
+    await vi.waitFor(() => expect(handlers).not.toBeNull());
+    await handlers!.onChunk?.(
+      chunk([
+        [
+          { t: "Int", v: 1 },
+          { t: "Str", v: "a@x.com" },
+        ],
+      ])
+    );
+
+    let cancelSettled = false;
+    const cancelPromise = cancel().then(() => {
+      cancelSettled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(cancelSettled).toBe(false);
+    expect(mocks.cancel).toHaveBeenCalledWith("op-1");
+
+    void (async () => {
+      await errorGate;
+      await handlers!.onError?.("query cancelled");
+    })();
+
+    releaseError();
+    await cancelPromise;
+    const result = await done;
+
+    expect(cancelSettled).toBe(true);
+    expect(result.error).toMatch(/cancelled/i);
+    expect(mocks.abort).toHaveBeenCalledWith("sess-1");
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it("cancel falls back to local finish if backend never terminals", async () => {
+    const { cancel, done } = runStreamingExport("/tmp/out.csv", config, opts, {
+      onProgress: () => {},
+    });
+
+    await vi.waitFor(() => expect(handlers).not.toBeNull());
+
+    vi.useFakeTimers();
+    try {
+      const cancelPromise = cancel();
+      await vi.advanceTimersByTimeAsync(500);
+      await cancelPromise;
+      const result = await done;
+
+      expect(result.error).toMatch(/cancelled/i);
+      expect(mocks.cancel).toHaveBeenCalledWith("op-1");
+      expect(mocks.abort).toHaveBeenCalledWith("sess-1");
+      expect(mocks.publish).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces string invoke errors instead of bare Export failed", async () => {
+    mocks.startStream.mockRejectedValueOnce(
+      "ERR_SQL_BUSY:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    );
+
+    const { done } = runStreamingExport("/tmp/out.csv", config, opts, {
+      onProgress: () => {},
+    });
+    const result = await done;
+
+    expect(result.error).toMatch(/busy|another query/i);
+    expect(result.error).not.toBe("Export failed");
+    expect(mocks.begin).toHaveBeenCalled();
+    expect(mocks.abort).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("cancel then immediate re-export can start a new stream", async () => {
+    const first = runStreamingExport("/tmp/ActivityLog.csv", config, opts, {
+      onProgress: () => {},
+    });
+    await vi.waitFor(() => expect(handlers).not.toBeNull());
+    await handlers!.onChunk?.(
+      chunk([
+        [
+          { t: "Int", v: 1 },
+          { t: "Str", v: "a@x.com" },
+        ],
+      ])
+    );
+
+    const cancelPromise = first.cancel();
+    await handlers!.onError?.("query cancelled");
+    await cancelPromise;
+    await first.done;
+
+    // Reset subscribe capture for the second run.
+    handlers = null;
+    mocks.startStream.mockResolvedValueOnce("op-2");
+    mocks.begin.mockResolvedValueOnce({ sessionId: "sess-2" });
+
+    const progress: number[] = [];
+    const second = runStreamingExport("/tmp/ActivityLog.csv", config, opts, {
+      onProgress: (p) => {
+        if (!p.error) progress.push(p.exported);
+      },
+    });
+    await vi.waitFor(() => expect(handlers).not.toBeNull());
+    await handlers!.onChunk?.(
+      chunk([
+        [
+          { t: "Int", v: 2 },
+          { t: "Str", v: "b@x.com" },
+        ],
+      ])
+    );
+    await handlers!.onDone?.({});
+    const result = await second.done;
+
+    expect(result.error).toBeUndefined();
+    expect(result.exported).toBe(1);
+    expect(progress.some((n) => n > 0)).toBe(true);
+    expect(mocks.startStream).toHaveBeenLastCalledWith(
+      "c1",
+      expect.any(String),
+      expect.any(Object)
+    );
+    expect(mocks.publish).toHaveBeenCalledWith("sess-2");
   });
 
   it("first append rejection terminates export without waiting for onDone", async () => {

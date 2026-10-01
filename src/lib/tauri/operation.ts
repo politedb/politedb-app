@@ -15,7 +15,11 @@ export async function operationExecute(
 }
 
 export async function operationCancel(opId: string): Promise<void> {
-  await invoke(CMD.operationCancel, { op_id: opId });
+  // Tauri command args default to camelCase: Rust `op_id` → IPC key `opId`.
+  // Passing snake_case `op_id` makes invoke fail with "missing required key opId";
+  // callers that catch/ignore then never release sql_busy (same ERR_SQL_BUSY
+  // holder forever across busy-retries).
+  await invoke(CMD.operationCancel, { opId });
 }
 
 export async function operationExecuteTransaction(args: {

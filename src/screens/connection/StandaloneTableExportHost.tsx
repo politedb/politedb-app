@@ -90,7 +90,7 @@ export function StandaloneTableExportHost(props: {
           appliedFilterCombine="AND"
           pagination={undefined}
           sortState={null}
-          totalRows={null}
+          totalRows={ready.metadata.totalRows}
           engine={ready.target.engine}
         />
       )}

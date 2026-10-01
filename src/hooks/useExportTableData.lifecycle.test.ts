@@ -95,15 +95,20 @@ describe("useExportTableData lifecycle", () => {
     await waitFor(() => expect(mocks.runStreamingExport).toHaveBeenCalled());
     await waitFor(() => expect(api.exporting).toBe(true));
 
+    let cancelRequest!: Promise<void>;
     await act(async () => {
-      await api.requestCancel();
+      cancelRequest = api.requestCancel();
+      await Promise.resolve();
     });
     expect(cancel).toHaveBeenCalledTimes(1);
+    expect(api.exporting).toBe(true);
 
     await act(async () => {
       resolveDone({ exported: 0 });
       await done;
+      await cancelRequest;
     });
+    await waitFor(() => expect(api.exporting).toBe(false));
   });
 
   it("unmount cancels the owned export", async () => {

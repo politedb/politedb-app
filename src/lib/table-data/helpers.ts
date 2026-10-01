@@ -15,6 +15,7 @@ export function getErrorMessage(e: unknown) {
 
 export function parseBusyOpId(err: unknown): string | null {
   const msg = getErrorMessage(err);
-  const m = /^ERR_SQL_BUSY:([0-9a-f-]{36})$/i.exec(msg.trim());
+  // Non-anchored: Tauri may wrap the code in a larger invoke error string.
+  const m = /ERR_SQL_BUSY:([0-9a-f-]{36})/i.exec(msg);
   return m?.[1] ?? null;
 }

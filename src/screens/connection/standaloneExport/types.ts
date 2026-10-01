@@ -11,11 +11,15 @@ export type StandaloneExportTarget = {
   schema: string;
   tableName: string;
   kind?: "table" | "view";
+  /** Row estimate captured from the catalog when the export was requested. */
+  estimatedRow?: number | string;
 };
 
 export type StandaloneExportMetadata = {
   columns: ColumnMeta[];
   constraints: TableConstraint[] | null;
+  /** Best available cached or catalog row estimate; null when unavailable. */
+  totalRows: number | null;
 };
 
 export type StandaloneExportPhase =

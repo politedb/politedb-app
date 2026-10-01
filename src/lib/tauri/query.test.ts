@@ -330,6 +330,135 @@ describe("runSqlQuery privacy and cancellation", () => {
     expect(operationCancelMock).toHaveBeenCalledWith("op_late");
   });
 
+  it("busy-retry recognizes object-shaped Tauri ERR_SQL_BUSY errors", async () => {
+    const busyId = "22222222-2222-2222-2222-222222222222";
+    operationExecuteMock
+      .mockRejectedValueOnce({ message: `ERR_SQL_BUSY:${busyId}` })
+      .mockResolvedValueOnce("op_ok");
+
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    // Known holder id → cancel + immediate retry (no backoff sleep).
+    await Promise.resolve();
+    await Promise.resolve();
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+
+    expect(operationCancelMock).toHaveBeenCalledWith(busyId);
+    expect(operationExecuteMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("busy-retry cancels the holding stream op before retrying", async () => {
+    const busyId = "11111111-1111-1111-1111-111111111111";
+    operationExecuteMock
+      .mockRejectedValueOnce(new Error(`ERR_SQL_BUSY:${busyId}`))
+      .mockResolvedValueOnce("op_ok");
+
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    // Immediate retry after cancel — do not advance fake timers.
+    await Promise.resolve();
+    await Promise.resolve();
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+
+    expect(operationCancelMock).toHaveBeenCalledWith(busyId);
+    expect(operationExecuteMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("busy-retry parses bare-string and wrapped invoke ERR_SQL_BUSY", async () => {
+    const busyId = "33333333-3333-3333-3333-333333333333";
+    operationExecuteMock
+      .mockRejectedValueOnce(`ERR_SQL_BUSY:${busyId}`)
+      .mockRejectedValueOnce(
+        `error invoking operation_execute: ERR_SQL_BUSY:${busyId}`
+      )
+      .mockResolvedValueOnce("op_ok");
+
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    // Two known-holder failures → two immediate cancel+retries (no sleep).
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+
+    expect(operationCancelMock).toHaveBeenCalledWith(busyId);
+    expect(operationCancelMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(operationExecuteMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("busy-retry after cancel does not sleep before reacquire", async () => {
+    const busyId = "44444444-4444-4444-4444-444444444444";
+    let secondExecuteAt: number | null = null;
+    operationExecuteMock.mockImplementation(async () => {
+      if (operationExecuteMock.mock.calls.length === 1) {
+        throw new Error(`ERR_SQL_BUSY:${busyId}`);
+      }
+      secondExecuteAt = Date.now();
+      return "op_ok";
+    });
+    operationCancelMock.mockImplementation(async () => {
+      // Simulate sync release_op: holder gone before retry.
+    });
+
+    const cap = setupSubscribeCapture();
+    const started = Date.now();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await cap.ready;
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+
+    expect(operationCancelMock).toHaveBeenCalledWith(busyId);
+    expect(operationExecuteMock).toHaveBeenCalledTimes(2);
+    expect(secondExecuteAt).not.toBeNull();
+    // Must not have waited for the old 80ms backoff window.
+    expect((secondExecuteAt ?? 0) - started).toBeLessThan(50);
+  });
+
+  it("same ERR_SQL_BUSY holder uuid across retries releases after cancel", async () => {
+    // Live log pattern: new op ids each attempt, SAME holder every time.
+    const busyId = "37f37825-99c5-4742-af61-62e8fc3a6417";
+    let released = false;
+    let busyHits = 0;
+    operationExecuteMock.mockImplementation(async () => {
+      if (!released) {
+        busyHits += 1;
+        throw new Error(`ERR_SQL_BUSY:${busyId}`);
+      }
+      return "op_ok";
+    });
+    operationCancelMock.mockImplementation(async (id: string) => {
+      // Mimic backend release_op: only clearing the holder frees the slot.
+      if (id === busyId) released = true;
+    });
+
+    const cap = setupSubscribeCapture();
+    const p = runSqlQuery("c", "select 1", { timeoutMs: 0, internal: true });
+    // Several microtasks: busy → cancel → retry → subscribe
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    await cap.ready;
+    await Promise.resolve();
+    cap.handlers.onDone?.({ columns: [], row_count: 0 });
+    await p;
+
+    expect(busyHits).toBeGreaterThanOrEqual(1);
+    expect(operationCancelMock).toHaveBeenCalledWith(busyId);
+    expect(released).toBe(true);
+    expect(operationExecuteMock.mock.calls.length).toBe(busyHits + 1);
+  });
+
   it("busy-retry respects abort and does not cancel unrelated work", async () => {
     operationExecuteMock
       .mockRejectedValueOnce(new Error("ERR_SQL_BUSY"))
