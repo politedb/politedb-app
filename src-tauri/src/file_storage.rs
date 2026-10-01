@@ -174,7 +174,6 @@ pub fn export_append_to_file(path: &Path, content: &str, append: &bool) -> Resul
     Ok(())
 }
 
-
 /* -------------------------------------------------------------------------- */
 /* Export sessions: exclusive temp sibling + publish / discard                */
 /* -------------------------------------------------------------------------- */

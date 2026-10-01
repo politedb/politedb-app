@@ -116,39 +116,12 @@ function SegButton({
   );
 }
 
-function EnvBadge({ text }: { text: string }) {
-  if (!text) return null;
-
-  const t = text.toUpperCase();
-  const isProd = t.includes("PROD");
-  const isStaging = t.includes("STAGING");
-  const isDev = t.includes("DEV");
-
-  const cls = isProd
-    ? "bg-red-50 text-red-700 border-red-200"
-    : isStaging
-      ? "bg-sky-50 text-sky-700 border-sky-200"
-      : isDev
-        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-        : "bg-neutral-100 text-neutral-600 border-neutral-200";
-
-  return (
-    <span
-      class={cn(
-        "flex h-5 items-center rounded-md border px-1.5 text-xs font-semibold",
-        cls
-      )}
-    >
-      {t}
-    </span>
-  );
-}
-
 function MetaPillSkeleton({ className }: { className?: string }) {
   return (
     <div
       class={cn(
-        "flex h-5 w-12 rounded-md border border-neutral-200 bg-neutral-100 p-0.75",
+        "flex h-5 w-12 rounded-md border border-neutral-200 bg-neutral-100",
+        "p-0.75",
         className
       )}
       role="status"
@@ -552,7 +525,8 @@ export function MenuBar({
         <div class="flex items-center">
           <div
             class={cn(
-              "flex items-center gap-1 rounded-lg border border-neutral-200 bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+              "flex items-center gap-1 rounded-lg border border-neutral-200",
+              "bg-white px-1 py-0.5 shadow-[0_1px_0_rgba(0,0,0,0.02)]"
             )}
           >
             <div class="relative" ref={safeModeRef}>
@@ -587,7 +561,8 @@ export function MenuBar({
                     <button
                       type="button"
                       class={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-neutral-100",
+                        "flex w-full items-center gap-2 rounded-md",
+                        "px-2 py-1.5 text-left hover:bg-neutral-100",
                         querySafetyMode === mode.value && "bg-neutral-100"
                       )}
                       onClick={() =>
@@ -644,22 +619,20 @@ export function MenuBar({
           <div class="relative w-full max-w-220 min-w-0">
             <div
               class={cn(
-                "relative flex h-7.75 w-full items-center gap-2 overflow-hidden rounded-lg border bg-white pr-2 pl-8",
+                "relative flex h-7.75 w-full items-center gap-2 overflow-hidden pr-2 pl-8",
+                "rounded-lg border bg-white shadow-[0_1px_0_rgba(0,0,0,0.02)]",
                 loadTableError
-                  ? "border-red-200 bg-red-50 dark:border-red-700"
-                  : "border-neutral-200 hover:border-neutral-300",
-                "shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+                  ? "border-rose-200 bg-rose-50"
+                  : "border-neutral-200 hover:border-neutral-300"
               )}
             >
               {(tags.env || tags.rest.length > 0) && (
                 <div class="flex min-w-0 items-center gap-1">
-                  {tags.env ? <EnvBadge text={tags.env} /> : null}
-
                   <TagChips
-                    tags={tags.rest}
+                    tags={[...(tags.env ? [tags.env] : []), ...tags.rest]}
                     max={2}
                     size="sm"
-                    className="gap-1"
+                    className="gap-1 uppercase"
                   />
 
                   <div class="mx-1 h-4 w-px bg-neutral-200" />
@@ -805,14 +778,12 @@ export function MenuBar({
             onClick={onRefresh}
             disabled={isRefreshing}
           >
-            <span
-              class={cn(
-                "inline-flex items-center justify-center",
+            <RefreshCwIcon
+              className={cn(
+                "size-5.5 text-neutral-700",
                 isRefreshing && "animate-spin"
               )}
-            >
-              <RefreshCwIcon className="size-5.5 text-neutral-700" />
-            </span>
+            />
           </IconButton>
 
           <IconButton title="Search" onClick={onSearchOpen}>
