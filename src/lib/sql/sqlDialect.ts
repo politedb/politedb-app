@@ -608,16 +608,42 @@ export function normalizeJsonValue(value: unknown): string {
   }
 }
 
-function unwrapCellValue(value: unknown): unknown {
+function decodeBytesAsUtf8Text(bytes: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  } catch {
+    return Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  }
+}
+
+/**
+ * Unwrap typed cell values for SQL literals.
+ * BytesB64 stays as Uint8Array only for blob/binary columns; otherwise decode
+ * UTF-8 text. MySQL text protocol often labels ints/datetimes as BytesB64 with
+ * binary charset metadata — String(Uint8Array) would become comma-joined codes
+ * (e.g. id 3 -> 51, datetime -> "50,48,50,54,...").
+ */
+function unwrapCellValue(value: unknown, dbType?: string): unknown {
   if (value && typeof value === "object") {
     const cell = value as Record<string, unknown>;
     if (cell.t === "Null") return null;
     if (cell.t === "BytesB64" && typeof cell.v === "string") {
-      return decodeBytesB64(cell.v) ?? cell.v;
+      const bytes = decodeBytesB64(cell.v);
+      if (!bytes) return cell.v;
+      if (isBlobColumnType(dbType)) return bytes;
+      return decodeBytesAsUtf8Text(bytes);
     }
     if ("v" in cell) return cell.v;
   }
   return value;
+}
+
+function coerceNonBlobBytesToText(raw: unknown, dbType?: string): unknown {
+  if (isBlobColumnType(dbType)) return raw;
+  if (raw instanceof Uint8Array) return decodeBytesAsUtf8Text(raw);
+  if (raw instanceof ArrayBuffer)
+    return decodeBytesAsUtf8Text(new Uint8Array(raw));
+  return raw;
 }
 
 export function formatSqlValue(
@@ -625,7 +651,7 @@ export function formatSqlValue(
   dbType: string | undefined,
   engine?: DatabaseEngine
 ): string {
-  const raw = unwrapCellValue(value);
+  let raw = unwrapCellValue(value, dbType);
   if (raw === null || raw === undefined) return "NULL";
 
   if (isBlobColumnType(dbType)) {
@@ -654,6 +680,8 @@ export function formatSqlValue(
       return `X'${hex}'`;
     }
   }
+
+  raw = coerceNonBlobBytesToText(raw, dbType);
 
   if (isJsonColumnType(dbType)) {
     const jsonText = normalizeJsonValue(raw);

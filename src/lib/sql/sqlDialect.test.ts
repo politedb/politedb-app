@@ -42,6 +42,29 @@ describe("sqlDialect", () => {
     ).toBe("X'010203ff'");
   });
 
+  it("decodes MySQL text-protocol BytesB64 ints/datetimes as real values, not byte codes", () => {
+    // ASCII "3" base64 is Mw==; String(Uint8Array([51])) would wrongly yield "51".
+    expect(formatSqlValue({ t: "BytesB64", v: "Mw==" }, "int", "mysql")).toBe(
+      "3"
+    );
+
+    const datetime = "2026-10-01 04:47:06.554675";
+    const datetimeB64 = globalThis.btoa(datetime);
+    const sql = formatSqlValue(
+      { t: "BytesB64", v: datetimeB64 },
+      "datetime",
+      "mysql"
+    );
+    expect(sql).toMatch(
+      /^CONVERT\(UNHEX\('[0-9a-f]+'\) USING utf8mb4\) COLLATE utf8mb4_unicode_ci$/
+    );
+    expect(sql).not.toContain("50,48,50,54");
+    // Display rewrite should recover the original datetime text.
+    expect(sqlForDisplay(`WHERE created_at = ${sql}`, "mysql")).toContain(
+      `'${datetime}'`
+    );
+  });
+
   it("serializes edited blob hex text as MySQL binary literals", () => {
     expect(formatSqlValue("A1761FA5", "longblob", "mysql")).toBe("X'A1761FA5'");
   });

@@ -112,6 +112,27 @@ fn decode_value(v: Option<&Value>, decoder: &ColDecoder) -> CellValue {
     }
 }
 
+fn utf8_str_or_b64(b: &[u8]) -> CellValue {
+    match std::str::from_utf8(b) {
+        Ok(s) => CellValue::Str(s.to_string()),
+        Err(_) => CellValue::BytesB64(B64.encode(b)),
+    }
+}
+
+fn decode_integer_text_bytes(b: &[u8]) -> CellValue {
+    match std::str::from_utf8(b) {
+        Ok(s) => {
+            let trimmed = s.trim();
+            if let Ok(i) = trimmed.parse::<i64>() {
+                CellValue::I64(i)
+            } else {
+                CellValue::Str(s.to_string())
+            }
+        }
+        Err(_) => CellValue::BytesB64(B64.encode(b)),
+    }
+}
+
 fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
     let ty = decoder.ty;
 
@@ -141,57 +162,87 @@ fn decode_bytes(b: &[u8], decoder: &ColDecoder) -> CellValue {
         return CellValue::BytesB64(B64.encode(b));
     }
 
-    // 4) DECIMAL/NEWDECIMAL use the binary charset in MySQL metadata even
-    // though their payload is textual. Decode them before binary detection.
+    // 4) Text protocol delivers numerics/temporals as Value::Bytes with charset 63
+    // (binary) in column metadata. They are textual payloads, not opaque binary —
+    // treating charset 63 alone as BytesB64 made UPDATE/DELETE WHERE use
+    // String(Uint8Array) byte codes (id 3 -> 51, datetime -> "50,48,...").
     if matches!(
         ty,
-        ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL
+        ColumnType::MYSQL_TYPE_TINY
+            | ColumnType::MYSQL_TYPE_SHORT
+            | ColumnType::MYSQL_TYPE_LONG
+            | ColumnType::MYSQL_TYPE_LONGLONG
+            | ColumnType::MYSQL_TYPE_INT24
+            | ColumnType::MYSQL_TYPE_YEAR
     ) {
-        return match std::str::from_utf8(b) {
-            Ok(s) => CellValue::Str(s.to_string()),
-            Err(_) => CellValue::BytesB64(B64.encode(b)),
-        };
+        return decode_integer_text_bytes(b);
     }
 
-    // 5) Binary BLOB/VARBINARY/BINARY: always base64 (avoid corrupting arbitrary binary).
-    // MySQL reports TEXT and VARCHAR-like values through byte variants too; only binary
-    // charset means opaque bytes.
+    if matches!(
+        ty,
+        ColumnType::MYSQL_TYPE_FLOAT
+            | ColumnType::MYSQL_TYPE_DOUBLE
+            | ColumnType::MYSQL_TYPE_DECIMAL
+            | ColumnType::MYSQL_TYPE_NEWDECIMAL
+    ) {
+        return utf8_str_or_b64(b);
+    }
+
+    if matches!(
+        ty,
+        ColumnType::MYSQL_TYPE_DATE
+            | ColumnType::MYSQL_TYPE_NEWDATE
+            | ColumnType::MYSQL_TYPE_TIME
+            | ColumnType::MYSQL_TYPE_TIME2
+            | ColumnType::MYSQL_TYPE_DATETIME
+            | ColumnType::MYSQL_TYPE_DATETIME2
+            | ColumnType::MYSQL_TYPE_TIMESTAMP
+            | ColumnType::MYSQL_TYPE_TIMESTAMP2
+    ) {
+        return utf8_str_or_b64(b);
+    }
+
+    // 5) Binary BLOB/VARBINARY/BINARY: only for string/blob payload types with
+    // binary charset (or blob + BINARY_FLAG). Do not apply to numeric/temporal.
     if is_binary_bytes(decoder) {
         return CellValue::BytesB64(B64.encode(b));
     }
 
     // 6) ENUM/SET: returned as string (bytes). Keep UTF-8 else base64.
     if matches!(ty, ColumnType::MYSQL_TYPE_ENUM | ColumnType::MYSQL_TYPE_SET) {
-        return match std::str::from_utf8(b) {
-            Ok(s) => CellValue::Str(s.to_string()),
-            Err(_) => CellValue::BytesB64(B64.encode(b)),
-        };
+        return utf8_str_or_b64(b);
     }
 
-    // 6) YEAR: often returned as bytes depending on protocol/settings; prefer string
-    if ty == ColumnType::MYSQL_TYPE_YEAR {
-        return match std::str::from_utf8(b) {
-            Ok(s) => CellValue::Str(s.to_string()),
-            Err(_) => CellValue::BytesB64(B64.encode(b)),
-        };
-    }
-
-    // 7) Binary BLOB/VARBINARY/BINARY: preserve opaque bytes.
-    if is_binary_bytes(decoder) {
-        return CellValue::BytesB64(B64.encode(b));
-    }
-
-    // 8) TEXT/STRING/VARCHAR/VAR_STRING/CHAR and most other text-like values:
+    // 7) TEXT/STRING/VARCHAR/VAR_STRING/CHAR and most other text-like values:
     // Try UTF-8; if not, keep bytes base64 (do not lose data).
-    match std::str::from_utf8(b) {
-        Ok(s) => CellValue::Str(s.to_string()),
-        Err(_) => CellValue::BytesB64(B64.encode(b)),
-    }
+    utf8_str_or_b64(b)
+}
+
+/// True only for column types that can carry opaque binary string payloads.
+/// Numeric/temporal types use charset 63 in MySQL metadata but are not binary.
+#[inline]
+fn is_binary_payload_type(ty: ColumnType) -> bool {
+    matches!(
+        ty,
+        ColumnType::MYSQL_TYPE_BLOB
+            | ColumnType::MYSQL_TYPE_LONG_BLOB
+            | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | ColumnType::MYSQL_TYPE_TINY_BLOB
+            | ColumnType::MYSQL_TYPE_STRING
+            | ColumnType::MYSQL_TYPE_VARCHAR
+            | ColumnType::MYSQL_TYPE_VAR_STRING
+            | ColumnType::MYSQL_TYPE_GEOMETRY
+            | ColumnType::MYSQL_TYPE_VECTOR
+    )
 }
 
 #[inline]
 fn is_binary_bytes(decoder: &ColDecoder) -> bool {
     const MYSQL_BINARY_CHARSET: u16 = 63;
+
+    if !is_binary_payload_type(decoder.ty) {
+        return false;
+    }
 
     decoder.character_set == MYSQL_BINARY_CHARSET
         || (is_blob_type(decoder.ty) && decoder.flags.contains(ColumnFlags::BINARY_FLAG))
@@ -361,5 +412,36 @@ mod tests {
             CellValue::BytesB64(value) => assert_eq!(value, "AQL/"),
             other => panic!("expected base64 bytes, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn int_bytes_with_binary_charset_decode_as_i64() {
+        // Text protocol + charset 63 must not become BytesB64 (byte 51 != id 3).
+        let value = decode_bytes(b"3", &decoder(ColumnType::MYSQL_TYPE_LONG, 63));
+        assert!(matches!(value, CellValue::I64(3)), "got {value:?}");
+    }
+
+    #[test]
+    fn datetime_bytes_with_binary_charset_decode_as_str() {
+        let value = decode_bytes(
+            b"2026-10-01 04:47:06.554675",
+            &decoder(ColumnType::MYSQL_TYPE_DATETIME, 63),
+        );
+        assert!(
+            matches!(
+                value,
+                CellValue::Str(ref text) if text == "2026-10-01 04:47:06.554675"
+            ),
+            "got {value:?}"
+        );
+    }
+
+    #[test]
+    fn varchar_binary_charset_still_base64() {
+        let value = decode_bytes(
+            &[0x01, 0x02, 0xff],
+            &decoder(ColumnType::MYSQL_TYPE_VAR_STRING, 63),
+        );
+        assert!(matches!(value, CellValue::BytesB64(ref text) if text == "AQL/"));
     }
 }

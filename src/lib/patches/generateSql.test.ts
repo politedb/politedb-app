@@ -112,6 +112,60 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(binaryKeySql[0]).not.toContain("AQID/w==");
   });
 
+  it("MySQL UPDATE/DELETE WHERE uses real int/datetime values from BytesB64 cells", () => {
+    const datetime = "2026-10-01 04:47:06.554675";
+    const datetimeB64 = globalThis.btoa(datetime);
+    const columns = [
+      { name: "id", db_type: "int" },
+      { name: "name", db_type: "varchar" },
+      { name: "created_at", db_type: "datetime" },
+    ];
+    const rows = [
+      [
+        { t: "BytesB64", v: "Mw==" }, // "3"
+        { t: "Str", v: "alice" },
+        { t: "BytesB64", v: datetimeB64 },
+      ],
+    ];
+    const constraints = [
+      {
+        index_name: "PRIMARY",
+        index_algorithm: "BTREE",
+        is_unique: true,
+        is_primary: true,
+        column_name: "id",
+      },
+    ];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      constraints,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 3;");
+    expect(updateSql[0]).not.toContain("WHERE `id` = 51");
+    expect(updateSql[0]).not.toContain("50,48,50,54");
+
+    const deleteSql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": true } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      [],
+      "mysql"
+    );
+    expect(deleteSql).toHaveLength(1);
+    expect(deleteSql[0]).toContain("`id` = 3");
+    expect(deleteSql[0]).toContain("`name` =");
+    expect(deleteSql[0]).toContain("`created_at` =");
+    expect(deleteSql[0]).not.toContain("`id` = 51");
+    expect(deleteSql[0]).not.toContain("50,48,50,54");
+  });
+
   it("serializes MySQL JSON updates and avoids JSON columns in fallback WHERE", () => {
     const sql = generateUpdateSqlFromPatches(
       {
