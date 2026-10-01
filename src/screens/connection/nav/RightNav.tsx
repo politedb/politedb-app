@@ -8,7 +8,7 @@ import { cn } from "src/utils/cn";
 import { ChevronDownIcon, SearchIcon } from "src/components/icons";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { Button } from "src/components/common/Button";
-import { isBlobColumnType } from "src/utils/sqlDialect";
+import { isBlobColumnType } from "src/lib/sql/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 interface Props {

@@ -39,8 +39,8 @@ import {
   generateSqlFromPatches,
   type PatchMap,
 } from "src/utils/generateSql";
-import { runSqlTransaction } from "src/utils/sqlTransaction";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+import { runSqlTransaction } from "src/lib/sql/sqlTransaction";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {

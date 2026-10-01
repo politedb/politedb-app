@@ -14,7 +14,7 @@ import {
   getSqlStreamSnapshot,
 } from "src/screens/connection/hooks/useSqlStreamResult";
 import { operationCancel } from "src/lib/tauri/operation";
-import { isMutatingStatement } from "src/utils/detect";
+import { isMutatingStatement } from "src/lib/sql/detect";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import { buildExplainSql } from "src/lib/queries/sql/explain";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";

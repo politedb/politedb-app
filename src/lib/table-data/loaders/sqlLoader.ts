@@ -1,6 +1,6 @@
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
-import { normalizeClickhouseDbType } from "src/utils/clickhouse";
+import { normalizeClickhouseDbType } from "src/lib/engines/clickhouse";
 import {
   diagramTableColumnsQuery,
   tableColumnsQuery,

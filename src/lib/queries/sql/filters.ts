@@ -2,7 +2,7 @@ import type { DatabaseEngine } from "src/types";
 import {
   isMysqlFamilyEngine,
   mysqlStringCompareExpr,
-} from "src/utils/sqlDialect";
+} from "src/lib/sql/sqlDialect";
 import { qIdent, qLiteral } from "./shared";
 
 function filterColumnExpr(col: string, engine?: DatabaseEngine) {

@@ -1,5 +1,5 @@
 import { serializeCsvChunk, type CsvExportOptions } from "src/utils/csv";
-import { formatJsonChunk, formatSqlChunk } from "src/utils/exportFormats";
+import { formatJsonChunk, formatSqlChunk } from "src/lib/exportPipeline/exportFormats";
 import { cellToString } from "src/utils/convert";
 import type { DatabaseEngine } from "src/types";
 import type { MaskingPolicy } from "src/lib/exportMasking";

@@ -25,14 +25,14 @@ export function isBlobColumnType(dbType: string | undefined): boolean {
 import {
   clickhouseDecimalScale,
   formatClickhouseDecimalForSql,
-} from "./clickhouse";
+} from "../engines/clickhouse";
 
 export {
   clickhouseDecimalScale,
   formatClickhouseDecimalForSql,
   normalizeClickhouseDbType,
   unwrapClickhouseType,
-} from "./clickhouse";
+} from "../engines/clickhouse";
 
 export function isNumericColumnType(dbType: string | undefined): boolean {
   if (!dbType || typeof dbType !== "string") return false;

@@ -56,9 +56,9 @@ import { useProfileStore } from "src/stores/profile";
 import {
   currentDatabaseFromInput,
   inferDatabaseOverrideFromTabLabel,
-} from "src/utils/connection";
+} from "src/lib/connection/connection";
 import type { PatchMap } from "src/utils/generateSql";
-import { pickHostDbUser } from "src/utils/connection";
+import { pickHostDbUser } from "src/lib/connection/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";

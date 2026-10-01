@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "preact/hooks";
 import type { DatabaseEngine } from "src/types";
 import type { QueryResult } from "src/lib/tauri";
 import { runSqlQuery, startSqlQueryStream } from "src/lib/tauri/query";
-import { isDDLStatement } from "src/utils/detect";
+import { isDDLStatement } from "src/lib/sql/detect";
 import { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";

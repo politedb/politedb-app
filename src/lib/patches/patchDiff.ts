@@ -1,6 +1,6 @@
 import type { PatchMap } from "./generateSql";
-import { cellToString } from "./convert";
-import { isBlobColumnType, isJsonColumnType } from "./sqlDialect";
+import { cellToString } from "../../utils/convert";
+import { isBlobColumnType, isJsonColumnType } from "../sql/sqlDialect";
 
 export type PatchCellDiff = {
   column: string;

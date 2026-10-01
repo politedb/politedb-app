@@ -1,5 +1,5 @@
 import { cellToBinaryHexString, cellToString } from "src/utils/convert";
-import { isBlobColumnType } from "src/utils/sqlDialect";
+import { isBlobColumnType } from "src/lib/sql/sqlDialect";
 
 export function formatTableCellValue(
   value: unknown,

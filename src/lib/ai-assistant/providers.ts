@@ -10,7 +10,7 @@ import {
 import {
   DEFAULT_AI_MODEL_NAME,
   normalizeLocalAiModelName,
-} from "src/utils/assistant";
+} from "src/lib/ai-assistant/assistant";
 
 const AI_SELECTED_PROVIDER_KEY = "politedb.ai.provider.selected";
 

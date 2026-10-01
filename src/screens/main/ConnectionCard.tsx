@@ -21,7 +21,7 @@ import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { cn } from "src/utils/cn";
-import { formatConnectionDatabaseDisplay } from "src/utils/connection";
+import { formatConnectionDatabaseDisplay } from "src/lib/connection/connection";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
@@ -33,7 +33,7 @@ import {
   formatExportPasswordError,
   CONNECTION_EXPORT_EXTENSION,
   formatSharingExportSuccessMessage,
-} from "src/utils/profileSharing";
+} from "src/lib/profiles/profileSharing";
 import { KebabButton } from "src/components/common/KebabButton";
 
 /* -------------------------------------------------- */

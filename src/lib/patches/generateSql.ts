@@ -9,7 +9,7 @@ import type {
 import { cellToString } from "src/utils/convert";
 import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { TableDataState } from "src/stores/connection";
-import { getDbConfig } from "src/utils/dbConfig";
+import { getDbConfig } from "src/lib/engines/dbConfig";
 import {
   addColumnSql,
   addForeignKeySql,
@@ -30,7 +30,7 @@ import {
   renameColumnSql,
   renameTableSql,
   sqlStringLiteral,
-} from "src/utils/sqlDialect";
+} from "src/lib/sql/sqlDialect";
 
 // patchMap[action][dataKey][rowKey] = data
 export type PatchData = Record<string, Record<string, Record<string, any>>>;

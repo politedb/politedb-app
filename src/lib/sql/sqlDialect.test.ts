@@ -7,7 +7,7 @@ import {
   sqlForDisplay,
   truncateTableSql,
 } from "./sqlDialect";
-import { formatSqlChunk } from "./exportFormats";
+import { formatSqlChunk } from "../export-pipeline/exportFormats";
 
 describe("sqlDialect", () => {
   it("quotes identifiers by engine", () => {

@@ -1,6 +1,6 @@
 import type { DatabaseEngine } from "src/types";
 import { isSqliteLike } from "src/utils/sqliteLike";
-import { quoteTableName } from "src/utils/sqlDialect";
+import { quoteTableName } from "src/lib/sql/sqlDialect";
 import {
   buildWhereClause,
   type TableFilterCondition,

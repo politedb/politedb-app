@@ -29,7 +29,7 @@ import {
   inferDatabaseOverrideFromTabLabel,
   pickHostDbUser,
   usesTableOnlyBreadcrumb,
-} from "src/utils/connection";
+} from "src/lib/connection/connection";
 import { Button } from "src/components/common/Button";
 import { TabViewMode } from "src/types";
 import { TagChips } from "src/components/common/TagChips";

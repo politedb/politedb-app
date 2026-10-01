@@ -22,7 +22,7 @@ import {
 import { getErrorMessage } from "src/lib/table-data/helpers";
 import { patchMeta } from "src/lib/table-data/metaPatch";
 import type { LoadFlags, TablePagination } from "src/lib/table-data";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import type { DatabaseEngine } from "src/types";
 
 export { tableKey, DEFAULT_LIMIT, DEFAULT_OFFSET } from "src/lib/table-data";

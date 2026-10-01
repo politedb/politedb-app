@@ -18,7 +18,7 @@ import {
   isJsonColumnType,
   quoteIdentifier,
   quoteTableName,
-} from "src/utils/sqlDialect";
+} from "src/lib/sql/sqlDialect";
 import { useTableFocusState } from "src/hooks/useTableFocusState";
 import { defaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { openDialog } from "src/lib/system-dialog";
