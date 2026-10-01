@@ -1,4 +1,5 @@
 import type { TableConstraint } from "src/types";
+import { primaryKeyColumnsFromConstraints } from "src/utils/primaryKey";
 import type { TableRowCache, TableRowState } from "./types";
 
 const ROW_CACHE_LIMIT = 100000;
@@ -55,20 +56,9 @@ export function normalizePrimaryKeyValue(value: unknown): string[] {
 export function getPrimaryKeyColumnsFromConstraints(
   constraints: TableConstraint[] | null | undefined
 ): string[] {
-  if (!constraints?.length) return [];
-
-  const isTruthy = (v: unknown) =>
-    v === true || String(v ?? "").toLowerCase() === "true";
-
-  const pkConstraint = constraints.find(
-    (c) =>
-      isTruthy(c.is_primary) ||
-      c.index_name?.toLowerCase() === "primary" ||
-      c.index_name?.toLowerCase().includes("pkey") ||
-      (isTruthy(c.is_unique) && c.index_name?.toLowerCase().includes("primary"))
+  return normalizePrimaryKeyValue(
+    primaryKeyColumnsFromConstraints(constraints).join(",")
   );
-
-  return normalizePrimaryKeyValue(pkConstraint?.column_name);
 }
 
 export function raf(cb: () => void) {

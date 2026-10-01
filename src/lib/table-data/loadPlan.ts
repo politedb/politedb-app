@@ -68,7 +68,11 @@ export function computeLoadPlan(params: {
     (isFirstLoad && !hasRowCount) ||
     (!isFirstLoad && (!hasRowCount || refreshStats));
   const needSizeInfo = force || !hasSizeInfo || refreshStats;
-  const needMeta = force || refreshMeta;
+  // Structure/constraints are required for PK-aware Save Changes WHERE clauses.
+  // Load once when missing (data tab used to skip this until Structure/Save).
+  // Foreign keys stay independent so data-grid FK links are not gated on meta.
+  const hasConstraints = Array.isArray(prev.constraints);
+  const needMeta = force || refreshMeta || !hasConstraints;
   const needForeignKeys = force || refreshForeignKeys || !hasForeignKeys;
 
   const needAnyMetaWork =

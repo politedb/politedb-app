@@ -37,7 +37,7 @@ export function diagramSchemaMetadataQueries(
       uniqueConstraints: regexEscape(`
         SELECT
           table_name,
-          CASE WHEN UPPER(index_name) = 'PRIMARY' THEN TRUE ELSE FALSE END AS is_primary,
+          CASE WHEN UPPER(index_name) = 'PRIMARY' THEN 'true' ELSE 'false' END AS is_primary,
           GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') AS column_names
         FROM information_schema.statistics
         WHERE table_schema = ${qLiteral(schema)}

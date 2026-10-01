@@ -7,6 +7,10 @@ import type {
   DatabaseEngine,
 } from "src/types";
 import { cellToString } from "src/utils/convert";
+import {
+  isPrimaryKeyColumn,
+  resolvePrimaryKeyColumns,
+} from "src/utils/primaryKey";
 import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
 import { TableDataState } from "src/stores/connection";
 import { getDbConfig } from "src/lib/engines/dbConfig";
@@ -101,7 +105,7 @@ function assertSafeRowIdentity(args: {
   action: "update" | "delete";
   rowKey: string;
 }): string[] {
-  const primaryKeyColumns = getPrimaryKeyColumns(args.constraints);
+  const primaryKeyColumns = getPrimaryKeyColumns(args.constraints, args.columns);
   if (primaryKeyColumns.length > 0) return primaryKeyColumns;
 
   const virtualColumns = virtualIdentityColumns(args.columns);
@@ -127,7 +131,10 @@ export function analyzePatchIdentitySafety(
     const columns = tableData.columns ?? [];
     if (!columns.length) continue;
 
-    const primaryKeyColumns = getPrimaryKeyColumns(tableData.constraints);
+    const primaryKeyColumns = getPrimaryKeyColumns(
+      tableData.constraints,
+      tableData.columns
+    );
     if (primaryKeyColumns.length > 0) continue;
 
     const { schema, name: tableName } = tableWindow.table;
@@ -173,34 +180,13 @@ export function analyzePatchIdentitySafety(
 }
 
 /**
- * Extract primary key column names from constraints
+ * Extract primary key column names from constraints, falling back to column flags.
  */
 function getPrimaryKeyColumns(
-  constraints: TableConstraintType[] | null | undefined
+  constraints: TableConstraintType[] | null | undefined,
+  columns?: TableDataType["columns"] | null
 ): string[] {
-  if (!constraints || constraints.length === 0) {
-    return [];
-  }
-
-  const isTruthy = (v: unknown) =>
-    v === true || String(v ?? "").toLowerCase() === "true";
-
-  const pkConstraint = constraints.find(
-    (c) =>
-      isTruthy(c.is_primary) ||
-      c.index_name.toLowerCase() === "primary" ||
-      c.index_name.toLowerCase().includes("pkey") ||
-      (c.is_unique && c.index_name.toLowerCase().includes("primary"))
-  );
-
-  if (!pkConstraint?.column_name) {
-    return [];
-  }
-
-  return pkConstraint.column_name
-    .split(",")
-    .map((col) => col.trim())
-    .filter(Boolean);
+  return resolvePrimaryKeyColumns({ constraints, columns });
 }
 
 /**
@@ -226,8 +212,8 @@ export function generateUpdateSqlFromPatches(
   const columns = tableData.columns;
   const rows = tableData.rows;
 
-  // Get primary key columns if available
-  const primaryKeyColumns = getPrimaryKeyColumns(constraints);
+  // Get primary key columns if available (constraints first, else column flags)
+  const primaryKeyColumns = getPrimaryKeyColumns(constraints, columns);
   const usePrimaryKey = primaryKeyColumns.length > 0;
 
   if (!usePrimaryKey) {
@@ -275,7 +261,7 @@ export function generateUpdateSqlFromPatches(
       if (!col) continue;
 
       // Skip if using primary key and this column is not a primary key
-      if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
+      if (usePrimaryKey && !isPrimaryKeyColumn(col.name, primaryKeyColumns)) {
         continue;
       }
       if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type)) {
@@ -907,8 +893,8 @@ export function generateDeleteSqlFromPatches(
   const columns = tableData.columns;
   const rows = tableData.rows;
 
-  // Get primary key columns if available
-  const primaryKeyColumns = getPrimaryKeyColumns(constraints);
+  // Get primary key columns if available (constraints first, else column flags)
+  const primaryKeyColumns = getPrimaryKeyColumns(constraints, columns);
   const usePrimaryKey = primaryKeyColumns.length > 0;
 
   if (!usePrimaryKey) {
@@ -941,7 +927,7 @@ export function generateDeleteSqlFromPatches(
       if (!col) continue;
 
       // Skip if using primary key and this column is not a primary key
-      if (usePrimaryKey && !primaryKeyColumns.includes(col.name)) {
+      if (usePrimaryKey && !isPrimaryKeyColumn(col.name, primaryKeyColumns)) {
         continue;
       }
       if (!usePrimaryKey && !isVirtualIdentityColumn(col.db_type)) {

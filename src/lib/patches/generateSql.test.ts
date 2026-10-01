@@ -166,6 +166,62 @@ describe("generateUpdateSqlFromPatches", () => {
     expect(deleteSql[0]).not.toContain("50,48,50,54");
   });
 
+  it("MySQL fleet.users_deleted uses PRIMARY key WHERE when constraints load", () => {
+    const columns = [
+      { name: "id", db_type: "int" },
+      { name: "name", db_type: "varchar" },
+      { name: "created_at", db_type: "datetime" },
+    ];
+    const rows = [[3, "alice", "2026-10-01 04:47:06"]];
+    const constraints = [
+      {
+        index_name: "PRIMARY",
+        index_algorithm: "BTREE",
+        // MySQL TRUE often arrives as 1 / "1" before string normalization
+        is_unique: true,
+        is_primary: "1" as unknown as boolean,
+        column_name: "id",
+      },
+    ];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      constraints as never,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 3;");
+    expect(updateSql[0]).toMatch(/WHERE `id` = 3;?\s*$/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`name`/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`created_at`/);
+  });
+
+  it("MySQL uses column is_primary flags when constraints are missing", () => {
+    const columns = [
+      { name: "id", db_type: "int", is_primary: true },
+      { name: "name", db_type: "varchar" },
+      { name: "note", db_type: "text" },
+    ];
+    const rows = [[7, "alice", "x"]];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      null,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 7;");
+    expect(updateSql[0]).toMatch(/WHERE `id` = 7;?\s*$/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`name`/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`note`/);
+  });
+
   it("serializes MySQL JSON updates and avoids JSON columns in fallback WHERE", () => {
     const sql = generateUpdateSqlFromPatches(
       {

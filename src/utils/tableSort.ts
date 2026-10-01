@@ -1,5 +1,9 @@
 import type { TableSort } from "src/lib/queries/sql";
 import type { DatabaseEngine, TableConstraint } from "src/types";
+import {
+  cellIsTruthy,
+  resolvePrimaryKeyColumns,
+} from "src/utils/primaryKey";
 
 export type TableColumnForSort = {
   name: string | null;
@@ -12,31 +16,6 @@ const ENGINES_WITHOUT_STABLE_ORDER: DatabaseEngine[] = [
   "cassandra",
 ];
 
-function isTruthyPrimary(value: unknown): boolean {
-  return value === true || String(value ?? "").toLowerCase() === "true";
-}
-
-function getPrimaryKeyColumns(
-  constraints: TableConstraint[] | null | undefined
-): string[] {
-  if (!constraints?.length) return [];
-
-  const pkConstraint = constraints.find(
-    (c) =>
-      isTruthyPrimary(c.is_primary) ||
-      c.index_name.toLowerCase() === "primary" ||
-      c.index_name.toLowerCase().includes("pkey") ||
-      (c.is_unique && c.index_name.toLowerCase().includes("primary"))
-  );
-
-  if (!pkConstraint?.column_name) return [];
-
-  return pkConstraint.column_name
-    .split(",")
-    .map((col) => col.trim())
-    .filter(Boolean);
-}
-
 /** Stable ORDER BY for paginated table scans (PK → `id` → first column). */
 export function resolveDefaultTableSort(args: {
   columns?: TableColumnForSort[] | null;
@@ -48,22 +27,15 @@ export function resolveDefaultTableSort(args: {
     return null;
   }
 
-  const pkFromConstraints = getPrimaryKeyColumns(constraints ?? null);
-  if (pkFromConstraints.length > 0) {
-    return { colName: pkFromConstraints[0]!, direction: "asc" };
+  const pkColumns = resolvePrimaryKeyColumns({ constraints, columns });
+  if (pkColumns.length > 0) {
+    return { colName: pkColumns[0]!, direction: "asc" };
   }
 
   const namedColumns = (columns ?? []).filter(
     (c): c is TableColumnForSort & { name: string } =>
       Boolean((c.name ?? "").trim())
   );
-
-  const pkFromColumns = namedColumns
-    .filter((c) => isTruthyPrimary(c.is_primary))
-    .map((c) => c.name);
-  if (pkFromColumns.length > 0) {
-    return { colName: pkFromColumns[0]!, direction: "asc" };
-  }
 
   const idColumn = namedColumns.find((c) => c.name.toLowerCase() === "id");
   if (idColumn) {
@@ -78,5 +50,5 @@ export function resolveDefaultTableSort(args: {
 }
 
 export function cellIsTruthyPrimary(value: unknown): boolean {
-  return isTruthyPrimary(value);
+  return cellIsTruthy(value);
 }

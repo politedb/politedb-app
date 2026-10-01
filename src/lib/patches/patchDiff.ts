@@ -1,5 +1,6 @@
 import type { PatchMap } from "./generateSql";
 import { cellToString } from "../../utils/convert";
+import { resolvePrimaryKeyColumns } from "../../utils/primaryKey";
 import { isBlobColumnType, isJsonColumnType } from "../sql/sqlDialect";
 
 export type PatchCellDiff = {
@@ -24,29 +25,6 @@ function displayValue(value: unknown) {
   return cellToString(value, true) ?? "";
 }
 
-function isTruthy(value: unknown) {
-  return value === true || String(value ?? "").toLowerCase() === "true";
-}
-
-function primaryKeyColumns(
-  constraints: Array<{
-    index_name: string;
-    is_primary?: boolean | string;
-    is_unique?: boolean | string;
-    column_name: string;
-  }> | null
-) {
-  const constraint = constraints?.find(
-    (item) =>
-      isTruthy(item.is_primary) ||
-      item.index_name.toLowerCase() === "primary" ||
-      item.index_name.toLowerCase().includes("pkey")
-  );
-  return (constraint?.column_name ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 function virtualIdentityColumns(
   columns: Array<{ name: string; db_type?: string }>
@@ -113,7 +91,10 @@ export function buildPatchDiffs(
     const { schema, name } = tableWindow.table;
     const table = tableLabel(schema, name);
     const columns = tableData.columns ?? [];
-    const pkColumns = primaryKeyColumns(tableData.constraints ?? null);
+    const pkColumns = resolvePrimaryKeyColumns({
+      constraints: tableData.constraints ?? null,
+      columns: tableData.columns ?? null,
+    });
     const tableKey = activeScreen ? `${activeScreen}.${schema}.${name}` : "";
 
     for (const [rowKey, patch] of Object.entries(patches.create?.data ?? {})) {
