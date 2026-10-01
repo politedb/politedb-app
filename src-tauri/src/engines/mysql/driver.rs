@@ -260,13 +260,11 @@ pub async fn connect_mysql(
                 match smoke_mysql(&pool2, &input).await {
                     Ok(_) => pool = pool2,
                     Err(fallback_err) => {
-                        return Err(format!(
-                            "MYSQL_CONNECT_FAILED: primary={primary_err}; fallback={fallback_err}"
-                        ));
+                        return Err(format!("primary={primary_err}; fallback={fallback_err}"));
                     }
                 }
             } else {
-                return Err(format!("MYSQL_CONNECT_FAILED: {primary_err}"));
+                return Err(format!("{primary_err}"));
             }
         }
     }
@@ -299,11 +297,11 @@ pub async fn test_mysql_direct(
             if let Some(fallback) = plan.fallback {
                 let pool2 = Pool::new(fallback);
                 smoke_mysql(&pool2, &input).await.map_err(|fallback_err| {
-                    format!("MYSQL_TEST_FAILED: primary={primary_err}; fallback={fallback_err}")
+                    format!("primary={primary_err}; fallback={fallback_err}")
                 })?;
                 Ok(())
             } else {
-                Err(format!("MYSQL_TEST_FAILED: {primary_err}"))
+                Err(format!("{primary_err}"))
             }
         }
     }
