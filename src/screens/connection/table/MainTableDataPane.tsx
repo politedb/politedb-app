@@ -42,7 +42,8 @@ import {
   dropTableQuery,
   type TableSort,
 } from "src/lib/queries/sql";
-import type { TableForeignKey, TableItem } from "src/types";
+import type { TableItem } from "src/types";
+import { buildForeignKeyColumnMap } from "src/utils/foreignKey";
 import { MainTableDialogs } from "./MainTableDialogs";
 import { useMainTablePaneState } from "../hooks/useMainTablePaneState";
 import { useMainTableDataLoading } from "../hooks/useMainTableDataLoading";
@@ -655,20 +656,10 @@ export function MainTableDataPane(props: {
 
   const getEmptyRowAt = useCallback(() => undefined, []);
 
-  const foreignKeyMap = useMemo(() => {
-    const out: Record<string, TableForeignKey> = {};
-    const fks = meta.foreignKeys ?? [];
-    for (const fk of fks) {
-      if (!fk.column_names || !fk.ref_column_names) continue;
-      out[fk.column_names] = {
-        schema: fk.ref_table_schema,
-        table: fk.ref_table_name,
-        column: fk.ref_column_names,
-      };
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta.foreignKeys, activeTableWindow.table.schema]);
+  const foreignKeyMap = useMemo(
+    () => buildForeignKeyColumnMap(meta.foreignKeys),
+    [meta.foreignKeys]
+  );
 
   const handleNavigateFk = useCallback(
     async (args: {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { cellEditValuesEqual, cellToString } from "src/utils/convert";
+import { findFkForColumn } from "src/utils/foreignKey";
 import { DATA_ACTIONS, DATA_KEYS } from "src/constant";
 import type { ConnectionState, DataPatchesState } from "./types";
 import {
@@ -523,13 +524,10 @@ export const useConnectionStore = create<ConnectionState>()(
                       : "";
                   if ((cellToString(origVal) ?? "") === "" && rowColumn) {
                     const meta = s.tableDataMap[tableKey];
-                    const existingFk =
-                      meta?.foreignKeys?.find((fk) =>
-                        fk.column_names
-                          .split(",")
-                          .map((x) => x.trim())
-                          .includes(rowColumn)
-                      ) ?? null;
+                    const existingFk = findFkForColumn(
+                      meta?.foreignKeys,
+                      rowColumn
+                    );
                     if (
                       existingFk?.ref_table_name &&
                       existingFk?.ref_column_names
