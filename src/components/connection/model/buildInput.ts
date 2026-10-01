@@ -5,7 +5,7 @@ import type {
 } from "src/lib/tauri";
 import { normalizeTag, toNumber } from "src/utils/convert";
 import type { DatabaseEngine } from "src/types";
-import type { FormValues } from "./types";
+import type { FormValues } from "../types";
 
 export function defaultPortForEngine(engine: DatabaseEngine): number {
   switch (engine) {

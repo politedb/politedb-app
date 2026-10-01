@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTED_TEXT } from "src/lib/exportMasking";
+import { REDACTED_TEXT } from "src/lib/export-masking";
 import { serializeExportChunk, serializeExportTrailer } from "./serializeChunk";
 
 const SENSITIVE = "SECRET_VALUE_SHOULD_NOT_LEAK";

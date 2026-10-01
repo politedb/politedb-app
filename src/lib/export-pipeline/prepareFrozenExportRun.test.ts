@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDefaultMaskedPolicy,
   withColumnRule,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 import { prepareFrozenExportRun } from "./runStreamingExport";
 import type { ExportConfig, ExportOptions } from "./types";
 

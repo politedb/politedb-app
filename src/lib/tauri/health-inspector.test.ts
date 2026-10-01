@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HEALTH_INSPECTOR_MAX_STATEMENTS,
   collectHealthInspectorSnapshot,
-} from "./healthInspector";
+} from "./health-inspector";
 import type { QueryResult } from "./types";
 
 function result(columns: string[], rows: any[][] = []): QueryResult {

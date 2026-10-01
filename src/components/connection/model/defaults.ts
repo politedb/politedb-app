@@ -6,19 +6,19 @@ import type {
 import { normalizeTag } from "src/utils/convert";
 import type { DatabaseEngine } from "src/types";
 import { SUPPORTED_DATABASES } from "src/constant";
-import type { FormValues } from "./types";
+import type { FormValues } from "../types";
 import {
   defaultHostForEngine,
   defaultPortForEngine,
   pickByEngine,
   resolveClickhouseProtocol,
 } from "./buildInput";
-import { dedupeKeepOrder } from "./dedupe";
+import { dedupeKeepOrder } from "../dedupe";
 import {
   defaultCredentialDatabase,
   defaultCredentialUser,
 } from "src/lib/engines";
-import { getConnectionFormEngineConfig } from "./engineFormConfig";
+import { getConnectionFormEngineConfig } from "../engineFormConfig";
 
 function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
   return (

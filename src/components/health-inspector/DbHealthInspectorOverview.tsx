@@ -4,7 +4,7 @@ import { formatBytesSize } from "src/utils/convert";
 import {
   formatExactCount,
   formatHealthInspectorTimestamp,
-} from "src/lib/healthInspector/format";
+} from "src/lib/health-inspector/format";
 import {
   BLOCKING_LIMITATION_NOTE,
   DEADLOCKS_CAVEAT,
@@ -13,11 +13,11 @@ import {
   formatAgeSeconds,
   formatOptionalNumber,
   overviewVisibilityNote,
-} from "src/lib/healthInspector/signals";
+} from "src/lib/health-inspector/signals";
 import type {
   HealthInspectorSnapshot,
   HealthSection,
-} from "src/lib/healthInspector/types";
+} from "src/lib/health-inspector/types";
 
 function formatCollectedAt(ts: number | null): string {
   return formatHealthInspectorTimestamp(ts);

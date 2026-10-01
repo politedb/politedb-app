@@ -2,7 +2,7 @@ import type { CsvExportOptions } from "src/utils/csv";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import type { DatabaseEngine, TableConstraint } from "src/types";
-import type { MaskingPolicy } from "src/lib/exportMasking";
+import type { MaskingPolicy } from "src/lib/export-masking";
 
 export type ExportFormat = "csv" | "json" | "sql";
 

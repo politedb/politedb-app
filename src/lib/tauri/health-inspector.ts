@@ -7,7 +7,7 @@ import {
   healthInspectorStatementsSql,
   healthInspectorTablesSql,
   type HealthInspectorStatementsCapability,
-} from "src/lib/queries/sql/healthInspector";
+} from "src/lib/queries/sql/health-inspector";
 import {
   decodeCapabilities,
   decodeIndexes,
@@ -18,7 +18,7 @@ import {
   decodeTables,
   isPermissionOrMissingRelationError,
   sanitizeHealthError,
-} from "src/lib/healthInspector/decode";
+} from "src/lib/health-inspector/decode";
 import { isAbortError, runSqlQuery } from "src/lib/tauri/query";
 import type {
   HealthIndexRow,
@@ -29,7 +29,7 @@ import type {
   HealthStatementRow,
   HealthStatementsInfo,
   HealthTableRow,
-} from "src/lib/healthInspector/types";
+} from "src/lib/health-inspector/types";
 
 export const HEALTH_INSPECTOR_QUERY_TIMEOUT_MS = 10_000;
 export const HEALTH_INSPECTOR_OVERALL_DEADLINE_MS = 30_000;

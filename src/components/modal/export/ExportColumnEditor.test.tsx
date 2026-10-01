@@ -4,7 +4,7 @@ import { ExportColumnEditor } from "./ExportColumnEditor";
 import {
   buildDefaultMaskedPolicy,
   withColumnRule,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 
 const columns = ["id", "email", "note", "created_at", "name", "role"];
 

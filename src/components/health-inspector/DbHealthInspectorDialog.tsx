@@ -23,14 +23,14 @@ import { cn } from "src/utils/cn";
 import {
   formatHealthInspectorTimestamp,
   latestHealthTimestamp,
-} from "src/lib/healthInspector/format";
+} from "src/lib/health-inspector/format";
 import {
   DEAD_ROW_CAVEAT,
   INDEX_SCAN_CAVEAT,
   PARTITION_SIZE_NOTE,
   formatAgeSeconds,
   formatOptionalNumber,
-} from "src/lib/healthInspector/signals";
+} from "src/lib/health-inspector/signals";
 import type {
   HealthIndexRow,
   HealthInspectorSnapshot,
@@ -38,7 +38,7 @@ import type {
   HealthSessionRow,
   HealthStatementRow,
   HealthTableRow,
-} from "src/lib/healthInspector/types";
+} from "src/lib/health-inspector/types";
 import { DbHealthInspectorOverview } from "./DbHealthInspectorOverview";
 
 type SectionKey = "overview" | "sessions" | "statements" | "tables" | "indexes";

@@ -24,7 +24,8 @@ flowchart LR
 - `src/components/` owns reusable UI and feature UI.
 - `src/hooks/` owns reusable frontend behavior and orchestration.
 - `src/stores/` owns shared client state, row windows, patches, filters, sorting, SQL results, and active connection state.
-- `src/lib/` owns typed service helpers: Tauri wrappers, query builders, table loading, patch SQL generation, editor helpers, updater helpers, and engine-specific frontend utilities.
+- `src/lib/` owns typed service helpers: Tauri wrappers, query builders (`queries/`, `sql/`), table loading, patch SQL generation, export pipeline/masking, profiles, AI assistant, editor helpers, updater helpers, and engine-specific frontend utilities.
+- `src/screens/connection/` is carved into `workspace/`, `table/`, `sql/`, `nav/`, `export/`, plus colocated `hooks/` and `lib/` helpers.
 - `src/utils/` owns small pure helpers shared across features.
 
 Keep rendering, state orchestration, query generation, and Tauri I/O separate. When a screen grows, move focused logic into hooks or `src/lib/` helpers rather than adding more unrelated logic to the screen component.
@@ -55,7 +56,7 @@ Table filters and sort are part of the data query contract. Any reload after sav
 
 1. Cell edits create patch entries in `dataPatchMap`.
 2. UI renders pending changes over original rows.
-3. Save collects changed windows and builds SQL via `src/lib/patches/` and `src/utils/generateSql`.
+3. Save collects changed windows and builds SQL via `src/lib/patches/` (including `generateSql`).
 4. SQL engines execute statements through backend transaction helpers where supported.
 5. Non-SQL engines route to focused patch adapters.
 6. After success, patches are cleared and affected tables are reloaded.

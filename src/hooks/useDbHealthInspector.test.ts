@@ -4,7 +4,7 @@ import { useDbHealthInspector } from "./useDbHealthInspector";
 
 const collectMock = vi.fn();
 
-vi.mock("src/lib/tauri/healthInspector", () => ({
+vi.mock("src/lib/tauri/health-inspector", () => ({
   collectHealthInspectorSnapshot: (...args: any[]) => collectMock(...args),
 }));
 

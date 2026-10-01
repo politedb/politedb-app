@@ -9,7 +9,7 @@ import {
   formatPreviewCell,
   type MaskingPolicy,
   type MaskRuleKind,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 import { SearchIcon } from "src/components/icons";
 import { Tooltip } from "src/components/common/Tooltip";
 

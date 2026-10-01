@@ -10,7 +10,7 @@ import {
   healthInspectorStatementsInfoSql,
   healthInspectorStatementsSql,
   healthInspectorTablesSql,
-} from "./healthInspector";
+} from "./health-inspector";
 
 describe("healthInspector SQL builders", () => {
   it("uses catalog/statistics sources only and caps list fetches", () => {

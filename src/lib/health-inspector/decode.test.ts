@@ -17,7 +17,7 @@ import {
 import {
   HEALTH_INSPECTOR_LIST_LIMIT,
   HEALTH_INSPECTOR_QUERY_TEXT_CAP,
-} from "src/lib/queries/sql/healthInspector";
+} from "src/lib/queries/sql/health-inspector";
 
 describe("healthInspector decode", () => {
   it("decodes nulls, numeric strings, and large counters without coercing unknown to zero", () => {

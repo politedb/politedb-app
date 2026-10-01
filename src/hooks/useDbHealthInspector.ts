@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { collectHealthInspectorSnapshot } from "src/lib/tauri/healthInspector";
-import type { HealthInspectorSnapshot } from "src/lib/healthInspector/types";
+import { collectHealthInspectorSnapshot } from "src/lib/tauri/health-inspector";
+import type { HealthInspectorSnapshot } from "src/lib/health-inspector/types";
 import type { DatabaseEngine } from "src/types";
 
 export type HealthInspectorContext = {

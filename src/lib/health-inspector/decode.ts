@@ -3,7 +3,7 @@ import {
   HEALTH_INSPECTOR_LIST_LIMIT,
   HEALTH_INSPECTOR_QUERY_TEXT_CAP,
   PG_INSUFFICIENT_PRIVILEGE_QUERY,
-} from "src/lib/queries/sql/healthInspector";
+} from "src/lib/queries/sql/health-inspector";
 import type {
   HealthBlockerSummary,
   HealthInspectorCapabilities,

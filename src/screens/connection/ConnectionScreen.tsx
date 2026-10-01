@@ -31,7 +31,7 @@ import { SnippetPickerDialog } from "src/components/modal/SnippetPickerDialog";
 import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 import type { SavedSnippet } from "src/lib/snippets/types";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
-import { DbHealthInspectorDialog } from "@root/src/components/healthInspector/DbHealthInspectorDialog";
+import { DbHealthInspectorDialog } from "@root/src/components/health-inspector/DbHealthInspectorDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";

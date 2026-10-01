@@ -5,7 +5,7 @@ import {
   transformExportChunk,
   validateMaskingPolicy,
   type MaskingPolicy,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 import { tableExportQuery } from "src/lib/queries/sql";
 import {
   exportSessionAbort,

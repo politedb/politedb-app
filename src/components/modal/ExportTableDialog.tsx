@@ -27,7 +27,7 @@ import {
   validateMaskingPolicy,
   withColumnRule,
   type MaskRuleKind,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 import { cn } from "src/utils/cn";
 import { showMessage } from "src/lib/system-dialog";
 

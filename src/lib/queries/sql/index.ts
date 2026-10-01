@@ -8,4 +8,4 @@ export * from "./tableStructure";
 export * from "./mysqlStructure";
 export * from "./ddl";
 export * from "./diagram";
-export * from "./healthInspector";
+export * from "./health-inspector";

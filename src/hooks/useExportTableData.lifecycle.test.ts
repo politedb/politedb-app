@@ -3,7 +3,7 @@ import { useEffect } from "preact/hooks";
 import { act, render, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useExportTableData } from "./useExportTableData";
-import type { ExportConfig } from "src/lib/exportPipeline";
+import type { ExportConfig } from "src/lib/export-pipeline";
 
 const mocks = vi.hoisted(() => ({
   saveDialog: vi.fn(),
@@ -14,9 +14,9 @@ vi.mock("src/lib/system-dialog", () => ({
   saveDialog: (...args: unknown[]) => mocks.saveDialog(...args),
 }));
 
-vi.mock("src/lib/exportPipeline", async (importOriginal) => {
+vi.mock("src/lib/export-pipeline", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("src/lib/exportPipeline")>();
+    await importOriginal<typeof import("src/lib/export-pipeline")>();
   return {
     ...actual,
     runStreamingExport: (...args: unknown[]) =>
