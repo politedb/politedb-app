@@ -1,5 +1,5 @@
 import { useCallback, useState } from "preact/hooks";
-import { openDialog, saveDialog } from "src/lib/system-dialog";
+import { openDialog, saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeFile, readFile } from "src/lib/system-fs";
 
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
@@ -583,13 +583,11 @@ export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
   const [dbBackupRunning, setDbBackupRunning] = useState(false);
   const [dbRestoreRunning, setDbRestoreRunning] = useState(false);
-  const [opError, setOpError] = useState<string | null>(null);
 
   const onBackupDatabase = useCallback(
     async (databaseName?: string) => {
       if (!rt.runtimeConnectionId) return;
 
-      setOpError(null);
       setDbBackupRunning(true);
 
       try {
@@ -738,9 +736,9 @@ export function useDatabaseBackup() {
 
         showToast("Database backup completed.", { tone: "success" });
       } catch (err) {
-        setOpError(
-          err instanceof Error ? err.message : "Backup database failed."
-        );
+        const message =
+          err instanceof Error ? err.message : "Backup database failed.";
+        void showMessage(message, { title: "Backup error", kind: "error" });
       } finally {
         setDbBackupRunning(false);
       }
@@ -754,8 +752,6 @@ export function useDatabaseBackup() {
       opts?: { dialogTitle?: string; successToast?: string }
     ) => {
       if (!rt.runtimeConnectionId) return;
-
-      setOpError(null);
 
       const path = await openDialog({
         title: opts?.dialogTitle ?? "Restore database from dump",
@@ -848,8 +844,7 @@ export function useDatabaseBackup() {
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "SQL dump import failed.";
-        setOpError(message);
-        showToast(message, { tone: "error" });
+        void showMessage(message, { title: "Restore error", kind: "error" });
       } finally {
         setDbRestoreRunning(false);
       }
@@ -881,8 +876,6 @@ export function useDatabaseBackup() {
   return {
     dbBackupRunning,
     dbRestoreRunning,
-    opError,
-    setOpError,
     onBackupDatabase,
     onRestoreDatabase,
     onImportSqlDump,

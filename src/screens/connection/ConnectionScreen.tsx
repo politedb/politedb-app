@@ -24,7 +24,7 @@ import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection
 import { resolveTabRuntimeConnectionId } from "src/lib/runtimeConnection";
 import { resolveDefaultSchema } from "src/lib/engines";
 
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 import { SaveChangesDialog } from "src/components/modal/SaveChangesDialog";
 import { DatabaseSearchDialog } from "src/components/modal/DatabaseSearchDialog";
 import { SnippetPickerDialog } from "src/components/modal/SnippetPickerDialog";
@@ -161,8 +161,6 @@ export function ConnectionScreen() {
     setSnippetPickerOpen,
     diagramOpen,
     setDiagramOpen,
-    errorDialogOpen,
-    setErrorDialogOpen,
     healthInspectorOpen,
     setHealthInspectorOpen,
   } = useConnectionScreenState();
@@ -213,8 +211,19 @@ export function ConnectionScreen() {
   } = useEnsureRuntimeConnection(activeTab);
 
   useEffect(() => {
-    setErrorDialogOpen(!!errorRuntime);
-  }, [errorRuntime, setErrorDialogOpen]);
+    if (!errorRuntime) return;
+    void showMessage(errorRuntime, {
+      title: "Connection error",
+      kind: "error",
+    });
+  }, [errorRuntime]);
+
+  useEffect(() => {
+    if (!error) return;
+    void showMessage(error, { title: "Error", kind: "error" }).then(() => {
+      setError(null);
+    });
+  }, [error, setError]);
 
   /* =============================================================================
    * Engine/metaKey (depends on activeTab)
@@ -239,8 +248,6 @@ export function ConnectionScreen() {
       await saveProfile(saved);
       await loadProfiles();
       closeEdit();
-      setErrorDialogOpen(false);
-
       const currentTab =
         useScreenStore
           .getState()
@@ -260,14 +267,7 @@ export function ConnectionScreen() {
         setRuntimeConnectionError(null);
       }
     },
-    [
-      activeTab,
-      saveProfile,
-      loadProfiles,
-      closeEdit,
-      setErrorDialogOpen,
-      setRuntimeConnectionError,
-    ]
+    [activeTab, saveProfile, loadProfiles, closeEdit, setRuntimeConnectionError]
   );
 
   const metaKey = useMemo(() => {
@@ -379,14 +379,8 @@ export function ConnectionScreen() {
     if (!runtimeConnectionId || runtimeConnectionId === prev) return;
 
     setRuntimeConnectionError(null);
-    setErrorDialogOpen(false);
     void refreshSchemaAndTables();
-  }, [
-    runtimeConnectionId,
-    refreshSchemaAndTables,
-    setRuntimeConnectionError,
-    setErrorDialogOpen,
-  ]);
+  }, [runtimeConnectionId, refreshSchemaAndTables, setRuntimeConnectionError]);
 
   const sidebarTables = useMemo(() => {
     const base = [...filteredTables];
@@ -874,14 +868,6 @@ export function ConnectionScreen() {
             isProfileLocked={isProfileLocked}
           />
 
-          {error && (
-            <ErrorDialog
-              open={!!error}
-              error={error}
-              onClose={() => setError(null)}
-            />
-          )}
-
           {showSaveDialog && (
             <SaveChangesDialog
               open={showSaveDialog}
@@ -902,15 +888,6 @@ export function ConnectionScreen() {
             />
           )}
         </div>
-
-        {errorDialogOpen && (
-          <ErrorDialog
-            open
-            error={errorRuntime ?? ""}
-            onClose={() => setErrorDialogOpen(false)}
-            onRetry={() => void reloadRuntime()}
-          />
-        )}
 
         <DatabaseSearchDialog
           open={searchDialogOpen}

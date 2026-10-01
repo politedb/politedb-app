@@ -42,7 +42,6 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
@@ -295,8 +294,6 @@ export function MenuBar({
   const {
     dbBackupRunning,
     dbRestoreRunning,
-    opError,
-    setOpError,
     onBackupDatabase,
     onRestoreDatabase,
   } = useDatabaseBackup();
@@ -865,16 +862,6 @@ export function MenuBar({
         onOpenDatabase={onOpenDatabase}
         onClose={() => setDbDialogOpen(false)}
       />
-
-      {opError && (
-        <ErrorDialog
-          open={true}
-          error={opError}
-          onClose={() => setOpError(null)}
-          size="md"
-          showRevertNote={false}
-        />
-      )}
     </>
   );
 }

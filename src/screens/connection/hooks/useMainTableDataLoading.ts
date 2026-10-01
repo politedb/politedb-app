@@ -3,6 +3,7 @@ import type { Dispatch, StateUpdater } from "preact/hooks";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionStore } from "src/stores/connection";
+import { showMessage } from "src/lib/system-dialog";
 
 const EMPTY_META = {
   columns: null,
@@ -44,7 +45,6 @@ export function useMainTableDataLoading(args: {
   progressNow: number;
   setProgressNow: Dispatch<StateUpdater<number>>;
   viewMode: "data" | "structure";
-  setErrorDialogOpen: Dispatch<StateUpdater<boolean>>;
   loadTableData: (
     schema: string,
     table: string,
@@ -79,7 +79,6 @@ export function useMainTableDataLoading(args: {
     progressNow,
     setProgressNow,
     viewMode,
-    setErrorDialogOpen,
     loadTableData,
     rerender,
   } = args;
@@ -243,12 +242,17 @@ export function useMainTableDataLoading(args: {
   useEffect(() => {
     if (!hasError) {
       dismissedTableErrorByKey.delete(activeKey);
-      setErrorDialogOpen(false);
       return;
     }
     if (dismissedTableErrorByKey.get(activeKey) === errorText) return;
-    setErrorDialogOpen(true);
-  }, [hasError, errorText, activeKey, setErrorDialogOpen]);
+    const key = activeKey;
+    const message = errorText;
+    void showMessage(message, { title: "Execution", kind: "error" }).then(
+      () => {
+        dismissedTableErrorByKey.set(key, message);
+      }
+    );
+  }, [hasError, errorText, activeKey]);
 
   useEffect(() => {
     if (viewMode !== "structure") return;
@@ -358,8 +362,7 @@ export function useMainTableDataLoading(args: {
     if (errorText) {
       dismissedTableErrorByKey.set(activeKey, errorText);
     }
-    setErrorDialogOpen(false);
-  }, [activeKey, errorText, setErrorDialogOpen]);
+  }, [activeKey, errorText]);
 
   return {
     meta,

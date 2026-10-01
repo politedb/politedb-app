@@ -1,4 +1,4 @@
-import { useMemo } from "preact/hooks";
+import { useEffect, useMemo, useRef } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Spinner } from "src/components/common/Spinner";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 import type { DatabaseEngine } from "src/types";
 import { useStandaloneTableExport } from "./hooks/useStandaloneTableExport";
 import type { StandaloneExportTarget } from "./standaloneExport/types";
@@ -21,17 +21,34 @@ export function StandaloneTableExportHost(props: {
   target: StandaloneExportTarget | null;
   onClearTarget: () => void;
 }) {
-  const { phase, close, retry } = useStandaloneTableExport(props);
+  const { phase, close } = useStandaloneTableExport(props);
 
   const ready = phase.status === "ready" ? phase : null;
   const loading = phase.status === "loading" ? phase : null;
   const errored = phase.status === "error" ? phase : null;
+  const shownErrorRef = useRef<string | null>(null);
 
   const identityLabel = useMemo(() => {
     const t = ready?.target ?? loading?.target ?? errored?.target;
     if (!t) return "";
     return t.schema ? `${t.schema}.${t.tableName}` : t.tableName;
   }, [ready, loading, errored]);
+
+  useEffect(() => {
+    if (!errored) {
+      shownErrorRef.current = null;
+      return;
+    }
+    const key = `${errored.target.requestId}:${errored.message}`;
+    if (shownErrorRef.current === key) return;
+    shownErrorRef.current = key;
+    void showMessage(errored.message, {
+      title: "Export error",
+      kind: "error",
+    }).then(() => {
+      close();
+    });
+  }, [errored, close]);
 
   return (
     <>
@@ -65,16 +82,6 @@ export function StandaloneTableExportHost(props: {
             </Button>
           </DialogFooter>
         </Dialog>
-      )}
-
-      {errored && (
-        <ErrorDialog
-          open
-          error={errored.message}
-          onClose={close}
-          onRetry={retry}
-          size="md"
-        />
       )}
 
       {ready && (

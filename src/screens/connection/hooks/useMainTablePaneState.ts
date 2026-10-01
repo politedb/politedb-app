@@ -16,7 +16,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
   const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
   const [dropDialogOpen, setDropDialogOpen] = useState(false);
   const [progressNow, setProgressNow] = useState(() => Date.now());
-  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [settledPagination, setSettledPagination] = useState(() => ({
     limit,
     offset,
@@ -43,8 +42,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
     setDropDialogOpen,
     progressNow,
     setProgressNow,
-    errorDialogOpen,
-    setErrorDialogOpen,
     settledPagination,
     setSettledPagination,
   };
