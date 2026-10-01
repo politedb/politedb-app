@@ -10,7 +10,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { licenseOpenExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
-import { ErrorDialog } from "./ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
 
@@ -82,6 +82,13 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
       window.location.href = mailto;
     }
   };
+
+  useEffect(() => {
+    if (!error) return;
+    void showMessage(error, { title: "Error", kind: "error" }).then(() => {
+      clearError();
+    });
+  }, [error, clearError]);
 
   return (
     <>
@@ -258,12 +265,6 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
           </div>
         </DialogFooter>
       </Dialog>
-
-      <ErrorDialog
-        open={!!error}
-        error={error ?? ""}
-        onClose={() => clearError()}
-      />
     </>
   );
 }

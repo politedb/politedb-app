@@ -4,7 +4,6 @@ import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
 import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
 import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { SqlPreviewModal } from "src/components/modal/SqlPreviewModal";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import type { DatabaseEngine } from "src/types";
 import type { TableConstraint } from "src/types";
 import type { TableFilterCondition, TableSort } from "src/lib/queries/sql";
@@ -29,12 +28,6 @@ export function MainTableDialogs(props: {
   onTruncateClose: () => void;
   dropDialogOpen: boolean;
   onDropClose: () => void;
-  errorDialogOpen: boolean;
-  setErrorDialogOpen: (open: boolean) => void;
-  hasError: boolean;
-  activeKey: string;
-  errorText: string;
-  onErrorDismissPersist: (key: string, message: string) => void;
   connectionId: string | null;
   schema: string;
   tableName: string;
@@ -77,12 +70,6 @@ export function MainTableDialogs(props: {
     onTruncateClose,
     dropDialogOpen,
     onDropClose,
-    errorDialogOpen,
-    setErrorDialogOpen,
-    hasError,
-    activeKey,
-    errorText,
-    onErrorDismissPersist,
     connectionId,
     schema,
     tableName,
@@ -171,21 +158,6 @@ export function MainTableDialogs(props: {
           onClose={onDropClose}
           tableName={tableName}
           onConfirm={handleDrop}
-        />
-      )}
-
-      {errorDialogOpen && (
-        <ErrorDialog
-          open
-          variant="execution"
-          backdropClassName="bg-transparent"
-          error={errorText}
-          onClose={() => {
-            setErrorDialogOpen(false);
-            if (hasError) {
-              onErrorDismissPersist(activeKey, errorText);
-            }
-          }}
         />
       )}
     </>

@@ -17,7 +17,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
-import { ErrorDialog } from "./ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
@@ -133,6 +133,15 @@ export function ImportTableDialog({
     if (!progress || progress.total === 0) return 0;
     return (progress.imported / progress.total) * 100;
   }, [progress]);
+
+  useEffect(() => {
+    if (!error) return;
+    void showMessage(error, { title: "Import error", kind: "error" }).then(
+      () => {
+        handleClose();
+      }
+    );
+  }, [error, handleClose]);
 
   return (
     <>
@@ -329,15 +338,6 @@ export function ImportTableDialog({
           )}
         </DialogFooter>
       </Dialog>
-
-      {error && (
-        <ErrorDialog
-          open={true}
-          error={error}
-          onClose={handleClose}
-          size="md"
-        />
-      )}
     </>
   );
 }

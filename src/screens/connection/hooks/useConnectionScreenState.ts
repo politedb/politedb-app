@@ -18,7 +18,6 @@ export function useConnectionScreenState() {
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
   const [snippetPickerOpen, setSnippetPickerOpen] = useState(false);
   const [diagramOpen, setDiagramOpen] = useState(false);
-  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [healthInspectorOpen, setHealthInspectorOpen] = useState(false);
 
   return {
@@ -38,8 +37,6 @@ export function useConnectionScreenState() {
     setSnippetPickerOpen,
     diagramOpen,
     setDiagramOpen,
-    errorDialogOpen,
-    setErrorDialogOpen,
     healthInspectorOpen,
     setHealthInspectorOpen,
   };

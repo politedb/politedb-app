@@ -42,10 +42,10 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { type QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
 import { useDatabaseBackup } from "./hooks/useDatabaseBackup";
 import { useConnectionHealthCheck } from "./hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
+import { resolveMenuBarConnectionChrome } from "./menuBarConnectionChrome";
 
 interface Props {
   activeSchema?: string;
@@ -269,10 +269,15 @@ export function MenuBar({
   onOpenHealthInspector,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
+  const { connected, isConnectionError } = resolveMenuBarConnectionChrome({
+    hasRuntimeConnection: !!rt.runtimeConnectionId,
+    loadError: loadTableError,
+  });
   const health = useConnectionHealthCheck({
     runtimeConnectionId: rt.runtimeConnectionId,
     engine: rt.engine,
-    loadError: loadTableError,
+    // Only seed health from connection-level errors, not table/query failures.
+    loadError: isConnectionError ? loadTableError : null,
   });
 
   const [dbDialogOpen, setDbDialogOpen] = useState(false);
@@ -295,8 +300,6 @@ export function MenuBar({
   const {
     dbBackupRunning,
     dbRestoreRunning,
-    opError,
-    setOpError,
     onBackupDatabase,
     onRestoreDatabase,
   } = useDatabaseBackup();
@@ -383,7 +386,6 @@ export function MenuBar({
     activeTable,
   ]);
 
-  const connected = !!connectionInfo && !loadTableError;
   const runtimeConnectionId = rt.runtimeConnectionId ?? "";
   const connectionBlocked = !rt.runtimeConnectionId;
   const canOpenSql =
@@ -621,7 +623,7 @@ export function MenuBar({
               class={cn(
                 "relative flex h-7.75 w-full items-center gap-2 overflow-hidden pr-2 pl-8",
                 "rounded-lg border bg-white shadow-[0_1px_0_rgba(0,0,0,0.02)]",
-                loadTableError
+                isConnectionError
                   ? "border-rose-200 bg-rose-50"
                   : "border-neutral-200 hover:border-neutral-300"
               )}
@@ -724,7 +726,7 @@ export function MenuBar({
                       "absolute inline-flex h-full w-full rounded-full opacity-75 group-hover:animate-ping",
                       connected
                         ? "bg-emerald-500"
-                        : loadTableError
+                        : isConnectionError
                           ? "bg-red-500"
                           : "bg-neutral-300"
                     )}
@@ -734,7 +736,7 @@ export function MenuBar({
                       "relative inline-flex size-2 rounded-full",
                       connected
                         ? "bg-emerald-500"
-                        : loadTableError
+                        : isConnectionError
                           ? "bg-red-500"
                           : "bg-neutral-300"
                     )}
@@ -865,16 +867,6 @@ export function MenuBar({
         onOpenDatabase={onOpenDatabase}
         onClose={() => setDbDialogOpen(false)}
       />
-
-      {opError && (
-        <ErrorDialog
-          open={true}
-          error={opError}
-          onClose={() => setOpError(null)}
-          size="md"
-          showRevertNote={false}
-        />
-      )}
     </>
   );
 }

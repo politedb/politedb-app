@@ -1,6 +1,6 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect } from "preact/hooks";
 import { Button } from "src/components/common/Button";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 import { cn } from "src/utils/cn";
 
 type Status =
@@ -63,13 +63,12 @@ export function ConnectionFooter(props: {
   } = props;
 
   const busy = isBusy(status);
-  const [openErrorDialog, setOpenErrorDialog] = useState(false);
 
+  const errorMessage = status.kind === "error" ? status.message : null;
   useEffect(() => {
-    if (status.kind === "error") {
-      setOpenErrorDialog(true);
-    }
-  }, [status.kind]);
+    if (!errorMessage) return;
+    void showMessage(errorMessage, { title: "Error", kind: "error" });
+  }, [errorMessage]);
 
   const statusNode = (() => {
     if (status.kind === "idle") {
@@ -131,58 +130,46 @@ export function ConnectionFooter(props: {
   })();
 
   return (
-    <>
-      <div
-        class={cn(
-          "rounded-2xl border border-slate-200 bg-white px-5 py-4",
-          className
-        )}
-      >
-        <div class="flex items-center justify-between">
-          {/* LEFT: Status */}
-          <div class="flex items-center gap-2 text-sm">{statusNode}</div>
+    <div
+      class={cn(
+        "rounded-2xl border border-slate-200 bg-white px-5 py-4",
+        className
+      )}
+    >
+      <div class="flex items-center justify-between">
+        {/* LEFT: Status */}
+        <div class="flex items-center gap-2 text-sm">{statusNode}</div>
 
-          {/* RIGHT: Actions */}
-          <div class="flex gap-3">
-            <Button
-              variant="shadow"
-              className="text-sm"
-              disabled={busy || !requiredOk}
-              onClick={onTest}
-            >
-              Test
-            </Button>
+        {/* RIGHT: Actions */}
+        <div class="flex gap-3">
+          <Button
+            variant="shadow"
+            className="text-sm"
+            disabled={busy || !requiredOk}
+            onClick={onTest}
+          >
+            Test
+          </Button>
 
-            <Button
-              variant="shadow"
-              className="text-sm"
-              disabled={busy || !requiredOk}
-              onClick={onSave}
-            >
-              Save
-            </Button>
+          <Button
+            variant="shadow"
+            className="text-sm"
+            disabled={busy || !requiredOk}
+            onClick={onSave}
+          >
+            Save
+          </Button>
 
-            <Button
-              variant="default"
-              className="text-sm"
-              disabled={busy || !requiredOk}
-              onClick={onConnect}
-            >
-              Connect
-            </Button>
-          </div>
+          <Button
+            variant="default"
+            className="text-sm"
+            disabled={busy || !requiredOk}
+            onClick={onConnect}
+          >
+            Connect
+          </Button>
         </div>
       </div>
-
-      {/* Error detail – ONLY when error */}
-      {openErrorDialog && status.kind === "error" && (
-        <ErrorDialog
-          open={openErrorDialog}
-          onClose={() => setOpenErrorDialog(false)}
-          error={status.message}
-          showRevertNote={false}
-        />
-      )}
-    </>
+    </div>
   );
 }

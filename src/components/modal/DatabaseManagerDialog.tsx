@@ -19,7 +19,7 @@ import {
 } from "src/hooks/useDatabases";
 import { DatabaseEditorDialog } from "./DatabaseEditorDialog";
 import { ContextMenu, MenuItem } from "src/components/common/ContextMenu";
-import { ErrorDialog } from "src/components/modal/ErrorDialog";
+import { showMessage } from "src/lib/system-dialog";
 
 type MenuState = {
   x: number;
@@ -140,6 +140,13 @@ export function DatabaseManagerDialog({
     if (ok) onClose();
   }, [selectedDb, onOpenDb, onClose]);
 
+  useEffect(() => {
+    if (!error) return;
+    void showMessage(error, { title: "Error", kind: "error" }).then(() => {
+      setError("");
+    });
+  }, [error, setError]);
+
   return (
     <Dialog open={open} size="sm" onClose={onClose}>
       <DialogHeader>
@@ -248,10 +255,6 @@ export function DatabaseManagerDialog({
           onClose={closeEditor}
           onSave={editorMode === "create" ? onCreateDb : onRenameDb}
         />
-      )}
-
-      {error && (
-        <ErrorDialog open={true} error={error} onClose={() => setError("")} />
       )}
 
       <Dialog

@@ -175,8 +175,6 @@ export function MainTableDataPane(props: {
     setDropDialogOpen,
     progressNow,
     setProgressNow,
-    errorDialogOpen,
-    setErrorDialogOpen,
     settledPagination,
     setSettledPagination,
   } = useMainTablePaneState({ limit, offset });
@@ -249,7 +247,6 @@ export function MainTableDataPane(props: {
     meta,
     rowsInfo,
     hasError,
-    errorText,
     hasAppliedFilters,
     basePageTotal,
     loadedMax,
@@ -259,7 +256,6 @@ export function MainTableDataPane(props: {
     renderOffset,
     shouldShowLoading,
     rowsLoadProgress,
-    dismissCurrentError,
     clearLoadedQuerySignature,
   } = useMainTableDataLoading({
     activeKey,
@@ -277,7 +273,6 @@ export function MainTableDataPane(props: {
     progressNow,
     setProgressNow,
     viewMode: viewMode === "structure" ? "structure" : "data",
-    setErrorDialogOpen,
     loadTableData,
     rerender,
   });
@@ -1205,12 +1200,6 @@ export function MainTableDataPane(props: {
         onTruncateClose={onTruncateClose}
         dropDialogOpen={dropDialogOpen}
         onDropClose={onDropClose}
-        errorDialogOpen={errorDialogOpen}
-        setErrorDialogOpen={setErrorDialogOpen}
-        hasError={hasError}
-        activeKey={activeKey}
-        errorText={errorText}
-        onErrorDismissPersist={() => dismissCurrentError()}
         connectionId={meta.connectionId}
         schema={activeTableWindow.table.schema}
         tableName={activeTableWindow.table.name}
