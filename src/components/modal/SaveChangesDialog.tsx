@@ -8,11 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../common/Dialog";
-import type { PatchData, PatchMap } from "src/utils/generateSql";
+import type { PatchData, PatchMap } from "src/lib/patches/generateSql";
 import {
   buildMongoOperations,
   generateSqlFromPatches,
-} from "src/utils/generateSql";
+} from "src/lib/patches/generateSql";
 import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/sql/QueryHistory";

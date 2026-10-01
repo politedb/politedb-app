@@ -57,7 +57,7 @@ import {
   currentDatabaseFromInput,
   inferDatabaseOverrideFromTabLabel,
 } from "src/lib/connection/connection";
-import type { PatchMap } from "src/utils/generateSql";
+import type { PatchMap } from "src/lib/patches/generateSql";
 import { pickHostDbUser } from "src/lib/connection/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";

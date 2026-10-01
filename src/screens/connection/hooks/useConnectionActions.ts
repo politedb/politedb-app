@@ -38,7 +38,7 @@ import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
   type PatchMap,
-} from "src/utils/generateSql";
+} from "src/lib/patches/generateSql";
 import { runSqlTransaction } from "src/lib/sql/sqlTransaction";
 import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";

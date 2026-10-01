@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
-import { DiagramCanvas } from "src/components/DiagramCanvas";
+import { DiagramCanvas } from "src/components/diagram/DiagramCanvas";
 import { buildDiagramSvg } from "src/components/diagram/diagramExport";
 import { loadDiagramState } from "src/components/diagram/diagramMetadata";
 import type { DiagramState } from "src/components/diagram/diagramTypes";

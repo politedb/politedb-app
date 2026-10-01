@@ -1,7 +1,7 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { TableItem } from "src/types";
-import type { PatchMap } from "src/utils/generateSql";
+import type { PatchMap } from "src/lib/patches/generateSql";
 
 export type ConnectionActions = {
   openSql(): void;

@@ -1,4 +1,4 @@
-import type { PatchMap } from "src/utils/generateSql";
+import type { PatchMap } from "src/lib/patches/generateSql";
 import { useConnectionStore } from "src/stores/connection";
 
 function patchMapHasAnyChanges(patchMap: PatchMap | undefined): boolean {
