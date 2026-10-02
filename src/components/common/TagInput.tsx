@@ -2,6 +2,7 @@ import { useMemo, useState } from "preact/hooks";
 import { normalizeTag } from "src/utils/convert";
 import { XIcon } from "../icons";
 import { Button } from "./Button";
+import { cn } from "src/utils/cn";
 
 export function TagInput(props: {
   value: string[];
@@ -52,7 +53,12 @@ export function TagInput(props: {
   return (
     <div class="space-y-2">
       {/* Input field */}
-      <div class="flex flex-wrap items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 focus-within:ring-2 focus-within:ring-blue-200">
+      <div
+        class={cn(
+          "flex flex-wrap items-center gap-1 rounded-lg border border-slate-300",
+          "bg-white px-2 py-1.5 focus-within:ring-2 focus-within:ring-blue-200"
+        )}
+      >
         {value.map((t) => (
           <span
             key={t}
@@ -95,7 +101,7 @@ export function TagInput(props: {
             <Button
               key={s}
               variant="outline"
-              className="cursor-default rounded-full border-slate-300 px-3"
+              className="cursor-default rounded-full border-slate-300 px-3 py-0.5 text-[12px]"
               onClick={() => {
                 addTag(s);
                 setInput("");

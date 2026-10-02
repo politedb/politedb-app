@@ -15,7 +15,7 @@ import { clearObjectEditorDraft } from "src/lib/objectEditorDraftCache";
 import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
-import { PatchData } from "src/utils/generateSql";
+import { PatchData } from "src/lib/patches/generateSql";
 import {
   consumeUndrainedSqlForLiveEditor,
   getLiveSqlEditorContent,

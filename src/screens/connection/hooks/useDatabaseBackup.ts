@@ -13,7 +13,7 @@ import {
 import { cellToString } from "src/utils/convert";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
-import { useConnectionRuntimeCtx } from "../ConnectionRuntimeContext";
+import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
 import {

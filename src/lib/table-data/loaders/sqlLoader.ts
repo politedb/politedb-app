@@ -1,6 +1,6 @@
 import { isSqliteLike } from "src/utils/sqliteLike";
 import { cellToString, formatBytesSize } from "src/utils/convert";
-import { normalizeClickhouseDbType } from "src/utils/clickhouse";
+import { normalizeClickhouseDbType } from "src/lib/engines/clickhouse";
 import {
   diagramTableColumnsQuery,
   tableColumnsQuery,
@@ -24,10 +24,8 @@ import { operationCancel, type TableChunk } from "src/lib/tauri";
 import { DEFAULT_ROWS_CAP, useConnectionStore } from "src/stores/connection";
 import type { DatabaseEngine } from "src/types";
 import { retryAsync } from "src/utils/common";
-import {
-  cellIsTruthyPrimary,
-  resolveDefaultTableSort,
-} from "src/utils/tableSort";
+import { resolveDefaultTableSort } from "src/utils/tableSort";
+import { cellIsTruthy } from "src/utils/primaryKey";
 import { RETRY_ATTEMPTS } from "../constants";
 import {
   inflightForeignKeysByKey,
@@ -58,7 +56,7 @@ export async function loadColumns(params: {
       if (engine === "clickhouse") {
         db_type = normalizeClickhouseDbType(db_type, cellToString(r?.[2]));
       }
-      const is_primary = diagramQ ? cellIsTruthyPrimary(r?.[2]) : undefined;
+      const is_primary = diagramQ ? cellIsTruthy(r?.[2]) : undefined;
       const columnDefaultIndex = diagramQ ? 3 : engine === "clickhouse" ? 3 : 2;
       const column_default = cellToString(r?.[columnDefaultIndex], true);
       return { name, db_type, is_primary, column_default };
@@ -112,9 +110,11 @@ export async function loadRowCount(params: {
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   exact?: boolean;
+  /** Skip coalescing into an in-flight count (MenuBar force refresh). */
+  force?: boolean;
 }): Promise<{ value: number; estimated: boolean }> {
   const cacheKey = rowCountCacheKey(params);
-  const inflight = inflightRowCountByKey.get(cacheKey);
+  const inflight = params.force ? undefined : inflightRowCountByKey.get(cacheKey);
   if (inflight) return inflight;
 
   const task = loadRowCountOnce(params);
@@ -206,9 +206,12 @@ export async function loadSizeInfo(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
+  force?: boolean;
 }): Promise<{ totalSize: string; dataSize: string; indexSize: string }> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
-  const inflight = inflightSizeInfoByKey.get(cacheKey);
+  const inflight = params.force
+    ? undefined
+    : inflightSizeInfoByKey.get(cacheKey);
   if (inflight) {
     return inflight as Promise<{
       totalSize: string;
@@ -300,8 +303,8 @@ export async function loadMeta(params: {
     const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
       index_name: cellToString(row?.[0]),
       index_algorithm: cellToString(row?.[1]) ?? "BTREE",
-      is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
-      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+      is_unique: cellIsTruthy(row?.[2]),
+      is_primary: cellIsTruthy(row?.[3]),
       index_definition: cellToString(row?.[4]) ?? "",
       column_name: cellToString(row?.[5]) ?? "",
       condition: "",
@@ -340,8 +343,8 @@ export async function loadMeta(params: {
     const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
       index_name: cellToString(row?.[0]),
       index_algorithm: cellToString(row?.[1]) ?? "BTREE",
-      is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
-      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+      is_unique: cellIsTruthy(row?.[2]),
+      is_primary: cellIsTruthy(row?.[3]),
       index_definition: cellToString(row?.[4]) ?? "",
       column_name: cellToString(row?.[5]) ?? "",
       condition: cellToString(row?.[6]) ?? "",
@@ -377,7 +380,7 @@ export async function loadMeta(params: {
       index_name: cellToString(row?.[0]),
       index_algorithm: cellToString(row?.[1]),
       is_unique: Number(cellToString(row?.[2]) ?? "1") === 0,
-      is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+      is_primary: cellIsTruthy(row?.[3]),
       index_definition: "",
       column_name: cellToString(row?.[4]) ?? "",
       condition: "",
@@ -417,8 +420,8 @@ export async function loadMeta(params: {
   const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
     index_name: cellToString(row?.[0]),
     index_algorithm: cellToString(row?.[1]),
-    is_unique: cellToString(row?.[2])?.toLowerCase() === "true",
-    is_primary: cellToString(row?.[3])?.toLowerCase() === "true",
+    is_unique: cellIsTruthy(row?.[2]),
+    is_primary: cellIsTruthy(row?.[3]),
     index_definition: cellToString(row?.[4]),
     column_name: cellToString(row?.[5]),
     condition: cellToString(row?.[6]),
@@ -435,9 +438,12 @@ export async function loadForeignKeys(params: {
   tableName: string;
   engine?: DatabaseEngine;
   addLogQuery: (sql: string, engine?: DatabaseEngine) => void;
+  force?: boolean;
 }): Promise<any[]> {
   const cacheKey = `${params.schema}.${params.tableName}:${params.engine ?? ""}`;
-  const inflight = inflightForeignKeysByKey.get(cacheKey);
+  const inflight = params.force
+    ? undefined
+    : inflightForeignKeysByKey.get(cacheKey);
   if (inflight) return inflight;
 
   const task = loadForeignKeysOnce(params);

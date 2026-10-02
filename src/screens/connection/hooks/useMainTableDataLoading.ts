@@ -273,7 +273,8 @@ export function useMainTableDataLoading(args: {
       {
         refreshRows: false,
         refreshMeta: true,
-        refreshForeignKeys: false,
+        // Keep FK links available if data-tab load has not filled them yet.
+        refreshForeignKeys: !Array.isArray(meta.foreignKeys),
         refreshStats: false,
       }
     );

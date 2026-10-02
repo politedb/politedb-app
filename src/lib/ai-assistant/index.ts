@@ -8,7 +8,7 @@ import {
   MODEL_LOADING_MAX_RETRIES,
   MODEL_LOADING_RETRY_MS,
   normalizeLocalAiModelName,
-} from "src/utils/assistant";
+} from "src/lib/ai-assistant/assistant";
 import {
   buildChatReplyPlainPrompt,
   buildChatReplyPrompt,

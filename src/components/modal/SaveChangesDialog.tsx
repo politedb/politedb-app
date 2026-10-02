@@ -8,18 +8,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../common/Dialog";
-import type { PatchData, PatchMap } from "src/utils/generateSql";
+import type { PatchData, PatchMap } from "src/lib/patches/generateSql";
 import {
   buildMongoOperations,
   generateSqlFromPatches,
-} from "src/utils/generateSql";
+} from "src/lib/patches/generateSql";
 import { DATA_ACTIONS } from "src/constant";
 import { DataKey } from "src/stores/connection";
-import { highlightSql } from "src/screens/connection/QueryHistory";
+import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
-import { buildPatchDiffs } from "src/utils/patchDiff";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+import { buildPatchDiffs } from "src/lib/patches/patchDiff";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
 import type { ObjectChangeSummary } from "src/lib/objectEditorDraftCache";
@@ -412,8 +412,8 @@ export function SaveChangesDialog({
                           diff.action === "insert" &&
                             "bg-green-50 text-green-700",
                           diff.action === "update" &&
-                            "bg-amber-100 text-amber-700",
-                          diff.action === "delete" && "bg-red-100 text-red-700"
+                            "bg-amber-50 text-amber-700",
+                          diff.action === "delete" && "bg-red-50 text-red-700"
                         )}
                       >
                         {diff.action}

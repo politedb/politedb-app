@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "preact/hooks";
 import { DATA_KEYS } from "src/constant";
 import type { DataAction, DataKey } from "src/stores/connection";
 import type { TableConstraint, TableStructure } from "src/types";
+import { primaryKeyColumnsFromConstraints } from "src/utils/primaryKey";
 
 interface Props {
   initialTableName: string;
@@ -26,25 +27,7 @@ export function useTableMetaState(props: Props) {
   } = props;
 
   const primaryKeyFromDB = useMemo(() => {
-    if (!constraints?.length) return [];
-
-    const isTruthy = (v: unknown) =>
-      v === true || String(v ?? "").toLowerCase() === "true";
-
-    const pk = constraints.find(
-      (c) =>
-        isTruthy(c.is_primary) ||
-        c.index_name.toLowerCase() === "primary" ||
-        c.index_name.toLowerCase().includes("pkey") ||
-        (c.is_unique && c.index_name.toLowerCase().includes("primary"))
-    );
-
-    if (!pk?.column_name) return [];
-
-    return pk.column_name
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean);
+    return primaryKeyColumnsFromConstraints(constraints);
   }, [constraints]);
 
   const columnNames = useMemo(() => {

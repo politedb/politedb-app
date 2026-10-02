@@ -11,7 +11,7 @@ import {
 } from "./SchemaCanvasTable";
 import type { InputOption } from "src/components/common/Input";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
-import { getDbConfig, supportsForeignKeyEditing } from "src/utils/dbConfig";
+import { getDbConfig, supportsForeignKeyEditing } from "src/lib/engines/dbConfig";
 import { useTableStructureOperations } from "src/screens/connection/hooks/useTableStructureOperations";
 import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 

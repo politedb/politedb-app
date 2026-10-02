@@ -22,7 +22,7 @@ import {
   formatShortcutLabel,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
-import { highlightSql } from "src/screens/connection/QueryHistory";
+import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 
 type Props = {
   open: boolean;

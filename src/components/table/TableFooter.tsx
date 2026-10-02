@@ -7,7 +7,7 @@ import {
 } from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
 import { Select } from "src/components/common/Select";
-import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
+import { StructPaneTab } from "src/screens/connection/table/MainTableDataPane";
 import { cn } from "src/utils/cn";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Popover } from "src/components/common/Popover";

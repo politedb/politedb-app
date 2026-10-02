@@ -22,7 +22,7 @@ import {
 import { getErrorMessage } from "src/lib/table-data/helpers";
 import { patchMeta } from "src/lib/table-data/metaPatch";
 import type { LoadFlags, TablePagination } from "src/lib/table-data";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import type { DatabaseEngine } from "src/types";
 
 export { tableKey, DEFAULT_LIMIT, DEFAULT_OFFSET } from "src/lib/table-data";
@@ -86,23 +86,27 @@ export function useLoadTableData() {
       }
 
       const existingTableLoad = inflightLoadByTableKey.get(key);
-      if (
-        existingTableLoad &&
-        !flags.force &&
-        !flags.forceRefresh &&
-        !flags.forceRows
-      ) {
+      // Do not coalesce meta/stats/force refreshes into an in-flight rows-only load —
+      // that left Save Changes without constraints and forced Virtual-key WHERE.
+      // forceRefresh must be included here AND in the loadingKeysRef guard below;
+      // omitting it made MenuBar "refresh focused tab" race the pane loader.
+      const bypassInflightGuard =
+        !!flags.force ||
+        !!flags.forceRefresh ||
+        !!flags.forceRows ||
+        !!flags.refreshMeta ||
+        !!flags.refreshForeignKeys ||
+        !!flags.refreshStats ||
+        !!flags.refreshRowCount;
+
+      if (existingTableLoad && !bypassInflightGuard) {
         return existingTableLoad;
       }
 
       const task = (async () => {
         latestLoadSignatureByKey.set(key, loadSignature);
 
-        if (
-          loadingKeysRef.current.has(key) &&
-          !flags.force &&
-          !flags.forceRows
-        ) {
+        if (loadingKeysRef.current.has(key) && !bypassInflightGuard) {
           return;
         }
         loadingKeysRef.current.add(key);

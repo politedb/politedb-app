@@ -6,22 +6,22 @@ Use this map to find the owning area before changing a feature. Prefer extending
 
 | Feature                          | Primary paths                                                                                         | Notes                                                              |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Main connection screen           | `src/screens/connection/ConnectionScreen.tsx`, `src/screens/connection/ConnectionWorkspaceLayout.tsx` | Overall layout, active windows, sidebars, toolbar wiring.          |
+| Main connection screen           | `src/screens/connection/ConnectionScreen.tsx`, `src/screens/connection/workspace/ConnectionWorkspaceLayout.tsx` | Overall layout, active windows, sidebars, toolbar wiring.          |
 | Open/close table and SQL windows | `src/screens/connection/hooks/useConnectionWindows.ts`, `src/stores/screen.ts`                        | Window identity, active window state, close behavior.              |
 | Connection actions               | `src/screens/connection/hooks/useConnectionActions.ts`                                                | Refresh, pagination, save/discard, tab close, Redis rename/delete. |
-| Left navigation                  | `src/screens/connection/LeftNav.tsx`                                                                  | Schemas, tables, search, table selection.                          |
-| Right panel / Data Info          | `src/screens/connection/RightNav.tsx`                                                                 | Selected-row details, table info, AI assistant tab.                |
+| Left navigation                  | `src/screens/connection/nav/LeftNav.tsx`                                                                  | Schemas, tables, search, table selection.                          |
+| Right panel / Data Info          | `src/screens/connection/nav/RightNav.tsx`                                                                 | Selected-row details, table info, AI assistant tab.                |
 
 ## Table Browser And Editing
 
 | Feature              | Primary paths                                                                                                 | Notes                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Table data pane      | `src/screens/connection/MainTableDataPane.tsx`                                                                | Top-level data/structure/constraints pane and table UI wiring.      |
+| Table data pane      | `src/screens/connection/table/MainTableDataPane.tsx`                                                                | Top-level data/structure/constraints pane and table UI wiring.      |
 | Table loading        | `src/screens/connection/hooks/useMainTableDataLoading.ts`, `src/lib/table-data/`                              | Load planning, row streaming, metadata, row count, size info.       |
 | SQL table queries    | `src/lib/queries/sql/`                                                                                        | Engine-specific SQL for rows, columns, constraints, indexes, sizes. |
 | Row storage          | `src/stores/connection/rowsSlice.ts`, `src/stores/connection/store.ts`                                        | Row windows, streaming state, row updates.                          |
 | Filters and sorting  | `src/components/table/TableFilterBar.tsx`, `src/stores/connection/store.ts`, `src/lib/table-data/loadPlan.ts` | Applied filters/sort must be passed to reloads.                     |
-| Cell editing         | `src/components/table/`, `src/screens/connection/MainTableDataPane.tsx`                                       | Inline edits, selected-row edits, null/default handling.            |
+| Cell editing         | `src/components/table/`, `src/screens/connection/table/MainTableDataPane.tsx`                                       | Inline edits, selected-row edits, null/default handling.            |
 | Add/delete rows      | `src/screens/connection/hooks/useTableDataOperations.ts`                                                      | Creates patch entries rather than immediately writing to DB.        |
 | Structure editing    | `src/screens/connection/hooks/useTableStructureOperations.ts`                                                 | Column and FK structure edits.                                      |
 | Constraint editing   | `src/screens/connection/hooks/useTableConstraintOperations.ts`                                                | Constraints patch flow.                                             |
@@ -32,7 +32,7 @@ Use this map to find the owning area before changing a feature. Prefer extending
 
 | Feature         | Primary paths                                                                           | Notes                                                                   |
 | --------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| SQL editor UI   | `src/components/editor/`, `src/screens/connection/ActiveWindowContent.tsx`              | Monaco editor, editor window content.                                   |
+| SQL editor UI   | `src/components/editor/`, `src/screens/connection/workspace/ActiveWindowContent.tsx`              | Monaco editor, editor window content.                                   |
 | SQL runner      | `src/screens/connection/hooks/useSqlRunner.ts`                                          | Run/explain flow, result run tabs, cancellation, result state.          |
 | Query history   | `src/screens/connection/hooks/useSqlHistoryRunner.ts`, `src/stores/connection/store.ts` | History should not receive internal explain helper SQL unless intended. |
 | Safety modes    | `src/lib/queries/sql/`, `src/screens/connection/`                                       | Lock/safe/production behavior and SQL classification.                   |
@@ -63,17 +63,23 @@ Use this map to find the owning area before changing a feature. Prefer extending
 | Feature            | Primary paths                                                                    | Notes                                                   |
 | ------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | CSV import         | `src-tauri/src/engines/csv_import.rs`, `src/screens/connection/hooks/`           | Mapping, null/default behavior, transaction handling.   |
-| Export data        | `src-tauri/src/commands/export.rs`, `src/screens/connection/`                    | Keep large export paths cancellable and memory-aware.   |
-| Table context menu | `src/screens/connection/LeftNav.tsx`, connection actions/hooks                   | Open, copy name, export, import, clone, truncate, drop. |
+| Export data        | `src-tauri/src/commands/export.rs`, `src/screens/connection/export/`, `src/lib/export-pipeline/`, `src/lib/export-masking/` | Keep large export paths cancellable and memory-aware.   |
+| Table context menu | `src/screens/connection/nav/LeftNav.tsx`, connection actions/hooks                   | Open, copy name, export, import, clone, truncate, drop. |
 | New table drafts   | `src/screens/connection/hooks/useConnectionActions.ts`, `src/stores/connection/` | Draft tables allow limited actions until created.       |
 
 ## AI Assistant
 
 | Feature                | Primary paths                                                         | Notes                                            |
 | ---------------------- | --------------------------------------------------------------------- | ------------------------------------------------ |
-| Assistant UI           | `src/components/ai-assistant/`, `src/screens/connection/RightNav.tsx` | Local assistant surface.                         |
+| Assistant UI           | `src/components/ai-assistant/`, `src/screens/connection/nav/RightNav.tsx` | Local assistant surface.                         |
 | Assistant frontend lib | `src/lib/ai-assistant/`                                               | Request orchestration and local runtime helpers. |
 | Native AI runtime      | `src-tauri/src/ai_runtime.rs`, `src-tauri/src/commands/ai.rs`         | Model/runtime setup, download, cancellation.     |
+
+## Database Health
+
+| Feature | Primary paths | Notes |
+| --- | --- | --- |
+| Health inspector | `src/components/health-inspector/`, `src/lib/health-inspector/`, `src/lib/tauri/health-inspector.ts` | Overview metrics and dialog. |
 
 ## App Shell, Updater, License
 

@@ -5,7 +5,7 @@ import { useMemo, useRef, useCallback, useState } from "preact/hooks";
 
 import { ProfileTab, useScreenStore } from "../stores/screen";
 import { Button } from "./common/Button";
-import { requestCloseConnectionTab } from "src/screens/connection/connectionTabClose";
+import { requestCloseConnectionTab } from "src/screens/connection/lib/connectionTabClose";
 import { DbIcon } from "./icons/DbIcon";
 import { ContextMenu, type MenuItem } from "./common/ContextMenu";
 import { cn } from "../utils/cn";

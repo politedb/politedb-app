@@ -1,4 +1,4 @@
-import type { ObjectSaveHandler } from "../ConnectionRuntimeContext";
+import type { ObjectSaveHandler } from "../workspace/ConnectionRuntimeContext";
 import { useCallback, useRef } from "preact/hooks";
 
 import type {
@@ -33,14 +33,14 @@ import {
 import {
   clearTablePagination,
   setTablePagination,
-} from "src/screens/connection/tablePagination";
+} from "src/screens/connection/lib/tablePagination";
 import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
   type PatchMap,
-} from "src/utils/generateSql";
-import { runSqlTransaction } from "src/utils/sqlTransaction";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+} from "src/lib/patches/generateSql";
+import { runSqlTransaction } from "src/lib/sql/sqlTransaction";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { normalizeSqlError } from "src/lib/tauri/queryValidate";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import {
@@ -49,10 +49,11 @@ import {
 } from "src/stores/connection";
 import { type ProfileTab, useScreenStore } from "src/stores/screen";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
-import { connectionTabHasChanges } from "src/screens/connection/tabDirty";
+import { connectionTabHasChanges } from "src/screens/connection/lib/tabDirty";
 import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/lib/queries/sql";
-import { buildTableReloadQueryFlags } from "src/screens/connection/tableReloadQueryFlags";
+import { buildTableReloadQueryFlags } from "src/screens/connection/lib/tableReloadQueryFlags";
+import { tablesToReloadOnManualRefresh } from "src/screens/connection/lib/refreshTableTarget";
 
 /* =============================================================================
  * Types
@@ -328,16 +329,6 @@ function hydratePatchMapWithLatestTableData(
   return out;
 }
 
-function getOpenTableWindows(
-  openWindows: Record<string, OpenWindow[]>,
-  profileId: string
-): TableWindow[] {
-  const windows = openWindows[profileId] ?? [];
-  return windows.filter(
-    (window): window is TableWindow => window.type === "table"
-  );
-}
-
 /* =============================================================================
  * Hook
  * ============================================================================= */
@@ -453,52 +444,36 @@ export function useConnectionActions(
 
     await refreshSchemaAndTables();
 
-    const tableWindows = getOpenTableWindows(openWindows, activeProfileScreen);
+    // MenuBar / Mod+R: only the focused table pane, not every open table tab.
+    const tableWindows = tablesToReloadOnManualRefresh(activeTableWindow);
     if (tableWindows.length === 0) return;
 
-    const store = useConnectionStore.getState();
-    const uniqueTableWindows = Array.from(
-      new Map(
-        tableWindows.map((window) => [
-          tableKey(activeProfileScreen, window.table.schema, window.table.name),
-          window,
-        ])
-      ).values()
-    );
-
-    await Promise.all(
-      uniqueTableWindows.map((window) => {
-        const key = tableKey(
-          activeProfileScreen,
-          window.table.schema,
-          window.table.name
-        );
-        const applied = store.tableFilterByKey[key];
-        const hasAppliedFilters = Boolean(
-          applied?.appliedFilters?.some(
-            (filter) => filter.enabled && Boolean((filter.column ?? "").trim())
-          )
-        );
-
-        return loadTableData(
+    // allSettled: a single table load error/cancel must still finish the
+    // MenuBar isRefreshing spin (success/error/cancel).
+    await Promise.allSettled(
+      tableWindows.map((window) =>
+        loadTableData(
           window.table.schema,
           window.table.name,
           { limit, offset },
-          {
-            forceRefresh: true,
-            refreshRows: true,
-            refreshRowCount: true,
-            filters: hasAppliedFilters ? applied.appliedFilters : undefined,
-            filterCombine: applied?.appliedFilterCombine ?? "AND",
-          }
-        );
-      })
+          getTableReloadQueryFlags(
+            activeProfileScreen,
+            window.table.schema,
+            window.table.name,
+            {
+              forceRefresh: true,
+              refreshRows: true,
+              refreshRowCount: true,
+            }
+          )
+        )
+      )
     );
   }, [
     tabHasChanges,
     activeProfileScreen,
+    activeTableWindow,
     refreshSchemaAndTables,
-    openWindows,
     loadTableData,
     limit,
     offset,

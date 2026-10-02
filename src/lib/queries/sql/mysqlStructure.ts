@@ -33,7 +33,7 @@ export const tableConstraintsMySqlQuery = (
       index_name,
       index_type,
       non_unique,
-      CASE WHEN UPPER(index_name) = 'PRIMARY' THEN TRUE ELSE FALSE END AS is_primary,
+      CASE WHEN UPPER(index_name) = 'PRIMARY' THEN 'true' ELSE 'false' END AS is_primary,
       GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',') AS column_name
     FROM information_schema.statistics
     WHERE table_schema = ${qLiteral(schema)}

@@ -21,7 +21,7 @@ import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
 import { cn } from "src/utils/cn";
-import { formatConnectionDatabaseDisplay } from "src/utils/connection";
+import { formatConnectionDatabaseDisplay } from "src/lib/connection/connection";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
@@ -33,7 +33,7 @@ import {
   formatExportPasswordError,
   CONNECTION_EXPORT_EXTENSION,
   formatSharingExportSuccessMessage,
-} from "src/utils/profileSharing";
+} from "src/lib/profiles/profileSharing";
 import { KebabButton } from "src/components/common/KebabButton";
 
 /* -------------------------------------------------- */
@@ -434,7 +434,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
             {tags?.length ? (
               <div class="min-w-0 shrink-0">
                 <TagChips
-                  className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap"
+                  className="min-w-0 uppercase"
                   tags={tags}
                   max={2}
                   size="sm"
@@ -442,7 +442,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               </div>
             ) : (
               <TagChips
-                className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap"
+                className="min-w-0 uppercase"
                 tags={currentGroups.map((group) => group.name)}
                 max={1}
                 size="sm"

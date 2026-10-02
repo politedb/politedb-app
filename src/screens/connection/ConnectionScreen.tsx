@@ -9,11 +9,11 @@ import {
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
-import { getTablePagination } from "./tablePagination";
+import { getTablePagination } from "./lib/tablePagination";
 
-import { MenuBar } from "./MenuBar";
+import { MenuBar } from "./workspace/MenuBar";
 import { Box } from "src/components/common/Box";
-import { ConnectionWorkspaceLayout } from "./ConnectionWorkspaceLayout";
+import { ConnectionWorkspaceLayout } from "./workspace/ConnectionWorkspaceLayout";
 
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useViewMode } from "./hooks/useViewMode";
@@ -31,7 +31,7 @@ import { SnippetPickerDialog } from "src/components/modal/SnippetPickerDialog";
 import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 import type { SavedSnippet } from "src/lib/snippets/types";
 import { DiagramGeneratorDialog } from "src/components/modal/DiagramGeneratorDialog";
-import { DbHealthInspectorDialog } from "@root/src/components/healthInspector/DbHealthInspectorDialog";
+import { DbHealthInspectorDialog } from "@root/src/components/health-inspector/DbHealthInspectorDialog";
 import { OverlayModal } from "src/components/modal/OverlayModal";
 import { ConnectionFormDialog } from "src/components/connection/ConnectionFormDialog";
 import type { ConnectionProfile } from "src/lib/tauri";
@@ -42,30 +42,30 @@ import {
 import { useSnippetsStore } from "src/stores/snippets";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
-import { ConnectionActionsProvider } from "./ConnectionActionsContext";
+import { ConnectionActionsProvider } from "./workspace/ConnectionActionsContext";
 import {
   ConnectionRuntimeProvider,
   type ObjectSaveHandler,
-} from "./ConnectionRuntimeContext";
+} from "./workspace/ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
-import { registerConnectionTabCloseBridge } from "./connectionTabCloseBridge";
+import { registerConnectionTabCloseBridge } from "./lib/connectionTabCloseBridge";
 import type { TableItem } from "src/types";
-import { ConnectingPanel } from "./ConnectingPanel";
+import { ConnectingPanel } from "./workspace/ConnectingPanel";
 import { useProfileStore } from "src/stores/profile";
 import {
   currentDatabaseFromInput,
   inferDatabaseOverrideFromTabLabel,
-} from "src/utils/connection";
-import type { PatchMap } from "src/utils/generateSql";
-import { pickHostDbUser } from "src/utils/connection";
+} from "src/lib/connection/connection";
+import type { PatchMap } from "src/lib/patches/generateSql";
+import { pickHostDbUser } from "src/lib/connection/connection";
 import { tableRowsStreamLoadPercent } from "src/utils/tableRowsProgress";
 import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
-import { StandaloneTableExportHost } from "./StandaloneTableExportHost";
-import type { StandaloneExportTarget } from "./standaloneExport/types";
-import { canStandaloneExportTable } from "./standaloneExport/support";
+import { StandaloneTableExportHost } from "./export/StandaloneTableExportHost";
+import type { StandaloneExportTarget } from "./export/standalone-export/types";
+import { canStandaloneExportTable } from "./export/standalone-export/support";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
 import { OPEN_FLOATING_ASSISTANT_EVENT } from "src/components/ai-assistant/FloatingAssistantLauncher";
 

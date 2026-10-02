@@ -16,7 +16,7 @@ import {
 } from "src/lib/queries/sql";
 import { formatMongoFindPreview } from "src/lib/queries/mongo";
 import { cn } from "src/utils/cn";
-import { sqlForDisplay } from "src/utils/sqlDialect";
+import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { Input } from "src/components/common/Input";
 import { Checkbox } from "src/components/common/Checkbox";
 

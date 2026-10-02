@@ -18,7 +18,7 @@ import {
 import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
 import { SqlEditorToolbar } from "./SqlEditorToolbar";
 import { ensureSqlTheme, setSqlTheme } from "./registerSqlTheme";
-import { formatSql, minifySql } from "src/utils/sqlFormatter";
+import { formatSql, minifySql } from "src/lib/sql/sqlFormatter";
 import { saveDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import {

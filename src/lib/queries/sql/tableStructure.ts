@@ -278,7 +278,7 @@ export const tableConstraintsQuery = (
         '' AS include_txt,
         '' AS comment_txt
       FROM system.tables
-      WHERE database = currentDatabase()
+      WHERE database = ${qLiteral(schema)}
         AND name = ${qLiteral(tableName)}
         AND (primary_key != '' OR sorting_key != '')
     `;

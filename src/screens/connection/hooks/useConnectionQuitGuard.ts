@@ -6,7 +6,7 @@ import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import {
   discardAllConnectionChanges,
   hasAnyUnsavedConnectionChanges,
-} from "../unsavedChanges";
+} from "../lib/unsavedChanges";
 
 export function useConnectionQuitGuard() {
   const forceQuitRef = useRef(false);

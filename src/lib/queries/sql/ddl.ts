@@ -5,7 +5,7 @@ import {
   createTableSql,
   dropTableSql,
   truncateTableSql,
-} from "src/utils/sqlDialect";
+} from "src/lib/sql/sqlDialect";
 import { isMySqlLike, qIdent, qLiteral, regexEscape } from "./shared";
 
 export const createTableQuery = (

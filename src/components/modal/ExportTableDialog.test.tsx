@@ -4,7 +4,7 @@ import { ExportTableDialog } from "./ExportTableDialog";
 import {
   buildDefaultMaskedPolicy,
   withColumnRule,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 
 const hookState = {
   format: "csv" as const,

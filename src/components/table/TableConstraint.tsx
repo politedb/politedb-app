@@ -7,7 +7,7 @@ import {
 import type { InputOption } from "src/components/common/Input";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
-import { getDbConfig } from "src/utils/dbConfig";
+import { getDbConfig } from "src/lib/engines/dbConfig";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   postgres: [

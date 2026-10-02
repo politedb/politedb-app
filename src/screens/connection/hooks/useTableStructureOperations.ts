@@ -1,9 +1,8 @@
 import { useCallback, useState } from "preact/hooks";
 import { DataAction, DataKey, useConnectionStore } from "src/stores/connection";
 import type { ForeignKeyInfo, TableStructure } from "src/types";
+import { findFkForColumn as findFkForColumnUtil } from "src/utils/foreignKey";
 import { DATA_KEYS } from "src/constant";
-
-/** Find an existing FK that references the given column (column_names may be comma-separated). */
 
 export interface UseTableStructureOperationsProps {
   activeProfileScreen: string;
@@ -124,18 +123,8 @@ export function useTableStructureOperations({
   );
 
   const findFkForColumn = useCallback(
-    (foreignKeys: ForeignKeyInfo[] | null, columnName: string) => {
-      if (!foreignKeys?.length || !columnName?.trim()) return null;
-      const key = columnName.trim();
-      return (
-        foreignKeys.find((fk) =>
-          fk.column_names
-            .split(",")
-            .map((s) => s.trim())
-            .includes(key)
-        ) ?? null
-      );
-    },
+    (foreignKeys: ForeignKeyInfo[] | null, columnName: string) =>
+      findFkForColumnUtil(foreignKeys, columnName),
     []
   );
 

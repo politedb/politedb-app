@@ -3,14 +3,14 @@ import { saveDialog } from "src/lib/system-dialog";
 import {
   buildDefaultMaskedPolicy,
   type MaskingPolicy,
-} from "src/lib/exportMasking";
+} from "src/lib/export-masking";
 import {
   runStreamingExport,
   type ExportConfig,
   type ExportFormat,
   type ExportOptions,
   type ExportProgress,
-} from "src/lib/exportPipeline";
+} from "src/lib/export-pipeline";
 import type { ColumnMeta } from "src/lib/tauri/types";
 
 export type { ExportConfig, ExportFormat, ExportOptions, ExportProgress };

@@ -17,7 +17,7 @@ import { Input } from "src/components/common/Input";
 import { TagSelect } from "src/components/common/TagSelect";
 import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
-import { StructPaneTab } from "src/screens/connection/MainTableDataPane";
+import { StructPaneTab } from "src/screens/connection/table/MainTableDataPane";
 import { SearchIcon } from "src/components/icons";
 
 export function TableStructurePane(props: {

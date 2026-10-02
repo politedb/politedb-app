@@ -11,7 +11,7 @@ import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
 import { useProfileStore } from "src/stores/profile";
 import { useScreenStore } from "src/stores/screen";
 import { cn } from "src/utils/cn";
-import { pickHostDbUser } from "src/utils/connection";
+import { pickHostDbUser } from "src/lib/connection/connection";
 import { profileConnectionHost } from "src/utils/connectionLog";
 import { Button } from "../common/Button";
 

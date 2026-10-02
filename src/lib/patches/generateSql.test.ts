@@ -1,0 +1,903 @@
+import { describe, expect, it } from "vitest";
+import {
+  analyzePatchIdentitySafety,
+  generateSqlFromPatches,
+  generateSqlPlanFromPatches,
+  generateDeleteSqlFromPatches,
+  generateInsertSqlFromPatches,
+  generateUpdateSqlFromPatches,
+  type PatchMap,
+} from "./generateSql";
+
+describe("generateInsertSqlFromPatches", () => {
+  it("preserves DEFAULT, NULL, empty strings, and values", () => {
+    const sql = generateInsertSqlFromPatches(
+      {
+        create: {
+          data: {
+            "new:0": {
+              id: { __politedbCellEdit: "default" },
+              nullable_value: null,
+              empty_value: "",
+              title: "hello",
+              __rowKey: "new:0",
+            },
+          },
+        },
+      },
+      "public",
+      "items",
+      "postgres",
+      [
+        { name: "id", db_type: "integer" },
+        { name: "nullable_value", db_type: "text" },
+        { name: "empty_value", db_type: "text" },
+        { name: "title", db_type: "text" },
+      ]
+    );
+
+    expect(sql).toEqual([
+      'INSERT INTO "public"."items" ("id", "nullable_value", "empty_value", "title")\nVALUES (DEFAULT, NULL, \'\', \'hello\');',
+    ]);
+  });
+});
+
+function mysqlJsonDisplayLiteral(value: unknown) {
+  const json = typeof value === "string" ? value : JSON.stringify(value);
+  const hex = Array.from(new TextEncoder().encode(json))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `CONVERT(UNHEX('${hex}') USING utf8mb4)`;
+}
+
+describe("generateUpdateSqlFromPatches", () => {
+  it("preserves empty-string and binary primary keys in UPDATE identity", () => {
+    const emptyKeySql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { title: "updated" } } } },
+      "fleet",
+      "items",
+      {
+        columns: [
+          { name: "code", db_type: "varchar" },
+          { name: "title", db_type: "varchar" },
+        ],
+        rows: [
+          [
+            { t: "Str", v: "" },
+            { t: "Str", v: "old" },
+          ],
+        ],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "code",
+        },
+      ],
+      "mysql"
+    );
+    const binaryKeySql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { title: "updated" } } } },
+      "fleet",
+      "binary_items",
+      {
+        columns: [
+          { name: "id", db_type: "binary" },
+          { name: "title", db_type: "varchar" },
+        ],
+        rows: [[{ t: "BytesB64", v: "AQID/w==" }, "old"]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(emptyKeySql[0]).toContain(
+      "WHERE `code` = CONVERT(UNHEX('') USING utf8mb4)"
+    );
+    expect(emptyKeySql[0]).not.toContain("`code` IS NULL");
+    expect(binaryKeySql[0]).toContain("WHERE `id` = X'010203ff';");
+    expect(binaryKeySql[0]).not.toContain("AQID/w==");
+  });
+
+  it("MySQL UPDATE/DELETE WHERE uses real int/datetime values from BytesB64 cells", () => {
+    const datetime = "2026-10-01 04:47:06.554675";
+    const datetimeB64 = globalThis.btoa(datetime);
+    const columns = [
+      { name: "id", db_type: "int" },
+      { name: "name", db_type: "varchar" },
+      { name: "created_at", db_type: "datetime" },
+    ];
+    const rows = [
+      [
+        { t: "BytesB64", v: "Mw==" }, // "3"
+        { t: "Str", v: "alice" },
+        { t: "BytesB64", v: datetimeB64 },
+      ],
+    ];
+    const constraints = [
+      {
+        index_name: "PRIMARY",
+        index_algorithm: "BTREE",
+        is_unique: true,
+        is_primary: true,
+        column_name: "id",
+      },
+    ];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      constraints,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 3;");
+    expect(updateSql[0]).not.toContain("WHERE `id` = 51");
+    expect(updateSql[0]).not.toContain("50,48,50,54");
+
+    const deleteSql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": true } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      [],
+      "mysql"
+    );
+    expect(deleteSql).toHaveLength(1);
+    expect(deleteSql[0]).toContain("`id` = 3");
+    expect(deleteSql[0]).toContain("`name` =");
+    expect(deleteSql[0]).toContain("`created_at` =");
+    expect(deleteSql[0]).not.toContain("`id` = 51");
+    expect(deleteSql[0]).not.toContain("50,48,50,54");
+  });
+
+  it("MySQL fleet.users_deleted uses PRIMARY key WHERE when constraints load", () => {
+    const columns = [
+      { name: "id", db_type: "int" },
+      { name: "name", db_type: "varchar" },
+      { name: "created_at", db_type: "datetime" },
+    ];
+    const rows = [[3, "alice", "2026-10-01 04:47:06"]];
+    const constraints = [
+      {
+        index_name: "PRIMARY",
+        index_algorithm: "BTREE",
+        // MySQL TRUE often arrives as 1 / "1" before string normalization
+        is_unique: true,
+        is_primary: "1" as unknown as boolean,
+        column_name: "id",
+      },
+    ];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      constraints as never,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 3;");
+    expect(updateSql[0]).toMatch(/WHERE `id` = 3;?\s*$/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`name`/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`created_at`/);
+  });
+
+  it("MySQL uses column is_primary flags when constraints are missing", () => {
+    const columns = [
+      { name: "id", db_type: "int", is_primary: true },
+      { name: "name", db_type: "varchar" },
+      { name: "note", db_type: "text" },
+    ];
+    const rows = [[7, "alice", "x"]];
+
+    const updateSql = generateUpdateSqlFromPatches(
+      { update: { data: { "0": { name: "bob" } } } },
+      "fleet",
+      "users_deleted",
+      { columns, rows, rowCount: 1 },
+      null,
+      "mysql"
+    );
+    expect(updateSql).toHaveLength(1);
+    expect(updateSql[0]).toContain("WHERE `id` = 7;");
+    expect(updateSql[0]).toMatch(/WHERE `id` = 7;?\s*$/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`name`/);
+    expect(updateSql[0]).not.toMatch(/WHERE[\s\S]*`note`/);
+  });
+
+  it("serializes MySQL JSON updates and avoids JSON columns in fallback WHERE", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: {
+                mdm: {
+                  ios_updates: {
+                    deadline: null,
+                    minimum_version: null,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain("UPDATE `fleet`.`app_config_json`");
+    expect(sql[0]).toContain(
+      `\`json_value\` = ${mysqlJsonDisplayLiteral({
+        mdm: {
+          ios_updates: {
+            deadline: null,
+            minimum_version: null,
+          },
+        },
+      })}`
+    );
+    expect(sql[0]).toContain("WHERE `id` = 1;");
+    expect(sql[0]).not.toContain("WHERE `json_value`");
+    expect(sql[0]).not.toContain("AND `json_value`");
+  });
+
+  it("uses the primary key for MySQL JSON updates when available", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: '{"enabled":true}',
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      `\`json_value\` = ${mysqlJsonDisplayLiteral('{"enabled":true}')}`
+    );
+    expect(sql[0]).toContain("WHERE `id` = 1;");
+    expect(sql[0]).not.toContain("AND `json_value`");
+  });
+
+  it("formats ClickHouse Decimal values for UPDATE", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": { total: 6941 },
+          },
+        },
+      },
+      "demo_db",
+      "orders",
+      {
+        columns: [
+          { name: "id", db_type: "UInt64" },
+          { name: "total", db_type: "Decimal64(18, 2)" },
+        ],
+        rows: [[1, 6941]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql[0]).toContain("`total` = 6941.00");
+    expect(sql[0]).not.toContain("`total` = 694100");
+  });
+
+  it("uses ALTER TABLE UPDATE for ClickHouse", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": { unit_price: 4991 },
+          },
+        },
+      },
+      "demo_db",
+      "order_items",
+      {
+        columns: [
+          { name: "id", db_type: "UInt64" },
+          { name: "unit_price", db_type: "UInt32" },
+        ],
+        rows: [[1, 100]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      "ALTER TABLE `demo_db`.`order_items` UPDATE `unit_price` = 4991 WHERE `id` = 1;"
+    );
+    expect(sql[0]).not.toMatch(/^UPDATE /);
+  });
+
+  it("uses ALTER TABLE DELETE for ClickHouse", () => {
+    const sql = generateDeleteSqlFromPatches(
+      {
+        delete: {
+          data: {
+            "0": {},
+          },
+        },
+      },
+      "demo_db",
+      "order_items",
+      {
+        columns: [{ name: "id", db_type: "UInt64" }],
+        rows: [[1]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "clickhouse"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toBe(
+      "ALTER TABLE `demo_db`.`order_items` DELETE WHERE `id` = 1;"
+    );
+  });
+
+  it("preserves empty-string and binary primary keys in DELETE identity", () => {
+    const emptyKeySql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": {} } } },
+      "fleet",
+      "items",
+      {
+        columns: [{ name: "code", db_type: "varchar" }],
+        rows: [[{ t: "Str", v: "" }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "code",
+        },
+      ],
+      "mysql"
+    );
+    const binaryKeySql = generateDeleteSqlFromPatches(
+      { delete: { data: { "0": {} } } },
+      "fleet",
+      "binary_items",
+      {
+        columns: [{ name: "id", db_type: "longblob" }],
+        rows: [[{ t: "BytesB64", v: "AQID/w==" }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(emptyKeySql[0]).toContain(
+      "WHERE `code` = CONVERT(UNHEX('') USING utf8mb4)"
+    );
+    expect(binaryKeySql[0]).toContain("WHERE `id` = X'010203ff';");
+  });
+
+  it("normalizes double-encoded JSON strings for MySQL updates", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: '"{\\"mdm\\":{\\"enabled\\":true}}"',
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      `\`json_value\` = ${mysqlJsonDisplayLiteral('{"mdm":{"enabled":true}}')}`
+    );
+    expect(sql[0]).not.toContain("CAST(0x");
+    expect(sql[0]).toContain("WHERE `id` = 1;");
+  });
+
+  it("keeps MySQL JSON literals readable for backslashes and single quotes", () => {
+    const jsonValue = {
+      pattern: "password\\\\s*[:=]\\\\s*[\\\"\\'][^\\\"\\'\\\\n]{8,}",
+    };
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: jsonValue,
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      `\`json_value\` = ${mysqlJsonDisplayLiteral(jsonValue)}`
+    );
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain("password\\\\");
+    expect(sql[0]).not.toContain("CAST(0x");
+    expect(sql[0]).toContain("WHERE `id` = 1;");
+  });
+
+  it("keeps JSON payloads with closing arrays and quotes syntax safe for MySQL", () => {
+    const jsonValue = {
+      mdm: {
+        secrets: ['token"]}},"overrides":{}'],
+      },
+      fleet_desktop: {
+        transparency_url: "",
+      },
+      smtp_settings: {
+        password: "p'ass\\word",
+      },
+    };
+
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: jsonValue,
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [
+        {
+          index_name: "PRIMARY",
+          index_algorithm: "BTREE",
+          is_unique: true,
+          is_primary: true,
+          column_name: "id",
+        },
+      ],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(
+      `\`json_value\` = ${mysqlJsonDisplayLiteral(jsonValue)}`
+    );
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain('"]}}');
+    expect(sql[0]).toContain("WHERE `id` = 1;");
+  });
+
+  it("serializes MySQL JSON payloads with apostrophes through a hex utf8 literal", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              json_value: {
+                regex: "password\\s*[:=]\\s*[\"'][^\"'\\n]{8,}[\"']",
+              },
+            },
+          },
+        },
+      },
+      "fleet",
+      "app_config_json",
+      {
+        columns: [
+          { name: "id", db_type: "int" },
+          { name: "json_value", db_type: "json" },
+        ],
+        rows: [[1, { t: "Json", v: '{"old":true}' }]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain("CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain("[\\\"\\']");
+    expect(sql[0]).not.toContain("\\u0027");
+  });
+
+  it("uses a virtual identity from safe columns when no primary key exists", () => {
+    const sql = generateUpdateSqlFromPatches(
+      {
+        update: {
+          data: {
+            "0": {
+              name: "new",
+            },
+          },
+        },
+      },
+      "public",
+      "events",
+      {
+        columns: [
+          { name: "name", db_type: "text" },
+          { name: "payload", db_type: "json" },
+          { name: "raw", db_type: "bytea" },
+        ],
+        rows: [["old", { t: "Json", v: '{"a":1}' }, "abc"]],
+        rowCount: 1,
+      },
+      [],
+      "mysql"
+    );
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain("WHERE `name` = CONVERT(UNHEX(");
+    expect(sql[0]).not.toContain("`payload`");
+    expect(sql[0]).not.toContain("`raw`");
+  });
+
+  it("blocks unsafe fallback updates when no primary key or safe virtual key exists", () => {
+    expect(() =>
+      generateUpdateSqlFromPatches(
+        {
+          update: {
+            data: {
+              "0": {
+                payload: { next: true },
+              },
+            },
+          },
+        },
+        "public",
+        "events",
+        {
+          columns: [{ name: "payload", db_type: "json" }],
+          rows: [[{ t: "Json", v: '{"a":1}' }]],
+          rowCount: 1,
+        },
+        [],
+        "mysql"
+      )
+    ).toThrow("TABLE_EDIT_UNSAFE_IDENTITY");
+  });
+
+  it("blocks JSON/BLOB-only virtual keys across relational engines", () => {
+    for (const engine of ["postgres", "mysql", "sqlite"] as const) {
+      expect(() =>
+        generateUpdateSqlFromPatches(
+          {
+            update: {
+              data: {
+                "0": {
+                  payload: { next: true },
+                },
+              },
+            },
+          },
+          "public",
+          "events",
+          {
+            columns: [
+              {
+                name: "payload",
+                db_type: engine === "postgres" ? "jsonb" : "json",
+              },
+              {
+                name: "raw",
+                db_type: engine === "postgres" ? "bytea" : "blob",
+              },
+            ],
+            rows: [[{ t: "Json", v: '{"a":1}' }, "abc"]],
+            rowCount: 1,
+          },
+          [],
+          engine
+        )
+      ).toThrow("TABLE_EDIT_UNSAFE_IDENTITY");
+    }
+  });
+
+  it("reports virtual key safety metadata for tables without primary keys", () => {
+    const issues = analyzePatchIdentitySafety(
+      {
+        "table:public.events": {
+          tableWindow: {
+            id: "table:public.events",
+            type: "table",
+            table: { schema: "public", name: "events" },
+          },
+          tableData: {
+            columns: [
+              { name: "name", db_type: "text" },
+              { name: "payload", db_type: "json" },
+            ],
+            structure: null,
+            constraints: [],
+            foreignKeys: null,
+            sizeInfo: null,
+            rowCount: 1,
+            connectionId: null,
+            busy: false,
+            error: null,
+          },
+          patches: {
+            update: {
+              data: {
+                "0": {
+                  name: "new",
+                },
+              },
+            },
+          },
+        },
+      },
+      "mysql"
+    );
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      kind: "virtual-key",
+      columns: ["name"],
+      tableKey: "public.events",
+    });
+  });
+});
+
+describe("generateSqlPlanFromPatches", () => {
+  it("uses the offset row when generating update predicates from a paged table", () => {
+    const patchMap: PatchMap = {
+      "table:public.users": {
+        tableWindow: {
+          id: "table:public.users",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "name", db_type: "text" },
+          ],
+          structure: null,
+          constraints: [
+            {
+              index_name: "users_pkey",
+              index_algorithm: "BTREE",
+              is_unique: true,
+              is_primary: true,
+              column_name: "id",
+            },
+          ],
+          foreignKeys: null,
+          sizeInfo: null,
+          rowCount: 100,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches: {
+          update: {
+            data: {
+              "0": { name: "Ada" },
+            },
+          },
+        },
+      },
+    };
+
+    const sql = generateSqlFromPatches(patchMap, "postgres", {
+      activeScreen: "screen",
+      offset: 50,
+      getRowAt: (_key, rowIndex) =>
+        rowIndex === 50 ? [51, "Old Ada"] : [1, "Wrong row"],
+    });
+
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toContain(`WHERE "id" = 51;`);
+    expect(sql[0]).not.toContain(`WHERE "id" = 1;`);
+  });
+
+  it("orders structure changes before data and constraints", () => {
+    const patchMap: PatchMap = {
+      "table:public.users": {
+        tableWindow: {
+          id: "table:public.users",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "name", db_type: "text" },
+          ],
+          structure: [
+            {
+              column_name: "id",
+              data_type: "int",
+              is_nullable: "NO",
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+          ],
+          constraints: [],
+          foreignKeys: [],
+          sizeInfo: null,
+          rowCount: 0,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches: {
+          create: {
+            structure: {
+              "1": {
+                column_name: "name",
+                data_type: "text",
+                is_nullable: true,
+              },
+            },
+            data: {
+              new: { id: 1, name: "Ada" },
+            },
+            constraints: {
+              "0": {
+                index_name: "users_name_idx",
+                column_name: "name",
+                is_unique: false,
+                index_algorithm: "BTREE",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const plan = generateSqlPlanFromPatches(patchMap, "postgres");
+    expect(plan.preData[0]).toContain("ADD COLUMN");
+    expect(plan.data[0]).toContain("INSERT INTO");
+    expect(plan.postData[0]).toContain("CREATE INDEX");
+    expect(generateSqlFromPatches(patchMap, "postgres")).toEqual([
+      ...plan.preData,
+      ...plan.data,
+      ...plan.postData,
+    ]);
+  });
+});

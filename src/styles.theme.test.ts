@@ -13,11 +13,11 @@ const header = readFileSync(
   "utf8"
 );
 const statusBar = readFileSync(
-  resolve(process.cwd(), "src/components/AppStatusBar.tsx"),
+  resolve(process.cwd(), "src/components/status-bar/AppStatusBar.tsx"),
   "utf8"
 );
 const searchNav = readFileSync(
-  resolve(process.cwd(), "src/screens/connection/LeftNav.tsx"),
+  resolve(process.cwd(), "src/screens/connection/nav/LeftNav.tsx"),
   "utf8"
 );
 const commonTable = readFileSync(

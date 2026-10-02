@@ -27,7 +27,7 @@ import { GroupsSection } from "./GroupsSection";
 import { KeychainSection } from "./KeychainSection";
 import { ConnectionLogsSection } from "./ConnectionLogsSection";
 
-import { filterConnections } from "src/utils/connection";
+import { filterConnections } from "src/lib/connection/connection";
 import {
   formatExportPasswordError,
   formatSharingImportSuccessMessage,
@@ -35,12 +35,12 @@ import {
   CONNECTION_EXPORT_EXTENSION,
   isSharingExport,
   parseProfileExportMeta,
-} from "src/utils/profileSharing";
+} from "src/lib/profiles/profileSharing";
 import {
   formatExternalImportError,
   formatExternalImportSuccessMessage,
   isTablePlusEncryptedPath,
-} from "src/utils/profileImport";
+} from "src/lib/profiles/profileImport";
 import type {
   ConnectionSortMode,
   DatabaseEngine,

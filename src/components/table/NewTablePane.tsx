@@ -12,7 +12,7 @@ import { useConnectionStore } from "src/stores/connection";
 import { TableViewToggle } from "./TableViewToggle";
 import { TagSelect } from "src/components/common/TagSelect";
 import { useNewTableState } from "src/hooks/useNewTableState";
-import { getDbConfig } from "src/utils/dbConfig";
+import { getDbConfig } from "src/lib/engines/dbConfig";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",

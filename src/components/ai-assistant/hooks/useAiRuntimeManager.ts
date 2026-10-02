@@ -22,7 +22,7 @@ import {
 import {
   DEFAULT_AI_MODEL_NAME,
   normalizeLocalAiModelName,
-} from "src/utils/assistant";
+} from "src/lib/ai-assistant/assistant";
 import { sleep } from "src/utils/common";
 
 function formatError(error: unknown) {

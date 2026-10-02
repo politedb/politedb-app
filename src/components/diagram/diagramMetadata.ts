@@ -10,6 +10,7 @@ import {
 import { runSqlQuery } from "src/lib/tauri/query";
 import type { DatabaseEngine, ForeignKeyInfo } from "src/types";
 import { cellToString } from "src/utils/convert";
+import { cellIsTruthy as cellIsTruthyFlag } from "src/utils/primaryKey";
 import { mapPool } from "src/utils/mapPool";
 import type {
   DiagramColumn,
@@ -44,11 +45,7 @@ function tableKey(schema: string, table: string) {
 }
 
 function cellIsTruthy(value: unknown): boolean {
-  if (value === true || value === 1) return true;
-  const normalized = cellToString(value as never)
-    ?.toLowerCase()
-    .trim();
-  return ["true", "t", "1", "yes"].includes(normalized ?? "");
+  return cellIsTruthyFlag(value);
 }
 
 function diagramConstraintsSql(
@@ -79,7 +76,7 @@ function uniqueColumnSignatureFromConstraintRow(
 
   if (engine === "mysql" || engine === "mariadb") {
     const nonUnique = Number(cellToString(row?.[2]) ?? "1");
-    const isPrimary = cellToString(row?.[3])?.toLowerCase() === "true";
+    const isPrimary = cellIsTruthy(row?.[3]);
     isUniqueLike = nonUnique === 0 || isPrimary;
     columns = cellToString(row?.[4]) ?? "";
   } else {

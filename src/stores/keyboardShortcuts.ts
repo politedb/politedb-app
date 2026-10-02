@@ -47,7 +47,7 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: "refresh",
     label: "Refresh",
-    description: "Refresh the current view or schema metadata.",
+    description: "Refresh the focused table pane or schema metadata.",
     defaultBinding: "Mod+R",
   },
   {

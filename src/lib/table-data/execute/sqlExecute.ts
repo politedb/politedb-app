@@ -34,6 +34,10 @@ export async function executeSqlLoad(
     addLogQuery,
   } = ctx;
 
+  // MenuBar / force refresh must not await a pane-load meta query that may be
+  // cancelled when we take over the connection — that hung isRefreshing forever.
+  const forceMetaInflight = !!flags.force || !!flags.forceRefresh;
+
   const cachedCols = columnsCache[key];
   if (
     (!Array.isArray(prev.columns) || prev.columns.length === 0) &&
@@ -118,6 +122,7 @@ export async function executeSqlLoad(
           filters: flags.filters,
           filterCombine: flags.filterCombine ?? "AND",
           exact: !!flags.exactRowCount,
+          force: forceMetaInflight,
         });
         if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
         patchMeta(setMeta, key, prev, {
@@ -137,6 +142,7 @@ export async function executeSqlLoad(
           tableName,
           engine,
           addLogQuery,
+          force: forceMetaInflight,
         });
         if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
         patchMeta(setMeta, key, prev, { sizeInfo });
@@ -175,6 +181,7 @@ export async function executeSqlLoad(
           tableName,
           engine,
           addLogQuery,
+          force: forceMetaInflight,
         });
         if (latestLoadSignatureByKey.get(key) !== loadSignature) return;
         patchMeta(setMeta, key, prev, { foreignKeys });

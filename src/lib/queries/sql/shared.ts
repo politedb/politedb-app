@@ -1,5 +1,5 @@
 import type { DatabaseEngine } from "src/types";
-import { quoteIdentifier, sqlStringLiteral } from "src/utils/sqlDialect";
+import { quoteIdentifier, sqlStringLiteral } from "src/lib/sql/sqlDialect";
 
 export function isMySqlLike(engine?: DatabaseEngine) {
   return engine === "mysql" || engine === "mariadb";
