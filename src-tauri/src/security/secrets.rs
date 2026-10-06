@@ -1,7 +1,26 @@
 use tauri::AppHandle;
 
+/// Physical service for non-macOS keyring entries (unchanged naming).
+#[cfg(not(target_os = "macos"))]
 fn service_name(_app: &AppHandle) -> String {
-    "politedb".to_string()
+    crate::security::credential_identity::LEGACY_SERVICE.to_string()
+}
+
+/// macOS: recognized profile credentials use branded items (Name "PoliteDB",
+/// Where = bundle id, Account `<UUID>_profile|_ssh`) with lazy legacy
+/// migration; other keys keep the legacy service. See `credential_store`.
+#[cfg(target_os = "macos")]
+fn mac_store_call<T>(
+    f: impl FnOnce(
+        &crate::security::credential_store::CredentialStore<
+            '_,
+            crate::security::keychain_macos::MacKeychain,
+        >,
+    ) -> Result<T, String>,
+) -> Result<T, String> {
+    let port = crate::security::keychain_macos::MacKeychain;
+    let store = crate::security::credential_store::CredentialStore::new(&port);
+    f(&store)
 }
 
 /* ===============================
@@ -9,16 +28,16 @@ fn service_name(_app: &AppHandle) -> String {
  * =============================== */
 
 pub fn keychain_set(app: &AppHandle, key: &str, value: &str) -> Result<(), String> {
-    let service = service_name(app);
-
     #[cfg(target_os = "macos")]
     {
-        crate::security::keychain_macos::set_password(&service, key, value)
+        let _ = app;
+        mac_store_call(|store| store.set(key, value))
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         use keyring::Entry;
+        let service = service_name(app);
         let entry = Entry::new(&service, key).map_err(|e| format!("KEYRING_ENTRY_FAILED: {e}"))?;
         entry
             .set_password(value)
@@ -28,16 +47,16 @@ pub fn keychain_set(app: &AppHandle, key: &str, value: &str) -> Result<(), Strin
 }
 
 pub fn keychain_get(app: &AppHandle, key: &str) -> Result<String, String> {
-    let service = service_name(app);
-
     #[cfg(target_os = "macos")]
     {
-        crate::security::keychain_macos::get_password(&service, key)
+        let _ = app;
+        mac_store_call(|store| store.get(key))
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         use keyring::Entry;
+        let service = service_name(app);
         let entry = Entry::new(&service, key).map_err(|e| format!("KEYRING_ENTRY_FAILED: {e}"))?;
         entry
             .get_password()
@@ -46,16 +65,16 @@ pub fn keychain_get(app: &AppHandle, key: &str) -> Result<String, String> {
 }
 
 pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
-    let service = service_name(app);
-
     #[cfg(target_os = "macos")]
     {
-        crate::security::keychain_macos::delete_password(&service, key)
+        let _ = app;
+        mac_store_call(|store| store.delete(key))
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         use keyring::Entry;
+        let service = service_name(app);
         let entry = Entry::new(&service, key).map_err(|e| format!("KEYRING_ENTRY_FAILED: {e}"))?;
         entry
             .delete_password()
@@ -65,15 +84,15 @@ pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
 }
 
 pub fn keychain_list(app: &AppHandle) -> Result<Vec<String>, String> {
-    let service = service_name(app);
-
     #[cfg(target_os = "macos")]
     {
-        crate::security::keychain_macos::list_accounts(&service)
+        let _ = app;
+        mac_store_call(|store| store.list())
     }
 
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = app;
         Err("KEYCHAIN_LIST_UNSUPPORTED_ON_THIS_PLATFORM".into())
     }
 }

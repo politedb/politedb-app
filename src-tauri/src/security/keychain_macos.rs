@@ -21,8 +21,8 @@ use core_foundation_sys::string::{
 
 use security_framework_sys::base::{errSecDuplicateItem, errSecItemNotFound, errSecSuccess};
 use security_framework_sys::item::{
-    kSecAttrAccount, kSecAttrService, kSecAttrSynchronizable, kSecClass, kSecClassGenericPassword,
-    kSecMatchLimit, kSecReturnAttributes, kSecReturnData, kSecValueData,
+    kSecAttrAccount, kSecAttrLabel, kSecAttrService, kSecAttrSynchronizable, kSecClass,
+    kSecClassGenericPassword, kSecMatchLimit, kSecReturnAttributes, kSecReturnData, kSecValueData,
 };
 use security_framework_sys::keychain_item::{
     SecItemAdd, SecItemCopyMatching, SecItemDelete, SecItemUpdate,
@@ -144,17 +144,35 @@ fn extract_account_from_dict(dict: CFDictionaryRef) -> Option<String> {
     cfstring_to_string(value as CFStringRef)
 }
 
+fn add_label(attrs: &mut CFMutableDictionary, label: Option<&str>) {
+    if let Some(label) = label {
+        let label_cf = cfstr(label);
+        attrs.add(
+            &unsafe { k_str(kSecAttrLabel) },
+            &(label_cf.as_concrete_TypeRef() as CFTypeRef),
+        );
+    }
+}
+
 /* =============================================================================
  * Public API
  * ============================================================================= */
 
-fn set_password_in(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AddResult {
+    Added,
+    Duplicate,
+}
+
+fn add_password_in(
     service: &str,
     account: &str,
     value: &str,
+    label: Option<&str>,
     data_protection: bool,
-) -> Result<(), String> {
+) -> Result<AddResult, String> {
     let mut attrs = build_query(service, account, data_protection);
+    add_label(&mut attrs, label);
 
     // value
     attrs.add(
@@ -173,18 +191,30 @@ fn set_password_in(
     let status = unsafe { SecItemAdd(attrs.as_concrete_TypeRef(), std::ptr::null_mut()) };
 
     if status == errSecSuccess {
-        return Ok(());
+        return Ok(AddResult::Added);
     }
-
-    // Duplicate => update
     if status == errSecDuplicateItem {
-        return update_password_in(service, account, value, data_protection);
+        return Ok(AddResult::Duplicate);
     }
 
     Err(os_err(status, "KEYCHAIN_ADD_FAILED"))
 }
 
-pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), String> {
+fn set_password_in(
+    service: &str,
+    account: &str,
+    value: &str,
+    label: Option<&str>,
+    data_protection: bool,
+) -> Result<(), String> {
+    match add_password_in(service, account, value, label, data_protection)? {
+        AddResult::Added => Ok(()),
+        // Duplicate => update (label is refreshed too)
+        AddResult::Duplicate => update_password_in(service, account, value, label, data_protection),
+    }
+}
+
+fn validate_set_input(service: &str, account: &str, value: &str) -> Result<(), String> {
     if service.trim().is_empty() {
         return Err("SECRET_SERVICE_EMPTY".into());
     }
@@ -194,19 +224,49 @@ pub fn set_password(service: &str, account: &str, value: &str) -> Result<(), Str
     if value.is_empty() {
         return Err("SECRET_VALUE_EMPTY".into());
     }
+    Ok(())
+}
 
-    match set_password_in(service, account, value, true) {
+/// Create or update; `label` (Keychain Access "Name") is set on create and update.
+pub fn set_password_labeled(
+    service: &str,
+    account: &str,
+    value: &str,
+    label: Option<&str>,
+) -> Result<(), String> {
+    validate_set_input(service, account, value)?;
+
+    match set_password_in(service, account, value, label, true) {
         Err(error) if is_missing_entitlement_error(&error) => {
-            set_password_in(service, account, value, false)
+            set_password_in(service, account, value, label, false)
         }
         result => result,
     }
+}
+
+/// Create only. Returns `Ok(false)` when the item already exists (left untouched).
+pub fn add_password_if_absent(
+    service: &str,
+    account: &str,
+    value: &str,
+    label: Option<&str>,
+) -> Result<bool, String> {
+    validate_set_input(service, account, value)?;
+
+    let result = match add_password_in(service, account, value, label, true) {
+        Err(error) if is_missing_entitlement_error(&error) => {
+            add_password_in(service, account, value, label, false)
+        }
+        result => result,
+    }?;
+    Ok(result == AddResult::Added)
 }
 
 fn update_password_in(
     service: &str,
     account: &str,
     value: &str,
+    label: Option<&str>,
     data_protection: bool,
 ) -> Result<(), String> {
     let query = build_query(service, account, data_protection);
@@ -216,6 +276,7 @@ fn update_password_in(
         &unsafe { k_str(kSecValueData) },
         &(cfdata(value).as_concrete_TypeRef() as CFTypeRef),
     );
+    add_label(&mut attrs, label);
 
     let status = unsafe { SecItemUpdate(query.as_concrete_TypeRef(), attrs.as_concrete_TypeRef()) };
 
@@ -261,7 +322,15 @@ fn get_password_from(
     }
 }
 
-pub fn get_password(service: &str, account: &str) -> Result<String, String> {
+/// Read from the data-protection keychain, then the legacy file keychain.
+/// When `upgrade_storage` is true, a value found only in the file keychain is
+/// copied into the data-protection keychain (with `label`, if any).
+pub fn get_password_with(
+    service: &str,
+    account: &str,
+    upgrade_storage: bool,
+    label: Option<&str>,
+) -> Result<String, String> {
     match get_password_from(service, account, true) {
         Ok(value) => Ok(value),
         Err(error) if is_missing_entitlement_error(&error) => {
@@ -269,9 +338,11 @@ pub fn get_password(service: &str, account: &str) -> Result<String, String> {
         }
         Err(error) if error == "KEYCHAIN_ITEM_NOT_FOUND" => {
             let value = get_password_from(service, account, false)?;
-            // Legacy items can show the macOS ACL prompt once. Copying the
-            // authorized value makes future reads use the signed app access group.
-            let _ = set_password(service, account, &value);
+            if upgrade_storage {
+                // Legacy items can show the macOS ACL prompt once. Copying the
+                // authorized value makes future reads use the signed app access group.
+                let _ = set_password_labeled(service, account, &value, label);
+            }
             Ok(value)
         }
         Err(error) => Err(error),
@@ -361,4 +432,135 @@ pub fn list_accounts(service: &str) -> Result<Vec<String>, String> {
     keys.sort();
     keys.dedup();
     Ok(keys)
+}
+
+/* =============================================================================
+ * Port adapter
+ * ============================================================================= */
+
+/// macOS Security-framework adapter for [`crate::security::credential_store::KeychainPort`].
+pub struct MacKeychain;
+
+impl crate::security::credential_store::KeychainPort for MacKeychain {
+    fn get(
+        &self,
+        service: &str,
+        account: &str,
+        upgrade_storage: bool,
+        label: Option<&str>,
+    ) -> Result<String, String> {
+        get_password_with(service, account, upgrade_storage, label)
+    }
+
+    fn set(
+        &self,
+        service: &str,
+        account: &str,
+        value: &str,
+        label: Option<&str>,
+    ) -> Result<(), String> {
+        set_password_labeled(service, account, value, label)
+    }
+
+    fn add_if_absent(
+        &self,
+        service: &str,
+        account: &str,
+        value: &str,
+        label: Option<&str>,
+    ) -> Result<crate::security::credential_store::AddOutcome, String> {
+        use crate::security::credential_store::AddOutcome;
+        Ok(if add_password_if_absent(service, account, value, label)? {
+            AddOutcome::Added
+        } else {
+            AddOutcome::AlreadyExists
+        })
+    }
+
+    fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+        delete_password(service, account)
+    }
+
+    fn list(&self, service: &str) -> Result<Vec<String>, String> {
+        list_accounts(service)
+    }
+}
+
+#[cfg(test)]
+mod native_smoke {
+    //! Disposable native smoke test. Run explicitly on macOS:
+    //! `cargo test --locked native_branded_credential_smoke -- --ignored`
+    //! Uses a fresh random profile UUID and a throwaway value; never touches
+    //! existing credentials.
+    use std::process::Command;
+
+    use crate::security::credential_identity::{BRANDED_LABEL, BRANDED_SERVICE};
+    use crate::security::credential_store::{CredentialStore, KEYCHAIN_ITEM_NOT_FOUND};
+
+    use super::MacKeychain;
+
+    fn attributes(account: &str) -> Option<String> {
+        let out = Command::new("security")
+            .args([
+                "find-generic-password",
+                "-s",
+                BRANDED_SERVICE,
+                "-a",
+                account,
+            ])
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Removes the throwaway item even when an assertion fails.
+    struct Cleanup(String);
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = super::delete_password(BRANDED_SERVICE, &self.0);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn native_branded_credential_smoke() {
+        let id = uuid::Uuid::new_v4();
+        let key = format!("politedb/profile/{id}/postgres/db_password");
+        let account = format!("{}_profile", id.hyphenated().to_string().to_uppercase());
+        let _cleanup = Cleanup(account.clone());
+        let port = MacKeychain;
+        let store = CredentialStore::new(&port);
+
+        store.set(&key, "smoke-value-1").unwrap();
+        let attrs = attributes(&account).expect("branded item should exist");
+        assert!(
+            attrs.contains(&format!("0x00000007 <blob>=\"{BRANDED_LABEL}\"")),
+            "{attrs}"
+        );
+        assert!(
+            attrs.contains(&format!("\"svce\"<blob>=\"{BRANDED_SERVICE}\"")),
+            "{attrs}"
+        );
+        assert!(
+            attrs.contains(&format!("\"acct\"<blob>=\"{account}\"")),
+            "{attrs}"
+        );
+        assert!(attrs.contains("class: \"genp\""), "{attrs}");
+        assert_eq!(store.get(&key).unwrap(), "smoke-value-1");
+
+        store.set(&key, "smoke-value-2").unwrap();
+        assert_eq!(store.get(&key).unwrap(), "smoke-value-2");
+        let attrs = attributes(&account).expect("branded item should still exist");
+        assert!(
+            attrs.contains(&format!("0x00000007 <blob>=\"{BRANDED_LABEL}\"")),
+            "{attrs}"
+        );
+
+        store.delete(&key).unwrap();
+        assert!(attributes(&account).is_none());
+        assert_eq!(store.get(&key), Err(KEYCHAIN_ITEM_NOT_FOUND.into()));
+    }
 }
