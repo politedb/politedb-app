@@ -5,6 +5,7 @@ extern crate objc2;
 
 mod ai_runtime;
 mod commands;
+mod data_migration;
 mod engines;
 mod file_storage;
 mod license;
@@ -137,6 +138,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             enforce_minimum_macos_version()?;
+            data_migration::migrate_legacy_app_data(app.handle());
             window_chrome::apply(app);
             let state: tauri::State<AppState> = app.state();
             state.sql_busy.clear();
