@@ -12,7 +12,7 @@ const screenState: {
 };
 
 vi.mock("src/hooks/useAppUpdater", () => ({
-  useAppUpdater: () => ({ appVersion: "1.5.0" }),
+  useAppUpdater: () => ({ appVersion: "1.5.1" }),
 }));
 
 vi.mock("src/lib/analytics", () => ({
