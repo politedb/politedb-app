@@ -33,7 +33,7 @@
   <!-- Keychain access group (prevents errSecMissingEntitlement -34018) -->
   <key>com.apple.security.keychain-access-groups</key>
   <array>
-    <string>$(AppIdentifierPrefix)com.politehq.politedb</string>
+    <string>$(AppIdentifierPrefix)PoliteDB</string>
   </array>
 
 </dict>
