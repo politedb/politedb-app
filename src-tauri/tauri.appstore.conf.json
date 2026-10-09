@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeDevCommand": "npm run dev:appstore",
+    "beforeBuildCommand": "npm run build:appstore"
+  },
+  "app": {
+    "macOSPrivateApi": false,
+    "security": {
+      "capabilities": ["appstore"]
+    }
+  },
+  "bundle": {
+    "targets": ["app"],
+    "createUpdaterArtifacts": false,
+    "resources": [],
+    "macOS": {
+      "signingIdentity": null,
+      "entitlements": "entitlements.appstore.plist",
+      "minimumSystemVersion": "13.3",
+      "files": {
+        "embedded.provisionprofile": "embedded.provisionprofile"
+      }
+    }
+  }
+}

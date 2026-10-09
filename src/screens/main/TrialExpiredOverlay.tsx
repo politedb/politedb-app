@@ -1,6 +1,7 @@
 import { Button } from "src/components/common/Button";
-import { licenseOpenExternalUrl } from "src/lib/tauri";
+import { openExternalUrl } from "src/lib/tauri";
 import type { LicenseState } from "src/lib/tauri/license";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 
 const PRICING_URL = "https://politedb.com/pricing";
 
@@ -9,11 +10,7 @@ export function TrialExpiredOverlay(props: {
   onOpenLicense: () => void;
 }) {
   async function handleBuyLicense() {
-    try {
-      await licenseOpenExternalUrl(PRICING_URL);
-    } catch {
-      window.open(PRICING_URL, "_blank", "noopener,noreferrer");
-    }
+    await openExternalUrl(PRICING_URL);
   }
 
   return (
@@ -38,13 +35,15 @@ export function TrialExpiredOverlay(props: {
             >
               Enter license key
             </Button>
-            <Button
-              variant="shadow"
-              onClick={() => void handleBuyLicense()}
-              className="min-w-44 rounded-2xl py-2"
-            >
-              Buy a license
-            </Button>
+            {DISTRIBUTION_FEATURES.externalPurchase ? (
+              <Button
+                variant="shadow"
+                onClick={() => void handleBuyLicense()}
+                className="min-w-44 rounded-2xl py-2"
+              >
+                Buy a license
+              </Button>
+            ) : null}
           </div>
 
           <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm text-slate-600">

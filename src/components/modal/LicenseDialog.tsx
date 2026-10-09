@@ -8,11 +8,12 @@ import {
   DialogTitle,
 } from "src/components/common/Dialog";
 import { Button } from "src/components/common/Button";
-import { licenseOpenExternalUrl } from "src/lib/tauri";
+import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { showMessage } from "src/lib/system-dialog";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 
 const PRICING_URL = "https://politedb.com/pricing";
 /** Inbox for license recovery; send from the email used at purchase. */
@@ -63,11 +64,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
   };
 
   const handleBuyLicense = async () => {
-    try {
-      await licenseOpenExternalUrl(PRICING_URL);
-    } catch {
-      window.open(PRICING_URL, "_blank", "noopener,noreferrer");
-    }
+    await openExternalUrl(PRICING_URL);
   };
 
   const handleOpenRecoveryMail = async () => {
@@ -76,11 +73,9 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
       "Please help me recover my license key. I purchased using this email address.\n"
     );
     const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    try {
-      await licenseOpenExternalUrl(mailto);
-    } catch {
-      window.location.href = mailto;
-    }
+    await openExternalUrl(mailto, (url) => {
+      window.location.href = url;
+    });
   };
 
   useEffect(() => {
@@ -250,12 +245,14 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
               </>
             ) : (
               <>
-                <Button
-                  variant="shadow"
-                  onClick={() => void handleBuyLicense()}
-                >
-                  Buy a license
-                </Button>
+                {DISTRIBUTION_FEATURES.externalPurchase ? (
+                  <Button
+                    variant="shadow"
+                    onClick={() => void handleBuyLicense()}
+                  >
+                    Buy a license
+                  </Button>
+                ) : null}
 
                 <Button onClick={() => void handleActivate()} loading={busy}>
                   Activate

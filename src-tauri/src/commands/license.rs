@@ -1,6 +1,7 @@
 use std::process::Command;
 use tauri::AppHandle;
 
+use crate::distribution::{self, Distribution};
 use crate::license::{self, LicenseDeviceInfo, LicenseState};
 
 #[tauri::command]
@@ -53,6 +54,8 @@ pub async fn license_deactivate(
 
 #[tauri::command]
 pub async fn license_open_external_url(url: String) -> Result<(), String> {
+    distribution::ensure(Distribution::current().allows_external_url(&url))?;
+
     #[cfg(target_os = "macos")]
     let status = Command::new("open").arg(&url).status();
 

@@ -3,10 +3,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::process::Command as StdCommand;
 
+use crate::distribution::Distribution;
 use crate::file_storage as storage;
 
 const LICENSE_STATE_VERSION: u32 = 1;
 const TRIAL_DURATION_DAYS: i64 = 14;
+const TRIAL_EXPIRED_MESSAGE: &str = "Your 14-day free trial has expired.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LicenseDeviceInfo {
@@ -143,6 +145,25 @@ fn parse_expiry_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> 
         .ok()
 }
 
+/// Drops the local trial in flavors that do not offer it (App Store uses subscription
+/// intro offers), including dates persisted by older builds or returned by the API.
+fn apply_trial_policy(mut state: LicenseState, distribution: Distribution) -> LicenseState {
+    if distribution.supports_local_trial() {
+        return state;
+    }
+    state.trial_started_at = None;
+    state.trial_expires_at = None;
+    if state.message.as_deref() == Some(TRIAL_EXPIRED_MESSAGE) {
+        state.message = None;
+    }
+    state
+}
+
+/// Single exit path for license state handed to storage and the frontend.
+fn finalize_state(state: LicenseState) -> LicenseState {
+    apply_local_expiry(apply_trial_policy(state, Distribution::current()))
+}
+
 fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
     normalize_state_timestamps(&mut state);
 
@@ -155,7 +176,7 @@ fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
             .is_some_and(|trial_expires_at| trial_expires_at <= now)
             && state.message.as_deref().unwrap_or("").trim().is_empty()
         {
-            state.message = Some("Your 14-day free trial has expired.".to_string());
+            state.message = Some(TRIAL_EXPIRED_MESSAGE.to_string());
         }
         return state;
     }
@@ -178,12 +199,17 @@ fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
 }
 
 pub fn blocks_ai_feature(state: &LicenseState) -> bool {
+    blocks_ai_feature_for(state, Distribution::current())
+}
+
+fn blocks_ai_feature_for(state: &LicenseState, distribution: Distribution) -> bool {
     let status = state.status.trim().to_lowercase();
     if status == "active" {
         return false;
     }
 
-    if status == "expired" {
+    // Without a local trial, only an active license unlocks AI.
+    if status == "expired" || !distribution.supports_local_trial() {
         return true;
     }
 
@@ -333,7 +359,7 @@ pub fn license_state_load(app: &tauri::AppHandle) -> Result<LicenseState, String
     let path = storage::path_license_state(app)?;
     let value = storage::json_read_if_exists::<LicenseState>(&path)?;
     let existing = value.filter(|state| state.version == LICENSE_STATE_VERSION);
-    let next = apply_local_expiry(
+    let next = finalize_state(
         existing
             .unwrap_or_else(|| LicenseState::inactive(&device))
             .with_device(&device),
@@ -347,7 +373,7 @@ pub fn license_state_save(
     state: LicenseState,
 ) -> Result<LicenseState, String> {
     let device = license_device_info();
-    let next = apply_local_expiry(state.with_device(&device));
+    let next = finalize_state(state.with_device(&device));
     let path = storage::path_license_state(app)?;
     storage::json_write_atomic(&path, &next)?;
     Ok(next)
@@ -363,6 +389,7 @@ pub fn license_state_clear(app: &tauri::AppHandle) -> Result<LicenseState, Strin
         next.trial_started_at = previous.trial_started_at.or(next.trial_started_at);
         next.trial_expires_at = previous.trial_expires_at.or(next.trial_expires_at);
     }
+    let next = apply_trial_policy(next, Distribution::current());
 
     storage::json_write_atomic(&path, &next)?;
     Ok(apply_local_expiry(next))
@@ -717,5 +744,97 @@ mod tests {
         assert_eq!(state.status, "active");
         assert_eq!(state.activated_at, Some(1_767_000_000_000));
         assert_eq!(state.last_validated_at, Some(1_767_000_100_000));
+    }
+
+    fn now_ms() -> i64 {
+        chrono::Utc::now().timestamp_millis()
+    }
+
+    fn with_trial(status: &str, trial_expires_at: i64) -> LicenseState {
+        LicenseState {
+            status: status.to_string(),
+            trial_started_at: Some(trial_expires_at - 1_000),
+            trial_expires_at: Some(trial_expires_at),
+            ..LicenseState::inactive(&test_device())
+        }
+    }
+
+    #[test]
+    fn direct_keeps_trial_dates_and_message() {
+        let mut state = with_trial("inactive", 1_000);
+        state.message = Some(TRIAL_EXPIRED_MESSAGE.to_string());
+        let next = apply_trial_policy(state.clone(), Distribution::Direct);
+        assert_eq!(next.trial_started_at, state.trial_started_at);
+        assert_eq!(next.trial_expires_at, state.trial_expires_at);
+        assert_eq!(next.message.as_deref(), Some(TRIAL_EXPIRED_MESSAGE));
+    }
+
+    #[test]
+    fn app_store_strips_fresh_and_persisted_trials() {
+        let fresh = apply_trial_policy(
+            LicenseState::inactive(&test_device()),
+            Distribution::AppStore,
+        );
+        assert_eq!(fresh.trial_started_at, None);
+        assert_eq!(fresh.trial_expires_at, None);
+
+        let mut expired = with_trial("inactive", 1_000);
+        expired.message = Some(TRIAL_EXPIRED_MESSAGE.to_string());
+        let expired = apply_trial_policy(expired, Distribution::AppStore);
+        assert_eq!(expired.trial_expires_at, None);
+        assert_eq!(expired.message, None);
+        // No trial message is re-added once the dates are gone.
+        assert_eq!(apply_local_expiry(expired).message, None);
+    }
+
+    #[test]
+    fn app_store_keeps_unrelated_messages() {
+        let mut state = with_trial("invalid", 1_000);
+        state.message = Some("License key is invalid.".to_string());
+        let next = apply_trial_policy(state, Distribution::AppStore);
+        assert_eq!(next.message.as_deref(), Some("License key is invalid."));
+    }
+
+    #[test]
+    fn direct_ai_gate_honors_trial() {
+        let future = now_ms() + 60_000;
+        let past = now_ms() - 60_000;
+        assert!(!blocks_ai_feature_for(
+            &with_trial("inactive", future),
+            Distribution::Direct
+        ));
+        assert!(blocks_ai_feature_for(
+            &with_trial("inactive", past),
+            Distribution::Direct
+        ));
+        assert!(!blocks_ai_feature_for(
+            &with_trial("active", past),
+            Distribution::Direct
+        ));
+        assert!(blocks_ai_feature_for(
+            &with_trial("expired", future),
+            Distribution::Direct
+        ));
+    }
+
+    #[test]
+    fn app_store_ai_gate_requires_active_license_even_with_future_trial() {
+        let future = now_ms() + 60_000;
+        assert!(blocks_ai_feature_for(
+            &with_trial("inactive", future),
+            Distribution::AppStore
+        ));
+        assert!(blocks_ai_feature_for(
+            &with_trial("invalid", future),
+            Distribution::AppStore
+        ));
+        assert!(blocks_ai_feature_for(
+            &with_trial("expired", future),
+            Distribution::AppStore
+        ));
+        assert!(!blocks_ai_feature_for(
+            &with_trial("active", future),
+            Distribution::AppStore
+        ));
     }
 }

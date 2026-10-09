@@ -547,3 +547,44 @@ export function useAiRuntimeManager(args: {
     handleRefreshRuntimeSetup,
   };
 }
+
+export type AiRuntimeManager = ReturnType<typeof useAiRuntimeManager>;
+
+const noopAsync = async () => {};
+
+/**
+ * Stand-in for builds without the bundled runtime (App Store). Never calls the
+ * runtime commands, exposes no endpoint (so no local provider is bootstrapped),
+ * and reports no runtime screens.
+ */
+export function useUnavailableAiRuntimeManager(args: {
+  initialEndpoint: string;
+  initialModel: string;
+  submitting: boolean;
+}): AiRuntimeManager {
+  const [model, setModel] = useState(() =>
+    normalizeLocalAiModelName(args.initialModel)
+  );
+  return {
+    endpoint: "",
+    setEndpoint: () => {},
+    model,
+    setModel,
+    loadingModels: false,
+    runtimeBusy: false,
+    runtimeStatus: null,
+    modelDownloadFailed: false,
+    runtimeStartFailed: false,
+    modelDownloadInProgress: false,
+    showRuntimeLoadingScreen: false,
+    showMissingModelScreen: false,
+    showMissingRuntimeScreen: false,
+    handleStartBundledRuntime: noopAsync,
+    handleStopBundledRuntime: noopAsync,
+    handleRetryRuntimeSetup: noopAsync,
+    handleDownloadModel: noopAsync,
+    handleCancelModelDownload: noopAsync,
+    handleDeleteModel: noopAsync,
+    handleRefreshRuntimeSetup: noopAsync,
+  };
+}

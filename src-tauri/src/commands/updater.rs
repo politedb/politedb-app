@@ -4,6 +4,8 @@ use std::process::Command;
 use tauri::AppHandle;
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::distribution::{self, Distribution};
+
 #[cfg(target_os = "linux")]
 const DOWNLOAD_PAGE_URL: &str = "https://politedb.com/download?os=linux";
 
@@ -23,6 +25,8 @@ fn open_download_page() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn updater_install_if_allowed(app: AppHandle) -> Result<(), String> {
+    distribution::ensure(Distribution::current().supports_self_update())?;
+
     #[cfg(target_os = "linux")]
     if should_open_download_page(std::env::consts::OS, std::env::var_os("APPIMAGE").is_some()) {
         return open_download_page();

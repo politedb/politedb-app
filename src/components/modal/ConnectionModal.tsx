@@ -11,6 +11,7 @@ import type { DatabaseEngine, DatabaseType } from "src/types.ts";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { SUPPORTED_DATABASES } from "src/constant.ts";
 import { cn } from "src/utils/cn.ts";
+import { isEngineSupported } from "src/lib/distribution";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
@@ -141,7 +142,9 @@ export function ConnectionModal(props: {
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
-    return SUPPORTED_DATABASES.filter((db) => matchesDb(db, query));
+    return SUPPORTED_DATABASES.filter(
+      (db) => isEngineSupported(db.engine) && matchesDb(db, query)
+    );
   }, [query]);
 
   const anyAvailable = filtered.some((d) => d.available);

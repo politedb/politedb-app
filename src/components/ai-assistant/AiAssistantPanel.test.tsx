@@ -80,6 +80,9 @@ vi.mock("@root/src/lib/ai-assistant/providers", () => ({
   DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
   isLocalAiProviderKind: (kind: string) =>
     kind === "ollama" || kind === "local_openai_compatible",
+  isAiProviderKindAvailable: () => true,
+  filterAvailableAiProviders: (providers: any[]) => providers,
+  fallbackSelectedAiProviderId: () => "local",
   normalizeAiProviderConfig: (provider: any) => provider,
   ensureLocalAiProvider: vi.fn().mockResolvedValue({
     id: "local",

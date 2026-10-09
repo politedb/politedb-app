@@ -14,7 +14,7 @@ import {
 } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
-import { formatLicensePlanLabel, licenseOpenExternalUrl } from "src/lib/tauri";
+import { formatLicensePlanLabel, openExternalUrl } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import {
@@ -24,6 +24,7 @@ import {
 import { useState } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 const REQUEST_FEATURE_URL =
@@ -58,14 +59,6 @@ export function LeftNav(props: {
 
   async function handleSponsor() {
     await openExternalUrl(SPONSOR_URL);
-  }
-
-  async function openExternalUrl(url: string) {
-    try {
-      await licenseOpenExternalUrl(url);
-    } catch {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
   }
 
   function openSettingsSection(section: SettingsDialogSection) {
@@ -265,13 +258,18 @@ export function LeftNav(props: {
                 onSelect: () => void openExternalUrl(BUG_REPORT_URL),
                 className: "text-slate-900",
               },
-              {
-                icon: <HeartIcon className="size-5 text-rose-500" />,
-                label: "Github Sponsor",
-                onSelect: handleSponsor,
-                className:
-                  "my-1 border border-rose-200 bg-rose-50/80 py-1.25 font-semibold text-rose-500 hover:bg-rose-50! dark:border-rose-500/40 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40!",
-              },
+              // Donation links are an external payment mechanism (App Store 3.1.1).
+              ...(DISTRIBUTION_FEATURES.externalPurchase
+                ? [
+                    {
+                      icon: <HeartIcon className="size-5 text-rose-500" />,
+                      label: "Github Sponsor",
+                      onSelect: handleSponsor,
+                      className:
+                        "my-1 border border-rose-200 bg-rose-50/80 py-1.25 font-semibold text-rose-500 hover:bg-rose-50! dark:border-rose-500/40 dark:bg-rose-950/50 dark:text-rose-300 dark:hover:bg-rose-900/40!",
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>

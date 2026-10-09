@@ -103,3 +103,27 @@ export async function licenseDeactivate(args: {
 export async function licenseOpenExternalUrl(url: string) {
   return invoke<void>(CMD.licenseOpenExternalUrl, { url });
 }
+
+/** Backend error code when the build flavor forbids a destination (e.g. purchase links on the App Store). */
+export const FEATURE_UNAVAILABLE_IN_DISTRIBUTION =
+  "FEATURE_UNAVAILABLE_IN_DISTRIBUTION";
+
+function openInNewWindow(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * Opens `url` with the system handler through the backend URL policy. Falls back to the
+ * webview only when the opener itself fails, never when the policy rejected the URL.
+ */
+export async function openExternalUrl(
+  url: string,
+  fallback: (url: string) => void = openInNewWindow
+) {
+  try {
+    await licenseOpenExternalUrl(url);
+  } catch (error) {
+    if (String(error).includes(FEATURE_UNAVAILABLE_IN_DISTRIBUTION)) return;
+    fallback(url);
+  }
+}
