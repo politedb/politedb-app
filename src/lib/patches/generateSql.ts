@@ -105,7 +105,10 @@ function assertSafeRowIdentity(args: {
   action: "update" | "delete";
   rowKey: string;
 }): string[] {
-  const primaryKeyColumns = getPrimaryKeyColumns(args.constraints, args.columns);
+  const primaryKeyColumns = getPrimaryKeyColumns(
+    args.constraints,
+    args.columns
+  );
   if (primaryKeyColumns.length > 0) return primaryKeyColumns;
 
   const virtualColumns = virtualIdentityColumns(args.columns);

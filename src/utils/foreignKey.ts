@@ -1,9 +1,7 @@
 import type { ForeignKeyInfo, TableForeignKey } from "src/types";
 
 /** Split engine-aggregated FK column lists (`GROUP_CONCAT` / `string_agg`). */
-export function splitFkColumnList(
-  value: string | null | undefined
-): string[] {
+export function splitFkColumnList(value: string | null | undefined): string[] {
   return String(value ?? "")
     .split(",")
     .map((part) => part.trim())

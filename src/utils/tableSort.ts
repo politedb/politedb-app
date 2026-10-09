@@ -1,9 +1,6 @@
 import type { TableSort } from "src/lib/queries/sql";
 import type { DatabaseEngine, TableConstraint } from "src/types";
-import {
-  cellIsTruthy,
-  resolvePrimaryKeyColumns,
-} from "src/utils/primaryKey";
+import { cellIsTruthy, resolvePrimaryKeyColumns } from "src/utils/primaryKey";
 
 export type TableColumnForSort = {
   name: string | null;

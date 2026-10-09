@@ -25,7 +25,6 @@ function displayValue(value: unknown) {
   return cellToString(value, true) ?? "";
 }
 
-
 function virtualIdentityColumns(
   columns: Array<{ name: string; db_type?: string }>
 ) {

@@ -87,9 +87,7 @@ export function resolvePrimaryKeyColumns(args: {
 }
 
 export function primaryKeyColumnSet(pkColumns: string[]): Set<string> {
-  return new Set(
-    pkColumns.map((col) => normalizeIdentName(col).toLowerCase())
-  );
+  return new Set(pkColumns.map((col) => normalizeIdentName(col).toLowerCase()));
 }
 
 export function isPrimaryKeyColumn(

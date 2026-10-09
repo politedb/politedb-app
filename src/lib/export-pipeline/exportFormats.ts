@@ -5,7 +5,11 @@
 
 import { cellToString } from "src/utils/convert";
 import type { DatabaseEngine } from "src/types";
-import { formatSqlValue, quoteIdentifier, quoteTableName } from "src/lib/sql/sqlDialect";
+import {
+  formatSqlValue,
+  quoteIdentifier,
+  quoteTableName,
+} from "src/lib/sql/sqlDialect";
 
 /** Format rows as JSON array items (with leading comma when not first). */
 export function formatJsonChunk(

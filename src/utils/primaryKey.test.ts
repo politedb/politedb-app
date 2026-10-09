@@ -71,9 +71,7 @@ describe("resolvePrimaryKeyColumns", () => {
   });
 
   it("matches PK columns case-insensitively and strips quotes", () => {
-    expect(
-      isPrimaryKeyColumn("id", ["`ID`"])
-    ).toBe(true);
+    expect(isPrimaryKeyColumn("id", ["`ID`"])).toBe(true);
     expect(isPrimaryKeyColumn("created_at", ["id"])).toBe(false);
   });
 

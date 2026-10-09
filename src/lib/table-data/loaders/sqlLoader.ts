@@ -114,7 +114,9 @@ export async function loadRowCount(params: {
   force?: boolean;
 }): Promise<{ value: number; estimated: boolean }> {
   const cacheKey = rowCountCacheKey(params);
-  const inflight = params.force ? undefined : inflightRowCountByKey.get(cacheKey);
+  const inflight = params.force
+    ? undefined
+    : inflightRowCountByKey.get(cacheKey);
   if (inflight) return inflight;
 
   const task = loadRowCountOnce(params);
