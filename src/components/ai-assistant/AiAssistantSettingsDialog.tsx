@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import {
   Dialog,
@@ -8,34 +8,33 @@ import {
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
-import {
-  DownloadIcon,
-  PlayIcon,
-  RefreshCwIcon,
-  StopIcon,
-  VaultIcon,
-  XIcon,
-} from "src/components/icons";
+import { RefreshCwIcon, VaultIcon, XIcon } from "src/components/icons";
 import {
   AI_PROVIDER_LABELS,
-  DEFAULT_LOCAL_AI_PROVIDER_ID,
-  DEFAULT_MODELS,
   aiProviderDelete,
+  aiProviderKeyCapability,
   aiProviderList,
-  aiProviderTest,
+  aiProviderCancelListModels,
+  aiProviderListModels,
+  aiProviderTestDraft,
   buildBaseUrl,
-  fallbackSelectedAiProviderId,
-  filterAvailableAiProviders,
+  dismissLegacyLocalNotice,
   getSelectedAiProviderId,
-  isAiProviderKindAvailable,
+  isLegacyBundledProvider,
+  isLegacyLocalNoticeDismissed,
   isLocalAiProviderKind,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
   resolveSelectedAiProvider,
-  saveAiProviderWithOptionalKey,
+  saveAiProvider,
   setSelectedAiProviderId,
+  type AiProviderKeyChange,
 } from "src/lib/ai-assistant/providers";
-import type { AiRuntimeStatus } from "src/lib/tauri";
+import {
+  aiLegacyModelDelete,
+  aiLegacyModelInfo,
+  type AiLegacyModelInfo,
+} from "src/lib/tauri/ai";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
 import { formatBytesSize } from "src/utils/convert";
@@ -43,16 +42,6 @@ import { formatBytesSize } from "src/utils/convert";
 type Props = {
   open: boolean;
   onClose: () => void;
-  loadingModels: boolean;
-  runtimeBusy: boolean;
-  modelDownloadInProgress: boolean;
-  runtimeStatus: AiRuntimeStatus | null;
-  onLoadModels: () => void;
-  onStartRuntime: () => void;
-  onStopRuntime: () => void;
-  onDownloadModel: () => void;
-  onCancelModelDownload: () => void;
-  onDeleteLocalModel: () => Promise<void> | void;
 };
 
 const PROVIDER_KINDS: AiProviderKind[] = [
@@ -65,14 +54,11 @@ const PROVIDER_KINDS: AiProviderKind[] = [
   "openrouter",
   "github_copilot",
   "ollama",
+  "local_openai_compatible",
 ];
 
-function runtimeLabel(phase?: string) {
-  if (phase === "ready") return "Ready";
-  if (phase === "starting") return "Starting";
-  if (phase === "missing") return "Missing";
-  if (phase === "error") return "Error";
-  return "Stopped";
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function AiAssistantSettingsDialog(props: Props) {
@@ -81,9 +67,36 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
   const [apiKey, setApiKey] = useState("");
+  const [removeKey, setRemoveKey] = useState(false);
   const [modelInput, setModelInput] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [legacyModel, setLegacyModel] = useState<AiLegacyModelInfo | null>(
+    null
+  );
+  const [legacyNoticeDismissed, setLegacyNoticeDismissed] = useState(() =>
+    isLegacyLocalNoticeDismissed()
+  );
+  // Bumped whenever the draft's URL/auth/identity changes so late model lists are ignored.
+  const draftTokenRef = useRef(0);
+
+  // Discovery requests are scoped to this dialog instance so other panels are unaffected.
+  const instanceIdRef = useRef(
+    `settings-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  );
+  const discoveryIdRef = useRef<string | null>(null);
+  // Models the user removed while a discovery was running must not come back.
+  const removedDuringDiscoveryRef = useRef(new Set<string>());
+
+  /** Drops any in-flight model discovery: its result no longer matches the form. */
+  const invalidateDiscovery = () => {
+    draftTokenRef.current += 1;
+    setLoadingModels(false);
+    const requestId = discoveryIdRef.current;
+    discoveryIdRef.current = null;
+    if (requestId) void aiProviderCancelListModels(requestId);
+  };
 
   const normalizedProviders = useMemo(
     () => providers.map(normalizeAiProviderConfig),
@@ -92,79 +105,101 @@ export function AiAssistantSettingsDialog(props: Props) {
   const selectedProvider = normalizedProviders.find(
     (provider) => provider.id === selectedId
   );
-  const localProvider = normalizedProviders.find(
-    (provider) => provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID
-  );
+  const keyCapability = aiProviderKeyCapability(selectedKind);
   const isLocal = isLocalAiProviderKind(selectedKind);
-  const downloadedBytes = Number(
-    props.runtimeStatus?.model_downloaded_bytes ?? 0
-  );
-  const totalBytes = Number(props.runtimeStatus?.model_total_bytes ?? 0);
-  const downloadProgress =
-    totalBytes > 0
-      ? Math.max(0, Math.min(100, (downloadedBytes / totalBytes) * 100))
-      : null;
+  const showLegacyNotice =
+    !legacyNoticeDismissed &&
+    Boolean(selectedProvider && isLegacyBundledProvider(selectedProvider));
 
   const loadProviders = async () => {
-    const normalized = filterAvailableAiProviders(
-      (await aiProviderList()).map(normalizeAiProviderConfig)
-    );
-    const next = normalized.some((provider) => provider.isDefault)
-      ? normalized
-      : normalized.map((provider) => ({
-          ...provider,
-          isDefault: provider.id === DEFAULT_LOCAL_AI_PROVIDER_ID,
-        }));
+    const next = (await aiProviderList()).map(normalizeAiProviderConfig);
     setProviders(next);
     return next;
+  };
+
+  const refreshLegacyModel = async () => {
+    try {
+      setLegacyModel(await aiLegacyModelInfo());
+    } catch {
+      setLegacyModel(null);
+    }
+  };
+
+  const clearSecrets = () => {
+    setApiKey("");
+    setRemoveKey(false);
   };
 
   const chooseProvider = (
     kind: AiProviderKind,
     provider?: AiProviderConfig
   ) => {
-    const next =
-      provider ??
-      makeDefaultAiProvider(kind, {
-        id: kind === "ollama" ? DEFAULT_LOCAL_AI_PROVIDER_ID : undefined,
-      });
+    invalidateDiscovery();
     setSelectedKind(kind);
     setSelectedId(provider?.id ?? null);
-    setDraft(normalizeAiProviderConfig(next));
-    setApiKey("");
+    setDraft(
+      normalizeAiProviderConfig(provider ?? makeDefaultAiProvider(kind))
+    );
+    clearSecrets();
     setModelInput("");
     setStatus("");
   };
 
   useEffect(() => {
-    if (!props.open) return;
+    if (!props.open) {
+      // Never keep a typed secret around after the dialog closes.
+      invalidateDiscovery();
+      clearSecrets();
+      return;
+    }
+    void refreshLegacyModel();
     void loadProviders()
       .then((next) => {
         const provider =
+          next.find((item) => item.id === getSelectedAiProviderId()) ??
           next.find((item) => item.isDefault) ??
-          next.find((item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID) ??
           next[0];
         chooseProvider(provider?.kind ?? "openai", provider);
       })
-      .catch((error) => setStatus(String(error)));
+      .catch((error) => setStatus(errorText(error)));
   }, [props.open]);
 
   const updateDraft = (patch: Partial<AiProviderConfig>) => {
     setDraft((current) => ({ ...current, ...patch }));
   };
 
-  const addModel = () => {
-    const model = modelInput.trim();
-    if (!model) return;
-    const models = Array.from(new Set([...(draft.models ?? []), model]));
-    updateDraft({
-      models,
-      defaultModel: draft.defaultModel.trim() || model,
+  /** Merges into the latest draft so edits made while a request was running survive. */
+  const addModels = (ids: string[]) => {
+    setDraft((current) => {
+      const models = Array.from(
+        new Set(
+          [...(current.models ?? []), ...ids]
+            .map((id) => id.trim())
+            .filter(Boolean)
+        )
+      );
+      return {
+        ...current,
+        models,
+        defaultModel: current.defaultModel.trim() || models[0] || "",
+      };
     });
+  };
+
+  /** URL or auth edits make an in-flight discovery stale. */
+  const updateConnection = (patch: Partial<AiProviderConfig>) => {
+    invalidateDiscovery();
+    updateDraft(patch);
+  };
+
+  const addModel = () => {
+    if (!modelInput.trim()) return;
+    addModels([modelInput]);
     setModelInput("");
   };
 
   const removeModel = (model: string) => {
+    removedDuringDiscoveryRef.current.add(model);
     const models = (draft.models ?? []).filter((item) => item !== model);
     updateDraft({
       models,
@@ -173,52 +208,105 @@ export function AiAssistantSettingsDialog(props: Props) {
     });
   };
 
-  const saveProvider = async () => {
-    if (!(draft.models ?? []).length) {
-      setStatus("Add at least one model before saving.");
-      return;
-    }
-    setBusy(true);
-    setStatus("Validating provider and model...");
+  /** Draft as the backend expects it; nothing here touches storage. */
+  const draftConfig = (): AiProviderConfig =>
+    normalizeAiProviderConfig({
+      ...draft,
+      id: selectedProvider?.id ?? draft.id,
+      kind: selectedKind,
+      label: draft.label.trim() || AI_PROVIDER_LABELS[selectedKind],
+      baseUrl: buildBaseUrl(draft.host, draft.subPath),
+    });
+
+  const keyChange = (): AiProviderKeyChange => {
+    if (keyCapability === "none") return { action: "keep" };
+    if (removeKey) return { action: "remove" };
+    return apiKey.trim()
+      ? { action: "set", value: apiKey.trim() }
+      : { action: "keep" };
+  };
+
+  const loadModels = async () => {
+    invalidateDiscovery();
+    const token = draftTokenRef.current;
+    const requestId = `${instanceIdRef.current}:${token}`;
+    discoveryIdRef.current = requestId;
+    removedDuringDiscoveryRef.current = new Set();
+    setLoadingModels(true);
+    setStatus("Loading models from server...");
     try {
-      const config = normalizeAiProviderConfig({
-        ...draft,
-        id:
-          selectedProvider?.id ??
-          (selectedKind === "ollama" ? DEFAULT_LOCAL_AI_PROVIDER_ID : draft.id),
-        kind: selectedKind,
-        label: draft.label.trim() || AI_PROVIDER_LABELS[selectedKind],
-        defaultModel: draft.defaultModel.trim() || DEFAULT_MODELS[selectedKind],
-        models: draft.models,
-        baseUrl: buildBaseUrl(draft.host, draft.subPath),
+      const listed = await aiProviderListModels(
+        draftConfig(),
+        keyChange(),
+        requestId
+      );
+      if (token !== draftTokenRef.current) return;
+      const ids = listed.filter(
+        (id) => !removedDuringDiscoveryRef.current.has(id)
+      );
+      if (!ids.length) {
+        setStatus(
+          "The server returned no models. You can still add one by ID."
+        );
+        return;
+      }
+      addModels(ids);
+      setStatus(`Loaded ${ids.length} model${ids.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      if (token === draftTokenRef.current) setStatus(errorText(error));
+    } finally {
+      if (token === draftTokenRef.current) {
+        setLoadingModels(false);
+        discoveryIdRef.current = null;
+      }
+    }
+  };
+
+  const saveProvider = async () => {
+    setBusy(true);
+    setStatus("Saving provider...");
+    try {
+      const saved = await saveAiProvider({
+        config: draftConfig(),
+        keyChange: keyChange(),
       });
-      const saved = await saveAiProviderWithOptionalKey({ config, apiKey });
-      if (saved.isDefault) setSelectedAiProviderId(saved.id);
+      if (saved.isDefault && saved.enabled) setSelectedAiProviderId(saved.id);
       const next = await loadProviders();
       const normalized = next.find((item) => item.id === saved.id) ?? saved;
       setSelectedId(saved.id);
       setDraft(normalizeAiProviderConfig(normalized));
-      setApiKey("");
-      setStatus("Provider saved. API key is stored in OS keychain.");
+      clearSecrets();
+      setStatus(
+        saved.apiKeyRef
+          ? "Provider saved. API key is stored in the OS keychain."
+          : "Provider saved."
+      );
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(errorText(error));
+      if (String(error).includes("AI_PROVIDER_SAVE_ROLLBACK_FAILED")) {
+        // Show what is actually on disk now; never write again from here.
+        const next = await loadProviders().catch(() => null);
+        const onDisk = next?.find((item) => item.id === draftConfig().id);
+        if (onDisk) setDraft(normalizeAiProviderConfig(onDisk));
+        clearSecrets();
+      }
     } finally {
       setBusy(false);
     }
   };
 
   const testProvider = async () => {
-    if (!selectedProvider) {
-      setStatus("Save provider before testing.");
+    if (!draft.defaultModel.trim()) {
+      setStatus("Choose a model before testing.");
       return;
     }
     setBusy(true);
     setStatus("Testing provider...");
     try {
-      await aiProviderTest(selectedProvider.id);
+      await aiProviderTestDraft(draftConfig(), keyChange());
       setStatus("Provider connection succeeded.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(errorText(error));
     } finally {
       setBusy(false);
     }
@@ -226,36 +314,49 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const deleteProvider = async () => {
     if (!selectedProvider) return;
-    if (selectedProvider.id === localProvider?.id) {
-      if (!window.confirm("Delete downloaded local AI model?")) return;
-      setBusy(true);
-      try {
-        await props.onDeleteLocalModel();
-        setStatus("Local AI model deleted.");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
-      } finally {
-        setBusy(false);
-      }
-      return;
-    }
     if (!window.confirm(`Delete ${selectedProvider.label}?`)) return;
     setBusy(true);
     try {
-      const deletedId = selectedProvider.id;
-      await aiProviderDelete(deletedId);
+      await aiProviderDelete(selectedProvider.id);
       const next = await loadProviders();
-      const fallback = resolveSelectedAiProvider(next, deletedId);
-      chooseProvider(fallback?.kind ?? "openai", fallback);
-      if (getSelectedAiProviderId() === deletedId) {
-        setSelectedAiProviderId(fallback?.id ?? fallbackSelectedAiProviderId());
-      }
+      // The chat selection is left alone on purpose: if it pointed at the deleted
+      // provider, open panels ask the user before switching (plan R6).
+      const fallback = resolveSelectedAiProvider(
+        next,
+        getSelectedAiProviderId()
+      );
+      chooseProvider(fallback?.kind ?? selectedKind, fallback);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(errorText(error));
     } finally {
       setBusy(false);
     }
   };
+
+  const deleteLegacyModel = async () => {
+    if (
+      !window.confirm(
+        "Delete the AI model downloaded by earlier PoliteDB versions? This frees disk space and cannot be undone."
+      )
+    ) {
+      return;
+    }
+    try {
+      const remaining = await aiLegacyModelDelete();
+      setStatus(
+        remaining.files.length
+          ? `Could not delete: ${remaining.files.map((f) => f.name).join(", ")}`
+          : "Old built-in AI model deleted."
+      );
+    } catch (error) {
+      setStatus(errorText(error));
+    } finally {
+      void refreshLegacyModel();
+    }
+  };
+
+  const legacyModelBytes =
+    legacyModel?.files.reduce((sum, file) => sum + file.sizeBytes, 0) ?? 0;
 
   return (
     <Dialog
@@ -273,17 +374,12 @@ export function AiAssistantSettingsDialog(props: Props) {
             className="h-full"
             contentClassName="space-y-1 p-3"
           >
-            {PROVIDER_KINDS.filter((kind) =>
-              isAiProviderKindAvailable(kind)
-            ).map((kind) => {
+            {PROVIDER_KINDS.map((kind) => {
               const configured = normalizedProviders.filter(
                 (provider) => provider.kind === kind
               );
               const active = selectedKind === kind;
-              const available =
-                configured.length > 0 &&
-                (!isLocalAiProviderKind(kind) ||
-                  Boolean(props.runtimeStatus?.model_path));
+              const ready = configured.some((provider) => provider.enabled);
               return (
                 <div key={kind}>
                   <button
@@ -300,11 +396,11 @@ export function AiAssistantSettingsDialog(props: Props) {
                     <span class="min-w-0 flex-1 truncate">
                       {AI_PROVIDER_LABELS[kind]}
                     </span>
-                    {available ? (
+                    {ready ? (
                       <span class="size-2 rounded-full bg-emerald-400" />
                     ) : null}
                   </button>
-                  {active && configured.length > 1 ? (
+                  {active && configured.length > 0 ? (
                     <div class="mt-1 ml-6 space-y-1">
                       {configured.map((provider) => (
                         <button
@@ -319,8 +415,21 @@ export function AiAssistantSettingsDialog(props: Props) {
                           onClick={() => chooseProvider(kind, provider)}
                         >
                           {provider.label}
+                          {provider.enabled ? "" : " (off)"}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        class={cn(
+                          "block w-full truncate rounded px-2 py-1 text-left text-xs",
+                          selectedId === null
+                            ? "bg-neutral-200 font-semibold"
+                            : "text-neutral-500 hover:bg-neutral-100"
+                        )}
+                        onClick={() => chooseProvider(kind)}
+                      >
+                        + Add another
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -334,67 +443,147 @@ export function AiAssistantSettingsDialog(props: Props) {
             className="h-full"
             contentClassName="space-y-4 p-5"
           >
+            {showLegacyNotice ? (
+              <div class="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <span>
+                  If this was PoliteDB's built-in AI, it has been removed. Enter
+                  the URL of your own local server (for example Ollama or LM
+                  Studio) and load its models.
+                </span>
+                <button
+                  type="button"
+                  class="shrink-0 text-xs font-medium underline"
+                  onClick={() => {
+                    dismissLegacyLocalNotice();
+                    setLegacyNoticeDismissed(true);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
             <Input
               label="Name"
               value={draft.label}
               onValueChange={(value) => updateDraft({ label: value })}
               className="h-10 border border-neutral-300 px-3 text-sm"
             />
-            {!isLocal ? (
-              <Input
-                label="API Key"
-                type="password"
-                value={apiKey}
-                placeholder={
-                  draft.apiKeyRef ? "Stored in OS keychain" : "Secret key"
+            <label class="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={draft.enabled}
+                onChange={(event) =>
+                  updateDraft({ enabled: event.currentTarget.checked })
                 }
-                onValueChange={setApiKey}
-                className="h-10 border border-neutral-300 px-3 text-sm"
               />
+              Enabled
+            </label>
+            {keyCapability !== "none" ? (
+              <div class="space-y-1">
+                <Input
+                  label={
+                    keyCapability === "optional"
+                      ? "API Key (optional)"
+                      : "API Key"
+                  }
+                  type="password"
+                  value={apiKey}
+                  disabled={removeKey}
+                  placeholder={
+                    removeKey
+                      ? "Key will be removed on save"
+                      : draft.apiKeyRef
+                        ? "Stored in OS keychain"
+                        : "Secret key"
+                  }
+                  onValueChange={(value) => {
+                    invalidateDiscovery();
+                    setApiKey(value);
+                  }}
+                  className="h-10 border border-neutral-300 px-3 text-sm"
+                />
+                {keyCapability === "optional" && draft.apiKeyRef ? (
+                  <button
+                    type="button"
+                    class="text-xs text-neutral-500 underline"
+                    onClick={() => {
+                      invalidateDiscovery();
+                      setApiKey("");
+                      setRemoveKey((current) => !current);
+                    }}
+                  >
+                    {removeKey ? "Keep stored key" : "Remove stored key"}
+                  </button>
+                ) : null}
+                {keyCapability === "optional" &&
+                draft.host?.trim().toLowerCase().startsWith("http://") ? (
+                  <div class="text-xs text-neutral-500">
+                    Over plain http the key is sent unencrypted on your network.
+                    Prefer https for servers that require a key.
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             <div class="grid gap-3 sm:grid-cols-2">
               <Input
                 label="Host"
                 value={draft.host ?? ""}
-                onValueChange={(value) => updateDraft({ host: value })}
+                placeholder={isLocal ? "http://127.0.0.1:1234" : undefined}
+                onValueChange={(value) => updateConnection({ host: value })}
                 className="h-10 border border-neutral-300 px-3 text-sm"
               />
               <Input
                 label="Sub Path"
                 value={draft.subPath ?? ""}
-                onValueChange={(value) => updateDraft({ subPath: value })}
+                onValueChange={(value) => updateConnection({ subPath: value })}
                 className="h-10 border border-neutral-300 px-3 text-sm"
               />
             </div>
+            {isLocal ? (
+              <div class="text-xs text-neutral-500">
+                Plain http works for localhost and LAN IP addresses (for example
+                192.168.1.20). Other hosts need https.
+              </div>
+            ) : null}
             <section class="space-y-2">
-              <label class="block text-sm font-medium text-neutral-900">
-                Models
-              </label>
-              {!isLocal ? (
-                <div class="flex gap-2">
-                  <div class="min-w-0 flex-1">
-                    <Input
-                      value={modelInput}
-                      placeholder="Model ID"
-                      onValueChange={setModelInput}
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter") return;
-                        event.preventDefault();
-                        addModel();
-                      }}
-                      className="h-10 w-full border border-neutral-300 px-3 text-sm"
-                    />
-                  </div>
+              <div class="flex items-center justify-between">
+                <label class="block text-sm font-medium text-neutral-900">
+                  Models
+                </label>
+                {isLocal ? (
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={!modelInput.trim()}
-                    onClick={addModel}
+                    loading={loadingModels}
+                    onClick={() => void loadModels()}
                   >
-                    Add
+                    <RefreshCwIcon className="size-3.5" /> Load models
                   </Button>
+                ) : null}
+              </div>
+              <div class="flex gap-2">
+                <div class="min-w-0 flex-1">
+                  <Input
+                    value={modelInput}
+                    placeholder="Model ID"
+                    onValueChange={setModelInput}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addModel();
+                    }}
+                    className="h-10 w-full border border-neutral-300 px-3 text-sm"
+                  />
                 </div>
-              ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!modelInput.trim()}
+                  onClick={addModel}
+                >
+                  Add
+                </Button>
+              </div>
               <div class="overflow-hidden rounded-lg border border-neutral-200">
                 {(draft.models ?? []).length ? (
                   (draft.models ?? []).map((model) => (
@@ -402,23 +591,28 @@ export function AiAssistantSettingsDialog(props: Props) {
                       key={model}
                       class="flex min-w-0 items-center gap-2 border-b border-neutral-100 px-3 py-2 last:border-b-0"
                     >
-                      <span
-                        class="min-w-0 flex-1 truncate text-sm"
-                        title={model}
+                      <button
+                        type="button"
+                        class="min-w-0 flex-1 truncate text-left text-sm"
+                        title="Use as default model"
+                        onClick={() => updateDraft({ defaultModel: model })}
                       >
                         {model}
-                      </span>
-                      {!isLocal ? (
-                        <button
-                          type="button"
-                          class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-red-600"
-                          title={`Remove ${model}`}
-                          aria-label={`Remove ${model}`}
-                          onClick={() => removeModel(model)}
-                        >
-                          <XIcon className="size-3.5" />
-                        </button>
+                      </button>
+                      {draft.defaultModel === model ? (
+                        <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                          default
+                        </span>
                       ) : null}
+                      <button
+                        type="button"
+                        class="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-red-600"
+                        title={`Remove ${model}`}
+                        aria-label={`Remove ${model}`}
+                        onClick={() => removeModel(model)}
+                      >
+                        <XIcon className="size-3.5" />
+                      </button>
                     </div>
                   ))
                 ) : (
@@ -439,100 +633,19 @@ export function AiAssistantSettingsDialog(props: Props) {
               Default provider
             </label>
 
-            {isLocal ? (
-              <section class="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <div class="text-sm font-semibold text-neutral-900">
-                      Local Runtime
-                    </div>
-                    <div class="text-xs text-neutral-500">
-                      Bundled Qwen2.5-Coder-7B on this device.
-                    </div>
-                  </div>
-                  <span class="rounded-full border border-neutral-200 bg-white px-2 py-1 text-xs">
-                    {props.modelDownloadInProgress
-                      ? "Downloading"
-                      : runtimeLabel(props.runtimeStatus?.phase)}
-                  </span>
+            {legacyModel?.files.length ? (
+              <section class="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
+                <div class="text-sm text-neutral-700">
+                  An AI model downloaded by earlier PoliteDB versions is still
+                  on disk (
+                  {formatBytesSize(legacyModelBytes, { fractionDigits: 2 })}).
                 </div>
-
-                {props.modelDownloadInProgress ? (
-                  <div class="mt-3">
-                    <div class="h-2 overflow-hidden rounded-full bg-neutral-200">
-                      <div
-                        class="h-full rounded-full bg-blue-600 transition-[width] duration-200"
-                        style={{ width: `${downloadProgress ?? 0}%` }}
-                      />
-                    </div>
-                    <div class="mt-2 text-xs text-neutral-500">
-                      {downloadProgress !== null
-                        ? `${downloadProgress.toFixed(1)}%`
-                        : "Preparing download..."}
-                      {" · "}
-                      {formatBytesSize(downloadedBytes, {
-                        fractionDigits: 2,
-                      })}
-                      {totalBytes > 0
-                        ? ` / ${formatBytesSize(totalBytes, {
-                            fractionDigits: 2,
-                          })}`
-                        : ""}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div class="mt-3 flex flex-wrap gap-2">
-                  {props.modelDownloadInProgress ? (
-                    <Button
-                      variant="outline"
-                      onClick={props.onCancelModelDownload}
-                    >
-                      Cancel
-                    </Button>
-                  ) : (
-                    <Button
-                      variant={
-                        props.runtimeStatus?.phase === "ready"
-                          ? "destructive"
-                          : "default"
-                      }
-                      onClick={
-                        props.runtimeStatus?.phase === "ready"
-                          ? props.onStopRuntime
-                          : props.onStartRuntime
-                      }
-                      loading={props.runtimeBusy}
-                    >
-                      {props.runtimeStatus?.phase === "ready" ? (
-                        <>
-                          <StopIcon className="size-3.5" /> Stop
-                        </>
-                      ) : (
-                        <>
-                          <PlayIcon className="size-3.5" /> Start
-                        </>
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={props.onLoadModels}
-                    loading={props.loadingModels}
-                  >
-                    <RefreshCwIcon className="size-3.5" /> Refresh
-                  </Button>
-                  {!props.runtimeStatus?.model_path &&
-                  !props.modelDownloadInProgress ? (
-                    <Button
-                      variant="outline"
-                      onClick={props.onDownloadModel}
-                      disabled={props.runtimeBusy}
-                    >
-                      <DownloadIcon className="size-3.5" /> Download model
-                    </Button>
-                  ) : null}
-                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => void deleteLegacyModel()}
+                >
+                  Delete
+                </Button>
               </section>
             ) : null}
 
@@ -546,12 +659,7 @@ export function AiAssistantSettingsDialog(props: Props) {
               <Button
                 variant="destructive"
                 onClick={() => void deleteProvider()}
-                disabled={
-                  !selectedProvider ||
-                  busy ||
-                  (selectedProvider.id === localProvider?.id &&
-                    !props.runtimeStatus?.model_path)
-                }
+                disabled={!selectedProvider || busy}
               >
                 Delete
               </Button>
@@ -559,15 +667,11 @@ export function AiAssistantSettingsDialog(props: Props) {
                 <Button
                   variant="outline"
                   onClick={() => void testProvider()}
-                  disabled={!selectedProvider || busy}
+                  disabled={busy || !draft.defaultModel.trim()}
                 >
                   Test
                 </Button>
-                <Button
-                  loading={busy}
-                  disabled={!(draft.models ?? []).length}
-                  onClick={() => void saveProvider()}
-                >
+                <Button loading={busy} onClick={() => void saveProvider()}>
                   Save
                 </Button>
               </div>

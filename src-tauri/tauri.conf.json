@@ -59,7 +59,6 @@
         }
       }
     },
-    "resources": ["resources/ai"],
     "category": "DeveloperTool"
   },
   "plugins": {

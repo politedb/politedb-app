@@ -92,10 +92,9 @@ Supported migration workflows include:
 
 ### AI Assistant
 
-- optional local AI runtime
-- configurable GGUF model path
-- bundled-runtime support for release builds
-- model download management and cancellation
+- cloud providers (OpenAI, Anthropic, Gemini, Groq, Grok, DeepSeek, OpenRouter, GitHub Copilot)
+- your own local server: Ollama or LM Studio / any OpenAI-compatible API
+- API keys stored in the OS keychain
 - local-first design for sensitive database workflows
 
 ### Security and Privacy
@@ -210,23 +209,30 @@ Expected endpoints:
 - `POST /v1/licenses/validate`
 - `POST /v1/licenses/deactivate`
 
-## Local AI Environment Variables
+## Local AI Servers
 
-The AI assistant can use bundled assets, app data, or explicit environment overrides.
+PoliteDB no longer bundles an AI runtime. To keep AI on your machine or network, run a server and add it in **AI Assistant → Settings**:
 
-```bash
-export POLITEDB_LLM_SERVER_BIN=/absolute/path/to/llama-server
-export POLITEDB_LLM_MODEL_PATH=/absolute/path/to/model.gguf
-npm run tauri:dev
-```
+| Provider                      | Default URL                               | API key                 |
+| ----------------------------- | ----------------------------------------- | ----------------------- |
+| Ollama                        | `http://127.0.0.1:11434` + sub path `/v1` | not used                |
+| LM Studio / OpenAI-compatible | `http://127.0.0.1:1234` + sub path `/v1`  | optional (bearer token) |
 
-Resolution order:
+1. Start the server (Ollama: `ollama serve`; LM Studio: _Developer → Start Server_).
+2. Choose the provider, adjust Host / Sub Path if needed, and click **Load models**. Model ids are used exactly as the server reports them (for example `llama3:8b`).
+3. Click **Test**, then **Save** with **Enabled** checked.
 
-- `POLITEDB_LLM_SERVER_BIN`
-- bundled `llama-server`
-- `POLITEDB_LLM_MODEL_PATH`
-- downloaded app-data model at `ai/models/default.gguf`
-- local dev fallback in `src-tauri/resources/ai/models/default.gguf`
+URL rules:
+
+- `http://` is allowed only for `localhost` and IP addresses on this machine or your LAN (`127.x`, `10.x`, `172.16–31.x`, `192.168.x`, `::1`, `fc00::/7`). Use the IP, not a hostname such as `my-pc.local`.
+- Any other host needs `https://`. Redirects and proxies are not followed for AI requests.
+- Over plain `http` an API key travels unencrypted on your network; prefer `https` for servers that require a key.
+
+Upgrading from a version with the built-in AI:
+
+- A provider named "PoliteDB AI" may still point at the removed built-in server. PoliteDB shows a notice; edit its URL to your own server or delete it.
+- The previously downloaded model (several GB) stays on disk until you remove it with **Delete** in AI settings, or manually from `<app data>/ai/models/` (`default.gguf`, `default.gguf.part`).
+- The `POLITEDB_LLM_*` environment variables are no longer supported.
 
 ## Release Workflow
 
@@ -240,26 +246,10 @@ Repository variables:
 
 - `VITE_ANALYTICS_ENABLED`
 - `VITE_POSTHOG_HOST`
-- `BUNDLE_AI_ASSISTANT`
-- `BUNDLE_AI_MODEL`
-- `AI_MODEL_REPO`
-- `AI_MODEL_PATTERN`
-- `AI_LLAMA_REF`
 
 Repository secrets:
 
 - `VITE_POSTHOG_KEY`
-- `HF_TOKEN`
-
-Recommended AI release defaults:
-
-```bash
-BUNDLE_AI_ASSISTANT=true
-BUNDLE_AI_MODEL=false
-AI_MODEL_REPO=Qwen/Qwen2.5-Coder-7B-Instruct-GGUF
-AI_MODEL_PATTERN=qwen2.5-coder-7b-instruct-q4_k_m*.gguf
-AI_LLAMA_REF=master
-```
 
 ## FAQ
 

@@ -32,10 +32,10 @@ dataset-sample
 
 # Local AI runtime assets
 .tmp/
-src-tauri/resources/ai/bin/
-src-tauri/resources/ai/models/
-!src-tauri/resources/ai/README.md
 
 # Mac App Store provisioning profile (never commit)
 src-tauri/embedded.provisionprofile
 *.provisionprofile
+
+# Leftover assets from the removed bundled AI runtime (safe to delete locally)
+src-tauri/resources/ai/

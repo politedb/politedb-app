@@ -28,7 +28,6 @@ import { Input } from "src/components/common/Input";
 import type { AssistantStatus } from "src/components/ai-assistant/hooks/useAiAssistantSubmit";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
-import { normalizeLocalAiModelName } from "src/lib/ai-assistant/assistant";
 import { cn } from "src/utils/cn";
 import { Button } from "../common/Button";
 import { CheckMarkIcon } from "../icons/CheckMark";
@@ -57,7 +56,7 @@ function ProviderMark(props: { provider: AiProviderConfig }) {
 }
 
 function formatModelNameForDisplay(model: string) {
-  return normalizeLocalAiModelName(model);
+  return model.trim();
 }
 
 function messageText(message: ChatMessage) {

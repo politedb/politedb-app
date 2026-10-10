@@ -20,15 +20,13 @@ describe("featuresFor", () => {
     const features = featuresFor("direct");
     expect(features.selfUpdate).toBe(true);
     expect(features.externalPurchase).toBe(true);
-    expect(features.localAiRuntime).toBe(true);
     expect(isEngineSupported("oracle", features)).toBe(true);
   });
 
-  it("disables updater, external purchase, local AI and Oracle on the App Store", () => {
+  it("disables updater, external purchase and Oracle on the App Store", () => {
     const features = featuresFor("appstore");
     expect(features.selfUpdate).toBe(false);
     expect(features.externalPurchase).toBe(false);
-    expect(features.localAiRuntime).toBe(false);
     expect(isEngineSupported("oracle", features)).toBe(false);
     expect(isEngineSupported("postgres", features)).toBe(true);
   });

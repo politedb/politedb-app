@@ -1,36 +1,12 @@
 import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
 import { SettingsIcon } from "src/components/icons";
-import { type AiRuntimeStatus } from "src/lib/tauri";
 import { cn } from "src/utils/cn";
 
 export function AiAssistantPanelHeader(props: {
   settingsOpen: boolean;
   onSettingsOpenChange: (open: boolean) => void;
-  loadingModels: boolean;
-  runtimeBusy: boolean;
-  modelDownloadInProgress: boolean;
-  runtimeStatus: AiRuntimeStatus | null;
-  onLoadModels: () => void;
-  onStartRuntime: () => void;
-  onStopRuntime: () => void;
-  onDownloadModel: () => void;
-  onCancelModelDownload: () => void;
-  onDeleteLocalModel: () => Promise<void> | void;
 }) {
-  const {
-    settingsOpen,
-    onSettingsOpenChange,
-    loadingModels,
-    runtimeBusy,
-    modelDownloadInProgress,
-    runtimeStatus,
-    onLoadModels,
-    onStartRuntime,
-    onStopRuntime,
-    onDownloadModel,
-    onCancelModelDownload,
-    onDeleteLocalModel,
-  } = props;
+  const { settingsOpen, onSettingsOpenChange } = props;
 
   return (
     <div class="shrink-0 border-b border-neutral-200 p-3">
@@ -57,16 +33,6 @@ export function AiAssistantPanelHeader(props: {
         <AiAssistantSettingsDialog
           open={settingsOpen}
           onClose={() => onSettingsOpenChange(false)}
-          loadingModels={loadingModels}
-          runtimeBusy={runtimeBusy}
-          modelDownloadInProgress={modelDownloadInProgress}
-          runtimeStatus={runtimeStatus}
-          onLoadModels={onLoadModels}
-          onStartRuntime={onStartRuntime}
-          onStopRuntime={onStopRuntime}
-          onDownloadModel={onDownloadModel}
-          onCancelModelDownload={onCancelModelDownload}
-          onDeleteLocalModel={onDeleteLocalModel}
         />
       </div>
     </div>

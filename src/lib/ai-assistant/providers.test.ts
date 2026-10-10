@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiProviderKeyCapability,
   buildBaseUrl,
+  getSelectedAiProviderId,
+  isLegacyBundledProvider,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
   resolveSelectedAiProvider,
+  setSelectedAiProviderId,
   splitBaseUrl,
 } from "./providers";
+import type { AiProviderConfig } from "src/types";
 
 describe("AI provider configuration", () => {
   it("builds vendor defaults", () => {
@@ -73,18 +78,51 @@ describe("AI provider configuration", () => {
     });
   });
 
-  it("merges the legacy local API alias into PoliteDB Local", () => {
-    const provider = normalizeAiProviderConfig({
-      id: "local",
+  it("keeps local kinds and model ids exactly (plan R2)", () => {
+    const compat = normalizeAiProviderConfig({
+      id: "lmstudio-1",
       kind: "local_openai_compatible",
       label: "Local API",
-      baseUrl: "http://127.0.0.1:50953/v1",
-      defaultModel: "default.gguf",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      defaultModel: "local-model",
+      models: ["local-model", "default", "qwen2.5-coder-7b-instruct"],
       enabled: true,
     });
+    expect(compat.kind).toBe("local_openai_compatible");
+    expect(compat.label).toBe("LM Studio / OpenAI-compatible");
+    expect(compat.defaultModel).toBe("local-model");
+    expect(compat.models).toEqual([
+      "local-model",
+      "default",
+      "qwen2.5-coder-7b-instruct",
+    ]);
 
-    expect(provider.kind).toBe("ollama");
-    expect(provider.label).toBe("PoliteDB Local");
+    const ollama = normalizeAiProviderConfig({
+      id: "ollama-1",
+      kind: "ollama",
+      label: "Ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      defaultModel: "llama3:8b",
+      models: ["llama3:8b", "llama-3.1-8b"],
+      enabled: true,
+    });
+    expect(ollama.defaultModel).toBe("llama3:8b");
+    expect(ollama.models).toEqual(["llama3:8b", "llama-3.1-8b"]);
+  });
+
+  it("uses server-convention defaults and no placeholder model for local kinds", () => {
+    expect(makeDefaultAiProvider("ollama")).toMatchObject({
+      baseUrl: "http://127.0.0.1:11434/v1",
+      defaultModel: "",
+      models: [],
+    });
+    expect(makeDefaultAiProvider("local_openai_compatible")).toMatchObject({
+      baseUrl: "http://127.0.0.1:1234/v1",
+      defaultModel: "",
+    });
+    expect(makeDefaultAiProvider("ollama").id).not.toBe(
+      makeDefaultAiProvider("ollama").id
+    );
   });
 
   it("falls back from a deleted provider id to the default enabled provider", () => {
@@ -100,5 +138,74 @@ describe("AI provider configuration", () => {
     expect(resolveSelectedAiProvider([local, openai], "openai-1")?.id).toBe(
       "openai-1"
     );
+  });
+
+  it("never selects a disabled provider (plan R5)", () => {
+    const off = makeDefaultAiProvider("openai", {
+      id: "openai-off",
+      enabled: false,
+      isDefault: true,
+    });
+    const on = makeDefaultAiProvider("deepseek", { id: "deepseek-on" });
+    expect(resolveSelectedAiProvider([off, on], "openai-off")?.id).toBe(
+      "deepseek-on"
+    );
+    expect(resolveSelectedAiProvider([off], "openai-off")).toBeUndefined();
+    expect(resolveSelectedAiProvider([], "")).toBeUndefined();
+  });
+
+  it("stores, clears and broadcasts the selected provider", () => {
+    localStorage.clear();
+    const seen: string[] = [];
+    const onSelected = (event: Event) =>
+      seen.push(
+        (event as CustomEvent<{ providerId: string }>).detail.providerId
+      );
+    window.addEventListener("politedb-ai-provider-selected", onSelected);
+    expect(getSelectedAiProviderId()).toBe("");
+    setSelectedAiProviderId("openai-1");
+    expect(getSelectedAiProviderId()).toBe("openai-1");
+    setSelectedAiProviderId("");
+    expect(getSelectedAiProviderId()).toBe("");
+    window.removeEventListener("politedb-ai-provider-selected", onSelected);
+    expect(seen).toEqual(["openai-1", ""]);
+  });
+
+  it("maps key capability per kind", () => {
+    expect(aiProviderKeyCapability("openai")).toBe("required");
+    expect(aiProviderKeyCapability("local_openai_compatible")).toBe("optional");
+    expect(aiProviderKeyCapability("ollama")).toBe("none");
+  });
+});
+
+describe("legacy bundled provider signature (plan D11)", () => {
+  const legacy: AiProviderConfig = {
+    id: "local",
+    kind: "ollama",
+    label: "PoliteDB AI",
+    baseUrl: "http://127.0.0.1:50953/v1",
+    defaultModel: "Qwen2.5-Coder-7B",
+    enabled: true,
+  };
+
+  it("matches the record the removed runtime created", () => {
+    expect(isLegacyBundledProvider(legacy)).toBe(true);
+    expect(isLegacyBundledProvider(normalizeAiProviderConfig(legacy))).toBe(
+      true
+    );
+  });
+
+  it("does not match user-created or edited records", () => {
+    for (const variant of [
+      { ...legacy, id: "ollama-1" },
+      { ...legacy, label: "My Ollama" },
+      { ...legacy, kind: "local_openai_compatible" as const },
+      { ...legacy, baseUrl: "http://127.0.0.1:11434/v1" },
+      { ...legacy, baseUrl: "http://192.168.1.5:50953/v1" },
+      { ...legacy, baseUrl: "https://127.0.0.1:50953/v1" },
+      { ...legacy, baseUrl: "http://127.0.0.1:50953/api" },
+    ]) {
+      expect(isLegacyBundledProvider(variant)).toBe(false);
+    }
   });
 });

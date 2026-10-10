@@ -7,33 +7,21 @@ import {
 } from "src/components/ai-assistant/AiAssistantChatArea";
 import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
 import { AiAssistantPanelHeader } from "src/components/ai-assistant/AiAssistantPanelHeader";
-import { AiAssistantRuntimeNotice } from "src/components/ai-assistant/AiAssistantRuntimePanes";
-import { getLocalAiSettings } from "src/lib/ai-assistant";
 import type { AiColumnMetadata, DatabaseEngine, TableItem } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import {
-  DEFAULT_LOCAL_AI_PROVIDER_ID,
   aiProviderList,
-  ensureLocalAiProvider,
-  filterAvailableAiProviders,
+  dismissLegacyLocalNotice,
   getSelectedAiProviderId,
+  isLegacyBundledProvider,
+  isLegacyLocalNoticeDismissed,
   isLocalAiProviderKind,
   normalizeAiProviderConfig,
   resolveSelectedAiProvider,
   setSelectedAiProviderId,
 } from "@root/src/lib/ai-assistant/providers";
 import { useAiChatSession } from "./hooks/useAiChatSession";
-import {
-  useAiRuntimeManager,
-  useUnavailableAiRuntimeManager,
-} from "./hooks/useAiRuntimeManager";
-import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
-
-// Fixed per build, so the hook choice never changes between renders.
-const useRuntimeManager = DISTRIBUTION_FEATURES.localAiRuntime
-  ? useAiRuntimeManager
-  : useUnavailableAiRuntimeManager;
 import {
   useAiAssistantSubmit,
   type AssistantStatus,
@@ -121,12 +109,6 @@ export function AiAssistantPanel(props: Props) {
     onInsertSql,
   } = props;
 
-  const initialSettingsRef = useRef<ReturnType<typeof getLocalAiSettings>>();
-  if (!initialSettingsRef.current) {
-    initialSettingsRef.current = getLocalAiSettings();
-  }
-  const initialSettings = initialSettingsRef.current;
-
   const {
     prompt,
     setPrompt,
@@ -159,8 +141,8 @@ export function AiAssistantPanel(props: Props) {
   const [providerId, setProviderId] = useState(() => getSelectedAiProviderId());
   const [modelSelectionMode, setModelSelectionMode] =
     useState<AiModelSelectionMode>(() => getStoredModelSelectionMode());
-  const [providerModel, setProviderModel] = useState(initialSettings.model);
-  const [providerLabel, setProviderLabel] = useState("Local API");
+  const [providerModel, setProviderModel] = useState("");
+  const [providerLabel, setProviderLabel] = useState("");
   const [providerOptions, setProviderOptions] = useState<
     ReturnType<typeof normalizeAiProviderConfig>[]
   >([]);
@@ -168,51 +150,28 @@ export function AiAssistantPanel(props: Props) {
     []
   );
 
-  const {
-    endpoint,
-    model,
-    loadingModels,
-    runtimeBusy,
-    runtimeStatus,
-    modelDownloadFailed,
-    runtimeStartFailed,
-    modelDownloadInProgress,
-    showRuntimeLoadingScreen,
-    showMissingModelScreen,
-    showMissingRuntimeScreen,
-    handleStartBundledRuntime,
-    handleStopBundledRuntime,
-    handleDownloadModel,
-    handleCancelModelDownload,
-    handleDeleteModel,
-    handleRefreshRuntimeSetup,
-    handleRetryRuntimeSetup,
-  } = useRuntimeManager({
-    initialEndpoint: initialSettings.endpoint,
-    initialModel: initialSettings.model,
-    submitting,
-  });
+  const [legacyNoticeDismissed, setLegacyNoticeDismissed] = useState(() =>
+    isLegacyLocalNoticeDismissed()
+  );
+  /** Enabled provider offered after the selected one became unavailable (plan R6). */
+  const [pendingFallback, setPendingFallback] = useState<{
+    id: string;
+    label: string;
+    model: string;
+  } | null>(null);
+  /** Sessions whose unavailable original provider the user already accepted replacing. */
+  const [acceptedSessionIds, setAcceptedSessionIds] = useState<string[]>([]);
 
   const selectableProviderOptions = useMemo(
-    () =>
-      providerOptions.filter(
-        (provider) =>
-          provider.id !== DEFAULT_LOCAL_AI_PROVIDER_ID ||
-          Boolean(runtimeStatus?.model_path)
-      ),
-    [providerOptions, runtimeStatus?.model_path]
+    () => providerOptions.filter((provider) => provider.enabled),
+    [providerOptions]
   );
-
-  useEffect(() => {
-    if (!endpoint.trim() || !model.trim()) return;
-    void ensureLocalAiProvider({ endpoint, model }).then((provider) => {
-      if (!providerId || providerId === DEFAULT_LOCAL_AI_PROVIDER_ID) {
-        setProviderId(provider.id);
-        setProviderModel(provider.defaultModel);
-        setProviderLabel(provider.label);
-      }
-    });
-  }, [endpoint, model, providerId]);
+  const selectedProviderOption = providerOptions.find(
+    (provider) => provider.id === providerId
+  );
+  const showLegacyNotice =
+    !legacyNoticeDismissed &&
+    providerOptions.some((provider) => isLegacyBundledProvider(provider));
 
   const applyProviderList = (
     providers: ReturnType<typeof normalizeAiProviderConfig>[],
@@ -220,7 +179,26 @@ export function AiAssistantPanel(props: Props) {
   ) => {
     setProviderOptions(providers);
     const selected = resolveSelectedAiProvider(providers, currentId);
-    if (!selected) return;
+    if (!selected) {
+      // Nothing enabled: clear the selection so submit stays disabled (plan R5).
+      if (currentId) setSelectedAiProviderId("");
+      setProviderId("");
+      setProviderModel("");
+      setProviderLabel("");
+      return;
+    }
+    if (currentId && selected.id !== currentId) {
+      // The previously used provider is gone or disabled. Never switch silently: a
+      // conversation that ran on a local server must not move to another provider
+      // (possibly a cloud one) without the user choosing it (plan R6).
+      setPendingFallback({
+        id: selected.id,
+        label: selected.label,
+        model: selectedModelForProvider(selected),
+      });
+      return;
+    }
+    setPendingFallback(null);
     if (selected.id !== currentId) {
       setSelectedAiProviderId(selected.id);
       setProviderId(selected.id);
@@ -229,43 +207,27 @@ export function AiAssistantPanel(props: Props) {
     setProviderLabel(selected.label);
   };
 
+  const confirmFallback = () => {
+    if (!pendingFallback) return;
+    setPendingFallback(null);
+    // Switch provider, model and label together so the first request after Continue
+    // never pairs the new provider with the old provider's model.
+    setProviderModel(pendingFallback.model);
+    setProviderLabel(pendingFallback.label);
+    setSelectedAiProviderId(pendingFallback.id);
+    setProviderId(pendingFallback.id);
+  };
+
   useEffect(() => {
     void aiProviderList().then((providers) => {
-      applyProviderList(
-        filterAvailableAiProviders(providers.map(normalizeAiProviderConfig)),
-        providerId
-      );
+      applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
     });
   }, [providerId]);
 
   useEffect(() => {
-    if (!runtimeStatus || runtimeStatus.model_path) return;
-    const selected = providerOptions.find(
-      (provider) => provider.id === providerId
-    );
-    if (
-      selected?.id !== DEFAULT_LOCAL_AI_PROVIDER_ID ||
-      !isLocalAiProviderKind(selected.kind)
-    ) {
-      return;
-    }
-    const fallback = selectableProviderOptions.find(
-      (provider) => provider.enabled
-    );
-    if (!fallback) return;
-    setSelectedAiProviderId(fallback.id);
-    setProviderId(fallback.id);
-    setProviderLabel(fallback.label);
-    setProviderModel(selectedModelForProvider(fallback));
-  }, [providerId, providerOptions, runtimeStatus, selectableProviderOptions]);
-
-  useEffect(() => {
     const refreshProviders = () => {
       void aiProviderList().then((providers) => {
-        applyProviderList(
-          filterAvailableAiProviders(providers.map(normalizeAiProviderConfig)),
-          providerId
-        );
+        applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
       });
     };
     window.addEventListener("politedb-ai-providers-changed", refreshProviders);
@@ -280,7 +242,7 @@ export function AiAssistantPanel(props: Props) {
     const onSelected = (event: Event) => {
       const next = (event as CustomEvent<{ providerId?: string }>).detail
         ?.providerId;
-      if (next) setProviderId(next);
+      setProviderId(next ?? "");
     };
     window.addEventListener("politedb-ai-provider-selected", onSelected);
     return () =>
@@ -295,6 +257,14 @@ export function AiAssistantPanel(props: Props) {
       (item) => item.id === nextProviderId
     );
     if (!selected) return;
+    // Picking a model is an explicit choice of provider, also for an old session
+    // whose original provider is gone (its stored attribution is left untouched).
+    setPendingFallback(null);
+    if (activeSessionId) {
+      setAcceptedSessionIds((ids) =>
+        ids.includes(activeSessionId) ? ids : [...ids, activeSessionId]
+      );
+    }
     storeModelSelectionMode("manual");
     setModelSelectionMode("manual");
     setSelectedAiProviderId(selected.id);
@@ -305,6 +275,14 @@ export function AiAssistantPanel(props: Props) {
   };
 
   const handleSelectAutoModel = () => {
+    // Choosing Auto is an explicit choice too, including for an old session whose
+    // original provider is gone (its stored attribution is left untouched).
+    setPendingFallback(null);
+    if (activeSessionId) {
+      setAcceptedSessionIds((ids) =>
+        ids.includes(activeSessionId) ? ids : [...ids, activeSessionId]
+      );
+    }
     storeModelSelectionMode("auto");
     setModelSelectionMode("auto");
     const selected =
@@ -398,6 +376,19 @@ export function AiAssistantPanel(props: Props) {
     : {};
   const effectiveCurrentSql = includeSqlContext ? currentSql : undefined;
 
+  const activeSession = chatSessions.find(
+    (session) => session.id === activeSessionId
+  );
+  const sessionProviderUnavailable = Boolean(
+    activeSession?.providerId &&
+    activeSession.providerId !== providerId &&
+    !acceptedSessionIds.includes(activeSession.id) &&
+    !selectableProviderOptions.some(
+      (provider) => provider.id === activeSession.providerId
+    )
+  );
+  const submitBlocked = Boolean(pendingFallback) || sessionProviderUnavailable;
+
   const { canSubmit, handleSubmit, handleCancelSubmit } = useAiAssistantSubmit({
     prompt,
     setPrompt,
@@ -410,9 +401,13 @@ export function AiAssistantPanel(props: Props) {
     clearStreamingMessages,
     setSubmitting,
     setAssistantStatus,
-    providerId,
-    endpoint,
-    model: providerModel || model,
+    // Blocked until the user confirms a replacement provider (plan R6).
+    providerId: submitBlocked ? "" : providerId,
+    isLocalProvider: Boolean(
+      selectedProviderOption &&
+      isLocalAiProviderKind(selectedProviderOption.kind)
+    ),
+    model: providerModel,
     engine,
     runtimeConnectionId,
     activeSchema: effectiveActiveSchema,
@@ -447,16 +442,6 @@ export function AiAssistantPanel(props: Props) {
         <AiAssistantPanelHeader
           settingsOpen={settingsOpen}
           onSettingsOpenChange={setSettingsOpen}
-          loadingModels={loadingModels}
-          runtimeBusy={runtimeBusy}
-          modelDownloadInProgress={modelDownloadInProgress}
-          runtimeStatus={runtimeStatus}
-          onLoadModels={() => void handleRefreshRuntimeSetup()}
-          onStartRuntime={handleStartBundledRuntime}
-          onStopRuntime={handleStopBundledRuntime}
-          onDownloadModel={() => void handleDownloadModel()}
-          onCancelModelDownload={handleCancelModelDownload}
-          onDeleteLocalModel={handleDeleteModel}
         />
       ) : null}
 
@@ -464,32 +449,65 @@ export function AiAssistantPanel(props: Props) {
         <AiAssistantSettingsDialog
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          loadingModels={loadingModels}
-          runtimeBusy={runtimeBusy}
-          modelDownloadInProgress={modelDownloadInProgress}
-          runtimeStatus={runtimeStatus}
-          onLoadModels={() => void handleRefreshRuntimeSetup()}
-          onStartRuntime={handleStartBundledRuntime}
-          onStopRuntime={handleStopBundledRuntime}
-          onDownloadModel={() => void handleDownloadModel()}
-          onCancelModelDownload={handleCancelModelDownload}
-          onDeleteLocalModel={handleDeleteModel}
         />
       ) : null}
 
-      {presentation === "panel" ? (
-        <AiAssistantRuntimeNotice
-          status={runtimeStatus}
-          downloading={modelDownloadInProgress}
-          loading={showRuntimeLoadingScreen}
-          missingModel={showMissingModelScreen}
-          missingRuntime={showMissingRuntimeScreen}
-          failed={modelDownloadFailed || runtimeStartFailed}
-          busy={runtimeBusy}
-          onDownload={() => void handleDownloadModel()}
-          onCancelDownload={handleCancelModelDownload}
-          onRetry={handleRetryRuntimeSetup}
-        />
+      {pendingFallback || sessionProviderUnavailable ? (
+        <div class="flex shrink-0 items-start justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>
+            {pendingFallback
+              ? `The AI provider you used before is no longer available. Continue with ${pendingFallback.label}?`
+              : `This chat was started with an AI provider that is no longer available. Continue it with ${providerLabel || "the selected provider"}?`}
+          </span>
+          <div class="flex shrink-0 gap-2">
+            <button
+              type="button"
+              class="font-medium underline"
+              onClick={() => {
+                if (pendingFallback) confirmFallback();
+                else if (activeSession)
+                  setAcceptedSessionIds((ids) => [...ids, activeSession.id]);
+              }}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              class="underline"
+              onClick={() => setSettingsOpen(true)}
+            >
+              Open AI settings
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {showLegacyNotice ? (
+        <div class="flex shrink-0 items-start justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>
+            PoliteDB's built-in AI was removed. Point your local provider at
+            your own server (Ollama, LM Studio) in AI settings.
+          </span>
+          <div class="flex shrink-0 gap-2">
+            <button
+              type="button"
+              class="font-medium underline"
+              onClick={() => setSettingsOpen(true)}
+            >
+              Open AI settings
+            </button>
+            <button
+              type="button"
+              class="underline"
+              onClick={() => {
+                dismissLegacyLocalNotice();
+                setLegacyNoticeDismissed(true);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
       ) : null}
 
       <div class="flex min-h-0 flex-1 flex-col">
@@ -511,7 +529,7 @@ export function AiAssistantPanel(props: Props) {
           querySafetyMode={querySafetyMode}
           onUpdateMessage={updateMessage}
           providerLabel={providerLabel}
-          providerModel={providerModel || model}
+          providerModel={providerModel}
           providerOptions={selectableProviderOptions}
           activeProviderId={providerId}
           modelSelectionMode={modelSelectionMode}

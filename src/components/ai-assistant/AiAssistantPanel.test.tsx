@@ -8,11 +8,6 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AiAssistantPanel } from "./AiAssistantPanel";
 
-const getLocalAiSettingsMock = vi.fn();
-const saveLocalAiSettingsMock = vi.fn();
-const hasSeenLocalAiModelMock = vi.fn();
-const markLocalAiModelSeenMock = vi.fn();
-const listLocalAiModelsMock = vi.fn();
 const isGeneralChatPromptMock = vi.fn();
 const chatReplyMock = vi.fn();
 const getDirectMetadataReplyMock = vi.fn();
@@ -24,13 +19,9 @@ const buildFastResultAnswerMock = vi.fn();
 const getFastChatReplyMock = vi.fn();
 const getAmbiguousPromptReplyMock = vi.fn();
 const setSelectedAiProviderIdMock = vi.fn();
-
-const aiRuntimeStatusMock = vi.fn();
-const aiRuntimeDownloadDefaultModelMock = vi.fn();
-const aiRuntimeCancelModelDownloadMock = vi.fn();
-const aiRuntimeDeleteDefaultModelMock = vi.fn();
-const aiRuntimeStartMock = vi.fn();
-const aiRuntimeStopMock = vi.fn();
+const getSelectedAiProviderIdMock = vi.fn();
+const aiProviderListMock = vi.fn();
+const aiLegacyModelInfoMock = vi.fn();
 
 const runSqlQueryMock = vi.fn();
 
@@ -39,11 +30,6 @@ vi.mock("src/lib/ai-assistant", async (importOriginal) => {
 
   return {
     ...actual,
-    getLocalAiSettings: (...args: any[]) => getLocalAiSettingsMock(...args),
-    saveLocalAiSettings: (...args: any[]) => saveLocalAiSettingsMock(...args),
-    hasSeenLocalAiModel: (...args: any[]) => hasSeenLocalAiModelMock(...args),
-    markLocalAiModelSeen: (...args: any[]) => markLocalAiModelSeenMock(...args),
-    listLocalAiModels: (...args: any[]) => listLocalAiModelsMock(...args),
     isGeneralChatPrompt: (...args: any[]) => isGeneralChatPromptMock(...args),
     chatReply: (...args: any[]) => chatReplyMock(...args),
     getDirectMetadataReply: (...args: any[]) =>
@@ -60,84 +46,55 @@ vi.mock("src/lib/ai-assistant", async (importOriginal) => {
   };
 });
 
-vi.mock("src/lib/tauri", () => ({
-  aiRuntimeStatus: (...args: any[]) => aiRuntimeStatusMock(...args),
-  aiRuntimeCancelModelDownload: (...args: any[]) =>
-    aiRuntimeCancelModelDownloadMock(...args),
-  aiRuntimeDownloadDefaultModel: (...args: any[]) =>
-    aiRuntimeDownloadDefaultModelMock(...args),
-  aiRuntimeDeleteDefaultModel: (...args: any[]) =>
-    aiRuntimeDeleteDefaultModelMock(...args),
-  aiRuntimeStart: (...args: any[]) => aiRuntimeStartMock(...args),
-  aiRuntimeStop: (...args: any[]) => aiRuntimeStopMock(...args),
+vi.mock("src/lib/tauri/ai", () => ({
+  aiChatCancel: vi.fn(),
+  aiChatComplete: vi.fn(),
+  aiProviderDelete: vi.fn(),
+  aiProviderList: vi.fn(),
+  aiProviderSave: vi.fn(),
+  aiProviderListModels: vi.fn(),
+  aiProviderCancelListModels: vi.fn(),
+  aiProviderTestDraft: vi.fn(),
+  aiLegacyModelInfo: (...args: any[]) => aiLegacyModelInfoMock(...args),
+  aiLegacyModelDelete: vi.fn(),
 }));
 
 vi.mock("src/lib/tauri/query", () => ({
   runSqlQuery: (...args: any[]) => runSqlQueryMock(...args),
 }));
 
-vi.mock("@root/src/lib/ai-assistant/providers", () => ({
-  DEFAULT_LOCAL_AI_PROVIDER_ID: "local",
-  isLocalAiProviderKind: (kind: string) =>
-    kind === "ollama" || kind === "local_openai_compatible",
-  isAiProviderKindAvailable: () => true,
-  filterAvailableAiProviders: (providers: any[]) => providers,
-  fallbackSelectedAiProviderId: () => "local",
-  normalizeAiProviderConfig: (provider: any) => provider,
-  ensureLocalAiProvider: vi.fn().mockResolvedValue({
-    id: "local",
-    kind: "local_openai_compatible",
-    label: "PoliteDB AI",
-    baseUrl: "http://127.0.0.1:8080/v1",
-    defaultModel: "Qwen2.5-Coder-7B",
-    enabled: true,
-  }),
-  getSelectedAiProviderId: vi.fn(() => "local"),
-  setSelectedAiProviderId: (...args: any[]) =>
-    setSelectedAiProviderIdMock(...args),
-  resolveSelectedAiProvider: (providers: any[], selectedId?: string) =>
-    providers.find((provider) => provider.id === selectedId) ??
-    providers.find((provider) => provider.isDefault) ??
-    providers[0],
-  makeDefaultAiProvider: (kind: string, overrides: any = {}) => ({
-    id: overrides.id ?? kind,
-    kind,
-    label: overrides.label ?? kind,
-    defaultModel: overrides.defaultModel ?? "model",
-    enabled: true,
-    ...overrides,
-  }),
-  saveAiProviderWithOptionalKey: vi.fn(async ({ config }: any) => config),
-  aiProviderTest: vi.fn(),
-  aiProviderDelete: vi.fn(),
-  buildBaseUrl: (host: string, subPath: string) => `${host}${subPath}`,
-  AI_PROVIDER_LABELS: {
-    ollama: "Ollama",
-    local_openai_compatible: "Local API",
-  },
-  DEFAULT_HOSTS: {
-    ollama: "http://127.0.0.1:11434",
-    local_openai_compatible: "http://127.0.0.1:11434",
-  },
-  DEFAULT_SUB_PATHS: {
-    ollama: "/v1",
-    local_openai_compatible: "/v1",
-  },
-  DEFAULT_MODELS: {
-    ollama: "Qwen2.5-Coder-7B",
-    local_openai_compatible: "Qwen2.5-Coder-7B",
-  },
-  aiProviderList: vi.fn().mockResolvedValue([
-    {
-      id: "local",
-      kind: "local_openai_compatible",
-      label: "PoliteDB AI",
-      baseUrl: "http://127.0.0.1:8080/v1",
-      defaultModel: "Qwen2.5-Coder-7B",
-      enabled: true,
-    },
-  ]),
-}));
+vi.mock("@root/src/lib/ai-assistant/providers", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("src/lib/ai-assistant/providers")>();
+  return {
+    ...actual,
+    aiProviderList: (...args: any[]) => aiProviderListMock(...args),
+    getSelectedAiProviderId: (...args: any[]) =>
+      getSelectedAiProviderIdMock(...args),
+    setSelectedAiProviderId: (...args: any[]) =>
+      setSelectedAiProviderIdMock(...args),
+  };
+});
+
+const LM_STUDIO = {
+  id: "lmstudio-1",
+  kind: "local_openai_compatible",
+  label: "LM Studio",
+  baseUrl: "http://127.0.0.1:1234/v1",
+  defaultModel: "qwen2.5-7b-instruct",
+  models: ["qwen2.5-7b-instruct"],
+  enabled: true,
+};
+
+const LEGACY_BUNDLED = {
+  id: "local",
+  kind: "ollama",
+  label: "PoliteDB AI",
+  baseUrl: "http://127.0.0.1:50953/v1",
+  defaultModel: "Qwen2.5-Coder-7B",
+  models: ["Qwen2.5-Coder-7B"],
+  enabled: true,
+};
 
 vi.mock("src/components/ai-assistant/AiAssistantMessageCard", () => ({
   AiAssistantMessageCard: ({ message }: any) => (
@@ -185,39 +142,6 @@ vi.mock("src/components/icons", () => ({
   XIcon: () => <span>x</span>,
 }));
 
-function status(overrides: Record<string, unknown> = {}) {
-  return {
-    phase: "stopped",
-    endpoint: null,
-    model_name: null,
-    server_bin: "/tmp/llama-server",
-    model_path: null,
-    pid: null,
-    managed_by_app: true,
-    missing: [],
-    last_error: null,
-    model_downloaded_bytes: null,
-    model_total_bytes: null,
-    ...overrides,
-  };
-}
-
-function missingModelStatus(overrides: Record<string, unknown> = {}) {
-  return status({
-    phase: "missing",
-    missing: [
-      "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf",
-    ],
-    ...overrides,
-  });
-}
-
-function mockMissingModelStatus() {
-  aiRuntimeStatusMock.mockImplementation(() =>
-    Promise.resolve(missingModelStatus())
-  );
-}
-
 let renderSeq = 0;
 
 function renderPanel(props: Record<string, unknown> = {}) {
@@ -245,12 +169,10 @@ beforeEach(() => {
     value: vi.fn(),
   });
 
-  getLocalAiSettingsMock.mockReturnValue({
-    endpoint: "http://127.0.0.1:8080/v1",
-    model: "Qwen2.5-Coder-7B",
-  });
-  hasSeenLocalAiModelMock.mockReturnValue(false);
-  listLocalAiModelsMock.mockResolvedValue(["Qwen2.5-Coder-7B"]);
+  localStorage.clear();
+  aiProviderListMock.mockResolvedValue([LM_STUDIO]);
+  getSelectedAiProviderIdMock.mockReturnValue("lmstudio-1");
+  aiLegacyModelInfoMock.mockResolvedValue({ files: [] });
   isGeneralChatPromptMock.mockReturnValue(true);
   chatReplyMock.mockResolvedValue({
     answer: "Hello! How can I help?",
@@ -281,43 +203,6 @@ beforeEach(() => {
   });
   getFastChatReplyMock.mockReturnValue(null);
   getAmbiguousPromptReplyMock.mockReturnValue(null);
-  aiRuntimeStatusMock.mockResolvedValue(
-    status({
-      phase: "ready",
-      endpoint: "http://127.0.0.1:8080/v1",
-      model_name: "qwen2.5-coder:7b",
-      model_path: "/tmp/default.gguf",
-    })
-  );
-  aiRuntimeDownloadDefaultModelMock.mockResolvedValue(
-    status({
-      phase: "stopped",
-      model_name: "default",
-      model_path: "/tmp/default.gguf",
-    })
-  );
-  aiRuntimeCancelModelDownloadMock.mockResolvedValue(
-    status({
-      phase: "missing",
-      missing: [
-        "Missing GGUF model. Set POLITEDB_LLM_MODEL_PATH or place default.gguf in the app data folder under ai/models/default.gguf",
-      ],
-      last_error: "AI model download canceled.",
-    })
-  );
-  aiRuntimeStartMock.mockResolvedValue(
-    status({
-      phase: "ready",
-      endpoint: "http://127.0.0.1:8080/v1",
-      model_name: "qwen2.5-coder:7b",
-      model_path: "/tmp/default.gguf",
-    })
-  );
-  aiRuntimeStopMock.mockResolvedValue(
-    status({
-      phase: "stopped",
-    })
-  );
   runSqlQueryMock.mockResolvedValue({
     columns: [{ name: "id", db_type: "int4" }],
     rows: [[1], [2]],
@@ -326,51 +211,232 @@ beforeEach(() => {
 });
 
 describe("AiAssistantPanel", () => {
-  it("keeps chat available without prompting for a missing local model", async () => {
-    mockMissingModelStatus();
+  it("shows a setup state without requests when no provider is enabled", async () => {
+    aiProviderListMock.mockResolvedValue([{ ...LM_STUDIO, enabled: false }]);
 
     renderPanel({ presentation: "floating" });
 
     expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Download model" })
-    ).not.toBeInTheDocument();
-    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
-
+    await waitFor(() =>
+      expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("")
+    );
     fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
     await screen.findByText("Add a provider in Settings to choose models.");
+
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(chatReplyMock).not.toHaveBeenCalled();
+  });
+
+  it("opens AI settings from the panel header", async () => {
+    renderPanel({ presentation: "panel" });
+
+    fireEvent.click(await screen.findByTitle("AI settings"));
+    await screen.findByText("AI Provider Settings");
     expect(
-      screen.queryByRole("button", { name: /Qwen2\.5-Coder-7B/ })
+      screen.getByText("LM Studio / OpenAI-compatible")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Download model/ })
     ).not.toBeInTheDocument();
   });
 
-  it("keeps settings available when the local model is missing", async () => {
-    mockMissingModelStatus();
-
-    renderPanel({ presentation: "panel" });
-
-    expect(await screen.findByTitle("AI settings")).toBeInTheDocument();
-    expect(
-      await screen.findByRole("button", { name: "Download model" })
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTitle("AI settings"));
-    await screen.findByText("AI Provider Settings");
-  });
-
-  it("starts runtime automatically when runtime assets are available", async () => {
-    aiRuntimeStatusMock.mockResolvedValueOnce(
-      status({
-        phase: "stopped",
-        model_name: "default",
-        model_path: "/tmp/default.gguf",
-      })
-    );
+  it("shows a dismissible notice for the removed built-in provider without changing it", async () => {
+    aiProviderListMock.mockResolvedValue([LEGACY_BUNDLED, LM_STUDIO]);
 
     renderPanel();
 
-    await waitFor(() => expect(aiRuntimeStartMock).toHaveBeenCalledTimes(1));
-    expect(aiRuntimeDownloadDefaultModelMock).not.toHaveBeenCalled();
+    await screen.findByText(/built-in AI was removed/);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/built-in AI was removed/)
+      ).not.toBeInTheDocument()
+    );
+    expect(
+      localStorage.getItem("politedb.ai.legacyLocalNotice.dismissed")
+    ).toBe("1");
+  });
+
+  it("does not silently switch providers when the selected one is unavailable", async () => {
+    const cloud = {
+      id: "openai-1",
+      kind: "openai",
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      defaultModel: "gpt-4.1-mini",
+      models: ["gpt-4.1-mini"],
+      enabled: true,
+    };
+    getSelectedAiProviderIdMock.mockReturnValue("local-gone");
+    // Reloads after Continue stay pending, so only Continue itself can set the model.
+    aiProviderListMock
+      .mockResolvedValueOnce([cloud])
+      .mockReturnValue(new Promise(() => {}));
+
+    renderPanel();
+
+    await screen.findByText(/no longer available\. Continue with OpenAI\?/);
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(chatReplyMock).not.toHaveBeenCalled();
+    expect(setSelectedAiProviderIdMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("openai-1");
+    await waitFor(() =>
+      expect(screen.queryByText(/no longer available/)).not.toBeInTheDocument()
+    );
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(chatReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerId: "openai-1",
+          model: "gpt-4.1-mini",
+        })
+      )
+    );
+  });
+
+  it("asks before continuing a chat whose original provider is gone", async () => {
+    const key = "history-provider-test";
+    localStorage.setItem(
+      "politedb.ai.chat." + key,
+      JSON.stringify({
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Old local chat",
+            providerId: "local",
+            messages: [{ id: "m1", role: "user", text: "old question" }],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      })
+    );
+
+    renderPanel({ chatSessionKey: key });
+
+    await screen.findByText(/This chat was started with an AI provider/);
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "next" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(chatReplyMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.input(textarea, { target: { value: "next" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatReplyMock).toHaveBeenCalled());
+    expect(screen.getByText("old question")).toBeInTheDocument();
+  });
+
+  it("accepts an explicit model pick for a chat whose provider is gone", async () => {
+    const key = "history-pick-test";
+    localStorage.setItem(
+      "politedb.ai.chat." + key,
+      JSON.stringify({
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Old local chat",
+            providerId: "local",
+            messages: [{ id: "m1", role: "user", text: "old question" }],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      })
+    );
+
+    renderPanel({ chatSessionKey: key });
+
+    await screen.findByText(/This chat was started with an AI provider/);
+    fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /qwen2\.5-7b-instruct/ })
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/This chat was started with an AI provider/)
+      ).not.toBeInTheDocument()
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "next" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(chatReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({ providerId: "lmstudio-1" })
+      )
+    );
+  });
+
+  it("asks before switching when the selected provider is deleted in settings", async () => {
+    const cloud = {
+      id: "openai-1",
+      kind: "openai",
+      label: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      defaultModel: "gpt-4.1-mini",
+      models: ["gpt-4.1-mini"],
+      enabled: true,
+    };
+    aiProviderListMock.mockResolvedValue([LM_STUDIO, cloud]);
+    renderPanel();
+    await screen.findByPlaceholderText("Ask anything...");
+    await waitFor(() => expect(aiProviderListMock).toHaveBeenCalled());
+
+    // Settings deleted the selected local provider and only broadcast the change.
+    aiProviderListMock.mockResolvedValue([cloud]);
+    window.dispatchEvent(new Event("politedb-ai-providers-changed"));
+
+    await screen.findByText(/no longer available\. Continue with OpenAI\?/);
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(chatReplyMock).not.toHaveBeenCalled();
+    expect(setSelectedAiProviderIdMock).not.toHaveBeenCalledWith("openai-1");
+  });
+
+  it("accepts Auto as an explicit choice for a chat whose provider is gone", async () => {
+    const key = "history-auto-test";
+    localStorage.setItem(
+      "politedb.ai.chat." + key,
+      JSON.stringify({
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "Old local chat",
+            providerId: "local",
+            messages: [{ id: "m1", role: "user", text: "old question" }],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      })
+    );
+
+    renderPanel({ chatSessionKey: key });
+
+    await screen.findByText(/This chat was started with an AI provider/);
+    fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Auto/ }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/This chat was started with an AI provider/)
+      ).not.toBeInTheDocument()
+    );
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "next" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() => expect(chatReplyMock).toHaveBeenCalled());
   });
 
   it("sends a general chat message and renders the assistant reply", async () => {
@@ -382,23 +448,29 @@ describe("AiAssistantPanel", () => {
 
     await screen.findByText("hello");
     await screen.findByText(/Hello! How can I help\?/);
-    expect(saveLocalAiSettingsMock).toHaveBeenCalledWith({
-      endpoint: "http://127.0.0.1:8080/v1",
-      model: "Qwen2.5-Coder-7B",
-    });
+    expect(chatReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "lmstudio-1",
+        model: "qwen2.5-7b-instruct",
+      })
+    );
   });
 
-  it("opens the model picker and selects the local model", async () => {
+  it("opens the model picker and selects the local server model", async () => {
     renderPanel();
 
     await screen.findByPlaceholderText("Ask anything...");
     fireEvent.click(screen.getByRole("button", { name: "Select AI model" }));
 
     await screen.findByText("Select a model");
-    expect(screen.getAllByText("Qwen2.5-Coder-7B").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /Qwen2\.5-Coder-7B/ }));
+    expect(screen.getAllByText("qwen2.5-7b-instruct").length).toBeGreaterThan(
+      0
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /qwen2\.5-7b-instruct/ })
+    );
 
-    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("local");
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("lmstudio-1");
   });
 
   it("previews a read-only SQL plan without running it automatically", async () => {

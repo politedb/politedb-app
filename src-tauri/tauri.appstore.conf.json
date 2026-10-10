@@ -13,7 +13,6 @@
   "bundle": {
     "targets": ["app"],
     "createUpdaterArtifacts": false,
-    "resources": [],
     "macOS": {
       "signingIdentity": null,
       "entitlements": "entitlements.appstore.plist",

@@ -2,51 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { CMD } from "./commands";
 import type { AiProviderConfig } from "src/types";
 
-export type AiRuntimePhase =
-  | "missing"
-  | "stopped"
-  | "starting"
-  | "ready"
-  | "error";
-
-export type AiRuntimeStatus = {
-  phase: AiRuntimePhase;
-  endpoint?: string | null;
-  model_name?: string | null;
-  server_bin?: string | null;
-  model_path?: string | null;
-  pid?: number | null;
-  managed_by_app: boolean;
-  missing: string[];
-  last_error?: string | null;
-  model_downloaded_bytes?: number | null;
-  model_total_bytes?: number | null;
-};
-
-export async function aiRuntimeStatus() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeStatus);
-}
-
-export async function aiRuntimeStart() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeStart);
-}
-
-export async function aiRuntimeStop() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeStop);
-}
-
-export async function aiRuntimeDownloadDefaultModel() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeDownloadDefaultModel);
-}
-
-export async function aiRuntimeCancelModelDownload() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeCancelModelDownload);
-}
-
-export async function aiRuntimeDeleteDefaultModel() {
-  return invoke<AiRuntimeStatus>(CMD.aiRuntimeDeleteDefaultModel);
-}
-
 export type AiChatCompleteMessage = {
   role: "system" | "user" | "assistant";
   content: string;
@@ -64,33 +19,69 @@ export async function aiProviderList() {
   return invoke<AiProviderConfig[]>(CMD.aiProviderList);
 }
 
-export async function aiProviderSaveConfig(config: AiProviderConfig) {
-  return invoke<AiProviderConfig>(CMD.aiProviderSaveConfig, { config });
-}
+/** Key edit sent with a save. `keep` (blank input) leaves the stored key untouched. */
+export type AiProviderKeyChange =
+  | { action: "keep" }
+  | { action: "set"; value: string }
+  | { action: "remove" };
 
-export async function aiProviderSetKey(providerId: string, apiKey: string) {
-  return invoke<AiProviderConfig>(CMD.aiProviderSetKey, {
-    providerId,
-    apiKey,
-  });
-}
-
-export async function aiProviderValidateConfig(
+/** Saves config and key change in one backend transaction (no network call). */
+export async function aiProviderSave(
   config: AiProviderConfig,
-  apiKey?: string
+  keyChange: AiProviderKeyChange
 ) {
-  await invoke(CMD.aiProviderValidateConfig, {
-    config,
-    apiKey: apiKey?.trim() || null,
-  });
+  return invoke<AiProviderConfig>(CMD.aiProviderSave, { config, keyChange });
 }
 
 export async function aiProviderDelete(providerId: string) {
   await invoke(CMD.aiProviderDelete, { providerId });
 }
 
-export async function aiProviderTest(providerId: string) {
-  return invoke<string>(CMD.aiProviderTest, { providerId });
+/**
+ * Model ids reported by the server for an unsaved draft (not license-gated).
+ * `auth` mirrors the form: keep = stored key, set = typed key, remove = no key.
+ * `requestId` scopes {@link aiProviderCancelListModels} to this caller's request.
+ */
+export async function aiProviderListModels(
+  config: AiProviderConfig,
+  auth: AiProviderKeyChange,
+  requestId: string
+) {
+  return invoke<string[]>(CMD.aiProviderListModels, {
+    config,
+    auth,
+    requestId,
+  });
+}
+
+/** Cancels only the discovery started with `requestId`. */
+export async function aiProviderCancelListModels(requestId: string) {
+  try {
+    await invoke<void>(CMD.aiProviderCancelListModels, { requestId });
+  } catch {
+    // Ignore when the desktop backend is unavailable (tests / web preview).
+  }
+}
+
+/** Sends a short test completion for an unsaved draft; persists nothing. */
+export async function aiProviderTestDraft(
+  config: AiProviderConfig,
+  auth: AiProviderKeyChange
+) {
+  await invoke(CMD.aiProviderTestDraft, { config, auth });
+}
+
+export type AiLegacyModelFile = { name: string; sizeBytes: number };
+export type AiLegacyModelInfo = { files: AiLegacyModelFile[] };
+
+/** Model files left by the removed built-in AI runtime. */
+export async function aiLegacyModelInfo() {
+  return invoke<AiLegacyModelInfo>(CMD.aiLegacyModelInfo);
+}
+
+/** Deletes those files; returns any that could not be deleted. */
+export async function aiLegacyModelDelete() {
+  return invoke<AiLegacyModelInfo>(CMD.aiLegacyModelDelete);
 }
 
 export async function aiChatComplete(request: AiChatCompleteRequest) {

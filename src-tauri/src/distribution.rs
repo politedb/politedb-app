@@ -30,11 +30,6 @@ impl Distribution {
         matches!(self, Self::Direct)
     }
 
-    /// Bundled `llama-server` runtime and default model download.
-    pub const fn supports_local_ai_runtime(self) -> bool {
-        matches!(self, Self::Direct)
-    }
-
     /// Website-issued 14-day trial. App Store builds use subscription intro offers instead.
     pub const fn supports_local_trial(self) -> bool {
         matches!(self, Self::Direct)
@@ -105,16 +100,14 @@ mod tests {
     fn direct_allows_everything() {
         let d = Distribution::Direct;
         assert!(d.supports_self_update());
-        assert!(d.supports_local_ai_runtime());
         assert!(d.supports_engine(EngineKind::Oracle));
         assert!(d.supports_engine(EngineKind::Postgres));
     }
 
     #[test]
-    fn app_store_disables_updater_local_ai_and_oracle() {
+    fn app_store_disables_updater_and_oracle() {
         let d = Distribution::AppStore;
         assert!(!d.supports_self_update());
-        assert!(!d.supports_local_ai_runtime());
         assert!(!d.supports_engine(EngineKind::Oracle));
         assert!(d.supports_engine(EngineKind::Postgres));
         assert!(d.supports_engine(EngineKind::Sqlite));
