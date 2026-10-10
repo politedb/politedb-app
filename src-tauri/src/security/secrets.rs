@@ -83,6 +83,40 @@ pub fn keychain_delete(app: &AppHandle, key: &str) -> Result<(), String> {
     }
 }
 
+/// Like [`keychain_get`], but `Ok(None)` only when the item is absent.
+/// Locked, denied or entitlement failures stay errors.
+pub fn keychain_get_optional(app: &AppHandle, key: &str) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        match mac_store_call(|store| store.get(key)) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if crate::security::credential_store::is_not_found(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        use keyring::Entry;
+        let service = service_name(app);
+        let entry = Entry::new(&service, key).map_err(|e| format!("KEYRING_ENTRY_FAILED: {e}"))?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("KEYRING_GET_FAILED: {e}")),
+        }
+    }
+}
+
+/// Like [`keychain_delete`], but an absent item is success.
+pub fn keychain_delete_if_present(app: &AppHandle, key: &str) -> Result<(), String> {
+    match keychain_get_optional(app, key)? {
+        Some(_) => keychain_delete(app, key),
+        None => Ok(()),
+    }
+}
+
 pub fn keychain_list(app: &AppHandle) -> Result<Vec<String>, String> {
     #[cfg(target_os = "macos")]
     {

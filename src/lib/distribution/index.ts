@@ -12,8 +12,6 @@ export type DistributionFeatures = {
   selfUpdate: boolean;
   /** Links/buttons that send users to buy outside the App Store. */
   externalPurchase: boolean;
-  /** Bundled llama-server runtime and default model download. */
-  localAiRuntime: boolean;
   /** Engines hidden from the new-connection picker in this flavor. */
   unsupportedEngines: readonly DatabaseEngine[];
 };
@@ -30,14 +28,12 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
     return {
       selfUpdate: false,
       externalPurchase: false,
-      localAiRuntime: false,
       unsupportedEngines: ["oracle"],
     };
   }
   return {
     selfUpdate: true,
     externalPurchase: true,
-    localAiRuntime: true,
     unsupportedEngines: [],
   };
 }

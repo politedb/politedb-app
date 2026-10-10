@@ -4,7 +4,6 @@ use dashmap::DashMap;
 use futures_util::lock::Mutex;
 use uuid::Uuid;
 
-use crate::ai_runtime::AiRuntimeHandle;
 use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConnection};
 use crate::operations::ctx::{FlowCtrl, SqlBusyRegistry};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
@@ -50,8 +49,10 @@ pub struct AppState {
     pub op_tasks: Arc<DashMap<Uuid, tokio::task::JoinHandle<()>>>,
 
     pub sql_busy: SqlBusyRegistry,
-    pub ai_runtime: Arc<tokio::sync::Mutex<AiRuntimeHandle>>,
     pub ai_chat_cancel: Arc<tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    /// Serializes AI provider file + key reads and mutations. Never held across network I/O.
+    pub ai_providers_lock: Arc<std::sync::Mutex<()>>,
+    pub ai_discovery_cancel: Arc<crate::ai::cancel::CancelRegistry>,
 }
 
 impl AppState {
@@ -68,8 +69,9 @@ impl AppState {
             flow_by_op: Arc::new(DashMap::new()),
             op_tasks: Arc::new(DashMap::new()),
             sql_busy: SqlBusyRegistry::new(),
-            ai_runtime: Arc::new(tokio::sync::Mutex::new(AiRuntimeHandle::default())),
             ai_chat_cancel: Arc::new(tokio::sync::Mutex::new(None)),
+            ai_providers_lock: Arc::new(std::sync::Mutex::new(())),
+            ai_discovery_cancel: Arc::new(crate::ai::cancel::CancelRegistry::default()),
         }
     }
 }

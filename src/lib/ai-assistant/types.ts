@@ -1,10 +1,5 @@
 import type { ChatMessage } from "src/types";
 
-export type LocalAiSettings = {
-  endpoint: string;
-  model: string;
-};
-
 export type AiPlan = {
   sql: string;
   explanation: string;
@@ -66,12 +61,11 @@ export type AiIntentDecision = {
 };
 
 export type GenerateOptions = {
-  providerId?: string;
-  endpoint: string;
+  providerId: string;
   model: string;
   prompt: string;
   maxTokens?: number;
-  onStatusChange?: (status: "loading_model" | "generating") => void;
+  onStatusChange?: (status: "generating") => void;
   /** Called with the full accumulated text as new tokens arrive. */
   onDelta?: (text: string) => void;
   signal?: AbortSignal;

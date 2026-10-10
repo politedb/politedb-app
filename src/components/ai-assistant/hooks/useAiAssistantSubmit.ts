@@ -7,7 +7,6 @@ import {
   hasConcreteDatabaseContext,
   planAssistantTurn,
   resolveReplyLanguage,
-  saveLocalAiSettings,
   formatSqlExecutionError,
 } from "src/lib/ai-assistant";
 import type {
@@ -17,7 +16,6 @@ import type {
   TableItem,
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
-import { DEFAULT_LOCAL_AI_PROVIDER_ID } from "src/lib/ai-assistant/providers";
 import { aiChatCancel } from "src/lib/tauri/ai";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
@@ -31,8 +29,7 @@ function isAbortError(error: unknown) {
 function formatAssistantRequestError(args: {
   error: unknown;
   lang: ReturnType<typeof resolveReplyLanguage>;
-  endpoint?: string;
-  providerId?: string;
+  isLocalProvider: boolean;
 }) {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
@@ -43,20 +40,33 @@ function formatAssistantRequestError(args: {
     raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
     raw.includes("AI_PROVIDER") ||
-    raw.includes("OLLAMA_GENERATE_FAILED") ||
-    raw.includes("/chat/completions");
+    raw.includes("AI_LICENSE_REQUIRED");
 
   if (!isProviderRequest) return null;
 
-  const endpoint = (args.endpoint ?? "").toLowerCase();
-  const isLocalEndpoint =
-    args.providerId === DEFAULT_LOCAL_AI_PROVIDER_ID ||
-    endpoint.includes("127.0.0.1") ||
-    endpoint.includes("localhost") ||
-    endpoint.includes(":11434") ||
-    raw.includes("127.0.0.1") ||
-    raw.includes("localhost") ||
-    raw.includes(":11434");
+  const isLocalEndpoint = args.isLocalProvider;
+
+  if (raw.includes("AI_PROVIDER_NOT_CONFIGURED")) {
+    return vi
+      ? "Chưa có AI provider nào được bật. Hãy mở AI settings để thêm hoặc bật một provider."
+      : "No AI provider is enabled. Open AI settings to add or enable one.";
+  }
+
+  if (raw.includes("AI_PROVIDER_DISABLED")) {
+    return vi
+      ? "AI provider này đang tắt. Hãy bật lại trong AI settings."
+      : "This AI provider is disabled. Enable it in AI settings.";
+  }
+
+  if (
+    raw.includes("AI_PROVIDER_URL_HOST_NOT_ALLOWED") ||
+    raw.includes("AI_PROVIDER_URL_INVALID") ||
+    raw.includes("AI_PROVIDER_HTTPS_REQUIRED")
+  ) {
+    return vi
+      ? "URL của AI provider không được phép. Với http chỉ dùng localhost hoặc IP trong mạng LAN; các host khác cần https."
+      : "This AI provider URL is not allowed. Plain http works only for localhost or LAN IP addresses; other hosts need https.";
+  }
 
   if (
     /exceed(?:s|ed)? the available context size|exceed_context_size_error/i.test(
@@ -79,12 +89,12 @@ function formatAssistantRequestError(args: {
 
   if (vi) {
     return isLocalEndpoint
-      ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama/local OpenAI-compatible server đã chạy chưa."
+      ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama đã chạy và URL trong AI settings đúng chưa."
       : "Không kết nối được tới AI provider. Hãy kiểm tra API key, host, hoặc model trong AI settings.";
   }
 
   return isLocalEndpoint
-    ? "I could not reach the local AI provider. Check that Ollama or your OpenAI-compatible local server is running."
+    ? "I could not reach the local AI provider. Check that Ollama is running and the URL in AI settings is correct."
     : "I could not reach the AI provider. Check the API key, host, or model in AI settings.";
 }
 
@@ -107,8 +117,9 @@ export function useAiAssistantSubmit(args: {
   clearStreamingMessages: () => void;
   setSubmitting: Dispatch<StateUpdater<boolean>>;
   setAssistantStatus: Dispatch<StateUpdater<AssistantStatus>>;
-  providerId?: string;
-  endpoint: string;
+  providerId: string;
+  /** Whether the selected provider is a user-run local server (affects error wording). */
+  isLocalProvider: boolean;
   model: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
@@ -141,7 +152,7 @@ export function useAiAssistantSubmit(args: {
     setSubmitting,
     setAssistantStatus,
     providerId,
-    endpoint,
+    isLocalProvider,
     model,
     engine,
     runtimeConnectionId,
@@ -160,10 +171,8 @@ export function useAiAssistantSubmit(args: {
   const requestSeqRef = useRef(0);
 
   const canSubmit = useMemo(() => {
-    return Boolean(
-      prompt.trim() && model.trim() && (providerId?.trim() || endpoint.trim())
-    );
-  }, [prompt, endpoint, model, providerId]);
+    return Boolean(prompt.trim() && model.trim() && providerId.trim());
+  }, [prompt, model, providerId]);
 
   const handleCancelSubmit = useCallback(() => {
     requestSeqRef.current += 1;
@@ -190,7 +199,6 @@ export function useAiAssistantSubmit(args: {
     setPrompt("");
     setSubmitting(true);
     setAssistantStatus("thinking");
-    saveLocalAiSettings({ endpoint, model });
 
     appendUserMessage(question);
     if (!conversationState.replyLanguageCode) {
@@ -211,10 +219,8 @@ export function useAiAssistantSubmit(args: {
       });
       const hasDbContext = hasConcreteDatabaseContext(assistantContext);
 
-      const onAssistantStatus = (status: "loading_model" | "generating") => {
-        setAssistantStatus(
-          status === "loading_model" ? "loading_model" : "thinking"
-        );
+      const onAssistantStatus = (_status: "generating") => {
+        setAssistantStatus("thinking");
       };
 
       const directAppReply = getDirectAppContextReply({
@@ -239,7 +245,6 @@ export function useAiAssistantSubmit(args: {
       if (!hasDbContext) {
         const reply = await chatReply({
           providerId,
-          endpoint,
           model,
           engine,
           question,
@@ -271,7 +276,6 @@ export function useAiAssistantSubmit(args: {
 
       const plan = await planAssistantTurn({
         providerId,
-        endpoint,
         model,
         engine,
         question,
@@ -368,8 +372,7 @@ export function useAiAssistantSubmit(args: {
       const assistantError = formatAssistantRequestError({
         error: err,
         lang,
-        endpoint,
-        providerId,
+        isLocalProvider,
       });
       appendAssistantMessage(
         {

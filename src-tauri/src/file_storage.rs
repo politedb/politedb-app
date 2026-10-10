@@ -122,6 +122,59 @@ pub fn json_write_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), Str
     atomic_write_bytes(path, &bytes)
 }
 
+/// Atomically replaces `dst` with `src`; the previous `dst` survives any failure.
+#[cfg(not(windows))]
+fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::rename(src, dst)
+}
+
+/// Windows: `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)` so the replacement is flushed
+/// before returning (plan R11).
+#[cfg(windows)]
+fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (src_w, dst_w) = (wide(src), wide(dst));
+    // SAFETY: both paths are NUL-terminated wide strings that outlive the call.
+    unsafe {
+        MoveFileExW(
+            PCWSTR(src_w.as_ptr()),
+            PCWSTR(dst_w.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .map_err(|e| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF))
+}
+
+/// Writes `value` by replacing the destination in one step, so a failed write or crash
+/// leaves the previous file intact (no remove-then-rename window).
+pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let bytes = serde_json::to_vec(value).map_err(|e| format!("Serialize JSON failed: {e}"))?;
+    ensure_parent_dir(path)?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| "Invalid path (no file name)".to_string())?
+        .to_string_lossy();
+    let tmp_path = path.with_file_name(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
+    let write = || -> Result<(), String> {
+        let mut f = fs::File::create(&tmp_path).map_err(|e| format!("Create tmp failed: {e}"))?;
+        f.write_all(&bytes)
+            .map_err(|e| format!("Write tmp failed: {e}"))?;
+        f.sync_all().map_err(|e| format!("Sync tmp failed: {e}"))?;
+        drop(f);
+        replace_file(&tmp_path, path).map_err(|e| format!("Replace failed: {e}"))
+    };
+    let result = write();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+    result
+}
+
 pub fn json_read_if_exists<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
     let Some(bytes) = read_bytes_if_exists(path)? else {
         return Ok(None);
@@ -394,6 +447,55 @@ mod export_session_tests {
         export_publish_temp(&temp, &final_path).unwrap();
         assert_eq!(fs::read_to_string(&final_path).unwrap(), "NEWDATA");
         assert!(!temp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replace_preserving_overwrites_and_leaves_no_temp() {
+        let dir = std::env::temp_dir().join(format!("politedb-replace-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("providers.json");
+        json_replace_preserving(&path, &vec![1]).unwrap();
+        json_replace_preserving(&path, &vec![2]).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[2]");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replace_preserving_keeps_previous_file_when_write_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("politedb-replace-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("providers.json");
+        json_replace_preserving(&path, &vec![1]).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = json_replace_preserving(&path, &vec![2]);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[1]");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn replace_preserving_keeps_previous_bytes_when_replacement_fails() {
+        let dir = std::env::temp_dir().join(format!("politedb-replace-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("providers.json");
+        json_replace_preserving(&path, &vec![1]).unwrap();
+        // A read-only destination makes MoveFileExW(REPLACE_EXISTING) fail.
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&path, perms.clone()).unwrap();
+        let result = json_replace_preserving(&path, &vec![2]);
+        perms.set_readonly(false);
+        fs::set_permissions(&path, perms).unwrap();
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "[1]");
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            1,
+            "temp file cleaned up"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

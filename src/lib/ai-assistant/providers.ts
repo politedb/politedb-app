@@ -2,27 +2,21 @@ import type { AiProviderConfig, AiProviderKind } from "src/types";
 import {
   aiProviderDelete as tauriAiProviderDelete,
   aiProviderList as tauriAiProviderList,
-  aiProviderSaveConfig,
-  aiProviderSetKey,
-  aiProviderValidateConfig,
-  aiProviderTest,
+  aiProviderSave,
+  aiProviderListModels,
+  aiProviderCancelListModels,
+  aiProviderTestDraft,
+  type AiProviderKeyChange,
 } from "src/lib/tauri/ai";
-import {
-  DEFAULT_AI_MODEL_NAME,
-  normalizeLocalAiModelName,
-} from "src/lib/ai-assistant/assistant";
-import {
-  DISTRIBUTION_FEATURES,
-  type DistributionFeatures,
-} from "src/lib/distribution";
 
 const AI_SELECTED_PROVIDER_KEY = "politedb.ai.provider.selected";
 
-export const DEFAULT_LOCAL_AI_PROVIDER_ID = "local";
-export const LOCAL_AI_PROVIDER_KINDS: AiProviderKind[] = [
-  "ollama",
-  "local_openai_compatible",
-];
+/** Id the removed built-in runtime used for its auto-created provider (plan D11). */
+export const LEGACY_BUNDLED_PROVIDER_ID = "local";
+const LEGACY_BUNDLED_PROVIDER_LABEL = "PoliteDB AI";
+const LEGACY_NOTICE_DISMISSED_KEY = "politedb.ai.legacyLocalNotice.dismissed";
+
+export const LOCAL_AI_PROVIDER_KINDS: AiProviderKind[] = ["ollama"];
 
 export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
   openai: "OpenAI",
@@ -33,8 +27,7 @@ export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
   deepseek: "DeepSeek",
   github_copilot: "GitHub Copilot",
   groq: "Groq",
-  ollama: "PoliteDB Local",
-  local_openai_compatible: "PoliteDB Local",
+  ollama: "Ollama",
 };
 
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
@@ -46,8 +39,42 @@ export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   deepseek: "deepseek-chat",
   github_copilot: "gpt-4.1",
   groq: "openai/gpt-oss-120b",
-  ollama: DEFAULT_AI_MODEL_NAME,
-  local_openai_compatible: DEFAULT_AI_MODEL_NAME,
+  // Local servers expose whatever the user installed: pick via "Load models".
+  ollama: "",
+};
+
+/**
+ * Common model ids offered as suggestions in Settings. Not a whitelist: any id can be
+ * typed, and "Load models" adds what the server actually reports.
+ */
+export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
+  openai: [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o4-mini",
+    "o3",
+  ],
+  anthropic: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+  gemini: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  openrouter: [
+    "openai/gpt-4.1-mini",
+    "anthropic/claude-sonnet-4.5",
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-chat",
+  ],
+  grok: ["grok-4", "grok-3", "grok-3-mini"],
+  groq: [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+  ],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  github_copilot: ["gpt-4.1", "gpt-4o", "gpt-4o-mini"],
+  ollama: ["llama3.2", "qwen2.5-coder:7b", "mistral", "gemma3"],
 };
 
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
@@ -60,7 +87,6 @@ export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
   github_copilot: "https://models.inference.ai.azure.com",
   groq: "https://api.groq.com/openai",
   ollama: "http://127.0.0.1:11434",
-  local_openai_compatible: "http://127.0.0.1:11434",
 };
 
 export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
@@ -73,39 +99,25 @@ export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
   github_copilot: "",
   groq: "/v1",
   ollama: "/v1",
-  local_openai_compatible: "/v1",
 };
 
 export function isLocalAiProviderKind(kind: AiProviderKind) {
   return LOCAL_AI_PROVIDER_KINDS.includes(kind);
 }
 
-/** Local kinds rely on the bundled runtime, which some builds (App Store) omit. */
-export function isAiProviderKindAvailable(
-  kind: AiProviderKind,
-  features: DistributionFeatures = DISTRIBUTION_FEATURES
-) {
-  return features.localAiRuntime || !isLocalAiProviderKind(kind);
-}
+export type AiProviderKeyCapability = "required" | "none";
 
-export function filterAvailableAiProviders<T extends { kind: AiProviderKind }>(
-  providers: T[],
-  features: DistributionFeatures = DISTRIBUTION_FEATURES
-): T[] {
-  return providers.filter((provider) =>
-    isAiProviderKindAvailable(provider.kind, features)
-  );
-}
-
-/** Selection used when nothing valid is stored: bundled local AI if this build has it. */
-export function fallbackSelectedAiProviderId(
-  features: DistributionFeatures = DISTRIBUTION_FEATURES
-) {
-  return features.localAiRuntime ? DEFAULT_LOCAL_AI_PROVIDER_ID : "";
+/** Mirrors the backend: cloud keys are required, Ollama uses none. */
+export function aiProviderKeyCapability(
+  kind: AiProviderKind
+): AiProviderKeyCapability {
+  if (kind === "ollama") return "none";
+  return "required";
 }
 
 function makeId(kind: AiProviderKind) {
-  return `${kind}-${Date.now().toString(36)}`;
+  const random = Math.random().toString(36).slice(2, 8);
+  return `${kind}-${Date.now().toString(36)}-${random}`;
 }
 
 export function makeDefaultAiProvider(
@@ -123,7 +135,7 @@ export function makeDefaultAiProvider(
     subPath,
     baseUrl: overrides.baseUrl ?? buildBaseUrl(host, subPath),
     defaultModel,
-    models: overrides.models ?? [defaultModel],
+    models: overrides.models ?? (defaultModel ? [defaultModel] : []),
     enabled: overrides.enabled ?? true,
     isDefault: overrides.isDefault ?? false,
   };
@@ -160,22 +172,16 @@ export function splitBaseUrl(baseUrl?: string | null, kind?: AiProviderKind) {
 export function normalizeAiProviderConfig(
   provider: AiProviderConfig
 ): AiProviderConfig {
-  const kind =
-    provider.kind === "local_openai_compatible" ? "ollama" : provider.kind;
+  const kind = provider.kind;
   const parts = splitBaseUrl(provider.baseUrl, kind);
   const host = provider.host ?? parts.host;
   const subPath = provider.subPath ?? parts.subPath;
-  const defaultModel = isLocalAiProviderKind(kind)
-    ? normalizeLocalAiModelName(provider.defaultModel)
-    : provider.defaultModel.trim() || DEFAULT_MODELS[kind];
+  // Model ids are kept exactly as saved or reported by the server (plan R2).
+  const defaultModel = provider.defaultModel.trim() || DEFAULT_MODELS[kind];
   const models = Array.from(
     new Set(
       [...(provider.models ?? []), defaultModel]
-        .map((model) =>
-          isLocalAiProviderKind(kind)
-            ? normalizeLocalAiModelName(model)
-            : model.trim()
-        )
+        .map((model) => model.trim())
         .filter(Boolean)
     )
   );
@@ -194,6 +200,7 @@ export function normalizeAiProviderConfig(
   };
 }
 
+/** Selected → default → first, considering enabled providers only (plan R5). */
 export function resolveSelectedAiProvider(
   providers: AiProviderConfig[],
   selectedId?: string | null
@@ -205,31 +212,26 @@ export function resolveSelectedAiProvider(
       ? enabled.find((provider) => provider.id === selected)
       : undefined) ??
     enabled.find((provider) => provider.isDefault) ??
-    enabled[0] ??
-    providers[0]
+    enabled[0]
   );
 }
 
-export function getSelectedAiProviderId(
-  features: DistributionFeatures = DISTRIBUTION_FEATURES
-) {
-  const fallback = fallbackSelectedAiProviderId(features);
+export function getSelectedAiProviderId() {
   try {
-    const stored = localStorage.getItem(AI_SELECTED_PROVIDER_KEY)?.trim();
-    if (!stored) return fallback;
-    if (stored === DEFAULT_LOCAL_AI_PROVIDER_ID && !features.localAiRuntime) {
-      return fallback;
-    }
-    return stored;
+    return localStorage.getItem(AI_SELECTED_PROVIDER_KEY)?.trim() ?? "";
   } catch {
-    return fallback;
+    return "";
   }
 }
 
+/** Persists the selection; an empty id clears it. Always notifies open panels. */
 export function setSelectedAiProviderId(providerId: string) {
-  const next = providerId.trim() || fallbackSelectedAiProviderId();
+  const next = providerId.trim();
   try {
-    localStorage.setItem(AI_SELECTED_PROVIDER_KEY, next);
+    if (next) localStorage.setItem(AI_SELECTED_PROVIDER_KEY, next);
+    else localStorage.removeItem(AI_SELECTED_PROVIDER_KEY);
+  } catch {}
+  try {
     window.dispatchEvent(
       new CustomEvent("politedb-ai-provider-selected", {
         detail: { providerId: next },
@@ -238,44 +240,51 @@ export function setSelectedAiProviderId(providerId: string) {
   } catch {}
 }
 
-export async function ensureLocalAiProvider(args: {
-  endpoint: string;
-  model: string;
-}) {
-  const providers = await aiProviderList().catch(() => []);
-  const existing = providers.find(
-    (item) => item.id === DEFAULT_LOCAL_AI_PROVIDER_ID
-  );
-  const hasDefaultProvider = providers.some((provider) => provider.isDefault);
-  const parts = splitBaseUrl(args.endpoint, "ollama");
-  const next: AiProviderConfig = {
-    id: DEFAULT_LOCAL_AI_PROVIDER_ID,
-    kind: "ollama",
-    label: "PoliteDB AI",
-    host: parts.host,
-    subPath: parts.subPath,
-    baseUrl: args.endpoint.trim().replace(/\/+$/, ""),
-    defaultModel: DEFAULT_MODELS.ollama,
-    models: [DEFAULT_MODELS.ollama],
-    enabled: true,
-    isDefault: hasDefaultProvider ? Boolean(existing?.isDefault) : true,
-  };
-
+/**
+ * True for a provider that looks like the one the removed built-in runtime created
+ * (plan D11). Display hint only: such records are never modified.
+ */
+export function isLegacyBundledProvider(provider: AiProviderConfig) {
   if (
-    existing?.baseUrl === next.baseUrl &&
-    existing?.defaultModel === next.defaultModel &&
-    existing?.isDefault === next.isDefault &&
-    existing?.enabled
+    provider.id !== LEGACY_BUNDLED_PROVIDER_ID ||
+    provider.kind !== "ollama" ||
+    provider.label !== LEGACY_BUNDLED_PROVIDER_LABEL
   ) {
-    return existing;
+    return false;
   }
-
-  return aiProviderSaveConfig(next);
+  const raw = provider.baseUrl ?? buildBaseUrl(provider.host, provider.subPath);
+  try {
+    const url = new URL(raw ?? "");
+    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+    return (
+      url.protocol === "http:" &&
+      loopback &&
+      url.port !== "" &&
+      url.port !== "11434" &&
+      url.pathname.replace(/\/+$/, "") === "/v1"
+    );
+  } catch {
+    return false;
+  }
 }
 
-export async function saveAiProviderWithOptionalKey(args: {
+export function isLegacyLocalNoticeDismissed() {
+  try {
+    return localStorage.getItem(LEGACY_NOTICE_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissLegacyLocalNotice() {
+  try {
+    localStorage.setItem(LEGACY_NOTICE_DISMISSED_KEY, "1");
+  } catch {}
+}
+
+export async function saveAiProvider(args: {
   config: AiProviderConfig;
-  apiKey?: string;
+  keyChange: AiProviderKeyChange;
 }) {
   const config = {
     ...args.config,
@@ -283,26 +292,18 @@ export async function saveAiProviderWithOptionalKey(args: {
       args.config.baseUrl ??
       buildBaseUrl(args.config.host, args.config.subPath),
   };
-  if (!isLocalAiProviderKind(config.kind)) {
-    for (const model of config.models ?? [config.defaultModel]) {
-      try {
-        await aiProviderValidateConfig(
-          { ...config, defaultModel: model },
-          args.apiKey
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${model}: ${message}`);
-      }
+  try {
+    const saved = await aiProviderSave(config, args.keyChange);
+    window.dispatchEvent(new Event("politedb-ai-providers-changed"));
+    return saved;
+  } catch (error) {
+    // The disk may now hold the new config (rollback failed): make every open panel
+    // reload from disk instead of trusting its in-memory copy (plan R13).
+    if (String(error).includes("AI_PROVIDER_SAVE_ROLLBACK_FAILED")) {
+      window.dispatchEvent(new Event("politedb-ai-providers-changed"));
     }
+    throw error;
   }
-  const saved = await aiProviderSaveConfig(config);
-  let result = saved;
-  if (args.apiKey?.trim()) {
-    result = await aiProviderSetKey(saved.id, args.apiKey.trim());
-  }
-  window.dispatchEvent(new Event("politedb-ai-providers-changed"));
-  return result;
 }
 
 export async function aiProviderDelete(providerId: string) {
@@ -310,7 +311,12 @@ export async function aiProviderDelete(providerId: string) {
   window.dispatchEvent(new Event("politedb-ai-providers-changed"));
 }
 
-export { aiProviderSaveConfig, aiProviderTest };
+export {
+  aiProviderListModels,
+  aiProviderCancelListModels,
+  aiProviderTestDraft,
+};
+export type { AiProviderKeyChange };
 
 export async function aiProviderList() {
   return tauriAiProviderList();

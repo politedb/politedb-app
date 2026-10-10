@@ -69,11 +69,11 @@ Use this map to find the owning area before changing a feature. Prefer extending
 
 ## AI Assistant
 
-| Feature                | Primary paths                                                             | Notes                                            |
-| ---------------------- | ------------------------------------------------------------------------- | ------------------------------------------------ |
-| Assistant UI           | `src/components/ai-assistant/`, `src/screens/connection/nav/RightNav.tsx` | Local assistant surface.                         |
-| Assistant frontend lib | `src/lib/ai-assistant/`                                                   | Request orchestration and local runtime helpers. |
-| Native AI runtime      | `src-tauri/src/ai_runtime.rs`, `src-tauri/src/commands/ai.rs`             | Model/runtime setup, download, cancellation.     |
+| Feature                | Primary paths                                                                                                                         | Notes                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Assistant UI           | `src/components/ai-assistant/`, `src/screens/connection/nav/RightNav.tsx`                                                             | Chat panel, provider settings, model picker.                                                                                   |
+| Assistant frontend lib | `src/lib/ai-assistant/`, `src/lib/tauri/ai.ts`                                                                                        | Prompt orchestration, provider selection; every request goes through Tauri.                                                    |
+| AI providers (native)  | `src-tauri/src/ai/` (`url_policy`, `transport`, `provider`, `provider_store`, `chat`, `legacy_model`), `src-tauri/src/commands/ai.rs` | URL policy (http only loopback/LAN), no redirects/proxies, config+key save transaction, model discovery, legacy model cleanup. |
 
 ## Database Health
 

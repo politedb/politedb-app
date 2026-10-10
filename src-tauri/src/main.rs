@@ -3,7 +3,7 @@
 #[cfg(target_os = "macos")]
 extern crate objc2;
 
-mod ai_runtime;
+mod ai;
 mod commands;
 mod data_migration;
 mod distribution;
@@ -153,30 +153,18 @@ fn main() {
             window_chrome::apply(app);
             let state: tauri::State<AppState> = app.state();
             state.sql_busy.clear();
-            if distribution.supports_local_ai_runtime() {
-                let app_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let state: tauri::State<'_, AppState> = app_handle.state();
-                    let _ =
-                        ai_runtime::ai_runtime_autostart_if_available(&app_handle, &state).await;
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::app_quit,
-            commands::ai::ai_runtime_status,
-            commands::ai::ai_runtime_start,
-            commands::ai::ai_runtime_stop,
-            commands::ai::ai_runtime_download_default_model,
-            commands::ai::ai_runtime_cancel_model_download,
-            commands::ai::ai_runtime_delete_default_model,
             commands::ai::ai_provider_list,
-            commands::ai::ai_provider_save_config,
-            commands::ai::ai_provider_set_key,
-            commands::ai::ai_provider_validate_config,
+            commands::ai::ai_provider_save,
             commands::ai::ai_provider_delete,
-            commands::ai::ai_provider_test,
+            commands::ai::ai_provider_list_models,
+            commands::ai::ai_provider_cancel_list_models,
+            commands::ai::ai_provider_test_draft,
+            commands::ai::ai_legacy_model_info,
+            commands::ai::ai_legacy_model_delete,
             commands::ai::ai_chat_complete,
             commands::ai::ai_chat_cancel,
             commands::license::license_device_info,
@@ -264,13 +252,5 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building app");
 
-    app.run(|app_handle, event| {
-        if matches!(
-            event,
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-        ) {
-            let state: tauri::State<'_, AppState> = app_handle.state();
-            ai_runtime::ai_runtime_force_shutdown_blocking(&state);
-        }
-    });
+    app.run(|_app_handle, _event| {});
 }
