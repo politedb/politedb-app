@@ -101,3 +101,11 @@ PoliteDB uses a split agent workflow documented in [`.agent/WORKFLOW.md`](.agent
 - The agent that wrote the code never reviews it.
 - Hand off through those files. Do not require the human to re-explain the same task to both agents.
 - While `PLAN.md` is `DRAFT` or still contains `TBD` requirements, do not implement the planned task.
+
+### Claude subagents
+
+Claude may delegate to project subagents in `.claude/agents/`: `codebase-mapper` (read-only code locator), `verifier` (runs build/test/lint checks), `security-auditor` and `engine-dialect` (read-only pre-handoff self-checks), and `release-helper` (drafts changelogs and release posts).
+
+- Subagents act on Claude's behalf. Their output counts as the implementer's own work, never as independent review.
+- Subagents never write `.agent/REVIEW.md` or mark work `VERIFIED`; Codex review is still required.
+- Claude may record subagent results (e.g. verifier output) as verification evidence in `.agent/PLAN.md`.
