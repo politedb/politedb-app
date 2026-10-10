@@ -24,7 +24,10 @@ import {
   aiProviderList,
   aiProviderTest,
   buildBaseUrl,
+  fallbackSelectedAiProviderId,
+  filterAvailableAiProviders,
   getSelectedAiProviderId,
+  isAiProviderKindAvailable,
   isLocalAiProviderKind,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
@@ -103,7 +106,9 @@ export function AiAssistantSettingsDialog(props: Props) {
       : null;
 
   const loadProviders = async () => {
-    const normalized = (await aiProviderList()).map(normalizeAiProviderConfig);
+    const normalized = filterAvailableAiProviders(
+      (await aiProviderList()).map(normalizeAiProviderConfig)
+    );
     const next = normalized.some((provider) => provider.isDefault)
       ? normalized
       : normalized.map((provider) => ({
@@ -243,7 +248,7 @@ export function AiAssistantSettingsDialog(props: Props) {
       const fallback = resolveSelectedAiProvider(next, deletedId);
       chooseProvider(fallback?.kind ?? "openai", fallback);
       if (getSelectedAiProviderId() === deletedId) {
-        setSelectedAiProviderId(fallback?.id ?? DEFAULT_LOCAL_AI_PROVIDER_ID);
+        setSelectedAiProviderId(fallback?.id ?? fallbackSelectedAiProviderId());
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -268,7 +273,9 @@ export function AiAssistantSettingsDialog(props: Props) {
             className="h-full"
             contentClassName="space-y-1 p-3"
           >
-            {PROVIDER_KINDS.map((kind) => {
+            {PROVIDER_KINDS.filter((kind) =>
+              isAiProviderKindAvailable(kind)
+            ).map((kind) => {
               const configured = normalizedProviders.filter(
                 (provider) => provider.kind === kind
               );

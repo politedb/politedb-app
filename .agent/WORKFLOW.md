@@ -1,15 +1,19 @@
-# Dual-agent workflow (Codex + Grok Bot)
+# Dual-agent workflow (Claude + Codex)
 
-Single entry point for the human: talk to **Codex** _or_ **Grok Bot**. Agents hand off through this repo’s `.agent/` files — do not require the human to re-paste the task between tools.
+The human talks to **Claude** or **Codex**. Agents hand off through this repo’s `.agent/` files — do not require the human to re-paste the task between tools.
+
+Core rule: **the agent that wrote the code does not review it.** Claude implements; Codex reviews. Plans are drafted by one agent and critiqued by the other before approval.
 
 ## Roles
 
-| Agent                 | Owns                                                                                                      | Must not                                                                          |
-| --------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Codex**             | Fill / update `.agent/PLAN.md`, mark approval with the user, fill `.agent/REVIEW.md` after implementation | Implement application code unless the user explicitly overrides this split        |
-| **Grok Bot (Beaver)** | Implement and fix code from an approved plan / review findings                                            | Redesign the plan; edit `.agent/PLAN.md` requirements; push/merge/PR unless asked |
+| Agent      | Owns                                                                                                                                                           | Must not                                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Claude** | Draft `.agent/PLAN.md` (requirements, decisions, phases); implement an `APPROVED` plan; fix `CHANGES REQUIRED` findings; record progress/evidence in `PLAN.md` | Write `.agent/REVIEW.md`; mark its own work `VERIFIED`; change approved requirements without the human |
+| **Codex**  | Critique a `DRAFT` plan (add a `## Plan Review` section to `PLAN.md`); review implementation diffs and fill `.agent/REVIEW.md`                                 | Implement application code unless the human explicitly overrides this split                            |
 
 Both agents always read `AGENTS.md` first, then this file.
+
+Either agent may draft the plan when the human asks; the other one critiques it. The implementer is still Claude unless the human says otherwise.
 
 ## Status contracts
 
@@ -18,8 +22,8 @@ Both agents always read `AGENTS.md` first, then this file.
 Allowed status values (exactly one in the Status section):
 
 - `DRAFT` — planning only; **no code changes** for the planned task
-- `APPROVED` — user approved; Grok Bot may implement
-- `IMPLEMENTED` — Grok Bot finished the approved scope (verification recorded in the plan)
+- `APPROVED` — the human approved and no `TBD` decision remains; Claude may implement
+- `IMPLEMENTED` — Claude finished the approved scope (or the phase named in the plan) with verification recorded in the plan
 
 Never treat `TBD` placeholders as permission to change code.
 
@@ -28,76 +32,42 @@ Never treat `TBD` placeholders as permission to change code.
 Allowed task-report statuses:
 
 - `NOT REVIEWED`
-- `CHANGES REQUIRED` — Grok Bot must fix P0/P1 (and approved P2s)
+- `CHANGES REQUIRED` — Claude must fix P0/P1 (and approved P2s)
 - `VERIFIED` / `VERIFIED WITH LIMITATIONS`
 
 ## Happy path
 
-1. **Human** describes the task in Codex _or_ asks Grok Bot to start planning (Grok Bot then leaves plan drafting to Codex / asks the human to approve in Codex).
-2. **Codex** inspects the repo, fills `.agent/PLAN.md` (goal, requirements, files, steps, verification). Status stays `DRAFT` until the human explicitly approves.
-3. **Human** approves → **Codex** sets Status to `APPROVED`.
-4. **Grok Bot** notices `APPROVED` on the next poll (or optional Implement PLAN webhook) and implements: branch `type/short-kebab` per plan, minimal diffs, run verification from the plan, update progress/evidence only in `PLAN.md`, set Status to `IMPLEMENTED` when done. Then notify the human.
-5. **Codex** reviews the task-owned diff, fills `.agent/REVIEW.md`.
-6. If Status is `CHANGES REQUIRED`, Grok Bot picks it up on the next poll (or optional Fix REVIEW webhook), fixes P0/P1, re-verifies, then Codex re-reviews.
-7. Commit only when the human asks. Never push/merge/rebase/amend/PR unless requested.
+1. **Human** asks either agent to plan a task.
+2. **Planner** inspects the repo and fills `.agent/PLAN.md` (goal, decisions, files, phases, verification). Open product decisions are listed as `TBD` and asked to the human. Status stays `DRAFT`.
+3. **Other agent** critiques the plan (missing risks, wrong assumptions, unsafe scope) in a `## Plan Review` section.
+4. **Human** resolves decisions and approves → planner sets Status to `APPROVED`.
+5. **Claude** implements on the branch named in the plan (default `type/short-kebab`), one phase per branch/PR for multi-phase plans. Minimal diffs, verification from the plan, evidence recorded in `PLAN.md`, Status `IMPLEMENTED` for the finished phase.
+6. **Codex** reviews the task-owned diff and fills `.agent/REVIEW.md`.
+7. If `CHANGES REQUIRED`, **Claude** fixes P0/P1, re-verifies, and Codex re-reviews.
+8. Security-sensitive scope (keychain, SSH, profile import/export, license/IAP, data migration, destructive DB actions) gets a second pass with Claude's `/security-review` after Codex's review.
+9. Commit only when the human asks. Never push/merge/rebase/amend/PR unless requested.
 
-## Primary handoff (no copy/paste)
+## Handoff prompts for the human
 
-Grok Bot polls `.agent/PLAN.md` and `.agent/REVIEW.md` about every **5 minutes** on weekdays 09:00–18:00 Asia/Saigon:
+Short prompts are enough because context lives in `.agent/`:
 
-- If plan Status is `APPROVED` and work is not already in flight → implement
-- If review Status is `CHANGES REQUIRED` → fix
-- Otherwise → stay silent (no chatter)
+| Step          | Agent  | Prompt                     |
+| ------------- | ------ | -------------------------- |
+| Plan          | Claude | `soạn plan cho <task>`     |
+| Critique plan | Codex  | `phản biện .agent/PLAN.md` |
+| Implement     | Claude | `implement phase <n>`      |
+| Review        | Codex  | `review phase <n>`         |
+| Fix review    | Claude | `fix .agent/REVIEW.md`     |
 
-**Codex does not need webhook URLs.** After the human approves, set Status to `APPROVED` and wait for Grok Bot (usually under 5 minutes during work hours). Same for `CHANGES REQUIRED` after review.
+## Parallel work
 
-Idempotency: do not restart a finished `IMPLEMENTED` plan unless Status returns to `APPROVED` after a new approval, or review demands fixes.
-
-### Optional: instant webhook wake
-
-Webhooks still exist for faster wake (Implement PLAN / Fix REVIEW routines). They are optional. Prefer the poll above unless you already keep the URL/key in local env.
-
-## Entry points for the human
-
-### Only Codex
-
-1. Describe the task → get `PLAN.md` to `APPROVED`
-2. Wait for Grok Bot (poll ~5 min in work hours); optional webhook for instant wake
-3. When Grok Bot reports done → review → `REVIEW.md`
-4. If `CHANGES REQUIRED` → wait for Grok Bot fix (same poll / optional webhook)
-
-### Only Grok Bot
-
-1. If `.agent/PLAN.md` is already `APPROVED` → say “implement the plan” (or wait for webhook/cron)
-2. If plan is `DRAFT` / `TBD` → Grok Bot will not invent requirements; ask you to finish approval in Codex (or paste an approved plan into `PLAN.md` yourself)
-3. After `IMPLEMENTED`, ask Codex to review (Grok Bot can self-check but Codex owns `REVIEW.md`)
-
-## Signal cheat sheet (Codex)
-
-After setting `PLAN.md` → `APPROVED`:
-
-```bash
-# Replace URL and key from Grok Bot routine panel (Implement PLAN)
-curl -sS -X POST "$GROK_IMPLEMENT_PLAN_WEBHOOK_URL" \
-  -H "Authorization: Bearer $GROK_IMPLEMENT_PLAN_WEBHOOK_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"implement","repo":"politedb-app"}'
-```
-
-After setting `REVIEW.md` → `CHANGES REQUIRED`:
-
-```bash
-curl -sS -X POST "$GROK_FIX_REVIEW_WEBHOOK_URL" \
-  -H "Authorization: Bearer $GROK_FIX_REVIEW_WEBHOOK_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"fix","repo":"politedb-app"}'
-```
-
-Store URL/key in your local shell env or Codex config — never commit secrets into this repo.
+- Never run both agents in the same working tree at the same time.
+- Use `git worktree` so Claude can implement phase N while Codex reviews phase N-1 in a separate checkout.
+- One task plan at a time in `PLAN.md` unless the human says otherwise.
 
 ## Invariants
 
-- One task plan at a time in `PLAN.md` unless the human says otherwise
 - Preserve unrelated working-tree changes
 - No destructive DB writes without authorization
 - Prefer existing architecture in `AGENTS.md`
+- Never commit secrets, certificates, provisioning profiles or keys into this repo

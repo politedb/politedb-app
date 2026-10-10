@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::AppHandle;
 
+use crate::distribution::{self, Distribution};
 use crate::{ai_runtime, file_storage, license, security::secrets, state::AppState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,6 +487,7 @@ pub async fn ai_runtime_start(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ai_runtime::AiRuntimeStatus, String> {
+    distribution::ensure(Distribution::current().supports_local_ai_runtime())?;
     ai_runtime::ai_runtime_start(&app, &state).await
 }
 
@@ -501,6 +503,7 @@ pub async fn ai_runtime_download_default_model(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<ai_runtime::AiRuntimeStatus, String> {
+    distribution::ensure(Distribution::current().supports_local_ai_runtime())?;
     ai_runtime::ai_runtime_download_default_model(&app, &state).await
 }
 

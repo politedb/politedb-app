@@ -11,6 +11,10 @@ import {
   DEFAULT_AI_MODEL_NAME,
   normalizeLocalAiModelName,
 } from "src/lib/ai-assistant/assistant";
+import {
+  DISTRIBUTION_FEATURES,
+  type DistributionFeatures,
+} from "src/lib/distribution";
 
 const AI_SELECTED_PROVIDER_KEY = "politedb.ai.provider.selected";
 
@@ -74,6 +78,30 @@ export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
 
 export function isLocalAiProviderKind(kind: AiProviderKind) {
   return LOCAL_AI_PROVIDER_KINDS.includes(kind);
+}
+
+/** Local kinds rely on the bundled runtime, which some builds (App Store) omit. */
+export function isAiProviderKindAvailable(
+  kind: AiProviderKind,
+  features: DistributionFeatures = DISTRIBUTION_FEATURES
+) {
+  return features.localAiRuntime || !isLocalAiProviderKind(kind);
+}
+
+export function filterAvailableAiProviders<T extends { kind: AiProviderKind }>(
+  providers: T[],
+  features: DistributionFeatures = DISTRIBUTION_FEATURES
+): T[] {
+  return providers.filter((provider) =>
+    isAiProviderKindAvailable(provider.kind, features)
+  );
+}
+
+/** Selection used when nothing valid is stored: bundled local AI if this build has it. */
+export function fallbackSelectedAiProviderId(
+  features: DistributionFeatures = DISTRIBUTION_FEATURES
+) {
+  return features.localAiRuntime ? DEFAULT_LOCAL_AI_PROVIDER_ID : "";
 }
 
 function makeId(kind: AiProviderKind) {
@@ -182,19 +210,24 @@ export function resolveSelectedAiProvider(
   );
 }
 
-export function getSelectedAiProviderId() {
+export function getSelectedAiProviderId(
+  features: DistributionFeatures = DISTRIBUTION_FEATURES
+) {
+  const fallback = fallbackSelectedAiProviderId(features);
   try {
-    return (
-      localStorage.getItem(AI_SELECTED_PROVIDER_KEY)?.trim() ||
-      DEFAULT_LOCAL_AI_PROVIDER_ID
-    );
+    const stored = localStorage.getItem(AI_SELECTED_PROVIDER_KEY)?.trim();
+    if (!stored) return fallback;
+    if (stored === DEFAULT_LOCAL_AI_PROVIDER_ID && !features.localAiRuntime) {
+      return fallback;
+    }
+    return stored;
   } catch {
-    return DEFAULT_LOCAL_AI_PROVIDER_ID;
+    return fallback;
   }
 }
 
 export function setSelectedAiProviderId(providerId: string) {
-  const next = providerId.trim() || DEFAULT_LOCAL_AI_PROVIDER_ID;
+  const next = providerId.trim() || fallbackSelectedAiProviderId();
   try {
     localStorage.setItem(AI_SELECTED_PROVIDER_KEY, next);
     window.dispatchEvent(

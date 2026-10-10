@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import { CMD } from "src/lib/tauri/commands";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 
 export const UPDATER_CHECK_MIN_INTERVAL_MS = 60_000;
 
@@ -9,7 +10,9 @@ export function isTauriRuntime() {
 }
 
 export function shouldRunUpdaterCheck() {
-  return isTauriRuntime() && !import.meta.env.DEV;
+  return (
+    DISTRIBUTION_FEATURES.selfUpdate && isTauriRuntime() && !import.meta.env.DEV
+  );
 }
 
 export type RuntimeUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;

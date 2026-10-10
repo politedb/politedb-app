@@ -1,12 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
-import { licenseOpenExternalUrl } from "src/lib/tauri";
+import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
 import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 
 const PRICING_URL = "https://politedb.com/pricing";
 const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
@@ -36,14 +37,6 @@ export function LicenseKeySettings(props: { active: boolean }) {
     }
   }, [clearLicenseError, licenseLoaded, loadLicense, props.active]);
 
-  async function openExternalUrl(url: string) {
-    try {
-      await licenseOpenExternalUrl(url);
-    } catch {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
-  }
-
   async function handleActivateLicense() {
     const next = licenseKey.trim();
     if (!next) return;
@@ -57,11 +50,9 @@ export function LicenseKeySettings(props: { active: boolean }) {
       "Please help me recover my license key. I purchased using this email address.\n"
     );
     const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    try {
-      await licenseOpenExternalUrl(mailto);
-    } catch {
-      window.location.href = mailto;
-    }
+    await openExternalUrl(mailto, (url) => {
+      window.location.href = url;
+    });
   }
 
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
@@ -131,12 +122,14 @@ export function LicenseKeySettings(props: { active: boolean }) {
               Lost license key?
             </Button>
             <div class="flex gap-2">
-              <Button
-                variant="shadow"
-                onClick={() => void openExternalUrl(PRICING_URL)}
-              >
-                Buy a license
-              </Button>
+              {DISTRIBUTION_FEATURES.externalPurchase ? (
+                <Button
+                  variant="shadow"
+                  onClick={() => void openExternalUrl(PRICING_URL)}
+                >
+                  Buy a license
+                </Button>
+              ) : null}
               <Button
                 onClick={() => void handleActivateLicense()}
                 loading={licenseBusy}

@@ -6,6 +6,7 @@ extern crate objc2;
 mod ai_runtime;
 mod commands;
 mod data_migration;
+mod distribution;
 mod engines;
 mod file_storage;
 mod license;
@@ -15,6 +16,7 @@ mod security;
 mod state;
 mod types;
 
+use crate::distribution::Distribution;
 use crate::security::secrets;
 use crate::state::AppState;
 
@@ -127,26 +129,38 @@ fn main() {
         Arc::new(engines::google_sheets::driver::GoogleSheetsDriver),
     ];
 
+    let distribution = Distribution::current();
+    let drivers = drivers
+        .into_iter()
+        .filter(|driver| distribution.supports_engine(driver.kind()))
+        .collect();
+
     let engines = EngineRegistry::new(drivers);
 
-    let app = tauri::Builder::default()
-        .manage(state::AppState::new(engines))
-        .plugin(tauri_plugin_updater::Builder::new().build())
+    let mut builder = tauri::Builder::default().manage(state::AppState::new(engines));
+    if distribution.supports_self_update() {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    let app = builder
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|app| {
+        .setup(move |app| {
             enforce_minimum_macos_version()?;
             data_migration::migrate_legacy_app_data(app.handle());
             window_chrome::apply(app);
             let state: tauri::State<AppState> = app.state();
             state.sql_busy.clear();
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let state: tauri::State<'_, AppState> = app_handle.state();
-                let _ = ai_runtime::ai_runtime_autostart_if_available(&app_handle, &state).await;
-            });
+            if distribution.supports_local_ai_runtime() {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state: tauri::State<'_, AppState> = app_handle.state();
+                    let _ =
+                        ai_runtime::ai_runtime_autostart_if_available(&app_handle, &state).await;
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

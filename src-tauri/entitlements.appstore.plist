@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <!-- Mac App Store builds must be sandboxed -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+
+  <!-- Must match the App ID / provisioning profile (Team ID + bundle identifier) -->
+  <key>com.apple.application-identifier</key>
+  <string>B3X2G545LX.PoliteDB</string>
+  <key>com.apple.developer.team-identifier</key>
+  <string>B3X2G545LX</string>
+
+  <!-- Outbound connections (databases, SSH, AI providers, license API) -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!-- Local listeners: SSH tunnel port forwarding on 127.0.0.1 -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+
+  <!-- Files and folders the user picks (SQLite/DuckDB, SSH keys, import/export) -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+
+  <!-- Persist access to user-picked files across launches (security-scoped bookmarks) -->
+  <key>com.apple.security.files.bookmarks.app-scope</key>
+  <true/>
+
+  <!-- WebView JavaScript JIT -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+
+  <key>keychain-access-groups</key>
+  <array>
+    <string>B3X2G545LX.PoliteDB</string>
+  </array>
+
+</dict>
+</plist>

@@ -16,6 +16,7 @@ import {
   DEFAULT_LOCAL_AI_PROVIDER_ID,
   aiProviderList,
   ensureLocalAiProvider,
+  filterAvailableAiProviders,
   getSelectedAiProviderId,
   isLocalAiProviderKind,
   normalizeAiProviderConfig,
@@ -23,7 +24,16 @@ import {
   setSelectedAiProviderId,
 } from "@root/src/lib/ai-assistant/providers";
 import { useAiChatSession } from "./hooks/useAiChatSession";
-import { useAiRuntimeManager } from "./hooks/useAiRuntimeManager";
+import {
+  useAiRuntimeManager,
+  useUnavailableAiRuntimeManager,
+} from "./hooks/useAiRuntimeManager";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+
+// Fixed per build, so the hook choice never changes between renders.
+const useRuntimeManager = DISTRIBUTION_FEATURES.localAiRuntime
+  ? useAiRuntimeManager
+  : useUnavailableAiRuntimeManager;
 import {
   useAiAssistantSubmit,
   type AssistantStatus,
@@ -177,7 +187,7 @@ export function AiAssistantPanel(props: Props) {
     handleDeleteModel,
     handleRefreshRuntimeSetup,
     handleRetryRuntimeSetup,
-  } = useAiRuntimeManager({
+  } = useRuntimeManager({
     initialEndpoint: initialSettings.endpoint,
     initialModel: initialSettings.model,
     submitting,
@@ -221,7 +231,10 @@ export function AiAssistantPanel(props: Props) {
 
   useEffect(() => {
     void aiProviderList().then((providers) => {
-      applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
+      applyProviderList(
+        filterAvailableAiProviders(providers.map(normalizeAiProviderConfig)),
+        providerId
+      );
     });
   }, [providerId]);
 
@@ -249,7 +262,10 @@ export function AiAssistantPanel(props: Props) {
   useEffect(() => {
     const refreshProviders = () => {
       void aiProviderList().then((providers) => {
-        applyProviderList(providers.map(normalizeAiProviderConfig), providerId);
+        applyProviderList(
+          filterAvailableAiProviders(providers.map(normalizeAiProviderConfig)),
+          providerId
+        );
       });
     };
     window.addEventListener("politedb-ai-providers-changed", refreshProviders);

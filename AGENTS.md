@@ -92,11 +92,12 @@ Apply SOLID when designing or refactoring code. Prefer extending existing bounda
 - For UI changes, run the app or dev server and inspect the affected screen when feasible.
 - If a verification step cannot be run locally, document the reason and the risk in the handoff.
 
-## Dual-agent workflow (Codex + Grok Bot)
+## Dual-agent workflow (Claude + Codex)
 
 PoliteDB uses a split agent workflow documented in [`.agent/WORKFLOW.md`](.agent/WORKFLOW.md):
 
-- **Codex** owns planning and review via `.agent/PLAN.md` and `.agent/REVIEW.md`.
-- **Grok Bot** owns implementation and fix-ups from an `APPROVED` plan / `CHANGES REQUIRED` review.
-- Hand off through those files and the Grok Bot webhooks described in `WORKFLOW.md`. Do not require the human to re-explain the same task to both agents.
+- **Claude** drafts plans in `.agent/PLAN.md`, implements `APPROVED` plans, and fixes `CHANGES REQUIRED` findings.
+- **Codex** critiques draft plans and reviews implementation diffs in `.agent/REVIEW.md`.
+- The agent that wrote the code never reviews it.
+- Hand off through those files. Do not require the human to re-explain the same task to both agents.
 - While `PLAN.md` is `DRAFT` or still contains `TBD` requirements, do not implement the planned task.
