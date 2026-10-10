@@ -261,4 +261,29 @@ describe("AiAssistantSettingsDialog", () => {
     fireEvent.keyDown(combo, { key: "Escape" });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
+
+  it("renders suggestions outside the dialog and Escape closes only the list", async () => {
+    const onClose = vi.fn();
+    mocks.list.mockResolvedValue([
+      { ...LM_STUDIO, kind: "openai", id: "openai-1", label: "OpenAI" },
+    ]);
+    localStorage.setItem("politedb.ai.provider.selected", "openai-1");
+    render(<AiAssistantSettingsDialog open onClose={onClose} />);
+    await screen.findByDisplayValue("OpenAI");
+
+    const combo = screen.getByRole("combobox");
+    fireEvent.focus(combo);
+    fireEvent.input(combo, { target: { value: "gpt" } });
+    const listbox = await screen.findByRole("listbox");
+    // Portaled to <body>, so the dialog's overflow/scroll areas cannot clip it.
+    expect(listbox.parentElement).toBe(document.body);
+    expect(screen.getByRole("dialog").contains(listbox)).toBe(false);
+    // The floating assistant ignores outside clicks only on marked popovers; without
+    // this, picking a suggestion closed the whole assistant and the dialog.
+    expect(listbox.getAttribute("data-ai-assistant-popover")).toBe("true");
+
+    fireEvent.keyDown(combo, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

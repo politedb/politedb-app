@@ -371,7 +371,7 @@ export function AiAssistantSettingsDialog(props: Props) {
       <DialogHeader className="border-b border-neutral-200">
         <DialogTitle>AI Provider Settings</DialogTitle>
       </DialogHeader>
-      <DialogContent className="grid min-h-140 min-w-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden p-0">
+      <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden p-0">
         <aside class="min-h-0 overflow-hidden border-r border-neutral-200 bg-neutral-50">
           <OverlayScrollArea
             className="h-full"

@@ -1,7 +1,37 @@
-import { useMemo, useRef, useState } from "preact/hooks";
+import { createPortal } from "preact/compat";
+import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 
 const MAX_VISIBLE = 50;
+const LIST_MAX_HEIGHT = 240;
+const GAP = 4;
+
+type ListPosition = {
+  left: number;
+  width: number;
+  top?: number;
+  bottom?: number;
+  maxHeight: number;
+};
+
+/**
+ * Fixed position next to the input, rendered in a portal so dialog overflow and
+ * scroll areas never clip it. Opens upward when there is more room above.
+ */
+function listPositionFor(input: HTMLElement): ListPosition {
+  const rect = input.getBoundingClientRect();
+  const below = window.innerHeight - rect.bottom - GAP * 2;
+  const above = rect.top - GAP * 2;
+  const openUp = below < 160 && above > below;
+  return {
+    left: rect.left,
+    width: rect.width,
+    ...(openUp
+      ? { bottom: window.innerHeight - rect.top + GAP }
+      : { top: rect.bottom + GAP }),
+    maxHeight: Math.max(96, Math.min(LIST_MAX_HEIGHT, openUp ? above : below)),
+  };
+}
 
 /**
  * Model id input with filtered suggestions. Enter or click adds the highlighted
@@ -16,6 +46,8 @@ export function AiModelCombobox(props: {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  const [position, setPosition] = useState<ListPosition | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const listId = useRef(
     `ai-model-options-${Math.random().toString(36).slice(2, 8)}`
   ).current;
@@ -36,6 +68,21 @@ export function AiModelCombobox(props: {
     ...options.matches,
     ...(options.custom ? [options.custom] : []),
   ];
+  const showList = open && rows.length > 0;
+
+  // Follow the input while the list is open (dialog scroll, window resize).
+  useLayoutEffect(() => {
+    if (!showList || !inputRef.current) return;
+    const update = () =>
+      inputRef.current && setPosition(listPositionFor(inputRef.current));
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [showList]);
 
   const add = (model: string) => {
     const value = model.trim();
@@ -56,7 +103,9 @@ export function AiModelCombobox(props: {
     } else if (event.key === "Enter") {
       event.preventDefault();
       add(active >= 0 && rows[active] ? rows[active] : typed);
-    } else if (event.key === "Escape") {
+    } else if (event.key === "Escape" && showList) {
+      // Close only the list, not the surrounding dialog.
+      event.stopPropagation();
       setOpen(false);
       setActive(-1);
     }
@@ -65,9 +114,10 @@ export function AiModelCombobox(props: {
   return (
     <div class="relative">
       <input
+        ref={inputRef}
         type="text"
         role="combobox"
-        aria-expanded={open && rows.length > 0}
+        aria-expanded={showList}
         aria-controls={listId}
         aria-autocomplete="list"
         placeholder="Search or type a model ID"
@@ -82,39 +132,52 @@ export function AiModelCombobox(props: {
         onBlur={() => setOpen(false)}
         onKeyDown={onKeyDown}
       />
-      {open && rows.length > 0 ? (
-        <ul
-          id={listId}
-          role="listbox"
-          class="absolute top-full right-0 left-0 z-20 mt-1 max-h-60 overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
-        >
-          {rows.map((model, index) => {
-            const isCustom =
-              model === options.custom && index === rows.length - 1;
-            return (
-              <li
-                key={`${isCustom ? "custom" : "option"}:${model}`}
-                role="option"
-                aria-selected={index === active}
-                class={cn(
-                  "cursor-pointer truncate px-3 py-1.5 text-sm",
-                  index === active
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-neutral-700 hover:bg-neutral-100"
-                )}
-                // mousedown keeps focus in the input so blur does not close first.
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  add(model);
-                }}
-                onMouseEnter={() => setActive(index)}
-              >
-                {isCustom ? `Add "${model}"` : model}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+      {showList && position
+        ? createPortal(
+            <ul
+              id={listId}
+              role="listbox"
+              // Portaled outside the assistant: mark it so the floating assistant's
+              // outside-click handler treats clicks here as inside (it would close).
+              data-ai-assistant-popover="true"
+              class="fixed z-[1100] overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
+              style={{
+                left: position.left,
+                width: position.width,
+                top: position.top,
+                bottom: position.bottom,
+                maxHeight: position.maxHeight,
+              }}
+            >
+              {rows.map((model, index) => {
+                const isCustom =
+                  model === options.custom && index === rows.length - 1;
+                return (
+                  <li
+                    key={`${isCustom ? "custom" : "option"}:${model}`}
+                    role="option"
+                    aria-selected={index === active}
+                    class={cn(
+                      "cursor-pointer truncate px-3 py-1.5 text-sm",
+                      index === active
+                        ? "bg-blue-50 text-blue-700"
+                        : "text-neutral-700 hover:bg-neutral-100"
+                    )}
+                    // mousedown keeps focus in the input so blur does not close first.
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      add(model);
+                    }}
+                    onMouseEnter={() => setActive(index)}
+                  >
+                    {isCustom ? `Add "${model}"` : model}
+                  </li>
+                );
+              })}
+            </ul>,
+            document.body
+          )
+        : null}
     </div>
   );
 }
