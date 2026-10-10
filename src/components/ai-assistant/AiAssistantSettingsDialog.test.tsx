@@ -119,10 +119,9 @@ describe("AiAssistantSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    fireEvent.change(screen.getByPlaceholderText("Model ID"), {
-      target: { value: "typed-model" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    const combo = screen.getByRole("combobox");
+    fireEvent.input(combo, { target: { value: "typed-model" } });
+    fireEvent.keyDown(combo, { key: "Enter" });
     pending.resolve(["server-model"]);
 
     await screen.findByText("server-model");
@@ -211,5 +210,55 @@ describe("AiAssistantSettingsDialog", () => {
     expect(localStorage.getItem("politedb.ai.provider.selected")).toBe(
       "lmstudio-1"
     );
+  });
+
+  it("suggests models for the provider and adds the picked one", async () => {
+    mocks.list.mockResolvedValue([
+      {
+        id: "gemini-1",
+        kind: "gemini",
+        label: "Google AI",
+        host: "https://generativelanguage.googleapis.com",
+        subPath: "/v1beta",
+        defaultModel: "gemini-2.5-flash",
+        models: ["gemini-2.5-flash"],
+        apiKeyRef: "politedb:ai:gemini-1:api_key",
+        enabled: true,
+      },
+    ]);
+    localStorage.setItem("politedb.ai.provider.selected", "gemini-1");
+    render(<AiAssistantSettingsDialog open onClose={() => {}} />);
+    await screen.findByDisplayValue("Google AI");
+
+    const combo = screen.getByRole("combobox");
+    fireEvent.focus(combo);
+    fireEvent.input(combo, { target: { value: "pro" } });
+    const option = await screen.findByRole("option", {
+      name: "gemini-2.5-pro",
+    });
+    // Already-selected models are not suggested again.
+    expect(
+      screen.queryByRole("option", { name: "gemini-2.5-flash" })
+    ).not.toBeInTheDocument();
+    fireEvent.mouseDown(option);
+
+    expect(screen.getByText("gemini-2.5-pro")).toBeInTheDocument();
+    expect((combo as HTMLInputElement).value).toBe("");
+  });
+
+  it("adds a custom id with Enter and supports keyboard selection", async () => {
+    await openDialog();
+    const combo = screen.getByRole("combobox");
+    fireEvent.focus(combo);
+    fireEvent.input(combo, { target: { value: "my-finetune:latest" } });
+    expect(
+      screen.getByRole("option", { name: 'Add "my-finetune:latest"' })
+    ).toBeInTheDocument();
+    fireEvent.keyDown(combo, { key: "ArrowDown" });
+    fireEvent.keyDown(combo, { key: "Enter" });
+    expect(screen.getByText("my-finetune:latest")).toBeInTheDocument();
+
+    fireEvent.keyDown(combo, { key: "Escape" });
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });

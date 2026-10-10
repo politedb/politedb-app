@@ -11,6 +11,7 @@ import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { RefreshCwIcon, VaultIcon, XIcon } from "src/components/icons";
 import {
   AI_PROVIDER_LABELS,
+  SUGGESTED_MODELS,
   aiProviderDelete,
   aiProviderKeyCapability,
   aiProviderList,
@@ -37,6 +38,7 @@ import {
 } from "src/lib/tauri/ai";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
+import { AiModelCombobox } from "./AiModelCombobox";
 import { formatBytesSize } from "src/utils/convert";
 
 type Props = {
@@ -68,7 +70,8 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
   const [apiKey, setApiKey] = useState("");
   const [removeKey, setRemoveKey] = useState(false);
-  const [modelInput, setModelInput] = useState("");
+  // Ids the server reported on the last Load models, offered again as suggestions.
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -141,7 +144,7 @@ export function AiAssistantSettingsDialog(props: Props) {
       normalizeAiProviderConfig(provider ?? makeDefaultAiProvider(kind))
     );
     clearSecrets();
-    setModelInput("");
+    setDiscoveredModels([]);
     setStatus("");
   };
 
@@ -192,11 +195,10 @@ export function AiAssistantSettingsDialog(props: Props) {
     updateDraft(patch);
   };
 
-  const addModel = () => {
-    if (!modelInput.trim()) return;
-    addModels([modelInput]);
-    setModelInput("");
-  };
+  const modelSuggestions = useMemo(
+    () => [...discoveredModels, ...SUGGESTED_MODELS[selectedKind]],
+    [discoveredModels, selectedKind]
+  );
 
   const removeModel = (model: string) => {
     removedDuringDiscoveryRef.current.add(model);
@@ -241,6 +243,7 @@ export function AiAssistantSettingsDialog(props: Props) {
         requestId
       );
       if (token !== draftTokenRef.current) return;
+      setDiscoveredModels(listed);
       const ids = listed.filter(
         (id) => !removedDuringDiscoveryRef.current.has(id)
       );
@@ -561,29 +564,11 @@ export function AiAssistantSettingsDialog(props: Props) {
                   </Button>
                 ) : null}
               </div>
-              <div class="flex gap-2">
-                <div class="min-w-0 flex-1">
-                  <Input
-                    value={modelInput}
-                    placeholder="Model ID"
-                    onValueChange={setModelInput}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      addModel();
-                    }}
-                    className="h-10 w-full border border-neutral-300 px-3 text-sm"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!modelInput.trim()}
-                  onClick={addModel}
-                >
-                  Add
-                </Button>
-              </div>
+              <AiModelCombobox
+                suggestions={modelSuggestions}
+                selected={draft.models ?? []}
+                onAdd={(model) => addModels([model])}
+              />
               <div class="overflow-hidden rounded-lg border border-neutral-200">
                 {(draft.models ?? []).length ? (
                   (draft.models ?? []).map((model) => (

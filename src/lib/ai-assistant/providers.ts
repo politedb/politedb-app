@@ -48,6 +48,42 @@ export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   local_openai_compatible: "",
 };
 
+/**
+ * Common model ids offered as suggestions in Settings. Not a whitelist: any id can be
+ * typed, and "Load models" adds what the server actually reports.
+ */
+export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
+  openai: [
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o4-mini",
+    "o3",
+  ],
+  anthropic: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+  gemini: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  openrouter: [
+    "openai/gpt-4.1-mini",
+    "anthropic/claude-sonnet-4.5",
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-chat",
+  ],
+  grok: ["grok-4", "grok-3", "grok-3-mini"],
+  groq: [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+  ],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  github_copilot: ["gpt-4.1", "gpt-4o", "gpt-4o-mini"],
+  ollama: ["llama3.2", "qwen2.5-coder:7b", "mistral", "gemma3"],
+  // Server-specific: use "Load models".
+  local_openai_compatible: [],
+};
+
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
   openai: "https://api.openai.com",
   anthropic: "https://api.anthropic.com",
