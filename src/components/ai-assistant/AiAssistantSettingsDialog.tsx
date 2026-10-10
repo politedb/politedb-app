@@ -473,9 +473,10 @@ export function AiAssistantSettingsDialog(props: Props) {
           </OverlayScrollArea>
         </aside>
 
-        <main class="min-h-0 min-w-0 overflow-hidden">
+        <main class="flex min-h-0 min-w-0 flex-col overflow-hidden">
+          {/* The form scrolls; the action bar below stays pinned to the bottom. */}
           <OverlayScrollArea
-            className="h-full"
+            className="min-h-0 flex-1"
             contentClassName="space-y-4 p-5"
           >
             {showLegacyNotice ? (
@@ -649,29 +650,28 @@ export function AiAssistantSettingsDialog(props: Props) {
                 {status}
               </div>
             ) : null}
-
-            <div class="flex items-center justify-between gap-2 border-t border-neutral-200 pt-4">
-              <Button
-                variant="destructive"
-                onClick={() => void deleteProvider()}
-                disabled={!selectedProvider || busy}
-              >
-                Delete
-              </Button>
-              <div class="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() => void testProvider()}
-                  disabled={busy || !draft.defaultModel.trim()}
-                >
-                  Test
-                </Button>
-                <Button loading={busy} onClick={() => void saveProvider()}>
-                  Save
-                </Button>
-              </div>
-            </div>
           </OverlayScrollArea>
+          <div class="flex shrink-0 items-center justify-between gap-2 border-t border-neutral-200 bg-white px-5 py-3">
+            <Button
+              variant="destructive"
+              onClick={() => void deleteProvider()}
+              disabled={!selectedProvider || busy}
+            >
+              Delete
+            </Button>
+            <div class="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void testProvider()}
+                disabled={busy || !draft.defaultModel.trim()}
+              >
+                Test
+              </Button>
+              <Button loading={busy} onClick={() => void saveProvider()}>
+                Save
+              </Button>
+            </div>
+          </div>
         </main>
       </DialogContent>
     </Dialog>
