@@ -62,6 +62,14 @@ async function openDialog() {
   await screen.findByDisplayValue("LM Studio");
 }
 
+/** Local providers look up models on open; wait for that and start counting fresh. */
+async function settleAutoDiscovery() {
+  await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 0));
+  mocks.listModels.mockClear();
+  mocks.cancelListModels.mockClear();
+}
+
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -70,13 +78,15 @@ beforeEach(() => {
   mocks.list.mockResolvedValue([LM_STUDIO]);
   mocks.legacyInfo.mockResolvedValue({ files: [] });
   mocks.cancelListModels.mockResolvedValue(undefined);
+  mocks.listModels.mockResolvedValue([]);
 });
 
 describe("AiAssistantSettingsDialog", () => {
   it("never sends the stored key when the form removes it (Load models / Test)", async () => {
-    mocks.listModels.mockResolvedValue(["qwen"]);
     mocks.testDraft.mockResolvedValue(undefined);
     await openDialog();
+    await settleAutoDiscovery();
+    mocks.listModels.mockResolvedValue(["qwen"]);
 
     fireEvent.click(screen.getByRole("button", { name: "Remove stored key" }));
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
@@ -90,51 +100,55 @@ describe("AiAssistantSettingsDialog", () => {
   });
 
   it("ignores a model list that arrives after the URL changed, keeping edits", async () => {
+    await openDialog();
+    await settleAutoDiscovery();
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
-    await openDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    const cancelsBeforeEdit = mocks.cancelListModels.mock.calls.length;
-
     fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:1234"), {
       target: { value: "http://192.168.1.9:1234" },
     });
-    // The URL edit cancels the backend request and invalidates its result.
-    expect(mocks.cancelListModels.mock.calls.length).toBe(
-      cancelsBeforeEdit + 1
-    );
+    expect(mocks.cancelListModels).toHaveBeenCalledTimes(1);
     pending.resolve(["stale-model"]);
-
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.queryByText("stale-model")).not.toBeInTheDocument();
+
+    const combo = screen.getByRole("combobox");
+    fireEvent.input(combo, { target: { value: "stale" } });
+    expect(
+      screen.queryByRole("option", { name: "stale-model" })
+    ).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("http://192.168.1.9:1234")).toBeTruthy();
   });
-
-  it("merges a discovered list into models added while it was loading", async () => {
-    const pending = deferred<string[]>();
-    mocks.listModels.mockReturnValue(pending.promise);
+  it("offers server models as suggestions without selecting them", async () => {
     await openDialog();
+    await settleAutoDiscovery();
+    mocks.listModels.mockResolvedValue(["llama3:8b", "qwen"]);
 
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
-    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    const combo = screen.getByRole("combobox");
-    fireEvent.input(combo, { target: { value: "typed-model" } });
-    fireEvent.keyDown(combo, { key: "Enter" });
-    pending.resolve(["server-model"]);
+    // Manual load opens the picker with the server's models.
+    const option = await screen.findByRole("option", { name: "llama3:8b" });
+    // Already-selected `qwen` is not offered again; nothing was added automatically.
+    expect(
+      screen.queryByRole("option", { name: "qwen" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove llama3:8b" })
+    ).not.toBeInTheDocument();
 
-    await screen.findByText("server-model");
-    expect(screen.getByText("typed-model")).toBeInTheDocument();
-    expect(screen.getByText("qwen")).toBeInTheDocument();
+    fireEvent.mouseDown(option);
+    expect(
+      screen.getByRole("button", { name: "Remove llama3:8b" })
+    ).toBeInTheDocument();
   });
-
   it("saves offline setup without a model and without any network call", async () => {
     mocks.list.mockResolvedValue([
       { ...LM_STUDIO, defaultModel: "", models: [], enabled: false },
     ]);
     mocks.save.mockImplementation(async (config: any) => config);
     await openDialog();
+    await settleAutoDiscovery();
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
@@ -145,7 +159,6 @@ describe("AiAssistantSettingsDialog", () => {
     expect(mocks.listModels).not.toHaveBeenCalled();
     expect(mocks.testDraft).not.toHaveBeenCalled();
   });
-
   it("reloads the provider from disk when the save rollback failed", async () => {
     mocks.save.mockRejectedValue("AI_PROVIDER_SAVE_ROLLBACK_FAILED");
     await openDialog();
@@ -161,24 +174,47 @@ describe("AiAssistantSettingsDialog", () => {
     expect(mocks.save).toHaveBeenCalledTimes(1);
   });
 
-  it("does not re-add a model removed while discovery was running", async () => {
-    const pending = deferred<string[]>();
-    mocks.listModels.mockReturnValue(pending.promise);
+  it("looks up local models on open and shows guidance when the server is down", async () => {
+    mocks.list.mockResolvedValue([
+      { ...LM_STUDIO, models: [], defaultModel: "" },
+    ]);
+    mocks.listModels.mockRejectedValue("AI_CHAT_REQUEST_FAILED: connect");
     await openDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
-    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole("button", { name: "Remove qwen" }));
-    pending.resolve(["qwen", "llama3:8b"]);
-
-    await screen.findByText("llama3:8b");
-    expect(screen.queryByText("qwen")).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.listModels).toHaveBeenCalledTimes(1));
+    expect(mocks.listModels.mock.calls[0][1]).toEqual({ action: "keep" });
+    await screen.findByText(/Couldn't reach the server/);
+    // A silent lookup never shows the raw error.
+    expect(
+      screen.queryByText("AI_CHAT_REQUEST_FAILED: connect")
+    ).not.toBeInTheDocument();
   });
 
+  it("looks up models again after the server URL is edited", async () => {
+    mocks.list.mockResolvedValue([
+      { ...LM_STUDIO, models: [], defaultModel: "" },
+    ]);
+    await openDialog();
+    await settleAutoDiscovery();
+    mocks.listModels.mockResolvedValue(["phi-4"]);
+    const host = screen.getByDisplayValue("http://127.0.0.1:1234");
+    // preact/compat maps onChange/onBlur to input/focusout; testing-library's
+    // focusOut helper does not reach that listener, so dispatch a native event.
+    fireEvent.input(host, { target: { value: "http://127.0.0.1:1235" } });
+    await new Promise((r) => setTimeout(r, 0));
+    host.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+
+    await waitFor(() => expect(mocks.listModels).toHaveBeenCalledTimes(1));
+    expect(mocks.listModels.mock.calls[0][0].baseUrl).toBe(
+      "http://127.0.0.1:1235/v1"
+    );
+    await screen.findByText(/1 model found on the server/);
+  });
   it("scopes discovery cancellation to its own request id", async () => {
+    await openDialog();
+    await settleAutoDiscovery();
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
-    await openDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
@@ -189,12 +225,14 @@ describe("AiAssistantSettingsDialog", () => {
       target: { value: "http://10.0.0.2:1234" },
     });
     expect(mocks.cancelListModels).toHaveBeenLastCalledWith(requestId);
+    const prefix = requestId.split(":")[0];
     expect(
-      mocks.cancelListModels.mock.calls.every(([id]) => id === requestId)
+      mocks.cancelListModels.mock.calls.every(([id]) =>
+        String(id).startsWith(`${prefix}:`)
+      )
     ).toBe(true);
     pending.resolve([]);
   });
-
   it("does not change the chat selection when deleting the selected provider", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     mocks.list.mockResolvedValueOnce([LM_STUDIO]).mockResolvedValue([]);
@@ -285,5 +323,28 @@ describe("AiAssistantSettingsDialog", () => {
     fireEvent.keyDown(combo, { key: "Escape" });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("drops models found on the previous URL when the URL changes", async () => {
+    mocks.list.mockResolvedValue([
+      { ...LM_STUDIO, models: [], defaultModel: "" },
+    ]);
+    mocks.listModels.mockResolvedValue(["old-server-model"]);
+    await openDialog();
+    await screen.findByText(/1 model found on the server/);
+
+    fireEvent.input(screen.getByDisplayValue("http://127.0.0.1:1234"), {
+      target: { value: "http://127.0.0.1:9999" },
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/model found on the server/)
+      ).not.toBeInTheDocument()
+    );
+    const combo = screen.getByRole("combobox");
+    fireEvent.input(combo, { target: { value: "old" } });
+    expect(
+      screen.queryByRole("option", { name: "old-server-model" })
+    ).not.toBeInTheDocument();
   });
 });

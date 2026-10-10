@@ -89,8 +89,10 @@ export function AiAssistantSettingsDialog(props: Props) {
     `settings-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   );
   const discoveryIdRef = useRef<string | null>(null);
-  // Models the user removed while a discovery was running must not come back.
-  const removedDuringDiscoveryRef = useRef(new Set<string>());
+  /** Shown in the empty model list when a silent discovery could not reach the server. */
+  const [serverHint, setServerHint] = useState<string | null>(null);
+  /** Bumped to focus the model picker and open its suggestions. */
+  const [pickerFocusRequest, setPickerFocusRequest] = useState(0);
 
   /** Drops any in-flight model discovery: its result no longer matches the form. */
   const invalidateDiscovery = () => {
@@ -138,14 +140,24 @@ export function AiAssistantSettingsDialog(props: Props) {
     provider?: AiProviderConfig
   ) => {
     invalidateDiscovery();
+    const next = normalizeAiProviderConfig(
+      provider ?? makeDefaultAiProvider(kind)
+    );
     setSelectedKind(kind);
     setSelectedId(provider?.id ?? null);
-    setDraft(
-      normalizeAiProviderConfig(provider ?? makeDefaultAiProvider(kind))
-    );
+    setDraft(next);
     clearSecrets();
     setDiscoveredModels([]);
+    setServerHint(null);
     setStatus("");
+    // Local servers expose whatever is installed: look it up right away.
+    if (isLocalAiProviderKind(kind)) {
+      void loadModels({
+        silent: true,
+        config: { ...next, baseUrl: buildBaseUrl(next.host, next.subPath) },
+        auth: { action: "keep" },
+      });
+    }
   };
 
   useEffect(() => {
@@ -165,6 +177,7 @@ export function AiAssistantSettingsDialog(props: Props) {
         chooseProvider(provider?.kind ?? "openai", provider);
       })
       .catch((error) => setStatus(errorText(error)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open]);
 
   const updateDraft = (patch: Partial<AiProviderConfig>) => {
@@ -192,6 +205,9 @@ export function AiAssistantSettingsDialog(props: Props) {
   /** URL or auth edits make an in-flight discovery stale. */
   const updateConnection = (patch: Partial<AiProviderConfig>) => {
     invalidateDiscovery();
+    // Models found on the previous URL no longer apply.
+    setDiscoveredModels([]);
+    setServerHint(null);
     updateDraft(patch);
   };
 
@@ -201,7 +217,6 @@ export function AiAssistantSettingsDialog(props: Props) {
   );
 
   const removeModel = (model: string) => {
-    removedDuringDiscoveryRef.current.add(model);
     const models = (draft.models ?? []).filter((item) => item !== model);
     updateDraft({
       models,
@@ -228,41 +243,62 @@ export function AiAssistantSettingsDialog(props: Props) {
       : { action: "keep" };
   };
 
-  const loadModels = async () => {
+  /**
+   * Fetches the server's model ids into the picker's suggestions (never into the
+   * selected list). `silent` runs on open/URL blur: failures become a hint, not an error.
+   */
+  const loadModels = async (
+    options: {
+      silent?: boolean;
+      config?: AiProviderConfig;
+      auth?: AiProviderKeyChange;
+    } = {}
+  ) => {
     invalidateDiscovery();
     const token = draftTokenRef.current;
     const requestId = `${instanceIdRef.current}:${token}`;
     discoveryIdRef.current = requestId;
-    removedDuringDiscoveryRef.current = new Set();
     setLoadingModels(true);
-    setStatus("Loading models from server...");
+    if (!options.silent) setStatus("Loading models from server...");
     try {
-      const listed = await aiProviderListModels(
-        draftConfig(),
-        keyChange(),
+      const response = await aiProviderListModels(
+        options.config ?? draftConfig(),
+        options.auth ?? keyChange(),
         requestId
       );
+      const listed = Array.isArray(response) ? response : [];
       if (token !== draftTokenRef.current) return;
       setDiscoveredModels(listed);
-      const ids = listed.filter(
-        (id) => !removedDuringDiscoveryRef.current.has(id)
-      );
-      if (!ids.length) {
+      setServerHint(listed.length ? null : "The server returned no models.");
+      if (!options.silent) {
         setStatus(
-          "The server returned no models. You can still add one by ID."
+          listed.length
+            ? `Found ${listed.length} model${listed.length === 1 ? "" : "s"} — pick from the list.`
+            : "The server returned no models. You can still type a model ID."
         );
-        return;
+        if (listed.length) setPickerFocusRequest((n) => n + 1);
       }
-      addModels(ids);
-      setStatus(`Loaded ${ids.length} model${ids.length === 1 ? "" : "s"}.`);
     } catch (error) {
-      if (token === draftTokenRef.current) setStatus(errorText(error));
+      if (token !== draftTokenRef.current) return;
+      setDiscoveredModels([]);
+      if (options.silent) {
+        setServerHint(
+          "Couldn't reach the server. Start it, then click Load models — or type a model ID above."
+        );
+      } else {
+        setStatus(errorText(error));
+      }
     } finally {
       if (token === draftTokenRef.current) {
         setLoadingModels(false);
         discoveryIdRef.current = null;
       }
     }
+  };
+
+  /** Re-discovers after the server URL was edited (local servers only). */
+  const reloadModelsAfterUrlEdit = () => {
+    if (isLocal) void loadModels({ silent: true });
   };
 
   const saveProvider = async () => {
@@ -371,7 +407,7 @@ export function AiAssistantSettingsDialog(props: Props) {
       <DialogHeader className="border-b border-neutral-200">
         <DialogTitle>AI Provider Settings</DialogTitle>
       </DialogHeader>
-      <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] overflow-hidden p-0">
+      <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] gap-0 overflow-hidden p-0">
         <aside class="min-h-0 overflow-hidden border-r border-neutral-200 bg-neutral-50">
           <OverlayScrollArea
             className="h-full"
@@ -533,12 +569,14 @@ export function AiAssistantSettingsDialog(props: Props) {
                 value={draft.host ?? ""}
                 placeholder={isLocal ? "http://127.0.0.1:1234" : undefined}
                 onValueChange={(value) => updateConnection({ host: value })}
+                onBlur={reloadModelsAfterUrlEdit}
                 className="h-10 border border-neutral-300 px-3 text-sm"
               />
               <Input
                 label="Sub Path"
                 value={draft.subPath ?? ""}
                 onValueChange={(value) => updateConnection({ subPath: value })}
+                onBlur={reloadModelsAfterUrlEdit}
                 className="h-10 border border-neutral-300 px-3 text-sm"
               />
             </div>
@@ -568,6 +606,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                 suggestions={modelSuggestions}
                 selected={draft.models ?? []}
                 onAdd={(model) => addModels([model])}
+                focusRequest={pickerFocusRequest}
               />
               <div class="overflow-hidden rounded-lg border border-neutral-200">
                 {(draft.models ?? []).length ? (
@@ -602,7 +641,14 @@ export function AiAssistantSettingsDialog(props: Props) {
                   ))
                 ) : (
                   <div class="px-3 py-3 text-sm text-neutral-400">
-                    No models selected.
+                    {!isLocal
+                      ? "No models selected."
+                      : loadingModels
+                        ? "Looking for models on the server..."
+                        : discoveredModels.length
+                          ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found on the server — pick from the list above.`
+                          : (serverHint ??
+                            "Start the server, then click Load models — or type a model ID above.")}
                   </div>
                 )}
               </div>

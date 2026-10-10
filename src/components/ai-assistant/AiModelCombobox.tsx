@@ -1,5 +1,11 @@
 import { createPortal } from "preact/compat";
-import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { cn } from "src/utils/cn";
 
 const MAX_VISIBLE = 50;
@@ -42,6 +48,8 @@ export function AiModelCombobox(props: {
   /** Already selected ids; hidden from suggestions. */
   selected: string[];
   onAdd: (model: string) => void;
+  /** Changing this focuses the input and opens the suggestions (e.g. after Load models). */
+  focusRequest?: number;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -69,6 +77,12 @@ export function AiModelCombobox(props: {
     ...(options.custom ? [options.custom] : []),
   ];
   const showList = open && rows.length > 0;
+
+  useEffect(() => {
+    if (!props.focusRequest) return;
+    inputRef.current?.focus();
+    setOpen(true);
+  }, [props.focusRequest]);
 
   // Follow the input while the list is open (dialog scroll, window resize).
   useLayoutEffect(() => {
