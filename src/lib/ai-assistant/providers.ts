@@ -16,10 +16,7 @@ export const LEGACY_BUNDLED_PROVIDER_ID = "local";
 const LEGACY_BUNDLED_PROVIDER_LABEL = "PoliteDB AI";
 const LEGACY_NOTICE_DISMISSED_KEY = "politedb.ai.legacyLocalNotice.dismissed";
 
-export const LOCAL_AI_PROVIDER_KINDS: AiProviderKind[] = [
-  "ollama",
-  "local_openai_compatible",
-];
+export const LOCAL_AI_PROVIDER_KINDS: AiProviderKind[] = ["ollama"];
 
 export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
   openai: "OpenAI",
@@ -31,7 +28,6 @@ export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
   github_copilot: "GitHub Copilot",
   groq: "Groq",
   ollama: "Ollama",
-  local_openai_compatible: "LM Studio / OpenAI-compatible",
 };
 
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
@@ -45,7 +41,6 @@ export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   groq: "openai/gpt-oss-120b",
   // Local servers expose whatever the user installed: pick via "Load models".
   ollama: "",
-  local_openai_compatible: "",
 };
 
 /**
@@ -80,8 +75,6 @@ export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
   deepseek: ["deepseek-chat", "deepseek-reasoner"],
   github_copilot: ["gpt-4.1", "gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.2", "qwen2.5-coder:7b", "mistral", "gemma3"],
-  // Server-specific: use "Load models".
-  local_openai_compatible: [],
 };
 
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
@@ -94,7 +87,6 @@ export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
   github_copilot: "https://models.inference.ai.azure.com",
   groq: "https://api.groq.com/openai",
   ollama: "http://127.0.0.1:11434",
-  local_openai_compatible: "http://127.0.0.1:1234",
 };
 
 export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
@@ -107,21 +99,19 @@ export const DEFAULT_SUB_PATHS: Record<AiProviderKind, string> = {
   github_copilot: "",
   groq: "/v1",
   ollama: "/v1",
-  local_openai_compatible: "/v1",
 };
 
 export function isLocalAiProviderKind(kind: AiProviderKind) {
   return LOCAL_AI_PROVIDER_KINDS.includes(kind);
 }
 
-export type AiProviderKeyCapability = "required" | "optional" | "none";
+export type AiProviderKeyCapability = "required" | "none";
 
-/** Mirrors the backend: cloud keys are required, OpenAI-compatible optional, Ollama none. */
+/** Mirrors the backend: cloud keys are required, Ollama uses none. */
 export function aiProviderKeyCapability(
   kind: AiProviderKind
 ): AiProviderKeyCapability {
   if (kind === "ollama") return "none";
-  if (kind === "local_openai_compatible") return "optional";
   return "required";
 }
 
@@ -160,7 +150,7 @@ export function buildBaseUrl(host?: string | null, subPath?: string | null) {
 }
 
 export function splitBaseUrl(baseUrl?: string | null, kind?: AiProviderKind) {
-  const fallbackKind = kind ?? "local_openai_compatible";
+  const fallbackKind = kind ?? "ollama";
   const raw = (baseUrl ?? "").trim().replace(/\/+$/, "");
   if (!raw) {
     return {

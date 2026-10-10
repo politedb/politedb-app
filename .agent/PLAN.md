@@ -311,6 +311,13 @@ Verification (round 3): `tsc` clean; `npm run build` + `npm run build:appstore` 
 
 - Codex Re-review 3 (2026-10-10): VERIFIED WITH LIMITATIONS. Claude `/security-review` (2026-10-10) on the full uncommitted diff: no findings at confidence >= 8 (URL policy, transport, key handling, save transaction, license gate, legacy cleanup, deserialization, webview exposure). Optional follow-up: drop `http://127.0.0.1:*` / `http://localhost:*` from CSP `connect-src` now that the webview no longer calls AI endpoints.
 
+### Phase 1c — Scope change: OpenAI-compatible kind removed (user, 2026-10-11)
+
+- User decision ("bỏ hẳn loại provider"): remove the "LM Studio / OpenAI-compatible" (`local_openai_compatible`) provider kind. Ollama is the only local kind. Supersedes D13 (optional key for local servers) and the second half of D14.
+- Back-compat: Rust `AiProviderKind::Ollama` carries `#[serde(alias = "local_openai_compatible")]`, so existing `providers.json` files still load; such records become Ollama (URL kept, keyless). A previously stored key is ignored and deleted on the next save of that provider (Ollama key rule). `KeyCapability::Optional` removed; draft `remove` auth now always means "no key" → required kinds error.
+- Frontend: kind removed from `AiProviderKind`, labels/defaults/suggestions and Settings; optional-key UI ("Remove stored key", http plaintext warning) removed; copy mentions Ollama only. README updated.
+- Verification: Rust alias test (`reads_removed_openai_compatible_kind_as_ollama`), provider-store tests moved to cloud (keyed) / Ollama (keyless) fixtures; frontend fixtures switched to Ollama.
+
 ## Plan Review — Phase 1c (Codex)
 
 Reviewed 2026-10-09 against the current working tree and the uncommitted `.github/workflows/release.yml` diff. Scope: plan critique only; no application implementation. Locations below refer to pre-review source lines. Existing Phase 1 findings and unrelated plan sections are outside this review.

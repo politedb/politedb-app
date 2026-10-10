@@ -275,8 +275,7 @@ export type AiProviderKind =
   | "groq"
   | "deepseek"
   | "github_copilot"
-  | "ollama"
-  | "local_openai_compatible";
+  | "ollama";
 
 export type AiProviderConfig = {
   id: string;

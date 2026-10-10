@@ -16,22 +16,23 @@ pub enum AiProviderKind {
     Groq,
     Deepseek,
     GithubCopilot,
+    /// Also reads providers saved as the removed `local_openai_compatible` kind, so older
+    /// `providers.json` files keep loading (their saved URL is preserved).
+    #[serde(alias = "local_openai_compatible")]
     Ollama,
-    LocalOpenaiCompatible,
 }
 
 /// Whether a provider kind uses an API key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyCapability {
     Required,
-    Optional,
     None,
 }
 
 impl AiProviderKind {
     pub fn class(self) -> ProviderClass {
         match self {
-            Self::Ollama | Self::LocalOpenaiCompatible => ProviderClass::Local,
+            Self::Ollama => ProviderClass::Local,
             _ => ProviderClass::Cloud,
         }
     }
@@ -39,7 +40,6 @@ impl AiProviderKind {
     pub fn key_capability(self) -> KeyCapability {
         match self {
             Self::Ollama => KeyCapability::None,
-            Self::LocalOpenaiCompatible => KeyCapability::Optional,
             _ => KeyCapability::Required,
         }
     }
@@ -55,7 +55,6 @@ impl AiProviderKind {
             Self::Deepseek => "https://api.deepseek.com/v1",
             Self::GithubCopilot => "https://models.inference.ai.azure.com",
             Self::Ollama => "http://127.0.0.1:11434/v1",
-            Self::LocalOpenaiCompatible => "http://127.0.0.1:1234/v1",
         }
     }
 }
@@ -216,10 +215,6 @@ pub(crate) mod tests {
             AiProviderKind::Openai.key_capability(),
             KeyCapability::Required
         );
-        assert_eq!(
-            AiProviderKind::LocalOpenaiCompatible.key_capability(),
-            KeyCapability::Optional
-        );
         assert_eq!(AiProviderKind::Ollama.key_capability(), KeyCapability::None);
         assert_eq!(AiProviderKind::Ollama.class(), ProviderClass::Local);
         assert_eq!(AiProviderKind::Groq.class(), ProviderClass::Cloud);
@@ -230,10 +225,6 @@ pub(crate) mod tests {
         assert_eq!(
             AiProviderKind::Ollama.default_base_url(),
             "http://127.0.0.1:11434/v1"
-        );
-        assert_eq!(
-            AiProviderKind::LocalOpenaiCompatible.default_base_url(),
-            "http://127.0.0.1:1234/v1"
         );
     }
 
@@ -272,10 +263,7 @@ pub(crate) mod tests {
 
     #[test]
     fn discovery_does_not_require_a_model() {
-        let mut config = provider(
-            AiProviderKind::LocalOpenaiCompatible,
-            "http://127.0.0.1:1234",
-        );
+        let mut config = provider(AiProviderKind::Ollama, "http://127.0.0.1:11434");
         config.id = String::new();
         config.label = String::new();
         config.default_model = String::new();
@@ -289,10 +277,7 @@ pub(crate) mod tests {
 
     #[test]
     fn save_allows_missing_model_but_completion_does_not() {
-        let mut config = provider(
-            AiProviderKind::LocalOpenaiCompatible,
-            "http://127.0.0.1:1234",
-        );
+        let mut config = provider(AiProviderKind::Ollama, "http://127.0.0.1:11434");
         config.default_model = String::new();
         config.models.clear();
         let saved = validate_for_save(config.clone()).unwrap();
@@ -331,27 +316,36 @@ pub(crate) mod tests {
             validate_for_discovery(local_public).unwrap_err(),
             url_policy::HOST_NOT_ALLOWED
         );
-        let lan = provider(
-            AiProviderKind::LocalOpenaiCompatible,
-            "http://192.168.1.5:1234",
-        );
+        let lan = provider(AiProviderKind::Ollama, "http://192.168.1.5:11434");
         assert!(validate_for_discovery(lan).is_ok());
     }
 
     #[test]
     fn endpoint_joins_and_revalidates() {
-        let config = normalize_fields(provider(
-            AiProviderKind::LocalOpenaiCompatible,
-            "http://127.0.0.1:1234",
-        ));
+        let config = normalize_fields(provider(AiProviderKind::Ollama, "http://127.0.0.1:11434"));
         assert_eq!(
             endpoint(&config, "/models").unwrap().as_str(),
-            "http://127.0.0.1:1234/v1/models"
+            "http://127.0.0.1:11434/v1/models"
         );
     }
 
     #[test]
     fn key_ref_is_derived_from_id() {
         assert_eq!(key_ref("openai-1"), "politedb:ai:openai-1:api_key");
+    }
+
+    #[test]
+    fn reads_removed_openai_compatible_kind_as_ollama() {
+        let json = r#"{"providers":[{"id":"lm","kind":"local_openai_compatible","label":"LM Studio","baseUrl":"http://127.0.0.1:1234/v1","host":null,"subPath":null,"defaultModel":"qwen","models":["qwen"],"apiKeyRef":null,"enabled":true,"isDefault":false}]}"#;
+        let file: AiProviderFile = serde_json::from_str(json).unwrap();
+        assert_eq!(file.providers[0].kind, AiProviderKind::Ollama);
+        assert_eq!(
+            file.providers[0].base_url.as_deref(),
+            Some("http://127.0.0.1:1234/v1")
+        );
+        // New saves write the canonical kind.
+        assert!(serde_json::to_string(&file)
+            .unwrap()
+            .contains(r#""kind":"ollama""#));
     }
 }

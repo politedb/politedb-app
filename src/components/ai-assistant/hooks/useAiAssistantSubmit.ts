@@ -89,12 +89,12 @@ function formatAssistantRequestError(args: {
 
   if (vi) {
     return isLocalEndpoint
-      ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama/LM Studio đã chạy và URL trong AI settings đúng chưa."
+      ? "Không kết nối được tới local AI provider. Hãy kiểm tra Ollama đã chạy và URL trong AI settings đúng chưa."
       : "Không kết nối được tới AI provider. Hãy kiểm tra API key, host, hoặc model trong AI settings.";
   }
 
   return isLocalEndpoint
-    ? "I could not reach the local AI provider. Check that Ollama or LM Studio is running and the URL in AI settings is correct."
+    ? "I could not reach the local AI provider. Check that Ollama is running and the URL in AI settings is correct."
     : "I could not reach the AI provider. Check the API key, host, or model in AI settings.";
 }
 

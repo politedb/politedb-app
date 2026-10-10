@@ -110,33 +110,25 @@ pub fn delete(
 }
 
 /// API key to send for `config`. `auth` follows the draft form: `Keep` uses the stored
-/// key, `Set` the typed one, `Remove` sends none (nothing is persisted here). Required
-/// kinds must end up with a key, keyless kinds never read the keychain, and only a
-/// genuinely absent item means "no key".
+/// key, `Set` the typed one (nothing is persisted here). Keyed kinds must end up with a
+/// key, keyless kinds never read the keychain, and only a genuinely absent item means
+/// "no key"; locked/denied keychain errors fail.
 pub fn request_key(
     secrets: &impl SecretPort,
     config: &AiProviderConfig,
     auth: &KeyChange,
 ) -> Result<Option<String>, String> {
-    let capability = config.kind.key_capability();
-    if capability == KeyCapability::None {
+    if config.kind.key_capability() == KeyCapability::None {
         return Ok(None);
     }
     match auth {
         KeyChange::Set(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
-        KeyChange::Remove if capability == KeyCapability::Required => {
-            Err("AI_PROVIDER_API_KEY_MISSING".into())
-        }
-        KeyChange::Remove => Ok(None),
-        _ => {
-            let stored = secrets
-                .get(&key_ref(&config.id))
-                .map_err(|_| "AI_PROVIDER_KEYCHAIN_FAILED".to_string())?;
-            match (capability, stored) {
-                (KeyCapability::Required, None) => Err("AI_PROVIDER_API_KEY_MISSING".into()),
-                (_, stored) => Ok(stored),
-            }
-        }
+        KeyChange::Remove => Err("AI_PROVIDER_API_KEY_MISSING".into()),
+        _ => secrets
+            .get(&key_ref(&config.id))
+            .map_err(|_| "AI_PROVIDER_KEYCHAIN_FAILED".to_string())?
+            .map(Some)
+            .ok_or_else(|| "AI_PROVIDER_API_KEY_MISSING".to_string()),
     }
 }
 
@@ -226,11 +218,8 @@ mod tests {
         }
     }
 
-    fn compat() -> AiProviderConfig {
-        provider(
-            AiProviderKind::LocalOpenaiCompatible,
-            "http://127.0.0.1:1234",
-        )
+    fn ollama() -> AiProviderConfig {
+        provider(AiProviderKind::Ollama, "http://127.0.0.1:11434")
     }
 
     fn cloud() -> AiProviderConfig {
@@ -238,9 +227,9 @@ mod tests {
     }
 
     #[test]
-    fn saves_optional_key_and_ref() {
+    fn saves_cloud_key_and_ref() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        let saved = save(&files, &secrets, compat(), KeyChange::Set(" tok ".into())).unwrap();
+        let saved = save(&files, &secrets, cloud(), KeyChange::Set(" sk-1 ".into())).unwrap();
         assert_eq!(saved.api_key_ref.as_deref(), Some("politedb:ai:p1:api_key"));
         assert_eq!(
             secrets
@@ -248,14 +237,14 @@ mod tests {
                 .borrow()
                 .get("politedb:ai:p1:api_key")
                 .map(String::as_str),
-            Some("tok")
+            Some("sk-1")
         );
     }
 
     #[test]
-    fn optional_kind_without_key_has_no_ref() {
+    fn keyless_kind_has_no_ref() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        let saved = save(&files, &secrets, compat(), KeyChange::Keep).unwrap();
+        let saved = save(&files, &secrets, ollama(), KeyChange::Keep).unwrap();
         assert_eq!(saved.api_key_ref, None);
     }
 
@@ -282,20 +271,31 @@ mod tests {
             save(&files, &secrets, cloud(), KeyChange::Keep).unwrap_err(),
             "AI_PROVIDER_API_KEY_REQUIRED"
         );
+        assert_eq!(
+            save(&files, &secrets, cloud(), KeyChange::Remove).unwrap_err(),
+            "AI_PROVIDER_API_KEY_REQUIRED"
+        );
         assert!(files.file.borrow().providers.is_empty());
     }
 
     #[test]
     fn ollama_rejects_keys_and_kind_change_deletes_stored_key() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        save(&files, &secrets, compat(), KeyChange::Set("tok".into())).unwrap();
-        let mut ollama = compat();
-        ollama.kind = AiProviderKind::Ollama;
+        save(&files, &secrets, cloud(), KeyChange::Set("sk-1".into())).unwrap();
+        let mut switched = cloud();
+        switched.kind = AiProviderKind::Ollama;
+        switched.host = Some("http://127.0.0.1:11434".into());
         assert_eq!(
-            save(&files, &secrets, ollama.clone(), KeyChange::Set("x".into())).unwrap_err(),
+            save(
+                &files,
+                &secrets,
+                switched.clone(),
+                KeyChange::Set("x".into())
+            )
+            .unwrap_err(),
             "AI_PROVIDER_API_KEY_NOT_SUPPORTED"
         );
-        let saved = save(&files, &secrets, ollama, KeyChange::Keep).unwrap();
+        let saved = save(&files, &secrets, switched, KeyChange::Keep).unwrap();
         assert_eq!(saved.api_key_ref, None);
         assert!(secrets.items.borrow().is_empty());
     }
@@ -304,17 +304,18 @@ mod tests {
     fn key_write_failure_restores_previous_config() {
         let files = FakeFiles::default();
         let ok = FakeSecrets::default();
-        save(&files, &ok, compat(), KeyChange::Keep).unwrap();
+        save(&files, &ok, cloud(), KeyChange::Set("sk-1".into())).unwrap();
         let before = files.file.borrow().clone();
 
         let failing = FakeSecrets {
             fail_set: true,
+            items: RefCell::new(ok.items.borrow().clone()),
             ..Default::default()
         };
-        let mut edited = compat();
+        let mut edited = cloud();
         edited.label = "Edited".into();
         assert_eq!(
-            save(&files, &failing, edited, KeyChange::Set("tok".into())).unwrap_err(),
+            save(&files, &failing, edited, KeyChange::Set("sk-2".into())).unwrap_err(),
             "KEYCHAIN_DENIED"
         );
         assert_eq!(*files.file.borrow(), before);
@@ -324,16 +325,17 @@ mod tests {
     fn key_delete_failure_on_kind_change_restores_previous_config() {
         let files = FakeFiles::default();
         let secrets = FakeSecrets::default();
-        save(&files, &secrets, compat(), KeyChange::Set("tok".into())).unwrap();
+        save(&files, &secrets, cloud(), KeyChange::Set("sk-1".into())).unwrap();
         let before = files.file.borrow().clone();
         let failing = FakeSecrets {
             fail_delete: true,
             items: RefCell::new(secrets.items.borrow().clone()),
             ..Default::default()
         };
-        let mut ollama = compat();
-        ollama.kind = AiProviderKind::Ollama;
-        assert!(save(&files, &failing, ollama, KeyChange::Keep).is_err());
+        let mut switched = cloud();
+        switched.kind = AiProviderKind::Ollama;
+        switched.host = Some("http://127.0.0.1:11434".into());
+        assert!(save(&files, &failing, switched, KeyChange::Keep).is_err());
         assert_eq!(*files.file.borrow(), before);
     }
 
@@ -346,7 +348,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            save(&files, &failing, compat(), KeyChange::Set("tok".into())).unwrap_err(),
+            save(&files, &failing, cloud(), KeyChange::Set("sk-1".into())).unwrap_err(),
             ROLLBACK_FAILED
         );
     }
@@ -360,58 +362,44 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(save(&files, &secrets, compat(), KeyChange::Keep).is_err());
+        assert!(save(&files, &secrets, cloud(), KeyChange::Keep).is_err());
         assert_eq!(
-            request_key(&secrets, &compat(), &KeyChange::Keep).unwrap_err(),
+            request_key(&secrets, &cloud(), &KeyChange::Keep).unwrap_err(),
             "AI_PROVIDER_KEYCHAIN_FAILED"
         );
     }
 
     #[test]
     fn request_key_semantics_per_kind() {
-        let secrets = FakeSecrets::default();
+        let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
         let keep = KeyChange::Keep;
-        assert_eq!(request_key(&secrets, &compat(), &keep).unwrap(), None);
         assert_eq!(
             request_key(&secrets, &cloud(), &keep).unwrap_err(),
             "AI_PROVIDER_API_KEY_MISSING"
         );
-        let typed = KeyChange::Set(" draft ".into());
+        save(&files, &secrets, cloud(), KeyChange::Set("stored".into())).unwrap();
         assert_eq!(
-            request_key(&secrets, &compat(), &typed).unwrap().as_deref(),
-            Some("draft")
-        );
-        let mut ollama = compat();
-        ollama.kind = AiProviderKind::Ollama;
-        assert_eq!(request_key(&secrets, &ollama, &typed).unwrap(), None);
-    }
-
-    #[test]
-    fn draft_remove_never_sends_the_stored_key() {
-        let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        save(&files, &secrets, compat(), KeyChange::Set("stored".into())).unwrap();
-        assert_eq!(
-            request_key(&secrets, &compat(), &KeyChange::Remove).unwrap(),
-            None
-        );
-        assert_eq!(
-            request_key(&secrets, &compat(), &KeyChange::Keep)
-                .unwrap()
-                .as_deref(),
+            request_key(&secrets, &cloud(), &keep).unwrap().as_deref(),
             Some("stored")
         );
-        // Drafts never persist: the stored key is still there.
-        assert_eq!(secrets.items.borrow().len(), 1);
+        let typed = KeyChange::Set(" draft ".into());
+        assert_eq!(
+            request_key(&secrets, &cloud(), &typed).unwrap().as_deref(),
+            Some("draft")
+        );
         assert_eq!(
             request_key(&secrets, &cloud(), &KeyChange::Remove).unwrap_err(),
             "AI_PROVIDER_API_KEY_MISSING"
         );
+        // Keyless kinds never read the keychain and ignore typed keys.
+        assert_eq!(request_key(&secrets, &ollama(), &typed).unwrap(), None);
+        assert_eq!(request_key(&secrets, &ollama(), &keep).unwrap(), None);
     }
 
     #[test]
     fn saves_without_a_model_for_offline_setup() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        let mut draft = compat();
+        let mut draft = ollama();
         draft.default_model = String::new();
         draft.models.clear();
         draft.enabled = false;
@@ -424,14 +412,14 @@ mod tests {
     #[test]
     fn chat_snapshot_requires_enabled_provider() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        let mut off = compat();
+        let mut off = cloud();
         off.enabled = false;
         save(&files, &secrets, off, KeyChange::Set("tok".into())).unwrap();
         assert_eq!(
             snapshot_for_chat(&files, &secrets, "p1").unwrap_err(),
             "AI_PROVIDER_DISABLED"
         );
-        save(&files, &secrets, compat(), KeyChange::Keep).unwrap();
+        save(&files, &secrets, cloud(), KeyChange::Keep).unwrap();
         let (config, key) = snapshot_for_chat(&files, &secrets, "p1").unwrap();
         assert!(config.enabled);
         assert_eq!(key.as_deref(), Some("tok"));
@@ -440,10 +428,10 @@ mod tests {
     #[test]
     fn default_flag_is_exclusive() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        let mut first = compat();
+        let mut first = ollama();
         first.is_default = Some(true);
         save(&files, &secrets, first, KeyChange::Keep).unwrap();
-        let mut second = compat();
+        let mut second = ollama();
         second.id = "p2".into();
         second.is_default = Some(true);
         save(&files, &secrets, second, KeyChange::Keep).unwrap();
@@ -455,7 +443,7 @@ mod tests {
     #[test]
     fn delete_removes_provider_and_key() {
         let (files, secrets) = (FakeFiles::default(), FakeSecrets::default());
-        save(&files, &secrets, compat(), KeyChange::Set("tok".into())).unwrap();
+        save(&files, &secrets, cloud(), KeyChange::Set("tok".into())).unwrap();
         delete(&files, &secrets, "p1").unwrap();
         assert!(files.file.borrow().providers.is_empty());
         assert!(secrets.items.borrow().is_empty());
@@ -576,11 +564,8 @@ mod tests {
         fn list_never_sees_config_of_a_save_that_rolls_back() {
             let files = Arc::new(SharedFiles::default());
             let lock = Arc::new(Mutex::new(()));
-            let mut original = provider(
-                AiProviderKind::LocalOpenaiCompatible,
-                "http://127.0.0.1:1234",
-            );
-            original.id = "local-1".into();
+            let mut original = provider(AiProviderKind::Openai, "https://api.openai.com");
+            original.id = "cloud-1".into();
             {
                 let ok = PausingSecrets {
                     items: Mutex::new(HashMap::new()),
@@ -588,7 +573,13 @@ mod tests {
                     release: Mutex::new(None),
                     fail_set: false,
                 };
-                save(&*files, &ok, original.clone(), KeyChange::Keep).unwrap();
+                save(
+                    &*files,
+                    &ok,
+                    original.clone(),
+                    KeyChange::Set("sk-0".into()),
+                )
+                .unwrap();
             }
 
             let (reached_tx, reached_rx) = mpsc::channel();
@@ -600,7 +591,7 @@ mod tests {
                 fail_set: true,
             });
             let mut moved = original.clone();
-            moved.host = Some("http://192.168.1.50:1234".into());
+            moved.host = Some("https://other-host.example".into());
 
             let writer = {
                 let (files, failing, lock) = (files.clone(), failing.clone(), lock.clone());
@@ -628,7 +619,7 @@ mod tests {
             let listed = reader.join().unwrap();
             assert_eq!(
                 listed.providers[0].host.as_deref(),
-                Some("http://127.0.0.1:1234"),
+                Some("https://api.openai.com"),
                 "rolled-back config must never be listed"
             );
         }

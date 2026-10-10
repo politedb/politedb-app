@@ -486,7 +486,7 @@ export function AiAssistantPanel(props: Props) {
         <div class="flex shrink-0 items-start justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
           <span>
             PoliteDB's built-in AI was removed. Point your local provider at
-            your own server (Ollama, LM Studio) in AI settings.
+            your own Ollama server in AI settings.
           </span>
           <div class="flex shrink-0 gap-2">
             <button

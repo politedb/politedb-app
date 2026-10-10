@@ -53,7 +53,7 @@ describe("saveAiProvider (plan R3, R13)", () => {
     window.addEventListener("politedb-ai-providers-changed", changed);
     await expect(
       saveAiProvider({
-        config: makeDefaultAiProvider("local_openai_compatible"),
+        config: makeDefaultAiProvider("ollama"),
         keyChange: { action: "keep" },
       })
     ).rejects.toBe("AI_PROVIDER_API_KEY_REQUIRED");

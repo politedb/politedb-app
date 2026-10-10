@@ -93,7 +93,7 @@ Supported migration workflows include:
 ### AI Assistant
 
 - cloud providers (OpenAI, Anthropic, Gemini, Groq, Grok, DeepSeek, OpenRouter, GitHub Copilot)
-- your own local server: Ollama or LM Studio / any OpenAI-compatible API
+- your own local Ollama server
 - API keys stored in the OS keychain
 - local-first design for sensitive database workflows
 
@@ -211,28 +211,23 @@ Expected endpoints:
 
 ## Local AI Servers
 
-PoliteDB no longer bundles an AI runtime. To keep AI on your machine or network, run a server and add it in **AI Assistant → Settings**:
+PoliteDB no longer bundles an AI runtime. To keep AI on your machine or network, run [Ollama](https://ollama.com) and add it in **AI Assistant → Settings → Ollama** (default `http://127.0.0.1:11434`, sub path `/v1`, no API key).
 
-| Provider                      | Default URL                               | API key                 |
-| ----------------------------- | ----------------------------------------- | ----------------------- |
-| Ollama                        | `http://127.0.0.1:11434` + sub path `/v1` | not used                |
-| LM Studio / OpenAI-compatible | `http://127.0.0.1:1234` + sub path `/v1`  | optional (bearer token) |
-
-1. Start the server (Ollama: `ollama serve`; LM Studio: _Developer → Start Server_).
-2. Choose the provider, adjust Host / Sub Path if needed, and click **Load models**. Model ids are used exactly as the server reports them (for example `llama3:8b`).
+1. Start Ollama (`ollama serve`) and pull a model (`ollama pull llama3.2`).
+2. Open the Ollama provider: PoliteDB looks up the installed models automatically (or click **Load models**). Pick one from the list; ids are used exactly as Ollama reports them (for example `llama3:8b`).
 3. Click **Test**, then **Save** with **Enabled** checked.
 
 URL rules:
 
 - `http://` is allowed only for `localhost` and IP addresses on this machine or your LAN (`127.x`, `10.x`, `172.16–31.x`, `192.168.x`, `::1`, `fc00::/7`). Use the IP, not a hostname such as `my-pc.local`.
 - Any other host needs `https://`. Redirects and proxies are not followed for AI requests.
-- Over plain `http` an API key travels unencrypted on your network; prefer `https` for servers that require a key.
 
 Upgrading from a version with the built-in AI:
 
 - A provider named "PoliteDB AI" may still point at the removed built-in server. PoliteDB shows a notice; edit its URL to your own server or delete it.
 - The previously downloaded model (several GB) stays on disk until you remove it with **Delete** in AI settings, or manually from `<app data>/ai/models/` (`default.gguf`, `default.gguf.part`).
 - The `POLITEDB_LLM_*` environment variables are no longer supported.
+- Providers saved with the earlier "LM Studio / OpenAI-compatible" type are loaded as Ollama providers (their URL is kept; any stored API key is no longer used).
 
 ## Release Workflow
 

@@ -349,7 +349,7 @@ mod tests {
 
     fn local(port: u16) -> AiProviderConfig {
         provider::normalize_fields(provider(
-            AiProviderKind::LocalOpenaiCompatible,
+            AiProviderKind::Ollama,
             &format!("http://127.0.0.1:{port}"),
         ))
     }

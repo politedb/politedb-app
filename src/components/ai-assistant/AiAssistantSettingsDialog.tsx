@@ -56,7 +56,6 @@ const PROVIDER_KINDS: AiProviderKind[] = [
   "openrouter",
   "github_copilot",
   "ollama",
-  "local_openai_compatible",
 ];
 
 function errorText(error: unknown) {
@@ -69,7 +68,6 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
   const [apiKey, setApiKey] = useState("");
-  const [removeKey, setRemoveKey] = useState(false);
   // Ids the server reported on the last Load models, offered again as suggestions.
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatus] = useState("");
@@ -132,7 +130,6 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const clearSecrets = () => {
     setApiKey("");
-    setRemoveKey(false);
   };
 
   const chooseProvider = (
@@ -237,7 +234,6 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const keyChange = (): AiProviderKeyChange => {
     if (keyCapability === "none") return { action: "keep" };
-    if (removeKey) return { action: "remove" };
     return apiKey.trim()
       ? { action: "set", value: apiKey.trim() }
       : { action: "keep" };
@@ -486,8 +482,7 @@ export function AiAssistantSettingsDialog(props: Props) {
               <div class="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 <span>
                   If this was PoliteDB's built-in AI, it has been removed. Enter
-                  the URL of your own local server (for example Ollama or LM
-                  Studio) and load its models.
+                  the URL of your own Ollama server and load its models.
                 </span>
                 <button
                   type="button"
@@ -518,56 +513,25 @@ export function AiAssistantSettingsDialog(props: Props) {
               Enabled
             </label>
             {keyCapability !== "none" ? (
-              <div class="space-y-1">
-                <Input
-                  label={
-                    keyCapability === "optional"
-                      ? "API Key (optional)"
-                      : "API Key"
-                  }
-                  type="password"
-                  value={apiKey}
-                  disabled={removeKey}
-                  placeholder={
-                    removeKey
-                      ? "Key will be removed on save"
-                      : draft.apiKeyRef
-                        ? "Stored in OS keychain"
-                        : "Secret key"
-                  }
-                  onValueChange={(value) => {
-                    invalidateDiscovery();
-                    setApiKey(value);
-                  }}
-                  className="h-10 border border-neutral-300 px-3 text-sm"
-                />
-                {keyCapability === "optional" && draft.apiKeyRef ? (
-                  <button
-                    type="button"
-                    class="text-xs text-neutral-500 underline"
-                    onClick={() => {
-                      invalidateDiscovery();
-                      setApiKey("");
-                      setRemoveKey((current) => !current);
-                    }}
-                  >
-                    {removeKey ? "Keep stored key" : "Remove stored key"}
-                  </button>
-                ) : null}
-                {keyCapability === "optional" &&
-                draft.host?.trim().toLowerCase().startsWith("http://") ? (
-                  <div class="text-xs text-neutral-500">
-                    Over plain http the key is sent unencrypted on your network.
-                    Prefer https for servers that require a key.
-                  </div>
-                ) : null}
-              </div>
+              <Input
+                label="API Key"
+                type="password"
+                value={apiKey}
+                placeholder={
+                  draft.apiKeyRef ? "Stored in OS keychain" : "Secret key"
+                }
+                onValueChange={(value) => {
+                  invalidateDiscovery();
+                  setApiKey(value);
+                }}
+                className="h-10 border border-neutral-300 px-3 text-sm"
+              />
             ) : null}
             <div class="grid gap-3 sm:grid-cols-2">
               <Input
                 label="Host"
                 value={draft.host ?? ""}
-                placeholder={isLocal ? "http://127.0.0.1:1234" : undefined}
+                placeholder={isLocal ? "http://127.0.0.1:11434" : undefined}
                 onValueChange={(value) => updateConnection({ host: value })}
                 onBlur={reloadModelsAfterUrlEdit}
                 className="h-10 border border-neutral-300 px-3 text-sm"

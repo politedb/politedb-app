@@ -79,24 +79,6 @@ describe("AI provider configuration", () => {
   });
 
   it("keeps local kinds and model ids exactly (plan R2)", () => {
-    const compat = normalizeAiProviderConfig({
-      id: "lmstudio-1",
-      kind: "local_openai_compatible",
-      label: "Local API",
-      baseUrl: "http://127.0.0.1:1234/v1",
-      defaultModel: "local-model",
-      models: ["local-model", "default", "qwen2.5-coder-7b-instruct"],
-      enabled: true,
-    });
-    expect(compat.kind).toBe("local_openai_compatible");
-    expect(compat.label).toBe("LM Studio / OpenAI-compatible");
-    expect(compat.defaultModel).toBe("local-model");
-    expect(compat.models).toEqual([
-      "local-model",
-      "default",
-      "qwen2.5-coder-7b-instruct",
-    ]);
-
     const ollama = normalizeAiProviderConfig({
       id: "ollama-1",
       kind: "ollama",
@@ -115,10 +97,6 @@ describe("AI provider configuration", () => {
       baseUrl: "http://127.0.0.1:11434/v1",
       defaultModel: "",
       models: [],
-    });
-    expect(makeDefaultAiProvider("local_openai_compatible")).toMatchObject({
-      baseUrl: "http://127.0.0.1:1234/v1",
-      defaultModel: "",
     });
     expect(makeDefaultAiProvider("ollama").id).not.toBe(
       makeDefaultAiProvider("ollama").id
@@ -173,7 +151,6 @@ describe("AI provider configuration", () => {
 
   it("maps key capability per kind", () => {
     expect(aiProviderKeyCapability("openai")).toBe("required");
-    expect(aiProviderKeyCapability("local_openai_compatible")).toBe("optional");
     expect(aiProviderKeyCapability("ollama")).toBe("none");
   });
 });
@@ -199,7 +176,6 @@ describe("legacy bundled provider signature (plan D11)", () => {
     for (const variant of [
       { ...legacy, id: "ollama-1" },
       { ...legacy, label: "My Ollama" },
-      { ...legacy, kind: "local_openai_compatible" as const },
       { ...legacy, baseUrl: "http://127.0.0.1:11434/v1" },
       { ...legacy, baseUrl: "http://192.168.1.5:50953/v1" },
       { ...legacy, baseUrl: "https://127.0.0.1:50953/v1" },

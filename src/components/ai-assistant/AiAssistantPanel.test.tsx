@@ -76,11 +76,11 @@ vi.mock("@root/src/lib/ai-assistant/providers", async (importOriginal) => {
   };
 });
 
-const LM_STUDIO = {
-  id: "lmstudio-1",
-  kind: "local_openai_compatible",
-  label: "LM Studio",
-  baseUrl: "http://127.0.0.1:1234/v1",
+const LOCAL = {
+  id: "ollama-1",
+  kind: "ollama",
+  label: "My Ollama",
+  baseUrl: "http://127.0.0.1:11434/v1",
   defaultModel: "qwen2.5-7b-instruct",
   models: ["qwen2.5-7b-instruct"],
   enabled: true,
@@ -170,8 +170,8 @@ beforeEach(() => {
   });
 
   localStorage.clear();
-  aiProviderListMock.mockResolvedValue([LM_STUDIO]);
-  getSelectedAiProviderIdMock.mockReturnValue("lmstudio-1");
+  aiProviderListMock.mockResolvedValue([LOCAL]);
+  getSelectedAiProviderIdMock.mockReturnValue("ollama-1");
   aiLegacyModelInfoMock.mockResolvedValue({ files: [] });
   isGeneralChatPromptMock.mockReturnValue(true);
   chatReplyMock.mockResolvedValue({
@@ -212,7 +212,7 @@ beforeEach(() => {
 
 describe("AiAssistantPanel", () => {
   it("shows a setup state without requests when no provider is enabled", async () => {
-    aiProviderListMock.mockResolvedValue([{ ...LM_STUDIO, enabled: false }]);
+    aiProviderListMock.mockResolvedValue([{ ...LOCAL, enabled: false }]);
 
     renderPanel({ presentation: "floating" });
 
@@ -234,16 +234,17 @@ describe("AiAssistantPanel", () => {
 
     fireEvent.click(await screen.findByTitle("AI settings"));
     await screen.findByText("AI Provider Settings");
+    expect(screen.getAllByText("Ollama").length).toBeGreaterThan(0);
     expect(
-      screen.getByText("LM Studio / OpenAI-compatible")
-    ).toBeInTheDocument();
+      screen.queryByText("LM Studio / OpenAI-compatible")
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Download model/ })
     ).not.toBeInTheDocument();
   });
 
   it("shows a dismissible notice for the removed built-in provider without changing it", async () => {
-    aiProviderListMock.mockResolvedValue([LEGACY_BUNDLED, LM_STUDIO]);
+    aiProviderListMock.mockResolvedValue([LEGACY_BUNDLED, LOCAL]);
 
     renderPanel();
 
@@ -372,7 +373,7 @@ describe("AiAssistantPanel", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     await waitFor(() =>
       expect(chatReplyMock).toHaveBeenCalledWith(
-        expect.objectContaining({ providerId: "lmstudio-1" })
+        expect.objectContaining({ providerId: "ollama-1" })
       )
     );
   });
@@ -387,7 +388,7 @@ describe("AiAssistantPanel", () => {
       models: ["gpt-4.1-mini"],
       enabled: true,
     };
-    aiProviderListMock.mockResolvedValue([LM_STUDIO, cloud]);
+    aiProviderListMock.mockResolvedValue([LOCAL, cloud]);
     renderPanel();
     await screen.findByPlaceholderText("Ask anything...");
     await waitFor(() => expect(aiProviderListMock).toHaveBeenCalled());
@@ -450,7 +451,7 @@ describe("AiAssistantPanel", () => {
     await screen.findByText(/Hello! How can I help\?/);
     expect(chatReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        providerId: "lmstudio-1",
+        providerId: "ollama-1",
         model: "qwen2.5-7b-instruct",
       })
     );
@@ -470,7 +471,7 @@ describe("AiAssistantPanel", () => {
       screen.getByRole("button", { name: /qwen2\.5-7b-instruct/ })
     );
 
-    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("lmstudio-1");
+    expect(setSelectedAiProviderIdMock).toHaveBeenCalledWith("ollama-1");
   });
 
   it("previews a read-only SQL plan without running it automatically", async () => {

@@ -38,16 +38,15 @@ vi.mock("src/components/common/Button", () => ({
 
 import { AiAssistantSettingsDialog } from "./AiAssistantSettingsDialog";
 
-const LM_STUDIO = {
-  id: "lmstudio-1",
-  kind: "local_openai_compatible",
-  label: "LM Studio",
-  host: "http://127.0.0.1:1234",
+const LOCAL = {
+  id: "ollama-1",
+  kind: "ollama",
+  label: "My Ollama",
+  host: "http://127.0.0.1:11434",
   subPath: "/v1",
-  baseUrl: "http://127.0.0.1:1234/v1",
+  baseUrl: "http://127.0.0.1:11434/v1",
   defaultModel: "qwen",
   models: ["qwen"],
-  apiKeyRef: "politedb:ai:lmstudio-1:api_key",
   enabled: true,
 };
 
@@ -59,7 +58,7 @@ function deferred<T>() {
 
 async function openDialog() {
   render(<AiAssistantSettingsDialog open onClose={() => {}} />);
-  await screen.findByDisplayValue("LM Studio");
+  await screen.findByDisplayValue("My Ollama");
 }
 
 /** Local providers look up models on open; wait for that and start counting fresh. */
@@ -74,31 +73,14 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
-  localStorage.setItem("politedb.ai.provider.selected", "lmstudio-1");
-  mocks.list.mockResolvedValue([LM_STUDIO]);
+  localStorage.setItem("politedb.ai.provider.selected", "ollama-1");
+  mocks.list.mockResolvedValue([LOCAL]);
   mocks.legacyInfo.mockResolvedValue({ files: [] });
   mocks.cancelListModels.mockResolvedValue(undefined);
   mocks.listModels.mockResolvedValue([]);
 });
 
 describe("AiAssistantSettingsDialog", () => {
-  it("never sends the stored key when the form removes it (Load models / Test)", async () => {
-    mocks.testDraft.mockResolvedValue(undefined);
-    await openDialog();
-    await settleAutoDiscovery();
-    mocks.listModels.mockResolvedValue(["qwen"]);
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove stored key" }));
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
-    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    expect(mocks.listModels.mock.calls[0][1]).toEqual({ action: "remove" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-    await waitFor(() => expect(mocks.testDraft).toHaveBeenCalled());
-    expect(mocks.testDraft.mock.calls[0][1]).toEqual({ action: "remove" });
-    expect(mocks.save).not.toHaveBeenCalled();
-  });
-
   it("ignores a model list that arrives after the URL changed, keeping edits", async () => {
     await openDialog();
     await settleAutoDiscovery();
@@ -107,8 +89,8 @@ describe("AiAssistantSettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
-    fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:1234"), {
-      target: { value: "http://192.168.1.9:1234" },
+    fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:11434"), {
+      target: { value: "http://192.168.1.9:11434" },
     });
     expect(mocks.cancelListModels).toHaveBeenCalledTimes(1);
     pending.resolve(["stale-model"]);
@@ -119,7 +101,7 @@ describe("AiAssistantSettingsDialog", () => {
     expect(
       screen.queryByRole("option", { name: "stale-model" })
     ).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("http://192.168.1.9:1234")).toBeTruthy();
+    expect(screen.getByDisplayValue("http://192.168.1.9:11434")).toBeTruthy();
   });
   it("offers server models as suggestions without selecting them", async () => {
     await openDialog();
@@ -144,7 +126,7 @@ describe("AiAssistantSettingsDialog", () => {
   });
   it("saves offline setup without a model and without any network call", async () => {
     mocks.list.mockResolvedValue([
-      { ...LM_STUDIO, defaultModel: "", models: [], enabled: false },
+      { ...LOCAL, defaultModel: "", models: [], enabled: false },
     ]);
     mocks.save.mockImplementation(async (config: any) => config);
     await openDialog();
@@ -162,9 +144,9 @@ describe("AiAssistantSettingsDialog", () => {
   it("reloads the provider from disk when the save rollback failed", async () => {
     mocks.save.mockRejectedValue("AI_PROVIDER_SAVE_ROLLBACK_FAILED");
     await openDialog();
-    mocks.list.mockResolvedValue([{ ...LM_STUDIO, label: "On disk" }]);
+    mocks.list.mockResolvedValue([{ ...LOCAL, label: "On disk" }]);
 
-    fireEvent.change(screen.getByDisplayValue("LM Studio"), {
+    fireEvent.change(screen.getByDisplayValue("My Ollama"), {
       target: { value: "Edited" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -175,9 +157,7 @@ describe("AiAssistantSettingsDialog", () => {
   });
 
   it("looks up local models on open and shows guidance when the server is down", async () => {
-    mocks.list.mockResolvedValue([
-      { ...LM_STUDIO, models: [], defaultModel: "" },
-    ]);
+    mocks.list.mockResolvedValue([{ ...LOCAL, models: [], defaultModel: "" }]);
     mocks.listModels.mockRejectedValue("AI_CHAT_REQUEST_FAILED: connect");
     await openDialog();
 
@@ -191,22 +171,20 @@ describe("AiAssistantSettingsDialog", () => {
   });
 
   it("looks up models again after the server URL is edited", async () => {
-    mocks.list.mockResolvedValue([
-      { ...LM_STUDIO, models: [], defaultModel: "" },
-    ]);
+    mocks.list.mockResolvedValue([{ ...LOCAL, models: [], defaultModel: "" }]);
     await openDialog();
     await settleAutoDiscovery();
     mocks.listModels.mockResolvedValue(["phi-4"]);
-    const host = screen.getByDisplayValue("http://127.0.0.1:1234");
+    const host = screen.getByDisplayValue("http://127.0.0.1:11434");
     // preact/compat maps onChange/onBlur to input/focusout; testing-library's
     // focusOut helper does not reach that listener, so dispatch a native event.
-    fireEvent.input(host, { target: { value: "http://127.0.0.1:1235" } });
+    fireEvent.input(host, { target: { value: "http://127.0.0.1:11435" } });
     await new Promise((r) => setTimeout(r, 0));
     host.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
 
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalledTimes(1));
     expect(mocks.listModels.mock.calls[0][0].baseUrl).toBe(
-      "http://127.0.0.1:1235/v1"
+      "http://127.0.0.1:11435/v1"
     );
     await screen.findByText(/1 model found on the server/);
   });
@@ -221,8 +199,8 @@ describe("AiAssistantSettingsDialog", () => {
     const requestId = mocks.listModels.mock.calls[0][2];
     expect(requestId).toMatch(/^settings-/);
 
-    fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:1234"), {
-      target: { value: "http://10.0.0.2:1234" },
+    fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:11434"), {
+      target: { value: "http://10.0.0.2:11434" },
     });
     expect(mocks.cancelListModels).toHaveBeenLastCalledWith(requestId);
     const prefix = requestId.split(":")[0];
@@ -235,7 +213,7 @@ describe("AiAssistantSettingsDialog", () => {
   });
   it("does not change the chat selection when deleting the selected provider", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    mocks.list.mockResolvedValueOnce([LM_STUDIO]).mockResolvedValue([]);
+    mocks.list.mockResolvedValueOnce([LOCAL]).mockResolvedValue([]);
     const selected = vi.fn();
     window.addEventListener("politedb-ai-provider-selected", selected);
     await openDialog();
@@ -246,7 +224,7 @@ describe("AiAssistantSettingsDialog", () => {
     window.removeEventListener("politedb-ai-provider-selected", selected);
     expect(selected).not.toHaveBeenCalled();
     expect(localStorage.getItem("politedb.ai.provider.selected")).toBe(
-      "lmstudio-1"
+      "ollama-1"
     );
   });
 
@@ -303,7 +281,7 @@ describe("AiAssistantSettingsDialog", () => {
   it("renders suggestions outside the dialog and Escape closes only the list", async () => {
     const onClose = vi.fn();
     mocks.list.mockResolvedValue([
-      { ...LM_STUDIO, kind: "openai", id: "openai-1", label: "OpenAI" },
+      { ...LOCAL, kind: "openai", id: "openai-1", label: "OpenAI" },
     ]);
     localStorage.setItem("politedb.ai.provider.selected", "openai-1");
     render(<AiAssistantSettingsDialog open onClose={onClose} />);
@@ -326,15 +304,13 @@ describe("AiAssistantSettingsDialog", () => {
   });
 
   it("drops models found on the previous URL when the URL changes", async () => {
-    mocks.list.mockResolvedValue([
-      { ...LM_STUDIO, models: [], defaultModel: "" },
-    ]);
+    mocks.list.mockResolvedValue([{ ...LOCAL, models: [], defaultModel: "" }]);
     mocks.listModels.mockResolvedValue(["old-server-model"]);
     await openDialog();
     await screen.findByText(/1 model found on the server/);
 
-    fireEvent.input(screen.getByDisplayValue("http://127.0.0.1:1234"), {
-      target: { value: "http://127.0.0.1:9999" },
+    fireEvent.input(screen.getByDisplayValue("http://127.0.0.1:11434"), {
+      target: { value: "http://127.0.0.1:19999" },
     });
     await waitFor(() =>
       expect(
