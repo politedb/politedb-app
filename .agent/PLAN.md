@@ -341,6 +341,14 @@ Branch `feat/mas-native-apis`. Both flavors; no subprocess left on macOS for the
 - Tests: `blank_reasons_use_the_default_prompt`, `blank_reason_is_rejected_before_the_native_call`. `cargo test` 197 passed / 1 ignored in both flavors; clippy only pre-existing warnings.
 - Cross-target `cargo check` not possible on this Mac: Linux stops at pkg-config (no sysroot), Windows at `ring` C build (`assert.h`, no MSVC SDK). Manual audit of non-macOS cfg paths: `Arc` unconditional; `Command`/`StdCommand`/`command_output` gated `not(macos)` and used only by Windows/Linux `open`, `reg`, `hostname` paths; non-macOS `enforce_minimum_macos_version` stub unchanged. Real coverage relies on CI Windows/Linux jobs.
 
+### D16 — AI features are free (user, 2026-10-11)
+
+- User decision ("tính năng AI là free, không cần politedb license"): AI no longer requires a PoliteDB license in either flavor. Supersedes the AI license gate in R3/D15 and P1-2's `blocks_ai_feature_for` (App Store "active only" for AI). Phase 4 (IAP): AI is not part of the paid entitlement.
+- Backend: `commands/ai.rs` `ensure_ai_licensed` removed from `ai_provider_test_draft` and `ai_chat_complete`; `license::blocks_ai_feature{,_for}` and their tests removed (no other callers). The `AI_LICENSE_REQUIRED` error no longer exists.
+- Frontend: `useAiAssistantSubmit` no longer maps `AI_LICENSE_REQUIRED`. The short-lived "Activate license" notice in AI settings was reverted before commit.
+- Unchanged: trial/licence state, `apply_trial_policy`, the app-wide trial-expired overlay, keychain/URL policy, `enabled`/key checks before any request.
+- Verification: `cargo test` 195 passed / 1 ignored in default and `--features app-store`, clippy only pre-existing warnings; `npm run test:run` 642 passed; `npm run build` OK.
+
 ## Plan Review — Phase 1c (Codex)
 
 Reviewed 2026-10-09 against the current working tree and the uncommitted `.github/workflows/release.yml` diff. Scope: plan critique only; no application implementation. Locations below refer to pre-review source lines. Existing Phase 1 findings and unrelated plan sections are outside this review.

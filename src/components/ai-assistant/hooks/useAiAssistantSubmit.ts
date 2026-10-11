@@ -39,8 +39,7 @@ function formatAssistantRequestError(args: {
     raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
     raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
-    raw.includes("AI_PROVIDER") ||
-    raw.includes("AI_LICENSE_REQUIRED");
+    raw.includes("AI_PROVIDER");
 
   if (!isProviderRequest) return null;
 
