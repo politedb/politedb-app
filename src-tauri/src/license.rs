@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+#[cfg(not(target_os = "macos"))]
 use std::process::Command as StdCommand;
 
 use crate::distribution::Distribution;
@@ -238,6 +239,7 @@ fn normalize_state_timestamps(state: &mut LicenseState) {
     state.trial_expires_at = state.trial_expires_at.map(normalize_unix_timestamp_millis);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
     let output = StdCommand::new(cmd).args(args).output().ok()?;
     if !output.status.success() {
@@ -254,15 +256,8 @@ fn command_output(cmd: &str, args: &[&str]) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn machine_identity_source() -> Option<String> {
-    let output = command_output("ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])?;
-    output.lines().find_map(|line| {
-        if !line.contains("IOPlatformUUID") {
-            return None;
-        }
-        line.split('=')
-            .nth(1)
-            .map(|value| value.trim().trim_matches('"').to_string())
-    })
+    // Same IOPlatformUUID `ioreg` reported, read via IOKit (no subprocess in the sandbox).
+    crate::platform::macos::platform_uuid()
 }
 
 #[cfg(target_os = "linux")]
@@ -306,6 +301,16 @@ fn machine_identity_source() -> Option<String> {
     None
 }
 
+#[cfg(target_os = "macos")]
+fn host_name() -> Option<String> {
+    crate::platform::macos::host_name()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn host_name() -> Option<String> {
+    command_output("hostname", &[])
+}
+
 fn detect_device_name() -> String {
     std::env::var("COMPUTERNAME")
         .ok()
@@ -315,7 +320,7 @@ fn detect_device_name() -> String {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         })
-        .or_else(|| command_output("hostname", &[]))
+        .or_else(host_name)
         .unwrap_or_else(|| "This device".to_string())
 }
 

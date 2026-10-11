@@ -2,7 +2,7 @@
 
 ## Status
 
-IMPLEMENTED
+APPROVED
 
 ## Task
 
@@ -11,7 +11,7 @@ IMPLEMENTED
 - User approved the plan with all decisions D1–D8 on 2026-10-09 ("chốt").
 - Previous plan (branded-keychain-entries, IMPLEMENTED) is in git history.
 - Implement phases in order on branch `feat/mac-app-store-flavor`; record progress and verification evidence in this file.
-- Current: Phase 1 committed (`b10fa09`, Codex VERIFIED WITH LIMITATIONS). Phase 1c APPROVED by the user on 2026-10-10 ("tôi duyệt") after Codex plan re-check 4 READY; implementing on branch `feat/local-ai-api` (from `feat/mac-app-store-flavor`).
+- Current: Phase 1 and Phase 1c committed. Phase 2 (native replacements) APPROVED by the user on 2026-10-11 ("làm tiếp các phần trong các phase sau đi"); IMPLEMENTED on branch `feat/mas-native-apis` (from `feat/local-ai-api`), awaiting Codex review. Phases 3–6 follow one per branch; Phase 4/5 need App Store Connect products and signing assets from the user.
 - No commit/push unless requested.
 
 ## Goal And Visible Result
@@ -317,6 +317,29 @@ Verification (round 3): `tsc` clean; `npm run build` + `npm run build:appstore` 
 - Back-compat: Rust `AiProviderKind::Ollama` carries `#[serde(alias = "local_openai_compatible")]`, so existing `providers.json` files still load; such records become Ollama (URL kept, keyless). A previously stored key is ignored and deleted on the next save of that provider (Ollama key rule). `KeyCapability::Optional` removed; draft `remove` auth now always means "no key" → required kinds error.
 - Frontend: kind removed from `AiProviderKind`, labels/defaults/suggestions and Settings; optional-key UI ("Remove stored key", http plaintext warning) removed; copy mentions Ollama only. README updated.
 - Verification: Rust alias test (`reads_removed_openai_compatible_kind_as_ollama`), provider-store tests moved to cloud (keyed) / Ollama (keyless) fixtures; frontend fixtures switched to Ollama.
+
+### Phase 2 — Implementation evidence (Claude, 2026-10-11)
+
+Branch `feat/mas-native-apis`. Both flavors; no subprocess left on macOS for these paths.
+
+- New `src-tauri/src/platform/{mod.rs,macos.rs}` (objc2 / IOKit / libc):
+  - `os_version` (NSProcessInfo) replaces `sw_vers`; `show_critical_alert` (NSAlert, main thread only) replaces `osascript`.
+  - `open_url` (NSURL + NSWorkspace) replaces `open` in `license_open_external_url`; the `distribution::allows_external_url` gate is unchanged.
+  - `platform_uuid` (IOKit `IOPlatformUUID`) replaces `ioreg`; `host_name` (`gethostname`) replaces `hostname`. Device ids for existing license activations are unchanged (test compares with `ioreg`).
+  - `authenticate_device_owner` (LAContext `DeviceOwnerAuthentication`, oneshot reply, 30 s timeout → `invalidate`) replaces the `/usr/bin/swift` script. Error shape `TOUCH_ID_AUTH_FAILED: <reason>` and non-macOS `TOUCH_ID_UNSUPPORTED_PLATFORM` kept.
+- `main.rs`: `parse_macos_version`/osascript removed; `is_supported_macos_version`, `format_macos_version`, `enforce_minimum_macos_version` (min 13.3) use the platform module.
+- `license.rs`, `commands/license.rs`: `Command` use gated to non-macOS (Windows/Linux paths unchanged).
+- Deps (macOS target only): `objc2-app-kit`, `objc2-local-authentication`, `block2`.
+- Verification: `cargo test` 195 passed / 1 ignored in default and `--features app-store` (new: `platform_uuid_matches_ioreg`, `host_name_matches_hostname_tool`, `reports_a_plausible_os_version`, `macos_version_tests::*`); clippy shows only the 5 pre-existing warnings; `cargo fmt` clean.
+- Not exercised: real Touch ID/password prompt (needs interactive run), the NSAlert path (needs macOS < 13.3), `open_url` at runtime, Windows/Linux builds.
+
+### Phase 2 — Review round 1 fixes (Claude, 2026-10-11)
+
+- P1-1: `use std::sync::Arc` in `main.rs` is unconditional again (the macOS-only `#[cfg]` had belonged to the removed `StdCommand` import).
+- P2-2: `commands/security.rs::prompt_for` trims the reason and falls back to the default prompt for `None`/empty/whitespace; `platform::macos::authenticate_device_owner` additionally rejects a blank reason with `TOUCH_ID_AUTH_FAILED: Authentication failed.` before touching LAContext (defense in depth, never `Ok(true)`).
+- `AuthContext` safety comment narrowed to what the code does (invalidate/release only, possibly on another worker; the framework already uses the context from its private reply queue).
+- Tests: `blank_reasons_use_the_default_prompt`, `blank_reason_is_rejected_before_the_native_call`. `cargo test` 197 passed / 1 ignored in both flavors; clippy only pre-existing warnings.
+- Cross-target `cargo check` not possible on this Mac: Linux stops at pkg-config (no sysroot), Windows at `ring` C build (`assert.h`, no MSVC SDK). Manual audit of non-macOS cfg paths: `Arc` unconditional; `Command`/`StdCommand`/`command_output` gated `not(macos)` and used only by Windows/Linux `open`, `reg`, `hostname` paths; non-macOS `enforce_minimum_macos_version` stub unchanged. Real coverage relies on CI Windows/Linux jobs.
 
 ## Plan Review — Phase 1c (Codex)
 
