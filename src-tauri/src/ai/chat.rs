@@ -60,6 +60,7 @@ pub fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
                 })
                 .filter(|item| !item.is_empty())
         });
+    // Only the provider's error code: its message can echo the prompt (SQL, data).
     match code {
         Some(code) => format!("AI_CHAT_FAILED: {status} {code}"),
         None => format!("AI_CHAT_FAILED: {status}"),
@@ -160,11 +161,17 @@ async fn complete_openai_like(
     Ok(text)
 }
 
-async fn complete_anthropic(
+/// Current Claude models (Opus 5.5 and later) always think, and `max_tokens` covers
+/// thinking plus the answer, so small limits leave no room for any text.
+const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
+
+/// Messages API payload. No sampling parameters: Claude Opus 5.5+ rejects any
+/// non-default `temperature`/`top_p`/`top_k` with a 400, and older models accept their
+/// defaults. An empty system prompt is omitted.
+fn anthropic_payload(
     config: &AiProviderConfig,
     request: &AiChatCompleteRequest,
-    api_key: &str,
-) -> Result<String, String> {
+) -> serde_json::Value {
     let system = request
         .messages
         .iter()
@@ -183,28 +190,45 @@ async fn complete_anthropic(
             })
         })
         .collect::<Vec<_>>();
-    let payload = json!({
+    let mut payload = json!({
         "model": request.model.as_deref().unwrap_or(&config.default_model),
-        "max_tokens": request.max_tokens.unwrap_or(1024),
-        "temperature": request.temperature.unwrap_or(0.2),
-        "system": system,
+        "max_tokens": request.max_tokens.unwrap_or(1024).max(ANTHROPIC_MIN_MAX_TOKENS),
         "messages": messages,
     });
-    let headers = [("x-api-key", api_key), ("anthropic-version", "2023-06-01")];
-    let value = post_json(config, "messages", &payload, &headers, None).await?;
-    Ok(value
+    if !system.trim().is_empty() {
+        payload["system"] = json!(system);
+    }
+    payload
+}
+
+/// Text of a Messages API response; `thinking` blocks (always present on newer models)
+/// are skipped.
+fn anthropic_text(value: &serde_json::Value) -> String {
+    value
         .get("content")
         .and_then(|content| content.as_array())
-        .and_then(|content| {
-            content
+        .map(|blocks| {
+            blocks
                 .iter()
-                .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("text"))
+                .filter(|item| item.get("type").and_then(|v| v.as_str()) == Some("text"))
+                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("")
         })
-        .and_then(|item| item.get("text"))
-        .and_then(|text| text.as_str())
-        .unwrap_or("")
+        .unwrap_or_default()
         .trim()
-        .to_string())
+        .to_string()
+}
+
+async fn complete_anthropic(
+    config: &AiProviderConfig,
+    request: &AiChatCompleteRequest,
+    api_key: &str,
+) -> Result<String, String> {
+    let payload = anthropic_payload(config, request);
+    let headers = [("x-api-key", api_key), ("anthropic-version", "2023-06-01")];
+    let value = post_json(config, "messages", &payload, &headers, None).await?;
+    Ok(anthropic_text(&value))
 }
 
 async fn complete_gemini(
@@ -352,6 +376,55 @@ mod tests {
             AiProviderKind::Ollama,
             &format!("http://127.0.0.1:{port}"),
         ))
+    }
+
+    fn anthropic_config() -> AiProviderConfig {
+        provider::normalize_fields(provider(
+            AiProviderKind::Anthropic,
+            "https://api.anthropic.com",
+        ))
+    }
+
+    #[test]
+    fn anthropic_payload_has_no_sampling_params_or_empty_system() {
+        let config = anthropic_config();
+        let mut probe = probe_request(&config);
+        probe.model = Some("claude-opus-5-5".into());
+        let payload = anthropic_payload(&config, &probe);
+        // Opus 5.5+ rejects non-default temperature/top_p/top_k with a 400.
+        assert!(payload.get("temperature").is_none());
+        assert!(payload.get("top_p").is_none());
+        assert!(payload.get("system").is_none(), "empty system is omitted");
+        // max_tokens covers thinking + text: never the tiny probe limit.
+        assert_eq!(payload["max_tokens"], ANTHROPIC_MIN_MAX_TOKENS);
+        assert_eq!(payload["model"], "claude-opus-5-5");
+
+        let mut chat = probe.clone();
+        chat.messages.insert(
+            0,
+            AiChatMessage {
+                role: "system".into(),
+                content: "Be brief.".into(),
+            },
+        );
+        chat.max_tokens = Some(10_000);
+        let payload = anthropic_payload(&config, &chat);
+        assert_eq!(payload["system"], "Be brief.");
+        assert_eq!(payload["max_tokens"], 10_000);
+        assert_eq!(payload["messages"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn anthropic_text_skips_thinking_blocks() {
+        let value = serde_json::json!({
+            "content": [
+                { "type": "thinking", "thinking": "hmm" },
+                { "type": "text", "text": "OK" },
+                { "type": "text", "text": "!" }
+            ]
+        });
+        assert_eq!(anthropic_text(&value), "OK!");
+        assert_eq!(anthropic_text(&serde_json::json!({ "content": [] })), "");
     }
 
     #[test]

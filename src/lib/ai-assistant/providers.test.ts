@@ -28,7 +28,7 @@ describe("AI provider configuration", () => {
     });
     expect(makeDefaultAiProvider("anthropic")).toMatchObject({
       baseUrl: "https://api.anthropic.com/v1",
-      defaultModel: "claude-sonnet-4-5",
+      defaultModel: "claude-sonnet-5-5",
     });
   });
 
