@@ -27,7 +27,7 @@ jobs:
       matrix:
         target: ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4

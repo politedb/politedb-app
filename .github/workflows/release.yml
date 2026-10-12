@@ -36,11 +36,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - platform: macos-14
+          - platform: macos-15
             target: "aarch64-apple-darwin"
           # Cross-compiled on Apple Silicon: Intel runners queue for a long time and
           # build ~1.7x slower. Keep in sync with rust-cache-warm.yml.
-          - platform: macos-14
+          - platform: macos-15
             target: "x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
