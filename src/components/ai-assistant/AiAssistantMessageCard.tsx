@@ -193,11 +193,10 @@ export function AiAssistantMessageCard({
         </>
       ) : null}
 
-      {floatingAssistant ? (
-        <div class="flex items-center gap-2 text-base font-semibold text-neutral-500">
-          <span>Thought</span>
-          <span class="text-neutral-400">›</span>
-        </div>
+      {/* While streaming the body shows "Thinking..."; afterwards only how long it
+          took. No chevron: there is nothing to expand (thinking text is not kept). */}
+      {floatingAssistant && durationText ? (
+        <div class="text-xs font-medium text-neutral-500">{durationText}</div>
       ) : null}
 
       {floatingUser ? (

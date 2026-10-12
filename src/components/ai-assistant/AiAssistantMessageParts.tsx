@@ -148,7 +148,7 @@ function SqlPreviewPart(props: {
           {onRun && part.safety === "read_only" ? (
             <Button
               variant="default"
-              class="px-2 py-1"
+              class="px-2 py-1 text-xs"
               loading={sqlRunState === "running"}
               onClick={() => onRun(part.sql)}
             >
@@ -158,7 +158,7 @@ function SqlPreviewPart(props: {
           {onInsertSql ? (
             <Button
               variant="default"
-              class="px-2 py-1"
+              class="px-2 py-1 text-xs"
               onClick={() => onInsert(part.sql)}
             >
               Insert

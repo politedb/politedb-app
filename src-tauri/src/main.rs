@@ -11,6 +11,7 @@ mod engines;
 mod file_storage;
 mod license;
 mod operations;
+mod platform;
 mod profiles;
 mod security;
 mod state;
@@ -23,8 +24,6 @@ use crate::state::AppState;
 mod ssh_tunnel;
 
 mod window_chrome;
-#[cfg(target_os = "macos")]
-use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -40,62 +39,38 @@ const MIN_SUPPORTED_MACOS_MAJOR: u32 = 13;
 const MIN_SUPPORTED_MACOS_MINOR: u32 = 3;
 
 #[cfg(target_os = "macos")]
-fn parse_macos_version(version: &str) -> Option<(u32, u32, u32)> {
-    let mut parts = version.trim().split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let patch = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    Some((major, minor, patch))
-}
-
-#[cfg(target_os = "macos")]
 fn is_supported_macos_version(version: (u32, u32, u32)) -> bool {
     let (major, minor, _) = version;
     major > MIN_SUPPORTED_MACOS_MAJOR
         || (major == MIN_SUPPORTED_MACOS_MAJOR && minor >= MIN_SUPPORTED_MACOS_MINOR)
 }
 
+/// `13.3` / `13.3.1`, matching how `sw_vers -productVersion` prints versions.
 #[cfg(target_os = "macos")]
-fn show_unsupported_macos_alert(current_version: &str) {
-    let message = format!(
-        "PoliteDB requires macOS {}.{} or later.\\nCurrent macOS version: {}",
-        MIN_SUPPORTED_MACOS_MAJOR, MIN_SUPPORTED_MACOS_MINOR, current_version
-    );
-
-    let _ = StdCommand::new("osascript")
-        .args([
-            "-e",
-            &format!(
-                "display alert \"Unsupported macOS Version\" message \"{}\" as critical buttons {{\"OK\"}} default button \"OK\"",
-                message.replace('\\', "\\\\").replace('"', "\\\"")
-            ),
-        ])
-        .status();
+fn format_macos_version((major, minor, patch): (u32, u32, u32)) -> String {
+    if patch == 0 {
+        format!("{major}.{minor}")
+    } else {
+        format!("{major}.{minor}.{patch}")
+    }
 }
 
 #[cfg(target_os = "macos")]
 fn enforce_minimum_macos_version() -> Result<(), String> {
-    let output = StdCommand::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .map_err(|e| format!("Failed to read macOS version: {e}"))?;
-
-    let version = String::from_utf8(output.stdout)
-        .map_err(|e| format!("Failed to decode macOS version: {e}"))?;
-    let parsed = parse_macos_version(&version)
-        .ok_or_else(|| format!("Failed to parse macOS version: {}", version.trim()))?;
-
-    if is_supported_macos_version(parsed) {
-        Ok(())
-    } else {
-        show_unsupported_macos_alert(version.trim());
-        Err(format!(
-            "PoliteDB requires macOS {}.{} or later. Current version: {}",
-            MIN_SUPPORTED_MACOS_MAJOR,
-            MIN_SUPPORTED_MACOS_MINOR,
-            version.trim()
-        ))
+    let version = platform::macos::os_version();
+    if is_supported_macos_version(version) {
+        return Ok(());
     }
+    let current = format_macos_version(version);
+    platform::macos::show_critical_alert(
+        "Unsupported macOS Version",
+        &format!(
+            "PoliteDB requires macOS {MIN_SUPPORTED_MACOS_MAJOR}.{MIN_SUPPORTED_MACOS_MINOR} or later.\nCurrent macOS version: {current}"
+        ),
+    );
+    Err(format!(
+        "PoliteDB requires macOS {MIN_SUPPORTED_MACOS_MAJOR}.{MIN_SUPPORTED_MACOS_MINOR} or later. Current version: {current}"
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -253,4 +228,28 @@ fn main() {
         .expect("error while building app");
 
     app.run(|_app_handle, _event| {});
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_version_tests {
+    use super::*;
+
+    #[test]
+    fn enforces_the_minimum_version() {
+        assert!(is_supported_macos_version((13, 3, 0)));
+        assert!(is_supported_macos_version((14, 0, 0)));
+        assert!(!is_supported_macos_version((13, 2, 1)));
+        assert!(!is_supported_macos_version((12, 7, 6)));
+    }
+
+    #[test]
+    fn formats_versions_like_sw_vers() {
+        assert_eq!(format_macos_version((13, 3, 0)), "13.3");
+        assert_eq!(format_macos_version((14, 6, 1)), "14.6.1");
+    }
+
+    #[test]
+    fn current_mac_is_supported() {
+        assert!(enforce_minimum_macos_version().is_ok());
+    }
 }

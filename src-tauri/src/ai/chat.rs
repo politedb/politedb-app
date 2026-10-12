@@ -60,6 +60,7 @@ pub fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
                 })
                 .filter(|item| !item.is_empty())
         });
+    // Only the provider's error code: its message can echo the prompt (SQL, data).
     match code {
         Some(code) => format!("AI_CHAT_FAILED: {status} {code}"),
         None => format!("AI_CHAT_FAILED: {status}"),
@@ -160,11 +161,43 @@ async fn complete_openai_like(
     Ok(text)
 }
 
-async fn complete_anthropic(
+/// Claude Opus 4.7 and later (and ids we cannot parse, which are assumed new) always
+/// think, with `max_tokens` covering thinking plus the answer, and reject non-default
+/// `temperature`/`top_p`/`top_k` with a 400. Earlier models keep the previous request
+/// shape: caller temperature and token limit.
+const ANTHROPIC_ALWAYS_THINKING_FROM: (u32, u32) = (4, 7);
+
+/// Room for adaptive thinking plus a short answer on always-thinking models.
+const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
+
+/// `(major, minor)` from ids like `claude-opus-4-1-20250805`, `claude-3-5-sonnet-20241022`
+/// or `claude-opus-5-5`. Date suffixes (8 digits) are not versions.
+fn anthropic_version(model: &str) -> Option<(u32, u32)> {
+    let rest = model.trim().strip_prefix("claude-")?;
+    let mut numbers = rest
+        .split('-')
+        .filter(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+        .filter(|part| part.len() <= 2)
+        .filter_map(|part| part.parse::<u32>().ok());
+    let major = numbers.next()?;
+    Some((major, numbers.next().unwrap_or(0)))
+}
+
+fn anthropic_always_thinks(model: &str) -> bool {
+    anthropic_version(model).map_or(true, |version| version >= ANTHROPIC_ALWAYS_THINKING_FROM)
+}
+
+/// Messages API payload; see [`ANTHROPIC_ALWAYS_THINKING_FROM`]. An empty system
+/// prompt is omitted.
+fn anthropic_payload(
     config: &AiProviderConfig,
     request: &AiChatCompleteRequest,
-    api_key: &str,
-) -> Result<String, String> {
+) -> serde_json::Value {
+    let model = request
+        .model
+        .as_deref()
+        .filter(|model| !model.trim().is_empty())
+        .unwrap_or(&config.default_model);
     let system = request
         .messages
         .iter()
@@ -183,28 +216,58 @@ async fn complete_anthropic(
             })
         })
         .collect::<Vec<_>>();
-    let payload = json!({
-        "model": request.model.as_deref().unwrap_or(&config.default_model),
-        "max_tokens": request.max_tokens.unwrap_or(1024),
-        "temperature": request.temperature.unwrap_or(0.2),
-        "system": system,
-        "messages": messages,
-    });
-    let headers = [("x-api-key", api_key), ("anthropic-version", "2023-06-01")];
-    let value = post_json(config, "messages", &payload, &headers, None).await?;
-    Ok(value
+    let requested = request.max_tokens.unwrap_or(1024);
+    let mut payload = json!({ "model": model, "messages": messages });
+    if anthropic_always_thinks(model) {
+        payload["max_tokens"] = json!(requested.max(ANTHROPIC_MIN_MAX_TOKENS));
+    } else {
+        payload["max_tokens"] = json!(requested);
+        payload["temperature"] = json!(request.temperature.unwrap_or(0.2));
+    }
+    if !system.trim().is_empty() {
+        payload["system"] = json!(system);
+    }
+    payload
+}
+
+/// Text of a Messages API response. `thinking`/`redacted_thinking` blocks are skipped.
+/// No text because the budget ran out, or because the model refused, gets its own code
+/// (never the provider's message, which can echo the prompt).
+fn anthropic_text(value: &serde_json::Value) -> Result<String, String> {
+    let text = value
         .get("content")
         .and_then(|content| content.as_array())
-        .and_then(|content| {
-            content
+        .map(|blocks| {
+            blocks
                 .iter()
-                .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("text"))
+                .filter(|item| item.get("type").and_then(|v| v.as_str()) == Some("text"))
+                .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("")
         })
-        .and_then(|item| item.get("text"))
-        .and_then(|text| text.as_str())
-        .unwrap_or("")
+        .unwrap_or_default()
         .trim()
-        .to_string())
+        .to_string();
+    match value.get("stop_reason").and_then(|reason| reason.as_str()) {
+        // A refusal may arrive with partial text; it is never a completed answer.
+        Some("refusal") => Err("AI_CHAT_REFUSED".into()),
+        // Truncated text is still returned, like the OpenAI-compatible path.
+        Some("max_tokens") if text.is_empty() => {
+            Err("AI_CHAT_OUTPUT_TOKEN_LIMIT: model produced no final content".into())
+        }
+        _ => Ok(text),
+    }
+}
+
+async fn complete_anthropic(
+    config: &AiProviderConfig,
+    request: &AiChatCompleteRequest,
+    api_key: &str,
+) -> Result<String, String> {
+    let payload = anthropic_payload(config, request);
+    let headers = [("x-api-key", api_key), ("anthropic-version", "2023-06-01")];
+    let value = post_json(config, "messages", &payload, &headers, None).await?;
+    anthropic_text(&value)
 }
 
 async fn complete_gemini(
@@ -352,6 +415,176 @@ mod tests {
             AiProviderKind::Ollama,
             &format!("http://127.0.0.1:{port}"),
         ))
+    }
+
+    fn anthropic_config() -> AiProviderConfig {
+        provider::normalize_fields(provider(
+            AiProviderKind::Anthropic,
+            "https://api.anthropic.com",
+        ))
+    }
+
+    fn request_for(model: &str) -> AiChatCompleteRequest {
+        let mut request = probe_request(&anthropic_config());
+        request.model = Some(model.into());
+        request
+    }
+
+    #[test]
+    fn reads_claude_versions_from_model_ids() {
+        assert_eq!(anthropic_version("claude-opus-5-5"), Some((5, 5)));
+        assert_eq!(anthropic_version("claude-fable-5-1"), Some((5, 1)));
+        assert_eq!(anthropic_version("claude-opus-4-1-20250805"), Some((4, 1)));
+        assert_eq!(
+            anthropic_version("claude-3-5-sonnet-20241022"),
+            Some((3, 5))
+        );
+        assert_eq!(anthropic_version("claude-3-opus-20240229"), Some((3, 0)));
+        assert_eq!(anthropic_version("claude-sonnet-4-5"), Some((4, 5)));
+        assert_eq!(anthropic_version("my-proxy-model"), None);
+        assert!(anthropic_always_thinks("claude-opus-4-7"));
+        assert!(anthropic_always_thinks("claude-haiku-5-5"));
+        assert!(!anthropic_always_thinks("claude-opus-4-6"));
+        assert!(!anthropic_always_thinks("claude-3-5-sonnet-20241022"));
+        // Unknown ids are treated as new: the safe request shape for current models.
+        assert!(anthropic_always_thinks("my-proxy-model"));
+    }
+
+    #[test]
+    fn new_claude_payload_has_no_sampling_params_and_room_to_think() {
+        let payload = anthropic_payload(&anthropic_config(), &request_for("claude-opus-5-5"));
+        for param in ["temperature", "top_p", "top_k"] {
+            assert!(payload.get(param).is_none(), "{param} must be omitted");
+        }
+        assert!(payload.get("system").is_none(), "empty system is omitted");
+        assert_eq!(payload["max_tokens"], ANTHROPIC_MIN_MAX_TOKENS);
+        assert_eq!(payload["model"], "claude-opus-5-5");
+
+        let mut big = request_for("claude-opus-5-5");
+        big.max_tokens = Some(10_000);
+        assert_eq!(
+            anthropic_payload(&anthropic_config(), &big)["max_tokens"],
+            10_000
+        );
+    }
+
+    #[test]
+    fn older_claude_payload_keeps_temperature_and_token_limit() {
+        let mut request = request_for("claude-sonnet-4-5");
+        request.temperature = Some(0.1);
+        request.max_tokens = Some(96);
+        let payload = anthropic_payload(&anthropic_config(), &request);
+        assert_eq!(payload["max_tokens"], 96);
+        assert!((payload["temperature"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+
+        request.temperature = None;
+        request.max_tokens = None;
+        let payload = anthropic_payload(&anthropic_config(), &request);
+        assert_eq!(payload["max_tokens"], 1024);
+        assert!((payload["temperature"].as_f64().unwrap() - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn payload_falls_back_to_default_model_and_maps_history() {
+        let mut config = anthropic_config();
+        config.default_model = "claude-sonnet-5-5".into();
+        let request = AiChatCompleteRequest {
+            provider_id: config.id.clone(),
+            model: Some("  ".into()),
+            messages: vec![
+                AiChatMessage {
+                    role: "system".into(),
+                    content: "   ".into(),
+                },
+                AiChatMessage {
+                    role: "user".into(),
+                    content: "Q1".into(),
+                },
+                AiChatMessage {
+                    role: "assistant".into(),
+                    content: "A1".into(),
+                },
+                AiChatMessage {
+                    role: "tool".into(),
+                    content: "Q2".into(),
+                },
+            ],
+            temperature: None,
+            max_tokens: None,
+        };
+        let payload = anthropic_payload(&config, &request);
+        assert_eq!(payload["model"], "claude-sonnet-5-5");
+        assert!(
+            payload.get("system").is_none(),
+            "whitespace-only system is omitted"
+        );
+        let roles: Vec<_> = payload["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["role"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(roles, ["user", "assistant", "user"]);
+        assert_eq!(payload["max_tokens"], ANTHROPIC_MIN_MAX_TOKENS);
+    }
+
+    #[test]
+    fn response_text_skips_thinking_and_reports_why_it_is_empty() {
+        let value = serde_json::json!({
+            "content": [
+                { "type": "thinking", "thinking": "hmm" },
+                { "type": "redacted_thinking", "data": "xx" },
+                { "type": "text", "text": "OK" },
+                { "type": "text", "text": "!" }
+            ],
+            "stop_reason": "end_turn"
+        });
+        assert_eq!(anthropic_text(&value).unwrap(), "OK!");
+
+        let truncated_with_text = serde_json::json!({
+            "content": [{ "type": "text", "text": "partial" }],
+            "stop_reason": "max_tokens"
+        });
+        assert_eq!(anthropic_text(&truncated_with_text).unwrap(), "partial");
+
+        let thinking_only = serde_json::json!({
+            "content": [{ "type": "thinking", "thinking": "..." }],
+            "stop_reason": "max_tokens"
+        });
+        assert!(anthropic_text(&thinking_only)
+            .unwrap_err()
+            .starts_with("AI_CHAT_OUTPUT_TOKEN_LIMIT"));
+
+        let refused = serde_json::json!({ "content": [], "stop_reason": "refusal" });
+        assert_eq!(anthropic_text(&refused).unwrap_err(), "AI_CHAT_REFUSED");
+
+        // Refusal with partial text (documented shape): still a refusal, and neither
+        // the text nor stop_details reach the error.
+        let refused_with_text = serde_json::json!({
+            "content": [{ "type": "text", "text": "Hello.." }],
+            "stop_reason": "refusal",
+            "stop_details": { "explanation": "policy" }
+        });
+        assert_eq!(
+            anthropic_text(&refused_with_text).unwrap_err(),
+            "AI_CHAT_REFUSED"
+        );
+
+        assert_eq!(
+            anthropic_text(&serde_json::json!({ "content": [] })).unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn anthropic_errors_keep_the_type_but_not_the_message() {
+        let body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt: SELECT * FROM customers"}}"#;
+        let error = provider_http_error(reqwest::StatusCode::BAD_REQUEST, body);
+        assert_eq!(
+            error,
+            "AI_CHAT_FAILED: 400 Bad Request invalid_request_error"
+        );
+        assert!(!error.contains("customers"));
     }
 
     #[test]

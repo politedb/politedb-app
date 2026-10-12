@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "macos"))]
 use std::process::Command;
 use tauri::AppHandle;
 
@@ -57,18 +58,23 @@ pub async fn license_open_external_url(url: String) -> Result<(), String> {
     distribution::ensure(Distribution::current().allows_external_url(&url))?;
 
     #[cfg(target_os = "macos")]
-    let status = Command::new("open").arg(&url).status();
+    {
+        crate::platform::macos::open_url(&url)
+    }
 
-    #[cfg(target_os = "windows")]
-    let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
+    #[cfg(not(target_os = "macos"))]
+    {
+        #[cfg(target_os = "windows")]
+        let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let status = Command::new("xdg-open").arg(&url).status();
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let status = Command::new("xdg-open").arg(&url).status();
 
-    let status = status.map_err(|e| format!("FAILED_TO_OPEN_URL: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("FAILED_TO_OPEN_URL: exited with status {status}"))
+        let status = status.map_err(|e| format!("FAILED_TO_OPEN_URL: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("FAILED_TO_OPEN_URL: exited with status {status}"))
+        }
     }
 }

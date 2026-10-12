@@ -32,7 +32,7 @@ export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
 
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   openai: "gpt-4.1-mini",
-  anthropic: "claude-sonnet-4-5",
+  anthropic: "claude-sonnet-5-5",
   gemini: "gemini-2.5-flash",
   openrouter: "openai/gpt-4.1-mini",
   grok: "grok-3-mini",
@@ -57,7 +57,12 @@ export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
     "o4-mini",
     "o3",
   ],
-  anthropic: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+  anthropic: [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-haiku-5-5",
+    "claude-fable-5-1",
+  ],
   gemini: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
   openrouter: [
     "openai/gpt-4.1-mini",

@@ -8,7 +8,7 @@ use crate::ai::chat::{self, AiChatCompleteRequest};
 use crate::ai::legacy_model::{self, LegacyModelInfo};
 use crate::ai::provider::{self, AiProviderConfig};
 use crate::ai::provider_store::{self, KeyChange};
-use crate::{license, state::AppState};
+use crate::state::AppState;
 
 /// Key edit sent with a save: blank input keeps the stored key.
 #[derive(Debug, Clone, Deserialize)]
@@ -27,14 +27,6 @@ impl From<KeyChangeInput> for KeyChange {
             KeyChangeInput::Remove => KeyChange::Remove,
         }
     }
-}
-
-fn ensure_ai_licensed(app: &AppHandle) -> Result<(), String> {
-    let license_state = license::license_state_load(app)?;
-    if license::blocks_ai_feature(&license_state) {
-        return Err("AI_LICENSE_REQUIRED".into());
-    }
-    Ok(())
 }
 
 fn lock_providers(state: &AppState) -> Result<std::sync::MutexGuard<'_, ()>, String> {
@@ -95,7 +87,7 @@ fn draft_key(
     provider_store::request_key(&AppSecrets(app), config, &auth.into())
 }
 
-/// Lists model ids for an unsaved draft. Metadata only, so not license-gated (plan D15);
+/// Lists model ids for an unsaved draft. Metadata only (plan D15);
 /// runs regardless of `enabled` because the user asked for it explicitly (plan R3).
 /// `request_id` scopes cancellation to the caller (see [`ai_provider_cancel_list_models`]).
 #[tauri::command]
@@ -131,7 +123,7 @@ pub fn ai_provider_cancel_list_models(
 }
 
 /// Tests an unsaved draft with a short completion. Persists nothing and ignores
-/// `enabled` (plan R3); license-gated like chat.
+/// `enabled` (plan R3). AI is free: no license check (D16).
 #[tauri::command]
 pub async fn ai_provider_test_draft(
     app: AppHandle,
@@ -139,7 +131,6 @@ pub async fn ai_provider_test_draft(
     config: AiProviderConfig,
     auth: KeyChangeInput,
 ) -> Result<(), String> {
-    ensure_ai_licensed(&app)?;
     let config = provider::validate_for_completion(config)?;
     let key = draft_key(&app, &state, &config, auth)?;
     let text = chat::complete(&config, &chat::probe_request(&config), key.as_deref()).await?;
@@ -155,7 +146,6 @@ pub async fn ai_chat_complete(
     state: tauri::State<'_, AppState>,
     request: AiChatCompleteRequest,
 ) -> Result<String, String> {
-    ensure_ai_licensed(&app)?;
     // Config and key are read together under the lock, then the lock is released
     // before any network I/O (plan R1/R13).
     let (config, key) = {
@@ -198,7 +188,7 @@ fn app_data_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
         .map_err(|_| legacy_model::IO_FAILED.to_string())
 }
 
-/// Fixed files left by the removed bundled runtime (plan D10). Not license-gated.
+/// Fixed files left by the removed bundled runtime (plan D10).
 #[tauri::command]
 pub fn ai_legacy_model_info(app: AppHandle) -> Result<LegacyModelInfo, String> {
     legacy_model::info(&app_data_root(&app)?)
