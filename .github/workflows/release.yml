@@ -38,7 +38,9 @@ jobs:
         include:
           - platform: macos-14
             target: "aarch64-apple-darwin"
-          - platform: macos-15-intel
+          # Cross-compiled on Apple Silicon: Intel runners queue for a long time and
+          # build ~1.7x slower. Keep in sync with rust-cache-warm.yml.
+          - platform: macos-14
             target: "x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
@@ -50,6 +52,16 @@ jobs:
 
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # Tag-triggered runs can read caches saved on the default branch but their own
+      # saves are scoped to the tag, so rust-cache-warm.yml keeps the main-branch cache
+      # fresh and release runs only save when started from main via workflow_dispatch.
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: macos-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
