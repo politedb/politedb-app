@@ -163,3 +163,49 @@ Independent verification:
 - `git diff --check`: passed. No live provider call, desktop UI session, frontend build or full Rust suite rerun for this backend-only fix. Loopback transport remains unverified in this sandbox; prior broader-review limitations remain applicable.
 
 The refusal fix is verified within this scope; the prior required P2 no longer blocks handoff.
+
+
+## Review: 173e36c (assistant header)
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-12.
+
+Scope: read AGENTS.md, RTK.md and .agent/WORKFLOW.md; reviewed complete `git show 173e36c`, message body/placeholder, floating container, session timing and adjacent submission paths. HEAD is `173e36c01d629a173c21c258752cae88fbc56303` on `feat/mas-native-apis`. Only this report appended; no source edits, staging or commit.
+
+### Finding
+
+- **P2 — `src/components/ai-assistant/AiAssistantMessageCard.tsx:199`: new duration text has insufficient contrast.** `text-xs text-neutral-400` renders 12px informative text on the floating launcher's white background (`FloatingAssistantLauncher.tsx:120`). Built CSS resolves neutral-400 to `oklch(70.8% 0 0)`, yielding approximately **2.59:1** contrast; small text needs **4.5:1**. Use `text-neutral-500` (approximately **4.73:1** on white) or darker while retaining the compact size. Existing panel duration/timestamps use the same pale color, but this commit newly introduces it for floating duration; this finding targets the added line.
+
+### Message-state correctness
+
+- **Streaming empty/whitespace:** no static Thought/chevron or duration header; existing body placeholder shows Thinking..., retaining `aria-busy="true"` and `aria-live="polite"`. A stale durationMs is suppressed while streaming.
+- **Streaming with text:** no header or duration; existing body renders partial answer text and removes Thinking.... Thus “only Thinking...” describes the empty streaming placeholder, not suppression of streamed answer text. Rendering of parts/SQL/results is unchanged. Existing synthetic empty-text messages with populated parts can show placeholder plus parts; this is pre-existing, not introduced here.
+- **Completed with duration:** one floating duration line above the body; existing formatDuration hides absent/zero/negative/<1000ms values and rounds seconds at >=1000ms (4200ms -> Worked for 4s). Minute/hour formatting is reused unchanged. There is no duplicate floating duration because panel markup is gated by !floating.
+- **Completed without duration or under 1s:** no header; answer remains visible. Empty completed messages have no Thinking... placeholder. Duration remains informational, with no expand affordance or interaction.
+- **Errors:** role=assistant error messages follow the same timing gate; error body/parts remain intact, and duration describes elapsed attempt rather than successful completion. Error styling and handling are untouched; no new error masking or success-state mutation.
+- **Non-floating/user presentation:** panel role label, duration, body and hover actions unchanged; floating user messages never receive duration/assistant header. No handlers, focusable elements, keyboard behavior, copy names or SQL safety gates changed. Removed Thought/chevron were plain spans, not an accessible disclosure control. New timing line is ordinary text, not a live announcement.
+
+### Verification and coverage limits
+
+- `npm run test:run -- src/components/ai-assistant src/lib/ai-assistant src/lib/tauri/ai.test.ts src/lib/politedbBackend/ai.test.ts`: **12 files / 84 tests passed**.
+- `npm run build`: **passed** (TypeScript and Vite). Existing browser externalization, ineffective dynamic-import, chunk-size and plugin timing warnings remain.
+- `git diff --check`: **passed** before report append. Source tree matches reviewed commit.
+- Added test covers empty streaming and completed 4200ms only, using separate mounts. It does not prove an in-place streaming-to-completed transition, streaming with text/stale duration, absent duration, 999/1000ms boundary, minute/hour formatting, errors, panel or user presentation. Add focused render/rerender fixtures for these states; missing tests are coverage limitations, not evidence of another runtime defect.
+- Visual/accessibility assessment uses source plus generated CSS and calculated contrast. No rendered desktop/browser session, zoom/geometry inspection or screen-reader session performed; those remain unverified. No Rust checks needed for this frontend-only diff.
+
+Next: Claude darkens the added duration text, adds focused state regressions, records verification and requests re-review.
+
+
+## Re-review: 173e36c contrast fix
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-12. The assistant-header P2 is resolved; no new findings in the fix.
+
+Scope: read AGENTS.md, RTK.md and .agent/WORKFLOW.md; re-reviewed the uncommitted `git diff` in AiAssistantMessageCard.tsx and AiAssistantMessageCard.test.tsx against HEAD `173e36c01d629a173c21c258752cae88fbc56303`, plus the original finding and floating container. Preserved the existing review content; only this section appended. No source edits, staging or commit.
+
+- **Contrast fix verified:** the sole runtime change replaces `text-neutral-400` with `text-neutral-500` on the floating assistant duration line. Production CSS resolves `--color-neutral-500` to `oklch(55.6% 0 0)` and `.text-neutral-500` to that variable. Against the launcher's `bg-white`, calculated contrast is **4.732:1**, exceeding the **4.5:1** small-text threshold. Compact size and font weight remain unchanged.
+- **Focused regressions verified:** same mounted card rerenders from empty streaming to completed (`Thinking...` disappears; `Worked for 1m 5s` appears). Fixtures suppress duration for streaming text with stale duration, absent duration and 999ms, and show it at 1000ms. Panel keeps its role label and exactly one duration; floating user messages receive no duration. Existing SQL-preview tests retain read-only execution, connection gating, mutating-query suppression and production authentication ordering. Timing gates, formatting, body rendering, actions and SQL safety code are unchanged.
+- `npm run test:run -- src/components/ai-assistant src/lib/ai-assistant src/lib/tauri/ai.test.ts src/lib/politedbBackend/ai.test.ts`: **12 files / 87 tests passed**.
+- `npm run build`: **passed** (TypeScript and Vite). Browser externalization, ineffective dynamic-import, chunk-size and plugin timing warnings remain.
+- `git diff --check`: **passed** before and after report append.
+- **Limitations:** contrast assessed from source and generated CSS; no rendered desktop/browser, zoom/geometry or screen-reader inspection performed. Tests do not directly assert the color class/contrast, preservation of partial answer text, hour formatting or error-message presentation. These are nonblocking coverage limits for this one-class fix; no behavior change was found in those paths. Existing panel duration contrast remains outside this finding's scope. No Rust checks needed for this frontend-only diff.
+
+Next: contrast fix is ready for commit when requested by the human.
