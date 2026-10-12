@@ -4,16 +4,11 @@ import { CopyIcon, EditIcon, KeyIcon, TrashIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { KebabButton } from "../../components/common/KebabButton";
 
-function parseKeyName(keyName: string) {
-  const parts = keyName.split(":").filter(Boolean);
-  const labelParts = parts[parts.length - 1].split("/").slice(-3);
-  const label = labelParts.slice(-2).join("/") || keyName;
-
-  return { label, tag: labelParts[0] };
-}
-
 export function KeychainCard(props: {
   keyName: string;
+  /** Display text from `keychainDisplay` (the raw key name stays the identity). */
+  title: string;
+  subtitle: string;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -26,7 +21,7 @@ export function KeychainCard(props: {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const { label, tag } = useMemo(() => parseKeyName(keyName), [keyName]);
+  const { title: label, subtitle: tag } = props;
 
   const onDeleteSecret = useCallback(async () => {
     const ok = await Promise.resolve(
@@ -105,7 +100,10 @@ export function KeychainCard(props: {
 
           <div class="min-w-0 flex-1">
             <div class="flex flex-col justify-start gap-1">
-              <div class="truncate text-sm font-semibold text-slate-800">
+              <div
+                class="truncate text-sm font-semibold text-slate-800"
+                title={keyName}
+              >
                 {label}
               </div>
               <span class="text-xs text-neutral-600">{tag}</span>

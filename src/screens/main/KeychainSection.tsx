@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { aiProviderList } from "src/lib/tauri/ai";
+import { profileList } from "src/lib/tauri/profile";
+import type { ConnectionProfile } from "src/lib/tauri/types";
+import { keychainDisplay } from "src/lib/keychain/display";
+import type { AiProviderConfig } from "src/types";
 import { Button } from "src/components/common/Button";
 import {
   Dialog,
@@ -67,6 +72,9 @@ export function KeychainSection(props: {
   const [value, setValue] = useState("");
   const [resolvedValue, setResolvedValue] = useState("");
   const [keys, setKeys] = useState<string[]>([]);
+  // AI providers and connections give their keys readable names.
+  const [aiProviders, setAiProviders] = useState<AiProviderConfig[]>([]);
+  const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -209,6 +217,29 @@ export function KeychainSection(props: {
   }, [tauriReady]);
 
   useEffect(() => {
+    if (!tauriReady) return;
+    const load = () =>
+      aiProviderList()
+        .then(setAiProviders)
+        .catch(() => setAiProviders([]));
+    void load();
+    void profileList()
+      .then(setProfiles)
+      .catch(() => setProfiles([]));
+    window.addEventListener("politedb-ai-providers-changed", load);
+    return () =>
+      window.removeEventListener("politedb-ai-providers-changed", load);
+  }, [tauriReady]);
+
+  const displays = useMemo(
+    () =>
+      new Map(
+        keys.map((k) => [k, keychainDisplay(k, { aiProviders, profiles })])
+      ),
+    [keys, aiProviders, profiles]
+  );
+
+  useEffect(() => {
     setSelectedKey(null);
     setKey("");
     setValue("");
@@ -220,11 +251,18 @@ export function KeychainSection(props: {
   const canSubmit = tauriReady && !busy;
   const filteredKeys = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    const matched = !q ? keys : keys.filter((k) => k.toLowerCase().includes(q));
+    const matched = !q
+      ? keys
+      : keys.filter((k) => {
+          const d = displays.get(k);
+          return [k, d?.title ?? "", d?.subtitle ?? ""].some((text) =>
+            text.toLowerCase().includes(q)
+          );
+        });
     return [...matched].sort((a, b) =>
       sortMode === "label-desc" ? b.localeCompare(a) : a.localeCompare(b)
     );
-  }, [keys, searchQuery, sortMode]);
+  }, [keys, displays, searchQuery, sortMode]);
 
   return (
     <div class="h-full w-full bg-slate-50">
@@ -264,6 +302,8 @@ export function KeychainSection(props: {
               <KeychainCard
                 key={k}
                 keyName={k}
+                title={displays.get(k)?.title ?? k}
+                subtitle={displays.get(k)?.subtitle ?? ""}
                 selected={selectedKey === k}
                 disabled={!canSubmit}
                 onSelect={() => setSelectedKey(k)}
