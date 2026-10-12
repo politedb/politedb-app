@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
-import { trackEvent } from "src/lib/analytics";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { errorCode, trackEvent } from "src/lib/analytics";
 import {
   connectProfileOnce,
   resolveTabRuntimeConnectionId,
@@ -27,6 +27,15 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
 
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  // Bumped whenever the screen moves to another tab/profile (and on unmount), so a
+  // reload started for the previous one never applies its result here.
+  const generation = useRef(0);
+  useEffect(() => {
+    generation.current += 1;
+    return () => {
+      generation.current += 1;
+    };
+  }, [activeTab?.id, activeTab?.profileId]);
 
   useEffect(() => {
     if (!activeTab?.profileId || activeProfileScreen === "main") return;
@@ -82,7 +91,7 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
           engine: activeTab.engine,
           source: "auto_restore",
           duration_ms: Date.now() - startedAt,
-          error: msg.slice(0, 240),
+          error: errorCode(msg),
         });
       } finally {
         if (!canceled) setConnecting(false);
@@ -111,31 +120,44 @@ export function useEnsureRuntimeConnection(activeTab?: ProfileTab | null) {
     );
     if (resolvedConnectionId) return resolvedConnectionId;
 
+    const startedFor = generation.current;
+    const tab = activeTab;
+    const profileId = activeTab.profileId;
+    // Screen state (error, busy) belongs to whatever tab is shown now; results of a
+    // reload started for another tab only touch that tab, and only if it still exists.
+    const sameScreen = () => generation.current === startedFor;
+    const tabExists = () =>
+      useScreenStore.getState().profileTabs.some((t) => t.id === tab.id);
+
     setConnecting(true);
     const startedAt = Date.now();
     try {
-      const connectionId = await connectProfileOnce(activeTab.profileId);
-      setError(null);
-      updateTab(activeTab.id, { runtimeConnectionId: connectionId });
-      void recordConnectionSessionOpened(activeTab);
-      trackEvent("runtime_connection_opened", {
-        engine: activeTab.engine,
-        source: "manual_reload",
-        duration_ms: Date.now() - startedAt,
-      });
+      const connectionId = await connectProfileOnce(profileId);
+      if (sameScreen()) setError(null);
+      if (tabExists()) {
+        updateTab(tab.id, { runtimeConnectionId: connectionId });
+        void recordConnectionSessionOpened(tab);
+        trackEvent("runtime_connection_opened", {
+          engine: tab.engine,
+          source: "manual_reload",
+          duration_ms: Date.now() - startedAt,
+        });
+      }
       return connectionId;
     } catch (e: any) {
       const msg = e?.message ? String(e.message) : String(e);
-      setError(msg);
-      void recordConnectionSessionFailed(activeTab, msg);
-      trackEvent("runtime_connection_open_error", {
-        engine: activeTab.engine,
-        source: "manual_reload",
-        duration_ms: Date.now() - startedAt,
-        error: msg.slice(0, 240),
-      });
+      if (sameScreen()) setError(msg);
+      if (tabExists()) {
+        void recordConnectionSessionFailed(tab, msg);
+        trackEvent("runtime_connection_open_error", {
+          engine: tab.engine,
+          source: "manual_reload",
+          duration_ms: Date.now() - startedAt,
+          error: errorCode(msg),
+        });
+      }
     } finally {
-      setConnecting(false);
+      if (sameScreen()) setConnecting(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [

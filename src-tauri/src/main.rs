@@ -8,6 +8,7 @@ mod commands;
 mod data_migration;
 mod distribution;
 mod engines;
+mod file_access;
 mod file_storage;
 mod license;
 mod operations;
@@ -125,6 +126,7 @@ fn main() {
         .setup(move |app| {
             enforce_minimum_macos_version()?;
             data_migration::migrate_legacy_app_data(app.handle());
+            file_access::install(file_access::for_app(app.handle())?);
             window_chrome::apply(app);
             let state: tauri::State<AppState> = app.state();
             state.sql_busy.clear();
@@ -151,6 +153,9 @@ fn main() {
             commands::license::license_deactivate,
             commands::license::license_open_external_url,
             commands::security::security_touch_id_authenticate,
+            commands::file_access::file_access_pick_database,
+            commands::file_access::file_access_pick_ssh_key,
+            commands::file_access::file_access_missing,
             // Connections
             commands::connection::lifecycle::connection_create,
             commands::connection::lifecycle::connection_list,

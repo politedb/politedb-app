@@ -20,6 +20,9 @@ export default defineConfig(async () => ({
       "monaco-editor": resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
     },
     exclude: ["**/node_modules/**", "**/dist/**", "**/.tmp/**", ".tmp/**"],
+    // Bundle react-hook-form through Vite so its `react` import resolves to preact/compat
+    // (otherwise Node loads real React and form components cannot render in tests).
+    server: { deps: { inline: ["react-hook-form"] } },
   },
   resolve: {
     alias: {

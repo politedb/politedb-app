@@ -14,3 +14,4 @@ export * from "./license";
 export * from "./sql";
 export * from "./snippets";
 export * from "./security";
+export * from "./fileAccess";

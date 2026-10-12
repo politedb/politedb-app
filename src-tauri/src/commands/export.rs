@@ -5,11 +5,12 @@ use std::sync::{LazyLock, Mutex};
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::file_access::safe_save::{self, Staged};
 use crate::file_storage;
 
 struct ExportSession {
     final_path: PathBuf,
-    temp_path: PathBuf,
+    staged: Staged,
 }
 
 static SESSIONS: LazyLock<Mutex<HashMap<String, ExportSession>>> =
@@ -25,7 +26,8 @@ fn sanitize(msg: &str) -> String {
     msg.to_string()
 }
 
-/// Begin a scoped export session. Writes go to an exclusive temp sibling of `path`.
+/// Begin a scoped export session. Writes go to a session-owned staging file (a temp
+/// sibling of `path`, or the system replacement directory in sandboxed builds).
 #[tauri::command]
 pub fn export_session_begin(path: String) -> Result<ExportSessionBeginResult, String> {
     let final_path = PathBuf::from(&path);
@@ -34,19 +36,14 @@ pub fn export_session_begin(path: String) -> Result<ExportSessionBeginResult, St
     }
 
     let session_id = Uuid::new_v4().to_string();
-    let temp_path = file_storage::export_create_temp(&final_path, &session_id)
+    let staged = safe_save::for_distribution()
+        .stage(&final_path, &session_id)
         .map_err(|_| sanitize("Failed to create export temp file"))?;
 
     let mut guard = SESSIONS
         .lock()
         .map_err(|_| sanitize("Export session lock failed"))?;
-    guard.insert(
-        session_id.clone(),
-        ExportSession {
-            final_path,
-            temp_path,
-        },
-    );
+    guard.insert(session_id.clone(), ExportSession { final_path, staged });
 
     Ok(ExportSessionBeginResult { session_id })
 }
@@ -61,7 +58,7 @@ pub fn export_session_append(session_id: String, content: String) -> Result<(), 
         .get(&session_id)
         .ok_or_else(|| sanitize("Export session not found"))?;
 
-    file_storage::export_append_to_file(&session.temp_path, &content, &true)
+    file_storage::export_append_to_file(&session.staged.temp_path, &content, &true)
         .map_err(|_| sanitize("Export write failed"))
 }
 
@@ -75,10 +72,11 @@ pub fn export_session_publish(session_id: String) -> Result<(), String> {
         .remove(&session_id)
         .ok_or_else(|| sanitize("Export session not found"))?;
 
-    match file_storage::export_publish_temp(&session.temp_path, &session.final_path) {
+    let saver = safe_save::for_distribution();
+    match saver.publish(&session.staged, &session.final_path) {
         Ok(()) => Ok(()),
         Err(_) => {
-            let _ = file_storage::export_discard_temp(&session.temp_path);
+            saver.discard(&session.staged);
             Err(sanitize("Failed to publish export file"))
         }
     }
@@ -91,7 +89,7 @@ pub fn export_session_abort(session_id: String) -> Result<(), String> {
         .lock()
         .map_err(|_| sanitize("Export session lock failed"))?;
     if let Some(session) = guard.remove(&session_id) {
-        let _ = file_storage::export_discard_temp(&session.temp_path);
+        safe_save::for_distribution().discard(&session.staged);
     }
     Ok(())
 }

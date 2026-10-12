@@ -35,6 +35,11 @@ export const CMD = {
   profileSaveAndConnect: "profile_save_and_connect",
   profileConnect: "profile_connect",
   profileConnectTest: "profile_connect_test",
+
+  // Sandboxed file access (security-scoped bookmarks)
+  fileAccessPickDatabase: "file_access_pick_database",
+  fileAccessPickSshKey: "file_access_pick_ssh_key",
+  fileAccessMissing: "file_access_missing",
   profileExport: "profile_export",
   profileExportOne: "profile_export_one",
   profileExportOneEncrypted: "profile_export_one_encrypted",

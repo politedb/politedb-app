@@ -227,6 +227,10 @@ fn connect_ssh_session_blocking(input: &SshTunnelInput) -> anyhow::Result<Sessio
             identity_file,
             passphrase,
         } => {
+            // Sandboxed builds: keep the key's grant active for the whole native read.
+            let _lease = crate::file_access::service()
+                .acquire(crate::file_access::Role::SshKey, identity_file)
+                .map_err(|e| anyhow!(e))?;
             sess.userauth_pubkey_file(user, None, Path::new(identity_file), passphrase.as_deref())?;
         }
         SshAuth::Password { password } => {

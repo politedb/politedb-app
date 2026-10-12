@@ -365,6 +365,27 @@ mod tests {
         assert!(pw.value.is_empty());
     }
 
+    /// File grants (security-scoped bookmarks) live only in `file_access/grants.json`:
+    /// profiles, and therefore exports/imports, never carry them (plan Phase 3 R7).
+    #[test]
+    fn profiles_never_carry_file_grants() {
+        let mut profile = sample_profile();
+        profile.input.sqlite = Some(crate::types::SqliteConnectInput {
+            path: "/Users/me/data/app.db".into(),
+            statement_timeout_ms: None,
+        });
+        let json = serde_json::to_value(&profile).unwrap();
+        assert!(!json.to_string().contains("bookmark"));
+
+        // An imported file that smuggles grant data in is read without it.
+        let mut injected = json.clone();
+        injected["input"]["sqlite"]["bookmark"] = "Ym9vaw==".into();
+        injected["file_grants"] = serde_json::json!([{ "role": "database_folder" }]);
+        let imported: ConnectionProfile = serde_json::from_value(injected).unwrap();
+        let round_trip = serde_json::to_string(&imported).unwrap();
+        assert!(!round_trip.contains("bookmark") && !round_trip.contains("file_grants"));
+    }
+
     fn sample_profile() -> ConnectionProfile {
         ConnectionProfile {
             id: Uuid::new_v4(),

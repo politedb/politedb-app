@@ -5,6 +5,10 @@ import {
   useRef,
   useState,
 } from "preact/hooks";
+import {
+  fileAccessRequests,
+  withFileAccessRecovery,
+} from "src/lib/file-access";
 import { useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { usePersistentStore } from "src/stores/persistentStore";
@@ -493,7 +497,10 @@ export function MenuBar({
       if (!nextDb || nextDb === connectionInfo?.database) return;
 
       const nextInput = withDatabaseInput(profile.input, nextDb);
-      const conn = await connectionCreate(nextInput);
+      const conn = await withFileAccessRecovery(
+        () => connectionCreate(nextInput),
+        fileAccessRequests(nextInput)
+      );
 
       const nextTabId = `tab-${uuid()}`;
       const nextTab = {

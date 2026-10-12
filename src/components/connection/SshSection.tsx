@@ -1,5 +1,7 @@
 import { TargetedEvent } from "preact";
-import { pickOpenFile } from "src/lib/system-dialog";
+import { describeFileAccessError } from "src/lib/file-access";
+import { showMessage } from "src/lib/system-dialog";
+import { fileAccessPickSshKey } from "src/lib/tauri/fileAccess";
 import { useController, useWatch } from "react-hook-form";
 import { Field, Input } from "src/components/form";
 import { Button } from "../common/Button";
@@ -88,10 +90,18 @@ export function SSHSection(props: SectionProps) {
     onDirty?.();
   }
 
+  /** Backend picker: in sandboxed builds it also remembers read access to the key. */
   async function pickSSHKeyPath(): Promise<string | null> {
-    const res = await pickOpenFile();
-    if (!res) return null;
-    return Array.isArray(res) ? (res[0] ?? null) : res;
+    try {
+      return await fileAccessPickSshKey();
+    } catch (error) {
+      await showMessage(
+        describeFileAccessError(error) ??
+          (error instanceof Error ? error.message : String(error)),
+        { title: "SSH key", kind: "error" }
+      );
+      return null;
+    }
   }
 
   // Errors (from RHF)

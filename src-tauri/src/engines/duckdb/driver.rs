@@ -6,8 +6,9 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::engines::driver::EngineDriver;
-use crate::engines::duckdb::connection::DuckdbConn;
+use crate::engines::duckdb::connection::{DuckdbConn, SharedDuckdb};
 use crate::engines::EngineConnection;
+use crate::file_access::Leased;
 use crate::types::{ConnectionCreateInput, ConnectionTestSecrets, DuckdbConnectInput, EngineKind};
 
 pub struct DuckdbDriver;
@@ -83,13 +84,15 @@ pub async fn connect_duckdb(
         return Err("DUCKDB_PATH_REQUIRED".into());
     }
 
+    // Lease taken inside the blocking task and owned by the shared handle (plan B5).
     let conn = tokio::task::spawn_blocking({
         let db_path = db_path.clone();
-        move || -> Result<Connection, String> {
+        move || -> Result<SharedDuckdb, String> {
+            let lease = crate::file_access::service().acquire_database(&db_path)?;
             let conn = open_duckdb(&db_path)?;
             conn.execute_batch("SELECT 1;")
                 .map_err(|e| format!("DUCKDB_SMOKE_TEST_FAILED: {e}"))?;
-            Ok(conn)
+            Ok(Arc::new(Leased::new(Mutex::new(conn), lease)))
         }
     })
     .await
@@ -99,7 +102,7 @@ pub async fn connect_duckdb(
         id: conn_id,
         label,
         db_path,
-        conn: Arc::new(Mutex::new(conn)),
+        conn,
         default_statement_timeout_ms: input.statement_timeout_ms,
     })
 }
@@ -111,6 +114,8 @@ pub async fn test_duckdb_direct(input: DuckdbConnectInput) -> Result<(), String>
     }
 
     tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Declared first so it drops after the connection closes.
+        let _lease = crate::file_access::service().acquire_database(&db_path)?;
         let conn = open_duckdb(&db_path)?;
         conn.execute_batch("SELECT 1;")
             .map_err(|e| format!("DUCKDB_SMOKE_TEST_FAILED: {e}"))?;

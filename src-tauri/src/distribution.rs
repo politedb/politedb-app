@@ -35,6 +35,12 @@ impl Distribution {
         matches!(self, Self::Direct)
     }
 
+    /// Sandboxed builds reach user files only through security-scoped bookmarks
+    /// (`crate::file_access`); direct builds open paths as typed.
+    pub const fn requires_file_grants(self) -> bool {
+        matches!(self, Self::AppStore)
+    }
+
     /// Whether `license_open_external_url` may open `url`. App Store builds open only
     /// support destinations, never purchase or donation pages (guideline 3.1.1).
     pub fn allows_external_url(self, url: &str) -> bool {

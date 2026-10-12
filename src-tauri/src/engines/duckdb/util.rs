@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use duckdb::Connection;
 
 /// Lock the shared handle, recovering from a prior poisoned lock when possible.
-fn lock_shared(shared: &Arc<Mutex<Connection>>) -> Result<MutexGuard<'_, Connection>, String> {
+fn lock_shared(
+    shared: &Arc<crate::file_access::Leased<Mutex<Connection>>>,
+) -> Result<MutexGuard<'_, Connection>, String> {
     match shared.lock() {
         Ok(guard) => Ok(guard),
         Err(poisoned) => Ok(poisoned.into_inner()),
@@ -12,7 +14,10 @@ fn lock_shared(shared: &Arc<Mutex<Connection>>) -> Result<MutexGuard<'_, Connect
 
 /// Run `f` on a cloned connection so the global mutex is not held during long queries.
 /// Panics inside `f` no longer poison the shared mutex for other operations.
-pub fn with_duckdb_connection<R, F>(shared: &Arc<Mutex<Connection>>, f: F) -> Result<R, String>
+pub fn with_duckdb_connection<R, F>(
+    shared: &Arc<crate::file_access::Leased<Mutex<Connection>>>,
+    f: F,
+) -> Result<R, String>
 where
     F: FnOnce(&Connection) -> Result<R, String>,
 {

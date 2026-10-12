@@ -1,10 +1,13 @@
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
 use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::engines::driver::EngineDriver;
-use crate::engines::sqlite::connection::SqliteConn;
+use crate::engines::sqlite::connection::{SharedSqlite, SqliteConn};
 use crate::engines::EngineConnection;
+use crate::file_access::Leased;
 use crate::types::{ConnectionCreateInput, ConnectionTestSecrets, EngineKind, SqliteConnectInput};
 
 pub struct SqliteDriver;
@@ -78,14 +81,17 @@ pub async fn connect_sqlite(
         return Err("SQLITE_PATH_REQUIRED".into());
     }
 
+    // The lease is taken inside the blocking task and moves into the shared handle, so a
+    // dropped await cannot stop access while the database is still open (plan B5).
     let conn = tokio::task::spawn_blocking({
         let db_path = db_path.clone();
-        move || -> Result<rusqlite::Connection, String> {
+        move || -> Result<SharedSqlite, String> {
+            let lease = crate::file_access::service().acquire_database(&db_path)?;
             let conn = rusqlite::Connection::open(&db_path)
                 .map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
             conn.execute_batch("SELECT 1;")
                 .map_err(|e| format!("SQLITE_SMOKE_TEST_FAILED: {e}"))?;
-            Ok(conn)
+            Ok(Arc::new(Leased::new(Mutex::new(conn), lease)))
         }
     })
     .await
@@ -95,7 +101,7 @@ pub async fn connect_sqlite(
         id: conn_id,
         label,
         db_path,
-        conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
+        conn,
         default_statement_timeout_ms: input.statement_timeout_ms,
     })
 }
@@ -107,6 +113,8 @@ pub async fn test_sqlite_direct(input: SqliteConnectInput) -> Result<(), String>
     }
 
     tokio::task::spawn_blocking(move || -> Result<(), String> {
+        // Declared first so it drops after the connection closes.
+        let _lease = crate::file_access::service().acquire_database(&db_path)?;
         let conn =
             rusqlite::Connection::open(&db_path).map_err(|e| format!("SQLITE_OPEN_FAILED: {e}"))?;
         conn.execute_batch("SELECT 1;")

@@ -499,7 +499,9 @@ export type SaveAndConnectInput = ConnectionCreateInput & {
 };
 
 export type SaveAndConnectAction =
-  | { mode: "create"; profileId?: never }
+  /** `profileId` (optional) fixes the new profile's id, so a retry after a failed
+   * connect can update that same profile instead of creating another one. */
+  | { mode: "create"; profileId?: string }
   | { mode: "update"; profileId: string };
 
 export type PrepareSecretOptions = {

@@ -30,7 +30,7 @@ fn sqlite_value_to_cell(v: ValueRef<'_>) -> CellValue {
 
 pub async fn run_sqlite_sql_query(
     ctx: OperationCtx,
-    shared: Arc<Mutex<Connection>>,
+    shared: Arc<crate::file_access::Leased<Mutex<Connection>>>,
     sql_input: SqlQueryInput,
     _default_statement_timeout_ms: Option<u64>,
 ) {

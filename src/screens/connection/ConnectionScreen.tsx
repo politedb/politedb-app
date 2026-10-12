@@ -6,6 +6,12 @@ import {
   useState,
 } from "preact/hooks";
 
+import { FileAccessBanner } from "src/components/connection/FileAccessBanner";
+import {
+  describeFileAccessError,
+  fileAccessRequests,
+  parseFileAccessError,
+} from "src/lib/file-access";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
@@ -210,13 +216,20 @@ export function ConnectionScreen() {
     reload: reloadRuntime,
   } = useEnsureRuntimeConnection(activeTab);
 
+  // Auto-restore never opens file panels or prompts by itself: a missing file grant is
+  // shown as a banner with a Grant Access action instead of an error dialog.
+  const fileAccessError = useMemo(() => {
+    const parsed = errorRuntime ? parseFileAccessError(errorRuntime) : null;
+    return parsed?.code === "FILE_ACCESS_REQUIRED" ? parsed : null;
+  }, [errorRuntime]);
+
   useEffect(() => {
-    if (!errorRuntime) return;
-    void showMessage(errorRuntime, {
+    if (!errorRuntime || fileAccessError) return;
+    void showMessage(describeFileAccessError(errorRuntime) ?? errorRuntime, {
       title: "Connection error",
       kind: "error",
     });
-  }, [errorRuntime]);
+  }, [errorRuntime, fileAccessError]);
 
   useEffect(() => {
     if (!error) return;
@@ -843,6 +856,15 @@ export function ConnectionScreen() {
             onOpenDiagram={openDiagram}
             onOpenHealthInspector={() => setHealthInspectorOpen(true)}
           />
+
+          {fileAccessError && !runtimeConnectionId ? (
+            <FileAccessBanner
+              error={fileAccessError}
+              requests={fileAccessRequests(profile?.input)}
+              scope={`${activeTab.id}:${activeTab.profileId ?? ""}`}
+              onGranted={() => void reloadRuntime()}
+            />
+          ) : null}
 
           <ConnectionWorkspaceLayout
             viewMode={viewMode}

@@ -5,6 +5,7 @@ import { Select } from "src/components/common/Select";
 import { Field, Input } from "src/components/form";
 import type { ClickHouseProtocol } from "src/lib/tauri";
 import { toNumber } from "src/utils/convert";
+import { DatabasePathField } from "./DatabasePathField";
 import { SSLSection } from "./SSLSection";
 import type { SectionProps } from "./connectionForm.utils";
 import {
@@ -470,18 +471,28 @@ export function ConnectionBasicsSection(
                 isSqlite || isDuckDB ? "grid-cols-1" : "grid-cols-2"
               )}
             >
-              {showDatabaseInput && (
+              {showDatabaseInput && (isSqlite || isDuckDB) ? (
+                <DatabasePathField
+                  value={database.field.value}
+                  placeholder={engineConfig.databasePlaceholder}
+                  error={dbErr}
+                  className="col-span-2"
+                  onChange={(path) => {
+                    database.field.onChange(path);
+                    dirty();
+                  }}
+                />
+              ) : showDatabaseInput ? (
                 <Input
                   value={database.field.value}
                   placeholder={engineConfig.databasePlaceholder}
                   error={dbErr}
-                  class={cn((isSqlite || isDuckDB) && "col-span-2")}
                   onInput={(e: InputEvt) => {
                     database.field.onChange(e.currentTarget.value);
                     dirty();
                   }}
                 />
-              )}
+              ) : null}
               {!isSqlite && !isDuckDB && (
                 <Input
                   value={user.field.value}

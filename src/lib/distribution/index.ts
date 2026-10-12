@@ -14,6 +14,11 @@ export type DistributionFeatures = {
   externalPurchase: boolean;
   /** Engines hidden from the new-connection picker in this flavor. */
   unsupportedEngines: readonly DatabaseEngine[];
+  /**
+   * Sandboxed: user files are reachable only through grants made in the backend
+   * pickers (`src/lib/file-access`), so file paths cannot be typed.
+   */
+  fileGrants: boolean;
 };
 
 export const APP_STORE_MODE = "appstore";
@@ -29,12 +34,14 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
       selfUpdate: false,
       externalPurchase: false,
       unsupportedEngines: ["oracle"],
+      fileGrants: true,
     };
   }
   return {
     selfUpdate: true,
     externalPurchase: true,
     unsupportedEngines: [],
+    fileGrants: false,
   };
 }
 

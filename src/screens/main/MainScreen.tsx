@@ -59,7 +59,7 @@ import {
   type SaveAndConnectInput,
 } from "src/lib/tauri";
 import { pickOpenFile, showMessage } from "src/lib/system-dialog";
-import { trackEvent } from "src/lib/analytics";
+import { errorCode, trackEvent } from "src/lib/analytics";
 import { seedSqliteTemplateDemo } from "src/lib/sqliteTemplateSeed";
 
 export function MainScreen() {
@@ -400,7 +400,7 @@ export function MainScreen() {
         kind: "error",
       });
       trackEvent("connection_sqlite_template_error", {
-        error: msg.slice(0, 240),
+        error: errorCode(msg),
       });
     } finally {
       setTemplateSaving(false);
@@ -428,7 +428,7 @@ export function MainScreen() {
       });
       trackEvent("connection_duplicate_error", {
         engine: found.engine,
-        error: msg.slice(0, 240),
+        error: errorCode(msg),
       });
     }
   }

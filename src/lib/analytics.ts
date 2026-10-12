@@ -415,3 +415,15 @@ export function detectSqlKind(sql: string) {
 
   return token || "UNKNOWN";
 }
+
+/**
+ * Analytics-safe error value: the leading error code (e.g. `SQLITE_OPEN_FAILED`,
+ * `FILE_ACCESS_REQUIRED`) or `OTHER`. Never send raw error text: engine and native
+ * errors can contain file paths, database names or SQL (AGENTS.md).
+ */
+export function errorCode(error: unknown): string {
+  const text =
+    error instanceof Error ? error.message : String(error ?? "");
+  const match = /^\s*([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b/.exec(text);
+  return match ? match[1] : "OTHER";
+}

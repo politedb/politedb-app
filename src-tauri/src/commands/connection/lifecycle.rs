@@ -8,6 +8,21 @@ use crate::types::{ConnectionCreateInput, ConnectionInfo, ConnectionTestInput};
 
 use super::helpers::close_tunnel_quietly;
 
+/// Error text for logs: code only (see `file_access::log_safe`).
+pub(crate) fn log_safe(error: &str) -> String {
+    crate::file_access::log_safe(error)
+}
+
+/// SSH open errors for the frontend. `FILE_ACCESS_*` codes are returned unwrapped so
+/// the grant recovery flow can recognise them (plan B4).
+fn ssh_open_error(error: &anyhow::Error) -> String {
+    let message = format!("{error:#}");
+    match message.find("FILE_ACCESS_") {
+        Some(start) => message[start..].to_string(),
+        None => format!("SSH_TUNNEL_OPEN_FAILED: {message}"),
+    }
+}
+
 #[tauri::command]
 pub async fn connection_create(
     app: AppHandle,
@@ -36,7 +51,7 @@ pub async fn connection_create(
 
         let (key, shared) = acquire_shared_tunnel(&state, &ssh_in)
             .await
-            .map_err(|e| format!("SSH_TUNNEL_OPEN_FAILED: {e:#}"))?;
+            .map_err(|e| ssh_open_error(&e))?;
 
         tracing::info!(
             conn_id = %id,
@@ -62,7 +77,7 @@ pub async fn connection_create(
     let conn = match driver.connect(&app, id, label.clone(), input).await {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(conn_id=%id, engine=?engine, error=%e, "connection_create: connect failed");
+            tracing::error!(conn_id=%id, engine=?engine, error=%log_safe(&e), "connection_create: connect failed");
 
             // rollback tunnel ref if acquired
             if let Some(key) = acquired_key {
@@ -293,10 +308,10 @@ pub async fn connection_test(
                 ssh_port = ssh_in.ssh_port,
                 remote_host = %ssh_in.remote_host,
                 remote_port = ssh_in.remote_port,
-                error = %format!("{e:#}"),
+                error = %log_safe(&format!("{e:#}")),
                 "connection_test: ssh tunnel open failed"
             );
-            format!("SSH_TUNNEL_OPEN_FAILED: {e:#}")
+            ssh_open_error(&e)
         })?;
 
         let local = tunnel.local_addr();
@@ -322,7 +337,7 @@ pub async fn connection_test(
             engine = ?engine,
             label = %label,
             elapsed_ms = t1.elapsed().as_millis(),
-            error = %e,
+            error = %log_safe(e),
             "connection_test: failed"
         );
     } else {
@@ -403,4 +418,23 @@ pub async fn connection_remove(
     crate::ssh_tunnel::pool::release_shared_tunnel_by_conn(&state, connection_id).await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_access_codes_survive_ssh_wrapping() {
+        let error = anyhow::Error::msg(r#"FILE_ACCESS_REQUIRED:{"role":"ssh_key"}"#);
+        assert_eq!(
+            ssh_open_error(&error),
+            r#"FILE_ACCESS_REQUIRED:{"role":"ssh_key"}"#
+        );
+        let other = anyhow::anyhow!("SSH_AUTH_FAILED");
+        assert_eq!(
+            ssh_open_error(&other),
+            "SSH_TUNNEL_OPEN_FAILED: SSH_AUTH_FAILED"
+        );
+    }
 }

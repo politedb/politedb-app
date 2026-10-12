@@ -8,7 +8,7 @@ use crate::engines::{cancel::CancelHandle, registry::EngineRegistry, EngineConne
 use crate::operations::ctx::{FlowCtrl, SqlBusyRegistry};
 use crate::ssh_tunnel::handle::SshTunnelHandle;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct TunnelKey {
     pub ssh_host: String,
     pub ssh_port: u16,
@@ -73,5 +73,37 @@ impl AppState {
             ai_providers_lock: Arc::new(std::sync::Mutex::new(())),
             ai_discovery_cancel: Arc::new(crate::ai::cancel::CancelRegistry::default()),
         }
+    }
+}
+
+/// Logs show an opaque id only: `auth_fp` contains the SSH key path, which must not
+/// reach logs (AGENTS.md). Equality/hashing for pooling are unchanged.
+impl std::fmt::Debug for TunnelKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        write!(f, "TunnelKey({:016x})", hasher.finish())
+    }
+}
+
+#[cfg(test)]
+mod tunnel_key_tests {
+    use super::*;
+
+    #[test]
+    fn debug_output_hides_the_key_path() {
+        let key = TunnelKey {
+            ssh_host: "bastion".into(),
+            ssh_port: 22,
+            ssh_user: "me".into(),
+            strict: "accept-new".into(),
+            auth_fp: "pk:/Users/me/secret-dir/id_ed25519|pp:0".into(),
+            remote_host: "db".into(),
+            remote_port: 5432,
+        };
+        let text = format!("{key:?}");
+        assert!(!text.contains("secret-dir"), "{text}");
+        assert!(text.starts_with("TunnelKey("));
     }
 }

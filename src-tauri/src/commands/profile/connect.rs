@@ -1,7 +1,7 @@
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::commands::connection::lifecycle::{connection_create, connection_test};
+use crate::commands::connection::lifecycle::{connection_create, connection_test, log_safe};
 use crate::profiles::store as profile_store;
 use crate::profiles::types::{
     ConnectionProfile, ProfileConnectInput, ProfileConnectResult, ProfileConnectTestInput,
@@ -55,6 +55,10 @@ pub async fn profile_save_and_connect(
         e
     })?;
 
+    // 1b) Sandboxed builds: every file the connection opens must have a usable grant
+    // before anything is persisted, so a retry after re-granting creates nothing twice.
+    let _file_leases = crate::commands::file_access::ensure_usable(&input)?;
+
     // 2) Persist secrets (Inline -> Keychain) if enabled
     input = persist_input_with_secrets(&app, profile_id, persist_secrets, input).map_err(|e| {
         tracing::error!(
@@ -94,7 +98,7 @@ pub async fn profile_save_and_connect(
                 step = "runtime_connect",
                 mode,
                 profile_id = %profile_id,
-                error = %e,
+                error = %log_safe(&e),
                 "failed"
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
@@ -231,7 +235,7 @@ pub async fn profile_connect(
             tracing::error!(
                 step = "runtime_connect",
                 profile_id = %profile_id,
-                error = %e,
+                error = %log_safe(&e),
                 "failed"
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
@@ -325,7 +329,7 @@ pub async fn profile_connect_test(
         tracing::error!(
             step = "test_profile_connection",
             profile_id = %profile_id,
-            error = %e,
+            error = %log_safe(&e),
             "failed"
         );
         format!("PROFILE_TEST_FAILED: {e}")

@@ -153,6 +153,16 @@ fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Writes `value` by replacing the destination in one step, so a failed write or crash
 /// leaves the previous file intact (no remove-then-rename window).
 pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    replace_preserving(path, value, false)
+}
+
+/// Like [`json_replace_preserving`], but the file is readable by the owner only (0600 on
+/// Unix), set on the staged file before it replaces the destination.
+pub fn json_replace_preserving_private<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    replace_preserving(path, value, true)
+}
+
+fn replace_preserving<T: Serialize>(path: &Path, value: &T, private: bool) -> Result<(), String> {
     let bytes = serde_json::to_vec(value).map_err(|e| format!("Serialize JSON failed: {e}"))?;
     ensure_parent_dir(path)?;
     let file_name = path
@@ -162,6 +172,14 @@ pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(
     let tmp_path = path.with_file_name(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
     let write = || -> Result<(), String> {
         let mut f = fs::File::create(&tmp_path).map_err(|e| format!("Create tmp failed: {e}"))?;
+        #[cfg(unix)]
+        if private {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("Set tmp permissions failed: {e}"))?;
+        }
+        #[cfg(not(unix))]
+        let _ = private;
         f.write_all(&bytes)
             .map_err(|e| format!("Write tmp failed: {e}"))?;
         f.sync_all().map_err(|e| format!("Sync tmp failed: {e}"))?;

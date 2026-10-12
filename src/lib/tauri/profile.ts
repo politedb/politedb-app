@@ -26,7 +26,9 @@ import type { DatabaseEngine } from "src/types";
  */
 
 type SaveMode = "create" | "update";
-type SaveAction = { mode: "create" } | { mode: "update"; profileId: string };
+type SaveAction =
+  | { mode: "create"; profileId?: string }
+  | { mode: "update"; profileId: string };
 
 type SaveResultMap = {
   save: ConnectionProfile;
@@ -542,7 +544,8 @@ async function withKeychainRollback<T>(
 
 function buildSavePlan(input: SaveAndConnectInput & SaveAction): PersistPlan {
   const mode = input.mode;
-  const profileId = mode === "create" ? uuidv4() : input.profileId;
+  const profileId =
+    input.mode === "create" ? (input.profileId ?? uuidv4()) : input.profileId;
 
   const persistSecrets = !!input.storeKeychain;
   const engine = String(input.engine || "");
