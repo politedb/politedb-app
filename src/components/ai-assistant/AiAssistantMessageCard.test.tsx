@@ -158,4 +158,83 @@ describe("AiAssistantMessageCard floating header", () => {
     expect(screen.getByText("Worked for 4s")).toBeInTheDocument();
     expect(screen.queryByText("Thought")).not.toBeInTheDocument();
   });
+
+  it("switches from Thinking to the duration in place", () => {
+    const view = render(
+      <AiAssistantMessageCard
+        presentation="floating"
+        message={{ id: "a", role: "assistant", text: "", streaming: true }}
+      />
+    );
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    view.rerender(
+      <AiAssistantMessageCard
+        presentation="floating"
+        message={{
+          id: "a",
+          role: "assistant",
+          text: "Done.",
+          durationMs: 65_000,
+        }}
+      />
+    );
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    expect(screen.getByText("Worked for 1m 5s")).toBeInTheDocument();
+  });
+
+  it("hides the duration while streaming text and for short or unknown durations", () => {
+    const cases: ChatMessage[] = [
+      {
+        id: "s",
+        role: "assistant",
+        text: "Partial",
+        streaming: true,
+        durationMs: 5000,
+      },
+      { id: "n", role: "assistant", text: "Done." },
+      { id: "f", role: "assistant", text: "Done.", durationMs: 999 },
+    ];
+    for (const message of cases) {
+      const view = render(<Harness initialMessage={message} />);
+      expect(screen.queryByText(/^Worked for/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+      view.unmount();
+    }
+    render(
+      <Harness
+        initialMessage={{
+          id: "b",
+          role: "assistant",
+          text: "Done.",
+          durationMs: 1000,
+        }}
+      />
+    );
+    expect(screen.getByText("Worked for 1s")).toBeInTheDocument();
+  });
+
+  it("keeps the panel layout and never labels user messages", () => {
+    const view = render(
+      <AiAssistantMessageCard
+        presentation="panel"
+        message={{
+          id: "p",
+          role: "assistant",
+          text: "Done.",
+          durationMs: 3000,
+        }}
+      />
+    );
+    // Panel shows its own role label and a single duration line.
+    expect(screen.getByText("PoliteDB AI")).toBeInTheDocument();
+    expect(screen.getAllByText("Worked for 3s")).toHaveLength(1);
+    view.unmount();
+
+    render(
+      <Harness
+        initialMessage={{ id: "u", role: "user", text: "hi", durationMs: 3000 }}
+      />
+    );
+    expect(screen.queryByText(/^Worked for/)).not.toBeInTheDocument();
+  });
 });
