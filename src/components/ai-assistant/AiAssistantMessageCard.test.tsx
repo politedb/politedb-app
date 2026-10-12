@@ -130,3 +130,32 @@ describe("AiAssistantMessageCard SQL preview", () => {
     );
   });
 });
+
+describe("AiAssistantMessageCard floating header", () => {
+  it("shows only Thinking while streaming, then how long it took", () => {
+    const streaming: ChatMessage = {
+      id: "a-stream",
+      role: "assistant",
+      text: "",
+      streaming: true,
+    };
+    const { unmount } = render(<Harness initialMessage={streaming} />);
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    expect(screen.queryByText("Thought")).not.toBeInTheDocument();
+    expect(screen.queryByText("›")).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Harness
+        initialMessage={{
+          id: "a-done",
+          role: "assistant",
+          text: "Done.",
+          durationMs: 4200,
+        }}
+      />
+    );
+    expect(screen.getByText("Worked for 4s")).toBeInTheDocument();
+    expect(screen.queryByText("Thought")).not.toBeInTheDocument();
+  });
+});
