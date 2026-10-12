@@ -112,3 +112,54 @@ Independent verification:
 - `npm run test:run -- src/components/ai-assistant src/lib/ai-assistant src/lib/tauri/ai.test.ts src/lib/politedbBackend/ai.test.ts`: **11 files / 82 tests passed**, including all four SQL-preview component regressions.
 - `git diff --check`: **passed**. Application source/package files have no working-tree diff against HEAD.
 - No rendered desktop/browser inspection, zoom/keyboard/contrast audit or new Insert-specific fixture performed. Visual consistency is verified from source and actual class merging, not a screenshot; tests do not establish rendered geometry or comprehensive accessibility. No Rust rerun: backend tree is identical to the prior reviewed commit, whose socket-bind restrictions, API/coverage and cost/behavior limitations remain recorded above.
+
+## Review: f52fd48 (Anthropic follow-up)
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-12.
+
+Scope: read AGENTS.md, RTK.md, .agent/WORKFLOW.md and both preceding Anthropic reviews; inspected the complete `git show f52fd48`, adjacent provider dispatch, command validation/cancellation and assistant error handling. HEAD is `f52fd48d801e383cc0c0039c41fc401d06fa5ed4` on `feat/mas-native-apis`. Only this review appended; no application source edits, staging or commit.
+
+### Required finding
+
+- **P2 — `src-tauri/src/ai/chat.rs:250-257`: nonempty refusals bypass `AI_CHAT_REFUSED`.** The refusal branch is inside `if text.is_empty()`. A response containing a text block and `stop_reason: "refusal"` returns success, so the assistant never displays the new refusal message and downstream completion consumers can treat declined/partial output as a completed answer. Anthropic documents exactly this response shape with a nonempty text block in [Handle streaming refusals](https://platform.claude.com/docs/en/test-and-evaluate/strengthen-guardrails/handle-streaming-refusals). An isolated Rust harness compiled the commit's exact `anthropic_text` function and reproduced `Ok("Hello..")` for that fixture. Check `stop_reason == "refusal"` independently of text emptiness and return the fixed `AI_CHAT_REFUSED` code; add a nonempty-refusal regression alongside the empty fixture. Keep provider `stop_details.explanation`, messages and partial content out of the error. This is incomplete fulfillment of the requested refusal mapping, not a claim that ordinary successful answer text must be redacted.
+
+### Four-limitations assessment
+
+1. **Budget scope resolved for supported direct IDs:** the 4096 floor applies only to parsed versions >= (4, 7) and unknown IDs; explicit larger budgets survive. Older direct Claude versions preserve smaller limits. The [official Opus 5.5 migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide) explicitly identifies non-default sampling rejection as beginning with Opus 4.7. The numerical policy is intentionally applied across model families and unknown IDs; that guide alone does not establish every future family's thinking capability. The floor remains a chosen allowance, not a measured guarantee of completion or cost/latency.
+2. **Older-model request behavior restored:** parsed <4.7 models receive caller temperature and max_tokens, with previous 0.2 / 1024 defaults when absent. Probe retains 0.0 / 128; assistant budgets such as 96 are no longer raised for those IDs. System extraction, role mapping and message content remain unchanged; blank model overrides now correctly fall back to the configured model.
+3. **Stop reasons partially resolved:** empty/whitespace or thinking-only `max_tokens` responses return `AI_CHAT_OUTPUT_TOKEN_LIMIT`; empty refusals return `AI_CHAT_REFUSED`, and frontend recognizes that code in English/Vietnamese. Nonempty refusals remain unresolved as above. Nonempty `max_tokens` output deliberately remains successful, matching the existing OpenAI-compatible behavior and the new explicit regression fixture; it has no truncation notice. This review does not interpret the earlier empty-answer limitation as requiring rejection of all partial text.
+4. **Coverage substantially expanded, incomplete refusal case:** six Anthropic-focused Rust tests cover version parsing, both payload policies, top_k omission, whitespace system omission, blank-model fallback, absent budget, history roles, redacted thinking, empty stop reasons and Anthropic `/error/type` redaction. New frontend test verifies English/Vietnamese refusal wording and token-limit wording. The amendment removes the previous nonblank-system assertion; nonblank system extraction is unchanged and statically checked. Missing nonempty-refusal coverage permits the required finding.
+
+### ID parser and redaction
+
+- **Direct API formats:** checked dated `claude-3-5-sonnet-20241022`, `claude-3-7-sonnet-20250219`, `claude-3-opus-20240229`, `claude-sonnet-4-20250514`, modern `claude-opus-4-6`, `claude-opus-4-7`, and minorless `claude-opus-5`; also historical `claude-3-5-sonnet-latest` / `claude-3-opus-latest` aliases and modern short aliases. Numeric extraction handles both 3.x ordering and name-first ordering; eight-digit dates are ignored and omitted minor means zero. [Model IDs and versioning](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions) confirms dated IDs, short aliases and pinned dateless IDs.
+- **Cloud/proxy limitation, nonblocking for current adapters:** Bedrock `anthropic.claude-3-5-sonnet-20241022-v2:0` and region-prefixed `us.anthropic.claude-opus-4-6-v1` return None and therefore use the documented unknown-ID floor/omission policy. Vertex `claude-sonnet-4-5@20250929` parses as (4, 0), losing its minor segment because it includes `@date`; its old/new classification remains correct for this actual 4.5 ID. `claude-3-5-sonnet-v2@20241022` parses (3, 5). No native Bedrock signing/runtime or Vertex OAuth/predict adapter exists in provider dispatch: Anthropic sends Messages API with x-api-key and anthropic-version; OpenRouter remains a separate OpenAI-compatible adapter. Do not claim older-model preservation for arbitrary proxy aliases or cloud IDs. Normalize provider-specific IDs before capability detection if that support is added.
+- **Redaction invariant preserved:** unchanged `provider_http_error` returns only HTTP status and filtered/bounded code/type/status; never `/error/message` or raw bodies. New stop-reason errors are fixed literals; thinking/redacted_thinking and stop_details are not returned by error paths. Anthropic SQL-echo fixture and existing generic redaction fixture pass. No new logging, telemetry, key/URL exposure or transport-policy change. Existing caveat remains: character filtering cannot semantically redact a malicious provider's code field.
+
+### Independent verification
+
+- `npm run build`: passed; existing externalization, dynamic-import and chunk-size warnings remain.
+- Focused frontend suite (`src/components/ai-assistant`, `src/lib/ai-assistant`, Tauri/backend AI wrappers): **12 files / 83 tests passed**. New formatter test also passed separately.
+- `cargo test --offline --locked ai::chat::tests`: **10 passed / 3 failed**. All six Anthropic-focused tests passed. Three unchanged loopback tests fail at `chat.rs:394` with socket-bind PermissionDenied / Operation not permitted; environment restriction, not a commit defect.
+- Temporary offline Rust harness under `/private/tmp` compiled exact parser/refusal functions from reviewed source and confirmed ID classifications and the nonempty-refusal reproduction above. No repository source changed for the harness.
+- `git diff --check`: passed before report append. No live provider call, desktop UI session, full Rust suite or app-store flavor rerun; transport/live-provider and actual cost/latency remain unverified.
+
+Next: Claude fixes the refusal branch and adds the nonempty fixture, records verification, then requests Codex re-review. No change needed to the documented 4.7 sampling threshold.
+
+## Re-review: f52fd48 refusal fix
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-12. Prior P2 resolved; no new findings.
+
+Scope: read AGENTS.md, RTK.md and .agent/WORKFLOW.md; reviewed the uncommitted `src-tauri/src/ai/chat.rs` diff against HEAD and adjacent response parsing/provider dispatch and frontend error formatting. Only this report appended; no source edits, staging or commit.
+
+- **P2 resolved — `src-tauri/src/ai/chat.rs:251-259`:** refusal is checked independently of text emptiness. Both empty and nonempty refusals return exactly `AI_CHAT_REFUSED`; partial text and `stop_details.explanation` cannot enter the error. The added nonempty fixture asserts that exact code and would fail on the previous implementation.
+- **Regression review:** text concatenation, trimming and thinking/redacted-thinking filtering are unchanged. Empty `max_tokens` output retains `AI_CHAT_OUTPUT_TOKEN_LIMIT`; nonempty `max_tokens` output remains successful. Ordinary `end_turn` output and empty content without a stop reason retain their previous results. Existing fixtures cover these adjacent paths. Payload policy, model parsing, transport, other providers and frontend wording are unchanged; the existing English/Vietnamese refusal formatter still recognizes the fixed code.
+
+Independent verification:
+
+- `cargo test --offline --locked ai::chat::tests`: **10 passed / 3 failed**. The response regression and all other non-network chat tests passed. Three unchanged loopback fixtures fail at `chat.rs:393` because socket bind returns `PermissionDenied: Operation not permitted`; no assertion regression observed.
+- Same Rust command with the three loopback fixtures explicitly skipped: **10 passed / 0 failed**.
+- `npm run test:run -- src/components/ai-assistant/hooks/formatAssistantRequestError.test.ts`: **1 file / 1 test passed**, including English/Vietnamese refusal and token-limit wording assertions.
+- `git diff --check`: passed. No live provider call, desktop UI session, frontend build or full Rust suite rerun for this backend-only fix. Loopback transport remains unverified in this sandbox; prior broader-review limitations remain applicable.
+
+The refusal fix is verified within this scope; the prior required P2 no longer blocks handoff.
