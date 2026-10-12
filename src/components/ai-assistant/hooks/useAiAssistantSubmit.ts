@@ -26,7 +26,7 @@ function isAbortError(error: unknown) {
   return message.includes("AI_CHAT_CANCELED");
 }
 
-function formatAssistantRequestError(args: {
+export function formatAssistantRequestError(args: {
   error: unknown;
   lang: ReturnType<typeof resolveReplyLanguage>;
   isLocalProvider: boolean;
@@ -38,6 +38,7 @@ function formatAssistantRequestError(args: {
     raw.includes("AI_CHAT_FAILED") ||
     raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
     raw.includes("AI_CHAT_OUTPUT_TOKEN_LIMIT") ||
+    raw.includes("AI_CHAT_REFUSED") ||
     raw.includes("AI_CHAT_REQUEST_FAILED") ||
     raw.includes("AI_PROVIDER");
 
@@ -75,6 +76,12 @@ function formatAssistantRequestError(args: {
     return vi
       ? "Nội dung cuộc trò chuyện vượt giới hạn context của model local. PoliteDB đã rút gọn context; hãy thử gửi lại."
       : "This conversation exceeded the local model context limit. PoliteDB has reduced the context; try sending it again.";
+  }
+
+  if (raw.includes("AI_CHAT_REFUSED")) {
+    return vi
+      ? "Model từ chối trả lời yêu cầu này. Hãy diễn đạt lại hoặc chọn model khác."
+      : "The model declined to answer this request. Rephrase it or choose another model.";
   }
 
   if (
