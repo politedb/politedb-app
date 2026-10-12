@@ -248,16 +248,15 @@ fn anthropic_text(value: &serde_json::Value) -> Result<String, String> {
         .unwrap_or_default()
         .trim()
         .to_string();
-    if text.is_empty() {
-        match value.get("stop_reason").and_then(|reason| reason.as_str()) {
-            Some("max_tokens") => {
-                return Err("AI_CHAT_OUTPUT_TOKEN_LIMIT: model produced no final content".into())
-            }
-            Some("refusal") => return Err("AI_CHAT_REFUSED".into()),
-            _ => {}
+    match value.get("stop_reason").and_then(|reason| reason.as_str()) {
+        // A refusal may arrive with partial text; it is never a completed answer.
+        Some("refusal") => Err("AI_CHAT_REFUSED".into()),
+        // Truncated text is still returned, like the OpenAI-compatible path.
+        Some("max_tokens") if text.is_empty() => {
+            Err("AI_CHAT_OUTPUT_TOKEN_LIMIT: model produced no final content".into())
         }
+        _ => Ok(text),
     }
-    Ok(text)
 }
 
 async fn complete_anthropic(
@@ -558,6 +557,18 @@ mod tests {
 
         let refused = serde_json::json!({ "content": [], "stop_reason": "refusal" });
         assert_eq!(anthropic_text(&refused).unwrap_err(), "AI_CHAT_REFUSED");
+
+        // Refusal with partial text (documented shape): still a refusal, and neither
+        // the text nor stop_details reach the error.
+        let refused_with_text = serde_json::json!({
+            "content": [{ "type": "text", "text": "Hello.." }],
+            "stop_reason": "refusal",
+            "stop_details": { "explanation": "policy" }
+        });
+        assert_eq!(
+            anthropic_text(&refused_with_text).unwrap_err(),
+            "AI_CHAT_REFUSED"
+        );
 
         assert_eq!(
             anthropic_text(&serde_json::json!({ "content": [] })).unwrap(),
