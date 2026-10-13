@@ -64,6 +64,7 @@ Short prompts are enough because context lives in `.agent/`:
 - Never run both agents in the same working tree at the same time.
 - Use `git worktree` so Claude can implement phase N while Codex reviews phase N-1 in a separate checkout.
 - One task plan at a time in `PLAN.md` unless the human says otherwise.
+- When the human approves a second concurrent plan, it lives in `.agent/plans/<task-id>.md` with the same status contract; its reviews are appended to `.agent/REVIEW.md` under a heading naming that plan.
 
 ## Invariants
 
