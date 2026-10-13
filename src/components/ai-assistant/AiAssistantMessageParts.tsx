@@ -6,7 +6,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
 } from "src/components/icons";
-import type { ChatMessage } from "src/types";
+import type { AgentStepSummary, ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 import { cn } from "src/utils/cn";
 import {
@@ -119,7 +119,7 @@ function SqlPreviewPart(props: {
   onInsertSql?: (sql: string) => Promise<void> | void;
   onCopySql: (sql: string) => void;
   onInsert: (sql: string) => void;
-  onRun?: (sql: string) => void;
+  onRun?: (sql: string, agent: boolean) => void;
 }) {
   const {
     messageId,
@@ -150,7 +150,7 @@ function SqlPreviewPart(props: {
               variant="default"
               class="px-2 py-1 text-xs"
               loading={sqlRunState === "running"}
-              onClick={() => onRun(part.sql)}
+              onClick={() => onRun(part.sql, part.agent === true)}
             >
               Run
             </Button>
@@ -195,7 +195,7 @@ function MessageParts(props: {
   onInsertSql?: (sql: string) => Promise<void> | void;
   onCopySql: (sql: string) => void;
   onInsert: (sql: string) => void;
-  onRun?: (sql: string) => void;
+  onRun?: (sql: string, agent: boolean) => void;
 }) {
   const {
     message,
@@ -216,9 +216,10 @@ function MessageParts(props: {
           return (
             <div
               key={`${message.id}-part-${index}`}
-              class={`max-w-full min-w-0 break-all whitespace-pre-wrap ${
+              class={cn(
+                "max-w-full min-w-0",
                 floating ? "text-inherit" : "text-sm text-neutral-800"
-              }`}
+              )}
             >
               {part.text}
             </div>
@@ -239,6 +240,15 @@ function MessageParts(props: {
               onCopySql={onCopySql}
               onInsert={onInsert}
               onRun={onRun}
+            />
+          );
+        }
+
+        if (part.type === "agentSteps") {
+          return (
+            <AgentStepsPart
+              key={`${message.id}-part-${index}`}
+              steps={part.steps}
             />
           );
         }
@@ -452,7 +462,7 @@ export function AiAssistantMessageBody(props: {
   onCopySql: () => void;
   onCopySqlText: (sql: string) => void;
   onInsertSqlPreview: (sql: string) => void;
-  onRunSqlPreview?: (sql: string) => void;
+  onRunSqlPreview?: (sql: string, agent: boolean) => void;
 }) {
   const {
     message,
@@ -521,5 +531,38 @@ export function AiAssistantMessageBody(props: {
         </ul>
       ) : null}
     </>
+  );
+}
+
+/** Fixed labels for agent tools; anything unknown gets a generic one. */
+const AGENT_STEP_LABELS: Record<string, string> = {
+  list_schemas: "Listed schemas",
+  list_tables: "Listed tables",
+  describe_table: "Looked at a table's structure",
+};
+
+/** What an agent run looked at, collapsed by default (plan ai-agent R6). */
+export function AgentStepsPart(props: { steps: AgentStepSummary[] }) {
+  const { steps } = props;
+  if (!steps.length) return null;
+  return (
+    <details class="group/steps text-[11px] text-neutral-500">
+      <summary class="cursor-pointer list-none select-none hover:text-neutral-700">
+        <span class="mr-1 inline-block transition group-open/steps:rotate-90">
+          ›
+        </span>
+        Checked the database ({steps.length}{" "}
+        {steps.length === 1 ? "step" : "steps"})
+      </summary>
+      <ol class="mt-1 space-y-0.5 pl-4">
+        {steps.map((step, index) => (
+          <li key={index} class={step.ok ? undefined : "text-amber-700"}>
+            {AGENT_STEP_LABELS[step.tool] ?? "Used a database tool"}
+            {step.ok ? "" : " (failed)"}
+            {step.truncated ? " (partial)" : ""}
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }

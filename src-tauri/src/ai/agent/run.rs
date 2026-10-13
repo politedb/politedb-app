@@ -24,7 +24,10 @@ pub const TURN_DEADLINE: Duration = Duration::from_secs(120);
 pub const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
 pub const OUTPUT_TOKEN_BUDGET: u64 = 32_000;
 pub const STEP_MAX_TOKENS: u32 = 4096;
+/// The user's own question.
 pub const MAX_QUESTION_BYTES: usize = 16 * 1024;
+/// The composed first message: question plus bounded history, context and editor SQL.
+pub const MAX_PROMPT_BYTES: usize = 40 * 1024;
 pub const MAX_ACTIVE_RUNS: usize = 2;
 pub const TOOL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -95,12 +98,30 @@ pub struct ToolContext {
     pub tracker: TaskTracker,
 }
 
+/// What a tool returns to the model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolOutput {
+    pub content: String,
+    /// The tool itself left something out (a row or list cap); reported in the step
+    /// together with the coordinator's own byte cap.
+    pub truncated: bool,
+}
+
+impl From<String> for ToolOutput {
+    fn from(content: String) -> Self {
+        Self {
+            content,
+            truncated: false,
+        }
+    }
+}
+
 /// A tool the model may call. Arguments arrive as a parsed JSON object;
 /// implementations must validate them against their own schema (plan R5).
 #[async_trait]
 pub trait AgentTool: Send + Sync {
     fn spec(&self) -> ToolSpec;
-    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<String, String>;
+    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String>;
 }
 
 /// Tools offered in a run. Empty in Phase 1.
@@ -110,17 +131,15 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    // Registered tools arrive in Phase 2 (plan R7); until then only tests build one.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(tools: Vec<Arc<dyn AgentTool>>) -> Self {
         Self { tools }
     }
 
-    fn specs(&self) -> Vec<ToolSpec> {
+    pub(crate) fn specs(&self) -> Vec<ToolSpec> {
         self.tools.iter().map(|tool| tool.spec()).collect()
     }
 
-    fn find(&self, name: &str) -> Option<&Arc<dyn AgentTool>> {
+    pub(crate) fn find(&self, name: &str) -> Option<&Arc<dyn AgentTool>> {
         self.tools.iter().find(|tool| tool.spec().name == name)
     }
 }
@@ -133,9 +152,13 @@ pub struct RunInput<'a> {
     pub deadline: Duration,
     /// Limit per tool call ([`TOOL_TIMEOUT`] in the app).
     pub tool_timeout: Duration,
+    /// Cleanup slower than this is logged ([`CLEANUP_GRACE`] in the app). The run still
+    /// waits for it: `Done` and the run's slot come only after every tool stopped.
+    pub cleanup_grace: Duration,
 }
 
-/// How long cancelled tools get to finish their cleanup.
+/// Expected upper bound for cancelled tools' cleanup. Tools must stay within it (the
+/// catalog asserts this at compile time); the run waits longer only if one does not.
 pub const CLEANUP_GRACE: Duration = Duration::from_secs(5);
 /// Output tokens kept back so the final, tool-free answer always fits the budget.
 pub const FINAL_RESERVE_TOKENS: u32 = 4096;
@@ -175,14 +198,16 @@ pub async fn run_turn(
     // Whatever happened, signal every tool and wait for its native work to stop.
     cancel.cancel();
     tracker.close();
-    if tokio::time::timeout(CLEANUP_GRACE, tracker.wait())
+    if tokio::time::timeout(input.cleanup_grace, tracker.wait())
         .await
         .is_err()
     {
         tracing::warn!(
-            code = "AI_AGENT_CLEANUP_TIMEOUT",
+            code = "AI_AGENT_CLEANUP_SLOW",
             "agent tool cleanup exceeded grace period"
         );
+        // Never report the run finished (or free its slot) while native work runs.
+        tracker.wait().await;
     }
     let status = match outcome {
         Ok(text) => {
@@ -218,7 +243,7 @@ async fn drive(
     if input.question.trim().is_empty() {
         return Err("AI_AGENT_QUESTION_REQUIRED".into());
     }
-    if input.question.len() > MAX_QUESTION_BYTES {
+    if input.question.len() > MAX_PROMPT_BYTES {
         return Err("AI_AGENT_QUESTION_TOO_LONG".into());
     }
     let specs = tools.specs();
@@ -403,11 +428,12 @@ async fn run_tool(
         // A result that arrives after cancel is dropped.
         return Err(CANCELED.into());
     }
-    let (ok, content) = match outcome {
-        Ok(content) => (true, content),
-        Err(reason) => (false, reason),
+    let (ok, content, partial) = match outcome {
+        Ok(output) => (true, output.content, output.truncated),
+        Err(reason) => (false, reason, false),
     };
-    let (content, truncated) = cap(content, MAX_TOOL_RESULT_BYTES);
+    let (content, capped) = cap(content, MAX_TOOL_RESULT_BYTES);
+    let truncated = partial || capped;
     let delivered = sink.send(AgentEvent::ToolFinished {
         tool: tool_name,
         ok,
@@ -658,11 +684,15 @@ mod tests {
                 parameters: serde_json::json!({ "type": "object" }),
             }
         }
-        async fn run(&self, arguments: Value, _ctx: &ToolContext) -> Result<String, String> {
+        async fn run(&self, arguments: Value, _ctx: &ToolContext) -> Result<ToolOutput, String> {
             if arguments.get("fail").is_some() {
                 return Err("bad input".into());
             }
-            Ok("x".repeat(arguments.get("size").and_then(Value::as_u64).unwrap_or(2) as usize))
+            Ok(ToolOutput {
+                content: "x"
+                    .repeat(arguments.get("size").and_then(Value::as_u64).unwrap_or(2) as usize),
+                truncated: arguments.get("partial").is_some(),
+            })
         }
     }
 
@@ -673,6 +703,7 @@ mod tests {
             question: "how many orders?",
             deadline: TURN_DEADLINE,
             tool_timeout: TOOL_TIMEOUT,
+            cleanup_grace: CLEANUP_GRACE,
         }
     }
 
@@ -806,6 +837,83 @@ mod tests {
         );
     }
 
+    /// Catalog list caps reach the step summary through the real tools and coordinator,
+    /// even when the result is far below the byte cap.
+    #[tokio::test]
+    async fn catalog_caps_are_reported_as_truncated_steps() {
+        use crate::ai::agent::catalog::{
+            self, tools::MetadataPolicy, CatalogExecutor, TableDescription, TableRef,
+        };
+
+        struct ManyTables;
+        #[async_trait]
+        impl CatalogExecutor for ManyTables {
+            fn dialect(&self) -> &'static str {
+                "SQLite"
+            }
+            fn sql_engine(&self) -> &'static str {
+                "sqlite"
+            }
+            async fn only_builtin_code(&self, _: &ToolContext) -> Result<bool, String> {
+                Ok(false)
+            }
+            async fn list_schemas(&self, _: &ToolContext) -> Result<Vec<String>, String> {
+                Ok(vec!["main".into()])
+            }
+            async fn list_tables(
+                &self,
+                _: Option<&str>,
+                _: Option<&str>,
+                _: &ToolContext,
+            ) -> Result<Vec<TableRef>, String> {
+                Ok((0..catalog::MAX_TABLES + 1)
+                    .map(|i| TableRef {
+                        schema: "main".into(),
+                        name: format!("t{i}"),
+                        kind: "table".into(),
+                    })
+                    .collect())
+            }
+            async fn describe_table(
+                &self,
+                _: &str,
+                _: &str,
+                _: &ToolContext,
+            ) -> Result<TableDescription, String> {
+                Err(catalog::TABLE_NOT_FOUND.into())
+            }
+        }
+
+        let model = ScriptedModel::new(vec![
+            Ok(tool_use(vec![
+                call("1", "list_schemas", "{}"),
+                call("2", "list_tables", "{}"),
+            ])),
+            Ok(answer("ok")),
+        ]);
+        let tools = catalog::tools::registry(
+            Arc::new(ManyTables),
+            Arc::new(|| true),
+            MetadataPolicy {
+                column_details: false,
+            },
+        );
+        let (_, events) = run(&model, &tools).await;
+        let finished: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ToolFinished {
+                    tool, truncated, ..
+                } => Some((tool.as_str(), *truncated)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            finished,
+            vec![("list_schemas", false), ("list_tables", true)]
+        );
+    }
+
     #[tokio::test]
     async fn tool_results_are_capped() {
         let model = ScriptedModel::new(vec![
@@ -843,7 +951,7 @@ mod tests {
     async fn empty_and_oversized_questions_are_rejected() {
         let model = ScriptedModel::new(vec![]);
         let sink = Recorder::default();
-        let long = "x".repeat(MAX_QUESTION_BYTES + 1);
+        let long = "x".repeat(MAX_PROMPT_BYTES + 1);
         let status = run_turn(
             &model,
             &ToolRegistry::default(),
@@ -853,6 +961,7 @@ mod tests {
                 question: &long,
                 deadline: TURN_DEADLINE,
                 tool_timeout: TOOL_TIMEOUT,
+                cleanup_grace: CLEANUP_GRACE,
             },
             &sink,
             &CancellationToken::new(),
@@ -977,7 +1086,7 @@ mod tests {
                 parameters: serde_json::json!({ "type": "object" }),
             }
         }
-        async fn run(&self, _arguments: Value, ctx: &ToolContext) -> Result<String, String> {
+        async fn run(&self, _arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
             let cancel = ctx.cancel.clone();
             let observed = self.observed_cancel.clone();
             let finished = self.finished.clone();
@@ -992,7 +1101,7 @@ mod tests {
                 ctx.cancel.cancelled().await;
             }
             let _ = handle.await;
-            Ok("done".into())
+            Ok(String::from("done").into())
         }
     }
 
@@ -1048,6 +1157,67 @@ mod tests {
         // run_turn returned only after the tool saw the cancel and finished cleanup.
         assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
         assert!(finished.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    /// Cleanup slower than the grace period is still awaited before `Done`, so the
+    /// run's slot is never released while native work continues.
+    #[tokio::test]
+    async fn done_waits_for_cleanup_beyond_the_grace_period() {
+        struct SlowCleanup(Arc<std::sync::atomic::AtomicBool>);
+        #[async_trait]
+        impl AgentTool for SlowCleanup {
+            fn spec(&self) -> ToolSpec {
+                ToolSpec {
+                    name: "slow".into(),
+                    description: "slow".into(),
+                    parameters: serde_json::json!({ "type": "object" }),
+                }
+            }
+            async fn run(&self, _: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+                let cancel = ctx.cancel.clone();
+                let finished = self.0.clone();
+                ctx.tracker.spawn(async move {
+                    cancel.cancelled().await;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    finished.store(true, std::sync::atomic::Ordering::SeqCst);
+                });
+                ctx.cancel.cancelled().await;
+                Err("stopped".into())
+            }
+        }
+
+        struct DoneSink {
+            finished: Arc<std::sync::atomic::AtomicBool>,
+            finished_at_done: Mutex<Option<bool>>,
+        }
+        impl EventSink for DoneSink {
+            fn send(&self, event: AgentEvent) -> bool {
+                if matches!(event, AgentEvent::Done { .. }) {
+                    *self.finished_at_done.lock().unwrap() =
+                        Some(self.finished.load(std::sync::atomic::Ordering::SeqCst));
+                }
+                true
+            }
+        }
+
+        let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let model = ScriptedModel::new(vec![Ok(tool_use(vec![call("1", "slow", "{}")]))]);
+        let mut short = input();
+        short.deadline = Duration::from_millis(50);
+        short.cleanup_grace = Duration::from_millis(20);
+        let sink = DoneSink {
+            finished: finished.clone(),
+            finished_at_done: Mutex::new(None),
+        };
+        run_turn(
+            &model,
+            &ToolRegistry::new(vec![Arc::new(SlowCleanup(finished.clone()))]),
+            short,
+            &sink,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(*sink.finished_at_done.lock().unwrap(), Some(true));
     }
 
     #[tokio::test]

@@ -323,4 +323,38 @@ describe("AiAssistantSettingsDialog", () => {
       screen.queryByRole("option", { name: "old-server-model" })
     ).not.toBeInTheDocument();
   });
+
+  it("toggles the AI agent beta, off by default", async () => {
+    await openDialog();
+    const toggle = screen.getByRole("checkbox", { name: /AI agent \(beta\)/ });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(localStorage.getItem("politedb.ai.agent.enabled")).toBe("1");
+    fireEvent.click(toggle);
+    expect(localStorage.getItem("politedb.ai.agent.enabled")).toBeNull();
+  });
+
+  it("lets the agent leave out column comments and defaults, and discloses storage", async () => {
+    await openDialog();
+    expect(
+      screen.getByText(
+        /Chat history is stored on this device without encryption/
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: /column comments/ })
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /AI agent \(beta\)/ })
+    );
+    expect(
+      screen.getByText(/sent to the selected provider/)
+    ).toBeInTheDocument();
+    const details = screen.getByRole("checkbox", { name: /column comments/ });
+    expect((details as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(details);
+    expect(localStorage.getItem("politedb.ai.agent.columnDetails")).toBe("0");
+    fireEvent.click(details);
+    expect(localStorage.getItem("politedb.ai.agent.columnDetails")).toBeNull();
+  });
 });

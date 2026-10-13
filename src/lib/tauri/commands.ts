@@ -13,6 +13,7 @@ export const CMD = {
   // AI agent (plan .agent/plans/ai-agent.md)
   aiAgentStart: "ai_agent_start",
   aiAgentCancel: "ai_agent_cancel",
+  aiAgentSqlSafety: "ai_agent_sql_safety",
   licenseDeviceInfo: "license_device_info",
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",

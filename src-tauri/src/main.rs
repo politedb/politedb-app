@@ -144,6 +144,7 @@ fn main() {
             commands::ai::ai_chat_cancel,
             commands::ai_agent::ai_agent_start,
             commands::ai_agent::ai_agent_cancel,
+            commands::ai_agent::ai_agent_sql_safety,
             commands::license::license_device_info,
             commands::license::license_state_load,
             commands::license::license_state_save,

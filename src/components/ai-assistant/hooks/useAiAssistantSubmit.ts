@@ -17,6 +17,17 @@ import type {
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
+import {
+  isAiAgentColumnDetailsEnabled,
+  isAiAgentEnabled,
+} from "src/lib/tauri/aiAgent";
+import {
+  AGENT_ENGINES,
+  AgentFallback,
+  agentAnswerParts,
+  agentHistory,
+  runAgentTurn,
+} from "src/lib/ai-assistant/agent";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
@@ -34,6 +45,27 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // AI agent run limits and connection state (plan ai-agent R1).
+  if (
+    raw.includes("AI_AGENT_DEADLINE") ||
+    raw.includes("AI_AGENT_BUDGET_EXHAUSTED") ||
+    raw.includes("AI_AGENT_STEP_LIMIT")
+  ) {
+    return vi
+      ? "AI agent không hoàn thành trong giới hạn cho phép. Hãy hỏi cụ thể hơn (ví dụ nêu tên bảng) rồi thử lại."
+      : "The AI agent could not finish within its limits. Ask a more specific question (for example, name the table) and try again.";
+  }
+  if (raw.includes("CONNECTION_NOT_FOUND")) {
+    return vi
+      ? "Kết nối database đã đóng. Hãy kết nối lại rồi thử lại."
+      : "The database connection was closed. Reconnect and try again.";
+  }
+  if (raw.includes("AI_AGENT_")) {
+    return vi
+      ? "AI agent gặp lỗi. Hãy thử lại, hoặc tắt AI agent (beta) trong AI settings."
+      : "The AI agent ran into a problem. Try again, or turn off AI agent (beta) in AI settings.";
+  }
   const isProviderRequest =
     raw.includes("AI_CHAT_FAILED") ||
     raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
@@ -246,6 +278,40 @@ export function useAiAssistantSubmit(args: {
           requestStartedAt
         );
         return;
+      }
+
+      // AI agent (beta): inspects the schema with tools before answering. Any reason it
+      // cannot run here (off, provider/model/engine unsupported) falls back silently.
+      if (
+        hasDbContext &&
+        runtimeConnectionId &&
+        isAiAgentEnabled() &&
+        AGENT_ENGINES.includes(engine)
+      ) {
+        try {
+          const result = await runAgentTurn({
+            providerId,
+            model,
+            question,
+            connectionId: runtimeConnectionId,
+            editorSql: currentSql,
+            // Same conversation and context the legacy planner gets.
+            history: agentHistory(messages),
+            activeSchema: activeSchema ?? null,
+            activeTable: activeTable?.name ?? null,
+            targetTable: conversationState.targetTable ?? null,
+            replyLanguage: resolveReplyLanguage(question, messages).name,
+            includeColumnDetails: isAiAgentColumnDetailsEnabled(),
+            signal: abortController.signal,
+          });
+          if (requestSeqRef.current !== requestId) return;
+          const answer = await agentAnswerParts(result, runtimeConnectionId);
+          if (requestSeqRef.current !== requestId) return;
+          finalizeStreamingAssistantMessage(streamId, answer, requestStartedAt);
+          return;
+        } catch (agentError) {
+          if (!(agentError instanceof AgentFallback)) throw agentError;
+        }
       }
 
       if (!hasDbContext) {

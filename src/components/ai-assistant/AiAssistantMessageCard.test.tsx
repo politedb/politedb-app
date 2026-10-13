@@ -6,6 +6,8 @@ import { AiAssistantMessageCard } from "./AiAssistantMessageCard";
 
 const runSqlQueryMock = vi.fn();
 const touchIdMock = vi.fn();
+const sqlSafetyMock = vi.fn();
+const calls: string[] = [];
 
 vi.mock("src/lib/tauri/query", () => ({
   runSqlQuery: (...args: unknown[]) => runSqlQueryMock(...args),
@@ -14,6 +16,25 @@ vi.mock("src/lib/tauri/query", () => ({
 vi.mock("src/lib/tauri/security", () => ({
   securityTouchIdAuthenticate: (...args: unknown[]) => touchIdMock(...args),
 }));
+
+vi.mock("src/lib/tauri/aiAgent", () => ({
+  aiAgentSqlSafety: (...args: unknown[]) => sqlSafetyMock(...args),
+}));
+
+const agentMessage: ChatMessage = {
+  id: "assistant-2",
+  role: "assistant",
+  text: "Lowercase it.",
+  parts: [
+    {
+      type: "sqlPreview",
+      sql: "SELECT lower(1);",
+      safety: "read_only",
+      agent: true,
+      confirmationState: "pending",
+    },
+  ],
+};
 
 const readOnlyMessage: ChatMessage = {
   id: "assistant-1",
@@ -54,9 +75,18 @@ function Harness(props: {
 
 describe("AiAssistantMessageCard SQL preview", () => {
   beforeEach(() => {
+    calls.length = 0;
     runSqlQueryMock.mockReset();
     touchIdMock.mockReset();
-    touchIdMock.mockResolvedValue(true);
+    touchIdMock.mockImplementation(async () => {
+      calls.push("auth");
+      return true;
+    });
+    sqlSafetyMock.mockReset();
+    sqlSafetyMock.mockImplementation(async () => {
+      calls.push("check");
+      return "read_only";
+    });
     runSqlQueryMock.mockResolvedValue({
       columns: [
         { name: "id", db_type: "int4" },
@@ -83,6 +113,40 @@ describe("AiAssistantMessageCard SQL preview", () => {
       { maxRows: 100 }
     );
     expect(screen.getByText("2 row(s)")).toBeInTheDocument();
+  });
+
+  it("does not re-check legacy previews", async () => {
+    render(<Harness runtimeConnectionId="conn-1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Ada");
+    expect(sqlSafetyMock).not.toHaveBeenCalled();
+  });
+
+  it("re-checks an agent preview on the current connection after authenticating", async () => {
+    // A saved chat reopened on another connection: the label is from back then.
+    render(
+      <Harness
+        initialMessage={agentMessage}
+        runtimeConnectionId="conn-2"
+        querySafetyMode="production"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("Ada");
+    expect(sqlSafetyMock).toHaveBeenCalledWith("SELECT lower(1);", "conn-2");
+    expect(calls).toEqual(["auth", "check"]);
+    expect(runSqlQueryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run an agent preview the current catalog no longer allows", async () => {
+    // e.g. a user overload of lower(integer) was created after the answer.
+    sqlSafetyMock.mockResolvedValue("unknown");
+    render(
+      <Harness initialMessage={agentMessage} runtimeConnectionId="conn-1" />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText(/can no longer be run from the assistant/);
+    expect(runSqlQueryMock).not.toHaveBeenCalled();
   });
 
   it("does not show Run without an active connection", () => {

@@ -9,8 +9,9 @@ use tauri::AppHandle;
 use crate::ai::adapters::{AppProviderFiles, AppSecrets};
 use crate::ai::agent::model::{CapabilityCache, CapabilityKey, HttpModel, TOOLS_UNSUPPORTED};
 use crate::ai::agent::run::{self, AgentEvent, EventSink, RunInput, ToolRegistry};
+use crate::ai::agent::sql_safety::{self, SqlSafety};
 use crate::ai::agent::start::{self, RunSnapshot};
-use crate::ai::agent::SYSTEM_PROMPT;
+use crate::ai::agent::{self, catalog};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -21,7 +22,26 @@ pub struct AgentStartInput {
     pub provider_id: String,
     pub model: Option<String>,
     pub question: String,
+    /// Runtime connection the metadata tools read (plan R3). Without one the run has
+    /// no tools.
+    pub connection_id: Option<String>,
+    /// Current SQL editor text, sent only when the user's "sql" context chip is on.
+    pub editor_sql: Option<String>,
+    /// Visible earlier messages of this chat; bounded again by `compose_question`.
+    #[serde(default)]
+    pub history: Vec<agent::HistoryEntry>,
+    pub active_schema: Option<String>,
+    pub active_table: Option<String>,
+    pub target_table: Option<String>,
+    pub reply_language: Option<String>,
+    /// Send column comments and defaults to the provider (plan R3). Off unless the
+    /// frontend says so.
+    #[serde(default)]
+    pub include_column_details: bool,
 }
+
+/// The connection's engine has no agent tools in v1: use the legacy assistant.
+pub const ENGINE_UNSUPPORTED: &str = "AI_AGENT_ENGINE_UNSUPPORTED";
 
 /// Forwards events to the frontend and remembers models that cannot use tools.
 struct ChannelSink {
@@ -70,30 +90,60 @@ pub async fn ai_agent_start(
         return Err(TOOLS_UNSUPPORTED.into());
     }
     let model = HttpModel::new(config, key)?;
+    // Tools are bound to one runtime connection, resolved here, never chosen by the model.
+    let (tools, dialect) = match input.connection_id.as_deref() {
+        Some(id) => {
+            let connection_id =
+                uuid::Uuid::parse_str(id).map_err(|_| "CONNECTION_NOT_FOUND".to_string())?;
+            let connection = state
+                .connections
+                .get(&connection_id)
+                .ok_or_else(|| "CONNECTION_NOT_FOUND".to_string())?
+                .clone();
+            let executor =
+                catalog::executor_for(&connection).ok_or_else(|| ENGINE_UNSUPPORTED.to_string())?;
+            let dialect = executor.dialect();
+            let connections = Arc::clone(&state.connections);
+            let alive: catalog::tools::Alive =
+                Arc::new(move || connections.contains_key(&connection_id));
+            let policy = catalog::tools::MetadataPolicy {
+                column_details: input.include_column_details,
+            };
+            (
+                catalog::tools::registry(executor, alive, policy),
+                Some(dialect),
+            )
+        }
+        None => (ToolRegistry::default(), None),
+    };
+    let question = agent::compose_question(
+        &input.question,
+        &agent::TurnContext {
+            history: &input.history,
+            editor_sql: input.editor_sql.as_deref(),
+            active_schema: input.active_schema.as_deref(),
+            active_table: input.active_table.as_deref(),
+            target_table: input.target_table.as_deref(),
+            reply_language: input.reply_language.as_deref(),
+        },
+    )?;
     let guard = state.ai_agent_runs.start(&input.run_id)?;
     let sink = ChannelSink {
         channel: on_event,
         capabilities: Arc::clone(&state.ai_agent_capabilities),
         capability_key,
     };
-    let question = input.question;
+    let system = agent::system_prompt(dialect);
     tauri::async_runtime::spawn(async move {
         let input = RunInput {
             model_id: &model_id,
-            system: SYSTEM_PROMPT,
+            system: &system,
             question: &question,
             deadline: run::TURN_DEADLINE,
             tool_timeout: run::TOOL_TIMEOUT,
+            cleanup_grace: run::CLEANUP_GRACE,
         };
-        // Phase 1 registers no tools (plan R7).
-        run::run_turn(
-            &model,
-            &ToolRegistry::default(),
-            input,
-            &sink,
-            &guard.cancel,
-        )
-        .await;
+        run::run_turn(&model, &tools, input, &sink, &guard.cancel).await;
         drop(guard);
     });
     Ok(())
@@ -103,4 +153,114 @@ pub async fn ai_agent_start(
 #[tauri::command]
 pub fn ai_agent_cancel(state: tauri::State<'_, AppState>, run_id: String) {
     state.ai_agent_runs.cancel(&run_id);
+}
+
+/// Longest suggested SQL the read-only check looks at; longer text is "unknown".
+const MAX_SAFETY_SQL_BYTES: usize = 64 * 1024;
+
+/// Whether SQL the assistant suggested is a single read-only query on this connection,
+/// so its preview may offer Run (plan R7). Fails closed: "unknown" unless the syntax is
+/// understood and the connection's catalog shows its function calls can only be
+/// built-ins (see `CatalogExecutor::only_builtin_code`).
+#[tauri::command]
+pub async fn ai_agent_sql_safety(
+    state: tauri::State<'_, AppState>,
+    sql: String,
+    connection_id: String,
+) -> Result<SqlSafety, String> {
+    if sql.len() > MAX_SAFETY_SQL_BYTES {
+        return Ok(SqlSafety::Unknown);
+    }
+    let Some(executor) = uuid::Uuid::parse_str(&connection_id)
+        .ok()
+        .and_then(|id| state.connections.get(&id).map(|c| c.clone()))
+        .and_then(|connection| catalog::executor_for(&connection))
+    else {
+        return Ok(SqlSafety::Unknown);
+    };
+    Ok(safety_on(executor.as_ref(), &sql).await)
+}
+
+/// The syntax check, then the connection check, on a short-lived tracked context.
+async fn safety_on(executor: &dyn catalog::CatalogExecutor, sql: &str) -> SqlSafety {
+    if sql_safety::classify(sql, executor.sql_engine()) != SqlSafety::ReadOnly {
+        return SqlSafety::Unknown;
+    }
+    let ctx = run::ToolContext {
+        cancel: tokio_util::sync::CancellationToken::new(),
+        tracker: tokio_util::task::TaskTracker::new(),
+    };
+    let trusted = executor.only_builtin_code(&ctx).await;
+    ctx.cancel.cancel();
+    ctx.tracker.close();
+    ctx.tracker.wait().await;
+    match trusted {
+        Ok(true) => SqlSafety::ReadOnly,
+        _ => SqlSafety::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::agent::catalog::{CatalogExecutor, TableDescription, TableRef};
+    use crate::ai::agent::run::ToolContext;
+    use async_trait::async_trait;
+
+    struct Catalog(Result<bool, String>);
+
+    #[async_trait]
+    impl CatalogExecutor for Catalog {
+        fn dialect(&self) -> &'static str {
+            "PostgreSQL"
+        }
+        fn sql_engine(&self) -> &'static str {
+            "postgres"
+        }
+        async fn list_schemas(&self, _: &ToolContext) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+        async fn list_tables(
+            &self,
+            _: Option<&str>,
+            _: Option<&str>,
+            _: &ToolContext,
+        ) -> Result<Vec<TableRef>, String> {
+            Ok(vec![])
+        }
+        async fn describe_table(
+            &self,
+            _: &str,
+            _: &str,
+            _: &ToolContext,
+        ) -> Result<TableDescription, String> {
+            Err("no".into())
+        }
+        async fn only_builtin_code(&self, _: &ToolContext) -> Result<bool, String> {
+            self.0.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_needs_both_the_syntax_and_the_connection_check() {
+        let trusted = Catalog(Ok(true));
+        assert_eq!(
+            safety_on(&trusted, "SELECT lower(name) FROM t").await,
+            SqlSafety::ReadOnly
+        );
+        assert_eq!(
+            safety_on(&trusted, "SELECT pg_advisory_lock(1)").await,
+            SqlSafety::Unknown
+        );
+        // A user overload such as `public.lower(integer)` or a view that runs other
+        // code makes the connection check say no.
+        assert_eq!(
+            safety_on(&Catalog(Ok(false)), "SELECT lower(1)").await,
+            SqlSafety::Unknown
+        );
+        assert_eq!(
+            safety_on(&Catalog(Err("catalog query failed".into())), "SELECT 1").await,
+            SqlSafety::Unknown
+        );
+    }
 }

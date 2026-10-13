@@ -12,7 +12,7 @@ Scope: **Phase 1 only** (R7.1, protocol only). Phases 2 and 3 are not started an
 - Requested 2026-10-13 by the user: turn the AI assistant into an agent ("giờ tôi muốn phần AI chuyển thành agent").
 - Branch: `feat/ai-agent` (from `main` @ `b74100b`). One phase per commit series; PR per phase or one PR for Phases 1–3 (decide at review).
 - Plan file: `.agent/plans/ai-agent.md` (user decision 2026-10-13) because `.agent/PLAN.md` still holds the unfinished Mac App Store plan. Same DRAFT → Codex critique → human APPROVED workflow applies.
-- Approved by the user on 2026-10-13 ("tôi duyệt, làm phase 1 đi") with Revision 2, including the R5 residual risk (UI-supplied safety mode). Implementing Phase 1 on `feat/ai-agent`.
+- Approved by the user on 2026-10-13 ("tôi duyệt, làm phase 1 đi") with Revision 2, including the R5 residual risk (UI-supplied safety mode). Phase 1 committed on `feat/ai-agent` (Codex VERIFIED WITH LIMITATIONS). Phase 2 requested by the user on 2026-10-13 ("làm tiếp phase 2 đi"), implemented (uncommitted) and reviewed by Codex over 10 rounds; round 10 is **VERIFIED WITH LIMITATIONS** (residuals deferred to the Phase 3 R4 executor). Awaiting the user's commit decision.
 - Current: Phase 1 implemented 2026-10-13 (uncommitted working tree on `feat/ai-agent`). Codex review 2026-10-13 returned **CHANGES REQUIRED** (2 P1 / 4 P2 / 1 nit); Grok Bot landed the fixes (still uncommitted). Awaiting Codex **re-review**. Next after VERIFIED: Phase 2 (R3 metadata tools + step UI), then Phase 3 (R4/R5 data tools, consent, approval).
 - No commit/push unless requested.
 
@@ -449,6 +449,366 @@ Addresses "Re-review: AI agent Phase 1 round 2" (two P2 findings).
   - Test: a barrier-controlled concurrent save. The run only ever sees the new config together with the new generation; recording its result updates the current cache key.
 - **Live smoke:** the second request now uses `allow_tools: false`, matching production finalization.
 - **Verification:** `cargo test` 254 passed / 2 ignored in both flavors (53 agent tests). Clippy has no agent warnings in either flavor. `cargo fmt` clean.
+
+## Phase 2 — Implementation evidence (Claude, 2026-10-13)
+
+Branch `feat/ai-agent`. Metadata agent behind "AI agent (beta)" (off by default).
+
+**Backend**
+
+- **`src-tauri/src/ai/agent/catalog/`:**
+  - **`CatalogExecutor` port.** Only fixed, parameterised statements run; the model never supplies SQL.
+  - **Shared types:** `TableRef`, `Column`, `ForeignKey`, `Index`, `TableDescription`.
+  - **Caps:** 200 schemas, 500 tables, 200 columns, 100 FKs, 100 indexes, 200 chars of free text (comments, defaults). A `truncated` flag is set when a cap is hit.
+  - **Timeout:** `CATALOG_TIMEOUT` is 10 s.
+  - **Name search:** `instr`/`position`/`LOCATE`, never LIKE, so `%` and `_` are literal.
+  - **Unknown tables:** looked up by bound parameters; a miss returns a fixed "table not found".
+  - **Errors** are fixed strings: DB error text never enters the transcript.
+- **Executors per engine:**
+  - **PostgreSQL (`postgres.rs`):**
+    - A dedicated pooled client per call, so the SSH tunnel is reused.
+    - `build_transaction().read_only(true)` plus `SET LOCAL statement_timeout`, always rolled back.
+    - A tracker task sends a server cancel on run cancel or timeout.
+    - Queries use `pg_catalog` with `format_type`, `pg_get_expr`, `col_description` and oid-bound joins. Expression index columns show as `<expression>`.
+  - **MySQL / MariaDB (`mysql.rs`):**
+    - A dedicated pooled connection; `START TRANSACTION READ ONLY` fails closed (unlike the best-effort editor runner); always `ROLLBACK`.
+    - A tracker task runs `KILL QUERY <thread id>` from a second connection on cancel or timeout.
+    - Queries use `information_schema` (columns, key_column_usage, statistics).
+  - **SQLite (`sqlite.rs`):**
+    - Uses the shared connection handle (the only way to see `:memory:`).
+    - Statements are only `sqlite_master` and the read-only `pragma_table_info` / `foreign_key_list` / `index_list` / `index_info` table functions, with bound arguments.
+    - Only schema `main` is exposed.
+    - The lock is taken with `try_lock` polling, bounded by the timeout and by cancel. An interrupt handle is armed by a watcher on cancel or timeout.
+    - Work runs on `tracker.spawn_blocking`.
+    - Deviation from R3's "own read-only connection": the statements cannot write by construction, and a separate open would bypass `:memory:` and the MAS file lease.
+- **Tools (`tools.rs`):**
+  - `list_schemas{}`, `list_tables{schema?, name_contains?}`, `describe_table{schema, table}`.
+  - Strict validation: object only, no extra fields (unknown names are not echoed), strings only, ≤128 chars, no control characters, required fields non-empty.
+  - A liveness check (the connection is still in `AppState.connections`) runs before every call.
+  - Results are JSON.
+- **Command `ai_agent_start`:**
+  - Optional `connectionId` resolves the runtime connection server-side. Engines without an executor return `AI_AGENT_ENGINE_UNSUPPORTED` (legacy fallback); without a connection there are no tools.
+  - `editorSql` is attached by `agent::compose_question` as reference text, capped at 8 KiB.
+  - `agent::system_prompt(dialect)` names the dialect and says the agent cannot run queries.
+
+**Frontend**
+
+- **`src/lib/ai-assistant/agent.ts`:**
+  - `runAgentTurn` uses a UUID run id. Abort cancels the backend run, and an already-aborted signal starts nothing.
+  - Fallback (`AgentFallback`) happens only on disabled/provider/tools/engine-unsupported codes and only before any tool ran.
+  - `agentAnswerParts`: the first ```sql block becomes a `sqlPreview` whose safety is computed locally (`isReadOnlySql`, `isDDLStatement`, `isMutatingStatement`) and never taken from the model.
+- **New `agentSteps` message part:** tool, ok, truncated, duration only.
+  - `AgentStepsPart` is a collapsible "Checked the database (N steps)" with fixed labels.
+  - Copy/share text excludes it.
+- **`useAiAssistantSubmit`:** the agent branch runs when the agent is enabled, there is DB context and a runtime connection, and the engine is in postgres/mysql/mariadb/sqlite.
+  - Fallback goes to the legacy planner.
+  - Agent errors are shown with fixed messages (deadline/limits, connection closed, generic `AI_AGENT_*`).
+- **AI settings:** "AI agent (beta)" checkbox (`setAiAgentEnabled`), off by default.
+- **Chat history:** a 2 MiB byte cap per scope (`fitWithinBytes`). The oldest sessions are dropped first, never the active one; then the active session's oldest messages. One list serves memory and storage.
+
+**Verification**
+
+- `cargo test`: 267 passed / 4 ignored in default and `--features app-store`. Clippy: no agent warnings in either flavor. `cargo fmt` clean.
+- **Live catalog tests** (ignored by default, run against throwaway Docker containers from local images, then stopped): `agent_pg_live` on PostgreSQL 16.3, and `agent_mysql_live` on MySQL 8.0 and MariaDB 11. Each covers schemas, filters, literal `%`, columns (types, defaults, comments, PK), FKs, indexes (including an expression column on PG), and an injected table name → not found.
+- **Vitest:** 672 passed, including:
+  - `agent.test.ts`: events, fallback rules, abort, local safety;
+  - the submit-hook agent branch: used, fallback, off/no-connection/other engine, errors shown;
+  - `AgentStepsPart`;
+  - the settings toggle;
+  - `fitWithinBytes`.
+- `npm run build` OK.
+- **UI** (built-in browser, harness with mocked backend events over the Tauri channel): question → "Checked the database (2 steps)" (expands to "Listed tables", "Looked at a table's structure") → answer text → "SQL Preview • read only" with Run.
+- **Not verified:**
+  - live provider plus live DB end to end in the desktop app;
+  - real cancel/timeout interruption against a long-running catalog query (the cancel paths are cooperative and tracker-owned, with no live slow-query test);
+  - the app-store flavor SQLite with the MAS file lease (that branch is not merged).
+
+## Phase 2 — Review fixes, round 2 (Claude, 2026-10-13)
+
+These fix every finding in Codex "Review: AI agent Phase 2" (2 P1 / 6 P2). The changes are uncommitted on `feat/ai-agent`.
+
+**1. P1 — Session ownership on cancel**
+
+- New helpers in `catalog/mod.rs`:
+  - `owned` runs each catalog operation as a tracker task; the tool future only awaits its result.
+  - `acquire` bounds the pool checkout by the timeout, stops it on cancel, and rejects a session that arrives after cancel.
+  - `interruptible` interrupts only while the caller still holds the session, gives it `CANCEL_GRACE` (3 s) to unwind, and reports `interrupted`.
+- **PostgreSQL:** `PgCatalog::read_only` with fixed HRTB closures replaces the `read_only!` macro.
+  - The rollback always runs.
+  - On a stop, `cancel_query` is sent while the client is held. The client is then removed from the pool with `deadpool::Object::take` and dropped, never reused.
+- **MySQL/MariaDB:**
+  - Same structure.
+  - `KILL QUERY <id>` goes over a separate unpooled `Conn::new(opts)`, so a full pool cannot block it.
+  - An interrupted session is closed with `disconnect`.
+  - `ROLLBACK` always runs, including after `?` or early returns in the body.
+  - Every catalog statement has a server-side limit:
+    - MySQL uses `/*+ MAX_EXECUTION_TIME(ms) */`;
+    - MariaDB (server major ≥ 10) uses `SET STATEMENT max_statement_time = s FOR …`.
+- **Tests:**
+  - Unit: completed work is never interrupted; a stop interrupts before the session is released, for both cancel and timeout; owned cleanup finishes after the caller future is dropped; checkout from an exhausted pool is bounded and stops on cancel.
+  - Live (`agent_pg_live_cancel`, `agent_mysql_live_cancel`): a `pg_sleep(30)` / `SLEEP(30)` on the catalog session is stopped within 5 s by run cancel, and within 8 s by timeout. No active sleep remains in `pg_stat_activity` / `processlist`.
+  - Live, exhausted pool: checkout fails with the fixed reason, then the catalog works again. For MySQL the pool has a single connection, which also proves the kill does not depend on pool capacity.
+- **Run on:** PostgreSQL 16.3, MySQL 8.0.46 and MariaDB 11.8.9, in throwaway Docker containers that were stopped afterwards.
+
+**2. P1 — Run offered for mutating SQL**
+
+- New `ai::agent::sql_safety::classify(sql, engine)` and command `ai_agent_sql_safety`. It fails closed:
+  - It returns `read_only` only for one statement led by `SELECT`/`WITH`/`EXPLAIN`, or MySQL `SHOW`/`DESCRIBE`.
+  - Denied words outside strings and comments: DML/DDL, `INTO`/`OUTFILE`, `FOR`/`LOCK`, `SET`, `PRAGMA`, `ANALYZE`, …
+  - Every function call must be on a pure built-in allow-list. Qualified and quoted calls make the result unknown.
+  - These also make it unknown: `:=`; dollar quotes; MySQL `/*! */` and `/*+ */`; MySQL `--` not followed by whitespace; any backslash in a plain string (server-dependent); unterminated text.
+  - Postgres-only nested comments and `E''` escapes are modelled.
+- Frontend `sqlSafety(sql, engine)` (async) gives `read_only` only when both `isReadOnlySql` and the backend say so; otherwise ddl, mutating or unknown. Run is shown only for `read_only` previews; Insert stays available.
+- **Regressions:** Codex's PRAGMA assignment, `SELECT … INTO OUTFILE` and `pg_advisory_lock` cases, plus:
+  - CTE DML, locking clauses, multi-statement, `EXPLAIN ANALYZE`;
+  - sleep, sequence, file and admin functions;
+  - quote and comment tricks;
+  - ordinary reporting queries that stay `read_only`.
+
+**3. P2 — SQLite TEMP/attached shadowing**
+
+- Every catalog statement now names `main`: `main.sqlite_master`, and `pragma_table_info` / `foreign_key_list` / `index_list` / `index_info(…, 'main')`.
+- The test adds a same-name TEMP table and index and an attached `aux.orders`. Neither their columns nor their tables leak.
+
+**4. P2 — SQLite arming race**
+
+- The worker arms the interrupt handle under the same mutex the watcher stops under, and rechecks cancel and the deadline after taking the lock.
+- After a stop, the watcher keeps interrupting every 20 ms until the worker releases the connection (bounded by `CANCEL_GRACE`). This works because SQLite ignores an interrupt that lands between statements.
+- A drop guard disarms the handle on every exit.
+- **Tests:**
+  - A stop before the first statement still interrupts a long statement. The old single interrupt was shown to hang this test; the test is now finite, so a regression fails instead of hanging.
+  - When the lock is freed only after the deadline, no work runs.
+
+**5. P2 — Byte cap and authoritative state**
+
+- `fitSessionsForStorage` measures the exact stored envelope and applies all limits (80 messages, 20 sessions, 2 MiB). It drops the oldest other sessions, then the active session's oldest messages, then replaces a lone oversized message with a fixed note.
+- The persist effect applies the result to the hook's `sessions` state before saving. Memory, UI and storage hold one list, and an unchanged input returns the same array, so there is no render loop.
+- Legacy oversized storage is fitted on load.
+- **Tests:** UTF-8, envelope size, a single oversized message with parts, the count limits and idempotence. A hook test covers visible eviction from legacy storage, a later append, remount and a cold load, with no resurrection.
+
+**6. P2 — Conversation and context**
+
+- `ai_agent_start` takes `history` (`{role: user|assistant, text}`), `activeSchema`, `activeTable`, `targetTable` and `replyLanguage`.
+- `agent::compose_question(question, &TurnContext)` builds the first message:
+  - the newest ≤ 12 messages, each ≤ 2 KiB and ≤ 8 KiB in total, marked as context and not instructions;
+  - a context line with single-line names of ≤ 128 chars;
+  - the question;
+  - the editor SQL (only when the sql chip is on).
+- The raw question is capped at 16 KiB, and the composed prompt at `MAX_PROMPT_BYTES` (40 KiB); the worst case is tested to fit.
+- Only visible text and SQL are sent (`agentHistory`). Step details, result rows, provider replay state and reasoning from earlier runs are never sent.
+- The hook passes the same history, language and target/active table the legacy planner uses.
+- **Tests:** a multi-turn follow-up with the SQL chip off, the active table, the target table and the reply language; history bounds; worst-case size.
+
+**7. P2 — Privacy controls**
+
+- `MetadataPolicy { column_details }`: when it is off, `describe_table` clears comments and defaults before the result is encoded.
+- The frontend sends `includeColumnDetails` from the new setting "Also send column comments and default values". It is shown under the agent toggle, on by default; the backend default is off.
+- Settings now say that names and types go to the selected provider without asking each time, and that chat history is stored on this device without encryption.
+- **Tests:** a sentinel comment/default is present with the setting on and absent with it off; settings toggle and copy.
+
+**8. P2 — Truncation in steps**
+
+- `AgentTool::run` returns `ToolOutput { content, truncated }`. The coordinator reports `truncated = tool cap || byte cap`.
+- The catalog tools set it from their list caps and from `TableDescription.truncated`.
+- **Test:** through the real catalog tools and coordinator, 501 tables give a `list_tables` step with `truncated: true`, while `list_schemas` stays false.
+
+**Verification (round 2)**
+
+- `cargo test`: 283 passed / 6 ignored, in both the default and `--features app-store` builds.
+- Live ignored tests on throwaway containers: `agent_pg_live` and `agent_pg_live_cancel` on PG 16.3; `agent_mysql_live` and `agent_mysql_live_cancel` on MySQL 8.0.46 and MariaDB 11.8.9.
+- Clippy: no warnings in `ai/agent` or `commands/ai_agent` in either flavor; the remaining warnings are pre-existing and elsewhere. `cargo fmt` clean.
+- `npm run test:run`: 122 files / 683 tests passed. `npm run build` OK.
+
+**Remaining limitations**
+
+- No live provider + DB round trip in the desktop app.
+- The SQLite catalog still uses the shared connection (main-qualified, read-only statements only), not its own read-only connection.
+- The MAS file lease is not on this branch.
+- Step progress is shown after the answer, not live.
+- `localStorage` quota failures are still swallowed: in-memory state stays fitted, but storage can keep its previous (also fitted) envelope.
+
+## Phase 2 — Review fixes, round 3 (Claude, 2026-10-13)
+
+These fix Codex "Review: AI agent Phase 2 — round 2" (2 P1 / 3 P2). The changes are uncommitted on `feat/ai-agent`.
+
+**1. P1 — MariaDB executable comments**
+
+- The tokenizer now also rejects `/*M!` and `/*m!` (including versioned forms) in every dialect, as well as `/*!` and `/*+`.
+- **Regressions:** `SELECT /*M! GET_LOCK('agent_review', 0) + */ 1` for mariadb and mysql, and `/*m!` for postgres.
+
+**2. P1 — Function identity**
+
+- The syntax check now only says the calls are *spelled* like built-ins. `ai_agent_sql_safety(sql, connectionId)` answers `read_only` only when that holds **and** `CatalogExecutor::only_builtin_code` returns true on the actual connection.
+- Run then uses the same connection, through the same fixed read-only catalog path, owned session and timeouts.
+- **PostgreSQL** — all of the following must hold:
+  - no functions in user schemas other than trigger or event-trigger functions (so no overload, operator, cast or aggregate can resolve to user code);
+  - no row-level security policies;
+  - no domain constraints in user schemas;
+  - every user view (at most 200) is itself a plain read-only query (`pg_get_viewdef` is run through the same classifier). This catches views over built-in side effects such as `pg_try_advisory_lock`.
+- **MySQL/MariaDB** — all of the following must hold:
+  - no visible stored functions in user schemas (loadable functions cannot take built-in names, and an invisible routine cannot be executed by the user);
+  - every visible view definition (at most 200) is plain. An empty definition (no SHOW VIEW privilege) counts as unsure.
+- **SQLite:** the app registers no SQL functions and extension loading is off, so the check returns true.
+- Any error or timeout gives `unknown`.
+- **Frontend:** `aiAgentSqlSafety(sql, connectionId)`; `sqlSafety` and `agentAnswerParts` take the runtime connection id.
+- **Tests:**
+  - Unit: a fake executor shows `read_only` needs both checks, and that a `false` or an error gives `unknown`.
+  - Live `agent_pg_live_identity` (PG 16.3): plain views → true; a trigger function → still true. Each of these → false: Codex's `lower(integer)` overload calling `pg_advisory_lock`; a view over `pg_try_advisory_lock`; an RLS policy; a domain CHECK.
+  - Live `agent_mysql_live_identity` (MySQL 8.0.46, MariaDB 11.8.9): a plain view → true; a stored function → false; a view over `GET_LOCK` → false.
+
+**3. P2 — SQLite release order**
+
+- `Held` owns the connection guard. Its `Drop` disarms the interrupt handle and marks the worker finished under the arm mutex, and only then unlocks the connection. This covers every exit, including a panic.
+- `Finish` still covers exits before the lock is taken.
+- The watcher bound is now `INTERRUPT_GRACE + UNWIND_GRACE`.
+- **Test:** `the_handle_is_disarmed_before_the_connection_is_released`, for both normal return and panic. An "editor" thread blocked on the connection always observes the handle cleared and the worker finished when it gets the lock.
+
+**4. P2 — Oversized legacy metadata**
+
+- `normalizeSession` bounds stored fields:
+  - session and message ids ≤ 64 chars (longer ones are replaced);
+  - title ≤ 120 chars;
+  - provider and target table ≤ 256 chars;
+  - language ≤ 16 chars;
+  - roles other than user/assistant are dropped.
+- `fitSessionsForStorage` has a terminal step: if even the minimal record is over the cap, it keeps one empty session with bounded fields. The result always fits, so fitting it again returns the same array with `changed: false`.
+- **Tests:** a metadata-only overflow fits and is idempotent. A mounted hook loading oversized legacy metadata settles (bounded renders, none after settling), stores less than 10 KB and keeps the valid message.
+
+**5. P2 — Cleanup and slot lifetime**
+
+- The catalog cleanup budget is split into `INTERRUPT_GRACE` (1 s), `UNWIND_GRACE` (1.5 s) and `DISCONNECT_GRACE` (1 s). A compile-time assert keeps their sum below `run::CLEANUP_GRACE` (5 s).
+- The coordinator now logs `AI_AGENT_CLEANUP_SLOW` if cleanup exceeds `RunInput.cleanup_grace`, but keeps waiting for the tracker. `Done`, and the return that drops the run guard and frees the slot, come only after every tracked task ended.
+- **Test:** `done_waits_for_cleanup_beyond_the_grace_period` uses a 20 ms grace and 300 ms of cleanup; the cleanup has finished when `Done` is sent.
+
+**Verification (round 3)**
+
+- `cargo test`: 286 passed / 8 ignored, in both the default and `--features app-store` builds.
+- Live tests on throwaway containers (stopped afterwards):
+  - PG 16.3: `agent_pg_live`, `agent_pg_live_cancel`, `agent_pg_live_identity`.
+  - MySQL 8.0.46 and MariaDB 11.8.9: `agent_mysql_live`, `agent_mysql_live_cancel`, `agent_mysql_live_identity`.
+- Clippy: no warnings in agent code in either flavor. `cargo fmt` clean.
+- `npm run test:run`: 122 files / 685 tests passed. `npm run build` OK.
+
+**Remaining limitations (unchanged)**
+
+- No live provider + DB desktop round trip.
+- SQLite still uses the shared connection.
+- The MAS lease is not on this branch.
+- Steps are shown after the answer.
+- `localStorage` quota failures are swallowed.
+- Run eligibility is fail-closed by design, so databases with user functions or complex views get Insert only.
+
+## Phase 2 — Review fixes, round 4 (Claude, 2026-10-13)
+
+These fix Codex "Review: AI agent Phase 2 — round 3" (2 P1). The changes are uncommitted on `feat/ai-agent`.
+
+**1. P1 — PostgreSQL casts and operators**
+
+- `PgCatalog::only_builtin_code` now treats **any object created after initdb** (OID ≥ 16384, including anything a superuser placed in `pg_catalog`) that a query could dispatch to as unsure. This covers:
+  - functions other than trigger and event-trigger functions;
+  - **casts**, **operators** and conversions, which can bind even a built-in such as `pg_try_advisory_lock`;
+  - domain constraints;
+  - RLS policies.
+- Views are selected by OID ≥ 16384 and must each be plain.
+- Codex's cast example was reproduced live first on a scratch PG 16.3: `CREATE CAST (bigint AS boolean) WITH FUNCTION pg_try_advisory_lock(bigint)`, then `SELECT CAST(CAST(424242 AS bigint) AS boolean)` returned `t` with one advisory lock held.
+- **Live test:** `agent_pg_live_identity` now also covers that cast and a `!` prefix operator over `pg_try_advisory_lock` (both → false). The earlier fixtures still pass: plain → true, trigger function → true; overload, view, policy and domain → false.
+- The live tests share one database, so they must run with `--test-threads=1`; the doc comments say so. A concurrent `DROP SCHEMA` makes `pg_get_viewdef` fail, which correctly yields "unsure".
+
+**2. P1 — Run trusted a stored label**
+
+- An agent preview now carries `agent: true` (`ChatMessagePart.sqlPreview.agent`), and its `safety` is documented as answer-time display metadata.
+- `AiAssistantMessageCard.handleRunSql(sql, agent)` re-checks an agent preview with `aiAgentSqlSafety(sql, runtimeConnectionId)` on the **current** runtime connection, after any Touch ID prompt and immediately before `runSqlQuery`. Anything but `read_only` stops with a fixed message and leaves Insert available.
+- Legacy previews are unchanged: no backend re-check, same Run rule as before.
+- **Tests** (mounted card):
+  - a legacy preview is not re-checked;
+  - an agent preview reopened on another connection is checked against that connection (`conn-2`), after authentication;
+  - an agent preview the catalog no longer allows does not run.
+- **Residual:** the check and `runSqlQuery` are two calls. DDL racing in the milliseconds between them is not covered. A single validate-and-execute boundary (read-only transaction on a discarded session) is the R4 executor planned for Phase 3.
+
+**Verification (round 4)**
+
+- `cargo test`: 286 passed / 8 ignored, in both flavors. Clippy: no agent warnings. fmt clean.
+- Live PG 16.3 (throwaway, stopped): `agent_pg_live`, `agent_pg_live_cancel` and `agent_pg_live_identity` pass with `--test-threads=1`.
+- The MySQL/MariaDB executor is unchanged since round 3 (live passed then).
+- `npm run test:run`: 122 files / 688 tests passed. `npm run build` OK.
+
+## Phase 2 — Review fixes, round 5 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 4" (1 P1: MySQL/MariaDB skipped `mysql`/`sys` views and functions).
+
+- `MySqlCatalog::only_builtin_code` now checks routines and views in **every** schema except `information_schema` and `performance_schema`, where nothing can be created.
+- In `sys` and `mysql`, only objects owned by the server's reserved definer (`mysql.sys@localhost`, `mariadb.sys@localhost`) are skipped. These are the stock `sys` views and functions, and MariaDB's `mysql.user` view. Setting such a definer requires administrative privileges (`SET_USER_ID` / `SUPER`); this is documented as accepted.
+- **Live test** (`agent_mysql_live_identity`), on MySQL 8.0.46 and MariaDB 11.8.9, run as root, which sees the stock `sys` objects:
+  - the baseline is still true, with 100 and 102 stock views skipped;
+  - a user view over `GET_LOCK` in `mysql` or `sys` → false;
+  - a stored function in `mysql` → false;
+  - the earlier user-schema fixtures are unchanged.
+- **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. Live `agent_mysql_live*` passes with `--test-threads=1` on both servers (throwaway containers, stopped). The frontend is unchanged since round 4 (688 tests passed, build OK).
+
+## Phase 2 — Review fixes, round 6 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 5" (1 P1: a view with the reserved definer could hide `GET_LOCK`).
+
+- The definer exemption is gone. `MySqlCatalog::only_builtin_code` checks **every visible view in every schema** (all but `information_schema` and `performance_schema`, where nothing can be created), whoever the definer. Each definition must pass the classifier; a missing definition counts as unsure.
+- An administrator who can see the stock `sys` views therefore gets "unsure" and Insert only (fail closed). Ordinary accounts do not see them.
+- **The stored-function check is removed.** On MySQL 8 every account sees the stock `sys` functions, so that check made Run impossible for everyone. It is also unnecessary: in MySQL and MariaDB an unqualified call resolves to the built-in of that name, and a stored function must be called schema-qualified, which the syntax check rejects. Only views can lead a plain query to a stored function, and views are checked.
+- **Live test** (`agent_mysql_live_identity`), on MySQL 8.0.46 and MariaDB 11.8.9, using an ordinary account `agent_ro` with SELECT, SHOW VIEW and EXECUTE on `agent_t`:
+  - the baseline is true; root gets false;
+  - with a stored `agent_t.lower(INT)` that calls `GET_LOCK`, the check stays true, and `SELECT lower(1)` run by that account leaves `IS_USED_LOCK('agent')` NULL (the built-in was called);
+  - views over `GET_LOCK` in the user schema → false;
+  - Codex's reserved-definer `SQL SECURITY INVOKER` views in `mysql` and in `sys`, granted to the account → false.
+- **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. Live `agent_mysql_live*` passes with `--test-threads=1` on both servers (throwaway containers, stopped). The frontend is unchanged since round 4.
+
+## Phase 2 — Review fixes, round 7 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 6" (1 P1: an allow-listed name that is not native in MySQL, such as `date_trunc`, resolves to a stored function in the default database).
+
+- **Separate MySQL/MariaDB allow-list.** `sql_safety::MYSQL_FUNCTIONS` contains only functions native to both servers. On MySQL and MariaDB, unqualified calls are checked against it; the PostgreSQL/SQLite list is unchanged.
+  - A native name always resolves to the built-in, and a stored function of that name needs schema qualification, which the syntax check rejects.
+  - So only views can reach stored functions, and views are checked.
+- **Unit tests:** `date_trunc`, `to_char` and `strftime` are unknown on mysql/mariadb; `date_trunc` stays read_only on postgres.
+- **Live test** (`agent_mysql_live_identity`): for **every** name in `MYSQL_FUNCTIONS`, `CREATE FUNCTION \`name\`()` is either refused or produces Note 1585 ("same name as a native function"). Any other outcome fails the test.
+  - Passes on MySQL 8.0.46 and MariaDB 11.8.9.
+  - The check discriminates: creating `date_trunc` produced no note on either server, while `lower` produced 1585.
+- **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. The frontend is unchanged since round 4 (688 tests passed, build OK).
+
+## Phase 2 — Review fixes, round 8 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 7" (1 P1: keyword exemptions accepted `agent_t.filter(1)`).
+
+- **Qualified calls first.** A word followed by `(` and preceded by `.` is now rejected before any keyword or type exemption, in every dialect.
+- **Separate MySQL/MariaDB keyword list.** `MYSQL_PAREN_KEYWORDS` holds only words reserved on both servers, so an unqualified `keyword(` can never reach a stored function. Unreserved words such as `FILTER`, `WITHIN`, `ROWS`, `ANY` and `ROW` are now checked as function names and rejected.
+  - Live, MariaDB accepts `CREATE FUNCTION filter()` unquoted, which confirms `FILTER` had to go.
+- **Live test** (`agent_mysql_live_identity`): for every word in `MYSQL_PAREN_KEYWORDS`, an unquoted `CREATE FUNCTION word()` must fail. Passes on MySQL 8.0.46 and MariaDB 11.8.9. The previous native-name (1585) and view checks also pass.
+- **Unit tests:** `agent_t.filter(1)` on mysql/postgres, `public.exists(1)` on sqlite, and `filter(1)`, `within(1)`, `rows(1)` on mysql/mariadb → unknown. The ordinary-query regressions still pass.
+- **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. The frontend is unchanged since round 4.
+
+## Phase 2 — Review fixes, round 9 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 8" (1 P1: callable identifiers tokenized as literals).
+
+- **Identifier runs.** The tokenizer scans one run of `[A-Za-z0-9_$]` (`$` may start a run only on MySQL). The run is a `Literal` only if it is wholly a number: digits, digits with an exponent, `0x…` or `0b…`. Anything else is a `Word`, so `1agent` and `$lower` get the normal function checks and are not allow-listed.
+- **Non-word before `(`.** Any `Literal` or `Quoted` token directly before `(` gives unknown. This covers `"name"(…)`, which ANSI_QUOTES turns into an identifier, and `` `name`(…) ``.
+- **ASCII only, outside strings and comments.** Non-ASCII characters there (including U+00A0, which MySQL accepts inside identifiers) give unknown. Only ASCII whitespace separates tokens, and MySQL's `--` comment needs ASCII whitespace or a control character after it.
+- **Unit tests:** `1agent(1)`, `agent_t.1agent(1)`, `"agent_lock"(1)`, `agent_t."agent_lock"(1)`, `$lower(1)`, `lower<U+00A0>(1)`, `--<U+00A0>` followed by `; DELETE`, `1e5(1)` and `'x'(1)` → unknown. Ordinary numbers (`1`, `1.5`, `1e5`, `0x1F`, `2.5E3`), `IN` lists, the digit-leading table name `1table` and a non-ASCII string literal stay read_only.
+- **Live test** (`agent_mysql_live_identity`), on MySQL 8.0.46 and MariaDB 11.8.9: a stored `` `1agent` `` that calls `GET_LOCK` is callable unqualified (`SELECT 1agent(1)` takes the lock), while the classifier returns unknown for both the unqualified and qualified forms.
+- **Verification:**
+  - `cargo test`: 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean.
+  - Live `agent_mysql_live*` on both servers and `agent_pg_live*` on PG 16.3 pass with `--test-threads=1` (throwaway containers, stopped).
+  - The frontend is unchanged since round 4.
+
+## Phase 2 — Review fixes, round 10 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 2 — round 9" (1 P1: PostgreSQL ends `--` comments at CR, the classifier did not).
+
+- `--` and MySQL `#` line comments now end at LF **or** CR in every dialect. If a server keeps going past CR, the classifier only sees more code than the server, which makes the check stricter.
+- **Unit tests:** `SELECT 1 -- note<CR>pg_advisory_lock(1)` (postgres) and `SELECT 1 # note<CR>GET_LOCK('a', 0)` (mysql) → unknown.
+- **Self-audit before this review:**
+  - Lexical forms checked: nested and executable comments; `E''`, `U&''`, `B''` and `X''` strings; dollar quotes and `$n` parameters; doubled-quote escapes in every quoted form; SQLite `[…]`; MySQL `$`/digit-leading identifiers; ODBC `{fn …}`.
+  - Statements and calls checked: `:=` and `@var`; `LAST_INSERT_ID(n)`; `PROCEDURE ANALYSE()`; `TABLESAMPLE SYSTEM(…)`; `EXPLAIN ANALYZE` / `EXPLAIN FOR CONNECTION`; `FOR UPDATE/SHARE … SKIP LOCKED`.
+  - PostgreSQL field-notation calls (`t.fn` = `fn(t)`) need a function taking the row type, i.e. a post-initdb function, which the identity check rejects.
+  - No further bypass found.
+- **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. The frontend is unchanged since round 4.
 
 ## Plan Review (Codex)
 

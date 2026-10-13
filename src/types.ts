@@ -309,6 +309,11 @@ export type ChatMessagePart =
       type: "sqlPreview";
       sql: string;
       safety?: "read_only" | "mutating" | "ddl" | "unknown";
+      /**
+       * Suggested by the AI agent. `safety` then only describes the check made when
+       * the answer arrived: Run re-checks the SQL against the current connection.
+       */
+      agent?: boolean;
       confirmationState?:
         | "pending"
         | "inserted"
@@ -332,4 +337,16 @@ export type ChatMessagePart =
       rowCount?: number | null;
       confidence?: "high" | "medium" | "low";
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      /** What an AI agent run looked at (plan ai-agent R6): no arguments or data. */
+      type: "agentSteps";
+      steps: AgentStepSummary[];
+    };
+
+export type AgentStepSummary = {
+  tool: string;
+  ok: boolean;
+  truncated: boolean;
+  durationMs: number;
+};

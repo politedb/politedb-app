@@ -410,7 +410,7 @@ export function AiAssistantChatArea(props: {
   return (
     <>
       {floating ? (
-        <div class="relative flex shrink-0 items-center justify-between p-2">
+        <div class="relative flex shrink-0 items-center justify-between p-2 shadow-xs">
           <div class="flex min-w-0 items-center gap-2">
             <Popover
               open={titleOpen}

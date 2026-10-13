@@ -38,6 +38,12 @@ import {
 } from "src/lib/tauri/ai";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
+import {
+  isAiAgentColumnDetailsEnabled,
+  isAiAgentEnabled,
+  setAiAgentColumnDetails,
+  setAiAgentEnabled,
+} from "src/lib/tauri/aiAgent";
 import { AiModelCombobox } from "./AiModelCombobox";
 import { formatBytesSize } from "src/utils/convert";
 
@@ -71,6 +77,10 @@ export function AiAssistantSettingsDialog(props: Props) {
   // Ids the server reported on the last Load models, offered again as suggestions.
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatus] = useState("");
+  const [agentEnabled, setAgentEnabled] = useState(isAiAgentEnabled);
+  const [agentColumnDetails, setAgentColumnDetailsState] = useState(
+    isAiAgentColumnDetailsEnabled
+  );
   const [busy, setBusy] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [legacyModel, setLegacyModel] = useState<AiLegacyModelInfo | null>(
@@ -404,9 +414,9 @@ export function AiAssistantSettingsDialog(props: Props) {
         <DialogTitle>AI Provider Settings</DialogTitle>
       </DialogHeader>
       <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] gap-0 overflow-hidden p-0">
-        <aside class="min-h-0 overflow-hidden border-r border-neutral-200 bg-neutral-50">
+        <aside class="flex min-h-0 flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
           <OverlayScrollArea
-            className="h-full"
+            className="min-h-0 flex-1"
             contentClassName="space-y-1 p-3"
           >
             {PROVIDER_KINDS.map((kind) => {
@@ -471,6 +481,47 @@ export function AiAssistantSettingsDialog(props: Props) {
               );
             })}
           </OverlayScrollArea>
+          <div class="shrink-0 space-y-2 border-t border-neutral-200 p-3 text-xs text-neutral-600">
+            <label class="flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                class="mt-0.5"
+                checked={agentEnabled}
+                onChange={(event) => {
+                  const next = event.currentTarget.checked;
+                  setAiAgentEnabled(next);
+                  setAgentEnabled(next);
+                }}
+              />
+              <span>
+                <span class="block font-medium text-neutral-800">
+                  AI agent (beta)
+                </span>
+                Lets the assistant look up schemas, tables and columns itself on
+                PostgreSQL, MySQL, MariaDB and SQLite, without asking each time.
+                Their names and types are sent to the selected provider. It
+                never runs your queries.
+              </span>
+            </label>
+            {agentEnabled ? (
+              <label class="ml-5 flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  class="mt-0.5"
+                  checked={agentColumnDetails}
+                  onChange={(event) => {
+                    const next = event.currentTarget.checked;
+                    setAiAgentColumnDetails(next);
+                    setAgentColumnDetailsState(next);
+                  }}
+                />
+                <span>Also send column comments and default values</span>
+              </label>
+            ) : null}
+            <p class="text-neutral-500">
+              Chat history is stored on this device without encryption.
+            </p>
+          </div>
         </aside>
 
         <main class="flex min-h-0 min-w-0 flex-col overflow-hidden">
