@@ -13,9 +13,15 @@ on:
       - "src-tauri/Cargo.lock"
       - "src-tauri/Cargo.toml"
       - ".github/workflows/rust-cache-warm.yml"
+      # Runner, targets or build env changes there change the cache key too.
+      - ".github/workflows/release.yml"
   # Caches unused for 7 days are evicted; a weekly restore keeps them alive.
   schedule:
     - cron: "0 3 * * 1"
+
+# Only restores/saves the Actions cache; no repository writes.
+permissions:
+  contents: read
 
 concurrency:
   group: rust-cache-warm

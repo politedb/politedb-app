@@ -224,6 +224,67 @@ jobs:
           echo "tauri build failed after ${MAX_ATTEMPTS} attempts due to network errors."
           exit 1
 
+      # Signing proves the artifacts are ours, not that they run where they should. The Intel
+      # build is cross-compiled on Apple Silicon, so check every shipped copy of the binary
+      # (the .app, the updater archive and the DMG) for the target architecture only and
+      # the minimum macOS version before anything is notarized or uploaded.
+      - name: Verify architecture and minimum macOS
+        shell: bash
+        env:
+          EXPECTED_MINOS: "13.3"
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) EXPECTED_ARCH="arm64" ;;
+            x86_64-apple-darwin) EXPECTED_ARCH="x86_64" ;;
+            *) echo "Unsupported target: ${{ matrix.target }}"; exit 1 ;;
+          esac
+
+          check_binary() {
+            local label="$1" bin="$2"
+            if [ ! -f "${bin}" ]; then
+              echo "${label}: missing binary ${bin}"
+              return 1
+            fi
+            local archs minos
+            archs="$(lipo -archs "${bin}")"
+            minos="$(vtool -show-build "${bin}" | awk '$1 == "minos" { print $2 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+            echo "${label}: archs='${archs}' minos='${minos}'"
+            if [ "${archs}" != "${EXPECTED_ARCH}" ]; then
+              echo "${label}: expected only ${EXPECTED_ARCH}"
+              return 1
+            fi
+            if [ "${minos}" != "${EXPECTED_MINOS}" ]; then
+              echo "${label}: expected minimum macOS ${EXPECTED_MINOS}"
+              return 1
+            fi
+          }
+
+          ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
+
+          check_binary "app" "${ROOT}/macos/PoliteDB.app/Contents/MacOS/PoliteDB"
+
+          UPDATE_FILE="$(find "${ROOT}" -type f -name '*.app.tar.gz' -print | head -n 1)"
+          if [ -z "${UPDATE_FILE}" ]; then
+            echo "Missing updater archive under ${ROOT}"
+            exit 1
+          fi
+          UNPACK="$(mktemp -d)"
+          tar -xzf "${UPDATE_FILE}" -C "${UNPACK}"
+          check_binary "updater archive" "${UNPACK}/PoliteDB.app/Contents/MacOS/PoliteDB"
+
+          DMG_PATH="$(find "${ROOT}" -type f -name '*.dmg' -print | head -n 1)"
+          if [ -z "${DMG_PATH}" ]; then
+            echo "Missing DMG under ${ROOT}"
+            exit 1
+          fi
+          MOUNT="$(mktemp -d)"
+          hdiutil attach -readonly -nobrowse -mountpoint "${MOUNT}" "${DMG_PATH}" >/dev/null
+          status=0
+          check_binary "dmg" "${MOUNT}/PoliteDB.app/Contents/MacOS/PoliteDB" || status=$?
+          hdiutil detach "${MOUNT}" >/dev/null || hdiutil detach -force "${MOUNT}" >/dev/null
+          exit "${status}"
+
       # Tauri notarizes/staples the .app; the .dmg is produced afterward and often has no stapled ticket.
       - name: Notarize and staple DMG (if needed)
         shell: bash
