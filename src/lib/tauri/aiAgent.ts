@@ -42,6 +42,16 @@ export type AiAgentStartInput = {
   replyLanguage?: string | null;
   /** Send column comments and defaults to the provider (setting, on by default). */
   includeColumnDetails?: boolean;
+  /**
+   * The editor's query safety mode. Data queries need native approval in
+   * `safe`/`production` and are off in `lock` (the backend treats missing as `lock`).
+   */
+  safetyMode?: string | null;
+  /**
+   * The history holds answers built from this connection's data: the backend sends
+   * nothing unless data-access consent holds for this provider.
+   */
+  historyHasData?: boolean;
 };
 
 export type AiAgentHistoryEntry = { role: "user" | "assistant"; text: string };
@@ -127,4 +137,51 @@ export async function aiAgentSqlSafety(
   } catch {
     return "unknown";
   }
+}
+
+/** Code of a run stopped because data access was not (or no longer) allowed. */
+export const AI_DATA_ACCESS_REQUIRED = "AI_DATA_ACCESS_REQUIRED";
+
+export type AiDataAccessStatus = {
+  /** Data tools exist for this connection (engine, saved profile, file database). */
+  available: boolean;
+  granted: boolean;
+  label: string | null;
+};
+
+export async function aiAgentDataAccessStatus(
+  connectionId: string,
+  providerId: string
+): Promise<AiDataAccessStatus> {
+  return invoke<AiDataAccessStatus>(CMD.aiAgentDataAccessStatus, {
+    connectionId,
+    providerId,
+  });
+}
+
+/** Records the user's "Allow" for this connection's saved profile and provider. */
+export async function aiAgentDataAccessGrant(
+  connectionId: string,
+  providerId: string
+): Promise<void> {
+  await invoke(CMD.aiAgentDataAccessGrant, { connectionId, providerId });
+}
+
+export type AiDataAccessGrant = {
+  profileId: string;
+  profileLabel: string | null;
+  providerLabel: string | null;
+  endpointHost: string;
+  grantedAt: number;
+};
+
+export async function aiAgentDataAccessList(): Promise<AiDataAccessGrant[]> {
+  return invoke<AiDataAccessGrant[]>(CMD.aiAgentDataAccessList);
+}
+
+/** Revokes a profile's grants and stops agent runs reading its connections. */
+export async function aiAgentDataAccessRevoke(
+  profileId: string
+): Promise<void> {
+  await invoke(CMD.aiAgentDataAccessRevoke, { profileId });
 }

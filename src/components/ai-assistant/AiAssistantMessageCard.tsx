@@ -23,6 +23,11 @@ type Props = {
   runtimeConnectionId?: string;
   querySafetyMode?: QuerySafetyMode;
   onUpdateMessage?: (id: string, patch: Partial<ChatMessage>) => void;
+  /**
+   * Grants data access for the current connection and asks `question` again; resolves
+   * `false` when the permission could not be saved.
+   */
+  onAllowDataAccess?: (question: string) => Promise<boolean>;
 };
 
 export { AssistantStreamingPlaceholder };
@@ -77,8 +82,10 @@ export function AiAssistantMessageCard({
   runtimeConnectionId,
   querySafetyMode = "default",
   onUpdateMessage,
+  onAllowDataAccess,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [dataAccessSaving, setDataAccessSaving] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
   const [sqlRunState, setSqlRunState] = useState<SqlRunState>("idle");
   const [sqlRunMessage, setSqlRunMessage] = useState("");
@@ -244,6 +251,27 @@ export function AiAssistantMessageCard({
           onCopySql={() => void handleCopySql()}
           onCopySqlText={(sql) => void handleCopySqlText(sql)}
           onInsertSqlPreview={(sql) => void handleInsertSql(sql)}
+          dataAccessSaving={dataAccessSaving}
+          onDataAccess={(allow, question) => {
+            if (dataAccessSaving) return;
+            const mark = (state: "allowed" | "declined") =>
+              onUpdateMessage?.(message.id, {
+                parts: message.parts?.map((part) =>
+                  part.type === "dataAccessRequest" ? { ...part, state } : part
+                ),
+              });
+            if (!allow) {
+              mark("declined");
+              return;
+            }
+            // Shown as allowed only once the permission is saved.
+            setDataAccessSaving(true);
+            void (onAllowDataAccess?.(question) ?? Promise.resolve(false))
+              .then((saved) => {
+                if (saved) mark("allowed");
+              })
+              .finally(() => setDataAccessSaving(false));
+          }}
           onRunSqlPreview={
             runtimeConnectionId
               ? (sql, agent) => void handleRunSql(sql, agent)

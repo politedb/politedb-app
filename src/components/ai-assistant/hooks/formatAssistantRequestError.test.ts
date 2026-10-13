@@ -30,4 +30,21 @@ describe("formatAssistantRequestError", () => {
       })
     ).toMatch(/did not produce a final response/);
   });
+
+  it("explains a declined data query", () => {
+    expect(
+      formatAssistantRequestError({
+        error: new Error("AI_DATA_APPROVAL_DENIED"),
+        lang: en,
+        isLocalProvider: false,
+      })
+    ).toMatch(/declined the AI's data query/);
+    expect(
+      formatAssistantRequestError({
+        error: "AI_DATA_APPROVAL_DENIED",
+        lang: vi,
+        isLocalProvider: false,
+      })
+    ).toMatch(/từ chối/);
+  });
 });

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   agentEnabled: true,
   columnDetails: true,
   safety: "read_only" as "read_only" | "unknown",
+  granted: false,
 }));
 
 vi.mock("src/lib/ai-assistant/agent", async (importOriginal) => ({
@@ -22,6 +23,12 @@ vi.mock("src/lib/tauri/aiAgent", () => ({
   isAiAgentEnabled: () => mocks.agentEnabled,
   isAiAgentColumnDetailsEnabled: () => mocks.columnDetails,
   aiAgentSqlSafety: async () => mocks.safety,
+  AI_DATA_ACCESS_REQUIRED: "AI_DATA_ACCESS_REQUIRED",
+  aiAgentDataAccessStatus: async () => ({
+    available: true,
+    granted: mocks.granted,
+    label: "Shop DB",
+  }),
 }));
 vi.mock("src/lib/tauri/ai", () => ({ aiChatCancel: vi.fn() }));
 
@@ -63,6 +70,7 @@ beforeEach(() => {
   mocks.agentEnabled = true;
   mocks.columnDetails = true;
   mocks.safety = "read_only";
+  mocks.granted = false;
   mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
 });
 
@@ -147,6 +155,119 @@ describe("useAiAssistantSubmit with the AI agent", () => {
         text: "Đây là truy vấn.\n\n```sql\nSELECT customer_id, count(*) FROM orders GROUP BY 1\n```",
       },
     ]);
+  });
+
+  it("asks for data access when the run needs it, then can ask again", async () => {
+    mocks.runAgentTurn.mockRejectedValue(new Error("AI_DATA_ACCESS_REQUIRED"));
+    const { result, finalize } = setup({ querySafetyMode: "production" });
+    await act(() => result.current.handleSubmit());
+    expect(mocks.runAgentTurn.mock.calls[0][0].safetyMode).toBe("production");
+    expect(mocks.plan).not.toHaveBeenCalled();
+    const parts = finalize.mock.calls[0][1].parts;
+    expect(parts[1]).toEqual({
+      type: "dataAccessRequest",
+      question: "how many orders per customer?",
+      label: "Shop DB",
+      state: "pending",
+    });
+
+    mocks.runAgentTurn.mockResolvedValue({ text: "42 orders", steps: [] });
+    await act(() =>
+      result.current.submitQuestion("how many orders per customer?")
+    );
+    expect(mocks.runAgentTurn).toHaveBeenCalledTimes(2);
+    expect(finalize.mock.calls[1][1].text).toBe("42 orders");
+  });
+
+  it("marks answers that queried data, failed queries included", async () => {
+    for (const ok of [true, false]) {
+      mocks.runAgentTurn.mockResolvedValue({
+        text: "Top: alice",
+        steps: [
+          { tool: "run_readonly_query", ok, truncated: false, durationMs: 3 },
+        ],
+      });
+      const { result, finalize } = setup();
+      await act(() => result.current.handleSubmit());
+      expect(finalize.mock.calls[0][1].dataRead).toBe(true);
+    }
+    mocks.runAgentTurn.mockResolvedValue({
+      text: "Schema only",
+      steps: [
+        { tool: "describe_table", ok: true, truncated: false, durationMs: 3 },
+      ],
+    });
+    const again = setup();
+    await act(() => again.result.current.handleSubmit());
+    expect(again.finalize.mock.calls[0][1].dataRead).toBeUndefined();
+  });
+
+  it("data answers and everything after them leave only through the consent-checked agent path", async () => {
+    const messages = [
+      { id: "1", role: "user", text: "how many tables?" },
+      { id: "2", role: "assistant", text: "orders has 5 columns" },
+      { id: "3", role: "user", text: "top customers?" },
+      {
+        id: "4",
+        role: "assistant",
+        text: "alice@corp.com 12400",
+        dataRead: true,
+      },
+      { id: "5", role: "user", text: "summarise that" },
+      {
+        id: "6",
+        role: "assistant",
+        text: "The top customer is alice@corp.com",
+      },
+    ];
+    // Agent path: the backend checks consent before the first request.
+    mocks.runAgentTurn.mockResolvedValue({ text: "ok", steps: [] });
+    const { result } = setup({ messages });
+    await act(() => result.current.handleSubmit());
+    expect(mocks.runAgentTurn.mock.calls[0][0].historyHasData).toBe(true);
+
+    // Legacy path without consent: nothing from the first data answer on.
+    mocks.agentEnabled = false;
+    const legacy = setup({ messages });
+    await act(() => legacy.result.current.handleSubmit());
+    const sent = JSON.stringify(mocks.plan.mock.calls[0][0].history);
+    expect(sent).toContain("orders has 5 columns");
+    expect(sent).not.toContain("alice@corp.com");
+
+    // Even with consent, paths without a backend consent check never get it, and a
+    // fallback after an agent attempt neither (consent may have changed meanwhile).
+    mocks.granted = true;
+    mocks.plan.mockClear();
+    const allowed = setup({ messages });
+    await act(() => allowed.result.current.handleSubmit());
+    expect(JSON.stringify(mocks.plan.mock.calls[0][0].history)).not.toContain(
+      "alice@corp.com"
+    );
+    mocks.agentEnabled = true;
+    mocks.plan.mockClear();
+    mocks.runAgentTurn.mockRejectedValue(
+      new AgentFallback("AI_AGENT_TOOLS_UNSUPPORTED")
+    );
+    const fallback = setup({ messages });
+    await act(() => fallback.result.current.handleSubmit());
+    expect(mocks.plan).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mocks.plan.mock.calls[0][0].history)).not.toContain(
+      "alice@corp.com"
+    );
+  });
+
+  it("a chat holding data marks every later message, even without new queries", async () => {
+    mocks.runAgentTurn.mockResolvedValue({ text: "summary", steps: [] });
+    const messages = [
+      { id: "1", role: "assistant", text: "alice 12400", dataRead: true },
+    ];
+    const append = vi.fn();
+    const { result, finalize } = setup({ messages, appendUserMessage: append });
+    await act(() => result.current.handleSubmit());
+    expect(append).toHaveBeenCalledWith("how many orders per customer?", {
+      dataRead: true,
+    });
+    expect(finalize.mock.calls[0][1].dataRead).toBe(true);
   });
 
   it("falls back to the legacy assistant when the agent cannot run", async () => {

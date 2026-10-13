@@ -10,6 +10,7 @@ use super::types::{ProfileExportFile, ProfileImportPayload, ProfileImportResult}
 #[tauri::command]
 pub fn profile_import(
     app: AppHandle,
+    state: tauri::State<'_, crate::state::AppState>,
     payload: ProfileImportPayload,
 ) -> Result<ProfileImportResult, String> {
     let json = payload.json.trim();
@@ -32,14 +33,33 @@ pub fn profile_import(
         },
     };
 
-    let (created, updated, profiles) = profile_store::profile_upsert_many(&app, profiles)?;
+    let imported_ids: Vec<uuid::Uuid> = profiles.iter().map(|p| p.id).collect();
+    // Import never carries AI data-access consent (plan ai-agent R5): a replaced
+    // profile may point elsewhere. Its grants go first, in one write; if that fails,
+    // nothing is imported.
+    let (created, updated, profiles) = {
+        let _lock = state
+            .ai_consent_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        crate::ai::agent::consent::revoke_then(
+            &crate::ai::adapters::AppConsentFiles(&app),
+            &imported_ids,
+            || profile_store::profile_upsert_many(&app, profiles),
+        )?
+    };
     let total = profiles.len();
+
+    for id in &imported_ids {
+        crate::commands::ai_agent_data::cancel_profile_runs(&state, *id);
+    }
 
     Ok(ProfileImportResult {
         created,
         updated,
         total,
         profiles,
+        imported_ids,
     })
 }
 

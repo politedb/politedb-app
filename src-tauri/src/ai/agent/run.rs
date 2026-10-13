@@ -116,12 +116,49 @@ impl From<String> for ToolOutput {
     }
 }
 
+/// Why a tool call did not produce a result.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToolError {
+    /// Sent back to the model as an error result; it may try something else.
+    Failed(String),
+    /// Ends the run with this code before anything else goes to the provider (plan
+    /// R5: missing data consent, denied approval).
+    Stop(String),
+}
+
+impl From<String> for ToolError {
+    fn from(reason: String) -> Self {
+        Self::Failed(reason)
+    }
+}
+
+impl From<&str> for ToolError {
+    fn from(reason: &str) -> Self {
+        Self::Failed(reason.to_string())
+    }
+}
+
 /// A tool the model may call. Arguments arrive as a parsed JSON object;
 /// implementations must validate them against their own schema (plan R5).
 #[async_trait]
 pub trait AgentTool: Send + Sync {
     fn spec(&self) -> ToolSpec;
-    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String>;
+    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError>;
+}
+
+/// Checked before every provider request (plan R5 disclosure check): an error stops
+/// the run with that code and nothing is sent.
+pub trait RequestGate: Sync {
+    fn check(&self) -> Result<(), String>;
+}
+
+/// A gate that never stops a run (no data was read).
+pub struct OpenGate;
+
+impl RequestGate for OpenGate {
+    fn check(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Tools offered in a run. Empty in Phase 1.
@@ -133,6 +170,12 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     pub fn new(tools: Vec<Arc<dyn AgentTool>>) -> Self {
         Self { tools }
+    }
+
+    /// Adds more tools to the registry.
+    pub fn with(mut self, more: Vec<Arc<dyn AgentTool>>) -> Self {
+        self.tools.extend(more);
+        self
     }
 
     pub(crate) fn specs(&self) -> Vec<ToolSpec> {
@@ -155,6 +198,8 @@ pub struct RunInput<'a> {
     /// Cleanup slower than this is logged ([`CLEANUP_GRACE`] in the app). The run still
     /// waits for it: `Done` and the run's slot come only after every tool stopped.
     pub cleanup_grace: Duration,
+    /// Asked before every provider request.
+    pub gate: &'a dyn RequestGate,
 }
 
 /// Expected upper bound for cancelled tools' cleanup. Tools must stay within it (the
@@ -278,6 +323,8 @@ async fn drive(
         if cancel.is_cancelled() || !sink.send(AgentEvent::Step { n: *steps }) {
             return Err(CANCELED.into());
         }
+        // Data read earlier in the run goes out only while its consent still holds.
+        input.gate.check()?;
         // Tools stay declared on the final step (some providers require it once the
         // transcript has tool calls) but calling them is disabled.
         let request = StepRequest {
@@ -430,7 +477,16 @@ async fn run_tool(
     }
     let (ok, content, partial) = match outcome {
         Ok(output) => (true, output.content, output.truncated),
-        Err(reason) => (false, reason, false),
+        Err(ToolError::Failed(reason)) => (false, reason, false),
+        Err(ToolError::Stop(code)) => {
+            sink.send(AgentEvent::ToolFinished {
+                tool: tool_name,
+                ok: false,
+                truncated: false,
+                duration_ms: started.elapsed().as_millis() as u64,
+            });
+            return Err(code);
+        }
     };
     let (content, capped) = cap(content, MAX_TOOL_RESULT_BYTES);
     let truncated = partial || capped;
@@ -491,7 +547,8 @@ pub struct RunRegistry {
 #[derive(Default)]
 struct RegistryInner {
     next_generation: u64,
-    active: HashMap<String, (u64, CancellationToken)>,
+    /// Run id → (generation, cancel, runtime connection whose catalog the run reads).
+    active: HashMap<String, (u64, CancellationToken, Option<uuid::Uuid>)>,
     early: HashMap<String, Instant>,
 }
 
@@ -504,7 +561,18 @@ pub struct RunGuard {
 }
 
 impl RunRegistry {
+    #[cfg(test)]
     pub fn start(self: &Arc<Self>, id: &str) -> Result<RunGuard, String> {
+        self.start_on(id, None)
+    }
+
+    /// Starts a run bound to a runtime connection, so revoking that connection's data
+    /// access can cancel it.
+    pub fn start_on(
+        self: &Arc<Self>,
+        id: &str,
+        connection: Option<uuid::Uuid>,
+    ) -> Result<RunGuard, String> {
         if id.is_empty()
             || id.len() > MAX_RUN_ID_LEN
             || !id
@@ -529,7 +597,7 @@ impl RunRegistry {
         let generation = inner.next_generation;
         inner
             .active
-            .insert(id.to_string(), (generation, cancel.clone()));
+            .insert(id.to_string(), (generation, cancel.clone(), connection));
         Ok(RunGuard {
             registry: Arc::clone(self),
             id: id.to_string(),
@@ -541,12 +609,22 @@ impl RunRegistry {
     pub fn cancel(&self, id: &str) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         match inner.active.get(id) {
-            Some((_, token)) => token.cancel(),
+            Some((_, token, _)) => token.cancel(),
             None => {
                 inner.early.retain(|_, at| at.elapsed() < EARLY_CANCEL_TTL);
                 if inner.early.len() < 256 {
                     inner.early.insert(id.to_string(), Instant::now());
                 }
+            }
+        }
+    }
+
+    /// Cancels every active run bound to one of `connections`.
+    pub fn cancel_on_connections(&self, connections: &[uuid::Uuid]) {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        for (_, token, connection) in inner.active.values() {
+            if connection.is_some_and(|c| connections.contains(&c)) {
+                token.cancel();
             }
         }
     }
@@ -571,7 +649,7 @@ impl Drop for RunGuard {
         if inner
             .active
             .get(&self.id)
-            .map(|(generation, _)| *generation)
+            .map(|(generation, _, _)| *generation)
             == Some(self.generation)
         {
             inner.active.remove(&self.id);
@@ -684,7 +762,7 @@ mod tests {
                 parameters: serde_json::json!({ "type": "object" }),
             }
         }
-        async fn run(&self, arguments: Value, _ctx: &ToolContext) -> Result<ToolOutput, String> {
+        async fn run(&self, arguments: Value, _ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
             if arguments.get("fail").is_some() {
                 return Err("bad input".into());
             }
@@ -704,6 +782,7 @@ mod tests {
             deadline: TURN_DEADLINE,
             tool_timeout: TOOL_TIMEOUT,
             cleanup_grace: CLEANUP_GRACE,
+            gate: &OpenGate,
         }
     }
 
@@ -837,6 +916,102 @@ mod tests {
         );
     }
 
+    struct Stopper;
+
+    #[async_trait]
+    impl AgentTool for Stopper {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "stopper".into(),
+                description: "stopper".into(),
+                parameters: serde_json::json!({ "type": "object" }),
+            }
+        }
+        async fn run(&self, _: Value, _: &ToolContext) -> Result<ToolOutput, ToolError> {
+            Err(ToolError::Stop("AI_DATA_ACCESS_REQUIRED".into()))
+        }
+    }
+
+    /// A tool's `Stop` ends the run with its code; nothing more goes to the provider.
+    #[tokio::test]
+    async fn a_stopping_tool_ends_the_run_without_another_request() {
+        let model = ScriptedModel::new(vec![
+            Ok(tool_use(vec![
+                call("1", "stopper", "{}"),
+                call("2", "echo", "{}"),
+            ])),
+            Ok(answer("should not be asked")),
+        ]);
+        let tools = ToolRegistry::new(vec![Arc::new(Stopper), Arc::new(Echo)]);
+        let (status, events) = run(&model, &tools).await;
+        assert_eq!(status, RunStatus::Failed);
+        assert_eq!(model.seen.lock().unwrap().len(), 1);
+        assert!(events.contains(&AgentEvent::Error {
+            code: "AI_DATA_ACCESS_REQUIRED".into()
+        }));
+        // The second call in the batch never ran.
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolStarted { .. }))
+            .count();
+        assert_eq!(started, 1);
+    }
+
+    struct ClosedAfterFirst(std::sync::atomic::AtomicUsize);
+
+    impl RequestGate for ClosedAfterFirst {
+        fn check(&self) -> Result<(), String> {
+            if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                Ok(())
+            } else {
+                Err("AI_DATA_ACCESS_REQUIRED".into())
+            }
+        }
+    }
+
+    /// The gate is asked before every provider request (consent revoked mid-run).
+    #[tokio::test]
+    async fn the_gate_stops_the_next_request() {
+        let model = ScriptedModel::new(vec![
+            Ok(tool_use(vec![call("1", "echo", "{}")])),
+            Ok(answer("should not be asked")),
+        ]);
+        let gate = ClosedAfterFirst(std::sync::atomic::AtomicUsize::new(0));
+        let mut gated = input();
+        gated.gate = &gate;
+        let sink = Recorder::default();
+        let status = run_turn(
+            &model,
+            &ToolRegistry::new(vec![Arc::new(Echo)]),
+            gated,
+            &sink,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(status, RunStatus::Failed);
+        assert_eq!(model.seen.lock().unwrap().len(), 1);
+        assert!(sink.events.lock().unwrap().contains(&AgentEvent::Error {
+            code: "AI_DATA_ACCESS_REQUIRED".into()
+        }));
+    }
+
+    #[test]
+    fn revoking_cancels_runs_on_that_connection_only() {
+        let registry = Arc::new(RunRegistry::default());
+        let on = uuid::Uuid::from_u128(1);
+        let a = registry.start_on("a", Some(on)).unwrap();
+        let b = registry
+            .start_on("b", Some(uuid::Uuid::from_u128(2)))
+            .unwrap();
+        registry.cancel_on_connections(&[on]);
+        assert!(a.cancel.is_cancelled());
+        assert!(!b.cancel.is_cancelled());
+        drop(a);
+        let c = registry.start("c").unwrap();
+        registry.cancel_on_connections(&[on]);
+        assert!(!c.cancel.is_cancelled());
+    }
+
     /// Catalog list caps reach the step summary through the real tools and coordinator,
     /// even when the result is far below the byte cap.
     #[tokio::test]
@@ -962,6 +1137,7 @@ mod tests {
                 deadline: TURN_DEADLINE,
                 tool_timeout: TOOL_TIMEOUT,
                 cleanup_grace: CLEANUP_GRACE,
+                gate: &OpenGate,
             },
             &sink,
             &CancellationToken::new(),
@@ -1086,7 +1262,7 @@ mod tests {
                 parameters: serde_json::json!({ "type": "object" }),
             }
         }
-        async fn run(&self, _arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+        async fn run(&self, _arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
             let cancel = ctx.cancel.clone();
             let observed = self.observed_cancel.clone();
             let finished = self.finished.clone();
@@ -1173,7 +1349,7 @@ mod tests {
                     parameters: serde_json::json!({ "type": "object" }),
                 }
             }
-            async fn run(&self, _: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+            async fn run(&self, _: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
                 let cancel = ctx.cancel.clone();
                 let finished = self.0.clone();
                 ctx.tracker.spawn(async move {
@@ -1478,7 +1654,7 @@ mod tests {
             let mut inner = registry.inner.lock().unwrap();
             inner
                 .active
-                .insert("run-a".into(), (99, CancellationToken::new()));
+                .insert("run-a".into(), (99, CancellationToken::new(), None));
         }
         drop(first);
         assert_eq!(registry.active_count(), 1, "newer generation kept");

@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use super::{cap, CatalogExecutor, MAX_SCHEMAS, MAX_TABLES};
 use crate::ai::agent::protocol::ToolSpec;
-use crate::ai::agent::run::{AgentTool, ToolContext, ToolOutput, ToolRegistry};
+use crate::ai::agent::run::{AgentTool, ToolContext, ToolError, ToolOutput, ToolRegistry};
 
 /// Longest accepted identifier or search text.
 pub const MAX_ARG_CHARS: usize = 128;
@@ -125,7 +125,7 @@ impl AgentTool for ListSchemas {
         }
     }
 
-    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         parse_args(&arguments, &[])?;
         ensure_alive(&self.alive)?;
         let (schemas, truncated) = cap(self.executor.list_schemas(ctx).await?, MAX_SCHEMAS);
@@ -160,7 +160,7 @@ impl AgentTool for ListTables {
         }
     }
 
-    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         let args = parse_args(&arguments, &[("schema", false), ("name_contains", false)])?;
         ensure_alive(&self.alive)?;
         let tables = self
@@ -205,7 +205,7 @@ impl AgentTool for DescribeTable {
         }
     }
 
-    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, String> {
+    async fn run(&self, arguments: Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         let args = parse_args(&arguments, &[("schema", true), ("table", true)])?;
         ensure_alive(&self.alive)?;
         let mut description = self
@@ -331,7 +331,14 @@ mod tests {
         name: &str,
         args: Value,
     ) -> Result<ToolOutput, String> {
-        registry.find(name).unwrap().run(args, &ctx()).await
+        registry
+            .find(name)
+            .unwrap()
+            .run(args, &ctx())
+            .await
+            .map_err(|e| match e {
+                ToolError::Failed(reason) | ToolError::Stop(reason) => reason,
+            })
     }
 
     async fn call(registry: &ToolRegistry, name: &str, args: Value) -> Result<String, String> {

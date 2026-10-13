@@ -74,4 +74,7 @@ pub struct ProfileImportResult {
     pub updated: usize,
     pub total: usize,
     pub profiles: Vec<ConnectionProfile>,
+    /// Ids written by this import (new or replaced).
+    #[serde(default, rename = "importedIds")]
+    pub imported_ids: Vec<uuid::Uuid>,
 }

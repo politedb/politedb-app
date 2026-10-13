@@ -196,6 +196,8 @@ function MessageParts(props: {
   onCopySql: (sql: string) => void;
   onInsert: (sql: string) => void;
   onRun?: (sql: string, agent: boolean) => void;
+  onDataAccess?: (allow: boolean, question: string) => void;
+  dataAccessSaving?: boolean;
 }) {
   const {
     message,
@@ -207,6 +209,8 @@ function MessageParts(props: {
     onCopySql,
     onInsert,
     onRun,
+    onDataAccess,
+    dataAccessSaving,
   } = props;
 
   return (
@@ -240,6 +244,22 @@ function MessageParts(props: {
               onCopySql={onCopySql}
               onInsert={onInsert}
               onRun={onRun}
+            />
+          );
+        }
+
+        if (part.type === "dataAccessRequest") {
+          return (
+            <DataAccessRequestPart
+              key={`${message.id}-part-${index}`}
+              label={part.label}
+              state={part.state ?? "pending"}
+              saving={dataAccessSaving}
+              onAnswer={
+                onDataAccess
+                  ? (allow) => onDataAccess(allow, part.question)
+                  : undefined
+              }
             />
           );
         }
@@ -463,6 +483,8 @@ export function AiAssistantMessageBody(props: {
   onCopySqlText: (sql: string) => void;
   onInsertSqlPreview: (sql: string) => void;
   onRunSqlPreview?: (sql: string, agent: boolean) => void;
+  onDataAccess?: (allow: boolean, question: string) => void;
+  dataAccessSaving?: boolean;
 }) {
   const {
     message,
@@ -478,6 +500,8 @@ export function AiAssistantMessageBody(props: {
     onCopySqlText,
     onInsertSqlPreview,
     onRunSqlPreview,
+    onDataAccess,
+    dataAccessSaving,
   } = props;
 
   return (
@@ -505,6 +529,8 @@ export function AiAssistantMessageBody(props: {
           onCopySql={onCopySqlText}
           onInsert={onInsertSqlPreview}
           onRun={onRunSqlPreview}
+          onDataAccess={onDataAccess}
+          dataAccessSaving={dataAccessSaving}
         />
       ) : null}
 
@@ -539,7 +565,65 @@ const AGENT_STEP_LABELS: Record<string, string> = {
   list_schemas: "Listed schemas",
   list_tables: "Listed tables",
   describe_table: "Looked at a table's structure",
+  sample_rows: "Read sample rows",
+  run_readonly_query: "Ran a read-only query",
+  explain_query: "Checked a query plan",
 };
+
+/**
+ * Asks once per connection whether the AI may read its data (plan ai-agent R5).
+ * Only fixed, locally built text: the label is the saved connection name.
+ */
+export function DataAccessRequestPart(props: {
+  label?: string;
+  state: "pending" | "allowed" | "declined";
+  /** The permission is being saved: no second answer. */
+  saving?: boolean;
+  onAnswer?: (allow: boolean) => void;
+}) {
+  const { label, state, saving, onAnswer } = props;
+  const name = label || "this connection";
+  return (
+    <div class="w-full min-w-0 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      <div class="font-medium">Allow AI to read data from {name}?</div>
+      <p class="mt-1 text-xs text-amber-900">
+        Query results from this connection will be sent to the selected AI
+        provider. Data queries are read-only; in safe and production mode each
+        one asks for Touch ID or your password. You can revoke this in AI
+        settings.
+      </p>
+      {state === "pending" && onAnswer ? (
+        <div class="mt-2 flex gap-2">
+          <Button
+            variant="primary"
+            class="px-2 py-1 text-xs"
+            disabled={saving}
+            loading={saving}
+            onClick={() => onAnswer(true)}
+          >
+            Allow
+          </Button>
+          <Button
+            variant="ghost"
+            class="px-2 py-1 text-xs"
+            disabled={saving}
+            onClick={() => onAnswer(false)}
+          >
+            Not now
+          </Button>
+        </div>
+      ) : (
+        <div class="mt-2 text-xs text-amber-800">
+          {state === "allowed"
+            ? "Allowed."
+            : state === "declined"
+              ? "Not allowed."
+              : ""}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** What an agent run looked at, collapsed by default (plan ai-agent R6). */
 export function AgentStepsPart(props: { steps: AgentStepSummary[] }) {

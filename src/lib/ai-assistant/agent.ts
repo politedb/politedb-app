@@ -42,6 +42,35 @@ function abortError(): Error {
 
 export type AgentTurnResult = { text: string; steps: AgentStepSummary[] };
 
+/** Tools whose results contain database data. */
+export const DATA_TOOLS = [
+  "sample_rows",
+  "run_readonly_query",
+  "explain_query",
+];
+
+/**
+ * Whether an agent run queried data: any data tool call counts, failed ones too (a
+ * database error can quote values).
+ */
+export function readData(steps: AgentStepSummary[]): boolean {
+  return steps.some((step) => DATA_TOOLS.includes(step.tool));
+}
+
+/** Index of the first message built from database data, or -1. */
+export function firstDataMessage(messages: ChatMessage[]): number {
+  return messages.findIndex((message) => message.dataRead);
+}
+
+/**
+ * The history without anything from the first data answer on (later answers may
+ * summarise it), for when data-access consent does not hold.
+ */
+export function withoutData(messages: ChatMessage[]): ChatMessage[] {
+  const first = firstDataMessage(messages);
+  return first < 0 ? messages : messages.slice(0, first);
+}
+
 /** Earlier messages sent with a question (the backend applies its own byte caps). */
 export const AGENT_HISTORY_MESSAGES = 12;
 
@@ -84,6 +113,8 @@ export function runAgentTurn(opts: {
   targetTable?: string | null;
   replyLanguage?: string | null;
   includeColumnDetails?: boolean;
+  safetyMode?: string | null;
+  historyHasData?: boolean;
   signal?: AbortSignal;
   onSteps?: (steps: AgentStepSummary[]) => void;
 }): Promise<AgentTurnResult> {
@@ -161,6 +192,8 @@ export function runAgentTurn(opts: {
         targetTable: opts.targetTable ?? null,
         replyLanguage: opts.replyLanguage ?? null,
         includeColumnDetails: opts.includeColumnDetails ?? false,
+        safetyMode: opts.safetyMode ?? null,
+        historyHasData: opts.historyHasData ?? false,
       },
       onEvent
     ).catch((error) => {

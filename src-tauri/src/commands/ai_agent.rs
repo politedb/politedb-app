@@ -7,6 +7,7 @@ use tauri::ipc::Channel;
 use tauri::AppHandle;
 
 use crate::ai::adapters::{AppProviderFiles, AppSecrets};
+use crate::ai::agent::consent::DATA_ACCESS_REQUIRED;
 use crate::ai::agent::model::{CapabilityCache, CapabilityKey, HttpModel, TOOLS_UNSUPPORTED};
 use crate::ai::agent::run::{self, AgentEvent, EventSink, RunInput, ToolRegistry};
 use crate::ai::agent::sql_safety::{self, SqlSafety};
@@ -38,6 +39,13 @@ pub struct AgentStartInput {
     /// frontend says so.
     #[serde(default)]
     pub include_column_details: bool,
+    /// The editor's query safety mode for this connection (plan R5). Missing or
+    /// unknown counts as `lock`: no data tools.
+    pub safety_mode: Option<String>,
+    /// The chat already holds answers built from this connection's data. The run then
+    /// sends nothing unless data-access consent holds for this provider (plan R5).
+    #[serde(default)]
+    pub history_has_data: bool,
 }
 
 /// The connection's engine has no agent tools in v1: use the legacy assistant.
@@ -89,7 +97,12 @@ pub async fn ai_agent_start(
     if state.ai_agent_capabilities.get(&capability_key) == Some(false) {
         return Err(TOOLS_UNSUPPORTED.into());
     }
+    let provider = config.clone();
     let model = HttpModel::new(config, key)?;
+    let mode = super::ai_agent_data::SafetyMode::parse(input.safety_mode.as_deref());
+    let mut gate: Box<dyn run::RequestGate + Send> = Box::new(run::OpenGate);
+    let mut bound_to = None;
+    let mut with_data = false;
     // Tools are bound to one runtime connection, resolved here, never chosen by the model.
     let (tools, dialect) = match input.connection_id.as_deref() {
         Some(id) => {
@@ -109,11 +122,33 @@ pub async fn ai_agent_start(
             let policy = catalog::tools::MetadataPolicy {
                 column_details: input.include_column_details,
             };
-            (
-                catalog::tools::registry(executor, alive, policy),
-                Some(dialect),
-            )
+            bound_to = Some(connection_id);
+            let mut tools = catalog::tools::registry(executor.clone(), alive.clone(), policy);
+            let bound = super::ai_agent_data::BoundConnection {
+                id: connection_id,
+                connection: &connection,
+                catalog: executor,
+                alive,
+            };
+            if let Some((data_tools, consent_gate)) =
+                super::ai_agent_data::data_tools(&app, &state, bound, &provider, mode)
+            {
+                tools = tools.with(data_tools);
+                if input.history_has_data {
+                    consent_gate.mark_data_read();
+                }
+                gate = Box::new(consent_gate);
+                with_data = true;
+            } else if input.history_has_data {
+                gate = Box::new(
+                    super::ai_agent_data::history_gate(&app, &state, connection_id, &provider)
+                        .ok_or_else(|| DATA_ACCESS_REQUIRED.to_string())?,
+                );
+            }
+            (tools, Some(dialect))
         }
+        // Earlier data answers need a connection whose consent can be checked.
+        None if input.history_has_data => return Err(DATA_ACCESS_REQUIRED.into()),
         None => (ToolRegistry::default(), None),
     };
     let question = agent::compose_question(
@@ -127,13 +162,13 @@ pub async fn ai_agent_start(
             reply_language: input.reply_language.as_deref(),
         },
     )?;
-    let guard = state.ai_agent_runs.start(&input.run_id)?;
+    let guard = state.ai_agent_runs.start_on(&input.run_id, bound_to)?;
     let sink = ChannelSink {
         channel: on_event,
         capabilities: Arc::clone(&state.ai_agent_capabilities),
         capability_key,
     };
-    let system = agent::system_prompt(dialect);
+    let system = agent::system_prompt(dialect, with_data);
     tauri::async_runtime::spawn(async move {
         let input = RunInput {
             model_id: &model_id,
@@ -142,6 +177,7 @@ pub async fn ai_agent_start(
             deadline: run::TURN_DEADLINE,
             tool_timeout: run::TOOL_TIMEOUT,
             cleanup_grace: run::CLEANUP_GRACE,
+            gate: gate.as_ref(),
         };
         run::run_turn(&model, &tools, input, &sink, &guard.cancel).await;
         drop(guard);

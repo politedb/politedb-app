@@ -259,6 +259,12 @@ export type ChatMessage = {
   createdAt?: number;
   durationMs?: number;
   sql?: string;
+  /**
+   * The AI agent queried database data for this answer (plan ai-agent R5). From this
+   * message on, the chat counts as holding that connection's data: it is sent only
+   * while data-access consent holds for the provider in use.
+   */
+  dataRead?: boolean;
   assumptions?: string[];
   clarification?: string;
   resultPreview?: Record<string, unknown>[];
@@ -305,6 +311,14 @@ export type AiChatSession = {
 
 export type ChatMessagePart =
   | { type: "text"; text: string }
+  | {
+      /** The agent needs the user's permission to read data (plan ai-agent R5). */
+      type: "dataAccessRequest";
+      question: string;
+      /** Saved connection name, from the backend. */
+      label?: string;
+      state?: "pending" | "allowed" | "declined";
+    }
   | {
       type: "sqlPreview";
       sql: string;

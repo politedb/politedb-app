@@ -44,6 +44,7 @@ import {
   setAiAgentColumnDetails,
   setAiAgentEnabled,
 } from "src/lib/tauri/aiAgent";
+import { AiDataAccessList } from "./AiDataAccessList";
 import { AiModelCombobox } from "./AiModelCombobox";
 import { formatBytesSize } from "src/utils/convert";
 
@@ -481,7 +482,7 @@ export function AiAssistantSettingsDialog(props: Props) {
               );
             })}
           </OverlayScrollArea>
-          <div class="shrink-0 space-y-2 border-t border-neutral-200 p-3 text-xs text-neutral-600">
+          <div class="max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-t border-neutral-200 p-3 text-xs text-neutral-600">
             <label class="flex cursor-pointer items-start gap-2">
               <input
                 type="checkbox"
@@ -499,8 +500,9 @@ export function AiAssistantSettingsDialog(props: Props) {
                 </span>
                 Lets the assistant look up schemas, tables and columns itself on
                 PostgreSQL, MySQL, MariaDB and SQLite, without asking each time.
-                Their names and types are sent to the selected provider. It
-                never runs your queries.
+                Their names and types are sent to the selected provider. On
+                PostgreSQL and SQLite it can also run read-only queries, after
+                you allow it for that connection.
               </span>
             </label>
             {agentEnabled ? (
@@ -518,6 +520,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                 <span>Also send column comments and default values</span>
               </label>
             ) : null}
+            {agentEnabled ? <AiDataAccessList /> : null}
             <p class="text-neutral-500">
               Chat history is stored on this device without encryption.
             </p>

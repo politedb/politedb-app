@@ -86,7 +86,13 @@ pub async fn profile_save_and_connect(
         format!("SAVE_PROFILE_FAILED: {e}")
     })?;
 
+    if is_update {
+        // An edited target must not be read under consent given for the old one.
+        crate::commands::ai_agent_data::cancel_profile_runs(&state, profile_id);
+    }
+
     // 4) Runtime connect
+    let profiles = std::sync::Arc::clone(&state.connection_profiles);
     let connection: AppConnectionInfo = connection_create(app.clone(), state, input)
         .await
         .map_err(|e| {
@@ -99,6 +105,11 @@ pub async fn profile_save_and_connect(
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
+
+    profiles.insert(
+        connection.id,
+        crate::ai::agent::consent::ProfileBinding::of(&profile),
+    );
 
     tracing::info!(
         step = "profile_save_and_connect",
@@ -117,6 +128,7 @@ pub async fn profile_save_and_connect(
 #[tauri::command]
 pub async fn profile_save(
     app: AppHandle,
+    state: State<'_, AppState>,
     payload: ProfileSaveInput,
 ) -> Result<ConnectionProfile, String> {
     let (mode, profile_id, persist_secrets, mut input, is_update) = match payload {
@@ -193,6 +205,10 @@ pub async fn profile_save(
         "ok"
     );
 
+    if is_update {
+        // An edited target must not be read under consent given for the old one.
+        crate::commands::ai_agent_data::cancel_profile_runs(&state, profile_id);
+    }
     Ok(profile)
 }
 
@@ -225,6 +241,7 @@ pub async fn profile_connect(
     let input = profile.input.clone();
 
     // 3) Runtime connect
+    let profiles = std::sync::Arc::clone(&state.connection_profiles);
     let connection = connection_create(app.clone(), state, input)
         .await
         .map_err(|e| {
@@ -236,6 +253,11 @@ pub async fn profile_connect(
             );
             format!("RUNTIME_CONNECT_FAILED: {e}")
         })?;
+
+    profiles.insert(
+        connection.id,
+        crate::ai::agent::consent::ProfileBinding::of(&profile),
+    );
 
     tracing::info!(
         step = "profile_connect",

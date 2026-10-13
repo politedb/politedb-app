@@ -5,8 +5,11 @@
 //! consent and approval (Phase 3).
 
 pub mod catalog;
+pub mod consent;
+pub mod data;
 pub mod model;
 pub mod protocol;
+pub mod query_guard;
 pub mod run;
 pub mod sql_safety;
 pub mod start;
@@ -23,8 +26,16 @@ SQL that you did not run. When you suggest SQL, put it in a fenced ```sql block.
 
 /// The system prompt for a run, naming the connected database's dialect when tools
 /// are available.
-pub fn system_prompt(dialect: Option<&str>) -> String {
+pub fn system_prompt(dialect: Option<&str>, data_tools: bool) -> String {
     match dialect {
+        Some(dialect) if data_tools => format!(
+            "{SYSTEM_PROMPT}\n\nThe user is connected to a {dialect} database. Use the tools to \
+             look up schemas, tables and columns before writing SQL, and never guess names. \
+             Write SQL for {dialect}. Read data (sample_rows, run_readonly_query, explain_query) \
+             only when the answer needs actual values; each data query may need the user's \
+             permission or approval. These tools run read-only SELECTs; never try to change \
+             data. Suggest any other SQL for the user to run."
+        ),
         Some(dialect) => format!(
             "{SYSTEM_PROMPT}\n\nThe user is connected to a {dialect} database. Use the tools to \
              look up schemas, tables and columns before writing SQL, and never guess names. \
@@ -280,7 +291,9 @@ mod tests {
 
     #[test]
     fn system_prompt_names_the_dialect() {
-        assert_eq!(system_prompt(None), SYSTEM_PROMPT);
-        assert!(system_prompt(Some("PostgreSQL")).contains("PostgreSQL database"));
+        assert_eq!(system_prompt(None, false), SYSTEM_PROMPT);
+        assert!(system_prompt(Some("PostgreSQL"), false).contains("PostgreSQL database"));
+        assert!(system_prompt(Some("SQLite"), true).contains("run_readonly_query"));
+        assert!(!system_prompt(Some("SQLite"), false).contains("run_readonly_query"));
     }
 }

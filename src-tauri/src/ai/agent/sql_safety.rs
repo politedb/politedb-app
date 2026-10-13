@@ -453,7 +453,7 @@ pub(crate) const MYSQL_FUNCTIONS: &[&str] = &[
 /// admin, sleep, lock, file or network functions, sequence functions) makes the query
 /// "unknown". On PostgreSQL a spelling is not an identity: the connection check rules
 /// out user overloads. SQLite has no user-defined SQL functions here.
-const ALLOWED_FUNCTIONS: &[&str] = &[
+pub(crate) const ALLOWED_FUNCTIONS: &[&str] = &[
     // aggregates and windows
     "COUNT",
     "SUM",

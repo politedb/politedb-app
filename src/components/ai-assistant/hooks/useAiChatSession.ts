@@ -1,3 +1,4 @@
+import { PROFILE_CHANGED_EVENT } from "src/lib/tauri/profile";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { AiChatSession, ChatMessage } from "src/types";
 
@@ -294,6 +295,89 @@ function persistSessions(
   } catch {}
 }
 
+const AI_CHAT_PURGED_EVENT = "politedb:ai-chat-purged";
+/** Which saved connection each chat scope belongs to, kept after its tab closes. */
+const AI_CHAT_OWNERS_KEY = "politedb.ai.chatOwners";
+
+function readOwners(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_CHAT_OWNERS_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOwners(owners: Record<string, string>) {
+  try {
+    localStorage.setItem(AI_CHAT_OWNERS_KEY, JSON.stringify(owners));
+  } catch {}
+}
+
+/** Records that a chat scope (a connection tab) belongs to a saved connection. */
+export function rememberAiChatOwner(scopeKey: string, profileId: string) {
+  const owners = readOwners();
+  if (owners[scopeKey] === profileId) return;
+  owners[scopeKey] = profileId;
+  writeOwners(owners);
+}
+
+/** Every chat scope that belongs to a saved connection, open or closed. */
+export function aiChatScopesOwnedBy(profileId: string): string[] {
+  return Object.entries(readOwners())
+    .filter(([, owner]) => owner === profileId)
+    .map(([scope]) => scope);
+}
+
+/**
+ * Deletes the chat history of these scopes from memory and storage, and resets any
+ * mounted chat showing one of them (revoked AI data access, plan ai-agent R6).
+ */
+export function purgeAiChatScopes(scopeKeys: string[]) {
+  // Ownership stays: the same tab may chat again and be revoked again later.
+  for (const key of scopeKeys) {
+    aiChatSessionMap.delete(key);
+    try {
+      localStorage.removeItem(storageKey(key));
+    } catch {}
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent<string[]>(AI_CHAT_PURGED_EVENT, { detail: scopeKeys })
+    );
+  }
+}
+
+function scopeHasData(scopeKey: string): boolean {
+  const memory = aiChatSessionMap.get(scopeKey);
+  if (memory) {
+    return memory.some((session) => session.messages.some((m) => m.dataRead));
+  }
+  try {
+    return (localStorage.getItem(storageKey(scopeKey)) ?? "").includes(
+      '"dataRead":true'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A saved connection was edited or deleted: chats holding its data came from the old
+ * target, which consent for the new one does not cover (plan ai-agent R5). Remove them.
+ */
+export function purgeAiDataChatsOfProfile(profileId: string) {
+  const scopes = aiChatScopesOwnedBy(profileId).filter(scopeHasData);
+  if (scopes.length) purgeAiChatScopes(scopes);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROFILE_CHANGED_EVENT, (event) => {
+    const profileId = (event as CustomEvent<string>).detail;
+    if (profileId) purgeAiDataChatsOfProfile(profileId);
+  });
+}
+
 export function useAiChatSession(chatSessionKey: string) {
   const initial = useMemo(
     () => loadPersistedSessions(chatSessionKey),
@@ -327,6 +411,18 @@ export function useAiChatSession(chatSessionKey: string) {
     const next = loadPersistedSessions(chatSessionKey);
     setSessions(next.sessions);
     setActiveSessionId(next.activeSessionId ?? next.sessions[0]?.id ?? "");
+  }, [chatSessionKey]);
+
+  useEffect(() => {
+    const onPurged = (event: Event) => {
+      const keys = (event as CustomEvent<string[]>).detail ?? [];
+      if (!keys.includes(chatSessionKey)) return;
+      const fresh = makeEmptySession(chatSessionKey);
+      setSessions([fresh]);
+      setActiveSessionId(fresh.id);
+    };
+    window.addEventListener(AI_CHAT_PURGED_EVENT, onPurged);
+    return () => window.removeEventListener(AI_CHAT_PURGED_EVENT, onPurged);
   }, [chatSessionKey]);
 
   useEffect(() => {
@@ -426,7 +522,10 @@ export function useAiChatSession(chatSessionKey: string) {
     });
   };
 
-  const appendUserMessage = (text: string) => {
+  const appendUserMessage = (
+    text: string,
+    extra?: Pick<ChatMessage, "dataRead">
+  ) => {
     updateActiveSession((session) => ({
       ...session,
       title: session.messages.length ? session.title : titleFromText(text),
@@ -438,6 +537,7 @@ export function useAiChatSession(chatSessionKey: string) {
           text,
           parts: [{ type: "text" as const, text }],
           createdAt: Date.now(),
+          ...extra,
         },
       ],
       updatedAt: Date.now(),

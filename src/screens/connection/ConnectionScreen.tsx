@@ -1,3 +1,4 @@
+import { rememberAiChatOwner } from "src/components/ai-assistant/hooks/useAiChatSession";
 import {
   useMemo,
   useEffect,
@@ -702,6 +703,7 @@ export function ConnectionScreen() {
   useEffect(() => {
     if (!activeTab || !engine) return;
 
+    rememberAiChatOwner(activeProfileScreen, activeTab.profileId);
     useFloatingAssistantStore.getState().setContext({
       scopeKey: activeProfileScreen,
       engine,

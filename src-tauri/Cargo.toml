@@ -104,6 +104,7 @@ num-bigint = "0.4"
 klickhouse = { version = "0.14", features = ["compression", "serde"] }
 clickhouse = { version = "0.15", features = ["rustls-tls"] }
 libsql = { version = "0.9.30", default-features = true, features = ["remote", "tls"] }
+sqlparser = { version = "0.63.0", features = ["visitor"] }
 
 [features]
 default = ["engine-postgres"]

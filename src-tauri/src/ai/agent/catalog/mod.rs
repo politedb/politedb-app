@@ -5,7 +5,7 @@
 //! transaction (or, for SQLite, read-only pragmas) with a timeout and cancellation.
 
 mod mysql;
-mod postgres;
+pub(crate) mod postgres;
 mod sqlite;
 pub mod tools;
 

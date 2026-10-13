@@ -57,6 +57,11 @@ pub struct AppState {
     pub ai_agent_runs: Arc<crate::ai::agent::run::RunRegistry>,
     /// Models known to lack tool support (plan ai-agent R2).
     pub ai_agent_capabilities: Arc<crate::ai::agent::model::CapabilityCache>,
+    /// Runtime connection → the saved profile it was opened from. Set only by
+    /// `profile_connect`, so agent consent never relies on ids from the frontend.
+    pub connection_profiles: Arc<DashMap<Uuid, crate::ai::agent::consent::ProfileBinding>>,
+    /// Serialises read-modify-write of the agent consent file.
+    pub ai_consent_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -78,6 +83,8 @@ impl AppState {
             ai_discovery_cancel: Arc::new(crate::ai::cancel::CancelRegistry::default()),
             ai_agent_runs: Arc::new(crate::ai::agent::run::RunRegistry::default()),
             ai_agent_capabilities: Arc::new(crate::ai::agent::model::CapabilityCache::default()),
+            connection_profiles: Arc::new(DashMap::new()),
+            ai_consent_lock: Arc::new(std::sync::Mutex::new(())),
         }
     }
 }

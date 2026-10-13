@@ -219,6 +219,7 @@ export function AiAssistantChatArea(props: {
   runtimeConnectionId?: string;
   querySafetyMode?: QuerySafetyMode;
   onUpdateMessage: (id: string, patch: Partial<ChatMessage>) => void;
+  onAllowDataAccess?: (question: string) => Promise<boolean>;
   providerLabel: string;
   providerModel: string;
   providerOptions: AiProviderConfig[];
@@ -255,6 +256,7 @@ export function AiAssistantChatArea(props: {
     runtimeConnectionId,
     querySafetyMode = "default",
     onUpdateMessage,
+    onAllowDataAccess,
     providerLabel,
     providerModel,
     providerOptions,
@@ -551,6 +553,7 @@ export function AiAssistantChatArea(props: {
                 runtimeConnectionId={runtimeConnectionId}
                 querySafetyMode={querySafetyMode}
                 onUpdateMessage={onUpdateMessage}
+                onAllowDataAccess={onAllowDataAccess}
               />
             ))}
 

@@ -12,7 +12,7 @@ Scope: **Phase 1 only** (R7.1, protocol only). Phases 2 and 3 are not started an
 - Requested 2026-10-13 by the user: turn the AI assistant into an agent ("giờ tôi muốn phần AI chuyển thành agent").
 - Branch: `feat/ai-agent` (from `main` @ `b74100b`). One phase per commit series; PR per phase or one PR for Phases 1–3 (decide at review).
 - Plan file: `.agent/plans/ai-agent.md` (user decision 2026-10-13) because `.agent/PLAN.md` still holds the unfinished Mac App Store plan. Same DRAFT → Codex critique → human APPROVED workflow applies.
-- Approved by the user on 2026-10-13 ("tôi duyệt, làm phase 1 đi") with Revision 2, including the R5 residual risk (UI-supplied safety mode). Phase 1 committed on `feat/ai-agent` (Codex VERIFIED WITH LIMITATIONS). Phase 2 requested by the user on 2026-10-13 ("làm tiếp phase 2 đi"), implemented (uncommitted) and reviewed by Codex over 10 rounds; round 10 is **VERIFIED WITH LIMITATIONS** (residuals deferred to the Phase 3 R4 executor). Awaiting the user's commit decision.
+- Approved by the user on 2026-10-13 ("tôi duyệt, làm phase 1 đi") with Revision 2, including the R5 residual risk (UI-supplied safety mode). Phase 1 committed on `feat/ai-agent` (Codex VERIFIED WITH LIMITATIONS). Phase 2 requested by the user on 2026-10-13 ("làm tiếp phase 2 đi"), implemented (uncommitted) and reviewed by Codex over 10 rounds; round 10 is **VERIFIED WITH LIMITATIONS** (residuals deferred to the Phase 3 R4 executor). Committed as `933c032` and pushed. Phase 3 requested by the user on 2026-10-13 ("làm tiếp phase 3 đi"), implemented (uncommitted) and reviewed by Codex over 8 rounds; round 8 is **VERIFIED WITH LIMITATIONS**. The planning-time replacement-view residual was accepted by the user. Still open from the R7 gate: live provider smoke (needs the user's keys), native prompt check, MAS lease, analytics. Awaiting the user's commit decision.
 - Current: Phase 1 implemented 2026-10-13 (uncommitted working tree on `feat/ai-agent`). Codex review 2026-10-13 returned **CHANGES REQUIRED** (2 P1 / 4 P2 / 1 nit); Grok Bot landed the fixes (still uncommitted). Awaiting Codex **re-review**. Next after VERIFIED: Phase 2 (R3 metadata tools + step UI), then Phase 3 (R4/R5 data tools, consent, approval).
 - No commit/push unless requested.
 
@@ -809,6 +809,344 @@ This fixes Codex "Review: AI agent Phase 2 — round 9" (1 P1: PostgreSQL ends `
   - PostgreSQL field-notation calls (`t.fn` = `fn(t)`) need a function taking the row type, i.e. a post-initdb function, which the identity check rejects.
   - No further bypass found.
 - **Verification:** `cargo test` 286 passed / 8 ignored in both flavors; clippy shows no agent warnings; fmt clean. The frontend is unchanged since round 4.
+
+## Phase 3 — Implementation notes (Claude, 2026-10-13)
+
+These are concrete choices within R4/R5, with any deviation called out.
+
+- **Profile binding.** Runtime connections carry no profile id. `profile_connect` now records `runtime id → profile id` in `AppState.connection_profiles`, and `connection_close` removes it.
+  - Consent, labels and the target fingerprint are resolved from that backend map, never from frontend input.
+  - A connection opened without a profile has no data tools.
+- **Consent store.** `<app_data>/ai/data_access.json` = `{version: 1, grants: [...]}`, written atomically. On unix the temp file is created with mode 0600 before the rename.
+  - A grant stores: profile id, provider id, provider kind, an endpoint fingerprint, the endpoint host (for display), a target fingerprint and the grant time.
+  - Target fingerprint: SHA-256 of host/port/database/user, or of the file path, plus the SSH host/port/user.
+  - Endpoint fingerprint: SHA-256 of `base_url`/`host`/`sub_path`.
+  - A grant is valid only while all of these still match. A missing or corrupt file means no consent.
+  - `profile_remove` purges the profile's grants. Clone and import create new ids, so nothing carries over.
+- **Query validation** (`agent::query_guard`). sqlparser (PostgreSQL or SQLite dialect) checks the R4 rules: one `Query`; no nested statement (so no DML in CTEs); no `SELECT INTO`; no locking clause; set expressions limited to select, query, set operations and values; every function, table function and table-valued call on the dialect's pure allow-list.
+  - **AND** the Phase 2 lexical classifier must say read-only.
+  - **AND**, on PostgreSQL, `only_builtin_code` must hold on the connection.
+  - A failure gives `AI_QUERY_NOT_ALLOWED: <fixed reason>`, which the model can repair from.
+- **Executors.**
+  - **PostgreSQL.** A pooled client removed from the pool for the call (`Object::take`), so the session is dedicated and never reused, and dropped afterwards on every path. This is equivalent to R4's "dedicated connection, discarded after timeout/cancel": it avoids rebuilding the tunnel and credentials, and the session is never returned.
+    - Inside: `BEGIN READ ONLY`, `SET LOCAL statement_timeout`, then `SELECT row_to_json(q)::text FROM (<sql>) q LIMIT n+1`, then rollback.
+    - Explain: `EXPLAIN (FORMAT JSON)`.
+  - **SQLite.** A separate connection `open_with_flags(path, READ_ONLY | NO_MUTEX)`, plus `PRAGMA query_only = 1` and an interrupt watcher.
+    - Explain: `EXPLAIN QUERY PLAN`.
+    - `:memory:`, empty and `file:` paths have no data tools.
+    - The MAS lease is not on this branch: the app-store build may fail to open the file, which surfaces as a tool error.
+  - **Limits:** `sample_rows` ≤ 20 rows; `run_readonly_query` ≤ 200 rows; cells cut to 500 chars; 15 s timeout.
+- **Approval.** `ApprovalPort` is the native LocalAuthentication prompt (macOS) and fakes in tests.
+  - The safety mode is sent at start; a missing or unknown mode counts as `lock`.
+  - In `lock` mode there are no data tools.
+  - In `safe`/`production`, every data query is approved with a reason naming the connection and showing the first 200 chars of the exact SQL, and runs right after approval.
+  - Without native approval (non-macOS), data tools are off in those modes.
+  - A denial stops the run with `AI_DATA_APPROVAL_DENIED`.
+- **Stop semantics.** Tools return `ToolError::{Failed(reason), Stop(code)}`.
+  - A data tool without valid consent returns `Stop(AI_DATA_ACCESS_REQUIRED)` before touching the database, and nothing further is sent.
+  - Before every provider request, the run re-checks consent for every connection whose data it read (the provenance set). If consent is gone, the run stops with `AI_DATA_ACCESS_REQUIRED` and nothing is sent.
+- **Revocation.** `ai_agent_data_access_revoke(profile_id)` deletes the grants and cancels active runs on that profile's connections. The frontend then purges chat history for that profile's tabs (R6).
+- **Frontend.**
+  - On `AI_DATA_ACCESS_REQUIRED`, the answer is a consent card: "Allow AI to read data from <label>?" with Allow / Not now. Allow grants consent and re-asks the same question.
+  - AI settings list the grants with Revoke.
+  - New fixed step labels for the data tools.
+  - Copy explaining that data queries need approval in safe/production and are off in lock.
+- **Analytics** (R6, opt-in `trackEvent`, enums only): deferred unless `trackEvent` fits without new identifiers; to be recorded in the evidence.
+
+## Phase 3 — Implementation evidence (Claude, 2026-10-13)
+
+Branch `feat/ai-agent`, uncommitted. Implements R4/R5 per "Phase 3 — Implementation notes".
+
+**Backend**
+
+- **`agent::query_guard`** (new dependency `sqlparser` 0.63, with the `visitor` feature).
+  - Accepts one `Statement::Query` with no nested statements; plain set expressions only (select, query, set operations, values).
+  - Rejects `SELECT INTO`, locking clauses (`FOR`), ClickHouse settings/format and pipe syntax, and optimizer hints.
+  - Every function and table function must be one unquoted name on the pure allow-list. Only table, derived, nested-join and `UNNEST` FROM items are allowed.
+  - The **sqlparser rendering** is what runs, and it must also pass the Phase 2 lexical classifier.
+  - Rejections are `AI_QUERY_NOT_ALLOWED: <fixed reason>`; the query is capped at 16 KiB.
+- **`agent::consent`.**
+  - `Grant` stores profile id, provider id and kind, endpoint fingerprint and host, target fingerprint and time. Fingerprints are SHA-256 over secret-free JSON.
+  - `ConsentFiles` port; `ProfileBinding` holds the profile id plus the target fingerprint **at connect time**.
+  - Consent requires all three: the saved profile still matches the connected target, the grant matches the current target, and the grant matches the provider kind and endpoint.
+  - A missing or corrupt file means no consent.
+- **Storage.** `AppConsentFiles` writes `<app_data>/ai/data_access.json` through `file_storage::json_replace_private`, an atomic replace whose temp file is created with mode 0600 on unix (tested).
+- **Binding.**
+  - `AppState.connection_profiles` is set by `profile_connect` and `profile_save_and_connect`, and removed by `connection_remove`.
+  - `profile_remove` purges that profile's grants.
+  - `AppState.ai_consent_lock` serialises all access to the consent file.
+- **`agent::data`.**
+  - Executors:
+    - **PostgreSQL:** `read_only_session`, shared with the catalog code, with `discard = true` so the client is always taken out of the pool. Inside it runs `BEGIN READ ONLY`, `SET LOCAL statement_timeout` 15 s, `SELECT row_to_json(q)::text FROM (<rendered>) q LIMIT n+1`, and `EXPLAIN (FORMAT JSON)`.
+    - **SQLite:** opens its own connection read-only with no URI parsing (`READ_ONLY | NO_MUTEX`), then `PRAGMA query_only`, a `stmt.readonly()` check, an interrupt watcher and `EXPLAIN QUERY PLAN`. `:memory:`, empty and `file:` paths have no data tools.
+  - Cells are cut to 500 chars; DB errors are reduced to one line of up to 300 chars, sent only on consented connections.
+  - Tools (`data::tools`): `sample_rows` (≤ 20 rows; the table must be catalogued and is quoted), `run_readonly_query` (≤ 200 rows), `explain_query`. Arguments are strict.
+  - Every call goes through `DataAccess::admit`, in order:
+    1. the connection is still open;
+    2. consent, else `ToolError::Stop(AI_DATA_ACCESS_REQUIRED)`;
+    3. the guard;
+    4. on PostgreSQL, `only_builtin_code`;
+    5. in safe/production, `ApprovalPort` (the native prompt shows the label and the first 200 chars of the **rendered** SQL); a denial is `Stop(AI_DATA_APPROVAL_DENIED)`;
+    6. provenance is marked, then the query runs.
+- **Coordinator.**
+  - `ToolError::{Failed, Stop}`: a stop ends the run with its code and nothing more is sent.
+  - `RequestGate` is checked before every provider request. `ConsentGate` stops the run once data was read and consent no longer holds.
+  - `RunRegistry::start_on(id, connection)` and `cancel_on_connections`.
+  - `ToolRegistry::with` adds tools.
+  - The system prompt mentions the data tools only when they are offered.
+- **Commands.**
+  - `ai_agent_start` takes `safetyMode`; a missing or unknown mode is `Lock`.
+  - New: `ai_agent_data_access_status`, `ai_agent_data_access_grant` (fails with `AI_DATA_ACCESS_RECONNECT` if the profile was edited since connecting), `ai_agent_data_access_list` and `ai_agent_data_access_revoke` (deletes the grants and cancels runs on the profile's connections).
+  - Native approval: `adapters::native_approval` uses macOS LocalAuthentication with a 60 s timeout; on other platforms there is none, so data tools are off in safe/production.
+
+**Frontend**
+
+- **Run start:** passes `safetyMode`, taken from the panel's `querySafetyMode`.
+- **Consent card:**
+  - On `AI_DATA_ACCESS_REQUIRED`, the answer is a `dataAccessRequest` part: "Allow AI to read data from <label>?" with Allow / Not now and fixed disclosure copy.
+  - Allow grants consent, then `submitQuestion` asks the same question again without touching the prompt.
+  - A grant error shows a fixed message.
+- **History by provider:**
+  - An answer built by data tools is tagged `dataProviderId`.
+  - History sent to a different provider leaves those answers out unless that provider also has consent for the current connection. This applies to the agent and legacy paths alike.
+  - This closes R8's "provider switch between acquiring data and sending it".
+- **Steps:** fixed labels for the data steps.
+- **Error message** for `AI_DATA_APPROVAL_DENIED`.
+- **Settings:** a "Data access" list with Revoke. Revoking cancels runs and calls `purgeAiChatScopes` for that profile's tabs, which clears memory and storage and resets any mounted chat.
+- **Settings copy:** read-only queries, only after Allow, Touch ID in safe/production, off in lock.
+
+**Verification**
+
+- `cargo test`: 308 passed / 9 ignored in both flavors. Clippy: no warnings in changed paths (5 existing elsewhere). `cargo fmt` clean.
+- **Live `agent_pg_live_data`** on throwaway PG 16.3 (stopped afterwards):
+  - Row cap and explain work.
+  - The guard rejects the full corpus: writes, DML in CTEs, locking, multi-statement, `nextval`, advisory lock, file readers, `set_config`, comment tricks, dollar quotes, backslash strings.
+  - Even run **past** the guard: `nextval` never advances the sequence; writes and `FOR UPDATE` fail; a session-level advisory lock is gone because the session was discarded; the table is unchanged.
+  - Cancel stops a slow query in under 5 s.
+  - The earlier `agent_pg_live*` tests still pass.
+- **SQLite unit tests on real files:** reads with the cap; `DELETE`/`INSERT`/`PRAGMA user_version`/`CREATE` all fail and leave the database unchanged; cancel interrupts; memory and URI paths have no data tools.
+- **Unit tests:**
+  - guard corpus;
+  - consent (target, endpoint, provider id and kind, revoke, corruption, binding after a profile edit);
+  - data tools (no consent → Stop before the DB; guard and identity failures never run; approval shows the rendered SQL and a denial stops the run; `sample_rows` quoting and unknown tables; strict arguments);
+  - coordinator (a Stop ends the run with no further request; the gate stops the next request; revoke cancels the right runs);
+  - safety mode parsing; the consent gate; 0600 file mode.
+- `npm run test:run`: 123 files / 696 tests passed. They cover: the consent card (Allow / Not now), step labels, revoke purging only that profile's chat, the consent flow in the submit hook, data tagging, and history filtering for both the agent and legacy paths. `npm run build` OK.
+- **Claude `/security-review`** of the Phase 3 diff: **no findings at confidence ≥ 8**.
+  - Two consent-integrity issues came out at 3/10 and 4/10 (no attacker; plan-compliance gaps), and both were fixed above:
+    - (1) data answers reaching a different provider through history;
+    - (2) consent checked against an edited profile instead of the connected target.
+  - Below threshold: the approval prompt shows only the first 200 chars of SQL.
+
+**Not done / gate items still open**
+
+- **R7 live smoke** with OpenAI, Anthropic Opus 5.5, Gemini and Ollama: needs the user's keys and the desktop app.
+- **UI check:** the new consent card and settings list were verified by Vitest only, not visually.
+- **MAS app-store:** opening the SQLite file needs the file-access lease, which is not on this branch.
+- **Analytics** (R6 `trackEvent`): not added.
+- The approval prompt shows the first 200 characters of the SQL.
+
+## Phase 3 — Review fixes, round 2 (Claude, 2026-10-13)
+
+These fix Codex "Review: AI agent Phase 3" (4 P1 / 4 P2 / 1 nit). The changes are uncommitted.
+
+**1. P1 — PostgreSQL validate/execute race.** `data::postgres::prepare` now runs inside the same `BEGIN READ ONLY` transaction as the query (and as EXPLAIN):
+1. It re-parses the validated SQL and collects the CTE names.
+2. It resolves every plain relation reference with `to_regclass` under the session's search path and locks all of them `ACCESS SHARE`. A locked relation cannot be dropped, swapped for a view, given a policy or rule, or have its view redefined until the transaction ends.
+3. It runs `SET LOCAL search_path = pg_catalog, pg_temp`. Unqualified functions, operators and types can then resolve **only** to built-ins, even ones created concurrently.
+4. It runs `builtin_only` (the same check as `only_builtin_code`) **in this transaction**.
+5. It rewrites the relations to quoted `schema.name`, re-renders, and runs the lexical check again.
+
+Supporting changes:
+- The guard now also rejects casts and typed strings to schema-qualified or quoted types, the only way to reach a user type once the path is pinned.
+- `catalog::postgres::builtin_only` is shared by both checks.
+- **Live test** (`agent_pg_live_data`, PG 16.3):
+  - unqualified `agent_pub` is resolved and works;
+  - CTE names still work;
+  - unknown relations fail;
+  - `public.lower(integer)` calling `pg_advisory_lock`, created **after** validation (the approval window), is caught inside the executing transaction, and no advisory lock exists afterwards;
+  - `pg_advisory_lock(…)` sent straight to the executor, past the guard, is now rejected by the executor itself;
+  - the earlier corpus still passes.
+- **Residual:** a superuser changing `pg_catalog` itself; casts between built-in types also need superuser.
+
+**2 and 3. P1 — History consent and data provenance.** Enforcement moved to the backend:
+- **Tagging (frontend):** an answer is tagged `dataRead` when its run called **any** data tool, failed calls included. From the first tagged message on, the whole chat counts as holding data (taint carries over to later summaries).
+- **Agent path:** sends `historyHasData`. The backend then marks the run's provenance from the start (`ConsentGate::mark_data_read`, or `history_gate` when no data tools are offered). Before the **first** provider request, `bound_consent` re-checks provider id, kind and endpoint, the connect-time target and the current profile.
+- **Missing consent:** the run stops with `AI_DATA_ACCESS_REQUIRED` and nothing is sent; the consent card appears. A run without a connection but with data in its history is refused up front.
+- **Legacy and fallback paths:** without consent for the current provider, the history is cut at the first data answer (`withoutData`).
+- **Tests:**
+  - failed data calls tag the answer;
+  - later summaries are cut on the legacy path;
+  - `historyHasData` is sent on the agent path;
+  - consent lets the whole history go;
+  - Rust: a gate marked as having read data closes before the first request.
+
+**4. P1 — Stale consent after waits.**
+- `DataAccess::admit` re-checks liveness and consent **after** the catalog check and approval, immediately before reading. Approval races the run's cancel.
+- `profile_update`, `profile_save` (update), `profile_save_and_connect` (update) and `profile_remove` call `cancel_profile_runs`.
+- **Tests:** consent revoked while the prompt is open → `Stop(AI_DATA_ACCESS_REQUIRED)` and nothing runs; a cancelled run drops the pending approval future.
+
+**5. P2 — Prompt dismissal.** `platform::macos::AuthContext` now invalidates the `LAContext` on `Drop`. Cancel, tool timeout or revoke drop the approval future, which dismisses the prompt (the guard is held for the whole wait). The native prompt was not exercised.
+
+**6. P2 — Revoke and closed tabs.** Chat scopes record their owner (`rememberAiChatOwner`, stored in `localStorage["politedb.ai.chatOwners"]`, set from `ConnectionScreen`). Revoke purges open tabs plus every scope the profile owned, including closed tabs and scopes from before a restart. **Test:** a closed tab's chat is removed.
+
+**7. P2 — Allow after unmount.**
+- The panel's Allow handler checks a mounted ref and that the connection and provider are unchanged before asking again.
+- The card marks "Allowed" only after the grant is saved, and stays pending on failure.
+- **Tests:** saved and failed grants. A delayed-grant-after-unmount panel test was **not** added (the guard is visible in code).
+
+**8. P2 — Acquisition bounds.**
+- **PostgreSQL:** each value is cut to 500 chars on the server (`json_each(row_to_json(q))` capped at 50 columns, `left(…)` for strings and long JSON values) before transfer.
+- **SQLite:** text is cut from SQLite's own buffer before copying, and rows keep at most 50 columns.
+- **Tests:** a 100 000-char value comes back as 500 chars (PG live) or 500 chars plus the cut marker (SQLite); 60 columns come back as 50.
+- **Residual:** the server still computes a large value within the statement timeout.
+
+**Nit.** Copy now says "Touch ID or your password".
+
+**Verification (round 2)**
+- `cargo test`: 311 passed / 9 ignored in both flavors. Clippy: no warnings in changed paths. `cargo fmt` clean.
+- Live PG 16.3: `agent_pg_live*` (4 tests, including `agent_pg_live_data`) pass with `--test-threads=1`; container stopped.
+- `npm run test:run`: 123 files / 697 tests passed. `npm run build` OK. Prettier clean on changed files.
+- **Still open:** live provider smoke (needs the user's keys); visual UI check; native prompt behaviour; MAS lease; analytics.
+
+## Phase 3 — Review fixes, round 3 (Claude, 2026-10-13)
+
+These fix Codex "Review: AI agent Phase 3 — round 2" (3 P1 / 4 P2). The changes are uncommitted.
+
+**1. P1 — Schema rename replacing a locked relation.**
+- `prepare` now also records the OID of every resolved relation.
+- The executed query carries a column-free gate in its `WHERE`: `pg_catalog.to_regclass('"s"."t"') = <oid>` for each relation. PostgreSQL evaluates such a qual **once, before running anything under it**. If a name no longer denotes the locked, checked relation, the subquery (and any replacement view) never runs.
+- **Live race test** (PG 16.3, two sessions, using a test-only pause between prepare and execute):
+  - session 2 runs `ALTER SCHEMA s RENAME TO s_old`, creates a new `s` and creates view `s.t` over `pg_try_advisory_lock(999)`;
+  - session 1 then runs its prepared `SELECT id FROM s.t`;
+  - result: no advisory lock taken, no rows returned.
+- **Mutation check:** with the gate replaced by `true`, the same test **fails** (the lock is taken). This proves the gate is what blocks the race.
+- **Gate semantics test:** a false gate stops a side-effecting subquery.
+- EXPLAIN plans without executing; planning folds only immutable functions, and `builtin_only` keeps those built-in.
+
+**7. P2 — CTE scope.** CTE scoping is not modelled. A `WITH` name that also resolves to a real relation (`to_regclass` under the session path) is refused ("rename it"), so every unqualified name is unambiguous. **Live test:** refused while `public.t` exists; works after it is dropped.
+
+**6. P2 — Disconnect.**
+- `connection_remove` now cancels agent runs on that connection before closing it.
+- Queued or acquiring executors see the cancel: PostgreSQL `acquire` rejects after cancel, and SQLite checks cancel after opening.
+
+**2. P1 — Taint survives eviction.**
+- Once a chat holds data (any `dataRead` message), **every later message** is marked: the user question (`appendUserMessage(text, { dataRead })`) and every answer of that turn (a `finalize` wrapper).
+- Evicting the first marked message therefore leaves the later ones marked, so `historyHasData` and `withoutData` keep working.
+- **Test:** a turn without new queries in a data chat marks both the question and the answer.
+
+**3. P1 — History source binding.** Implemented through the plan-allowed alternative: incompatible history is purged when the target can change.
+- Every saved-profile edit (`profileSave` / `profileSaveAndConnect` in update mode) and every `profileRemove` emits `politedb:profile-changed`.
+- The chat module then purges every chat scope owned by that profile (open or closed) that holds data.
+- So data read from target X can never be sent under consent for a profile edited to Y: it is gone before the user can reconnect or grant Y.
+- Endpoint or kind edits already fail closed against the old grant; a new grant for the same profile legitimately covers that profile's data.
+- **Test:** an edit purges only the data-holding chats of that profile.
+
+**4. P2 — Ownership after purge.** Purge no longer deletes owner entries, so a tab that chats again after a revoke is still found by the next revoke. **Test:** revoke → chat again (tab closed) → revoke purges it.
+
+**5. P2 — Allow lifecycle.**
+- The card has a saving state: both buttons are disabled until the grant resolves, and it is marked Allowed only on success.
+- The panel keeps an Allow generation that bumps on chat, connection or provider change and on Cancel. A continuation runs only if the panel is mounted and the generation is unchanged. `onAllowDataAccess` resolves after the grant (the question is re-asked without awaiting).
+- **Test:** double Allow plus Not now while saving → one grant, then Allowed. A delayed-continuation panel test is still not added.
+
+**Verification (round 3)**
+- `cargo test`: 311 passed / 9 ignored in both flavors. Clippy: no warnings in changed paths. `cargo fmt` clean.
+- Live PG 16.3: `agent_pg_live*` (4 tests, including the race) pass with `--test-threads=1`; container stopped.
+- `npm run test:run`: 123 files / 701 tests passed. `npm run build` OK. Prettier clean.
+- **Still open:** live provider smoke (user keys); visual UI check; native prompt dismissal; MAS lease; analytics.
+
+## Phase 3 — Review fixes, round 4 (Claude, 2026-10-13)
+
+These address Codex "Review: AI agent Phase 3 — round 3" (3 P1). The changes are uncommitted.
+
+**1. P1 — Planning-time code in a replacement view.** **Accepted residual, decided by the user on 2026-10-13** ("Chấp nhận, ghi rõ").
+- **The attack:** a role that **owns the queried schema** and has database CREATE renames that schema in the ~1 ms between the in-transaction checks and parsing of the final statement. It puts in place a view over its own IMMUTABLE function, which PostgreSQL may fold while planning.
+- **Why a client cannot pin it:** the name→schema mapping goes through `pg_namespace` with no lock and no row lock in a read-only transaction. Prepared statements are re-analysed on namespace invalidation, and constant folding cannot be disabled.
+- **Why it is accepted:**
+  - The role needs schema ownership plus CREATE, and a sub-millisecond race.
+  - The code runs inside the agent's read-only transaction on a discarded session.
+  - That role can already run its code in any query the user makes on its schema, through views and functions. The agent opens no capability that role does not already have against this user.
+- **What remains in place:** the execution-time OID gate stops replacement code that runs at execution (volatile functions, the tested case). The other alternatives (auto-run only on schemas owned by the user or a superuser; no PostgreSQL data tools) were offered and declined.
+- **Follow-up:** "Native permissions: use a read-only role" (R4) stays the documented recommendation.
+
+**2. P1 — Partial-success profile mutations.** `profileSaveCore` sends `politedb:profile-changed` in a `finally` for every update-mode save, so the event goes out even if connecting fails after the profile was written. `profileRemove` does the same even if the consent cleanup fails. An extra purge of data-holding chats is harmless. **Test:** a removal that fails after committing still sends the event.
+
+**3. P1 — Stale safety mode on a pending Allow.**
+- The Allow generation now also bumps when `querySafetyMode` changes.
+- The continuation calls the **latest** `submitQuestion` (through a ref), so the context, including the mode, is the current one.
+- **Panel-level tests** (`AiAssistantPanel.allow.test.tsx`, delayed grant):
+  - unchanged → the question is asked again;
+  - default → lock: not asked again;
+  - default → production: not asked again;
+  - unmount: not asked again.
+- **Mutation check:** removing `querySafetyMode` from the dependencies fails the lock and production cases.
+
+**Verification (round 4)**
+- `npm run test:run`: 125 files / 706 tests passed. `npm run build` OK. Prettier clean.
+- `cargo test`: 311 passed / 9 ignored. The Rust side is unchanged since round 3 (clippy and fmt clean; live PG round 3 still applies).
+
+## Phase 3 — Review fixes, round 5 (Claude, 2026-10-13)
+
+These fix Codex "Review: AI agent Phase 3 — round 4" (2 P1). The changes are uncommitted.
+
+**1. P1 — Import replacing a target.**
+- `profile_import` now returns `importedIds` (ids written, new or replaced). For each one it revokes AI data-access grants (R5: "import never carries consent") and cancels agent runs on that profile's connections.
+- The `profileImport` wrapper sends `politedb:profile-changed` for each imported id, so chats holding data owned by a replaced profile are purged, open or closed.
+- External imports create fresh ids.
+- **Test:** an import sends the event for every written id. The Rust revoke and cancel steps are covered only by code review (they need an `AppHandle`).
+
+**2. P1 — Pre-tool fallback with stale consent.** The hook no longer does any frontend consent check for history.
+- **Data-bearing history is sent only on the agent path:** the backend `history_gate`/`ConsentGate` checks it against the run's exact provider snapshot before the first request.
+- **Every other path gets `withoutData(messages)`:** direct replies, the legacy planner, `chatReply`, and the fallback after an agent attempt.
+- So no request without a backend consent check ever carries data, whatever changes while a request is pending.
+- **Tests:** with consent granted, the legacy planner still receives no data; a pre-tool `AgentFallback` with tainted history sends none to the legacy planner.
+
+**Verification (round 5)**
+- `npm run test:run`: 125 files / 707 tests passed. `npm run build` OK. Prettier clean.
+- `cargo test`: 311 passed / 9 ignored in both flavors. Clippy: no warnings in changed paths. `cargo fmt` clean.
+
+## Phase 3 — Review fixes, round 6 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 3 — round 5" (1 P1: import ignored a failed consent revocation).
+
+- New `consent::revoke_then(files, ids, commit)`. It removes every grant for the imported ids in **one** durable write, and only then runs `commit` (`profile_upsert_many`). If that write fails, the import returns the error and **nothing is imported**, so no replaced profile can inherit a grant, after a restart either.
+- Runs are cancelled after the commit. The frontend event for each imported id still follows success.
+- **Test:** with a consent file whose saves fail (the old file stays readable, as with the atomic writer), `revoke_then` over several ids returns `AI_DATA_ACCESS_WRITE_FAILED` and never calls `commit`. With a writable file, all grants are removed in one write and then the commit runs.
+- **Verification:** `cargo test` 312 passed / 9 ignored in both flavors; clippy clean in changed paths; fmt clean. The frontend is unchanged since round 5 (707 tests passed).
+
+## Phase 3 — Review fixes, round 7 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 3 — round 6" (1 P1: an unreadable consent file skipped revocation, and its grant came back once the file was readable again).
+
+- **Tri-state read.** `ConsentFiles` now has `read() -> Result<Option<ConsentFile>>`: `Ok(None)` means no file, `Err` means unreadable or corrupt. `load()` (used for grant checks) still treats both as no consent.
+- **Revocation.** `revoke_profile` and `revoke_then` both go through `remove_grants`. An unreadable file is **replaced by an empty consent file**, revoking everything in it. If even that write fails, the operation fails: import then commits nothing, and `profile_remove` / revoke return an error.
+- `AppConsentFiles::read` maps IO and parse errors to `AI_DATA_ACCESS_UNREADABLE`.
+- **Tests:**
+  - an unreadable file with a writable directory → empty file, commit, and the grant does not return when the file is readable again;
+  - unreadable and not writable → error, no commit;
+  - the earlier failed-write and corruption tests still pass.
+- **Verification:** `cargo test` 313 passed / 9 ignored in both flavors; clippy clean in changed paths; fmt clean. The frontend is unchanged (707 tests passed).
+
+## Phase 3 — Review fixes, round 8 (Claude, 2026-10-13)
+
+This fixes Codex "Review: AI agent Phase 3 — round 7" (1 P1: `Path::exists()` reported an unreadable directory as a missing consent file).
+
+- New `file_storage::json_read_strict`. Only a confirmed `NotFound` counts as missing: the file read must report `NotFound` and its directory must be readable (or itself missing). Any other IO or parse error is an error.
+- `AppConsentFiles::read` uses it, so an unreadable `ai/` directory or file makes revocation try to replace the file. That fails too (the directory is not writable), and the import, remove or revoke is refused.
+- **Test** (real permissions, unix, skipped when running as root):
+  - missing → `None`;
+  - with the `ai/` directory mode 000, `exists()` says false but the strict read returns an error;
+  - with the file mode 000, the strict read returns an error.
+- **Verification:** `cargo test` 314 passed / 9 ignored in both flavors; clippy clean in changed paths; fmt clean. The frontend is unchanged (707 tests passed).
+
+## Phase 3 — UI check (Claude, 2026-10-13)
+
+Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/agent-data.*`, `ai-settings.*`):
+
+- **Data flow:** a question gets the consent card ("Allow AI to read data from Shop DB?" with copy and Allow / Not now). Allow saves the grant, the card shows "Allowed.", and the same question is asked again. The answer shows "Checked the database (2 steps)", which expands to "Looked at a table's structure" and "Ran a read-only query (partial)".
+- **Follow-up:** "summarise that" was sent with `historyHasData: true` and four history messages, and the chat is stored with `dataRead`.
+- **Settings:** with the agent on, the "Data access" list shows both grants, and Revoke removes one.
+- **Fix found by this check:** the sidebar footer squeezed the provider list. It is now capped at 45% of the height and scrolls.
 
 ## Plan Review (Codex)
 

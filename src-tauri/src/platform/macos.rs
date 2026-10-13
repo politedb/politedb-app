@@ -77,6 +77,15 @@ struct AuthContext(Retained<LAContext>);
 // SAFETY: see above; the context is never used concurrently from two threads here.
 unsafe impl Send for AuthContext {}
 
+impl Drop for AuthContext {
+    /// Dismisses the system prompt whenever the wait ends without an answer: timeout,
+    /// or the awaiting future was dropped (run cancelled, tool timed out). After an
+    /// answer this is a no-op for the user.
+    fn drop(&mut self) {
+        unsafe { self.0.invalidate() };
+    }
+}
+
 type AuthResult = Result<(), String>;
 
 /// Starts the system prompt. The reply block is copied by LocalAuthentication, so our
@@ -118,16 +127,14 @@ pub async fn authenticate_device_owner(reason: &str, timeout: Duration) -> Resul
     if reason.trim().is_empty() {
         return Err(failure(None));
     }
-    let (context, rx) = start_owner_authentication(reason)?;
+    // Held (not `_`) so it lives until the wait ends; its Drop dismisses the prompt.
+    let (_context, rx) = start_owner_authentication(reason)?;
     match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(Ok(()))) => Ok(true),
         Ok(Ok(Err(message))) => Err(message),
         Ok(Err(_)) => Err(failure(None)),
-        Err(_) => {
-            // Dismiss the system prompt instead of leaving it on screen.
-            unsafe { context.0.invalidate() };
-            Err(failure(None))
-        }
+        // Dropping `context` dismisses the system prompt instead of leaving it on screen.
+        Err(_) => Err(failure(None)),
     }
 }
 

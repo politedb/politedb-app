@@ -18,14 +18,20 @@ import type {
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
 import {
+  AI_DATA_ACCESS_REQUIRED,
+  aiAgentDataAccessStatus,
   isAiAgentColumnDetailsEnabled,
   isAiAgentEnabled,
 } from "src/lib/tauri/aiAgent";
+import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import {
   AGENT_ENGINES,
   AgentFallback,
   agentAnswerParts,
   agentHistory,
+  firstDataMessage,
+  readData,
+  withoutData,
   runAgentTurn,
 } from "src/lib/ai-assistant/agent";
 
@@ -45,6 +51,18 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // AI agent data queries (plan ai-agent R5).
+  if (raw.includes("AI_DATA_APPROVAL_DENIED")) {
+    return vi
+      ? "Bạn đã từ chối cho AI chạy truy vấn đọc dữ liệu. Hãy hỏi lại hoặc diễn đạt khác."
+      : "You declined the AI's data query. Ask again or rephrase the question.";
+  }
+  if (raw.includes(AI_DATA_ACCESS_REQUIRED)) {
+    return vi
+      ? "AI cần quyền đọc dữ liệu của kết nối này để trả lời."
+      : "The AI needs permission to read data from this connection to answer.";
+  }
 
   // AI agent run limits and connection state (plan ai-agent R1).
   if (
@@ -140,7 +158,7 @@ export function useAiAssistantSubmit(args: {
   prompt: string;
   setPrompt: Dispatch<StateUpdater<string>>;
   messages: ChatMessage[];
-  appendUserMessage: (text: string) => void;
+  appendUserMessage: (text: string, extra?: { dataRead?: boolean }) => void;
   appendAssistantMessage: (
     message: Omit<ChatMessage, "id" | "role">,
     startedAt?: number
@@ -161,6 +179,8 @@ export function useAiAssistantSubmit(args: {
   model: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The editor's safety mode: data queries need approval in safe/production. */
+  querySafetyMode?: QuerySafetyMode;
   activeSchema?: string;
   activeTable?: TableItem;
   tables: TableItem[];
@@ -194,6 +214,7 @@ export function useAiAssistantSubmit(args: {
     model,
     engine,
     runtimeConnectionId,
+    querySafetyMode,
     activeSchema,
     tables,
     columnsByTable,
@@ -224,21 +245,42 @@ export function useAiAssistantSubmit(args: {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    await submit(prompt.trim(), true);
+  };
 
+  /** Asks `text` again without touching the prompt (after allowing data access). */
+  const submitQuestion = async (text: string) => {
+    if (!text.trim() || !model.trim() || !providerId.trim()) return;
+    await submit(text.trim(), false);
+  };
+
+  const submit = async (question: string, fromPrompt: boolean) => {
     requestSeqRef.current += 1;
     const requestId = requestSeqRef.current;
     const abortController = new AbortController();
     requestAbortRef.current?.abort();
     requestAbortRef.current = abortController;
 
-    const question = prompt.trim();
     const requestStartedAt = Date.now();
 
-    setPrompt("");
+    if (fromPrompt) setPrompt("");
     setSubmitting(true);
     setAssistantStatus("thinking");
 
-    appendUserMessage(question);
+    // Once a chat holds database data, every later message counts as holding it too
+    // (it may quote or summarise it), so the mark survives the original's eviction.
+    const tainted = firstDataMessage(messages) >= 0;
+    appendUserMessage(question, tainted ? { dataRead: true } : undefined);
+    const finalize: typeof finalizeStreamingAssistantMessage = (
+      id,
+      message,
+      startedAt
+    ) =>
+      finalizeStreamingAssistantMessage(
+        id,
+        tainted ? { ...message, dataRead: true } : message,
+        startedAt
+      );
     if (!conversationState.replyLanguageCode) {
       updateConversationState({
         replyLanguageCode: resolveReplyLanguage(question, messages).code,
@@ -257,18 +299,25 @@ export function useAiAssistantSubmit(args: {
       });
       const hasDbContext = hasConcreteDatabaseContext(assistantContext);
 
+      // Answers built from database data (and everything after them) go to a
+      // provider only where the backend checks data-access consent right before the
+      // request: the agent path. Every other path (direct replies, the legacy planner,
+      // fallback after an agent attempt) never gets them (plan ai-agent R5).
+      const historyHasData = tainted;
+      const history = withoutData(messages);
+
       const onAssistantStatus = (_status: "generating") => {
         setAssistantStatus("thinking");
       };
 
       const directAppReply = getDirectAppContextReply({
         question,
-        history: messages,
+        history,
         savedConnections,
       });
       if (directAppReply) {
         if (requestSeqRef.current !== requestId) return;
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text: [directAppReply.answer, directAppReply.followup]
@@ -296,20 +345,61 @@ export function useAiAssistantSubmit(args: {
             connectionId: runtimeConnectionId,
             editorSql: currentSql,
             // Same conversation and context the legacy planner gets.
+            // The backend checks consent before sending any of it.
             history: agentHistory(messages),
+            historyHasData,
             activeSchema: activeSchema ?? null,
             activeTable: activeTable?.name ?? null,
             targetTable: conversationState.targetTable ?? null,
             replyLanguage: resolveReplyLanguage(question, messages).name,
             includeColumnDetails: isAiAgentColumnDetailsEnabled(),
+            safetyMode: querySafetyMode ?? null,
             signal: abortController.signal,
           });
           if (requestSeqRef.current !== requestId) return;
           const answer = await agentAnswerParts(result, runtimeConnectionId);
           if (requestSeqRef.current !== requestId) return;
-          finalizeStreamingAssistantMessage(streamId, answer, requestStartedAt);
+          finalize(
+            streamId,
+            readData(result.steps) ? { ...answer, dataRead: true } : answer,
+            requestStartedAt
+          );
           return;
         } catch (agentError) {
+          const code =
+            agentError instanceof Error
+              ? agentError.message
+              : String(agentError);
+          if (code.includes(AI_DATA_ACCESS_REQUIRED)) {
+            // Nothing was sent: ask the user, then ask the question again.
+            const status = await aiAgentDataAccessStatus(
+              runtimeConnectionId,
+              providerId
+            ).catch(() => null);
+            if (requestSeqRef.current !== requestId) return;
+            const label = status?.label ?? undefined;
+            const vi = resolveReplyLanguage(question, messages).code === "vie";
+            const text = vi
+              ? `Để trả lời, AI cần đọc dữ liệu từ ${label ?? "kết nối này"}.`
+              : `To answer, the AI needs to read data from ${label ?? "this connection"}.`;
+            finalize(
+              streamId,
+              {
+                text,
+                parts: [
+                  { type: "text", text },
+                  {
+                    type: "dataAccessRequest",
+                    question,
+                    label,
+                    state: "pending",
+                  },
+                ],
+              },
+              requestStartedAt
+            );
+            return;
+          }
           if (!(agentError instanceof AgentFallback)) throw agentError;
         }
       }
@@ -325,7 +415,7 @@ export function useAiAssistantSubmit(args: {
           columnsByTable,
           activeTable,
           savedConnections,
-          history: messages,
+          history,
           onStatusChange: onAssistantStatus,
           onDelta: (text) => {
             if (requestSeqRef.current !== requestId) return;
@@ -336,7 +426,7 @@ export function useAiAssistantSubmit(args: {
 
         if (requestSeqRef.current !== requestId) return;
 
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
@@ -360,7 +450,7 @@ export function useAiAssistantSubmit(args: {
         targetTable: conversationState.targetTable ?? undefined,
         replyLanguageCode: conversationState.replyLanguageCode ?? undefined,
         savedConnections,
-        history: messages,
+        history,
         onStatusChange: onAssistantStatus,
         onDelta: (text) => {
           if (requestSeqRef.current !== requestId) return;
@@ -376,7 +466,7 @@ export function useAiAssistantSubmit(args: {
       }
 
       if (plan.kind !== "sql" || !plan.sql) {
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text:
@@ -393,7 +483,7 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      finalizeStreamingAssistantMessage(
+      finalize(
         streamId,
         {
           text:
@@ -473,6 +563,7 @@ export function useAiAssistantSubmit(args: {
   return {
     canSubmit,
     handleSubmit,
+    submitQuestion,
     handleCancelSubmit,
   };
 }

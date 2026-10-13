@@ -22,7 +22,7 @@ const USER_SCHEMAS: &str =
     "n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\' AND n.nspname <> 'information_schema'";
 const RELKINDS: &str = "c.relkind IN ('r', 'p', 'v', 'm', 'f')";
 
-type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
+pub(crate) type TxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
 
 pub struct PgCatalog {
     pool: Pool,
@@ -45,48 +45,105 @@ impl PgCatalog {
         T: Send + 'static,
         F: for<'a> FnOnce(&'a Transaction<'a>) -> TxFuture<'a, T> + Send + 'static,
     {
-        if ctx.cancel.is_cancelled() {
-            return Err("canceled".to_string());
-        }
-        let pool = self.pool.clone();
-        let timeout = self.timeout;
-        let cancel = ctx.cancel.clone();
-        owned(ctx, async move {
-            let mut client = acquire(pool.get(), &cancel, timeout).await?;
-            let token = client.cancel_token();
-            let (outcome, interrupted) = interruptible(
-                async {
-                    let tx = client
-                        .build_transaction()
-                        .read_only(true)
-                        .start()
-                        .await
-                        .map_err(|_| "could not start a read-only transaction".to_string())?;
-                    tx.batch_execute(&format!(
-                        "SET LOCAL statement_timeout = {}",
-                        timeout.as_millis()
-                    ))
-                    .await
-                    .map_err(|_| "could not set the statement timeout".to_string())?;
-                    let result = work(&tx).await;
-                    let _ = tx.rollback().await;
-                    result
-                },
-                &cancel,
-                timeout,
-                async move {
-                    let _ = token.cancel_query(NoTls).await;
-                },
-            )
-            .await;
-            if interrupted {
-                // Never hand a session that may still be busy back to the editor.
-                drop(deadpool_postgres::Object::take(client));
-            }
-            outcome
-        })
-        .await
+        read_only_session(&self.pool, self.timeout, ctx, false, work).await
     }
+}
+
+/// Runs `work` in a read-only transaction with a local statement timeout on a client
+/// owned by a tracker task, always rolled back. A stop cancels the server query while
+/// the client is still held. The client is removed from the pool (never reused) when
+/// interrupted, or always when `discard` is set (agent data queries).
+pub(crate) async fn read_only_session<T, F>(
+    pool: &Pool,
+    timeout: Duration,
+    ctx: &ToolContext,
+    discard: bool,
+    work: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: for<'a> FnOnce(&'a Transaction<'a>) -> TxFuture<'a, T> + Send + 'static,
+{
+    if ctx.cancel.is_cancelled() {
+        return Err("canceled".to_string());
+    }
+    let pool = pool.clone();
+    let cancel = ctx.cancel.clone();
+    owned(ctx, async move {
+        let mut client = acquire(pool.get(), &cancel, timeout).await?;
+        let token = client.cancel_token();
+        let (outcome, interrupted) = interruptible(
+            async {
+                let tx = client
+                    .build_transaction()
+                    .read_only(true)
+                    .start()
+                    .await
+                    .map_err(|_| "could not start a read-only transaction".to_string())?;
+                tx.batch_execute(&format!(
+                    "SET LOCAL statement_timeout = {}",
+                    timeout.as_millis()
+                ))
+                .await
+                .map_err(|_| "could not set the statement timeout".to_string())?;
+                let result = work(&tx).await;
+                let _ = tx.rollback().await;
+                result
+            },
+            &cancel,
+            timeout,
+            async move {
+                let _ = token.cancel_query(NoTls).await;
+            },
+        )
+        .await;
+        if interrupted || discard {
+            // Never hand a session that may still be busy, or that ran agent SQL,
+            // back to the editor.
+            drop(deadpool_postgres::Object::take(client));
+        }
+        outcome
+    })
+    .await
+}
+
+/// The [`CatalogExecutor::only_builtin_code`] check, inside a caller's transaction (the
+/// agent's data executor runs it in the same transaction as the query).
+pub(crate) async fn builtin_only(tx: &Transaction<'_>) -> Result<bool, String> {
+    let dispatch = tx
+        .query_one(
+            "SELECT \
+               EXISTS (SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid >= 16384 \
+                         AND p.prorettype NOT IN ('pg_catalog.trigger'::pg_catalog.regtype, \
+                                                  'pg_catalog.event_trigger'::pg_catalog.regtype)) \
+               OR EXISTS (SELECT 1 FROM pg_catalog.pg_cast WHERE oid >= 16384) \
+               OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator WHERE oid >= 16384) \
+               OR EXISTS (SELECT 1 FROM pg_catalog.pg_conversion WHERE oid >= 16384) \
+               OR EXISTS (SELECT 1 FROM pg_catalog.pg_constraint \
+                          WHERE contypid <> 0 AND oid >= 16384) \
+               OR EXISTS (SELECT 1 FROM pg_catalog.pg_policy)",
+            &[],
+        )
+        .await
+        .map_err(failed)?;
+    if dispatch.get::<_, bool>(0) {
+        return Ok(false);
+    }
+    let views: Vec<Option<String>> = tx
+        .query(
+            &format!(
+                "SELECT pg_catalog.pg_get_viewdef(c.oid) FROM pg_catalog.pg_class c \
+                 WHERE c.relkind = 'v' AND c.oid >= 16384 LIMIT {}",
+                MAX_CHECKED_VIEWS + 1
+            ),
+            &[],
+        )
+        .await
+        .map_err(failed)?
+        .iter()
+        .map(|row| row.get(0))
+        .collect();
+    Ok(views_are_plain(&views, "postgres"))
 }
 
 fn failed(_: tokio_postgres::Error) -> String {
@@ -110,45 +167,8 @@ impl CatalogExecutor for PgCatalog {
     /// can bind even built-in functions with side effects), no domain constraints and
     /// no row-level security policies. Views must each be a plain read-only query.
     async fn only_builtin_code(&self, ctx: &ToolContext) -> Result<bool, String> {
-        self.read_only(ctx, move |tx| {
-            Box::pin(async move {
-                let dispatch = tx
-                    .query_one(
-                        "SELECT \
-                           EXISTS (SELECT 1 FROM pg_catalog.pg_proc p WHERE p.oid >= 16384 \
-                                     AND p.prorettype NOT IN ('pg_catalog.trigger'::pg_catalog.regtype, \
-                                                              'pg_catalog.event_trigger'::pg_catalog.regtype)) \
-                           OR EXISTS (SELECT 1 FROM pg_catalog.pg_cast WHERE oid >= 16384) \
-                           OR EXISTS (SELECT 1 FROM pg_catalog.pg_operator WHERE oid >= 16384) \
-                           OR EXISTS (SELECT 1 FROM pg_catalog.pg_conversion WHERE oid >= 16384) \
-                           OR EXISTS (SELECT 1 FROM pg_catalog.pg_constraint \
-                                      WHERE contypid <> 0 AND oid >= 16384) \
-                           OR EXISTS (SELECT 1 FROM pg_catalog.pg_policy)",
-                        &[],
-                    )
-                    .await
-                    .map_err(failed)?;
-                if dispatch.get::<_, bool>(0) {
-                    return Ok(false);
-                }
-                let views: Vec<Option<String>> = tx
-                    .query(
-                        &format!(
-                            "SELECT pg_catalog.pg_get_viewdef(c.oid) FROM pg_catalog.pg_class c \
-                             WHERE c.relkind = 'v' AND c.oid >= 16384 LIMIT {}",
-                            MAX_CHECKED_VIEWS + 1
-                        ),
-                        &[],
-                    )
-                    .await
-                    .map_err(failed)?
-                    .iter()
-                    .map(|row| row.get(0))
-                    .collect();
-                Ok(views_are_plain(&views, "postgres"))
-            })
-        })
-        .await
+        self.read_only(ctx, move |tx| Box::pin(builtin_only(tx)))
+            .await
     }
 
     async fn list_schemas(&self, ctx: &ToolContext) -> Result<Vec<String>, String> {
