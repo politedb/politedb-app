@@ -36,9 +36,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - platform: macos-14
+          - platform: macos-15
             target: "aarch64-apple-darwin"
-          - platform: macos-15-intel
+          # Cross-compiled on Apple Silicon: Intel runners queue for a long time and
+          # build ~1.7x slower. Keep in sync with rust-cache-warm.yml.
+          - platform: macos-15
             target: "x86_64-apple-darwin"
 
     runs-on: ${{ matrix.platform }}
@@ -50,6 +52,16 @@ jobs:
 
       - name: Install Rust target
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      # Tag-triggered runs can read caches saved on the default branch but their own
+      # saves are scoped to the tag, so rust-cache-warm.yml keeps the main-branch cache
+      # fresh and release runs only save when started from main via workflow_dispatch.
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: macos-${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -187,8 +199,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: bash
         # Tauri notarizes the .app with `--wait` and has no retry, so a runner network blip
-        # while polling Apple fails the whole build. Retry only on network errors; cargo
-        # output is cached, so a retry mostly re-signs and re-submits for notarization.
+        # while polling Apple fails the whole build. codesign can also fail when Apple's
+        # timestamp service does not answer ("A timestamp was expected but was not found").
+        # Retry only on those transient errors; cargo output is cached, so a retry mostly
+        # re-signs and re-submits for notarization.
         run: |
           set -uo pipefail
           BUILD_LOG="$RUNNER_TEMP/tauri-build-${{ matrix.target }}.log"
@@ -198,7 +212,7 @@ jobs:
             if npx tauri build --target ${{ matrix.target }} 2>&1 | tee "${BUILD_LOG}"; then
               exit 0
             fi
-            if ! grep -qE 'NSURLErrorDomain|kCFErrorDomainCFNetwork' "${BUILD_LOG}"; then
+            if ! grep -qE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|A timestamp was expected but was not found|timestamp service is not available' "${BUILD_LOG}"; then
               echo "tauri build failed for a non-network reason; not retrying."
               exit 1
             fi
@@ -209,6 +223,67 @@ jobs:
           done
           echo "tauri build failed after ${MAX_ATTEMPTS} attempts due to network errors."
           exit 1
+
+      # Signing proves the artifacts are ours, not that they run where they should. The Intel
+      # build is cross-compiled on Apple Silicon, so check every shipped copy of the binary
+      # (the .app, the updater archive and the DMG) for the target architecture only and
+      # the minimum macOS version before anything is notarized or uploaded.
+      - name: Verify architecture and minimum macOS
+        shell: bash
+        env:
+          EXPECTED_MINOS: "13.3"
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) EXPECTED_ARCH="arm64" ;;
+            x86_64-apple-darwin) EXPECTED_ARCH="x86_64" ;;
+            *) echo "Unsupported target: ${{ matrix.target }}"; exit 1 ;;
+          esac
+
+          check_binary() {
+            local label="$1" bin="$2"
+            if [ ! -f "${bin}" ]; then
+              echo "${label}: missing binary ${bin}"
+              return 1
+            fi
+            local archs minos
+            archs="$(lipo -archs "${bin}")"
+            minos="$(vtool -show-build "${bin}" | awk '$1 == "minos" { print $2 }' | sort -u | tr '\n' ' ' | sed 's/ $//')"
+            echo "${label}: archs='${archs}' minos='${minos}'"
+            if [ "${archs}" != "${EXPECTED_ARCH}" ]; then
+              echo "${label}: expected only ${EXPECTED_ARCH}"
+              return 1
+            fi
+            if [ "${minos}" != "${EXPECTED_MINOS}" ]; then
+              echo "${label}: expected minimum macOS ${EXPECTED_MINOS}"
+              return 1
+            fi
+          }
+
+          ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
+
+          check_binary "app" "${ROOT}/macos/PoliteDB.app/Contents/MacOS/PoliteDB"
+
+          UPDATE_FILE="$(find "${ROOT}" -type f -name '*.app.tar.gz' -print | head -n 1)"
+          if [ -z "${UPDATE_FILE}" ]; then
+            echo "Missing updater archive under ${ROOT}"
+            exit 1
+          fi
+          UNPACK="$(mktemp -d)"
+          tar -xzf "${UPDATE_FILE}" -C "${UNPACK}"
+          check_binary "updater archive" "${UNPACK}/PoliteDB.app/Contents/MacOS/PoliteDB"
+
+          DMG_PATH="$(find "${ROOT}" -type f -name '*.dmg' -print | head -n 1)"
+          if [ -z "${DMG_PATH}" ]; then
+            echo "Missing DMG under ${ROOT}"
+            exit 1
+          fi
+          MOUNT="$(mktemp -d)"
+          hdiutil attach -readonly -nobrowse -mountpoint "${MOUNT}" "${DMG_PATH}" >/dev/null
+          status=0
+          check_binary "dmg" "${MOUNT}/PoliteDB.app/Contents/MacOS/PoliteDB" || status=$?
+          hdiutil detach "${MOUNT}" >/dev/null || hdiutil detach -force "${MOUNT}" >/dev/null
+          exit "${status}"
 
       # Tauri notarizes/staples the .app; the .dmg is produced afterward and often has no stapled ticket.
       - name: Notarize and staple DMG (if needed)
@@ -285,13 +360,19 @@ jobs:
             exit 1
           fi
 
+          # Stapling fetches the ticket from Apple (CloudKit); outages there can last
+          # several minutes, so back off up to 2 minutes between attempts (~11 min total).
           echo "Stapling DMG..."
-          for attempt in 1 2 3 4 5; do
+          STAPLE_ATTEMPTS=8
+          for attempt in $(seq 1 "${STAPLE_ATTEMPTS}"); do
             if xcrun stapler staple "${DMG_PATH}"; then
               exit 0
             fi
-            echo "Staple failed (attempt ${attempt}/5); retrying in 30s..."
-            sleep 30
+            if [ "${attempt}" -lt "${STAPLE_ATTEMPTS}" ]; then
+              delay=$(( attempt * 30 > 120 ? 120 : attempt * 30 ))
+              echo "Staple failed (attempt ${attempt}/${STAPLE_ATTEMPTS}); retrying in ${delay}s..."
+              sleep "${delay}"
+            fi
           done
           echo "Failed to staple DMG."
           exit 1

@@ -1,0 +1,65 @@
+name: Warm macOS Rust cache
+
+# Release runs are triggered by tags, and GitHub scopes caches saved by a tag run to that
+# tag. This workflow saves the Rust dependency cache on the default branch so every
+# release run can restore it. Keep the runner, targets, toolchain and env in sync with
+# the build-macos-installers job in release.yml, otherwise the cache will not match.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - ".github/workflows/rust-cache-warm.yml"
+      # Runner, targets or build env changes there change the cache key too.
+      - ".github/workflows/release.yml"
+  # Caches unused for 7 days are evicted; a weekly restore keeps them alive.
+  schedule:
+    - cron: "0 3 * * 1"
+
+# Only restores/saves the Actions cache; no repository writes.
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-cache-warm
+  cancel-in-progress: true
+
+jobs:
+  warm-macos:
+    strategy:
+      matrix:
+        target: ["aarch64-apple-darwin", "x86_64-apple-darwin"]
+
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          shared-key: macos-${{ matrix.target }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      # Same command as the release build minus bundling, so dependency fingerprints
+      # (tauri features, deployment target) match. No signing or notarization happens.
+      - name: Build Rust dependencies
+        env:
+          NODE_ENV: production
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
+        run: npx tauri build --target ${{ matrix.target }} --no-bundle
