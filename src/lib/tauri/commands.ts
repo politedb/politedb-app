@@ -10,6 +10,9 @@ export const CMD = {
   aiLegacyModelDelete: "ai_legacy_model_delete",
   aiChatComplete: "ai_chat_complete",
   aiChatCancel: "ai_chat_cancel",
+  // AI agent (plan .agent/plans/ai-agent.md)
+  aiAgentStart: "ai_agent_start",
+  aiAgentCancel: "ai_agent_cancel",
   licenseDeviceInfo: "license_device_info",
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",

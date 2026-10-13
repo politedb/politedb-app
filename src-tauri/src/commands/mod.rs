@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod ai_agent;
 pub mod app;
 pub mod cassandra;
 pub mod connection;

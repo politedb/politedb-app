@@ -1,6 +1,7 @@
 //! AI provider support: URL policy, transport, provider storage and legacy cleanup.
 
 pub mod adapters;
+pub mod agent;
 pub mod cancel;
 pub mod chat;
 pub mod legacy_model;

@@ -67,13 +67,15 @@ pub fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
     }
 }
 
-async fn post_json(
+/// POSTs JSON and returns the status with the (size-capped) body. No error mapping, so
+/// callers can recognise specific provider signals before redacting.
+pub(crate) async fn send_json(
     config: &AiProviderConfig,
     path: &str,
     payload: &serde_json::Value,
     headers: &[(&str, &str)],
     bearer: Option<&str>,
-) -> Result<serde_json::Value, String> {
+) -> Result<(reqwest::StatusCode, String), String> {
     let url = provider::endpoint(config, path)?;
     let client = transport::client_for(&url, transport::CHAT_TIMEOUT)?;
     let mut builder = client.post(url).json(payload);
@@ -89,10 +91,18 @@ async fn post_json(
         .map_err(|e| transport::request_error(&e))?;
     let status = response.status();
     transport::reject_redirect(status)?;
-    let body = response
-        .text()
-        .await
-        .map_err(|_| "AI_CHAT_RESPONSE_READ_FAILED".to_string())?;
+    let body = transport::read_body_limited(response, transport::CHAT_MAX_BYTES).await?;
+    Ok((status, body))
+}
+
+async fn post_json(
+    config: &AiProviderConfig,
+    path: &str,
+    payload: &serde_json::Value,
+    headers: &[(&str, &str)],
+    bearer: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let (status, body) = send_json(config, path, payload, headers, bearer).await?;
     if !status.is_success() {
         return Err(provider_http_error(status, &body));
     }
@@ -168,7 +178,7 @@ async fn complete_openai_like(
 const ANTHROPIC_ALWAYS_THINKING_FROM: (u32, u32) = (4, 7);
 
 /// Room for adaptive thinking plus a short answer on always-thinking models.
-const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
+pub(crate) const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
 
 /// `(major, minor)` from ids like `claude-opus-4-1-20250805`, `claude-3-5-sonnet-20241022`
 /// or `claude-opus-5-5`. Date suffixes (8 digits) are not versions.
@@ -183,7 +193,7 @@ fn anthropic_version(model: &str) -> Option<(u32, u32)> {
     Some((major, numbers.next().unwrap_or(0)))
 }
 
-fn anthropic_always_thinks(model: &str) -> bool {
+pub(crate) fn anthropic_always_thinks(model: &str) -> bool {
     anthropic_version(model).map_or(true, |version| version >= ANTHROPIC_ALWAYS_THINKING_FROM)
 }
 

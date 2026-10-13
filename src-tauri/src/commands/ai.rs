@@ -57,6 +57,8 @@ pub fn ai_provider_save(
     key_change: KeyChangeInput,
 ) -> Result<AiProviderConfig, String> {
     let _guard = lock_providers(&state)?;
+    // A changed config (URL, model, key) may change what the model can do.
+    state.ai_agent_capabilities.forget_provider(&config.id);
     provider_store::save(
         &AppProviderFiles(&app),
         &AppSecrets(&app),
@@ -72,6 +74,7 @@ pub fn ai_provider_delete(
     provider_id: String,
 ) -> Result<(), String> {
     let _guard = lock_providers(&state)?;
+    state.ai_agent_capabilities.forget_provider(&provider_id);
     provider_store::delete(&AppProviderFiles(&app), &AppSecrets(&app), &provider_id)
 }
 

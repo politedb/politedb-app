@@ -53,6 +53,10 @@ pub struct AppState {
     /// Serializes AI provider file + key reads and mutations. Never held across network I/O.
     pub ai_providers_lock: Arc<std::sync::Mutex<()>>,
     pub ai_discovery_cancel: Arc<crate::ai::cancel::CancelRegistry>,
+    /// Active agent runs (plan ai-agent R1).
+    pub ai_agent_runs: Arc<crate::ai::agent::run::RunRegistry>,
+    /// Models known to lack tool support (plan ai-agent R2).
+    pub ai_agent_capabilities: Arc<crate::ai::agent::model::CapabilityCache>,
 }
 
 impl AppState {
@@ -72,6 +76,8 @@ impl AppState {
             ai_chat_cancel: Arc::new(tokio::sync::Mutex::new(None)),
             ai_providers_lock: Arc::new(std::sync::Mutex::new(())),
             ai_discovery_cancel: Arc::new(crate::ai::cancel::CancelRegistry::default()),
+            ai_agent_runs: Arc::new(crate::ai::agent::run::RunRegistry::default()),
+            ai_agent_capabilities: Arc::new(crate::ai::agent::model::CapabilityCache::default()),
         }
     }
 }

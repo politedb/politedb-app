@@ -18,6 +18,9 @@ pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Upper bound for a model-list response body.
 pub const DISCOVERY_MAX_BYTES: usize = 2 * 1024 * 1024;
 
+/// Upper bound for a chat/agent completion response body.
+pub const CHAT_MAX_BYTES: usize = 2 * 1024 * 1024;
+
 pub fn client_for(url: &Url, timeout: Duration) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
