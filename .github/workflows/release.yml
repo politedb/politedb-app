@@ -199,8 +199,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: bash
         # Tauri notarizes the .app with `--wait` and has no retry, so a runner network blip
-        # while polling Apple fails the whole build. Retry only on network errors; cargo
-        # output is cached, so a retry mostly re-signs and re-submits for notarization.
+        # while polling Apple fails the whole build. codesign can also fail when Apple's
+        # timestamp service does not answer ("A timestamp was expected but was not found").
+        # Retry only on those transient errors; cargo output is cached, so a retry mostly
+        # re-signs and re-submits for notarization.
         run: |
           set -uo pipefail
           BUILD_LOG="$RUNNER_TEMP/tauri-build-${{ matrix.target }}.log"
@@ -210,7 +212,7 @@ jobs:
             if npx tauri build --target ${{ matrix.target }} 2>&1 | tee "${BUILD_LOG}"; then
               exit 0
             fi
-            if ! grep -qE 'NSURLErrorDomain|kCFErrorDomainCFNetwork' "${BUILD_LOG}"; then
+            if ! grep -qE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|A timestamp was expected but was not found|timestamp service is not available' "${BUILD_LOG}"; then
               echo "tauri build failed for a non-network reason; not retrying."
               exit 1
             fi
@@ -297,13 +299,19 @@ jobs:
             exit 1
           fi
 
+          # Stapling fetches the ticket from Apple (CloudKit); outages there can last
+          # several minutes, so back off up to 2 minutes between attempts (~11 min total).
           echo "Stapling DMG..."
-          for attempt in 1 2 3 4 5; do
+          STAPLE_ATTEMPTS=8
+          for attempt in $(seq 1 "${STAPLE_ATTEMPTS}"); do
             if xcrun stapler staple "${DMG_PATH}"; then
               exit 0
             fi
-            echo "Staple failed (attempt ${attempt}/5); retrying in 30s..."
-            sleep 30
+            if [ "${attempt}" -lt "${STAPLE_ATTEMPTS}" ]; then
+              delay=$(( attempt * 30 > 120 ? 120 : attempt * 30 ))
+              echo "Staple failed (attempt ${attempt}/${STAPLE_ATTEMPTS}); retrying in ${delay}s..."
+              sleep "${delay}"
+            fi
           done
           echo "Failed to staple DMG."
           exit 1
