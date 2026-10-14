@@ -1,4 +1,5 @@
 import { useRef } from "preact/hooks";
+import { MarkdownText } from "./MarkdownText";
 import { Button } from "src/components/common/Button";
 import {
   CheckMarkIcon,
@@ -217,13 +218,20 @@ function MessageParts(props: {
     <div class="max-w-full min-w-0 space-y-3">
       {message.parts!.map((part, index) => {
         if (part.type === "text") {
-          return (
+          const textClass = cn(
+            "max-w-full min-w-0",
+            floating ? "text-inherit" : "text-sm text-neutral-800"
+          );
+          return message.role === "assistant" ? (
+            <MarkdownText
+              key={`${message.id}-part-${index}`}
+              text={part.text}
+              class={textClass}
+            />
+          ) : (
             <div
               key={`${message.id}-part-${index}`}
-              class={cn(
-                "max-w-full min-w-0",
-                floating ? "text-inherit" : "text-sm text-neutral-800"
-              )}
+              class={cn(textClass, "wrap-break-word whitespace-pre-wrap")}
             >
               {part.text}
             </div>
@@ -508,6 +516,14 @@ export function AiAssistantMessageBody(props: {
     <>
       {isStreamingEmpty ? (
         <AssistantStreamingPlaceholder />
+      ) : !hasParts && message.role === "assistant" ? (
+        <MarkdownText
+          text={message.text}
+          class={cn(
+            "max-w-full min-w-0",
+            floating ? "text-inherit" : "text-sm text-neutral-800"
+          )}
+        />
       ) : !hasParts ? (
         <div
           class={`max-w-full min-w-0 break-all whitespace-pre-wrap ${

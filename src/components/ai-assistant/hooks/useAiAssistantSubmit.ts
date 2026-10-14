@@ -27,6 +27,7 @@ import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import {
   AGENT_ENGINES,
   AgentFallback,
+  agentActivityLabel,
   agentAnswerParts,
   agentHistory,
   firstDataMessage,
@@ -355,6 +356,10 @@ export function useAiAssistantSubmit(args: {
             includeColumnDetails: isAiAgentColumnDetailsEnabled(),
             safetyMode: querySafetyMode ?? null,
             signal: abortController.signal,
+            onActivity: (tool) => {
+              if (requestSeqRef.current !== requestId) return;
+              updateStreamingAssistantText(streamId, agentActivityLabel(tool));
+            },
           });
           if (requestSeqRef.current !== requestId) return;
           const answer = await agentAnswerParts(result, runtimeConnectionId);

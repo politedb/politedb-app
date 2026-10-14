@@ -42,6 +42,20 @@ function abortError(): Error {
 
 export type AgentTurnResult = { text: string; steps: AgentStepSummary[] };
 
+/** What the agent is doing right now, from fixed labels only. */
+const ACTIVITY_LABELS: Record<string, string> = {
+  list_schemas: "Listing schemas",
+  list_tables: "Listing tables",
+  describe_table: "Looking at a table's structure",
+  sample_rows: "Reading sample rows",
+  run_readonly_query: "Running a read-only query",
+  explain_query: "Checking a query plan",
+};
+
+export function agentActivityLabel(tool: string): string {
+  return `${ACTIVITY_LABELS[tool] ?? "Checking the database"}…`;
+}
+
 /** Tools whose results contain database data. */
 export const DATA_TOOLS = [
   "sample_rows",
@@ -117,6 +131,8 @@ export function runAgentTurn(opts: {
   historyHasData?: boolean;
   signal?: AbortSignal;
   onSteps?: (steps: AgentStepSummary[]) => void;
+  /** A tool started (its fixed name), for a live progress line. */
+  onActivity?: (tool: string) => void;
 }): Promise<AgentTurnResult> {
   const runId = crypto.randomUUID();
   return new Promise((resolve, reject) => {
@@ -146,6 +162,7 @@ export function runAgentTurn(opts: {
       switch (event.type) {
         case "toolStarted":
           toolRan = true;
+          opts.onActivity?.(event.tool);
           break;
         case "toolFinished":
           steps.push({

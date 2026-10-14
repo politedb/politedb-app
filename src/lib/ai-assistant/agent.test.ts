@@ -12,6 +12,7 @@ vi.mock("src/lib/tauri/aiAgent", () => ({
 }));
 
 import {
+  agentActivityLabel,
   AGENT_HISTORY_MESSAGES,
   AgentFallback,
   agentAnswerParts,
@@ -287,5 +288,35 @@ describe("agentHistory", () => {
     const history = agentHistory(messages);
     expect(history).toHaveLength(AGENT_HISTORY_MESSAGES);
     expect(history[history.length - 1]?.text).toBe("m29");
+  });
+});
+
+describe("agentActivityLabel", () => {
+  it("uses fixed labels only", () => {
+    expect(agentActivityLabel("describe_table")).toBe(
+      "Looking at a table's structure…"
+    );
+    expect(agentActivityLabel("anything_else")).toBe("Checking the database…");
+  });
+
+  it("reports each tool as it starts", async () => {
+    const run = capture();
+    const onActivity = vi.fn();
+    const turn = runAgentTurn({ ...base, onActivity });
+    run.emit()({ type: "toolStarted", tool: "list_tables" });
+    run.emit()({ type: "toolStarted", tool: "describe_table" });
+    run.emit()({ type: "answer", text: "ok" });
+    run.emit()({
+      type: "done",
+      status: "answered",
+      steps: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    await turn;
+    expect(onActivity.mock.calls.map((c) => c[0])).toEqual([
+      "list_tables",
+      "describe_table",
+    ]);
   });
 });
