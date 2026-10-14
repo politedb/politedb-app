@@ -209,3 +209,71 @@ Scope: read AGENTS.md, RTK.md and .agent/WORKFLOW.md; re-reviewed the uncommitte
 - **Limitations:** contrast assessed from source and generated CSS; no rendered desktop/browser, zoom/geometry or screen-reader inspection performed. Tests do not directly assert the color class/contrast, preservation of partial answer text, hour formatting or error-message presentation. These are nonblocking coverage limits for this one-class fix; no behavior change was found in those paths. Existing panel duration contrast remains outside this finding's scope. No Rust checks needed for this frontend-only diff.
 
 Next: contrast fix is ready for commit when requested by the human.
+
+
+## Review: legacy-webkit-storage Phase 1
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-14.
+
+Scope: read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK instructions and `.agent/plans/legacy-webkit-storage.md` (IMPLEMENTED), then reviewed the complete uncommitted diff on `fix/legacy-webkit-storage` against `b74100b557f9b46ab9526c7231267be6f006f818`, plus all five requested untracked paths. `.claude/launch.json` excluded. Application code unchanged; only this review appended. No real stores under `~/Library/WebKit` accessed, no ignored real-store tests run, and no real user values printed.
+
+### Findings, ranked
+
+1. **P1 — `src/main.tsx:26`: unavailable localStorage can abort desktop startup.** `window.localStorage` is evaluated while constructing the arguments, outside the helper's try/catch. When the browser storage getter throws `SecurityError`, `boot()` rejects before theme setup, persistent restore and `render()`, leaving the app blank. The existing unavailable-storage test only supplies an object whose methods throw; it does not exercise this getter. Synthetic execution of the exact call shape confirms rejection before the helper guard. Acquire storage inside a guarded startup path (or inject a guarded accessor), skip migration on failure, and test that boot continues to render. This violates R4's requirement that migration failure never prevent normal startup.
+
+2. **P2 — `src/lib/legacyWebStorage.ts:81-85`: a failed write permanently completes an incomplete import.** The catch ends the entire entry loop, then writes the success marker. A single large chat exceeding remaining localStorage quota can prevent smaller settings/groups/pins later in the response from being attempted, and later launches never retry even after storage becomes available. A synthetic throwing `setItem` reproduced `first=done`, marker present, later group absent, and only one backend read across two invocations. Handle failures per entry so later small entries still get a chance; route incomplete imports through the bounded failure/attempt policy rather than marking them successful. Preserve already written values and arrange the reload needed for module-time readers after partial success. Add first-entry failure and partial-write regressions, including recovery on a later launch. R3 specifies no completion marker on error before the three-attempt give-up limit.
+
+3. **P2 — `src-tauri/src/legacy_web_storage/webkit.rs:47-48,58-59`: parent symlinks bypass the source-selection boundary.** `symlink_metadata` checks only the final database component. A symlinked `inner/LocalStorage` directory or the entire flat-layout directory therefore resolves to an outside regular database and is accepted. A temporary Rust harness importing the exact production module returned one imported entry for each synthetic symlink case. The existing regression covers a symlinked hash folder and a symlinked database file, leaving these parent cases uncovered. Check each traversed storage-directory component before reading/copying (including the flat root), and add these two fixtures. R1 requires discovery without following symlinks; this is a boundary violation, not evidence that the original database is written.
+
+4. **P2 — `src-tauri/src/legacy_web_storage/mod.rs:388-392`: real-store smoke test logs raw storage keys.** Although ignored by default, this checked-in test explicitly reads the actual legacy store and prints every restored key when run as documented. Dynamic chat/model key suffixes contain persisted identifiers; R1 permits counts/error kinds only and explicitly prohibits logging keys. Remove the key listing and retain counts or use synthetic fixtures for key assertions. This finding comes from source inspection; the real-store test was not executed.
+
+### Independent verification
+
+- `cargo test --offline --locked legacy_web_storage`: **15 passed / 1 ignored**. Synthetic WebKit/WAL and Chromium/snappy fixtures pass; real-store smoke stays ignored.
+- `npm run test:run -- src/lib/legacyWebStorage.test.ts`: **8 passed**.
+- `npm run test:run`: **117 files / 659 tests passed**.
+- `npm run build`: **passed**, including TypeScript. Browser externalization, ineffective dynamic-import, large-chunk and plugin-timing warnings emitted in existing modules.
+- `cargo clippy --offline --locked --all-targets` and the same command with `--features app-store`: **passed**, with warnings reported in existing unchanged code; no new legacy-storage diagnostic reported.
+- `cargo test --offline --locked`: **208 passed / 8 failed / 2 ignored**. All eight failures are unchanged AI chat/transport loopback tests whose socket bind returns `PermissionDenied: Operation not permitted` (`src/ai/chat.rs:393`, `src/ai/transport.rs:96,159`). Full-suite verification is limited by sandbox networking; focused migration tests pass.
+- Temporary harnesses under `/private/tmp/politedb-storage-review` execute the transpiled production TypeScript helper and import the production Rust module directly. They reproduce findings 1–3 using in-memory storage and throwaway SQLite files only; no repository application/test edits required.
+- `git diff --check`: **passed** before report append.
+
+### Scope and remaining limitations
+
+- Exact allowlist amendment, frontend fill-only checks, timeout handling, backend fixed error mapping, private scratch cleanup, App Store early return, Windows-only pinned production dependency plus cross-platform dev dependency, and unchanged `data_migration.rs` reviewed. No new source write path found in either reader. Dependency review covers manifest/lock changes and exercised parser behavior; no external vulnerability audit performed.
+- Provider selection already falls back selected → enabled default → first enabled; restored legacy chat snapshots use the existing parser. `chatOwners`/`dataRead` purge behavior is absent on this branch, matching the plan's stated limitation; integration with the unmerged agent branch is not verified.
+- Windows/Linux target builds and real upgrade runs not performed. Synthesized fixtures do not establish real WebView2/WebKitGTK interoperability. The plan records the user's acceptance of missing real Windows/Linux probes; this is a limitation rather than a new required finding.
+- No desktop launch/manual upgrade performed: it would access the real user stores. The implementer's recorded macOS smoke/manual evidence was read, not independently repeated.
+- Non-Tauri boot skips the migration call but does not set the web marker requested by R3; no native read/reload occurs, so recorded as a minor plan deviation rather than a separate blocking defect. The planned reader trait is represented by a cfg-dispatched enum; platform branching remains centralized.
+
+Next: Claude fixes findings, records focused regressions, and requests Codex re-review. Data migration also requires Claude's security-review pass under `.agent/WORKFLOW.md` before handoff is complete. No staging or commit performed.
+
+## Re-review: legacy-webkit-storage Phase 1 round 2
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-14. All four prior findings resolved; no new P0/P1/P2 findings.
+
+Scope: read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK instructions, the Phase 1 review and the plan's `Fixes for Codex review round 1`. Reviewed the current uncommitted diff against `b74100b557f9b46ab9526c7231267be6f006f818` on `fix/legacy-webkit-storage`, plus all requested untracked reader, command, frontend helper/test and wrapper files. `.claude/launch.json` excluded. Only this report appended; no application-code edits, staging or commit. No real stores under `~/Library/WebKit` accessed or printed; ignored real-store smoke test not run.
+
+### Prior finding dispositions
+
+1. **P1 resolved — `src/main.tsx:29`, `src/lib/legacyWebStorage.ts:66`: throwing storage getter.** Startup passes an accessor; acquisition and marker lookup now execute inside the helper's guard. A `SecurityError` returns `done` without a backend read, allowing boot to reach its existing setup/render path. Added regression exercises a throwing accessor as well as throwing storage methods. Theme/font/density and module-time shortcut reads retain their existing guards. Actual full boot/render with a throwing getter was not exercised; helper behavior and call-site wiring verified separately.
+2. **P2 resolved — `src/lib/legacyWebStorage.ts:84-109`: incomplete import marked successful.** Each entry has its own guard; failed entries no longer suppress later writes. Incomplete imports count toward the three-attempt give-up policy without a success marker. Partial writes return `restored`, so module-time readers reload from restored values; subsequent imports skip those values. Tests verify first-entry failure with a later successful write, recovery on the next invocation, three incomplete attempts, preservation of existing values, and no repeated reload when the marker alone is unwritable. Marker-write failure also records an attempt. If storage cannot persist either marker or counter, attempts cannot be durably bounded; no-write invocations still request no reload.
+3. **P2 resolved — `src-tauri/src/legacy_web_storage/mod.rs:148-159,196-209`, `src-tauri/src/legacy_web_storage/webkit.rs:54-56`: parent symlink boundary.** Both reader variants now validate the identifier root and every directory down to their source layout; WebKit additionally rejects symlinked `inner/LocalStorage`. Synthetic fixtures reject the two reported cases, symlinked general/root directories, and a symlinked Chromium leveldb directory. Regular-store and WAL fixtures still pass. Checks are metadata-based; concurrent hostile directory replacement is not tested or made atomic by this fix.
+4. **P2 resolved — `src-tauri/src/legacy_web_storage/mod.rs:412-428`: smoke test logs storage keys.** Source inspection confirms only entry/skipped counts are printed; raw-key loop removed. Test remains ignored and was not executed.
+
+The minor non-Tauri R3 deviation is also resolved: boot supplies an empty read function outside Tauri, setting the marker through the same helper without native invocation. This wiring was checked statically; no dedicated non-Tauri boot integration test exists.
+
+### Independent verification
+
+- `npm run test:run -- src/lib/legacyWebStorage.test.ts`: **1 file / 10 tests passed**.
+- `cargo test --offline --locked legacy_web_storage`: **17 passed / 1 ignored**. Tests use throwaway SQLite/WAL and LevelDB/snappy stores, including source-preservation and symlink regressions.
+- `npm run test:run`: **117 files / 661 tests passed** in this run; no frontend failure reproduced.
+- `npm run build`: **passed**, including TypeScript. Existing browser externalization, ineffective dynamic-import, chunk-size and plugin-timing warnings remain in unrelated modules.
+- `cargo clippy --offline --locked --all-targets` and the same command with `--features app-store`: **passed**. Reported warnings concern unchanged MySQL, credential-identity and export code; none reported in the new migration modules.
+- `git diff --check`: **passed** before report append.
+
+### Remaining limitations and handoff
+
+No desktop launch/manual upgrade, real-store smoke, Windows/Linux target build, real WebView2/WebKitGTK probe, or full Rust suite rerun. The focused Rust suite and both macOS Clippy flavors pass; previous full-suite loopback restrictions and accepted Windows/Linux interoperability limitations remain. Synthetic fixtures establish the tested reader behavior, not real upgrade compatibility. Integration with `chatOwners`/`dataRead` on the unmerged agent branch remains unverified. No external dependency vulnerability audit performed.
+
+Codex re-review is complete within this scope. Claude's security-review pass remains required by `.agent/WORKFLOW.md` for data migration before handoff is complete; this verdict does not attest that pass occurred. Commit only when requested by the human.

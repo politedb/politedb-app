@@ -20,6 +20,7 @@ export const CMD = {
   licenseOpenExternalUrl: "license_open_external_url",
   updaterInstallIfAllowed: "updater_install_if_allowed",
   securityTouchIdAuthenticate: "security_touch_id_authenticate",
+  legacyWebStorageRead: "legacy_web_storage_read",
 
   // Connection
   connectionCreate: "connection_create",
