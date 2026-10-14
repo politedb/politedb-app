@@ -209,3 +209,40 @@ Scope: read AGENTS.md, RTK.md and .agent/WORKFLOW.md; re-reviewed the uncommitte
 - **Limitations:** contrast assessed from source and generated CSS; no rendered desktop/browser, zoom/geometry or screen-reader inspection performed. Tests do not directly assert the color class/contrast, preservation of partial answer text, hour formatting or error-message presentation. These are nonblocking coverage limits for this one-class fix; no behavior change was found in those paths. Existing panel duration contrast remains outside this finding's scope. No Rust checks needed for this frontend-only diff.
 
 Next: contrast fix is ready for commit when requested by the human.
+
+
+## Review: keychain-service-rename Phase 1
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-14.
+
+Reviewed commit `3dd0bec34e832a89ecebadce94af14547edf0f8b` on `fix/keychain-service-rename`, against `main` / `b74100b557f9b46ab9526c7231267be6f006f818`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK guidance and `.agent/plans/keychain-service-rename.md` first. Reviewed `git show 3dd0bec` and the complete base-to-commit diff, including ignored native-test code; traced production keychain entry points and the unchanged adapter's storage fallback. Application sources match the reviewed commit. Only this review appended; unrelated `.claude/launch.json` preserved. No application edits, staging or commit.
+
+### Findings, ranked
+
+- **P0: none found.**
+- **P1: none found.**
+- **P2 — Missing regression for the synchronization boundary.** `src-tauri/src/security/secrets.rs:28`; test setup `src-tauri/src/security/credential_store.rs:342`. All store tests instantiate `CredentialStore` directly with a `RefCell` fake, bypassing `MAC_STORE_LOCK`. The existing migration hooks exercise add/reread races, but none proves the R7 case: delete waiting while get has read an old value and is about to add it. Removing or shortening the production lock would leave the entire current suite green. Add a deterministic threaded test using a thread-safe fake and barriers/channels through the same synchronization boundary: pause get after the previous/legacy read, start delete, finish migration, then assert delete completes with all profile namespaces absent and no subsequent resurrection. Cover both migration sources and logical aliases of the same credential. This is a nonblocking coverage gap; inspection found the present lock correctly spans each complete production store operation.
+
+### Migration and compatibility assessment
+
+- Read order is current `PoliteDB` → previous `com.politehq.politedb` → legacy `politedb` aliases. Only genuine not-found advances the chain. Previous reads disable storage upgrade; add failure retains the source and returns its usable value. `AlreadyExists` returns the authoritative current reread or its error without retry/re-add.
+- Previous retirement occurs only after this call reports `Added` and a reread equals the copied value. Failed verification or deletion retains the previous item; messages contain no account or secret. Successful set writes the current namespace before best-effort previous cleanup, as allowed by R6. Legacy aliases retain their existing policy.
+- Delete attempts both branded services and every recognized legacy alias, retaining the first error while continuing cleanup. List deduplicates logical credentials and surfaces previous-service errors. Unsupported previous accounts remain ignored. Custom UUID-shaped physical accounts remain unmapped under `politedb`; `_database` support is not reintroduced. Logical SecretRefs, profile/export formats and non-macOS storage remain unchanged.
+- All production get/set/delete/list/optional-read calls enter `mac_store_call`; no production native-adapter bypass found. The mutex is process-wide and held through migration and retirement. Its broader coverage of unmapped keys is a documented R7 deviation: an ACL prompt can now delay AI/custom-key operations too. `keychain_delete_if_present` still consists of two separately locked operations; the lock does not provide cross-process or external Keychain Access synchronization.
+
+### Verification run
+
+Commands below used the required `rtk` prefix; Rust commands ran in `src-tauri/`.
+
+- `cargo test --locked security::credential_store::tests::`: **42 passed**, 0 failed; fake keychain only.
+- `cargo test --locked security::credential_identity::tests::`: **16 passed**, 0 failed; pure identity/parser tests.
+- `cargo clippy --locked --all-targets`: **passed**, 0 errors; RTK reports 6 warning occurrences in MySQL driver formatting, an unchanged identity-test formatting line, and export MSRV compatibility. None is on added/modified lines. No baseline Clippy run performed.
+- `npm run build`: **passed**, TypeScript and Vite. Browser externalization, ineffective dynamic imports, large chunks and plugin timing warnings remain outside this diff.
+- `git diff b74100b 3dd0bec --check`: **passed**. Final working-tree whitespace/status check recorded after append.
+
+### Limits and release gates
+
+- **No real keychain items were read, printed, created or deleted.** Neither ignored native smoke test ran; no desktop connection/manual migration, `security` command or native probe ran. The author's reported native smoke and Phase 0 file-keychain results are recorded evidence, not independently verified results from this review.
+- The fake matches service names exactly; it cannot prove that native `PoliteDB` and `politedb` lookup, uniqueness, listing and deletion are distinct. The plan reports file-keychain success, but data-protection case sensitivity remains unverified. The Phase 0 statement covering every existing DMG install is broader than this review can establish from one installed build. This verdict does **not** clear the MAS/data-protection release gate: retain the signed/provisioned native probe before shipping that path, and choose a distinct service string if it fails. SQLite storage alone is not evidence of API comparison semantics.
+- Signed-app ACL prompts, access-group behavior, actual file-to-data-protection transitions and Windows/Linux execution were not verified. Downgrade credential loss after approved D2a retirement remains intentional.
+- Workflow requires Claude's security review after Codex review. The plan records one before this review; Claude should perform the required post-review pass, including these limits, before release handoff.

@@ -176,6 +176,19 @@ Verification:
 
 - Claude `/security-review` (2026-10-14): no findings. Codex implementation review not yet done; committed on the user's request ("commit keychain trước đi").
 
+### Codex review P2 fix (Claude, 2026-10-14)
+
+Codex review "keychain-service-rename Phase 1": VERIFIED WITH LIMITATIONS, with one P2: no regression proved the R7 lock. The user chose to fix it ("chọn a, thêm test rồi commit").
+
+- The lock moved from `secrets.rs` into `credential_store::serialized(port, f)`: a process-wide `STORE_LOCK` held for the whole store operation. `mac_store_call` now calls it, so production and tests share one synchronization boundary. Behavior is unchanged.
+- New `tests::concurrency` with a thread-safe fake (`SyncKeychain`):
+  1. a `get` that migrates from `com.politehq.politedb` (and, in a second test, from a legacy `politedb` alias) pauses right after reading the old value;
+  2. a `delete` through another alias of the same credential starts meanwhile; the test asserts it is still blocked after 150 ms;
+  3. the migration is released;
+  4. the test asserts the delete then removed every namespace and later `get`s through both aliases return not-found.
+- Mutation check: with the lock replaced by a no-op, both tests fail (delete not blocked). With the lock restored, both pass.
+- `cargo test` → 216 passed / 2 ignored (`security::` 61 passed). `cargo clippy --all-targets` → 8 warnings, same as baseline.
+
 ## Plan Review
 
 (Codex)

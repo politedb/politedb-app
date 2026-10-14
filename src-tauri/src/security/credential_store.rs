@@ -90,6 +90,17 @@ pub trait KeychainPort {
     fn list(&self, service: &str) -> Result<Vec<String>, String>;
 }
 
+/// Serializes store operations process-wide, so a migrating `get` cannot
+/// interleave with a `delete` of the same credential and re-create it from an
+/// old copy it read before the delete.
+static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Runs `f` on a store over `port` while holding the process-wide store lock.
+pub fn serialized<P: KeychainPort, T>(port: &P, f: impl FnOnce(&CredentialStore<'_, P>) -> T) -> T {
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    f(&CredentialStore::new(port))
+}
+
 pub struct CredentialStore<'a, P: KeychainPort> {
     port: &'a P,
 }
@@ -1237,5 +1248,180 @@ mod tests {
             "KEYCHAIN_LIST_FAILED: OSSTATUS=-25293".into(),
         );
         assert!(CredentialStore::new(&kc).list().is_err());
+    }
+
+    // --- Synchronization boundary (`serialized`) ---
+
+    mod concurrency {
+        use super::super::*;
+        use super::{ID, ID_UPPER};
+        use std::collections::BTreeMap;
+        use std::sync::mpsc::{channel, Receiver, Sender};
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+        use std::time::Duration;
+
+        /// Thread-safe fake. A `get` on `pause_on` signals `paused`, then waits for
+        /// `release` before returning, so a test can act while a migration holds
+        /// an old value it has not written back yet.
+        /// Service to pause on, the "paused" signal and the "release" wait.
+        type Pause = (String, Sender<()>, Receiver<()>);
+
+        #[derive(Default)]
+        struct SyncKeychain {
+            items: Mutex<BTreeMap<(String, String), String>>,
+            pause_on: Mutex<Option<Pause>>,
+        }
+
+        impl SyncKeychain {
+            fn put(&self, service: &str, account: &str, value: &str) {
+                self.items
+                    .lock()
+                    .unwrap()
+                    .insert((service.into(), account.into()), value.into());
+            }
+        }
+
+        impl KeychainPort for SyncKeychain {
+            fn get(
+                &self,
+                service: &str,
+                account: &str,
+                _: bool,
+                _: Option<&str>,
+            ) -> Result<String, String> {
+                let value = self
+                    .items
+                    .lock()
+                    .unwrap()
+                    .get(&(service.into(), account.into()))
+                    .cloned()
+                    .ok_or_else(|| KEYCHAIN_ITEM_NOT_FOUND.to_string());
+                let pause = {
+                    let mut slot = self.pause_on.lock().unwrap();
+                    match slot.as_ref() {
+                        Some((s, _, _)) if s == service && value.is_ok() => slot.take(),
+                        _ => None,
+                    }
+                };
+                if let Some((_, paused, release)) = pause {
+                    paused.send(()).unwrap();
+                    release.recv().unwrap();
+                }
+                value
+            }
+            fn set(
+                &self,
+                service: &str,
+                account: &str,
+                value: &str,
+                _: Option<&str>,
+            ) -> Result<(), String> {
+                self.put(service, account, value);
+                Ok(())
+            }
+            fn add_if_absent(
+                &self,
+                service: &str,
+                account: &str,
+                value: &str,
+                _: Option<&str>,
+            ) -> Result<AddOutcome, String> {
+                let mut items = self.items.lock().unwrap();
+                let key = (service.to_string(), account.to_string());
+                if items.contains_key(&key) {
+                    return Ok(AddOutcome::AlreadyExists);
+                }
+                items.insert(key, value.into());
+                Ok(AddOutcome::Added)
+            }
+            fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+                self.items
+                    .lock()
+                    .unwrap()
+                    .remove(&(service.to_string(), account.to_string()));
+                Ok(())
+            }
+            fn list(&self, service: &str) -> Result<Vec<String>, String> {
+                Ok(self
+                    .items
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .filter(|(s, _)| s == service)
+                    .map(|(_, a)| a.clone())
+                    .collect())
+            }
+        }
+
+        /// A `get` migrating from `source` is paused right after reading the old
+        /// value; a `delete` through `delete_key` starts meanwhile. The delete must
+        /// wait for the migration, then remove everything, so nothing comes back.
+        fn delete_during_migration_does_not_resurrect(
+            source: &str,
+            source_account: &str,
+            get_key: &str,
+            delete_key: &str,
+        ) {
+            let kc = Arc::new(SyncKeychain::default());
+            kc.put(source, source_account, "old");
+            let (paused_tx, paused_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            *kc.pause_on.lock().unwrap() = Some((source.into(), paused_tx, release_rx));
+
+            let getter = {
+                let (kc, key) = (kc.clone(), get_key.to_string());
+                thread::spawn(move || serialized(&*kc, |store| store.get(&key)))
+            };
+            paused_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("migration reached the old value");
+
+            let deleter = {
+                let (kc, key) = (kc.clone(), delete_key.to_string());
+                thread::spawn(move || serialized(&*kc, |store| store.delete(&key)))
+            };
+            thread::sleep(Duration::from_millis(150));
+            assert!(
+                !deleter.is_finished(),
+                "delete must wait for the in-flight migration"
+            );
+
+            release_tx.send(()).unwrap();
+            assert_eq!(getter.join().unwrap().unwrap(), "old");
+            deleter.join().unwrap().unwrap();
+
+            assert!(
+                kc.items.lock().unwrap().is_empty(),
+                "no namespace keeps the credential"
+            );
+            for key in [get_key, delete_key] {
+                assert_eq!(
+                    serialized(&*kc, |store| store.get(key)),
+                    Err(KEYCHAIN_ITEM_NOT_FOUND.into())
+                );
+            }
+        }
+
+        #[test]
+        fn delete_waits_for_migration_from_previous_service() {
+            delete_during_migration_does_not_resurrect(
+                PREVIOUS_BRANDED_SERVICE,
+                &format!("{ID_UPPER}_profile"),
+                &format!("politedb/profile/{ID}/postgres/db_password"),
+                &format!("politedb/profile/{ID}/credential/database"),
+            );
+        }
+
+        #[test]
+        fn delete_waits_for_migration_from_legacy_service() {
+            let legacy = format!("politedb/profile/{ID}/postgres/db_password");
+            delete_during_migration_does_not_resurrect(
+                LEGACY_SERVICE,
+                &legacy,
+                &legacy,
+                &format!("profile:{ID}:postgres:password"),
+            );
+        }
     }
 }
