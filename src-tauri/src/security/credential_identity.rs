@@ -12,7 +12,12 @@
 //!   `<UPPERCASE-UUID>_ssh`
 //!
 //! Only these two physical account spellings are supported under
-//! [`BRANDED_SERVICE`]; any other account there is ignored.
+//! [`BRANDED_SERVICE`] (and [`PREVIOUS_BRANDED_SERVICE`]); any other account
+//! there is ignored.
+//!
+//! Branded items were first written under [`PREVIOUS_BRANDED_SERVICE`]
+//! (the old bundle identifier). They are read, migrated and deleted there but
+//! never written; see `credential_store`.
 //!
 //! Physical account parsing is kept separate from logical key parsing: the
 //! physical suffix (`profile`) is not the logical purpose segment (`database`).
@@ -34,8 +39,14 @@
 
 use uuid::Uuid;
 
-/// Bundle identifier from `tauri.conf.json`; shown as "Where" in Keychain Access.
-pub const BRANDED_SERVICE: &str = "com.politehq.politedb";
+/// Service of branded items; shown as "Where" in Keychain Access. Differs from
+/// [`LEGACY_SERVICE`] only by case: Keychain Services matches service names
+/// case-sensitively (verified for the file keychain, plan
+/// keychain-service-rename Phase 0).
+pub const BRANDED_SERVICE: &str = "PoliteDB";
+/// Service of branded items written before the rename (the old bundle
+/// identifier). Read, migrated from and deleted; never written.
+pub const PREVIOUS_BRANDED_SERVICE: &str = "com.politehq.politedb";
 /// Explicit item label; shown as "Name" in Keychain Access.
 pub const BRANDED_LABEL: &str = "PoliteDB";
 /// Service used for every secret before branded entries existed.
@@ -184,8 +195,8 @@ pub fn parse_legacy_profile_key(key: &str) -> Option<ProfileCredential> {
     None
 }
 
-/// Parse a physical branded account found under [`BRANDED_SERVICE`]
-/// (`<UPPERCASE-UUID>_profile|_ssh`). Only used for physical items, never for
+/// Parse a physical branded account found under [`BRANDED_SERVICE`] or
+/// [`PREVIOUS_BRANDED_SERVICE`] (`<UPPERCASE-UUID>_profile|_ssh`). Only used for physical items, never for
 /// logical keys.
 pub fn parse_branded_account(account: &str) -> Option<ProfileCredential> {
     let (id, _) = account.rsplit_once('_')?;
