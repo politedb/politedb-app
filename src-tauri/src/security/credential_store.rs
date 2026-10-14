@@ -1,11 +1,12 @@
 //! Profile-credential naming + legacy compatibility on top of a keychain port.
 //!
 //! Recognized profile keys (see [`credential_identity`]) are stored in one
-//! branded item per profile + purpose. Pre-branding items under
-//! [`LEGACY_SERVICE`] keep working:
+//! branded item per profile + purpose under [`BRANDED_SERVICE`]. Older items
+//! keep working:
 //!
 //! - get: branded item (`<UUID>_profile|_ssh`) first; only on genuine
-//!   not-found the exact legacy alias. A legacy hit is copied to the branded
+//!   not-found the same account under [`PREVIOUS_BRANDED_SERVICE`], then the
+//!   exact legacy alias under [`LEGACY_SERVICE`]. A hit is copied to the branded
 //!   item (add-only, never overwriting a newer branded value). The legacy item
 //!   is retained, so a failed or partial migration never loses the credential.
 //!   If the add finds a branded item created concurrently, that item is
@@ -13,9 +14,15 @@
 //!   legacy value. If it vanished again before the re-read (concurrent
 //!   delete), not-found is returned without re-adding, so a delete cannot be
 //!   undone by a stale legacy copy.
-//! - delete: the branded item and every recognized legacy alias, so fallback
-//!   cannot resurrect a stale password. Failures are surfaced.
-//! - list: one deterministic logical key per credential
+//! - A copy from [`PREVIOUS_BRANDED_SERVICE`] then removes the previous item,
+//!   but only when this call added the branded item and a re-read returns the
+//!   copied value. Otherwise the previous item is kept.
+//! - set: writes the branded item, then removes the previous-service item
+//!   best-effort (it now holds a stale value).
+//! - delete: the branded item, the previous-service item and every recognized
+//!   legacy alias, so fallback cannot resurrect a stale password. Failures are
+//!   surfaced.
+//! - list: one deterministic logical key per credential across all services
 //!   (`politedb/profile/<uuid>/credential/<purpose>`) plus unmapped custom
 //!   keys under their own names.
 //!
@@ -28,7 +35,7 @@ use std::collections::BTreeSet;
 
 use super::credential_identity::{
     map_key, parse_branded_account, parse_legacy_profile_key, KeyForm, MappedKey,
-    ProfileCredential, BRANDED_LABEL, BRANDED_SERVICE, LEGACY_SERVICE,
+    ProfileCredential, BRANDED_LABEL, BRANDED_SERVICE, LEGACY_SERVICE, PREVIOUS_BRANDED_SERVICE,
 };
 
 pub const KEYCHAIN_ITEM_NOT_FOUND: &str = "KEYCHAIN_ITEM_NOT_FOUND";
@@ -93,15 +100,20 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
     }
 
     pub fn set(&self, key: &str, value: &str) -> Result<(), String> {
-        match map_key(key) {
-            Some(mapped) => self.port.set(
-                BRANDED_SERVICE,
-                &mapped.credential.branded_account(),
-                value,
-                Some(BRANDED_LABEL),
-            ),
-            None => self.port.set(LEGACY_SERVICE, key, value, None),
+        let Some(mapped) = map_key(key) else {
+            return self.port.set(LEGACY_SERVICE, key, value, None);
+        };
+        let account = mapped.credential.branded_account();
+        self.port
+            .set(BRANDED_SERVICE, &account, value, Some(BRANDED_LABEL))?;
+        if self
+            .port
+            .delete(PREVIOUS_BRANDED_SERVICE, &account)
+            .is_err()
+        {
+            tracing::warn!("keychain: could not remove previous branded credential after set");
         }
+        Ok(())
     }
 
     pub fn get(&self, key: &str) -> Result<String, String> {
@@ -115,7 +127,7 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
             .get(BRANDED_SERVICE, &account, true, Some(BRANDED_LABEL))
         {
             Ok(value) => Ok(value),
-            Err(error) if is_not_found(&error) => self.get_legacy_and_migrate(key, &mapped),
+            Err(error) if is_not_found(&error) => self.get_previous_and_migrate(key, &mapped),
             Err(error) => Err(error),
         }
     }
@@ -132,10 +144,9 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
             }
         };
 
-        record(
-            self.port
-                .delete(BRANDED_SERVICE, &mapped.credential.branded_account()),
-        );
+        let account = mapped.credential.branded_account();
+        record(self.port.delete(BRANDED_SERVICE, &account));
+        record(self.port.delete(PREVIOUS_BRANDED_SERVICE, &account));
 
         let mut aliases: BTreeSet<String> = BTreeSet::new();
         if mapped.form == KeyForm::Legacy {
@@ -156,12 +167,13 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
     }
 
     pub fn list(&self) -> Result<Vec<String>, String> {
-        let branded = self.port.list(BRANDED_SERVICE)?;
+        let mut branded = self.port.list(BRANDED_SERVICE)?;
+        branded.extend(self.port.list(PREVIOUS_BRANDED_SERVICE)?);
         let legacy = self.port.list(LEGACY_SERVICE)?;
 
         let mut keys: BTreeSet<String> = BTreeSet::new();
         // Only well-formed branded accounts are listed, under their logical
-        // key; the set collapses them with their legacy aliases.
+        // key; the set collapses both branded services and legacy aliases.
         keys.extend(
             branded
                 .iter()
@@ -179,8 +191,50 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
         Ok(keys.into_iter().collect())
     }
 
-    /// Fallback after a genuine not-found on the branded item. Real errors from
-    /// the legacy read are returned, never treated as not-found.
+    /// First fallback after a genuine not-found on the branded item: the same
+    /// account under the previous branded service. Real errors are returned,
+    /// never treated as not-found.
+    fn get_previous_and_migrate(&self, key: &str, mapped: &MappedKey) -> Result<String, String> {
+        let account = mapped.credential.branded_account();
+        // No storage-upgrade copy here: the branded item is the upgrade target.
+        match self
+            .port
+            .get(PREVIOUS_BRANDED_SERVICE, &account, false, None)
+        {
+            Ok(value) => {
+                let (value, added) = self.migrate(&mapped.credential, value)?;
+                if added {
+                    self.retire_previous(&mapped.credential, &value);
+                }
+                Ok(value)
+            }
+            Err(error) if is_not_found(&error) => self.get_legacy_and_migrate(key, mapped),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Removes the previous-service item once its value is verified in the
+    /// branded item. Any doubt keeps it; failures are logged, not surfaced.
+    fn retire_previous(&self, credential: &ProfileCredential, copied: &str) {
+        let account = credential.branded_account();
+        let verified = matches!(
+            self.port
+                .get(BRANDED_SERVICE, &account, false, Some(BRANDED_LABEL)),
+            Ok(value) if value == copied
+        );
+        if !verified {
+            tracing::warn!("keychain: migrated credential not verified; previous item kept");
+        } else if self
+            .port
+            .delete(PREVIOUS_BRANDED_SERVICE, &account)
+            .is_err()
+        {
+            tracing::warn!("keychain: could not remove previous branded credential");
+        }
+    }
+
+    /// Last fallback: pre-branding aliases. Real errors from the legacy read
+    /// are returned, never treated as not-found.
     fn get_legacy_and_migrate(&self, key: &str, mapped: &MappedKey) -> Result<String, String> {
         let candidates: Vec<String> = match mapped.form {
             KeyForm::Legacy => vec![key.to_string()],
@@ -190,7 +244,7 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
         for candidate in candidates {
             // No storage-upgrade copy here: the branded item is the upgrade target.
             match self.port.get(LEGACY_SERVICE, &candidate, false, None) {
-                Ok(value) => return self.migrate(&mapped.credential, value),
+                Ok(value) => return self.migrate(&mapped.credential, value).map(|(v, _)| v),
                 Err(error) if is_not_found(&error) => continue,
                 Err(error) => return Err(error),
             }
@@ -198,10 +252,11 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
         Err(KEYCHAIN_ITEM_NOT_FOUND.into())
     }
 
-    /// Copy a legacy-service value into the branded item without overwriting a
-    /// newer one. The legacy item is never deleted here.
+    /// Copy an older value into the branded item without overwriting a newer
+    /// one. The source item is never deleted here. Returns the value to use and
+    /// whether this call added the branded item.
     ///
-    /// - Added: the legacy value is now persisted in the branded item.
+    /// - Added: the older value is now persisted in the branded item.
     /// - AlreadyExists: another writer created the branded item after our
     ///   not-found read, so it is authoritative. Its re-read value is returned;
     ///   access-denied / locked / OS errors are propagated, never masked by the
@@ -215,7 +270,7 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
         &self,
         credential: &ProfileCredential,
         legacy_value: String,
-    ) -> Result<String, String> {
+    ) -> Result<(String, bool), String> {
         let account = credential.branded_account();
         match self.port.add_if_absent(
             BRANDED_SERVICE,
@@ -223,13 +278,13 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
             &legacy_value,
             Some(BRANDED_LABEL),
         ) {
-            Ok(AddOutcome::Added) => Ok(legacy_value),
+            Ok(AddOutcome::Added) => Ok((legacy_value, true)),
             Ok(AddOutcome::AlreadyExists) => {
                 match self
                     .port
                     .get(BRANDED_SERVICE, &account, true, Some(BRANDED_LABEL))
                 {
-                    Ok(value) => Ok(value),
+                    Ok(value) => Ok((value, false)),
                     Err(error) if is_not_found(&error) => {
                         tracing::warn!(
                             "keychain: branded credential removed during migration; not re-adding"
@@ -241,9 +296,9 @@ impl<'a, P: KeychainPort> CredentialStore<'a, P> {
             }
             Err(_) => {
                 tracing::warn!(
-                    "keychain: branded credential migration failed; legacy item retained"
+                    "keychain: branded credential migration failed; older item retained"
                 );
-                Ok(legacy_value)
+                Ok((legacy_value, false))
             }
         }
     }
@@ -941,5 +996,246 @@ mod tests {
         store.delete(&custom_database).unwrap();
         store.delete(&branded_db()).unwrap();
         assert!(kc.items.borrow().is_empty());
+    }
+
+    // --- Previous branded service (`com.politehq.politedb`) ---
+
+    #[test]
+    fn previous_only_migrates_to_new_service_and_removes_previous() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        assert_eq!(CredentialStore::new(&kc).get(&fe_db()).unwrap(), "prev");
+        assert_eq!(
+            kc.item(BRANDED_SERVICE, &branded_db()),
+            Some(Item {
+                value: "prev".into(),
+                label: Some(BRANDED_LABEL.into())
+            })
+        );
+        assert!(kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db()).is_none());
+        assert!(kc
+            .reads
+            .borrow()
+            .iter()
+            .any(|(s, a, upgrade)| s == PREVIOUS_BRANDED_SERVICE
+                && a == &branded_db()
+                && !upgrade));
+        // The legacy service is never consulted when the previous item answers.
+        assert!(kc
+            .reads
+            .borrow()
+            .iter()
+            .all(|(s, _, _)| s != LEGACY_SERVICE));
+    }
+
+    #[test]
+    fn previous_is_preferred_over_legacy_and_legacy_is_retained() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_ssh(), "prev");
+        kc.put(LEGACY_SERVICE, &fe_ssh(), "old");
+        let store = CredentialStore::new(&kc);
+        assert_eq!(store.get(&fe_ssh()).unwrap(), "prev");
+        assert_eq!(
+            kc.item(BRANDED_SERVICE, &branded_ssh()).unwrap().value,
+            "prev"
+        );
+        assert_eq!(kc.item(LEGACY_SERVICE, &fe_ssh()).unwrap().value, "old");
+        assert_eq!(store.get(&fe_ssh()).unwrap(), "prev");
+    }
+
+    #[test]
+    fn previous_not_found_falls_back_to_legacy_into_new_service() {
+        let kc = FakeKeychain::default();
+        kc.put(LEGACY_SERVICE, &fe_db(), "old");
+        assert_eq!(CredentialStore::new(&kc).get(&fe_db()).unwrap(), "old");
+        assert_eq!(
+            kc.item(BRANDED_SERVICE, &branded_db()).unwrap().value,
+            "old"
+        );
+        assert!(kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db()).is_none());
+    }
+
+    #[test]
+    fn previous_read_error_is_surfaced_without_legacy_fallback() {
+        let kc = FakeKeychain::default();
+        kc.put(LEGACY_SERVICE, &fe_db(), "old");
+        kc.get_errors
+            .borrow_mut()
+            .insert(k(PREVIOUS_BRANDED_SERVICE, &branded_db()), LOCKED.into());
+        assert_eq!(CredentialStore::new(&kc).get(&fe_db()), Err(LOCKED.into()));
+        assert!(kc
+            .reads
+            .borrow()
+            .iter()
+            .all(|(s, _, _)| s != LEGACY_SERVICE));
+        assert!(kc.item(BRANDED_SERVICE, &branded_db()).is_none());
+    }
+
+    #[test]
+    fn previous_copy_failure_returns_value_and_keeps_previous() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        *kc.add_error.borrow_mut() = Some("KEYCHAIN_ADD_FAILED: OSSTATUS=-25308".into());
+        assert_eq!(CredentialStore::new(&kc).get(&fe_db()).unwrap(), "prev");
+        assert!(kc.item(BRANDED_SERVICE, &branded_db()).is_none());
+        assert_eq!(
+            kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db())
+                .unwrap()
+                .value,
+            "prev"
+        );
+    }
+
+    #[test]
+    fn previous_copy_race_keeps_newer_value_and_previous_item() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        *kc.before_add.borrow_mut() = Some(Box::new(|kc: &FakeKeychain| {
+            kc.put(BRANDED_SERVICE, &branded_db(), "newer");
+        }));
+        assert_eq!(CredentialStore::new(&kc).get(&fe_db()).unwrap(), "newer");
+        assert_eq!(
+            kc.item(BRANDED_SERVICE, &branded_db()).unwrap().value,
+            "newer"
+        );
+        // Not added by this call: the previous item is not retired here.
+        assert!(kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db()).is_some());
+    }
+
+    #[test]
+    fn previous_kept_when_copy_cannot_be_verified() {
+        for tamper in [
+            Box::new(|kc: &FakeKeychain| kc.put(BRANDED_SERVICE, &branded_db(), "changed")) as Hook,
+            Box::new(|kc: &FakeKeychain| {
+                kc.get_errors
+                    .borrow_mut()
+                    .insert(k(BRANDED_SERVICE, &branded_db()), ACCESS_DENIED.into());
+            }),
+        ] {
+            let kc = FakeKeychain::default();
+            kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+            *kc.after_add.borrow_mut() = Some(tamper);
+            assert_eq!(CredentialStore::new(&kc).get(&fe_db()).unwrap(), "prev");
+            assert_eq!(
+                kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db())
+                    .unwrap()
+                    .value,
+                "prev"
+            );
+        }
+    }
+
+    #[test]
+    fn previous_delete_failure_still_returns_value() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        kc.delete_errors.borrow_mut().insert(
+            k(PREVIOUS_BRANDED_SERVICE, &branded_db()),
+            "KEYCHAIN_DELETE_FAILED: OSSTATUS=-25293".into(),
+        );
+        let store = CredentialStore::new(&kc);
+        assert_eq!(store.get(&fe_db()).unwrap(), "prev");
+        assert_eq!(
+            kc.item(BRANDED_SERVICE, &branded_db()).unwrap().value,
+            "prev"
+        );
+        // Next read is served by the new item alone.
+        let before = kc.reads.borrow().len();
+        assert_eq!(store.get(&fe_db()).unwrap(), "prev");
+        assert_eq!(kc.reads.borrow().len(), before + 1);
+    }
+
+    #[test]
+    fn set_writes_new_service_only_and_removes_stale_previous() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        let store = CredentialStore::new(&kc);
+        store.set(&fe_db(), "pw").unwrap();
+        assert_eq!(kc.item(BRANDED_SERVICE, &branded_db()).unwrap().value, "pw");
+        assert!(kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db()).is_none());
+        assert!(kc.item(LEGACY_SERVICE, &fe_db()).is_none());
+
+        // A failed cleanup does not fail the write.
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        kc.delete_errors.borrow_mut().insert(
+            k(PREVIOUS_BRANDED_SERVICE, &branded_db()),
+            "KEYCHAIN_DELETE_FAILED: OSSTATUS=-25293".into(),
+        );
+        store.set(&fe_db(), "pw2").unwrap();
+        assert_eq!(store.get(&fe_db()).unwrap(), "pw2");
+    }
+
+    #[test]
+    fn set_custom_key_never_touches_previous_service() {
+        let kc = FakeKeychain::default();
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        CredentialStore::new(&kc)
+            .set(&branded_db(), "custom")
+            .unwrap();
+        assert_eq!(
+            kc.item(PREVIOUS_BRANDED_SERVICE, &branded_db())
+                .unwrap()
+                .value,
+            "prev"
+        );
+        assert_eq!(
+            kc.item(LEGACY_SERVICE, &branded_db()).unwrap().value,
+            "custom"
+        );
+    }
+
+    #[test]
+    fn delete_removes_every_service_and_surfaces_previous_failure() {
+        let kc = FakeKeychain::default();
+        kc.put(BRANDED_SERVICE, &branded_db(), "new");
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        kc.put(LEGACY_SERVICE, &fe_db(), "old");
+        let store = CredentialStore::new(&kc);
+        store.delete(&logical_db()).unwrap();
+        assert!(kc.items.borrow().is_empty());
+        assert_eq!(store.get(&fe_db()), Err(KEYCHAIN_ITEM_NOT_FOUND.into()));
+
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        kc.delete_errors.borrow_mut().insert(
+            k(PREVIOUS_BRANDED_SERVICE, &branded_db()),
+            "KEYCHAIN_DELETE_FAILED: OSSTATUS=-25293".into(),
+        );
+        assert_eq!(
+            store.delete(&fe_db()),
+            Err("KEYCHAIN_DELETE_FAILED: OSSTATUS=-25293".into())
+        );
+    }
+
+    #[test]
+    fn list_collapses_all_services_and_ignores_malformed_previous_accounts() {
+        let kc = FakeKeychain::default();
+        kc.put(BRANDED_SERVICE, &branded_db(), "new");
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_db(), "prev");
+        kc.put(PREVIOUS_BRANDED_SERVICE, &branded_ssh(), "prev-ssh");
+        kc.put(PREVIOUS_BRANDED_SERVICE, "unexpected", "x");
+        kc.put(
+            PREVIOUS_BRANDED_SERVICE,
+            &format!("{ID_UPPER}_database"),
+            "x",
+        );
+        kc.put(LEGACY_SERVICE, &fe_db(), "old");
+        let store = CredentialStore::new(&kc);
+        let listed = store.list().unwrap();
+        assert_eq!(listed, vec![logical_db(), logical_ssh()]);
+        // A credential listed only under the previous service round-trips.
+        assert_eq!(store.get(&listed[1]).unwrap(), "prev-ssh");
+        store.delete(&listed[1]).unwrap();
+        assert!(kc.item(PREVIOUS_BRANDED_SERVICE, &branded_ssh()).is_none());
+        assert!(kc.item(BRANDED_SERVICE, &branded_ssh()).is_none());
+    }
+
+    #[test]
+    fn list_surfaces_previous_service_failure() {
+        let kc = FakeKeychain::default();
+        kc.list_errors.borrow_mut().insert(
+            PREVIOUS_BRANDED_SERVICE.into(),
+            "KEYCHAIN_LIST_FAILED: OSSTATUS=-25293".into(),
+        );
+        assert!(CredentialStore::new(&kc).list().is_err());
     }
 }
