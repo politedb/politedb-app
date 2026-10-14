@@ -6,9 +6,11 @@ fn service_name(_app: &AppHandle) -> String {
     crate::security::credential_identity::LEGACY_SERVICE.to_string()
 }
 
-/// macOS: recognized profile credentials use branded items (Name "PoliteDB",
-/// Where = bundle id, Account `<UUID>_profile|_ssh`) with lazy legacy
-/// migration; other keys keep the legacy service. See `credential_store`.
+/// macOS: recognized profile credentials use branded items (Name and Where
+/// "PoliteDB", Account `<UUID>_profile|_ssh`) with lazy migration from the
+/// previous branded service and the legacy service; other keys keep the legacy
+/// service. See `credential_store`. Calls are serialized
+/// (`credential_store::serialized`).
 #[cfg(target_os = "macos")]
 fn mac_store_call<T>(
     f: impl FnOnce(
@@ -19,8 +21,7 @@ fn mac_store_call<T>(
     ) -> Result<T, String>,
 ) -> Result<T, String> {
     let port = crate::security::keychain_macos::MacKeychain;
-    let store = crate::security::credential_store::CredentialStore::new(&port);
-    f(&store)
+    crate::security::credential_store::serialized(&port, f)
 }
 
 /* ===============================
