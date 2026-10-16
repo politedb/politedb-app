@@ -4,7 +4,16 @@
 
 IMPLEMENTED
 
-Scope: **Phase 1 only** (R7.1, protocol only). Phases 2 and 3 are not started and still need their own implement → Codex review cycle; they stay governed by this approved plan.
+Scope: **Phases 1–3** are implemented and committed on `feat/ai-agent`; each was Codex-reviewed to VERIFIED WITH LIMITATIONS (Phase 1: `d2a7343`, Phase 2: `933c032`, Phase 3: `87b4a3f`). The follow-up `669c1ff` (assistant Markdown rendering and live agent activity) is pending Codex review.
+
+**Open before release** (R7 gate, see "Phase 3 — Implementation evidence → Not done"):
+- live smoke with OpenAI, Anthropic Opus 5.5, Gemini and Ollama (needs the user's keys);
+- the native Touch ID approval prompt checked by hand (approve and cancel).
+
+**Open, not blocking the DMG release:**
+- MAS SQLite file-access lease;
+- R6 analytics events;
+- real token streaming (separate plan).
 
 ## Task
 
@@ -1191,6 +1200,17 @@ Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/a
 - **Follow-up:** "summarise that" was sent with `historyHasData: true` and four history messages, and the chat is stored with `dataRead`.
 - **Settings:** with the agent on, the "Data access" list shows both grants, and Revoke removes one.
 - **Fix found by this check:** the sidebar footer squeezed the provider list. It is now capped at 45% of the height and scrolls.
+
+## Merge of main (Claude, 2026-10-16)
+
+`f60920f` merges `origin/main` (keychain-service-rename #60, legacy-webkit-storage #61) into `feat/ai-agent`. The only conflict was in `.agent/REVIEW.md` (both sides appended reviews); both were kept.
+
+- `cargo test` → 346 passed / 11 ignored; `cargo clippy --all-targets` → 8 warnings; `--features app-store` clean.
+- `npm run build` OK; Vitest 128 files / 724 tests passed.
+- Interaction with the restored ≤1.4 localStorage (#61):
+  - restored chats predate the agent, so they hold no `dataRead` and `purgeAiDataChatsOfProfile` correctly leaves them;
+  - `politedb.ai.chatOwners` and `politedb.ai.agent.enabled` are not in #61's allowlist, so they are never overwritten by old data;
+  - a restored tab chat gains an owner the first time it is used on a saved connection (`rememberAiChatOwner`), as any chat does.
 
 ## Plan Review (Codex)
 
