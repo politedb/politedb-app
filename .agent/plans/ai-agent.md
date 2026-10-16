@@ -1212,6 +1212,66 @@ Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/a
   - `politedb.ai.chatOwners` and `politedb.ai.agent.enabled` are not in #61's allowlist, so they are never overwritten by old data;
   - a restored tab chat gains an owner the first time it is used on a saved connection (`rememberAiChatOwner`), as any chat does.
 
+## Review fixes: markdown and activity (669c1ff), round 1 (Claude, 2026-10-16)
+
+`.agent/REVIEW.md` "Review: AI agent markdown and activity (669c1ff)": CHANGES REQUIRED, 1 P1 + 2 P2. All fixed:
+
+1. **P1, quadratic parsing (UI freeze).** `parseInline` was rewritten as a range-based scanner (`src/lib/ai-assistant/markdown.ts`):
+   - `nextIndex` remembers the next position of `` ` `` / `]`, so repeated searches stay linear;
+   - link destinations are scanned once, up to `)` or whitespace;
+   - every scan step draws on a budget (`10_000 + 8 × length`) with nesting capped at 16; on exhaustion the run falls back to plain text with its line breaks;
+   - `parseMarkdown` renders input over `MAX_MARKDOWN_CHARS` (200 000) as one plain paragraph.
+
+   Measured in Vitest/Node: `"[" × 128k` 2.6 ms (was 7.5 s per Codex), `"*a " × 40k` 10.5 ms, `"**a " × 30k` 6.7 ms, `` "`" × 128k `` 4.8 ms. A ~130k-char ordinary answer still renders fully formatted (1 500 strong + 1 500 links) under 500 ms.
+2. **P2, a queued activity frame overwrote the final answer** (`useAiChatSession.ts`):
+   - the frame applies only to a message still `streaming`;
+   - `finalizeStreamingAssistantMessage` drops a pending update for that message.
+
+   Regression `useAiChatSession.streaming.test.ts` (deferred `requestAnimationFrame`): activity → finalize → frame keeps the answer; a late update for a finalized message is ignored; streaming text still applies while streaming. Both tests fail without the fix.
+3. **P2, nested emphasis.** Delimiter runs are matched by `findCloser`:
+   - skips code spans;
+   - a run of another length that can open is matched as a whole (nested), and a run closes only after non-space;
+   - `_` must not sit inside a word on either side.
+
+   So `*italic **bold** text*`, `**bold *italic* text**`, `***both***` → strong(em), and `__strong__ and _em_` nest correctly; unmatched markers, `2 * 3 * 4`, snake_case and `[not a link]` stay literal.
+
+**Verification:**
+- `markdown.test.ts` 9 passed (×3 runs); `npm run build` OK; Vitest 129 files / 731 tests passed; prettier clean.
+- A first attempt put the finalize guard into `appendAssistantMessage` by mistake. `npm run build` (tsc) caught it; Vitest does not type-check. Fixed before handoff.
+
+## Review fixes: markdown and activity, round 2 (Claude, 2026-10-16)
+
+Codex re-review round 2: the activity race is resolved; 1 P1 + 2 P2 remain in the parser. Fixed:
+
+1. **P1, quadratic fence regex.** `/^\s*```\s*([\w+-]*)\s*$/` was replaced by `fenceLanguage()` (trim, `startsWith`, then a single-token check), and the closing fence by `trim() === "```"`. The heading and list regexes take `[\s\S]*` instead of `.*`, so a line separator never forces backtracking. Measured: ```` "```" + 64k spaces + "!" ```` 1.2 ms (was 2.7 s), 128k 1.4 ms. New `parseMarkdown` regressions on near-miss fence, heading (`\u2028`), list, continuation and quote lines.
+2. **P2, delimiter runs:**
+   - `canClose` checks the word boundary after the **whole** closing run;
+   - both `canOpen` and `canClose` treat the edge of the range being parsed as a boundary (the enclosing run's delimiter sits there);
+   - a triple opener with no triple closer is split (`splitTriple`), so `***a** b*` → em(strong(a), " b") and `***a* b**` → strong(em(a), " b").
+   - Fixtures: `__a _b___`, `_a __b___`, both triple splits, plus all earlier cases.
+3. **P2, emphasis closing inside link destinations.** `linkEnd()` is shared by `parseRange` and `findCloser`; the closer search skips a complete link span, so its destination is opaque. Fixtures: `*x [label](https://example.com/a*b) y*`, `**see [doc](https://x.dev/a**b)**`.
+4. **Text preservation:** the hostile-input test now asserts the flattened output **equals** the input for every literal/fallback case, including deep mixed markers and newline-heavy input.
+
+**Verification:**
+- `markdown.test.ts` 10 passed (×3).
+- `npm run build` OK; Vitest 129 files / 732 tests passed; prettier clean.
+- Probes: `"[" × 128k` 2.6 ms; deep mixed markers 0.2 ms; 5k links inside emphasis 10.5 ms.
+
+## Review fixes: markdown and activity, round 3 (Claude, 2026-10-16)
+
+Codex round 3: all earlier findings resolved except one P2. A later full `***` closer swallowed an earlier split closure (`***a** b* then ***c***`).
+
+**Fix:** for a triple opener the parser now computes both readings and keeps the one whose span **ends first**: the full `***` closer, or the best split (`splitTriple` evaluates both inner/outer orders and returns the earliest). On a tie it keeps the full reading. Building the nodes moved to `buildSplit`.
+
+**Fixtures:**
+- `***a** b* then ***c***`, `***a* b** then ***c***`, `___a__ b_ and **c**`, `***x*** and ***y***`;
+- all earlier nesting, link-destination, code and literal cases still pass.
+
+**Verification:**
+- `markdown.test.ts` passes; `npm run build` OK; Vitest 129 files / 732 tests passed; prettier clean.
+- Probes: `"***a " × 30k` 10.1 ms, `"___a " × 30k` 8.7 ms, `"***a** b* " × 20k` 13.9 ms.
+- **Known limit:** the last of these exhausts the work budget and renders as plain text. Every triple opener searches for a full `***` closer to the end. The text is preserved and nothing freezes, but formatting is lost for such inputs.
+
 ## Plan Review (Codex)
 
 Reviewed 2026-10-13. **Conclusion: NOT READY.** Status remains `DRAFT`; this review does not approve implementation. Scope: static code inspection and current provider documentation (Context7, supplemented with official provider pages). No application code changed; no live provider/DB execution or build/test run was performed for this document-only critique.

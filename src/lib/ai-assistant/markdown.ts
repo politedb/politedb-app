@@ -27,84 +27,345 @@ function domainOf(url: string): string | null {
   }
 }
 
-/** Inline markup: `code`, **strong**, *em* / _em_, [text](url), hard line breaks. */
-export function parseInline(source: string): Inline[] {
+/** Longer answers render as plain text: the reader never does unbounded work. */
+export const MAX_MARKDOWN_CHARS = 200_000;
+/** Scan steps per inline run, as a multiple of its length (nested runs rescan). */
+const WORK_PER_CHAR = 8;
+const WORK_BASE = 10_000;
+const MAX_NESTING = 16;
+
+class WorkLimit extends Error {}
+
+type Ctx = {
+  budget: number;
+  /** Next position of a character, remembered so repeated searches stay linear. */
+  next: Map<string, { from: number; at: number }>;
+};
+
+function step(ctx: Ctx, cost = 1) {
+  ctx.budget -= cost;
+  if (ctx.budget < 0) throw new WorkLimit();
+}
+
+function nextIndex(s: string, ch: string, from: number, ctx: Ctx): number {
+  const known = ctx.next.get(ch);
+  if (known && known.from <= from && (known.at === -1 || known.at >= from)) {
+    return known.at;
+  }
+  const at = s.indexOf(ch, from);
+  ctx.next.set(ch, { from, at });
+  return at;
+}
+
+const isSpace = (ch: string | undefined) => ch === undefined || /\s/.test(ch);
+const isWord = (ch: string | undefined) => ch !== undefined && /\w/.test(ch);
+
+function runLength(s: string, i: number, end: number, ch: string): number {
+  let j = i;
+  while (j < end && s[j] === ch) j += 1;
+  return j - i;
+}
+
+/** A delimiter run that can open: text follows it, and `_` does not sit inside a word. */
+function canOpen(
+  s: string,
+  i: number,
+  run: number,
+  end: number,
+  ch: string,
+  start = 0
+) {
+  if (run > 3 || i + run >= end || isSpace(s[i + run])) return false;
+  // Before `start` sits the enclosing run's own delimiter: a boundary, not a word.
+  return ch === "*" || i <= start || !isWord(s[i - 1]);
+}
+
+/**
+ * A delimiter run at `k` (of `run` characters) that can close: text precedes it,
+ * and for `_` no word follows the whole run (the run may close several openers).
+ */
+function canClose(s: string, k: number, run: number, end: number, ch: string) {
+  if (isSpace(s[k - 1])) return false;
+  // Past `end` sits the enclosing run's own delimiter: a boundary, not a word.
+  return ch === "*" || k + run >= end || !isWord(s[k + run]);
+}
+
+/** End (after `)`) of a complete `[text](destination)` at `i`, or -1. */
+function linkEnd(s: string, i: number, end: number, ctx: Ctx): number {
+  const close = nextIndex(s, "]", i + 1, ctx);
+  if (
+    close === -1 ||
+    close + 1 >= end ||
+    close <= i + 1 ||
+    s[close + 1] !== "("
+  ) {
+    return -1;
+  }
+  // The destination ends at `)` and holds no whitespace.
+  let k = close + 2;
+  while (k < end && s[k] !== ")" && !isSpace(s[k])) {
+    step(ctx);
+    k += 1;
+  }
+  return k < end && s[k] === ")" && k > close + 2 ? k + 1 : -1;
+}
+
+/**
+ * Where a run of `len` `ch` opened before `from` closes, or -1. Code spans are
+ * skipped, and nested runs of another length are matched as a whole, so
+ * `*a **b** c*` closes at the last `*`, not inside `**b**`.
+ */
+function findCloser(
+  s: string,
+  from: number,
+  end: number,
+  ch: string,
+  len: number,
+  ctx: Ctx,
+  depth: number
+): number {
+  if (depth > MAX_NESTING) throw new WorkLimit();
+  let k = from;
+  while (k < end) {
+    step(ctx);
+    const c = s[k];
+    if (c === "`") {
+      const close = nextIndex(s, "`", k + 1, ctx);
+      k = close !== -1 && close < end ? close + 1 : k + 1;
+      continue;
+    }
+    if (c === "[") {
+      // A link destination is opaque: markers inside it never close emphasis.
+      const after = linkEnd(s, k, end, ctx);
+      k = after !== -1 ? after : k + 1;
+      continue;
+    }
+    if (c !== ch) {
+      k += 1;
+      continue;
+    }
+    const run = runLength(s, k, end, ch);
+    step(ctx, run);
+    if (run >= len && canClose(s, k, run, end, ch)) return k;
+    if (run !== len && canOpen(s, k, run, end, ch)) {
+      const inner = findCloser(s, k + run, end, ch, run, ctx, depth + 1);
+      if (inner !== -1) {
+        k = inner + run;
+        continue;
+      }
+    }
+    k += run;
+  }
+  return -1;
+}
+
+function parseRange(
+  s: string,
+  start: number,
+  end: number,
+  ctx: Ctx,
+  depth: number
+): Inline[] {
+  if (depth > MAX_NESTING) throw new WorkLimit();
   const out: Inline[] = [];
   let buffer = "";
   const flush = () => {
     if (buffer) out.push({ kind: "text", text: buffer });
     buffer = "";
   };
-  let i = 0;
-  while (i < source.length) {
-    const rest = source.slice(i);
-    if (rest[0] === "\n") {
+  let i = start;
+  while (i < end) {
+    step(ctx);
+    const c = s[i];
+    if (c === "\n") {
       flush();
       out.push({ kind: "break" });
       i += 1;
       continue;
     }
-    if (rest[0] === "`") {
-      const end = source.indexOf("`", i + 1);
-      if (end > i + 1) {
+    if (c === "`") {
+      const close = nextIndex(s, "`", i + 1, ctx);
+      if (close !== -1 && close < end && close > i + 1) {
         flush();
-        out.push({ kind: "code", text: source.slice(i + 1, end) });
-        i = end + 1;
+        out.push({ kind: "code", text: s.slice(i + 1, close) });
+        i = close + 1;
         continue;
       }
     }
-    if (rest.startsWith("**") || rest.startsWith("__")) {
-      const marker = rest.slice(0, 2);
-      const end = source.indexOf(marker, i + 2);
-      if (end > i + 2) {
-        flush();
-        out.push({
-          kind: "strong",
-          children: parseInline(source.slice(i + 2, end)),
-        });
-        i = end + 2;
-        continue;
-      }
-    }
-    if (
-      (rest[0] === "*" || rest[0] === "_") &&
-      rest[1] &&
-      rest[1] !== " " &&
-      rest[1] !== rest[0]
-    ) {
-      const end = source.indexOf(rest[0], i + 1);
-      const prev = i > 0 ? source[i - 1] : " ";
-      // `_` inside words (snake_case) is not emphasis.
-      if (end > i + 1 && (rest[0] === "*" || !/\w/.test(prev))) {
+    if (c === "[") {
+      const after = linkEnd(s, i, end, ctx);
+      if (after !== -1) {
+        const close = s.indexOf("](", i + 1);
         flush();
         out.push({
-          kind: "em",
-          children: parseInline(source.slice(i + 1, end)),
+          kind: "link",
+          text: s.slice(i + 1, close),
+          domain: domainOf(s.slice(close + 2, after - 1)),
         });
-        i = end + 1;
+        i = after;
         continue;
       }
     }
-    if (rest[0] === "[") {
-      const match = /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(rest);
-      if (match) {
-        flush();
-        out.push({ kind: "link", text: match[1], domain: domainOf(match[2]) });
-        i += match[0].length;
-        continue;
+    if (c === "*" || c === "_") {
+      const run = runLength(s, i, end, c);
+      step(ctx, run);
+      if (canOpen(s, i, run, end, c, start)) {
+        const close = findCloser(s, i + run, end, c, run, ctx, depth + 1);
+        const full = close !== -1 && close > i + run ? close + run : -1;
+        // A triple opener may close in two steps (`***a** b*`). The span that
+        // closes first wins, so a later `***` never swallows the text between.
+        const split =
+          run === 3 ? splitTriple(s, i, end, c, ctx, depth + 1) : null;
+        if (split && (full === -1 || split.next < full)) {
+          flush();
+          out.push(buildSplit(s, i + 3, split, ctx, depth + 1));
+          i = split.next;
+          continue;
+        }
+        if (full !== -1) {
+          flush();
+          const children = parseRange(s, i + run, close, ctx, depth + 1);
+          out.push(
+            run === 1
+              ? { kind: "em", children }
+              : run === 2
+                ? { kind: "strong", children }
+                : { kind: "strong", children: [{ kind: "em", children }] }
+          );
+          i = full;
+          continue;
+        }
       }
+      buffer += s.slice(i, i + run);
+      i += run;
+      continue;
     }
-    buffer += rest[0];
+    buffer += c;
     i += 1;
   }
   flush();
   return out;
 }
 
-const LIST_ITEM = /^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/;
+type Split = {
+  inner: 1 | 2;
+  outer: 1 | 2;
+  innerClose: number;
+  outerClose: number;
+  /** Position after the whole span. */
+  next: number;
+};
+
+/**
+ * A triple opener closed by two runs instead of one: `***a** b*` is emphasis
+ * holding strong `a`, and `***a* b**` is strong holding emphasis `a`. Of the
+ * two readings, the one that closes first.
+ */
+function splitTriple(
+  s: string,
+  i: number,
+  end: number,
+  ch: string,
+  ctx: Ctx,
+  depth: number
+): Split | null {
+  const start = i + 3;
+  let best: Split | null = null;
+  for (const [inner, outer] of [
+    [2, 1],
+    [1, 2],
+  ] as const) {
+    const innerClose = findCloser(s, start, end, ch, inner, ctx, depth);
+    if (innerClose === -1 || innerClose <= start) continue;
+    const outerClose = findCloser(
+      s,
+      innerClose + inner,
+      end,
+      ch,
+      outer,
+      ctx,
+      depth
+    );
+    if (outerClose === -1) continue;
+    const next = outerClose + outer;
+    if (!best || next < best.next) {
+      best = { inner, outer, innerClose, outerClose, next };
+    }
+  }
+  return best;
+}
+
+function buildSplit(
+  s: string,
+  start: number,
+  split: Split,
+  ctx: Ctx,
+  depth: number
+): Inline {
+  const innerNode: Inline = {
+    kind: split.inner === 2 ? "strong" : "em",
+    children: parseRange(s, start, split.innerClose, ctx, depth),
+  };
+  const rest = parseRange(
+    s,
+    split.innerClose + split.inner,
+    split.outerClose,
+    ctx,
+    depth
+  );
+  return {
+    kind: split.outer === 2 ? "strong" : "em",
+    children: [innerNode, ...rest],
+  };
+}
+
+/** Text with line breaks only. */
+function plainInline(source: string): Inline[] {
+  const out: Inline[] = [];
+  source.split("\n").forEach((line, index) => {
+    if (index > 0) out.push({ kind: "break" });
+    if (line) out.push({ kind: "text", text: line });
+  });
+  return out;
+}
+
+/**
+ * Inline markup: `code`, **strong**, *em* / _em_ (nesting-aware), [text](url),
+ * hard line breaks. Work is bounded: past the budget the run is plain text.
+ */
+export function parseInline(source: string): Inline[] {
+  const ctx: Ctx = {
+    budget: WORK_BASE + WORK_PER_CHAR * source.length,
+    next: new Map(),
+  };
+  try {
+    return parseRange(source, 0, source.length, ctx, 0);
+  } catch (error) {
+    if (error instanceof WorkLimit) return plainInline(source);
+    throw error;
+  }
+}
+
+// `[\s\S]*` (not `.*`) so a line separator inside the text never forces backtracking.
+const LIST_ITEM = /^\s*(?:([-*+])|(\d+)[.)])\s+([\s\S]*)$/;
+
+/**
+ * The language of an opening code fence line (possibly empty), or null. A plain
+ * trim-and-check: a regex with whitespace on both sides of an optional token
+ * backtracks quadratically on near-miss lines.
+ */
+function fenceLanguage(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("```")) return null;
+  const lang = trimmed.slice(3).trim();
+  return /^[\w+-]*$/.test(lang) ? lang : null;
+}
 
 /** Block structure: fenced code, headings, lists, quotes and paragraphs. */
 export function parseMarkdown(source: string): Block[] {
+  if (source.length > MAX_MARKDOWN_CHARS) {
+    return [{ kind: "paragraph", children: plainInline(source) }];
+  }
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
   let paragraph: string[] = [];
@@ -120,18 +381,18 @@ export function parseMarkdown(source: string): Block[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const fence = /^\s*```\s*([\w+-]*)\s*$/.exec(line);
-    if (fence) {
+    const fence = fenceLanguage(line);
+    if (fence !== null) {
       flushParagraph();
       const body: string[] = [];
       i += 1;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) {
+      while (i < lines.length && lines[i].trim() !== "```") {
         body.push(lines[i]);
         i += 1;
       }
       blocks.push({
         kind: "code",
-        lang: fence[1] ?? "",
+        lang: fence,
         text: body.join("\n"),
       });
       i += 1;
@@ -142,7 +403,7 @@ export function parseMarkdown(source: string): Block[] {
       i += 1;
       continue;
     }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    const heading = /^(#{1,6})\s+([\s\S]*)$/.exec(line);
     if (heading) {
       flushParagraph();
       blocks.push({

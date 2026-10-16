@@ -585,7 +585,8 @@ export function useAiChatSession(chatSessionKey: string) {
       if (!pending) return;
       setActiveMessages((prev) =>
         prev.map((message) =>
-          message.id === pending.id
+          // A finalized message keeps its answer: a late frame never overwrites it.
+          message.id === pending.id && message.streaming
             ? { ...message, text: pending.text }
             : message
         )
@@ -598,6 +599,10 @@ export function useAiChatSession(chatSessionKey: string) {
     message: Omit<ChatMessage, "id" | "role" | "streaming">,
     startedAt = Date.now()
   ) => {
+    // Drop a queued streaming update for this message: the final text wins.
+    if (pendingStreamingTextRef.current?.id === id) {
+      pendingStreamingTextRef.current = null;
+    }
     setActiveMessages((prev) =>
       prev.map((item) =>
         item.id === id
