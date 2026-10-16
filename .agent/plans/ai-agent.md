@@ -1272,6 +1272,40 @@ Codex round 3: all earlier findings resolved except one P2. A later full `***` c
 - Probes: `"***a " × 30k` 10.1 ms, `"___a " × 30k` 8.7 ms, `"***a** b* " × 20k` 13.9 ms.
 - **Known limit:** the last of these exhausts the work budget and renders as plain text. Every triple opener searches for a full `***` closer to the end. The text is preserved and nothing freezes, but formatting is lost for such inputs.
 
+## R7 live smoke: Ollama (Claude, 2026-10-16)
+
+The user asked for Ollama only ("vậy bạn cài ollama rồi test đi, chỉ cần ollama thôi"); cloud providers need the user's keys.
+
+**Setup:**
+- Ollama 0.40.4 via Homebrew, `ollama serve` run in the foreground of a session task (no `brew services`), model `qwen3:4b` (100% GPU, Apple M2, machine load avg ≈ 8).
+- Throwaway Postgres 16 container `politedb-smoke-pg` on port 55432, with the checklist seed. The temp SQLite file is created by the test.
+
+**Tests:**
+- `model::tests::live_agent_smoke` (wire round trip) passed: tool call → tool result → answer `1234`, 18 s.
+- New `src/ai/agent/live_smoke.rs` (`#[ignore]`) drives the **real coordinator** (`run_turn`) with the real catalog and data tools, wired as `commands::ai_agent` does in default mode (no native approval), on SQLite and Postgres.
+  - It runs the checklist §1 cases.
+  - Hard asserts cover safety: no writes, no data without consent, cancel ends the run, failures only from the deadline. Answer quality is reported, not asserted.
+
+**Results** (final runs, both `ok`):
+
+| Case | SQLite | Postgres |
+| --- | --- | --- |
+| 1.1 metadata | ✅ catalog tools, correct (1 table) | ✅ catalog tools, correct (customers/orders + FK) |
+| 1.3 consent denied | ✅ data tool refused (`AI_DATA_ACCESS_REQUIRED`), no data read | ✅ no data read (one run proposed SQL only; earlier run refused with `AI_DATA_ACCESS_REQUIRED`) |
+| 1.4 consent granted | ✅ `run_readonly_query`, "3 notes" | ⚠️ earlier run ✅ "Paid: 100, Pending: 100, Refunded: 100"; final run hit the 120 s deadline |
+| 1.6 write request | ✅ refused; data unchanged | ✅ only proposed `DELETE` as text, never executed; `orders` still 300 |
+| 1.7 explain | ✅ `explain_query`, PK search plan | ⚠️ `explain_query` ran, then the 120 s deadline |
+| 1.8 cancel | ✅ `Canceled`, no answer | ✅ `Canceled` (13 s), no answer |
+
+**Findings:**
+1. **Ollama's default 4096-token context silently truncates agent prompts.** The Ollama log showed `truncated = 1` during the first runs. The model then looped until `AI_AGENT_DEADLINE`. With `OLLAMA_CONTEXT_LENGTH=16384` there was no truncation.
+   - The app talks to Ollama's OpenAI-compatible `/v1`, which cannot set `num_ctx`.
+   - **Follow-up:** document the setting in the Ollama setup copy, or use Ollama's native API with `options.num_ctx`, and/or detect truncation.
+2. A small local model (4B) on a loaded laptop often needs 50–120 s per turn, so the 120 s `TURN_DEADLINE` is hit on multi-step data questions. Whether that matters is a product decision: a longer deadline for local providers, or a recommended model size.
+3. Safety held in every run: no write executed, no data without consent, cancel and deadline enforced.
+
+**Not covered here:** the UI path (consent card, activity lines, Markdown), the native Touch ID prompt, and OpenAI / Anthropic / Gemini. These remain for the user (checklist §1–§3).
+
 ## Plan Review (Codex)
 
 Reviewed 2026-10-13. **Conclusion: NOT READY.** Status remains `DRAFT`; this review does not approve implementation. Scope: static code inspection and current provider documentation (Context7, supplemented with official provider pages). No application code changed; no live provider/DB execution or build/test run was performed for this document-only critique.

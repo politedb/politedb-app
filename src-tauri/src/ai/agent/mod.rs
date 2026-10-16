@@ -7,6 +7,8 @@
 pub mod catalog;
 pub mod consent;
 pub mod data;
+#[cfg(test)]
+mod live_smoke;
 pub mod model;
 pub mod protocol;
 pub mod query_guard;
