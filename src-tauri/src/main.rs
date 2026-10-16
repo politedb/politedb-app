@@ -9,6 +9,7 @@ mod data_migration;
 mod distribution;
 mod engines;
 mod file_storage;
+mod legacy_web_storage;
 mod license;
 mod operations;
 mod platform;
@@ -132,6 +133,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::app_quit,
+            commands::legacy_web_storage::legacy_web_storage_read,
             commands::ai::ai_provider_list,
             commands::ai::ai_provider_save,
             commands::ai::ai_provider_delete,

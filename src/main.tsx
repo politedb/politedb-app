@@ -11,12 +11,28 @@ import {
 } from "src/lib/theme";
 import { applyStoredUiFontPreference } from "src/lib/uiFont";
 import { applyStoredUiDensityPreference } from "src/lib/density";
+import { restoreLegacyWebStorage } from "src/lib/legacyWebStorage";
+import { readLegacyWebStorage } from "src/lib/tauri/legacyWebStorage";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 }
 
 async function boot() {
+  // Before anything reads localStorage: restore what the pre-1.5 store held. The
+  // web build has no old store; it only records that there is nothing to do.
+  const outcome = await restoreLegacyWebStorage({
+    read: isTauriRuntime()
+      ? readLegacyWebStorage
+      : async () => ({ entries: [] }),
+    storage: () => window.localStorage,
+  });
+  if (outcome === "restored") {
+    // Some modules read localStorage when imported; restart from restored values.
+    window.location.reload();
+    return;
+  }
+
   applyStoredThemePreference();
   applyStoredUiFontPreference();
   applyStoredUiDensityPreference();

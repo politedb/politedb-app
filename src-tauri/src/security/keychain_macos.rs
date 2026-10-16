@@ -494,20 +494,20 @@ mod native_smoke {
     //! existing credentials.
     use std::process::Command;
 
-    use crate::security::credential_identity::{BRANDED_LABEL, BRANDED_SERVICE};
+    use crate::security::credential_identity::{
+        BRANDED_LABEL, BRANDED_SERVICE, LEGACY_SERVICE, PREVIOUS_BRANDED_SERVICE,
+    };
     use crate::security::credential_store::{CredentialStore, KEYCHAIN_ITEM_NOT_FOUND};
 
     use super::MacKeychain;
 
     fn attributes(account: &str) -> Option<String> {
+        attributes_in(BRANDED_SERVICE, account)
+    }
+
+    fn attributes_in(service: &str, account: &str) -> Option<String> {
         let out = Command::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                BRANDED_SERVICE,
-                "-a",
-                account,
-            ])
+            .args(["find-generic-password", "-s", service, "-a", account])
             .output()
             .ok()?;
         out.status
@@ -520,7 +520,9 @@ mod native_smoke {
 
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            let _ = super::delete_password(BRANDED_SERVICE, &self.0);
+            for service in [BRANDED_SERVICE, PREVIOUS_BRANDED_SERVICE, LEGACY_SERVICE] {
+                let _ = super::delete_password(service, &self.0);
+            }
         }
     }
 
@@ -562,5 +564,45 @@ mod native_smoke {
         store.delete(&key).unwrap();
         assert!(attributes(&account).is_none());
         assert_eq!(store.get(&key), Err(KEYCHAIN_ITEM_NOT_FOUND.into()));
+    }
+
+    #[test]
+    #[ignore]
+    fn native_previous_service_migration_smoke() {
+        let id = uuid::Uuid::new_v4();
+        let key = format!("politedb/profile/{id}/postgres/db_password");
+        let account = format!("{}_profile", id.hyphenated().to_string().to_uppercase());
+        let _cleanup = Cleanup(account.clone());
+        let port = MacKeychain;
+        let store = CredentialStore::new(&port);
+
+        // An item written by a build before the rename, plus a custom key under
+        // the legacy service that differs from the new service only by case.
+        super::set_password_labeled(
+            PREVIOUS_BRANDED_SERVICE,
+            &account,
+            "previous-value",
+            Some(BRANDED_LABEL),
+        )
+        .unwrap();
+        super::set_password_labeled(LEGACY_SERVICE, &account, "custom-value", None).unwrap();
+
+        assert_eq!(store.get(&key).unwrap(), "previous-value");
+        let attrs = attributes(&account).expect("migrated item should exist");
+        assert!(
+            attrs.contains(&format!("\"svce\"<blob>=\"{BRANDED_SERVICE}\"")),
+            "{attrs}"
+        );
+        assert!(
+            attrs.contains(&format!("0x00000007 <blob>=\"{BRANDED_LABEL}\"")),
+            "{attrs}"
+        );
+        assert!(attributes_in(PREVIOUS_BRANDED_SERVICE, &account).is_none());
+        assert_eq!(store.get(&account).unwrap(), "custom-value");
+
+        store.delete(&key).unwrap();
+        assert!(attributes(&account).is_none());
+        assert_eq!(store.get(&key), Err(KEYCHAIN_ITEM_NOT_FOUND.into()));
+        assert_eq!(store.get(&account).unwrap(), "custom-value");
     }
 }

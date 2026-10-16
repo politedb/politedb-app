@@ -44,6 +44,12 @@ impl Distribution {
         }
     }
 
+    /// Restoring localStorage left by builds before the 1.5 identifier change. App Store
+    /// builds are sandboxed away from those stores and never had them.
+    pub const fn supports_legacy_web_storage_import(self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
     /// Engines whose client libraries cannot load inside the App Store sandbox are excluded.
     pub const fn supports_engine(self, kind: EngineKind) -> bool {
         match self {
