@@ -1,66 +1,59 @@
-import { useState } from "preact/hooks";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "src/components/common/Dialog";
-import { Button } from "src/components/common/Button";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import {
   PRICING_URL,
   PRO_FEATURE_LABELS,
-  PRO_FEATURES,
+  type ProFeature,
 } from "src/lib/license/proAccess";
+import { chooseDialog } from "src/lib/system-dialog";
 import { openExternalUrl } from "src/lib/tauri";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
-import { ProBadge } from "./ProBadge";
 
-/** Single upgrade prompt for every Pro gate; mounted once in the main layout. */
+/**
+ * Single upgrade prompt for every Pro gate, shown as a native dialog; mounted once in the
+ * main layout. "Enter license key" opens the license dialog; "See Pro pricing" (only where
+ * external purchase is allowed) opens the pricing page.
+ */
 export function ProUpgradeDialogHost() {
-  const feature = useProUpgradeStore((store) => store.feature);
-  const close = useProUpgradeStore((store) => store.close);
   const [licenseOpen, setLicenseOpen] = useState(false);
+  const prompting = useRef(false);
 
-  const handleEnterKey = () => {
-    close();
-    setLicenseOpen(true);
-  };
+  useEffect(() => {
+    const prompt = (feature: ProFeature) => {
+      // One native prompt at a time; clicks while it is open are ignored.
+      if (prompting.current) return;
+      prompting.current = true;
+      void chooseDialog(
+        `${PRO_FEATURE_LABELS[feature]} is a PoliteDB Pro feature.`,
+        {
+          title: "Upgrade to Pro",
+          kind: "info",
+          primary: "Enter license key",
+          secondary: DISTRIBUTION_FEATURES.externalPurchase
+            ? "See Pro pricing"
+            : undefined,
+          cancel: "Cancel",
+        }
+      )
+        .then((choice) => {
+          if (choice === "primary") setLicenseOpen(true);
+          if (choice === "secondary") void openExternalUrl(PRICING_URL);
+        })
+        .finally(() => {
+          prompting.current = false;
+        });
+    };
+    // Subscribe directly (no React adapter needed); each request is consumed at once.
+    return useProUpgradeStore.subscribe((store) => {
+      const feature = store.feature;
+      if (!feature) return;
+      useProUpgradeStore.getState().close();
+      prompt(feature);
+    });
+  }, []);
 
   return (
-    <>
-      <Dialog open={feature !== null} onClose={close} size="sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {feature ? PRO_FEATURE_LABELS[feature] : "PoliteDB Pro"}
-            <ProBadge />
-          </DialogTitle>
-          <DialogDescription>
-            This feature is part of PoliteDB Pro. Everything else stays free.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogContent className="pt-0">
-          <ul class="list-disc space-y-1 pl-5 text-sm text-neutral-700">
-            {PRO_FEATURES.map((item) => (
-              <li key={item}>{PRO_FEATURE_LABELS[item]}</li>
-            ))}
-          </ul>
-        </DialogContent>
-        <DialogFooter className="justify-end gap-2">
-          <Button variant="shadow" onClick={handleEnterKey}>
-            Enter license key
-          </Button>
-          {DISTRIBUTION_FEATURES.externalPurchase && (
-            <Button onClick={() => void openExternalUrl(PRICING_URL)}>
-              See Pro pricing
-            </Button>
-          )}
-        </DialogFooter>
-      </Dialog>
-      <LicenseDialog open={licenseOpen} onClose={() => setLicenseOpen(false)} />
-    </>
+    <LicenseDialog open={licenseOpen} onClose={() => setLicenseOpen(false)} />
   );
 }

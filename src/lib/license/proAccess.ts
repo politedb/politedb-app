@@ -22,16 +22,6 @@ export const PRO_FEATURE_LABELS: Record<ProFeature, string> = {
   "ai-agent": "AI agent mode",
 };
 
-/** Order of the features in the upgrade dialog. */
-export const PRO_FEATURES: ProFeature[] = [
-  "ai-agent",
-  "backup-restore",
-  "query-analyzer",
-  "health-inspector",
-  "er-diagram-export",
-  "export-masking",
-];
-
 export const PRICING_URL = "https://politedb.com/pricing";
 
 /** Error code thrown when a Pro-only path runs without Pro access. */
