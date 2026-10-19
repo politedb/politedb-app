@@ -17,6 +17,7 @@ use crate::ai::agent::run::{AgentTool, RequestGate};
 use crate::ai::provider::AiProviderConfig;
 use crate::ai::provider_store::ProviderFilePort;
 use crate::engines::EngineConnection;
+use crate::license;
 use crate::profiles::store as profile_store;
 use crate::state::AppState;
 
@@ -227,6 +228,8 @@ pub fn ai_agent_data_access_grant(
     connection_id: String,
     provider_id: String,
 ) -> Result<(), String> {
+    // Data access belongs to agent mode, a Pro feature.
+    license::require_pro(&app, super::ai_agent::AGENT_PRO_REQUIRED)?;
     let binding = data_profile(&state, &connection_id)
         .ok_or_else(|| "AI_DATA_ACCESS_UNAVAILABLE".to_string())?;
     let profile = profile_store::profile_get(&app, binding.profile_id)

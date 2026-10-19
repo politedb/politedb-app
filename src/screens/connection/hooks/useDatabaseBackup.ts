@@ -867,15 +867,16 @@ export function useDatabaseBackup() {
     [requirePro, runSqlDumpImport]
   );
 
+  // Table-level SQL dump import stays free, like CSV import; only database-level
+  // backup and restore are Pro.
   const onImportSqlDump = useCallback(
     async (onRefresh?: () => void) => {
-      if (!requirePro("backup-restore")) return;
       await runSqlDumpImport(onRefresh, {
         dialogTitle: "Import SQL dump",
         successToast: "SQL dump imported.",
       });
     },
-    [requirePro, runSqlDumpImport]
+    [runSqlDumpImport]
   );
 
   return {

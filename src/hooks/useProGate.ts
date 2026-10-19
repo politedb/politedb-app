@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { hasProAccess, type ProFeature } from "src/lib/license/proAccess";
-import { useLicenseStore } from "src/stores/license";
+import { hasProAccessNow, useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 
 /**
@@ -21,14 +21,13 @@ export function useProGate() {
     );
   }, []);
 
-  const requirePro = useCallback(
-    (feature: ProFeature) => {
-      if (hasPro) return true;
-      useProUpgradeStore.getState().open(feature);
-      return false;
-    },
-    [hasPro]
-  );
+  // Checked at action time, not with the value from the last render: access can end
+  // between the two (trial expiry).
+  const requirePro = useCallback((feature: ProFeature) => {
+    if (hasProAccessNow()) return true;
+    useProUpgradeStore.getState().open(feature);
+    return false;
+  }, []);
 
   return { hasPro, requirePro };
 }

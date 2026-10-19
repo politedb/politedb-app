@@ -156,16 +156,12 @@ function stableThreadId(context?: PoliteDbAiGatewayContext) {
     .slice(0, 48)}`;
 }
 
-/** Paid plan names; "ultimate" is the pre-rename name still stored on older licenses. */
-const PAID_PLAN_NAMES = new Set(["pro", "ultimate"]);
-
-/** The AI gateway still expects "ultimate" as the paid tier value. */
-export function planFromLicensePlanName(planName?: string | null) {
-  const normalized = String(planName ?? "")
-    .trim()
-    .replace(/\s*plan$/i, "")
-    .toLowerCase();
-  return PAID_PLAN_NAMES.has(normalized) ? "ultimate" : "free";
+/**
+ * AI gateway tier. Only an active paid license counts (trials stay "free"), as decided by
+ * the Rust side; the gateway still expects "ultimate" as the paid value.
+ */
+export function gatewayPlan(license?: { paid_license?: boolean } | null) {
+  return license?.paid_license === true ? "ultimate" : "free";
 }
 
 async function aiHeaders(workspaceId?: string) {
@@ -179,7 +175,7 @@ async function aiHeaders(workspaceId?: string) {
       license?.device_name ||
       "anonymous",
     "x-workspace-id": workspaceId || "politedb-desktop",
-    "x-user-plan": planFromLicensePlanName(license?.plan_name),
+    "x-user-plan": gatewayPlan(license),
   };
 }
 

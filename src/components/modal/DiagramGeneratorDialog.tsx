@@ -8,7 +8,7 @@ import type { DiagramState } from "src/components/diagram/diagramTypes";
 import { DownloadIcon, RefreshCwIcon, XIcon } from "src/components/icons";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
-import { writeFile } from "src/lib/system-fs";
+import { writeFile, writeTextFile } from "src/lib/system-fs";
 import type { DatabaseEngine } from "src/types";
 import { OverlayModal } from "./OverlayModal";
 import { ProBadge } from "src/components/license/ProBadge";
@@ -36,7 +36,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
     metaKey,
     metadata,
   } = props;
-  const { hasPro, requirePro } = useProGate();
+  const { requirePro } = useProGate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -97,7 +97,6 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
 
   async function handleDownloadPng() {
     if (!diagram) return;
-    if (!requirePro("er-diagram-export")) return;
     let objectUrl: string | null = null;
     try {
       const path = await saveDialog({
@@ -142,6 +141,31 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
       });
     } finally {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  // SVG export is the Pro feature; PNG export and Mermaid copy stay free.
+  async function handleDownloadSvg() {
+    if (!diagram) return;
+    if (!requirePro("er-diagram-export")) return;
+    try {
+      const path = await saveDialog({
+        title: "Export SVG",
+        defaultPath: `${exportBaseName || "diagram"}.svg`,
+        filters: [{ name: "SVG", extensions: ["svg"] }],
+      });
+      if (!path) return;
+
+      await writeTextFile(path, buildDiagramSvg(diagram));
+      await showMessage("SVG exported.", {
+        title: "Export completed",
+        kind: "info",
+      });
+    } catch (exportError) {
+      await showMessage(String(exportError), {
+        title: "Export failed",
+        kind: "error",
+      });
     }
   }
 
@@ -253,7 +277,16 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
             >
               <DownloadIcon className="size-4" />
               Export as PNG
-              {!hasPro && <ProBadge className="bg-white/20 text-white" />}
+            </Button>
+            <Button
+              variant="default"
+              onClick={() => void handleDownloadSvg()}
+              disabled={!diagram || loading}
+              class="h-9 rounded-lg px-3"
+            >
+              <DownloadIcon className="size-4" />
+              Export as SVG
+              <ProBadge className="bg-white/20 text-white" />
             </Button>
           </div>
         </div>

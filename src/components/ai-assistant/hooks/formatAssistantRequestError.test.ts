@@ -31,6 +31,20 @@ describe("formatAssistantRequestError", () => {
     ).toMatch(/did not produce a final response/);
   });
 
+  it("explains that agent mode needs Pro", () => {
+    for (const [lang, pattern] of [
+      [en, /Pro feature/],
+      [vi, /gói Pro/],
+    ] as const) {
+      const text = formatAssistantRequestError({
+        error: new Error("AI_AGENT_PRO_REQUIRED"),
+        lang,
+        isLocalProvider: false,
+      });
+      expect(text).toMatch(pattern);
+    }
+  });
+
   it("does not point a generic agent error at a removed setting", () => {
     for (const lang of [en, vi]) {
       const text = formatAssistantRequestError({

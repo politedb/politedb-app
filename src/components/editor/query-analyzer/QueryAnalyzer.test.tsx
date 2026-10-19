@@ -6,6 +6,9 @@ import { planFromResult } from "src/lib/query-analyzer/fromResult";
 import { queryPlanFixture } from "src/test/fixtures/queryPlan";
 import { confirmDialog, saveDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
+import { useLicenseStore } from "src/stores/license";
+import { useProUpgradeStore } from "src/stores/proUpgrade";
+import type { LicenseState } from "src/lib/tauri/license";
 
 vi.mock("src/lib/system-dialog", () => ({
   confirmDialog: vi.fn(),
@@ -19,7 +22,13 @@ vi.mock("src/components/common/OverlayScrollArea", () => ({
 }));
 const mount = () =>
   render(<QueryAnalyzer plan={parseQueryPlan(queryPlanFixture)!} />);
-beforeEach(() => vi.resetAllMocks());
+const setProAccess = (pro_access: boolean) =>
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+beforeEach(() => {
+  vi.resetAllMocks();
+  setProAccess(true);
+  useProUpgradeStore.setState({ feature: null });
+});
 
 describe("Query Analyzer", () => {
   it("selects nodes and displays their details without executing SQL", () => {
@@ -150,5 +159,47 @@ describe("Query Analyzer", () => {
       "/tmp/report.md",
       expect.stringContaining("# PoliteDB Query Analysis")
     );
+    expect(useProUpgradeStore.getState().feature).toBeNull();
   });
+  it("exports the JSON plan with Pro", async () => {
+    mount();
+    vi.mocked(confirmDialog).mockResolvedValue(true);
+    vi.mocked(saveDialog).mockResolvedValue("/tmp/plan.json");
+    vi.mocked(writeTextFile).mockResolvedValue(undefined);
+    fireEvent.click(screen.getByTitle("Export JSON plan"));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Export complete")
+    );
+    expect(writeTextFile).toHaveBeenCalledWith(
+      "/tmp/plan.json",
+      expect.any(String)
+    );
+  });
+  it("shows the Pro badge in the header for every tier", () => {
+    const view = mount();
+    expect(screen.getByText("Pro")).toBeInTheDocument();
+    view.unmount();
+    setProAccess(false);
+    mount();
+    expect(screen.getByText("Pro")).toBeInTheDocument();
+  });
+  it.each([
+    ["Markdown report", "Export Markdown report"],
+    ["JSON plan", "Export JSON plan"],
+  ])(
+    "blocks the %s export without Pro and opens the upgrade dialog",
+    async (_label, title) => {
+      setProAccess(false);
+      mount();
+      vi.mocked(confirmDialog).mockResolvedValue(true);
+      vi.mocked(saveDialog).mockResolvedValue("/tmp/out");
+      fireEvent.click(screen.getByTitle(title));
+      await waitFor(() =>
+        expect(useProUpgradeStore.getState().feature).toBe("query-analyzer")
+      );
+      expect(confirmDialog).not.toHaveBeenCalled();
+      expect(saveDialog).not.toHaveBeenCalled();
+      expect(writeTextFile).not.toHaveBeenCalled();
+    }
+  );
 });

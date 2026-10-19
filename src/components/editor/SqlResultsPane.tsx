@@ -13,6 +13,8 @@ import type { DatabaseEngine } from "src/types";
 import { MAX_PLAN_NODES } from "src/lib/query-analyzer/plan";
 import { planFromResult } from "src/lib/query-analyzer/fromResult";
 import { QueryAnalyzer } from "./query-analyzer/QueryAnalyzer";
+import { ProBadge } from "src/components/license/ProBadge";
+import { useProGate } from "src/hooks/useProGate";
 
 /* =============================================================================
  * UI blocks
@@ -73,6 +75,23 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
       >
         {props.error || "Unknown error."}
       </OverlayScrollArea>
+    </div>
+  );
+}
+
+/** Shown above raw EXPLAIN rows when the visual analyzer is locked. */
+function AnalyzerUpgradeBanner(props: { onUpgrade: () => void }) {
+  return (
+    <div class="flex shrink-0 items-center gap-2 border-b border-neutral-200 bg-blue-50/60 px-3 py-1.5 text-xs text-neutral-700">
+      <ProBadge />
+      <span>Visual analyzer and recommendations are Pro</span>
+      <Button
+        variant="ghost"
+        class="ml-auto rounded-md px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+        onClick={props.onUpgrade}
+      >
+        Upgrade
+      </Button>
     </div>
   );
 }
@@ -381,6 +400,9 @@ export function SqlResultsPane(props: {
   const slot = activeRun?.slots[safeIndex];
   const streamOpId = slot?.mode === "stream" ? (slot.opId ?? null) : null;
   const stream = useSqlStreamResult(streamOpId);
+  // Raw EXPLAIN is free; only the visual analyzer is Pro. Derived at render so
+  // restored runs and tier changes re-evaluate.
+  const { hasPro, requirePro } = useProGate();
   const {
     status: streamStatus,
     columns: streamColumns,
@@ -388,7 +410,7 @@ export function SqlResultsPane(props: {
     totalRows: streamRowCount,
   } = stream;
   const plan = useMemo(() => {
-    if (activeRun?.kind !== "explain") return null;
+    if (activeRun?.kind !== "explain" || !hasPro) return null;
     if (!props.engine || !slot || slot.status === "error") return null;
     if (slot.mode === "direct" && slot.status === "done" && slot.result) {
       return planFromResult(
@@ -412,6 +434,7 @@ export function SqlResultsPane(props: {
     return null;
   }, [
     activeRun?.kind,
+    hasPro,
     props.engine,
     slot,
     streamStatus,
@@ -446,6 +469,12 @@ export function SqlResultsPane(props: {
 
   const shouldShowTable = isDirectTable || isStreamTable;
 
+  const showAnalyzerUpgrade =
+    activeRun.kind === "explain" &&
+    !hasPro &&
+    slot.status !== "error" &&
+    !(slot.mode === "stream" && stream.status === "error");
+
   return (
     <div class="flex h-full min-h-0 flex-col bg-white">
       <RunTabs
@@ -463,6 +492,12 @@ export function SqlResultsPane(props: {
         activeIndex={safeIndex}
         onSelect={setActiveIndex}
       />
+
+      {showAnalyzerUpgrade && (
+        <AnalyzerUpgradeBanner
+          onUpgrade={() => void requirePro("query-analyzer")}
+        />
+      )}
 
       {plan ? (
         <div class="min-h-0 flex-1">

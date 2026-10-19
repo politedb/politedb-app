@@ -31,6 +31,7 @@ import {
 import { cn } from "src/utils/cn";
 import { showMessage } from "src/lib/system-dialog";
 import { useProGate } from "src/hooks/useProGate";
+import { ProBadge } from "src/components/license/ProBadge";
 
 interface Props {
   open: boolean;
@@ -392,6 +393,10 @@ export function ExportTableDialog({
                 </div>
               </div>
 
+              <p class="flex items-center gap-1.5 text-xs text-neutral-500">
+                Masking columns (any rule other than Keep) is a Pro feature.
+                <ProBadge />
+              </p>
               <ExportColumnEditor
                 columnNames={columnNames}
                 selectedColumns={selectedColumns}

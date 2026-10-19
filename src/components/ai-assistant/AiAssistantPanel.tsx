@@ -1,4 +1,11 @@
 import { aiAgentDataAccessGrant } from "src/lib/tauri/aiAgent";
+import {
+  AgentProHint,
+  isAgentProHintDismissed,
+} from "src/components/ai-assistant/AgentProHint";
+import { useProGate } from "src/hooks/useProGate";
+import { hasProAccessNow } from "src/stores/license";
+import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   AiAssistantChatArea,
@@ -390,6 +397,22 @@ export function AiAssistantPanel(props: Props) {
   );
   const submitBlocked = Boolean(pendingFallback) || sessionProviderUnavailable;
 
+  // Upgrade hint for turns the agent would have answered with Pro: once per chat, until
+  // dismissed on this device.
+  const [agentHintVisible, setAgentHintVisible] = useState(false);
+  const agentHintChatsRef = useRef(new Set<string>());
+  const showAgentProHint = () => {
+    const chat = activeSessionId ?? "";
+    if (isAgentProHintDismissed() || agentHintChatsRef.current.has(chat))
+      return;
+    agentHintChatsRef.current.add(chat);
+    setAgentHintVisible(true);
+  };
+  useEffect(() => {
+    setAgentHintVisible(false);
+  }, [activeSessionId]);
+  const { hasPro } = useProGate();
+
   const { canSubmit, handleSubmit, submitQuestion, handleCancelSubmit } =
     useAiAssistantSubmit({
       prompt,
@@ -422,6 +445,7 @@ export function AiAssistantPanel(props: Props) {
       savedConnections,
       conversationState,
       updateConversationState,
+      onAgentProLocked: showAgentProHint,
     });
   // Read by async continuations (data-access Allow) after awaits.
   const mountedRef = useRef(true);
@@ -436,7 +460,13 @@ export function AiAssistantPanel(props: Props) {
   const allowGenerationRef = useRef(0);
   useEffect(() => {
     allowGenerationRef.current += 1;
-  }, [activeSessionId, runtimeConnectionId, providerId, querySafetyMode]);
+  }, [
+    activeSessionId,
+    runtimeConnectionId,
+    providerId,
+    querySafetyMode,
+    hasPro,
+  ]);
   // The continuation asks again with the context current at that moment.
   const submitQuestionRef = useRef(submitQuestion);
   submitQuestionRef.current = submitQuestion;
@@ -534,6 +564,10 @@ export function AiAssistantPanel(props: Props) {
         </div>
       ) : null}
 
+      {agentHintVisible && !hasPro ? (
+        <AgentProHint onClose={() => setAgentHintVisible(false)} />
+      ) : null}
+
       <div class="flex min-h-0 flex-1 flex-col">
         <AiAssistantChatArea
           messages={messages}
@@ -557,11 +591,20 @@ export function AiAssistantPanel(props: Props) {
             const provider = providerId;
             const generation = allowGenerationRef.current;
             if (!connectionId || !provider || submitBlocked) return false;
+            // Data access belongs to agent mode (Pro), also on cards saved earlier.
+            if (!hasProAccessNow()) {
+              useProUpgradeStore.getState().open("ai-agent");
+              return false;
+            }
             try {
               await aiAgentDataAccessGrant(connectionId, provider);
             } catch (error) {
               const code =
                 error instanceof Error ? error.message : String(error);
+              if (code.includes("AI_AGENT_PRO_REQUIRED")) {
+                useProUpgradeStore.getState().open("ai-agent");
+                return false;
+              }
               if (mountedRef.current) {
                 appendAssistantMessage({
                   text: code.includes("AI_DATA_ACCESS_RECONNECT")
@@ -571,11 +614,13 @@ export function AiAssistantPanel(props: Props) {
               }
               return false;
             }
-            // Never start a run for a panel that closed, after a cancel, or in another
-            // chat, connection or provider than the one the user just allowed.
+            // Never start a run for a panel that closed, after a cancel, in another
+            // chat, connection or provider than the one the user just allowed, or once
+            // Pro access ended meanwhile.
             if (
               mountedRef.current &&
-              generation === allowGenerationRef.current
+              generation === allowGenerationRef.current &&
+              hasProAccessNow()
             ) {
               void submitQuestionRef.current(question);
             }

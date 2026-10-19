@@ -1,5 +1,6 @@
 import type { Ref } from "preact";
 import { useLayoutEffect, useState } from "preact/hooks";
+import { AgentModeChip } from "./AgentModeChip";
 import {
   AiAssistantMessageCard,
   AssistantStreamingPlaceholder,
@@ -595,7 +596,8 @@ export function AiAssistantChatArea(props: {
             "rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm"
           )}
         >
-          <div class={cn("mb-2 flex items-center justify-end gap-2")}>
+          <div class={cn("mb-2 flex items-center justify-between gap-2")}>
+            {runtimeConnectionId ? <AgentModeChip /> : <span />}
             <div class="text-xs text-neutral-400">
               {submitting
                 ? assistantStatus === "loading_model"

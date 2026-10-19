@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/preact";
 import { useDbHealthInspector } from "./useDbHealthInspector";
+import { useLicenseStore } from "src/stores/license";
+import type { LicenseState } from "src/lib/tauri/license";
 
 const collectMock = vi.fn();
 
@@ -62,7 +64,19 @@ function snap(partial?: Record<string, unknown>) {
   };
 }
 
+function setProAccess(pro_access: boolean) {
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+}
+
+const pgCtx = {
+  open: true,
+  runtimeConnectionId: "c1",
+  profileId: "p1",
+  engine: "postgres" as const,
+};
+
 beforeEach(() => {
+  setProAccess(true);
   collectMock.mockReset();
   collectMock.mockResolvedValue(snap());
 });
@@ -188,5 +202,75 @@ describe("useDbHealthInspector lifecycle", () => {
       result.current.cancel();
     });
     expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("useDbHealthInspector Pro gating", () => {
+  it("collects on open with Pro access", async () => {
+    const { result } = renderHook(() => useDbHealthInspector(pgCtx));
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(collectMock).toHaveBeenCalledTimes(1);
+    expect(result.current.locked).toBe(false);
+  });
+
+  it("runs no inspector query without Pro access, even on refresh", async () => {
+    setProAccess(false);
+    const { result } = renderHook(() => useDbHealthInspector(pgCtx));
+    expect(result.current.locked).toBe(true);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(collectMock).not.toHaveBeenCalled();
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("stops collecting after a downgrade: refresh issues no query", async () => {
+    const { result } = renderHook(() => useDbHealthInspector(pgCtx));
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(collectMock).toHaveBeenCalledTimes(1);
+
+    act(() => setProAccess(false));
+    await waitFor(() => expect(result.current.locked).toBe(true));
+    expect(result.current.snapshot).toBeNull();
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(collectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a pending result that arrives after a downgrade", async () => {
+    let resolveCollect: ((value: unknown) => void) | undefined;
+    let signal: AbortSignal | undefined;
+    collectMock.mockImplementation((args: any) => {
+      signal = args.signal;
+      return new Promise((resolve) => {
+        resolveCollect = resolve;
+      });
+    });
+
+    const { result } = renderHook(() => useDbHealthInspector(pgCtx));
+    await waitFor(() => expect(resolveCollect).toBeTruthy());
+    expect(result.current.loading).toBe(true);
+
+    act(() => setProAccess(false));
+    expect(signal?.aborted).toBe(true);
+
+    await act(async () => {
+      resolveCollect?.(snap());
+    });
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.loading).toBe(false);
+    expect(collectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("collects once Pro access returns while open", async () => {
+    setProAccess(false);
+    const { result } = renderHook(() => useDbHealthInspector(pgCtx));
+    expect(collectMock).not.toHaveBeenCalled();
+    act(() => setProAccess(true));
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull());
+    expect(collectMock).toHaveBeenCalledTimes(1);
   });
 });

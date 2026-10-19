@@ -44,6 +44,7 @@ import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
 import { useProGate } from "src/hooks/useProGate";
+import { ProIcon } from "src/components/license/ProBadge";
 import { useConnectionHealthCheck } from "../hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
 import { resolveMenuBarConnectionChrome } from "./menuBarConnectionChrome";
@@ -304,8 +305,7 @@ export function MenuBar({
     onBackupDatabase,
     onRestoreDatabase,
   } = useDatabaseBackup();
-  const { hasPro, requirePro } = useProGate();
-  const proSuffix = hasPro ? "" : " (Pro)";
+  const { requirePro } = useProGate();
 
   const activeTab = useMemo(() => {
     return profileTabs.find((tab) => tab.id === activeProfileScreen);
@@ -754,21 +754,19 @@ export function MenuBar({
           <div class="mx-1 h-5 w-px bg-neutral-200" />
 
           <IconButton
-            title={
-              dbBackupRunning ? "Backing up..." : `Backup database${proSuffix}`
-            }
+            title={dbBackupRunning ? "Backing up..." : "Backup database (Pro)"}
             onClick={() => void onBackupDatabase(connectionInfo?.database)}
             disabled={
               !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
             }
           >
-            <BackupIcon className="size-4.5 text-neutral-700" />
+            <ProIcon>
+              <BackupIcon className="size-4.5 text-neutral-700" />
+            </ProIcon>
           </IconButton>
 
           <IconButton
-            title={
-              dbRestoreRunning ? "Restoring..." : `Restore database${proSuffix}`
-            }
+            title={dbRestoreRunning ? "Restoring..." : "Restore database (Pro)"}
             onClick={() => void onRestoreDatabase(onRefresh)}
             disabled={
               !!activeTab?.isLocked ||
@@ -777,7 +775,9 @@ export function MenuBar({
               dbRestoreRunning
             }
           >
-            <RestoreIcon className="size-4.5 text-neutral-700" />
+            <ProIcon>
+              <RestoreIcon className="size-4.5 text-neutral-700" />
+            </ProIcon>
           </IconButton>
 
           <ToolbarDivider />
@@ -802,13 +802,15 @@ export function MenuBar({
           <ToolbarDivider />
 
           <IconButton
-            title={`Database Health Inspector${proSuffix}`}
+            title="Database Health Inspector (Pro)"
             onClick={() => {
               if (requirePro("health-inspector")) onOpenHealthInspector?.();
             }}
             disabled={!rt.runtimeConnectionId || rt.engine !== "postgres"}
           >
-            <DbInspectorIcon className="size-4.5 text-neutral-700" />
+            <ProIcon>
+              <DbInspectorIcon className="size-4.5 text-neutral-700" />
+            </ProIcon>
           </IconButton>
 
           <IconButton

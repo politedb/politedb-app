@@ -10,18 +10,14 @@ import {
 import { Button } from "src/components/common/Button";
 import { LicenseDialog } from "src/components/modal/LicenseDialog";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
-import { PRICING_URL, PRO_FEATURE_LABELS } from "src/lib/license/proAccess";
+import {
+  PRICING_URL,
+  PRO_FEATURE_LABELS,
+  PRO_FEATURES,
+} from "src/lib/license/proAccess";
 import { openExternalUrl } from "src/lib/tauri";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { ProBadge } from "./ProBadge";
-
-const PRO_HIGHLIGHTS = [
-  "Database backup and restore",
-  "Visual query analyzer",
-  "Database health inspector",
-  "ER diagram export",
-  "Column masking on export",
-];
 
 /** Single upgrade prompt for every Pro gate; mounted once in the main layout. */
 export function ProUpgradeDialogHost() {
@@ -48,8 +44,8 @@ export function ProUpgradeDialogHost() {
         </DialogHeader>
         <DialogContent className="pt-0">
           <ul class="list-disc space-y-1 pl-5 text-sm text-neutral-700">
-            {PRO_HIGHLIGHTS.map((item) => (
-              <li key={item}>{item}</li>
+            {PRO_FEATURES.map((item) => (
+              <li key={item}>{PRO_FEATURE_LABELS[item]}</li>
             ))}
           </ul>
         </DialogContent>

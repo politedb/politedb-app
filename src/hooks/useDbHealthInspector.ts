@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { collectHealthInspectorSnapshot } from "src/lib/tauri/health-inspector";
 import type { HealthInspectorSnapshot } from "src/lib/health-inspector/types";
 import type { DatabaseEngine } from "src/types";
+import { hasProAccess } from "src/lib/license/proAccess";
+import { hasProAccessNow, useLicenseStore } from "src/stores/license";
 
 export type HealthInspectorContext = {
   open: boolean;
@@ -14,6 +16,8 @@ export type HealthInspectorContext = {
  * Owns one authoritative in-memory snapshot per runtime context.
  * Opening loads once; Refresh replaces; Cancel aborts Inspector-owned ops only.
  * Context changes clear results (no cross-profile leak).
+ * Pro-only: no collection starts without Pro access (checked at call time), and losing
+ * access invalidates any pending collection so its late result is dropped.
  */
 export function useDbHealthInspector(ctx: HealthInspectorContext) {
   const [snapshot, setSnapshot] = useState<HealthInspectorSnapshot | null>(
@@ -21,6 +25,9 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [proAccess, setProAccess] = useState(() =>
+    hasProAccess(useLicenseStore.getState().state)
+  );
 
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
@@ -41,6 +48,10 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
 
   const refresh = useCallback(async () => {
     if (!ctx.open) return;
+    if (!hasProAccessNow()) {
+      clear();
+      return;
+    }
     if (!ctx.runtimeConnectionId || !ctx.profileId || !ctx.engine) {
       setError("No active runtime connection.");
       setSnapshot(null);
@@ -85,16 +96,33 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     } else if (result.overallError && !hasAnySectionData(result)) {
       setError(result.overallError);
     }
-  }, [cancel, ctx.engine, ctx.open, ctx.profileId, ctx.runtimeConnectionId]);
+  }, [
+    cancel,
+    clear,
+    ctx.engine,
+    ctx.open,
+    ctx.profileId,
+    ctx.runtimeConnectionId,
+  ]);
+
+  // Follow license changes; losing Pro access drops any pending collection.
+  useEffect(() => {
+    setProAccess(hasProAccess(useLicenseStore.getState().state));
+    return useLicenseStore.subscribe((store) => {
+      const next = hasProAccess(store.state);
+      setProAccess(next);
+      if (!next) clear();
+    });
+  }, [clear]);
 
   // Clear on context identity change
   useEffect(() => {
     clear();
   }, [contextKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load once on open; clear on close
+  // Load once on open (and when Pro access returns); clear on close or without Pro
   useEffect(() => {
-    if (!ctx.open) {
+    if (!ctx.open || !proAccess) {
       clear();
       return;
     }
@@ -102,7 +130,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     return () => {
       cancel();
     };
-  }, [ctx.open, contextKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ctx.open, contextKey, proAccess]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     snapshot,
@@ -112,6 +140,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     cancel,
     clear,
     supported: ctx.engine === "postgres",
+    locked: !proAccess,
   };
 }
 

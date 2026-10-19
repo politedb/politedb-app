@@ -38,9 +38,44 @@ export type LicenseState = {
   message?: string | null;
   /** Feature tier from the license API ("pro" | "free"); absent on older servers. */
   plan?: string | null;
-  /** Pro features unlocked (license or trial). Computed by the Rust side on every load/save. */
+  /** Pro features unlocked (license or trial). Computed by the Rust side on every read. */
   pro_access?: boolean;
+  /** When the current Pro access ends (epoch ms); null when unlimited or locked. */
+  pro_access_until?: number | null;
+  /** An active license on a paid plan, trials excluded. Computed by the Rust side. */
+  paid_license?: boolean;
+  /** Original start of a trial kept by an older build (migration only). */
+  legacy_trial_started_at?: number | null;
+  legacy_retired?: boolean;
+  /** Incremented by every write of the license file. */
+  revision?: number;
+  /** Order of this snapshot in the app session; only newer snapshots are shown. */
+  snapshot_seq?: number;
 };
+
+export type LicenseErrorKind =
+  | "config"
+  | "timeout"
+  | "network"
+  | "http"
+  | "malformed"
+  | "storage";
+
+/** A failed license command. `state` is the current snapshot, still worth showing. */
+export type LicenseOpError = {
+  kind: LicenseErrorKind;
+  status?: number;
+  retryAfterMs?: number;
+  message: string;
+  state?: LicenseState;
+};
+
+/** The snapshot attached to a failed license command, if any. */
+export function licenseErrorState(error: unknown): LicenseState | null {
+  if (!error || typeof error !== "object" || !("state" in error)) return null;
+  const state = (error as { state?: unknown }).state;
+  return state && typeof state === "object" ? (state as LicenseState) : null;
+}
 
 /** UI label from backend `plan_name` (e.g. "ultimate" → "Ultimate plan"). */
 export function formatLicensePlanLabel(planName?: string | null): string {

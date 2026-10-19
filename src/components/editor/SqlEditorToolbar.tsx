@@ -1,8 +1,6 @@
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 import { PlayIcon, XIcon } from "src/components/icons";
-import { ProBadge } from "src/components/license/ProBadge";
-import { useProGate } from "src/hooks/useProGate";
 
 type Props = {
   onExport?: () => void;
@@ -17,7 +15,6 @@ type Props = {
 };
 
 export function SqlEditorToolbar(props: Props) {
-  const { hasPro } = useProGate();
   const {
     onExport,
     onFormat,
@@ -76,7 +73,6 @@ export function SqlEditorToolbar(props: Props) {
           class={toolBtn}
         >
           Explain
-          {!hasPro && <ProBadge className="ml-1" />}
         </Button>
       </div>
 

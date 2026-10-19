@@ -1,5 +1,6 @@
 import { useRef } from "preact/hooks";
 import { MarkdownText } from "./MarkdownText";
+import { ProBadge } from "src/components/license/ProBadge";
 import { Button } from "src/components/common/Button";
 import {
   CheckMarkIcon,
@@ -617,6 +618,9 @@ export function DataAccessRequestPart(props: {
             onClick={() => onAnswer(true)}
           >
             Allow
+            <span aria-hidden="true">
+              <ProBadge className="bg-white/20 text-white" />
+            </span>
           </Button>
           <Button
             variant="ghost"
