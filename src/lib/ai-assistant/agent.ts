@@ -13,11 +13,10 @@ import { isReadOnlySql } from "./index";
 export const AGENT_ENGINES = ["postgres", "mysql", "mariadb", "sqlite"];
 
 /**
- * Codes meaning "use the legacy assistant instead": the agent is off, or this
- * provider, model or engine cannot run it. Only valid before any tool ran.
+ * Codes meaning "use the legacy assistant instead": this provider, model or
+ * engine cannot run the agent. Only valid before any tool ran.
  */
 const FALLBACK_CODES = [
-  "AI_AGENT_DISABLED",
   "AI_AGENT_PROVIDER_UNSUPPORTED",
   "AI_AGENT_TOOLS_UNSUPPORTED",
   "AI_AGENT_ENGINE_UNSUPPORTED",

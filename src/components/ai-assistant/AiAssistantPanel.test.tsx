@@ -46,6 +46,18 @@ vi.mock("src/lib/ai-assistant", async (importOriginal) => {
   };
 });
 
+// These cases cover the legacy planner: the agent reports a model without tool support.
+vi.mock("src/lib/ai-assistant/agent", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("src/lib/ai-assistant/agent")>();
+  return {
+    ...actual,
+    runAgentTurn: async () => {
+      throw new actual.AgentFallback("AI_AGENT_TOOLS_UNSUPPORTED");
+    },
+  };
+});
+
 vi.mock("src/lib/tauri/ai", () => ({
   aiChatCancel: vi.fn(),
   aiChatComplete: vi.fn(),

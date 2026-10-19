@@ -1478,3 +1478,57 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md`, RTK guidance, the prio
 - `rtk git diff --check`: **passed** before append; repeated after append.
 
 Limitations: native HTTP round trips and socket-dependent lifecycle/routing/status assertions could not execute under this sandbox. Claude's reported 400-pass default/app-store suites remain implementer-reported evidence, not independently reproduced passes. No full frontend suite, app-store Rust test suite, clippy, desktop UI inspection, real Ollama generation/allocation check or database smoke rerun. No Context7 lookup needed for this code-review/business-logic task. No commit or push.
+
+
+## Review: AI agent always on (uncommitted, feat/ai-agent)
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-19. One P2 stale consent reference; no P0/P1 or consent bypass found.
+
+Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Reviewed the current uncommitted task diff against HEAD `736103d` on `feat/ai-agent`, using the “Agent always on (2026-10-19 ...)” Status entry in `.agent/plans/ai-agent.md` as the requirement. Excluded `.claude/launch.json` and `src/lib/politedbBackend/ai.ts` / `ai.test.ts`. Only this section appended; no code, tests, plans, staging or commit changed.
+
+### Findings, ranked
+
+- **P0: none found.**
+- **P1: none found.**
+- **P2 — Consent card still promises revocation in the removed settings list.** `src/components/ai-assistant/AiAssistantMessageParts.tsx:608-609`, exposed by the removal in `AiAssistantSettingsDialog.tsx:569`: every consent request still says “You can revoke this in AI settings.” The Data access list was the only production mount of the revoke control; after this change that destination has no such action. A user granting ongoing access receives incorrect instructions for withdrawing it. **Fix:** update that sentence to reflect the current UI, preserving the card's Allow/Not now behavior, explicit per-connection grant, backend checks and native approval. Do not restore the list or auto-grant access. Add a focused assertion so the obsolete revocation instruction cannot return. The deliberately hidden list and temporarily unavailable revoke UI are explicitly accepted scope, not separate findings.
+
+### Behavior and consent assessment
+
+- Removing both opt-in checks makes supported connected engines enter the agent without reading the old preference. `hasConcreteDatabaseContext` recognizes a runtime connection even before metadata loads. Existing direct app-context replies remain local shortcuts. Unsupported engines/no connection retain legacy paths; provider/model/engine fallback codes remain, and runtime errors still surface instead of silently falling back. Removing `AI_AGENT_DISABLED` is consistent with removal of its only producer.
+- The submit hook always passes `includeColumnDetails: true`. The lower-level runner/wrapper still permit omission/false for callers; the production submit path supplies true. Both legacy keys are removed at the next `aiAgentStart`, before IPC, with storage exceptions contained; this does not modify consent storage or create grants.
+- Legacy history filtering remains `withoutData(messages)` before direct replies, chat replies, planning and agent fallback. Full agent history carries `historyHasData`, allowing the backend gate to require consent before the first provider request. Existing tests exercise filtered fallback even when a grant exists.
+- No grant is issued by agent startup or settings. The panel still calls `aiAgentDataAccessGrant` only from the consent-card Allow handler; Not now does not grant. Failed saves remain pending, and connection/provider/generation guards prevent retrying in a changed context.
+- Rust consent/approval code is unchanged. Inspected command wiring, `ConsentGate`, the coordinator's check before each provider request and `DataAccess::admit`: data reads require bound per-connection/provider consent, safe/production requires native approval, and consent/aliveness are rechecked after approval. Lock mode offers no data tools. No newly introduced bypass found by inspection.
+- Generic agent errors no longer advise disabling a removed setting; English/Vietnamese fixed copy remains contained. No live references to removed opt-in helpers/constants or `AI_AGENT_DISABLED` remain in `src/` or `src-tauri/`. `AiDataAccessList` and its list/revoke wrappers/tests are intentionally retained but have no production mount, as recorded in the approved scope.
+
+### Verification and test adequacy
+
+- `rtk npm run test:run -- src/components/ai-assistant src/lib/ai-assistant src/lib/tauri/aiAgent.test.ts`: **22 files / 170 tests passed**. Includes settings, panel legacy fallback, agent runner, submit orchestration, request-error formatting, consent-card grant/decline/save races, panel grant lifecycle and chat-history filtering.
+- `rtk npm run build`: **passed** (TypeScript and Vite). Warnings: browser-externalized `node:zlib`, ineffective dynamic imports and chunks over 500 kB.
+- `rtk git diff --check`: **passed** before append; repeated after append.
+- Changed tests cover no opt-in, old absent/false keys removed on startup, always-included column details, unsupported-engine/no-connection routing and preserved filtered legacy history. Panel tests now explicitly simulate a model without tool support rather than relying on default agent-off state. Existing consent tests pass unchanged.
+- Small nonblocking coverage gaps: settings tests do not explicitly assert the Data access list/agent description are absent; key cleanup does not cover stored `"1"` or unavailable storage; generic agent-error copy lacks a direct English/Vietnamese assertion rejecting the removed-toggle advice. Source inspection supports these paths. The stale revocation sentence above currently escapes the consent-card tests.
+
+Limitations: no native desktop/browser visual inspection, live provider/database run or Touch ID/password prompt interaction. Frontend tests use mocked IPC and cannot independently prove native enforcement; native paths were inspected, not rerun, because this scoped diff changes no Rust. Existing release smoke gates remain open. No Context7 lookup needed for this code-review scope. Build necessarily includes the current working tree, including the excluded backend-client files, without reviewing those unrelated changes. No commit performed.
+
+
+## Re-review: AI agent always on round 2
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-19. Prior P2 resolved; no new P0/P1/P2 found.
+
+Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Re-reviewed the current uncommitted task diff on `feat/ai-agent`, HEAD `736103d`, against the preceding “Review: AI agent always on (uncommitted, feat/ai-agent)” section and the fix note in `.agent/plans/ai-agent.md` Status. Excluded `.claude/launch.json` and `src/lib/politedbBackend/ai.ts` / `ai.test.ts` from review.
+
+### Findings and consent assessment
+
+- **P0/P1/P2: none found.** The prior P2 is resolved: `AiAssistantMessageParts.tsx` removes only “You can revoke this in AI settings.” The remaining disclosure still says query results go to the selected provider, queries are read-only, and safe/production requires Touch ID or password. `DataAccess.test.tsx` now rejects the obsolete instruction in the rendered card.
+- Consent behavior is unchanged by the fix. Allow/Not now buttons, saving guard, allowed/declined state transitions and callbacks are untouched. The message card marks consent allowed only after a successful save; Not now never invokes the grant handler. The panel still grants explicitly for the current connection/provider and guards resubmission against context changes. Existing tests cover Allow, decline, failed persistence, duplicate clicks, panel grant lifecycle and races.
+- Rechecked the surrounding always-on diff: supported connected engines enter the agent; unsupported engine/model/provider paths retain legacy fallback; generic runtime errors still surface. Legacy history remains filtered, column details are explicitly included, and startup removes only the two old preference keys without creating consent grants. Rust consent, read-only and native-approval implementation has no changes in this diff. The hidden revoke UI remains explicitly accepted scope from the prior review, not a new finding.
+- Added coverage addresses the prior suggestions for absent settings text/list, stored `"1"` preference cleanup and English/Vietnamese error copy. Unavailable-storage cleanup remains covered by source inspection rather than a dedicated test; no blocking defect found.
+
+### Verification
+
+- `rtk npm run test:run -- src/components/ai-assistant src/lib/ai-assistant src/lib/tauri/aiAgent.test.ts`: **22 files / 171 tests passed**.
+- `rtk npm run build`: **passed**, including TypeScript and Vite. Warnings remain for browser-externalized `node:zlib`, ineffective dynamic imports and chunks over 500 kB.
+- `rtk git diff --check`: **passed** before append; repeated after append.
+
+Limitations: no desktop/browser visual smoke, live provider/database run or native Touch ID/password interaction performed; this re-review targets a consent-copy fix and frontend regression coverage. Tests mock IPC and do not independently prove native enforcement; Rust checks were not rerun because no Rust changed. Existing release smoke gates remain open. Build includes the full current working tree, including the excluded backend-client files; those changes are not approved by this review. No Context7 lookup needed for this code-review scope. Only this new review section was appended; no code, tests or plans edited, no staging or commit.

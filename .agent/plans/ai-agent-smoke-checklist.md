@@ -44,7 +44,7 @@ sqlite3 /tmp/politedb-smoke.db "CREATE TABLE notes (id INTEGER PRIMARY KEY, titl
    - Anthropic: **Claude Opus 5.5** (`claude-opus-5-5`).
    - Gemini: a current Gemini model.
    - Ollama: `http://127.0.0.1:11434` with a tool-capable model (e.g. `qwen3`, `llama3.1`). Pull it first with `ollama pull <model>`.
-3. AI settings: turn on **AI agent (beta)**.
+3. AI settings: the agent is always on (the beta opt-in was removed on 2026-10-19).
 
 ---
 

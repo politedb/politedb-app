@@ -44,13 +44,6 @@ import {
 } from "src/lib/tauri/ai";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
-import {
-  isAiAgentColumnDetailsEnabled,
-  isAiAgentEnabled,
-  setAiAgentColumnDetails,
-  setAiAgentEnabled,
-} from "src/lib/tauri/aiAgent";
-import { AiDataAccessList } from "./AiDataAccessList";
 import { AiModelCombobox } from "./AiModelCombobox";
 import { formatBytesSize } from "src/utils/convert";
 
@@ -84,10 +77,6 @@ export function AiAssistantSettingsDialog(props: Props) {
   // Ids the server reported on the last discovery, offered again as suggestions.
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatus] = useState("");
-  const [agentEnabled, setAgentEnabled] = useState(isAiAgentEnabled);
-  const [agentColumnDetails, setAgentColumnDetailsState] = useState(
-    isAiAgentColumnDetailsEnabled
-  );
   const [busy, setBusy] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
   const [legacyModel, setLegacyModel] = useState<AiLegacyModelInfo | null>(
@@ -580,44 +569,6 @@ export function AiAssistantSettingsDialog(props: Props) {
             })}
           </OverlayScrollArea>
           <div class="max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-t border-neutral-200 p-3 text-xs text-neutral-600">
-            <label class="flex cursor-pointer items-start gap-2">
-              <input
-                type="checkbox"
-                class="mt-0.5"
-                checked={agentEnabled}
-                onChange={(event) => {
-                  const next = event.currentTarget.checked;
-                  setAiAgentEnabled(next);
-                  setAgentEnabled(next);
-                }}
-              />
-              <span>
-                <span class="block font-medium text-neutral-800">
-                  AI agent (beta)
-                </span>
-                Lets the assistant look up schemas, tables and columns itself on
-                PostgreSQL, MySQL, MariaDB and SQLite, without asking each time.
-                Their names and types are sent to the selected provider. On
-                PostgreSQL and SQLite it can also run read-only queries, after
-                you allow it for that connection.
-              </span>
-            </label>
-            {agentEnabled ? (
-              <label class="ml-5 flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
-                  class="mt-0.5"
-                  checked={agentColumnDetails}
-                  onChange={(event) => {
-                    const next = event.currentTarget.checked;
-                    setAiAgentColumnDetails(next);
-                    setAgentColumnDetailsState(next);
-                  }}
-                />
-                <span>Also send column comments and default values</span>
-              </label>
-            ) : null}
-            {agentEnabled ? <AiDataAccessList /> : null}
             <p class="text-neutral-500">
               Chat history is stored on this device without encryption.
             </p>

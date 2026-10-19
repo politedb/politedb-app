@@ -56,59 +56,33 @@ export type AiAgentStartInput = {
 
 export type AiAgentHistoryEntry = { role: "user" | "assistant"; text: string };
 
-/** Opt-in for the agent (plan ai-agent R7): "AI agent (beta)" in AI settings, off by default. */
-export const AI_AGENT_ENABLED_KEY = "politedb.ai.agent.enabled";
+/**
+ * Former agent settings: the "AI agent (beta)" opt-in and the column-details opt-out.
+ * The agent is always on and always sends column details now; the keys are only cleared.
+ */
+export const LEGACY_AI_AGENT_KEYS = [
+  "politedb.ai.agent.enabled",
+  "politedb.ai.agent.columnDetails",
+];
 
-/** Shown in AI settings as "AI agent (beta)". */
-export function setAiAgentEnabled(enabled: boolean): void {
+function forgetLegacyAgentSettings(): void {
   try {
-    if (enabled) localStorage.setItem(AI_AGENT_ENABLED_KEY, "1");
-    else localStorage.removeItem(AI_AGENT_ENABLED_KEY);
+    for (const key of LEGACY_AI_AGENT_KEYS) localStorage.removeItem(key);
   } catch {
-    // Storage unavailable: the agent simply stays off.
-  }
-}
-
-/** Column comments and default values in agent metadata; on unless turned off. */
-export const AI_AGENT_COLUMN_DETAILS_KEY = "politedb.ai.agent.columnDetails";
-
-export function setAiAgentColumnDetails(include: boolean): void {
-  try {
-    if (include) localStorage.removeItem(AI_AGENT_COLUMN_DETAILS_KEY);
-    else localStorage.setItem(AI_AGENT_COLUMN_DETAILS_KEY, "0");
-  } catch {
-    // Storage unavailable: the default applies.
-  }
-}
-
-export function isAiAgentColumnDetailsEnabled(): boolean {
-  try {
-    return localStorage.getItem(AI_AGENT_COLUMN_DETAILS_KEY) !== "0";
-  } catch {
-    // Without storage, keep comments and defaults out.
-    return false;
-  }
-}
-
-export function isAiAgentEnabled(): boolean {
-  try {
-    return localStorage.getItem(AI_AGENT_ENABLED_KEY) === "1";
-  } catch {
-    return false;
+    // Storage unavailable: nothing to clear.
   }
 }
 
 /**
  * Starts an agent run; resolves once it started (progress arrives on `onEvent`).
- * Rejects with `AI_AGENT_DISABLED` while the hidden setting is off, and up front with
- * `AI_AGENT_PROVIDER_UNSUPPORTED` / `AI_AGENT_TOOLS_UNSUPPORTED` when the legacy
- * assistant should be used instead.
+ * Rejects up front with `AI_AGENT_PROVIDER_UNSUPPORTED` / `AI_AGENT_TOOLS_UNSUPPORTED`
+ * when the legacy assistant should be used instead.
  */
 export async function aiAgentStart(
   input: AiAgentStartInput,
   onEvent: (event: AiAgentEvent) => void
 ): Promise<void> {
-  if (!isAiAgentEnabled()) throw new Error("AI_AGENT_DISABLED");
+  forgetLegacyAgentSettings();
   const channel = new Channel<AiAgentEvent>();
   channel.onmessage = onEvent;
   await invoke(CMD.aiAgentStart, { input, onEvent: channel });

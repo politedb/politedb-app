@@ -333,17 +333,14 @@ describe("AiAssistantSettingsDialog", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("toggles the AI agent beta, off by default", async () => {
+  it("has no agent opt-in", async () => {
     await openDialog();
-    const toggle = screen.getByRole("checkbox", { name: /AI agent \(beta\)/ });
-    expect((toggle as HTMLInputElement).checked).toBe(false);
-    fireEvent.click(toggle);
-    expect(localStorage.getItem("politedb.ai.agent.enabled")).toBe("1");
-    fireEvent.click(toggle);
-    expect(localStorage.getItem("politedb.ai.agent.enabled")).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: /AI agent/ })
+    ).not.toBeInTheDocument();
   });
 
-  it("lets the agent leave out column comments and defaults, and discloses storage", async () => {
+  it("has no column-details opt-out and discloses storage", async () => {
     await openDialog();
     expect(
       screen.getByText(
@@ -353,18 +350,10 @@ describe("AiAssistantSettingsDialog", () => {
     expect(
       screen.queryByRole("checkbox", { name: /column comments/ })
     ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: /AI agent \(beta\)/ })
-    );
+    expect(screen.queryByText("Data access")).not.toBeInTheDocument();
     expect(
-      screen.getByText(/sent to the selected provider/)
-    ).toBeInTheDocument();
-    const details = screen.getByRole("checkbox", { name: /column comments/ });
-    expect((details as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(details);
-    expect(localStorage.getItem("politedb.ai.agent.columnDetails")).toBe("0");
-    fireEvent.click(details);
-    expect(localStorage.getItem("politedb.ai.agent.columnDetails")).toBeNull();
+      screen.queryByText(/sent to the selected provider/)
+    ).not.toBeInTheDocument();
   });
 
   describe("Ollama context size and server status", () => {

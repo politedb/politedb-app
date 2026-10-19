@@ -31,6 +31,18 @@ describe("formatAssistantRequestError", () => {
     ).toMatch(/did not produce a final response/);
   });
 
+  it("does not point a generic agent error at a removed setting", () => {
+    for (const lang of [en, vi]) {
+      const text = formatAssistantRequestError({
+        error: new Error("AI_AGENT_PROTOCOL"),
+        lang,
+        isLocalProvider: false,
+      });
+      expect(text).toMatch(/AI agent/);
+      expect(text).not.toMatch(/beta|turn off|tắt/);
+    }
+  });
+
   it("explains a declined data query", () => {
     expect(
       formatAssistantRequestError({

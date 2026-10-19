@@ -4,8 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   runAgentTurn: vi.fn(),
   plan: vi.fn(),
-  agentEnabled: true,
-  columnDetails: true,
   safety: "read_only" as "read_only" | "unknown",
   granted: false,
 }));
@@ -20,8 +18,6 @@ vi.mock("src/lib/ai-assistant", async (importOriginal) => ({
   getDirectAppContextReply: () => null,
 }));
 vi.mock("src/lib/tauri/aiAgent", () => ({
-  isAiAgentEnabled: () => mocks.agentEnabled,
-  isAiAgentColumnDetailsEnabled: () => mocks.columnDetails,
   aiAgentSqlSafety: async () => mocks.safety,
   AI_DATA_ACCESS_REQUIRED: "AI_DATA_ACCESS_REQUIRED",
   aiAgentDataAccessStatus: async () => ({
@@ -67,8 +63,6 @@ function setup(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.agentEnabled = true;
-  mocks.columnDetails = true;
   mocks.safety = "read_only";
   mocks.granted = false;
   mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
@@ -117,7 +111,6 @@ describe("useAiAssistantSubmit with the AI agent", () => {
   });
 
   it("follow-ups carry the conversation and the same context as the legacy planner", async () => {
-    mocks.columnDetails = false;
     mocks.runAgentTurn.mockResolvedValue({ text: "ok", steps: [] });
     const { result } = setup({
       prompt: "giờ nhóm theo tháng",
@@ -145,7 +138,7 @@ describe("useAiAssistantSubmit with the AI agent", () => {
       activeTable: "orders",
       targetTable: "public.orders",
       replyLanguage: "Vietnamese",
-      includeColumnDetails: false,
+      includeColumnDetails: true,
     });
     expect(input.editorSql).toBeUndefined();
     expect(input.history).toEqual([
@@ -226,9 +219,9 @@ describe("useAiAssistantSubmit with the AI agent", () => {
     await act(() => result.current.handleSubmit());
     expect(mocks.runAgentTurn.mock.calls[0][0].historyHasData).toBe(true);
 
-    // Legacy path without consent: nothing from the first data answer on.
-    mocks.agentEnabled = false;
-    const legacy = setup({ messages });
+    // Legacy path (engine without agent tools) without consent: nothing from the
+    // first data answer on.
+    const legacy = setup({ messages, engine: "mongodb" });
     await act(() => legacy.result.current.handleSubmit());
     const sent = JSON.stringify(mocks.plan.mock.calls[0][0].history);
     expect(sent).toContain("orders has 5 columns");
@@ -238,12 +231,11 @@ describe("useAiAssistantSubmit with the AI agent", () => {
     // fallback after an agent attempt neither (consent may have changed meanwhile).
     mocks.granted = true;
     mocks.plan.mockClear();
-    const allowed = setup({ messages });
+    const allowed = setup({ messages, engine: "mongodb" });
     await act(() => allowed.result.current.handleSubmit());
     expect(JSON.stringify(mocks.plan.mock.calls[0][0].history)).not.toContain(
       "alice@corp.com"
     );
-    mocks.agentEnabled = true;
     mocks.plan.mockClear();
     mocks.runAgentTurn.mockRejectedValue(
       new AgentFallback("AI_AGENT_TOOLS_UNSUPPORTED")
@@ -280,14 +272,12 @@ describe("useAiAssistantSubmit with the AI agent", () => {
     expect(finalize.mock.calls[0][1].text).toBe("legacy answer");
   });
 
-  it("does not use the agent when off, without a connection or on other engines", async () => {
+  it("does not use the agent without a connection or on other engines", async () => {
     for (const overrides of [
-      { __off: true },
       { runtimeConnectionId: undefined },
       { engine: "mongodb" },
     ]) {
       vi.clearAllMocks();
-      mocks.agentEnabled = !("__off" in overrides);
       mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
       const { result } = setup(overrides);
       await act(() => result.current.handleSubmit());

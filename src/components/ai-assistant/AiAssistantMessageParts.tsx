@@ -605,8 +605,7 @@ export function DataAccessRequestPart(props: {
       <p class="mt-1 text-xs text-amber-900">
         Query results from this connection will be sent to the selected AI
         provider. Data queries are read-only; in safe and production mode each
-        one asks for Touch ID or your password. You can revoke this in AI
-        settings.
+        one asks for Touch ID or your password.
       </p>
       {state === "pending" && onAnswer ? (
         <div class="mt-2 flex gap-2">

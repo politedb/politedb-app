@@ -70,6 +70,8 @@ describe("data access request", () => {
     expect(
       screen.getByText("Allow AI to read data from Shop DB?")
     ).toBeInTheDocument();
+    // AI settings no longer list grants, so the card must not point there.
+    expect(screen.queryByText(/revoke this in AI settings/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Allow" }));
     expect(onAllow).toHaveBeenCalledWith("top customers?");
     await screen.findByText("Allowed.");

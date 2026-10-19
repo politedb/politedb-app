@@ -20,8 +20,6 @@ import { aiChatCancel } from "src/lib/tauri/ai";
 import {
   AI_DATA_ACCESS_REQUIRED,
   aiAgentDataAccessStatus,
-  isAiAgentColumnDetailsEnabled,
-  isAiAgentEnabled,
 } from "src/lib/tauri/aiAgent";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import {
@@ -121,8 +119,8 @@ export function formatAssistantRequestError(args: {
   }
   if (raw.includes("AI_AGENT_")) {
     return vi
-      ? "AI agent gặp lỗi. Hãy thử lại, hoặc tắt AI agent (beta) trong AI settings."
-      : "The AI agent ran into a problem. Try again, or turn off AI agent (beta) in AI settings.";
+      ? "AI agent gặp lỗi. Hãy thử lại."
+      : "The AI agent ran into a problem. Try again.";
   }
   const isProviderRequest =
     raw.includes("AI_CHAT_FAILED") ||
@@ -369,12 +367,11 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      // AI agent (beta): inspects the schema with tools before answering. Any reason it
-      // cannot run here (off, provider/model/engine unsupported) falls back silently.
+      // AI agent: inspects the schema with tools before answering. Any reason it
+      // cannot run here (provider/model/engine unsupported) falls back silently.
       if (
         hasDbContext &&
         runtimeConnectionId &&
-        isAiAgentEnabled() &&
         AGENT_ENGINES.includes(engine)
       ) {
         try {
@@ -392,7 +389,7 @@ export function useAiAssistantSubmit(args: {
             activeTable: activeTable?.name ?? null,
             targetTable: conversationState.targetTable ?? null,
             replyLanguage: resolveReplyLanguage(question, messages).name,
-            includeColumnDetails: isAiAgentColumnDetailsEnabled(),
+            includeColumnDetails: true,
             safetyMode: querySafetyMode ?? null,
             signal: abortController.signal,
             onActivity: (tool) => {

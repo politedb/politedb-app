@@ -9,26 +9,32 @@ vi.mock("@tauri-apps/api/core", () => {
 });
 
 import {
-  AI_AGENT_ENABLED_KEY,
+  LEGACY_AI_AGENT_KEYS,
   aiAgentCancel,
   aiAgentStart,
-  isAiAgentEnabled,
   type AiAgentEvent,
 } from "./aiAgent";
 
 beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(undefined);
-  localStorage.setItem(AI_AGENT_ENABLED_KEY, "1");
+  localStorage.clear();
 });
 
 describe("aiAgent wrappers", () => {
-  it("is off unless the hidden setting is enabled", async () => {
-    localStorage.removeItem(AI_AGENT_ENABLED_KEY);
-    expect(isAiAgentEnabled()).toBe(false);
-    await expect(
-      aiAgentStart({ runId: "r1", providerId: "p1", question: "hi" }, () => {})
-    ).rejects.toThrow("AI_AGENT_DISABLED");
-    expect(mocks.invoke).not.toHaveBeenCalled();
+  it("runs without an opt-in and clears the old agent settings", async () => {
+    for (const legacy of [null, "0", "1"]) {
+      mocks.invoke.mockClear();
+      if (legacy)
+        for (const key of LEGACY_AI_AGENT_KEYS)
+          localStorage.setItem(key, legacy);
+      await aiAgentStart(
+        { runId: "r1", providerId: "p1", question: "hi" },
+        () => {}
+      );
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+      for (const key of LEGACY_AI_AGENT_KEYS)
+        expect(localStorage.getItem(key)).toBeNull();
+    }
   });
 
   it("starts a run with a channel that forwards events", async () => {
