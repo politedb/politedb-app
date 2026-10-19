@@ -39,7 +39,7 @@ describe("ProUpgradeDialogHost", () => {
     expect(options).toMatchObject({
       title: "Upgrade to Pro",
       primary: "Enter license key",
-      secondary: "See Pro pricing",
+      secondary: "See plans & pricing",
       cancel: "Cancel",
     });
     expect(useProUpgradeStore.getState().feature).toBeNull();
@@ -54,7 +54,7 @@ describe("ProUpgradeDialogHost", () => {
     expect(await screen.findByText("license dialog")).toBeInTheDocument();
   });
 
-  it("opens the pricing page for See Pro pricing", async () => {
+  it("opens the pricing page for See plans & pricing", async () => {
     mocks.choose.mockResolvedValue("secondary");
     render(<ProUpgradeDialogHost />);
     act(() => useProUpgradeStore.getState().open("export-masking"));

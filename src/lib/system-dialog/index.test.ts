@@ -15,7 +15,7 @@ import { chooseDialog } from "./index";
 const options = {
   title: "PoliteDB Pro",
   primary: "Enter license key",
-  secondary: "See Pro pricing",
+  secondary: "See plans & pricing",
   cancel: "Cancel",
 };
 
@@ -38,11 +38,11 @@ describe("chooseDialog", () => {
       kind: undefined,
       buttons: {
         yes: "Enter license key",
-        no: "See Pro pricing",
+        no: "See plans & pricing",
         cancel: "Cancel",
       },
     });
-    mocks.message.mockResolvedValueOnce("See Pro pricing");
+    mocks.message.mockResolvedValueOnce("See plans & pricing");
     expect(await chooseDialog("Body", options)).toBe("secondary");
   });
 

@@ -12,7 +12,7 @@ import { useProUpgradeStore } from "src/stores/proUpgrade";
 
 /**
  * Single upgrade prompt for every Pro gate, shown as a native dialog; mounted once in the
- * main layout. "Enter license key" opens the license dialog; "See Pro pricing" (only where
+ * main layout. "Enter license key" opens the license dialog; "See plans & pricing" (only where
  * external purchase is allowed) opens the pricing page.
  */
 export function ProUpgradeDialogHost() {
@@ -31,7 +31,7 @@ export function ProUpgradeDialogHost() {
           kind: "info",
           primary: "Enter license key",
           secondary: DISTRIBUTION_FEATURES.externalPurchase
-            ? "See Pro pricing"
+            ? "See plans & pricing"
             : undefined,
           cancel: "Cancel",
         }

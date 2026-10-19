@@ -18,6 +18,7 @@ import {
   trialNote,
 } from "src/components/license/TrialStatusNote";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
 
 const PRICING_URL = "https://politedb.com/pricing";
 /** Inbox for license recovery; send from the email used at purchase. */
@@ -67,6 +68,16 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
 
   const handleBuyLicense = async () => {
     await openExternalUrl(PRICING_URL);
+  };
+
+  // Direct builds open the Polar customer portal, where buyers find their keys by
+  // purchase email; App Store builds cannot open it and show the email help instead.
+  const handleLostKey = async () => {
+    if (!DISTRIBUTION_FEATURES.externalPurchase) {
+      setLostKeyHelp(true);
+      return;
+    }
+    await openExternalUrl(LICENSE_PORTAL_URL);
   };
 
   const handleOpenRecoveryMail = async () => {
@@ -212,7 +223,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
 
         <DialogFooter className="justify-between pt-1">
           {!lostKeyHelp && (
-            <Button variant="shadow" onClick={() => setLostKeyHelp(true)}>
+            <Button variant="shadow" onClick={() => void handleLostKey()}>
               Lost license key?
             </Button>
           )}

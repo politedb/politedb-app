@@ -24,6 +24,9 @@ export const PRO_FEATURE_LABELS: Record<ProFeature, string> = {
 
 export const PRICING_URL = "https://politedb.com/pricing";
 
+/** Polar customer portal: buyers sign in with their purchase email to see their keys. */
+export const LICENSE_PORTAL_URL = "https://polar.sh/politedb/portal";
+
 /** Error code thrown when a Pro-only path runs without Pro access. */
 export const PRO_REQUIRED = "PRO_REQUIRED";
 

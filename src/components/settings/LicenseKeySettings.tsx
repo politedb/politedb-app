@@ -12,6 +12,7 @@ import {
 import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
 
 const PRICING_URL = "https://politedb.com/pricing";
 const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
@@ -47,6 +48,16 @@ export function LicenseKeySettings(props: { active: boolean }) {
     if (!next) return;
     await activateLicense(next);
     setLicenseKey("");
+  }
+
+  // Direct builds open the Polar customer portal, where buyers find their keys by
+  // purchase email; App Store builds cannot open it and show the email help instead.
+  async function handleLostKey() {
+    if (!DISTRIBUTION_FEATURES.externalPurchase) {
+      setLostKeyHelp(true);
+      return;
+    }
+    await openExternalUrl(LICENSE_PORTAL_URL);
   }
 
   async function openRecoveryMail() {
@@ -107,7 +118,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
           </SettingCard>
 
           <div class="flex flex-wrap justify-between gap-2">
-            <Button variant="shadow" onClick={() => setLostKeyHelp(true)}>
+            <Button variant="shadow" onClick={() => void handleLostKey()}>
               Lost license key?
             </Button>
             <div class="flex gap-2">
