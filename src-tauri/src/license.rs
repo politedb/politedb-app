@@ -12,7 +12,6 @@ use crate::distribution::Distribution;
 use crate::file_storage as storage;
 
 const LICENSE_STATE_VERSION: u32 = 1;
-const TRIAL_DURATION_DAYS: i64 = 14;
 const TRIAL_EXPIRED_MESSAGE: &str = "Your 14-day free trial has expired.";
 
 /// Bounds for one license operation; the operation lock is held for at most `operation`.
@@ -92,12 +91,42 @@ pub struct LicenseState {
     /// The legacy trial was handed over to the license server and is never captured again.
     #[serde(default)]
     pub legacy_retired: bool,
+    /// The trial window recorded by the license server; the only trial that unlocks Pro.
+    #[serde(default)]
+    pub trial: Option<ServerTrial>,
     /// Incremented by every write of the state file.
     #[serde(default)]
     pub revision: u64,
     /// Order of this snapshot within the process; the frontend publishes only newer ones.
     #[serde(default, skip_deserializing)]
     pub snapshot_seq: u64,
+}
+
+/// A trial window as the license server recorded it (epoch ms), and when it was fetched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServerTrial {
+    pub started_at: i64,
+    pub expires_at: i64,
+    pub synced_at: i64,
+}
+
+/// Trial times the app accepts: [2026-01-01, 2100-01-01), as the license server enforces.
+const TRIAL_TIME_MIN: i64 = 1_767_225_600_000;
+const TRIAL_TIME_MAX: i64 = 4_102_444_800_000;
+const MAX_TRIAL_LENGTH_MS: i64 = 31 * 24 * 60 * 60 * 1000;
+
+impl ServerTrial {
+    /// A window inside the time domain, starting before it ends and at most 31 days long.
+    fn is_valid(&self) -> bool {
+        let in_domain = |value: i64| (TRIAL_TIME_MIN..TRIAL_TIME_MAX).contains(&value);
+        in_domain(self.started_at)
+            && in_domain(self.expires_at)
+            && self.started_at < self.expires_at
+            && self
+                .expires_at
+                .checked_sub(self.started_at)
+                .is_some_and(|length| length <= MAX_TRIAL_LENGTH_MS)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -195,12 +224,8 @@ fn parse_license_api_response(text: &str) -> Option<LicenseApiResponse> {
 }
 
 impl LicenseState {
-    /// A fresh state whose local trial starts at `now`, the same instant used to evaluate it.
-    fn inactive_at(device: &LicenseDeviceInfo, now: i64) -> Self {
-        let trial_started_at = now;
-        let trial_expires_at =
-            now.saturating_add(chrono::Duration::days(TRIAL_DURATION_DAYS).num_milliseconds());
-
+    /// A fresh state with no trial: a trial starts only once the license server records it.
+    fn inactive(device: &LicenseDeviceInfo) -> Self {
         Self {
             version: LICENSE_STATE_VERSION,
             status: "inactive".to_string(),
@@ -219,8 +244,8 @@ impl LicenseState {
             last_validated_at: None,
             seats_allowed: None,
             devices_used: None,
-            trial_started_at: Some(trial_started_at),
-            trial_expires_at: Some(trial_expires_at),
+            trial_started_at: None,
+            trial_expires_at: None,
             message: None,
             plan: None,
             pro_access: false,
@@ -228,6 +253,7 @@ impl LicenseState {
             paid_license: false,
             legacy_trial_started_at: None,
             legacy_retired: false,
+            trial: None,
             revision: 0,
             snapshot_seq: 0,
         }
@@ -257,6 +283,7 @@ fn apply_trial_policy(mut state: LicenseState, distribution: Distribution) -> Li
     }
     state.trial_started_at = None;
     state.trial_expires_at = None;
+    state.trial = None;
     if state.message.as_deref() == Some(TRIAL_EXPIRED_MESSAGE) {
         state.message = None;
     }
@@ -310,14 +337,14 @@ struct Entitlement {
     until: Option<i64>,
 }
 
-/// End of a trial that is running at `now`.
+/// End of the server-recorded trial if it is running at `now`. Trial dates kept on the
+/// device by older builds never unlock anything; they only migrate (D2b).
 fn running_trial_end(state: &LicenseState, distribution: Distribution, now: i64) -> Option<i64> {
     if !distribution.supports_local_trial() {
         return None;
     }
-    let expires_at = state.trial_expires_at?;
-    let started = state.trial_started_at.unwrap_or(i64::MIN);
-    (started <= now && now < expires_at).then_some(expires_at)
+    let trial = state.trial.filter(ServerTrial::is_valid)?;
+    (trial.started_at <= now && now < trial.expires_at).then_some(trial.expires_at)
 }
 
 /// Pro access is the union of an active paid license and a running trial; it lasts until
@@ -371,9 +398,7 @@ fn finalize_state(mut state: LicenseState, distribution: Distribution, now: i64)
 
 fn apply_local_expiry(state: &mut LicenseState, now: i64) {
     if !is_active(state) {
-        if state
-            .trial_expires_at
-            .is_some_and(|trial_expires_at| trial_expires_at <= now)
+        if state.trial.is_some_and(|trial| trial.expires_at <= now)
             && state.message.as_deref().unwrap_or("").trim().is_empty()
         {
             state.message = Some(TRIAL_EXPIRED_MESSAGE.to_string());
@@ -416,7 +441,7 @@ fn normalize_state_timestamps(state: &mut LicenseState) {
 /// Records the original start of a trial kept by an older build, once, so the first
 /// license-server sync can honour it. Never recaptured after the hand-over.
 fn capture_legacy_trial(state: &mut LicenseState) -> bool {
-    if state.legacy_retired || state.legacy_trial_started_at.is_some() {
+    if state.legacy_retired || state.legacy_trial_started_at.is_some() || state.trial.is_some() {
         return false;
     }
     let Some(started_at) = state.trial_started_at else {
@@ -563,7 +588,6 @@ fn read_state_locked(
     path: &Path,
     device: &LicenseDeviceInfo,
     distribution: Distribution,
-    now: i64,
 ) -> Result<(LicenseState, bool), LicenseOpError> {
     let existing =
         storage::json_read_if_exists::<LicenseState>(path).map_err(LicenseOpError::storage)?;
@@ -580,7 +604,7 @@ fn read_state_locked(
             let migrated = state.version < LICENSE_STATE_VERSION;
             (state, migrated)
         }
-        None => (LicenseState::inactive_at(device, now), true),
+        None => (LicenseState::inactive(device), true),
     };
     let mut state = state.with_device(device);
     normalize_state_timestamps(&mut state);
@@ -617,7 +641,7 @@ fn load_at(
     now: i64,
 ) -> Result<LicenseState, LicenseOpError> {
     let _file = lock_file();
-    let (state, dirty) = read_state_locked(path, device, distribution, now)?;
+    let (state, dirty) = read_state_locked(path, device, distribution)?;
     let state = if dirty {
         let revision = state.revision;
         write_state_locked(path, finalize_state(state, distribution, now), revision)?
@@ -634,6 +658,7 @@ fn carry_device_fields(next: &mut LicenseState, disk: &LicenseState) {
     next.trial_expires_at = disk.trial_expires_at;
     next.legacy_trial_started_at = disk.legacy_trial_started_at;
     next.legacy_retired = disk.legacy_retired;
+    next.trial = disk.trial;
 }
 
 /// Re-reads disk and writes `build(disk)` in one file-lock section, keeping device fields.
@@ -645,7 +670,7 @@ fn commit_at(
     build: impl FnOnce(&LicenseState) -> LicenseState,
 ) -> Result<LicenseState, LicenseOpError> {
     let _file = lock_file();
-    let (disk, _) = read_state_locked(path, device, distribution, now)?;
+    let (disk, _) = read_state_locked(path, device, distribution)?;
     let mut next = build(&disk).with_device(device);
     carry_device_fields(&mut next, &disk);
     let written = write_state_locked(path, finalize_state(next, distribution, now), disk.revision)?;
@@ -727,7 +752,7 @@ fn clear_at(
 ) -> Result<LicenseState, LicenseOpError> {
     let now = now_ms();
     commit_at(path, device, distribution, now, |_| {
-        LicenseState::inactive_at(device, now)
+        LicenseState::inactive(device)
     })
 }
 
@@ -819,6 +844,7 @@ fn normalize_api_state(
         paid_license: false,
         legacy_trial_started_at: None,
         legacy_retired: false,
+        trial: None,
         revision: 0,
         snapshot_seq: 0,
     };
@@ -879,18 +905,24 @@ async fn read_capped(mut response: reqwest::Response) -> Result<Vec<u8>, License
     Ok(body)
 }
 
+fn parse_api_payload(text: &str) -> Result<LicenseApiResponse, LicenseOpError> {
+    parse_license_api_response(text).ok_or_else(malformed_error)
+}
+
 /// The server's own message for a failed request, shortened.
 fn server_message(payload: &LicenseApiResponse) -> Option<String> {
     pick_string(&[payload.message.clone(), payload.error.clone()])
         .map(|message| message.chars().take(MAX_SERVER_MESSAGE_CHARS).collect())
 }
 
-async fn post_license_api(
+/// Posts `body` to the license API (trying the fallback routes) and returns the body of
+/// the first successful response.
+async fn post_license_api<B: Serialize>(
     api_base: &str,
     action: &str,
-    body: &LicenseApiRequest,
+    body: &B,
     limits: HttpLimits,
-) -> Result<LicenseApiResponse, LicenseOpError> {
+) -> Result<String, LicenseOpError> {
     let base = api_base.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err(LicenseOpError::new(
@@ -906,12 +938,12 @@ async fn post_license_api(
     .unwrap_or_else(|_| Err(timeout_error()))
 }
 
-async fn post_candidates(
+async fn post_candidates<B: Serialize>(
     base: &str,
     action: &str,
-    body: &LicenseApiRequest,
+    body: &B,
     limits: HttpLimits,
-) -> Result<LicenseApiResponse, LicenseOpError> {
+) -> Result<String, LicenseOpError> {
     let client = reqwest::Client::builder()
         .connect_timeout(limits.connect)
         .timeout(limits.attempt)
@@ -942,19 +974,19 @@ async fn post_candidates(
             state: None,
         };
 
-        match parse_license_api_response(&text) {
-            Some(payload) if status.is_success() => return Ok(payload),
-            Some(_) if status == reqwest::StatusCode::NOT_FOUND => continue,
-            Some(payload) => return Err(http_error(server_message(&payload))),
-            None if status == reqwest::StatusCode::NOT_FOUND
-                || text.contains("Cannot POST")
-                || text.contains("<!DOCTYPE html") =>
-            {
-                continue
-            }
-            None if !status.is_success() => return Err(http_error(None)),
-            None => return Err(malformed_error()),
+        // A missing route (404, a framework's "Cannot POST" or an HTML page): try the next.
+        if status == reqwest::StatusCode::NOT_FOUND
+            || text.contains("Cannot POST")
+            || text.contains("<!DOCTYPE html")
+        {
+            continue;
         }
+        if status.is_success() {
+            return Ok(text.into_owned());
+        }
+        return Err(http_error(
+            parse_license_api_response(&text).and_then(|payload| server_message(&payload)),
+        ));
     }
 
     Err(LicenseOpError {
@@ -1029,6 +1061,7 @@ async fn activate_at(
     };
     let payload = post_license_api(api_base, "activate", &request, target.limits)
         .await
+        .and_then(|text| parse_api_payload(&text))
         .map_err(|error| {
             with_current_state(error, target.path, target.device, target.distribution)
         })?;
@@ -1056,6 +1089,7 @@ async fn refresh_at(
     };
     let payload = post_license_api(api_base, "validate", &request, target.limits)
         .await
+        .and_then(|text| parse_api_payload(&text))
         .map_err(|error| {
             with_current_state(error, target.path, target.device, target.distribution)
         })?;
@@ -1082,12 +1116,89 @@ async fn deactivate_at(
         activation_token: current.activation_token.clone(),
         device: target.device.clone(),
     };
+    // A successful reply must still be a license response before anything is cleared.
     post_license_api(api_base, "deactivate", &request, target.limits)
         .await
+        .and_then(|text| parse_api_payload(&text))
         .map_err(|error| {
             with_current_state(error, target.path, target.device, target.distribution)
         })?;
     clear_at(target.path, target.device, target.distribution)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TrialRequest {
+    product: String,
+    device: LicenseDeviceInfo,
+    /// Start of a trial an older build kept on this device; the server uses it only when it
+    /// creates the trial, so the trial keeps its remaining days (D2d).
+    #[serde(rename = "legacyStartedAt", skip_serializing_if = "Option::is_none")]
+    legacy_started_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TrialResponse {
+    #[serde(rename = "trialStartedAt")]
+    trial_started_at: i64,
+    #[serde(rename = "trialExpiresAt")]
+    trial_expires_at: i64,
+}
+
+/// Fetches this device's trial window from the license server and stores it. The window
+/// replaces any earlier one, and the legacy local trial is retired in the same write. A
+/// failed sync changes nothing, so a known window keeps working offline.
+async fn trial_sync_at(
+    target: &OpTarget<'_>,
+    api_base: &str,
+    product: String,
+) -> Result<LicenseState, LicenseOpError> {
+    if !target.distribution.supports_local_trial() {
+        return load_at(target.path, target.device, target.distribution, now_ms());
+    }
+    let _op = target.lock.lock().await;
+    let current = load_at(target.path, target.device, target.distribution, now_ms())?;
+    let request = TrialRequest {
+        product,
+        device: target.device.clone(),
+        legacy_started_at: current
+            .legacy_trial_started_at
+            .filter(|_| !current.legacy_retired),
+    };
+    let window = post_license_api(api_base, "trial", &request, target.limits)
+        .await
+        .and_then(|text| {
+            let response: TrialResponse =
+                serde_json::from_str(&text).map_err(|_| malformed_error())?;
+            let window = ServerTrial {
+                started_at: response.trial_started_at,
+                expires_at: response.trial_expires_at,
+                synced_at: now_ms(),
+            };
+            if window.is_valid() {
+                Ok(window)
+            } else {
+                Err(malformed_error())
+            }
+        })
+        .map_err(|error| {
+            with_current_state(error, target.path, target.device, target.distribution)
+        })?;
+
+    let now = now_ms();
+    let _file = lock_file();
+    let (mut disk, _) = read_state_locked(target.path, target.device, target.distribution)?;
+    let revision = disk.revision;
+    disk.trial = Some(window);
+    disk.legacy_retired = true;
+    disk.legacy_trial_started_at = None;
+    disk.trial_started_at = None;
+    disk.trial_expires_at = None;
+    let written = write_state_locked(
+        target.path,
+        finalize_state(disk, target.distribution, now),
+        revision,
+    )?;
+    Ok(snapshot(written, target.distribution, now))
 }
 
 fn app_target<'a>(path: &'a Path, device: &'a LicenseDeviceInfo) -> OpTarget<'a> {
@@ -1119,6 +1230,16 @@ pub async fn license_refresh(
     let path = state_path(app)?;
     let device = license_device_info();
     refresh_at(&app_target(&path, &device), &api_base, product).await
+}
+
+pub async fn license_trial_sync(
+    app: &tauri::AppHandle,
+    api_base: String,
+    product: String,
+) -> Result<LicenseState, LicenseOpError> {
+    let path = state_path(app)?;
+    let device = license_device_info();
+    trial_sync_at(&app_target(&path, &device), &api_base, product).await
 }
 
 pub async fn license_deactivate(
@@ -1172,7 +1293,7 @@ mod tests {
         LicenseState {
             trial_started_at: None,
             trial_expires_at: None,
-            ..LicenseState::inactive_at(&test_device(), NOW)
+            ..LicenseState::inactive(&test_device())
         }
     }
 
@@ -1185,12 +1306,25 @@ mod tests {
         }
     }
 
+    /// A state holding a server-recorded 14-day trial that ends at `trial_expires_at`.
     fn with_trial(status: &str, trial_expires_at: i64) -> LicenseState {
         LicenseState {
             status: status.to_string(),
-            trial_started_at: Some(trial_expires_at - 14 * DAY),
-            trial_expires_at: Some(trial_expires_at),
-            ..LicenseState::inactive_at(&test_device(), NOW)
+            trial: Some(ServerTrial {
+                started_at: trial_expires_at - 14 * DAY,
+                expires_at: trial_expires_at,
+                synced_at: trial_expires_at - 14 * DAY,
+            }),
+            ..LicenseState::inactive(&test_device())
+        }
+    }
+
+    /// A state holding only a trial an older build kept on the device.
+    fn with_legacy_trial(started_at: i64) -> LicenseState {
+        LicenseState {
+            trial_started_at: Some(started_at),
+            trial_expires_at: Some(started_at + 14 * DAY),
+            ..LicenseState::inactive(&test_device())
         }
     }
 
@@ -1243,7 +1377,7 @@ mod tests {
         let previous = LicenseState {
             plan: Some("pro".to_string()),
             plan_name: Some("Ultimate".to_string()),
-            ..LicenseState::inactive_at(&device, NOW)
+            ..LicenseState::inactive(&device)
         };
         let state = normalize_api_state(empty_payload(), &device, Some(&previous), None);
         assert_eq!(state.plan, None);
@@ -1268,7 +1402,7 @@ mod tests {
     #[test]
     fn app_store_strips_fresh_and_persisted_trials() {
         let fresh = apply_trial_policy(
-            LicenseState::inactive_at(&test_device(), NOW),
+            LicenseState::inactive(&test_device()),
             Distribution::AppStore,
         );
         assert_eq!(fresh.trial_started_at, None);
@@ -1434,40 +1568,46 @@ mod tests {
         assert_eq!(next.pro_access_until, None);
     }
 
+    /// Writes `state` as the license file, as a previous run left it.
+    fn seed(path: &Path, state: &LicenseState) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(state).unwrap()).unwrap();
+    }
+
     #[test]
     fn load_creates_once_and_orders_every_snapshot() {
         let path = temp_path();
-        // Fresh states start a real trial at the wall clock.
         let now = now_ms();
         let device = test_device();
+        // A fresh install has no trial until the license server records one (D2b).
         let first = load_at(&path, &device, Distribution::Direct, now).unwrap();
         let second = load_at(&path, &device, Distribution::Direct, now).unwrap();
-        // The fresh state is written once; a plain re-read does not write.
         assert_eq!(first.revision, 1);
         assert_eq!(second.revision, 1);
-        assert_eq!(first.trial_started_at, second.trial_started_at);
+        assert_eq!(first.trial, None);
+        assert_eq!(first.trial_started_at, None);
+        assert!(!first.pro_access);
         assert!(second.snapshot_seq > first.snapshot_seq);
-        // A re-read after the trial ended: same revision, newer snapshot, access gone.
-        let later = load_at(
-            &path,
-            &device,
-            Distribution::Direct,
-            first.trial_expires_at.unwrap(),
-        )
-        .unwrap();
+
+        // A re-read after the server trial ended: same revision, newer snapshot, locked.
+        let mut with_window = with_trial("inactive", now + DAY);
+        with_window.revision = 1;
+        seed(&path, &with_window);
+        let running = load_at(&path, &device, Distribution::Direct, now).unwrap();
+        let later = load_at(&path, &device, Distribution::Direct, now + DAY).unwrap();
+        assert!(running.pro_access);
+        assert_eq!(running.pro_access_until, Some(now + DAY));
         assert_eq!(later.revision, 1);
-        assert!(later.snapshot_seq > second.snapshot_seq);
-        assert!(first.pro_access);
+        assert!(later.snapshot_seq > running.snapshot_seq);
         assert!(!later.pro_access);
     }
 
     #[test]
     fn malformed_expiry_survives_save_and_reload() {
         let path = temp_path();
-        // Fresh states start a real trial at the wall clock.
         let now = now_ms();
         let device = test_device();
-        load_at(&path, &device, Distribution::Direct, now).unwrap();
+        seed(&path, &with_trial("inactive", now + DAY));
         let saved = commit_at(&path, &device, Distribution::Direct, now, |disk| {
             LicenseState {
                 status: "active".to_string(),
@@ -1481,12 +1621,12 @@ mod tests {
         let reloaded = load_at(&path, &device, Distribution::Direct, now).unwrap();
         assert_eq!(reloaded.expires_at.as_deref(), Some("garbage"));
         assert!(!reloaded.paid_license);
-        // The trial still counts.
+        // The server trial still counts.
         assert!(reloaded.pro_access);
     }
 
     fn write_legacy_file(path: &Path, started_seconds: i64) {
-        let mut legacy = with_trial("inactive", 0);
+        let mut legacy = with_legacy_trial(0);
         legacy.trial_started_at = Some(started_seconds);
         legacy.trial_expires_at = Some(started_seconds + 14 * 86_400);
         let mut value = serde_json::to_value(&legacy).unwrap();
@@ -1501,6 +1641,7 @@ mod tests {
             "revision",
             "snapshot_seq",
             "plan",
+            "trial",
         ] {
             object.remove(key);
         }
@@ -1524,7 +1665,7 @@ mod tests {
             LicenseState {
                 legacy_trial_started_at: Some(NOW),
                 trial_started_at: Some(NOW),
-                ..LicenseState::inactive_at(&device, NOW)
+                ..LicenseState::inactive(&device)
             }
         })
         .unwrap();
@@ -1538,12 +1679,17 @@ mod tests {
 
     #[test]
     fn retired_legacy_trial_is_never_recaptured() {
-        let mut state = with_trial("inactive", NOW);
+        let mut state = with_legacy_trial(NOW - DAY);
         state.legacy_retired = true;
         assert!(!capture_legacy_trial(&mut state));
         assert_eq!(state.legacy_trial_started_at, None);
 
+        // Nothing is captured once a server trial exists.
         let mut state = with_trial("inactive", NOW);
+        state.trial_started_at = Some(NOW - DAY);
+        assert!(!capture_legacy_trial(&mut state));
+
+        let mut state = with_legacy_trial(NOW - DAY);
         assert!(capture_legacy_trial(&mut state));
         let first = state.legacy_trial_started_at;
         state.trial_started_at = Some(NOW);
@@ -1619,7 +1765,7 @@ mod tests {
         let path = temp_path();
         let device = test_device();
         let now = now_ms();
-        load_at(&path, &device, Distribution::Direct, now).unwrap();
+        seed(&path, &with_trial("inactive", now + DAY));
         for invalid in ["", "garbage"] {
             commit_at(&path, &device, Distribution::Direct, now, |disk| {
                 let mut payload = empty_payload();
@@ -1667,8 +1813,7 @@ mod tests {
     }
 
     fn write_versioned_file(path: &Path, version: u32, started_ms: i64) {
-        let mut state = with_trial("inactive", started_ms + 14 * DAY);
-        state.trial_started_at = Some(started_ms);
+        let mut state = with_legacy_trial(started_ms);
         state.license_key = Some("OLD-KEY".to_string());
         state.version = version;
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1985,6 +2130,394 @@ mod tests {
         assert!(validate.1.get("licenseKey").is_none());
         assert!(validate.1.get("activationToken").is_none());
         assert_eq!(refreshed.license_key, None);
+    }
+
+    fn trial_reply(start: i64, end: i64) -> serde_json::Value {
+        serde_json::json!({ "trialStartedAt": start, "trialExpiresAt": end })
+    }
+
+    #[test]
+    fn a_trial_kept_on_the_device_never_unlocks_pro() {
+        let running = with_legacy_trial(now_ms() - DAY);
+        let state = finalize_state(running, Distribution::Direct, now_ms());
+        assert!(!state.pro_access);
+        assert_eq!(state.pro_access_until, None);
+    }
+
+    #[test]
+    fn server_trial_windows_are_validated() {
+        let window = |start: i64, end: i64| ServerTrial {
+            started_at: start,
+            expires_at: end,
+            synced_at: NOW,
+        };
+        assert!(window(NOW, NOW + 14 * DAY).is_valid());
+        assert!(window(NOW, NOW + 31 * DAY).is_valid());
+        assert!(!window(NOW, NOW + 31 * DAY + 1).is_valid());
+        assert!(!window(NOW, NOW).is_valid());
+        assert!(!window(NOW, NOW - 1).is_valid());
+        assert!(!window(TRIAL_TIME_MIN - 1, NOW).is_valid());
+        assert!(!window(TRIAL_TIME_MAX - DAY, TRIAL_TIME_MAX).is_valid());
+        assert!(!window(i64::MIN, i64::MAX).is_valid());
+        // An invalid stored window never unlocks Pro.
+        let mut state = no_trial();
+        state.trial = Some(window(NOW - DAY, NOW + 40 * DAY));
+        assert!(!direct(&state, NOW).pro_access);
+    }
+
+    #[tokio::test]
+    async fn a_trial_sync_stores_the_server_window_and_retires_the_legacy_trial() {
+        let now = now_ms();
+        let legacy_start = now - 5 * DAY;
+        // Like the server: the first request fixes the window, later ones read it.
+        let recorded = Arc::new(Mutex::new(None::<i64>));
+        let handler: Handler = Arc::new(move |_, body| {
+            let mut recorded = recorded.lock().unwrap();
+            let start =
+                *recorded.get_or_insert_with(|| body["legacyStartedAt"].as_i64().unwrap_or(now));
+            json(0, trial_reply(start, start + 14 * DAY))
+        });
+        let (base, seen) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        seed(&path, &with_legacy_trial(legacy_start));
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+
+        let synced = trial_sync_at(&target, &base, "politedb".into())
+            .await
+            .unwrap();
+        let request = seen.lock().unwrap()[0].clone();
+        assert!(request.0.ends_with("/trial"));
+        assert_eq!(request.1["legacyStartedAt"], legacy_start);
+        assert_eq!(request.1["product"], "politedb");
+        let trial = synced.trial.unwrap();
+        assert_eq!(
+            (trial.started_at, trial.expires_at),
+            (legacy_start, legacy_start + 14 * DAY)
+        );
+        assert!(synced.pro_access);
+        assert_eq!(synced.pro_access_until, Some(legacy_start + 14 * DAY));
+        // The legacy trial is retired in the same write.
+        assert!(synced.legacy_retired);
+        assert_eq!(synced.legacy_trial_started_at, None);
+        assert_eq!(synced.trial_started_at, None);
+        assert_eq!(synced.trial_expires_at, None);
+
+        // A later sync sends no legacy start; clear and reload keep the trial.
+        trial_sync_at(&target, &base, "politedb".into())
+            .await
+            .unwrap();
+        assert!(seen.lock().unwrap()[1].1.get("legacyStartedAt").is_none());
+        let cleared = {
+            let _op = lock.lock().await;
+            clear_at(&path, &device, Distribution::Direct).unwrap()
+        };
+        assert_eq!(
+            cleared.trial,
+            Some(trial).map(|t| ServerTrial {
+                synced_at: cleared.trial.unwrap().synced_at,
+                ..t
+            })
+        );
+        let reloaded = load_at(&path, &device, Distribution::Direct, now).unwrap();
+        assert!(reloaded.pro_access);
+        assert_eq!(reloaded.legacy_trial_started_at, None);
+    }
+
+    #[tokio::test]
+    async fn a_failed_trial_sync_keeps_the_known_window() {
+        let now = now_ms();
+        let replies = Arc::new(Mutex::new(vec![
+            Reply::Json {
+                delay_ms: 0,
+                status: 500,
+                body: "{}".into(),
+                headers: vec![],
+            },
+            Reply::Json {
+                delay_ms: 0,
+                status: 429,
+                body: r#"{"error":"RATE_LIMITED"}"#.into(),
+                headers: vec![("Retry-After", "60".into())],
+            },
+            Reply::Json {
+                delay_ms: 0,
+                status: 400,
+                body: r#"{"error":"TRIAL_PRODUCT_UNSUPPORTED"}"#.into(),
+                headers: vec![],
+            },
+            json(0, serde_json::json!({ "unexpected": true })),
+            json(0, trial_reply(now, now + 60 * DAY)),
+        ]));
+        let queue = replies.clone();
+        let handler: Handler = Arc::new(move |_, _| queue.lock().unwrap().remove(0));
+        let (base, _) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        let known = with_trial("inactive", now + DAY);
+        seed(&path, &known);
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+        let expected = [
+            (LicenseErrorKind::Http, Some(500)),
+            (LicenseErrorKind::Http, Some(429)),
+            (LicenseErrorKind::Http, Some(400)),
+            (LicenseErrorKind::Malformed, None),
+            (LicenseErrorKind::Malformed, None), // a 60-day window is rejected
+        ];
+        for (kind, status) in expected {
+            let error = trial_sync_at(&target, &base, "politedb".into())
+                .await
+                .unwrap_err();
+            assert_eq!((error.kind, error.status), (kind, status));
+            let state = error.state.expect("snapshot attached");
+            assert_eq!(state.trial, known.trial);
+            assert!(state.pro_access);
+        }
+        // No server at all: offline keeps the window too.
+        let offline = trial_sync_at(&target, "http://127.0.0.1:9", "politedb".into())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            offline.kind,
+            LicenseErrorKind::Network | LicenseErrorKind::Timeout
+        ));
+        assert_eq!(offline.state.unwrap().trial, known.trial);
+    }
+
+    #[tokio::test]
+    async fn a_malformed_deactivation_reply_clears_nothing() {
+        let now = now_ms();
+        let replies = Arc::new(Mutex::new(vec![
+            json(0, activation("token-K")),
+            Reply::Json {
+                delay_ms: 0,
+                status: 200,
+                body: "not json".into(),
+                headers: vec![],
+            },
+            Reply::Json {
+                delay_ms: 0,
+                status: 200,
+                body: "".into(),
+                headers: vec![],
+            },
+            json(
+                0,
+                serde_json::json!({ "status": "inactive", "plan": "free" }),
+            ),
+        ]));
+        let queue = replies.clone();
+        let handler: Handler = Arc::new(move |_, _| queue.lock().unwrap().remove(0));
+        let (base, _) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        seed(&path, &with_trial("inactive", now + DAY));
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+        activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        for _ in 0..2 {
+            let error = deactivate_at(&target, &base, "p".into()).await.unwrap_err();
+            assert_eq!(error.kind, LicenseErrorKind::Malformed);
+            assert_eq!(std::fs::read(&path).unwrap(), before, "nothing written");
+            let state = error.state.unwrap();
+            assert_eq!(state.license_key.as_deref(), Some("K"));
+            assert!(state.paid_license && state.trial.is_some());
+        }
+
+        // A proper reply clears the credentials and keeps the server trial.
+        let cleared = deactivate_at(&target, &base, "p".into()).await.unwrap();
+        assert_eq!(cleared.license_key, None);
+        assert!(!cleared.paid_license);
+        assert!(cleared.trial.is_some());
+        assert!(cleared.pro_access, "the running trial still counts");
+    }
+
+    #[tokio::test]
+    async fn the_trial_route_is_found_after_a_missing_prefixed_route() {
+        let now = now_ms();
+        let handler: Handler = Arc::new(move |path, _| {
+            if path.contains("/licenses/") {
+                Reply::Json {
+                    delay_ms: 0,
+                    status: 404,
+                    body: r#"{"error":"Cannot POST"}"#.into(),
+                    headers: vec![],
+                }
+            } else {
+                json(0, trial_reply(now, now + 14 * DAY))
+            }
+        });
+        let (base, seen) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+        let synced = trial_sync_at(&target, &base, "politedb".into())
+            .await
+            .unwrap();
+        assert!(synced.trial.is_some());
+        let paths: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                "/api/v1/licenses/trial".to_string(),
+                "/api/v1/trial".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_legacy_trial_survives_every_operation_until_the_server_accepts_it() {
+        let now = now_ms();
+        let legacy_start = now - 20 * DAY; // exhausted
+                                           // Sync attempts: 503, malformed, then success (the server honours the start).
+        let trial_replies = Arc::new(Mutex::new(vec![
+            Reply::Json {
+                delay_ms: 0,
+                status: 503,
+                body: r#"{"error":"TRIAL_UNAVAILABLE"}"#.into(),
+                headers: vec![],
+            },
+            json(0, serde_json::json!({ "trialStartedAt": "soon" })),
+        ]));
+        let queue = trial_replies.clone();
+        let handler: Handler = Arc::new(move |path, body| {
+            if path.ends_with("/trial") {
+                let mut queue = queue.lock().unwrap();
+                if queue.is_empty() {
+                    let start = body["legacyStartedAt"].as_i64().unwrap_or(now);
+                    return json(80, trial_reply(start, start + 14 * DAY));
+                }
+                return queue.remove(0);
+            }
+            if path.ends_with("/deactivate") {
+                return json(
+                    0,
+                    serde_json::json!({ "status": "inactive", "plan": "free" }),
+                );
+            }
+            json(0, activation("token-K"))
+        });
+        let (base, seen) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        write_legacy_file(&path, legacy_start / 1_000);
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+        let legacy_ms = (legacy_start / 1_000) * 1_000;
+
+        activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        refresh_at(&target, &base, "p".into()).await.unwrap();
+        deactivate_at(&target, &base, "p".into()).await.unwrap();
+        let reloaded = load_at(&path, &device, Distribution::Direct, now).unwrap();
+        assert_eq!(reloaded.legacy_trial_started_at, Some(legacy_ms));
+        assert!(!reloaded.pro_access, "a legacy trial never grants access");
+
+        for _ in 0..2 {
+            trial_sync_at(&target, &base, "politedb".into())
+                .await
+                .unwrap_err();
+            let state = load_at(&path, &device, Distribution::Direct, now).unwrap();
+            assert_eq!(state.legacy_trial_started_at, Some(legacy_ms));
+            assert!(!state.legacy_retired);
+        }
+        let synced = trial_sync_at(&target, &base, "politedb".into())
+            .await
+            .unwrap();
+
+        let trial_bodies: Vec<serde_json::Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p.ends_with("/trial"))
+            .map(|(_, b)| b.clone())
+            .collect();
+        assert_eq!(trial_bodies.len(), 3);
+        for body in &trial_bodies {
+            assert_eq!(body["legacyStartedAt"], legacy_ms);
+        }
+        let trial = synced.trial.unwrap();
+        assert_eq!(trial.started_at, legacy_ms);
+        assert!(!synced.pro_access, "an exhausted trial stays exhausted");
+        assert!(synced.legacy_retired);
+        assert_eq!(synced.legacy_trial_started_at, None);
+    }
+
+    #[tokio::test]
+    async fn the_app_store_never_syncs_a_trial() {
+        let handler: Handler = Arc::new(|_, _| json(0, trial_reply(NOW, NOW + DAY)));
+        let (base, seen) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        let lock = tokio::sync::Mutex::new(());
+        let target = OpTarget {
+            distribution: Distribution::AppStore,
+            ..target(&lock, &path, &device)
+        };
+        let state = trial_sync_at(&target, &base, "politedb".into())
+            .await
+            .unwrap();
+        assert!(seen.lock().unwrap().is_empty());
+        assert_eq!(state.trial, None);
+        assert!(state.pro_access);
+    }
+
+    #[tokio::test]
+    async fn trial_sync_and_activation_keep_each_others_fields() {
+        let now = now_ms();
+        let handler: Handler = Arc::new(move |path, body| {
+            if path.ends_with("/trial") {
+                json(120, trial_reply(now, now + 14 * DAY))
+            } else {
+                let key = body["licenseKey"].as_str().unwrap_or("").to_string();
+                json(120, activation(&format!("token-{key}")))
+            }
+        });
+        let (base, _) = server(handler).await;
+        for trial_first in [true, false] {
+            let path = temp_path();
+            let device = test_device();
+            let lock = tokio::sync::Mutex::new(());
+            let target = target(&lock, &path, &device);
+            let sync = trial_sync_at(&target, &base, "politedb".into());
+            let activate = activate_at(&target, &base, "politedb".into(), "K".into());
+            if trial_first {
+                let (a, b) = tokio::join!(sync, async {
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    activate.await
+                });
+                a.unwrap();
+                b.unwrap();
+            } else {
+                let (a, b) = tokio::join!(activate, async {
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    sync.await
+                });
+                a.unwrap();
+                b.unwrap();
+            }
+            let disk = load_at(&path, &device, Distribution::Direct, now).unwrap();
+            assert_eq!(
+                disk.license_key.as_deref(),
+                Some("K"),
+                "trial_first={trial_first}"
+            );
+            assert!(disk.trial.is_some(), "trial_first={trial_first}");
+            assert!(disk.paid_license && disk.pro_access);
+        }
     }
 
     #[tokio::test]

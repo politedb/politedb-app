@@ -23,6 +23,7 @@ export const CMD = {
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",
   licenseStateClear: "license_state_clear",
+  licenseTrialSync: "license_trial_sync",
   licenseActivate: "license_activate",
   licenseRefresh: "license_refresh",
   licenseDeactivate: "license_deactivate",

@@ -5,6 +5,10 @@ import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import {
+  TrialStatusNote,
+  trialNote,
+} from "src/components/license/TrialStatusNote";
 import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
@@ -25,6 +29,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
     refresh: refreshLicense,
     deactivate: deactivateLicense,
     clearError: clearLicenseError,
+    trialSync: { status: trialSyncStatus },
   } = useLicenseStore();
 
   useEffect(() => {
@@ -56,12 +61,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
   }
 
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
-  const trialExpiresAt =
-    typeof licenseState?.trial_expires_at === "number"
-      ? licenseState.trial_expires_at
-      : null;
-  const isTrialExpired =
-    trialExpiresAt != null && trialExpiresAt <= Date.now() && !isActive;
+  const trial = trialNote(licenseState ?? null, trialSyncStatus);
   const daysUntilExpires = formatDaysUntil(licenseState?.expires_at);
 
   return (
@@ -101,19 +101,8 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 placeholder="PLD-XXXX-XXXX-XXXX-XXXX-XXXX"
               />
             </FieldRow>
-            {trialExpiresAt ? (
-              <div
-                class={cn(
-                  "rounded-b-xl px-3 py-2 text-sm",
-                  isTrialExpired
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-slate-50 text-slate-700"
-                )}
-              >
-                {isTrialExpired
-                  ? `Free trial expired on ${formatDateTime(trialExpiresAt)}.`
-                  : `Free trial ends on ${formatDateTime(trialExpiresAt)}.`}
-              </div>
+            {trial ? (
+              <TrialStatusNote note={trial} className="rounded-b-xl" />
             ) : null}
           </SettingCard>
 
@@ -141,6 +130,9 @@ export function LicenseKeySettings(props: { active: boolean }) {
         </div>
       ) : (
         <div class="space-y-3">
+          {trial ? (
+            <TrialStatusNote note={trial} className="rounded-xl" />
+          ) : null}
           <SettingCard class="text-sm [&>div>div]:last:pb-4">
             <FieldRow label="Managed by email:">
               <div class="text-neutral-700">

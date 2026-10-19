@@ -2,7 +2,7 @@
 
 ## Status
 
-APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) committed on `politedb-backend` branch `feat/trial-endpoint` (Codex: VERIFIED WITH LIMITATIONS after 2 rounds; not deployed). Phase 3 in progress.
+APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) committed on `politedb-backend` branch `feat/trial-endpoint` (Codex: VERIFIED WITH LIMITATIONS after 2 rounds; not deployed). Phase 3 committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Next: Claude /security-review, backend push/deploy, then release (D9).
 
 ## Task
 
@@ -864,6 +864,101 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
 **Verification:**
 - 6 files / 86 tests pass with `TEST_POSTGRES_URL` set to the throwaway Postgres.
 - `tsc` is clean, and `git diff --check` is clean.
+
+## Phase 3 — Implementation evidence (Claude, 2026-10-19)
+
+**App, branch `feat/pro-gating`, uncommitted.**
+
+**Rust (`src-tauri/src/license.rs`, `commands/license.rs`, `main.rs`):**
+- **Server trial (V1, D2b):**
+  - `LicenseState.trial: Option<ServerTrial { started_at, expires_at, synced_at }>` is the only trial that unlocks Pro.
+  - `ServerTrial::is_valid` requires `[2026-01-01, 2100-01-01)`, a start before the end and a length of at most 31 days (checked subtraction). An invalid stored window never unlocks.
+  - `LicenseState::inactive` no longer creates a local trial, so a fresh install is Free until the server answers.
+  - The legacy `trial_started_at` / `trial_expires_at` never grant access; they only migrate.
+  - The App Store policy also strips `trial`.
+- **Sync (A2, V2, V3, W1):**
+  - New command `license_trial_sync(apiBase, product)` → `trial_sync_at`. On the App Store it returns the current state with no request.
+  - It holds the operation lock and posts `{ product, device, legacyStartedAt? }` to the `trial` action through the shared fallback candidates and HTTP limits.
+  - The response must parse and pass `is_valid`; otherwise the error is `Malformed`.
+  - On success one file-lock write stores `trial`, sets `legacy_retired`, and clears `legacy_trial_started_at`, `trial_started_at` and `trial_expires_at`.
+  - Every failure writes nothing and returns the current snapshot.
+  - Legacy capture now also stops once a server trial exists.
+  - `carry_device_fields` carries `trial`, so activate, refresh, save and clear keep it.
+- **Shared POST.** `post_license_api` is now generic over the request and returns the body of the first successful response. License actions parse it into `LicenseApiResponse`; the trial action parses `TrialResponse`. The 404, HTML and "Cannot POST" route fallback and the typed errors are unchanged.
+
+**Frontend:**
+- **Wrappers.** `licenseTrialSync` wrapper and `CMD.licenseTrialSync`. `ServerTrial` and `LicenseState.trial` types. `DistributionFeatures.serverTrial` is true only for Direct.
+- **Scheduler (`stores/license.ts`, V4, W3).** A module singleton:
+  - **Triggers:** load, focus or visibility (at most once per 10 min), online, and its own wake-up timer.
+  - **Single-flight:** one request at a time.
+  - **Success:** the next attempt is in 6 h; status `verified` with `lastOkAt`.
+  - **Failure:** backoff of 30 s → 2 min → 10 min → 30 min.
+    - 429: `max(Retry-After, 60 s)`.
+    - 400: syncing stops until the app restarts.
+    - Network, timeout or 404: an `online` event retries at once.
+  - **Known window:** a failure publishes the snapshot the error carries, so the stored window stays.
+  - **Lifetime:** the scheduler is independent of license re-reads, so an expiry re-read never cancels it.
+  - The API base is read at call time (`licenseApiBase()`).
+- **Presentation (V5).** `TrialStatusNote` / `trialNote` is used by `LicenseDialog` and `LicenseKeySettings`:
+  - "Free trial: N days left (ends DATE)";
+  - "Free trial ended on DATE";
+  - "Free trial not activated yet. Connect to the internet to start it";
+  - a muted "Couldn't reach the license server." when the status is `unavailable`;
+  - nothing for an active license or for the App Store.
+
+**Tests:**
+- **Rust (`license::tests`, 37):**
+  - `a_trial_kept_on_the_device_never_unlocks_pro` and `server_trial_windows_are_validated` (bounds, 31 days, overflow, invalid stored window);
+  - with loopback:
+    - a sync stores the window, sends the legacy start once, retires the legacy fields in the same write, and keeps the trial across clear and reload;
+    - a failed sync keeps the known window for 500, 429, 400, malformed, a 60-day window and offline, and attaches the snapshot each time;
+    - the App Store makes no request;
+    - sync and activation in both orders keep each other's fields.
+  - The earlier tests now use server trials: a fresh install is Free, the expiry re-read uses a server window, and legacy files are migration-only.
+- **Frontend:**
+  - `stores/license.trialSync.test.ts` (8): a sync on load then 6 h later; focus and online after a success do nothing; single-flight; backoff retries with no event; an immediate retry on online after a network failure; 429 `Retry-After`; 400 suppression that survives reloads; a failure keeps the known trial; the retry timer survives a re-read.
+  - `TrialStatusNote.test.ts` (5).
+
+**Verification:**
+- **Rust:**
+  - `cargo test --locked`: 432 passed / 15 ignored, the same with `--features app-store`.
+  - Clippy: 8 (default) and 9 (app-store), the baseline.
+- **Frontend:**
+  - Vitest with `VITE_POLITEDB_API_BASE=http://localhost:4000/api`: 136 files / 809 tests passed.
+  - `tsc`, Prettier and `npm run build` pass.
+  - `git diff --check` is clean.
+- **Not done:**
+  - The app was not run against a deployed backend, because the backend is not deployed.
+  - There was no live end-to-end sync.
+
+### Fixes for Codex review "pro-gating Phase 3" (Claude, 2026-10-19)
+
+Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
+
+1. **P2: a malformed deactivation reply cleared credentials.**
+   - **Fix:** `deactivate_at` now parses the 2xx reply (`parse_api_payload`) before clearing anything, and attaches the current snapshot on failure.
+   - **Test:** `a_malformed_deactivation_reply_clears_nothing`. Plain text and an empty 200 reply leave the file bytes, credentials, paid flag and trial untouched. A valid reply clears the credentials and keeps the running server trial.
+2. **P2: a long `Retry-After` overflowed the timer.**
+   - **Fix:** `scheduleTrialSyncWake` caps each wait at 24 h and keeps the absolute deadline. A wake that comes before the deadline only re-arms the timer. The server's delay is never shortened.
+   - **Test:** a 30-day `Retry-After` causes no request through 29 days of intermediate wakes, then one retry once the deadline passes, without any event.
+3. **P2: the trial line was hidden for an active license that is not paid.**
+   - **Fix:** `trialNote` hides only when `paid_license` is true. Both `LicenseDialog` and `LicenseKeySettings` also render the note in their active-license branch.
+   - **Tests:**
+     - `trialNote` with an active free license: running, ended, and absent with offline feedback; it is suppressed for a paid license even while offline.
+     - The new rendered test `LicenseKeySettings.trial.test.tsx`, for the active-free running trial, offline with no trial, and paid-hidden cases.
+
+**Coverage gaps closed:**
+- **Trial route fallback:** `the_trial_route_is_found_after_a_missing_prefixed_route` covers a 404 on `/api/v1/licenses/trial` followed by success on `/api/v1/trial`.
+- **Legacy lifecycle:** `a_legacy_trial_survives_every_operation_until_the_server_accepts_it` runs the full V3/W4 matrix on one file:
+  - an exhausted legacy file;
+  - activate → refresh → deactivate → reload;
+  - a 503 sync, a malformed sync, then a delayed successful sync.
+  It checks that every trial request carries the original `legacyStartedAt`, that the field survives each failure, and that the server window uses that start, so the trial stays exhausted. It also checks that the legacy fields are retired.
+
+**Verification:**
+- **Rust:** `cargo test --locked` gives 435 passed / 15 ignored, the same with `--features app-store`. `license::tests`: 40. Clippy: 8 and 9, the baseline.
+- **Frontend:** Vitest with `VITE_POLITEDB_API_BASE` set: 137 files / 814 tests passed. `tsc`, Prettier and the build pass.
+- `git diff --check` is clean.
 
 ## Plan Review
 

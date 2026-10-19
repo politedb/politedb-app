@@ -48,6 +48,15 @@ pub async fn license_refresh(
 }
 
 #[tauri::command]
+pub async fn license_trial_sync(
+    app: AppHandle,
+    api_base: String,
+    product: String,
+) -> Result<LicenseState, LicenseOpError> {
+    license::license_trial_sync(&app, api_base, product).await
+}
+
+#[tauri::command]
 pub async fn license_deactivate(
     app: AppHandle,
     api_base: String,

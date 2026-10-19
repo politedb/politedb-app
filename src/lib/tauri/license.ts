@@ -47,10 +47,19 @@ export type LicenseState = {
   /** Original start of a trial kept by an older build (migration only). */
   legacy_trial_started_at?: number | null;
   legacy_retired?: boolean;
+  /** The trial window recorded by the license server; the only trial that unlocks Pro. */
+  trial?: ServerTrial | null;
   /** Incremented by every write of the license file. */
   revision?: number;
   /** Order of this snapshot in the app session; only newer snapshots are shown. */
   snapshot_seq?: number;
+};
+
+/** A trial window from the license server (epoch ms) and when it was fetched. */
+export type ServerTrial = {
+  started_at: number;
+  expires_at: number;
+  synced_at: number;
 };
 
 export type LicenseErrorKind =
@@ -124,6 +133,17 @@ export async function licenseRefresh(args: {
   product: string;
 }) {
   return invoke<LicenseState>(CMD.licenseRefresh, {
+    apiBase: args.apiBase,
+    product: args.product,
+  });
+}
+
+/** Fetches this device's trial window from the license server and stores it. */
+export async function licenseTrialSync(args: {
+  apiBase: string;
+  product: string;
+}) {
+  return invoke<LicenseState>(CMD.licenseTrialSync, {
     apiBase: args.apiBase,
     product: args.product,
   });

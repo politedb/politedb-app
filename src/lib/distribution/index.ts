@@ -14,6 +14,8 @@ export type DistributionFeatures = {
   externalPurchase: boolean;
   /** Pro features need a license or trial (App Store keeps them unlocked until IAP). */
   gatesProFeatures: boolean;
+  /** Free trial recorded by the license server (none on the App Store). */
+  serverTrial: boolean;
   /** Engines hidden from the new-connection picker in this flavor. */
   unsupportedEngines: readonly DatabaseEngine[];
 };
@@ -31,6 +33,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
       selfUpdate: false,
       externalPurchase: false,
       gatesProFeatures: false,
+      serverTrial: false,
       unsupportedEngines: ["oracle"],
     };
   }
@@ -38,6 +41,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
     selfUpdate: true,
     externalPurchase: true,
     gatesProFeatures: true,
+    serverTrial: true,
     unsupportedEngines: [],
   };
 }
