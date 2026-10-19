@@ -156,12 +156,16 @@ function stableThreadId(context?: PoliteDbAiGatewayContext) {
     .slice(0, 48)}`;
 }
 
-function planFromLicensePlanName(planName?: string | null) {
-  return String(planName ?? "")
+/** Paid plan names; "ultimate" is the pre-rename name still stored on older licenses. */
+const PAID_PLAN_NAMES = new Set(["pro", "ultimate"]);
+
+/** The AI gateway still expects "ultimate" as the paid tier value. */
+export function planFromLicensePlanName(planName?: string | null) {
+  const normalized = String(planName ?? "")
     .trim()
-    .toLowerCase() === "ultimate"
-    ? "ultimate"
-    : "free";
+    .replace(/\s*plan$/i, "")
+    .toLowerCase();
+  return PAID_PLAN_NAMES.has(normalized) ? "ultimate" : "free";
 }
 
 async function aiHeaders(workspaceId?: string) {

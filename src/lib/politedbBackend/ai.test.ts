@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { politeDbAiListModels } from "./ai";
+import { planFromLicensePlanName, politeDbAiListModels } from "./ai";
 
 vi.mock("src/lib/tauri", () => ({
   licenseStateLoad: vi.fn().mockResolvedValue({
@@ -10,6 +10,22 @@ vi.mock("src/lib/tauri", () => ({
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("planFromLicensePlanName", () => {
+  it.each(["Pro", "pro", " Pro plan ", "Ultimate", "ultimate"])(
+    "maps paid plan %j to the ultimate AI tier",
+    (planName) => {
+      expect(planFromLicensePlanName(planName)).toBe("ultimate");
+    }
+  );
+
+  it.each([null, undefined, "", "Free", "Polar License"])(
+    "maps %j to the free AI tier",
+    (planName) => {
+      expect(planFromLicensePlanName(planName)).toBe("free");
+    }
+  );
 });
 
 describe("politeDb backend AI client", () => {
