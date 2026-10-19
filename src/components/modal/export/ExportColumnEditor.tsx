@@ -23,6 +23,8 @@ export type ExportColumnEditorProps = {
   columnNames: string[];
   selectedColumns: string[];
   policy: MaskingPolicy | null;
+  /** Shows the per-column treatment and preview; otherwise a plain column picker. */
+  maskingEnabled: boolean;
   disabled?: boolean;
   selectedCount: number;
   outputCount: number;
@@ -35,6 +37,7 @@ export function ExportColumnEditor({
   columnNames,
   selectedColumns,
   policy,
+  maskingEnabled,
   disabled,
   selectedCount,
   onToggleColumn,
@@ -79,6 +82,10 @@ export function ExportColumnEditor({
     return map;
   }, [policy]);
 
+  const gridCols = maskingEnabled
+    ? "grid-cols-[auto_minmax(0,1fr)_9.5rem] sm:grid-cols-[auto_minmax(0,1fr)_9.5rem_minmax(5rem,8rem)]"
+    : "grid-cols-[auto_minmax(0,1fr)]";
+
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -101,7 +108,7 @@ export function ExportColumnEditor({
           class={cn(
             "grid shrink-0 gap-2 border-b border-neutral-200 bg-neutral-50 p-2 text-xs font-bold tracking-wide",
             "text-neutral-500 uppercase dark:bg-neutral-900/80",
-            "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
+            gridCols
           )}
         >
           <Checkbox
@@ -113,13 +120,17 @@ export function ExportColumnEditor({
             title="Applies to every column, not only search matches"
           />
           <span>Column</span>
-          <span>Treatment</span>
-          <span
-            class="hidden truncate sm:block"
-            title="Synthetic preview — not live data"
-          >
-            Preview
-          </span>
+          {maskingEnabled ? (
+            <>
+              <span>Treatment</span>
+              <span
+                class="hidden truncate sm:block"
+                title="Synthetic preview — not live data"
+              >
+                Preview
+              </span>
+            </>
+          ) : null}
         </div>
 
         <OverlayScrollArea
@@ -136,17 +147,15 @@ export function ExportColumnEditor({
               const rule =
                 (policy?.rulesByColumn[name] as MaskRuleKind | undefined) ??
                 "keep";
-              const isKeep = selected && rule === "keep";
-              const preview = previewByColumn[name] ?? "—";
+              // Kept columns show their real data: no synthetic preview to offer.
+              const preview =
+                rule === "keep" ? "—" : (previewByColumn[name] ?? "—");
               const previewOpen = expandedPreview === name;
 
               return (
                 <div
                   key={name}
-                  class={cn(
-                    "grid h-10 items-center gap-2 px-2 py-1",
-                    "grid-cols-[auto_minmax(0,1fr)_7.5rem] sm:grid-cols-[auto_minmax(0,1fr)_7.5rem_minmax(5rem,8rem)]"
-                  )}
+                  class={cn("grid h-10 items-center gap-2 px-2 py-1", gridCols)}
                 >
                   <Checkbox
                     checked={selected}
@@ -155,20 +164,13 @@ export function ExportColumnEditor({
                     aria-label={`Include column ${name}`}
                   />
                   <div class="flex h-8 min-w-0 items-center gap-1.5">
-                    {isKeep && (
-                      <span
-                        class="inline-block size-1.5 shrink-0 rounded-full bg-amber-500"
-                        title="Keep original"
-                        aria-hidden="true"
-                      />
-                    )}
                     <span
                       class="truncate font-mono text-xs text-neutral-800"
                       title={name}
                     >
                       {name}
                     </span>
-                    {selected && (
+                    {maskingEnabled && selected && rule !== "keep" && (
                       <button
                         type="button"
                         class="ml-auto text-xs text-neutral-500 underline sm:hidden"
@@ -182,29 +184,34 @@ export function ExportColumnEditor({
                       </button>
                     )}
                   </div>
-                  <Select
-                    value={selected ? rule : "keep"}
-                    disabled={disabled || !selected}
-                    className="h-8 w-full"
-                    aria-label={`Treatment for ${name}`}
-                    onChange={(e) => {
-                      const nextRule = e.currentTarget.value as MaskRuleKind;
-                      onRuleChange(name, nextRule);
-                    }}
-                  >
-                    {RULE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </Select>
-                  <span
-                    class="hidden truncate font-mono text-xs text-neutral-600 sm:block"
-                    title="Synthetic preview (not live data)"
-                  >
-                    {selected ? preview : "—"}
-                  </span>
-                  {selected && previewOpen && (
+                  {maskingEnabled ? (
+                    <>
+                      <Select
+                        value={selected ? rule : "keep"}
+                        disabled={disabled || !selected}
+                        className="h-8 w-full"
+                        aria-label={`Treatment for ${name}`}
+                        onChange={(e) => {
+                          const nextRule = e.currentTarget
+                            .value as MaskRuleKind;
+                          onRuleChange(name, nextRule);
+                        }}
+                      >
+                        {RULE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <span
+                        class="hidden truncate font-mono text-xs text-neutral-600 sm:block"
+                        title="Synthetic preview (not live data)"
+                      >
+                        {selected ? preview : "—"}
+                      </span>
+                    </>
+                  ) : null}
+                  {maskingEnabled && selected && previewOpen && (
                     <div
                       class={cn(
                         "col-span-full rounded border border-neutral-200 bg-neutral-50 px-2 py-1 font-mono text-[10px]",
@@ -222,22 +229,23 @@ export function ExportColumnEditor({
         </OverlayScrollArea>
       </div>
 
-      <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-sm text-neutral-500 dark:text-neutral-400">
-        <span>
-          Per-column keep / redact / null. Uncheck a column to exclude it.
-        </span>
-        <span>Preview uses synthetic values only.</span>
-        <Tooltip
-          className="w-fit"
-          align="center"
-          side="top"
-          content="Masking reduces data exposure but does not guarantee anonymization or regulatory compliance. Null values are exported as NULL in CSV and null in JSON. Does not modify the database."
-        >
-          <span className="cursor-help underline decoration-dotted">
-            Masking & null export notes
+      {maskingEnabled ? (
+        <p className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <span>
+            Redact or null a column per row; the preview is synthetic.
           </span>
-        </Tooltip>
-      </p>
+          <Tooltip
+            className="w-fit"
+            align="center"
+            side="top"
+            content="Masking reduces data exposure but does not guarantee anonymization or regulatory compliance. Null values are exported as NULL in CSV and null in JSON. Does not modify the database."
+          >
+            <span className="cursor-help underline decoration-dotted">
+              Notes
+            </span>
+          </Tooltip>
+        </p>
+      ) : null}
     </div>
   );
 }

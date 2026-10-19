@@ -7,6 +7,7 @@ import {
 } from "src/lib/export-masking";
 import { useLicenseStore } from "src/stores/license";
 import type { LicenseState } from "src/lib/tauri/license";
+import { useProUpgradeStore } from "src/stores/proUpgrade";
 
 const hookState = {
   format: "csv" as const,
@@ -82,6 +83,11 @@ function renderDialog(
   );
 }
 
+/** Turns on "Mask sensitive columns", which reveals the per-column treatments. */
+function enableMasking() {
+  fireEvent.click(screen.getByLabelText("Mask sensitive columns"));
+}
+
 describe("ExportTableDialog UX", () => {
   beforeEach(() => {
     useLicenseStore.setState({ state: { pro_access: true } as LicenseState });
@@ -153,9 +159,57 @@ describe("ExportTableDialog UX", () => {
     expect(screen.getByText(".csv")).toBeTruthy();
   });
 
-  it("always shows per-column treatments defaulting to Keep", () => {
+  it("is a plain column picker until masking is turned on", () => {
     renderDialog();
-    expect(screen.queryByText("Mask sensitive values")).toBeNull();
+    expect(screen.getByLabelText("Include column email")).toBeTruthy();
+    expect(screen.queryByText("Treatment")).toBeNull();
+    expect(screen.queryByText(/kept original/)).toBeNull();
+    expect(
+      (screen.getByLabelText("Mask sensitive columns") as HTMLInputElement)
+        .checked
+    ).toBe(false);
+  });
+
+  it("asks Free users to upgrade instead of turning masking on", () => {
+    useLicenseStore.setState({ state: { pro_access: false } as LicenseState });
+    useProUpgradeStore.setState({ feature: null });
+    renderDialog();
+    enableMasking();
+    expect(useProUpgradeStore.getState().feature).toBe("export-masking");
+    expect(screen.queryByText("Treatment")).toBeNull();
+    // The refused click must not leave the box ticked.
+    expect(
+      (screen.getByLabelText("Mask sensitive columns") as HTMLInputElement)
+        .checked
+    ).toBe(false);
+  });
+
+  it("turning masking off resets every rule to Keep", () => {
+    hookState.exportOptions = {
+      ...hookState.exportOptions,
+      maskingPolicy: withColumnRule(
+        hookState.exportOptions.maskingPolicy!,
+        "email",
+        "redact"
+      ),
+    };
+    renderDialog();
+    enableMasking();
+    expect(
+      (screen.getByLabelText("Treatment for email") as HTMLSelectElement).value
+    ).toBe("redact");
+    enableMasking();
+    expect(hookState.exportOptions.maskingPolicy?.rulesByColumn.email).toBe(
+      "keep"
+    );
+    expect(
+      Object.values(hookState.exportOptions.maskingPolicy!.rulesByColumn)
+    ).toEqual(Array(6).fill("keep"));
+  });
+
+  it("shows per-column treatments defaulting to Keep once masking is on", () => {
+    renderDialog();
+    enableMasking();
     expect(screen.getByText("Treatment")).toBeTruthy();
     const treatment = screen.getByLabelText(
       "Treatment for email"
@@ -225,6 +279,7 @@ describe("ExportTableDialog UX", () => {
       maskingPolicy: policy,
     };
     renderDialog();
+    enableMasking();
     expect(screen.getByText(/1 kept original/)).toBeTruthy();
     expect(screen.getByText(/may contain sensitive data/)).toBeTruthy();
   });
@@ -255,6 +310,7 @@ describe("ExportTableDialog UX", () => {
       maskingPolicy: buildDefaultMaskedPolicy(["id", "email"]),
     };
     renderDialog();
+    enableMasking();
     const treatment = screen.getByLabelText(
       "Treatment for id"
     ) as HTMLSelectElement;

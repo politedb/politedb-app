@@ -39,7 +39,15 @@ export function Checkbox({
       type="checkbox"
       id={inputId}
       checked={checked}
-      onChange={onChange}
+      onChange={(event) => {
+        onChange?.(event);
+        // Controlled: the browser already flipped the box. Put back the rendered value;
+        // a parent that accepts the change re-renders with the new one (Preact only
+        // touches the DOM when the prop changes, so a refused change would stick).
+        if (checked !== undefined && inputRef.current) {
+          inputRef.current.checked = !!checked;
+        }
+      }}
       disabled={disabled}
       class={cn(
         "size-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500 focus:ring-offset-0",
