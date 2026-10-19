@@ -167,6 +167,11 @@ export async function licenseOpenExternalUrl(url: string) {
 export const FEATURE_UNAVAILABLE_IN_DISTRIBUTION =
   "FEATURE_UNAVAILABLE_IN_DISTRIBUTION";
 
+/** Navigates the webview itself; mail clients pick up `mailto:` links this way. */
+export function navigateToUrl(url: string) {
+  window.location.href = url;
+}
+
 function openInNewWindow(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }

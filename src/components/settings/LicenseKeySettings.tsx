@@ -13,9 +13,12 @@ import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  LICENSE_SUPPORT_EMAIL,
+  openLicenseRecoveryMail,
+} from "src/lib/license/support";
 
 const PRICING_URL = "https://politedb.com/pricing";
-const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
 
 export function LicenseKeySettings(props: { active: boolean }) {
   const [licenseKey, setLicenseKey] = useState("");
@@ -58,17 +61,6 @@ export function LicenseKeySettings(props: { active: boolean }) {
       return;
     }
     await openExternalUrl(LICENSE_PORTAL_URL);
-  }
-
-  async function openRecoveryMail() {
-    const subject = encodeURIComponent("PoliteDB license key recovery");
-    const body = encodeURIComponent(
-      "Please help me recover my license key. I purchased using this email address.\n"
-    );
-    const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    await openExternalUrl(mailto, (url) => {
-      window.location.href = url;
-    });
   }
 
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
@@ -213,7 +205,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 <button
                   type="button"
                   class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                  onClick={() => void openRecoveryMail()}
+                  onClick={() => void openLicenseRecoveryMail()}
                 >
                   {LICENSE_SUPPORT_EMAIL}
                 </button>
@@ -224,7 +216,10 @@ export function LicenseKeySettings(props: { active: boolean }) {
           </SettingCard>
 
           <div class="flex justify-end">
-            <Button variant="shadow" onClick={() => void openRecoveryMail()}>
+            <Button
+              variant="shadow"
+              onClick={() => void openLicenseRecoveryMail()}
+            >
               Open Mail
             </Button>
           </div>

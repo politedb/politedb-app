@@ -19,10 +19,13 @@ import {
 } from "src/components/license/TrialStatusNote";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  LICENSE_SUPPORT_EMAIL,
+  openLicenseRecoveryMail,
+} from "src/lib/license/support";
 
 const PRICING_URL = "https://politedb.com/pricing";
 /** Inbox for license recovery; send from the email used at purchase. */
-const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
 
 export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
   const { open, onClose } = props;
@@ -80,17 +83,6 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
     await openExternalUrl(LICENSE_PORTAL_URL);
   };
 
-  const handleOpenRecoveryMail = async () => {
-    const subject = encodeURIComponent("PoliteDB license key recovery");
-    const body = encodeURIComponent(
-      "Please help me recover my license key. I purchased using this email address.\n"
-    );
-    const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    await openExternalUrl(mailto, (url) => {
-      window.location.href = url;
-    });
-  };
-
   useEffect(() => {
     if (!error) return;
     void showMessage(error, { title: "Error", kind: "error" }).then(() => {
@@ -127,7 +119,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                   <button
                     type="button"
                     class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                    onClick={() => void handleOpenRecoveryMail()}
+                    onClick={() => void openLicenseRecoveryMail()}
                   >
                     {LICENSE_SUPPORT_EMAIL}
                   </button>
@@ -142,7 +134,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                 <button
                   type="button"
                   class="font-medium text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                  onClick={() => void handleOpenRecoveryMail()}
+                  onClick={() => void openLicenseRecoveryMail()}
                 >
                   open in mail app
                 </button>{" "}
