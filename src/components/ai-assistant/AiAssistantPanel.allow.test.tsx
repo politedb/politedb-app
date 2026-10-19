@@ -99,6 +99,7 @@ import type { LicenseState } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { AiAssistantPanel } from "./AiAssistantPanel";
+import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
 
 function setPro(pro_access: boolean) {
   useLicenseStore.setState({ state: { pro_access } as LicenseState });
@@ -260,5 +261,17 @@ describe("agent mode without Pro", () => {
     expect(localStorage.getItem("politedb.ai.agentProHint.dismissed")).toBe(
       "1"
     );
+  });
+
+  it("hides a shown upgrade hint once Manual is chosen", async () => {
+    setPro(false);
+    seedChat("i");
+    render(panel("i", "default"));
+    await screen.findByText("allow-m");
+    act(() => mocks.submitArgs?.onAgentProLocked?.());
+    expect(await screen.findByText(/is a Pro feature/)).toBeInTheDocument();
+    act(() => setAssistantMode("manual"));
+    expect(screen.queryByText(/is a Pro feature/)).toBeNull();
+    act(() => setAssistantMode("agent"));
   });
 });

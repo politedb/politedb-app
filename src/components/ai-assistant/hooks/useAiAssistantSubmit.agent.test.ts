@@ -31,6 +31,7 @@ vi.mock("src/lib/tauri/ai", () => ({ aiChatCancel: vi.fn() }));
 import { AgentFallback } from "src/lib/ai-assistant/agent";
 import type { LicenseState } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
+import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
 import { useAiAssistantSubmit } from "./useAiAssistantSubmit";
 
 function setPro(pro_access: boolean) {
@@ -326,7 +327,7 @@ describe("useAiAssistantSubmit with the AI agent", () => {
     });
 
     it("uses basic chat in manual mode, with no upgrade hint", async () => {
-      localStorage.setItem("politedb.ai.mode", "manual");
+      setAssistantMode("manual");
       try {
         mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
         const onAgentProLocked = vi.fn();
@@ -338,7 +339,7 @@ describe("useAiAssistantSubmit with the AI agent", () => {
         expect(mocks.runAgentTurn).not.toHaveBeenCalled();
         expect(onAgentProLocked).not.toHaveBeenCalled();
       } finally {
-        localStorage.removeItem("politedb.ai.mode");
+        setAssistantMode("agent");
       }
     });
 

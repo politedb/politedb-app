@@ -970,6 +970,41 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
 - **Diagram panel and JSON export:** the "Database Structure" panel was removed (taking "Copy Mermaid" with it) and replaced by a free JSON export. The export menu now sits in the diagram canvas, with the export logic in `useDiagramExport`.
 - **Export menu:** the ER diagram's "Export as PNG" and "Export as SVG" buttons are now one "Export as..." menu that opens upwards. The SVG entry carries the Pro badge; PNG stays free.
 
+### Fixes for Codex review "pro-gating UI follow-ups" (Claude, 2026-10-19)
+
+Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
+
+1. **P2: Manual could run the agent when storage failed.**
+   - **Fix:** `assistantMode.ts` now holds one authoritative session value. It is initialized from storage and persisted on a best-effort basis, with `subscribeAssistantMode`. The picker, the panel (`useAssistantMode`) and submission (`getAssistantMode`) all read that value.
+   - **Test:** with `setItem` throwing, choosing Manual makes both `getAssistantMode()` and the trigger read Manual.
+2. **P2: an Agent hint stayed visible after switching to Manual.**
+   - **Fix:** the panel renders the hint only while the session mode is Agent.
+   - **Test:** a rendered panel regression covers hint shown → Manual chosen → hint gone.
+3. **P2: the picker's accessibility.**
+   - **Fix:**
+     - The trigger is named "Assistant mode: <current>" and has `aria-expanded` and `aria-controls`.
+     - The menu has `role="menu"`, and its items are `menuitemradio` with `aria-checked`.
+     - Opening the menu focuses the selected mode. The arrow keys and Home/End move between items, and Escape closes the menu and returns focus to the trigger.
+   - **Tests:** roles and states, focus on open, arrow wrap-around, Escape with focus restoration.
+
+**Coverage gaps closed:**
+- **`Checkbox.test.tsx`:** an accepted change in both directions; a refused change from both initial states; an uncontrolled checkbox; the indeterminate state with the disabled attribute. jsdom dispatches clicks on disabled inputs, so the disabled-click case is left to browsers.
+- **`system-dialog/index.test.ts` (`chooseDialog`):**
+  - the button shape for yes/no/cancel and for ok/cancel;
+  - custom label mapping and the standard Yes/Ok/No/Cancel results;
+  - close and unknown results map to cancel;
+  - "No" from an ok/cancel dialog is never treated as a choice;
+  - the browser `window.confirm` fallback.
+
+**Verification:** Vitest passes 142 files / 840 tests; `tsc`, the build and Prettier pass.
+
+**Round 2 (Codex: accessibility P2 partially resolved).**
+- **Problem:** initial focus ran before the app Popover mounted its content.
+- **Fix:** the selected mode is focused from the menu's mount ref, and also on open, which covers reopening during the close transition.
+- **Tests:** `AssistantModePicker.popover.test.tsx` keeps the real app `Popover` and mocks only `react-tiny-popover`. It covers focus on mount, arrow keys, Escape with focus return, reopening after a full close, and reopening during the close transition. A mutation check confirmed the test catches the bug: dropping the mount ref fails it.
+
+**Still manual:** a real Popover layout, a screen reader, and the native dialog's close and Escape on each OS.
+
 ## Plan Review
 
 (empty)

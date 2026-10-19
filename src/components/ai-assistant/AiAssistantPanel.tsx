@@ -4,6 +4,7 @@ import {
   isAgentProHintDismissed,
 } from "src/components/ai-assistant/AgentProHint";
 import { useProGate } from "src/hooks/useProGate";
+import { useAssistantMode } from "src/components/ai-assistant/useAssistantMode";
 import { hasProAccessNow } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -412,6 +413,8 @@ export function AiAssistantPanel(props: Props) {
     setAgentHintVisible(false);
   }, [activeSessionId]);
   const { hasPro } = useProGate();
+  // Manual mode never shows the agent upgrade hint, including one already shown.
+  const assistantMode = useAssistantMode();
 
   const { canSubmit, handleSubmit, submitQuestion, handleCancelSubmit } =
     useAiAssistantSubmit({
@@ -564,7 +567,7 @@ export function AiAssistantPanel(props: Props) {
         </div>
       ) : null}
 
-      {agentHintVisible && !hasPro ? (
+      {agentHintVisible && !hasPro && assistantMode === "agent" ? (
         <AgentProHint onClose={() => setAgentHintVisible(false)} />
       ) : null}
 
