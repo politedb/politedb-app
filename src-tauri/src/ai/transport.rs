@@ -18,10 +18,32 @@ pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 /// Upper bound for a model-list response body.
 pub const DISCOVERY_MAX_BYTES: usize = 2 * 1024 * 1024;
 
+/// Upper bound for a chat/agent completion response body.
+pub const CHAT_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// Server probes (Ollama version, model metadata, compatibility check): short and small,
+/// with no conversation data (plan ollama-native-context A2', C7).
+pub const PROBE_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+pub const PROBE_MAX_BYTES: usize = 64 * 1024;
+
 pub fn client_for(url: &Url, timeout: Duration) -> Result<reqwest::Client, String> {
+    client_with(url, CONNECT_TIMEOUT, timeout)
+}
+
+/// Same policy as [`client_for`], with the probe timeouts.
+pub fn probe_client(url: &Url) -> Result<reqwest::Client, String> {
+    client_with(url, PROBE_CONNECT_TIMEOUT, PROBE_TIMEOUT)
+}
+
+fn client_with(
+    url: &Url,
+    connect_timeout: Duration,
+    timeout: Duration,
+) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
+        .connect_timeout(connect_timeout)
         .timeout(timeout);
     if url.scheme() == "http" {
         builder = builder.no_proxy();
@@ -123,6 +145,36 @@ mod tests {
         assert!(reject_redirect(response.status())
             .unwrap_err()
             .starts_with("AI_PROVIDER_REDIRECT_BLOCKED"));
+    }
+
+    #[tokio::test]
+    async fn probe_client_keeps_the_policy_and_times_out_fast() {
+        let port = serve(
+            "HTTP/1.1 302 Found\r\nLocation: http://8.8.8.8/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            1,
+        );
+        let url = local_url(&format!("http://localhost:{port}/api/version"));
+        let response = probe_client(&url).unwrap().get(url).send().await.unwrap();
+        assert!(reject_redirect(response.status()).is_err());
+
+        // A server that accepts but never answers: the total timeout applies.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let held: Vec<_> = listener.incoming().take(1).collect();
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            drop(held);
+        });
+        let url = local_url(&format!("http://127.0.0.1:{port}/api/version"));
+        let started = std::time::Instant::now();
+        let error = probe_client(&url)
+            .unwrap()
+            .get(url)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_timeout());
+        assert!(started.elapsed() < std::time::Duration::from_secs(4));
     }
 
     #[tokio::test]

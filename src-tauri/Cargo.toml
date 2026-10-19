@@ -91,7 +91,7 @@ tauri-plugin-os = "2"
 chrono = { version = "0.4.42", features = ["serde"] }
 postgres-types = { version = "0.2.9", features = ["derive"] }
 tauri-plugin-fs = "2"
-tokio-util = "0.7.18"
+tokio-util = { version = "0.7.18", features = ["rt"] }
 tiberius = { version = "0.12.3", default-features = false, features = ["rustls", "tds73"] }
 tauri-plugin-process = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -104,6 +104,7 @@ num-bigint = "0.4"
 klickhouse = { version = "0.14", features = ["compression", "serde"] }
 clickhouse = { version = "0.15", features = ["rustls-tls"] }
 libsql = { version = "0.9.30", default-features = true, features = ["remote", "tls"] }
+sqlparser = { version = "0.63.0", features = ["visitor"] }
 
 [features]
 default = ["engine-postgres"]

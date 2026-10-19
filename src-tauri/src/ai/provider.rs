@@ -74,7 +74,17 @@ pub struct AiProviderConfig {
     pub api_key_ref: Option<String>,
     pub enabled: bool,
     pub is_default: Option<bool>,
+    /// Ollama only: the agent's context size in tokens (`num_ctx`), clamped to the
+    /// model's trained maximum at run time. `None` means [`DEFAULT_CONTEXT_SIZE`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_size: Option<u32>,
 }
+
+/// Bounds and default of [`AiProviderConfig::context_size`] (plan ollama-native-context A4).
+pub const MIN_CONTEXT_SIZE: u32 = 2_048;
+pub const MAX_CONTEXT_SIZE: u32 = 262_144;
+pub const DEFAULT_CONTEXT_SIZE: u32 = 16_384;
+pub const CONTEXT_SIZE_INVALID: &str = "AI_PROVIDER_CONTEXT_SIZE_INVALID";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +133,10 @@ pub fn normalize_fields(mut config: AiProviderConfig) -> AiProviderConfig {
         .base_url
         .map(|v| v.trim().trim_end_matches('/').to_string())
         .filter(|v| !v.is_empty());
+    if config.kind != AiProviderKind::Ollama {
+        // Meaningful for Ollama only; other kinds never carry it.
+        config.context_size = None;
+    }
     if config.base_url.is_none() {
         config.base_url = Some(match config.host.as_deref() {
             Some(host) => {
@@ -157,11 +171,57 @@ pub fn endpoint(config: &AiProviderConfig, path: &str) -> Result<Url, String> {
     url_policy::validate(&joined, config.kind.class())
 }
 
-/// Validation for model discovery: URL only, no model required (R12).
+/// Validation for model discovery: URL and context size, no model required (R12).
 pub fn validate_for_discovery(config: AiProviderConfig) -> Result<AiProviderConfig, String> {
     let config = normalize_fields(config);
     base_url(&config)?;
+    validate_context_size(&config)?;
     Ok(config)
+}
+
+/// A context size, when set, must lie in `MIN_CONTEXT_SIZE..=MAX_CONTEXT_SIZE`. Checked
+/// on save, on draft requests and on every run snapshot (a hand-edited file included).
+pub fn validate_context_size(config: &AiProviderConfig) -> Result<(), String> {
+    match config.context_size {
+        Some(size) if !(MIN_CONTEXT_SIZE..=MAX_CONTEXT_SIZE).contains(&size) => {
+            Err(CONTEXT_SIZE_INVALID.into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The agent's requested Ollama context size before clamping to the model maximum.
+pub fn requested_context_size(config: &AiProviderConfig) -> u32 {
+    config.context_size.unwrap_or(DEFAULT_CONTEXT_SIZE)
+}
+
+/// The Ollama server prefix `origin + P` for a validated base whose path is exactly
+/// `P/v1` (plan ollama-native-context A1). `None` when the base does not end in `/v1`:
+/// native endpoints are then not derivable and never guessed.
+pub fn ollama_server_prefix(config: &AiProviderConfig) -> Option<Url> {
+    let base = base_url(config).ok()?;
+    if base.query().is_some() || base.fragment().is_some() {
+        return None;
+    }
+    let path = base.path().trim_end_matches('/');
+    let prefix = path.strip_suffix("/v1")?;
+    if prefix.ends_with('/') {
+        return None;
+    }
+    let mut url = base.clone();
+    url.set_path(if prefix.is_empty() { "/" } else { prefix });
+    Some(url)
+}
+
+/// A native Ollama endpoint under `prefix` (e.g. `api/chat`), re-validated like every
+/// provider request. The origin and prefix of the saved base never change.
+pub fn ollama_endpoint(config: &AiProviderConfig, prefix: &Url, path: &str) -> Result<Url, String> {
+    let joined = format!(
+        "{}/{}",
+        prefix.as_str().trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+    url_policy::validate(&joined, config.kind.class())
 }
 
 /// Validation for save: identity and URL; a model is optional so offline setup can be
@@ -206,7 +266,106 @@ pub(crate) mod tests {
             api_key_ref: None,
             enabled: true,
             is_default: Some(false),
+            context_size: None,
         }
+    }
+
+    fn ollama(base: &str) -> AiProviderConfig {
+        let mut config = provider(AiProviderKind::Ollama, "http://unused");
+        config.host = None;
+        config.sub_path = None;
+        config.base_url = Some(base.into());
+        normalize_fields(config)
+    }
+
+    #[test]
+    fn ollama_prefix_comes_only_from_a_v1_base() {
+        let cases = [
+            ("http://127.0.0.1:11434/v1", Some("http://127.0.0.1:11434/")),
+            (
+                "http://127.0.0.1:11434/v1/",
+                Some("http://127.0.0.1:11434/"),
+            ),
+            (
+                "http://localhost:11434/proxy/x/v1",
+                Some("http://localhost:11434/proxy/x"),
+            ),
+            ("http://[::1]:11434/v1", Some("http://[::1]:11434/")),
+            ("http://127.0.0.1:11434", None),
+            ("http://127.0.0.1:11434/v1/extra", None),
+            ("http://127.0.0.1:11434/api", None),
+            ("http://127.0.0.1:11434/xv1", None),
+        ];
+        for (base, expected) in cases {
+            let prefix = ollama_server_prefix(&ollama(base));
+            assert_eq!(prefix.as_ref().map(Url::as_str), expected, "{base}");
+        }
+    }
+
+    #[test]
+    fn ollama_endpoints_keep_origin_and_prefix() {
+        for (base, chat) in [
+            (
+                "http://127.0.0.1:11434/v1",
+                "http://127.0.0.1:11434/api/chat",
+            ),
+            (
+                "http://localhost:11434/p/q/v1/",
+                "http://localhost:11434/p/q/api/chat",
+            ),
+        ] {
+            let config = ollama(base);
+            let prefix = ollama_server_prefix(&config).unwrap();
+            let url = ollama_endpoint(&config, &prefix, "api/chat").unwrap();
+            assert_eq!(url.as_str(), chat);
+            let base_url = base_url(&config).unwrap();
+            assert_eq!(url.origin(), base_url.origin());
+            for path in ["api/version", "/api/show"] {
+                let other = ollama_endpoint(&config, &prefix, path).unwrap();
+                assert_eq!(other.origin(), base_url.origin());
+                assert!(!other.path().contains("/api/api"), "{other}");
+            }
+        }
+    }
+
+    #[test]
+    fn context_size_bounds_and_default() {
+        let mut config = ollama("http://127.0.0.1:11434/v1");
+        assert_eq!(requested_context_size(&config), DEFAULT_CONTEXT_SIZE);
+        for size in [MIN_CONTEXT_SIZE, 16_384, MAX_CONTEXT_SIZE] {
+            config.context_size = Some(size);
+            assert!(validate_for_discovery(config.clone()).is_ok(), "{size}");
+        }
+        for size in [0, 2_047, MAX_CONTEXT_SIZE + 1, u32::MAX] {
+            config.context_size = Some(size);
+            assert_eq!(
+                validate_for_discovery(config.clone()).unwrap_err(),
+                CONTEXT_SIZE_INVALID,
+                "{size}"
+            );
+        }
+        // Other kinds never carry a context size.
+        let mut cloud = provider(AiProviderKind::Openai, "https://api.openai.com");
+        cloud.context_size = Some(1);
+        assert_eq!(normalize_fields(cloud).context_size, None);
+    }
+
+    #[test]
+    fn context_size_round_trips_and_is_optional_on_disk() {
+        let json = r#"{"id":"o","kind":"ollama","label":"O","baseUrl":null,"host":null,"subPath":null,"defaultModel":"m","models":[],"apiKeyRef":null,"enabled":true,"isDefault":null}"#;
+        let config: AiProviderConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.context_size, None);
+        assert!(!serde_json::to_string(&config)
+            .unwrap()
+            .contains("contextSize"));
+        let mut sized = config.clone();
+        sized.context_size = Some(8192);
+        let text = serde_json::to_string(&sized).unwrap();
+        assert!(text.contains(r#""contextSize":8192"#));
+        assert_eq!(
+            serde_json::from_str::<AiProviderConfig>(&text).unwrap(),
+            sized
+        );
     }
 
     #[test]

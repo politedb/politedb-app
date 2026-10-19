@@ -98,6 +98,11 @@ pub fn path_ai_providers(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_root(app)?.join(AI_DIR).join(AI_PROVIDERS_FILE))
 }
 
+/// AI agent data-access consent (ids and fingerprints only).
+pub fn path_ai_data_access(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join(AI_DIR).join("data_access.json"))
+}
+
 pub fn dir_sql_drafts(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_root(app)?.join(DRAFTS_DIR).join(SQL_DRAFTS_DIR))
 }
@@ -153,6 +158,29 @@ fn replace_file(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// Writes `value` by replacing the destination in one step, so a failed write or crash
 /// leaves the previous file intact (no remove-then-rename window).
 pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    json_replace(path, value, false)
+}
+
+/// Like [`json_replace_preserving`], but the file is readable by its owner only
+/// (mode 0600 on unix) from the moment it is created.
+pub fn json_replace_private<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    json_replace(path, value, true)
+}
+
+fn create_tmp(path: &Path, private: bool) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    if private {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    let _ = private;
+    options.open(path)
+}
+
+fn json_replace<T: Serialize>(path: &Path, value: &T, private: bool) -> Result<(), String> {
     let bytes = serde_json::to_vec(value).map_err(|e| format!("Serialize JSON failed: {e}"))?;
     ensure_parent_dir(path)?;
     let file_name = path
@@ -161,7 +189,8 @@ pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(
         .to_string_lossy();
     let tmp_path = path.with_file_name(format!(".{file_name}.{}.tmp", uuid::Uuid::new_v4()));
     let write = || -> Result<(), String> {
-        let mut f = fs::File::create(&tmp_path).map_err(|e| format!("Create tmp failed: {e}"))?;
+        let mut f =
+            create_tmp(&tmp_path, private).map_err(|e| format!("Create tmp failed: {e}"))?;
         f.write_all(&bytes)
             .map_err(|e| format!("Write tmp failed: {e}"))?;
         f.sync_all().map_err(|e| format!("Sync tmp failed: {e}"))?;
@@ -173,6 +202,27 @@ pub fn json_replace_preserving<T: Serialize>(path: &Path, value: &T) -> Result<(
         let _ = fs::remove_file(&tmp_path);
     }
     result
+}
+
+/// Like [`json_read_if_exists`], but only a confirmed `NotFound` counts as missing:
+/// an unreadable directory or file is an error, never "no file".
+pub fn json_read_strict<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+    match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice::<T>(&bytes)
+            .map(Some)
+            .map_err(|e| format!("Parse JSON failed: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // A missing file under an unreadable directory also reports NotFound on
+            // some systems: confirm the directory itself is readable.
+            match path.parent().map(fs::read_dir) {
+                Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => {
+                    Err(format!("Read failed: {e}"))
+                }
+                _ => Ok(None),
+            }
+        }
+        Err(e) => Err(format!("Read failed: {e}")),
+    }
 }
 
 pub fn json_read_if_exists<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
@@ -365,6 +415,50 @@ pub fn export_publish_temp(temp_path: &Path, final_path: &Path) -> Result<(), St
 mod export_session_tests {
     use super::*;
     use uuid::Uuid;
+
+    #[cfg(unix)]
+    #[test]
+    fn strict_reads_never_mistake_an_unreadable_file_for_a_missing_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        let path = dir.join("ai").join("data_access.json");
+        assert_eq!(json_read_strict::<serde_json::Value>(&path).unwrap(), None);
+        json_replace_private(&path, &serde_json::json!({ "v": 1 })).unwrap();
+        let ai = path.parent().unwrap();
+        fs::set_permissions(ai, fs::Permissions::from_mode(0o000)).unwrap();
+        let locked = json_read_strict::<serde_json::Value>(&path);
+        // `exists()` would say "missing" here.
+        let exists = path.exists();
+        fs::set_permissions(ai, fs::Permissions::from_mode(0o700)).unwrap();
+        // Root bypasses permissions; the check only means something otherwise.
+        if !exists {
+            assert!(locked.is_err(), "{locked:?}");
+        }
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        let unreadable = json_read_strict::<serde_json::Value>(&path);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        if fs::read(&path).is_ok() && unreadable.is_ok() {
+            // running as root
+        } else {
+            assert!(unreadable.is_err());
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_json_is_owner_only_and_replaced_atomically() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("politedb-fs-{}", Uuid::new_v4()));
+        let path = dir.join("ai").join("data_access.json");
+        json_replace_private(&path, &serde_json::json!({ "v": 1 })).unwrap();
+        json_replace_private(&path, &serde_json::json!({ "v": 2 })).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(fs::read_to_string(&path).unwrap(), r#"{"v":2}"#);
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn discard_refuses_arbitrary_paths() {

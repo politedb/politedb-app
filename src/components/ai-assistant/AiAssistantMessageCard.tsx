@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { isReadOnlySql, queryResultToObjects } from "src/lib/ai-assistant";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
+import { aiAgentSqlSafety } from "src/lib/tauri/aiAgent";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import type { ChatMessage } from "src/types";
@@ -22,6 +23,11 @@ type Props = {
   runtimeConnectionId?: string;
   querySafetyMode?: QuerySafetyMode;
   onUpdateMessage?: (id: string, patch: Partial<ChatMessage>) => void;
+  /**
+   * Grants data access for the current connection and asks `question` again; resolves
+   * `false` when the permission could not be saved.
+   */
+  onAllowDataAccess?: (question: string) => Promise<boolean>;
 };
 
 export { AssistantStreamingPlaceholder };
@@ -76,8 +82,10 @@ export function AiAssistantMessageCard({
   runtimeConnectionId,
   querySafetyMode = "default",
   onUpdateMessage,
+  onAllowDataAccess,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [dataAccessSaving, setDataAccessSaving] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
   const [sqlRunState, setSqlRunState] = useState<SqlRunState>("idle");
   const [sqlRunMessage, setSqlRunMessage] = useState("");
@@ -130,7 +138,7 @@ export function AiAssistantMessageCard({
     }
   };
 
-  const handleRunSql = async (sql: string) => {
+  const handleRunSql = async (sql: string, agent = false) => {
     if (!runtimeConnectionId || !isReadOnlySql(sql)) return;
 
     setSqlRunState("running");
@@ -142,6 +150,18 @@ export function AiAssistantMessageCard({
             ? "Authenticate with Touch ID before reading production data."
             : "Authenticate with Touch ID before sending queries."
         );
+      }
+      // The label on an agent preview reflects the catalog when it was answered;
+      // re-check this SQL on the current connection right before running it.
+      if (
+        agent &&
+        (await aiAgentSqlSafety(sql, runtimeConnectionId)) !== "read_only"
+      ) {
+        setSqlRunState("error");
+        setSqlRunMessage(
+          "This query can no longer be run from the assistant. Insert it into the SQL editor to review and run it there."
+        );
+        return;
       }
       const result = await runSqlQuery(runtimeConnectionId, sql, {
         maxRows: 100,
@@ -186,7 +206,7 @@ export function AiAssistantMessageCard({
             />
           </div>
           {durationText ? (
-            <div class="mb-2 text-[11px] font-medium text-neutral-400">
+            <div class="mb-2 text-sm font-medium text-neutral-400">
               {durationText}
             </div>
           ) : null}
@@ -196,7 +216,7 @@ export function AiAssistantMessageCard({
       {/* While streaming the body shows "Thinking..."; afterwards only how long it
           took. No chevron: there is nothing to expand (thinking text is not kept). */}
       {floatingAssistant && durationText ? (
-        <div class="text-xs font-medium text-neutral-500">{durationText}</div>
+        <div class="text-sm font-medium text-neutral-500">{durationText}</div>
       ) : null}
 
       {floatingUser ? (
@@ -231,8 +251,31 @@ export function AiAssistantMessageCard({
           onCopySql={() => void handleCopySql()}
           onCopySqlText={(sql) => void handleCopySqlText(sql)}
           onInsertSqlPreview={(sql) => void handleInsertSql(sql)}
+          dataAccessSaving={dataAccessSaving}
+          onDataAccess={(allow, question) => {
+            if (dataAccessSaving) return;
+            const mark = (state: "allowed" | "declined") =>
+              onUpdateMessage?.(message.id, {
+                parts: message.parts?.map((part) =>
+                  part.type === "dataAccessRequest" ? { ...part, state } : part
+                ),
+              });
+            if (!allow) {
+              mark("declined");
+              return;
+            }
+            // Shown as allowed only once the permission is saved.
+            setDataAccessSaving(true);
+            void (onAllowDataAccess?.(question) ?? Promise.resolve(false))
+              .then((saved) => {
+                if (saved) mark("allowed");
+              })
+              .finally(() => setDataAccessSaving(false));
+          }}
           onRunSqlPreview={
-            runtimeConnectionId ? (sql) => void handleRunSql(sql) : undefined
+            runtimeConnectionId
+              ? (sql, agent) => void handleRunSql(sql, agent)
+              : undefined
           }
         />
       </div>

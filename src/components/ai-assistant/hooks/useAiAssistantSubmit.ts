@@ -17,6 +17,22 @@ import type {
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
+import {
+  AI_DATA_ACCESS_REQUIRED,
+  aiAgentDataAccessStatus,
+} from "src/lib/tauri/aiAgent";
+import type { QuerySafetyMode } from "src/lib/queries/querySafety";
+import {
+  AGENT_ENGINES,
+  AgentFallback,
+  agentActivityLabel,
+  agentAnswerParts,
+  agentHistory,
+  firstDataMessage,
+  readData,
+  withoutData,
+  runAgentTurn,
+} from "src/lib/ai-assistant/agent";
 
 export type AssistantStatus = "idle" | "loading_model" | "thinking";
 
@@ -34,6 +50,78 @@ export function formatAssistantRequestError(args: {
   const raw =
     args.error instanceof Error ? args.error.message : String(args.error ?? "");
   const vi = args.lang.code === "vie";
+
+  // AI agent data queries (plan ai-agent R5).
+  if (raw.includes("AI_DATA_APPROVAL_DENIED")) {
+    return vi
+      ? "Bạn đã từ chối cho AI chạy truy vấn đọc dữ liệu. Hãy hỏi lại hoặc diễn đạt khác."
+      : "You declined the AI's data query. Ask again or rephrase the question.";
+  }
+  if (raw.includes(AI_DATA_ACCESS_REQUIRED)) {
+    return vi
+      ? "AI cần quyền đọc dữ liệu của kết nối này để trả lời."
+      : "The AI needs permission to read data from this connection to answer.";
+  }
+
+  // Ollama native agent wire and context size (plan ollama-native-context A9').
+  // Fixed codes, matched before the generic agent and provider branches; provider
+  // text that may follow a code is never shown.
+  if (raw.includes("AI_AGENT_CONTEXT_FULL")) {
+    return vi
+      ? "Yêu cầu vượt quá context của model. Hãy tăng Context size trong AI settings, hoặc hỏi ngắn gọn hơn."
+      : "The request did not fit the model's context. Increase Context size in AI settings, or ask a shorter question.";
+  }
+  if (raw.includes("AI_OLLAMA_UPDATE_REQUIRED")) {
+    return vi
+      ? "Cần cập nhật Ollama lên 0.12.6 trở lên để dùng AI agent."
+      : "Update Ollama to 0.12.6 or newer to use the AI agent.";
+  }
+  if (raw.includes("AI_OLLAMA_MODEL_NOT_FOUND")) {
+    return vi
+      ? "Không tìm thấy model này trên server Ollama. Hãy tải model hoặc chọn model khác."
+      : "This model was not found on the Ollama server. Pull it or choose another model.";
+  }
+  if (raw.includes("AI_OLLAMA_MODEL_INFO_UNAVAILABLE")) {
+    return vi
+      ? "Không đọc được kích thước context của model này nên AI agent chưa chạy được. Hãy kiểm tra model trên server Ollama."
+      : "Couldn't read this model's context size, so the AI agent can't run. Check the model on the Ollama server.";
+  }
+  if (raw.includes("AI_OLLAMA_LOAD_FAILED")) {
+    return vi
+      ? "Ollama không đủ bộ nhớ để nạp model với context size này. Hãy giảm Context size trong AI settings."
+      : "Ollama doesn't have enough memory to load the model at this context size. Lower Context size in AI settings.";
+  }
+  if (raw.includes("AI_PROVIDER_UNREACHABLE")) {
+    return vi
+      ? "Không kết nối được tới server AI. Hãy kiểm tra server đang chạy và URL trong AI settings."
+      : "Couldn't reach the AI server. Check that it is running and the URL in AI settings.";
+  }
+  if (raw.includes("AI_PROVIDER_CONTEXT_SIZE_INVALID")) {
+    return vi
+      ? "Context size trong AI settings không hợp lệ (2048–262144)."
+      : "The Context size in AI settings is invalid (2048–262144).";
+  }
+
+  // AI agent run limits and connection state (plan ai-agent R1).
+  if (
+    raw.includes("AI_AGENT_DEADLINE") ||
+    raw.includes("AI_AGENT_BUDGET_EXHAUSTED") ||
+    raw.includes("AI_AGENT_STEP_LIMIT")
+  ) {
+    return vi
+      ? "AI agent không hoàn thành trong giới hạn cho phép. Hãy hỏi cụ thể hơn (ví dụ nêu tên bảng) rồi thử lại."
+      : "The AI agent could not finish within its limits. Ask a more specific question (for example, name the table) and try again.";
+  }
+  if (raw.includes("CONNECTION_NOT_FOUND")) {
+    return vi
+      ? "Kết nối database đã đóng. Hãy kết nối lại rồi thử lại."
+      : "The database connection was closed. Reconnect and try again.";
+  }
+  if (raw.includes("AI_AGENT_")) {
+    return vi
+      ? "AI agent gặp lỗi. Hãy thử lại."
+      : "The AI agent ran into a problem. Try again.";
+  }
   const isProviderRequest =
     raw.includes("AI_CHAT_FAILED") ||
     raw.includes("AI_CHAT_EMPTY_RESPONSE") ||
@@ -108,7 +196,7 @@ export function useAiAssistantSubmit(args: {
   prompt: string;
   setPrompt: Dispatch<StateUpdater<string>>;
   messages: ChatMessage[];
-  appendUserMessage: (text: string) => void;
+  appendUserMessage: (text: string, extra?: { dataRead?: boolean }) => void;
   appendAssistantMessage: (
     message: Omit<ChatMessage, "id" | "role">,
     startedAt?: number
@@ -129,6 +217,8 @@ export function useAiAssistantSubmit(args: {
   model: string;
   engine: DatabaseEngine;
   runtimeConnectionId?: string;
+  /** The editor's safety mode: data queries need approval in safe/production. */
+  querySafetyMode?: QuerySafetyMode;
   activeSchema?: string;
   activeTable?: TableItem;
   tables: TableItem[];
@@ -162,6 +252,7 @@ export function useAiAssistantSubmit(args: {
     model,
     engine,
     runtimeConnectionId,
+    querySafetyMode,
     activeSchema,
     tables,
     columnsByTable,
@@ -192,21 +283,42 @@ export function useAiAssistantSubmit(args: {
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    await submit(prompt.trim(), true);
+  };
 
+  /** Asks `text` again without touching the prompt (after allowing data access). */
+  const submitQuestion = async (text: string) => {
+    if (!text.trim() || !model.trim() || !providerId.trim()) return;
+    await submit(text.trim(), false);
+  };
+
+  const submit = async (question: string, fromPrompt: boolean) => {
     requestSeqRef.current += 1;
     const requestId = requestSeqRef.current;
     const abortController = new AbortController();
     requestAbortRef.current?.abort();
     requestAbortRef.current = abortController;
 
-    const question = prompt.trim();
     const requestStartedAt = Date.now();
 
-    setPrompt("");
+    if (fromPrompt) setPrompt("");
     setSubmitting(true);
     setAssistantStatus("thinking");
 
-    appendUserMessage(question);
+    // Once a chat holds database data, every later message counts as holding it too
+    // (it may quote or summarise it), so the mark survives the original's eviction.
+    const tainted = firstDataMessage(messages) >= 0;
+    appendUserMessage(question, tainted ? { dataRead: true } : undefined);
+    const finalize: typeof finalizeStreamingAssistantMessage = (
+      id,
+      message,
+      startedAt
+    ) =>
+      finalizeStreamingAssistantMessage(
+        id,
+        tainted ? { ...message, dataRead: true } : message,
+        startedAt
+      );
     if (!conversationState.replyLanguageCode) {
       updateConversationState({
         replyLanguageCode: resolveReplyLanguage(question, messages).code,
@@ -225,18 +337,25 @@ export function useAiAssistantSubmit(args: {
       });
       const hasDbContext = hasConcreteDatabaseContext(assistantContext);
 
+      // Answers built from database data (and everything after them) go to a
+      // provider only where the backend checks data-access consent right before the
+      // request: the agent path. Every other path (direct replies, the legacy planner,
+      // fallback after an agent attempt) never gets them (plan ai-agent R5).
+      const historyHasData = tainted;
+      const history = withoutData(messages);
+
       const onAssistantStatus = (_status: "generating") => {
         setAssistantStatus("thinking");
       };
 
       const directAppReply = getDirectAppContextReply({
         question,
-        history: messages,
+        history,
         savedConnections,
       });
       if (directAppReply) {
         if (requestSeqRef.current !== requestId) return;
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text: [directAppReply.answer, directAppReply.followup]
@@ -246,6 +365,84 @@ export function useAiAssistantSubmit(args: {
           requestStartedAt
         );
         return;
+      }
+
+      // AI agent: inspects the schema with tools before answering. Any reason it
+      // cannot run here (provider/model/engine unsupported) falls back silently.
+      if (
+        hasDbContext &&
+        runtimeConnectionId &&
+        AGENT_ENGINES.includes(engine)
+      ) {
+        try {
+          const result = await runAgentTurn({
+            providerId,
+            model,
+            question,
+            connectionId: runtimeConnectionId,
+            editorSql: currentSql,
+            // Same conversation and context the legacy planner gets.
+            // The backend checks consent before sending any of it.
+            history: agentHistory(messages),
+            historyHasData,
+            activeSchema: activeSchema ?? null,
+            activeTable: activeTable?.name ?? null,
+            targetTable: conversationState.targetTable ?? null,
+            replyLanguage: resolveReplyLanguage(question, messages).name,
+            includeColumnDetails: true,
+            safetyMode: querySafetyMode ?? null,
+            signal: abortController.signal,
+            onActivity: (tool) => {
+              if (requestSeqRef.current !== requestId) return;
+              updateStreamingAssistantText(streamId, agentActivityLabel(tool));
+            },
+          });
+          if (requestSeqRef.current !== requestId) return;
+          const answer = await agentAnswerParts(result, runtimeConnectionId);
+          if (requestSeqRef.current !== requestId) return;
+          finalize(
+            streamId,
+            readData(result.steps) ? { ...answer, dataRead: true } : answer,
+            requestStartedAt
+          );
+          return;
+        } catch (agentError) {
+          const code =
+            agentError instanceof Error
+              ? agentError.message
+              : String(agentError);
+          if (code.includes(AI_DATA_ACCESS_REQUIRED)) {
+            // Nothing was sent: ask the user, then ask the question again.
+            const status = await aiAgentDataAccessStatus(
+              runtimeConnectionId,
+              providerId
+            ).catch(() => null);
+            if (requestSeqRef.current !== requestId) return;
+            const label = status?.label ?? undefined;
+            const vi = resolveReplyLanguage(question, messages).code === "vie";
+            const text = vi
+              ? `Để trả lời, AI cần đọc dữ liệu từ ${label ?? "kết nối này"}.`
+              : `To answer, the AI needs to read data from ${label ?? "this connection"}.`;
+            finalize(
+              streamId,
+              {
+                text,
+                parts: [
+                  { type: "text", text },
+                  {
+                    type: "dataAccessRequest",
+                    question,
+                    label,
+                    state: "pending",
+                  },
+                ],
+              },
+              requestStartedAt
+            );
+            return;
+          }
+          if (!(agentError instanceof AgentFallback)) throw agentError;
+        }
       }
 
       if (!hasDbContext) {
@@ -259,7 +456,7 @@ export function useAiAssistantSubmit(args: {
           columnsByTable,
           activeTable,
           savedConnections,
-          history: messages,
+          history,
           onStatusChange: onAssistantStatus,
           onDelta: (text) => {
             if (requestSeqRef.current !== requestId) return;
@@ -270,7 +467,7 @@ export function useAiAssistantSubmit(args: {
 
         if (requestSeqRef.current !== requestId) return;
 
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text: [reply.answer, reply.followup].filter(Boolean).join("\n\n"),
@@ -294,7 +491,7 @@ export function useAiAssistantSubmit(args: {
         targetTable: conversationState.targetTable ?? undefined,
         replyLanguageCode: conversationState.replyLanguageCode ?? undefined,
         savedConnections,
-        history: messages,
+        history,
         onStatusChange: onAssistantStatus,
         onDelta: (text) => {
           if (requestSeqRef.current !== requestId) return;
@@ -310,7 +507,7 @@ export function useAiAssistantSubmit(args: {
       }
 
       if (plan.kind !== "sql" || !plan.sql) {
-        finalizeStreamingAssistantMessage(
+        finalize(
           streamId,
           {
             text:
@@ -327,7 +524,7 @@ export function useAiAssistantSubmit(args: {
         return;
       }
 
-      finalizeStreamingAssistantMessage(
+      finalize(
         streamId,
         {
           text:
@@ -407,6 +604,7 @@ export function useAiAssistantSubmit(args: {
   return {
     canSubmit,
     handleSubmit,
+    submitQuestion,
     handleCancelSubmit,
   };
 }

@@ -1,4 +1,5 @@
 import { useRef } from "preact/hooks";
+import { MarkdownText } from "./MarkdownText";
 import { Button } from "src/components/common/Button";
 import {
   CheckMarkIcon,
@@ -6,7 +7,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
 } from "src/components/icons";
-import type { ChatMessage } from "src/types";
+import type { AgentStepSummary, ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 import { cn } from "src/utils/cn";
 import {
@@ -119,7 +120,7 @@ function SqlPreviewPart(props: {
   onInsertSql?: (sql: string) => Promise<void> | void;
   onCopySql: (sql: string) => void;
   onInsert: (sql: string) => void;
-  onRun?: (sql: string) => void;
+  onRun?: (sql: string, agent: boolean) => void;
 }) {
   const {
     messageId,
@@ -150,7 +151,7 @@ function SqlPreviewPart(props: {
               variant="default"
               class="px-2 py-1 text-xs"
               loading={sqlRunState === "running"}
-              onClick={() => onRun(part.sql)}
+              onClick={() => onRun(part.sql, part.agent === true)}
             >
               Run
             </Button>
@@ -195,7 +196,9 @@ function MessageParts(props: {
   onInsertSql?: (sql: string) => Promise<void> | void;
   onCopySql: (sql: string) => void;
   onInsert: (sql: string) => void;
-  onRun?: (sql: string) => void;
+  onRun?: (sql: string, agent: boolean) => void;
+  onDataAccess?: (allow: boolean, question: string) => void;
+  dataAccessSaving?: boolean;
 }) {
   const {
     message,
@@ -207,18 +210,28 @@ function MessageParts(props: {
     onCopySql,
     onInsert,
     onRun,
+    onDataAccess,
+    dataAccessSaving,
   } = props;
 
   return (
     <div class="max-w-full min-w-0 space-y-3">
       {message.parts!.map((part, index) => {
         if (part.type === "text") {
-          return (
+          const textClass = cn(
+            "max-w-full min-w-0",
+            floating ? "text-inherit" : "text-sm text-neutral-800"
+          );
+          return message.role === "assistant" ? (
+            <MarkdownText
+              key={`${message.id}-part-${index}`}
+              text={part.text}
+              class={textClass}
+            />
+          ) : (
             <div
               key={`${message.id}-part-${index}`}
-              class={`max-w-full min-w-0 break-all whitespace-pre-wrap ${
-                floating ? "text-inherit" : "text-sm text-neutral-800"
-              }`}
+              class={cn(textClass, "wrap-break-word whitespace-pre-wrap")}
             >
               {part.text}
             </div>
@@ -239,6 +252,31 @@ function MessageParts(props: {
               onCopySql={onCopySql}
               onInsert={onInsert}
               onRun={onRun}
+            />
+          );
+        }
+
+        if (part.type === "dataAccessRequest") {
+          return (
+            <DataAccessRequestPart
+              key={`${message.id}-part-${index}`}
+              label={part.label}
+              state={part.state ?? "pending"}
+              saving={dataAccessSaving}
+              onAnswer={
+                onDataAccess
+                  ? (allow) => onDataAccess(allow, part.question)
+                  : undefined
+              }
+            />
+          );
+        }
+
+        if (part.type === "agentSteps") {
+          return (
+            <AgentStepsPart
+              key={`${message.id}-part-${index}`}
+              steps={part.steps}
             />
           );
         }
@@ -452,7 +490,9 @@ export function AiAssistantMessageBody(props: {
   onCopySql: () => void;
   onCopySqlText: (sql: string) => void;
   onInsertSqlPreview: (sql: string) => void;
-  onRunSqlPreview?: (sql: string) => void;
+  onRunSqlPreview?: (sql: string, agent: boolean) => void;
+  onDataAccess?: (allow: boolean, question: string) => void;
+  dataAccessSaving?: boolean;
 }) {
   const {
     message,
@@ -468,12 +508,22 @@ export function AiAssistantMessageBody(props: {
     onCopySqlText,
     onInsertSqlPreview,
     onRunSqlPreview,
+    onDataAccess,
+    dataAccessSaving,
   } = props;
 
   return (
     <>
       {isStreamingEmpty ? (
         <AssistantStreamingPlaceholder />
+      ) : !hasParts && message.role === "assistant" ? (
+        <MarkdownText
+          text={message.text}
+          class={cn(
+            "max-w-full min-w-0",
+            floating ? "text-inherit" : "text-sm text-neutral-800"
+          )}
+        />
       ) : !hasParts ? (
         <div
           class={`max-w-full min-w-0 break-all whitespace-pre-wrap ${
@@ -495,6 +545,8 @@ export function AiAssistantMessageBody(props: {
           onCopySql={onCopySqlText}
           onInsert={onInsertSqlPreview}
           onRun={onRunSqlPreview}
+          onDataAccess={onDataAccess}
+          dataAccessSaving={dataAccessSaving}
         />
       ) : null}
 
@@ -521,5 +573,95 @@ export function AiAssistantMessageBody(props: {
         </ul>
       ) : null}
     </>
+  );
+}
+
+/** Fixed labels for agent tools; anything unknown gets a generic one. */
+const AGENT_STEP_LABELS: Record<string, string> = {
+  list_schemas: "Listed schemas",
+  list_tables: "Listed tables",
+  describe_table: "Looked at a table's structure",
+  sample_rows: "Read sample rows",
+  run_readonly_query: "Ran a read-only query",
+  explain_query: "Checked a query plan",
+};
+
+/**
+ * Asks once per connection whether the AI may read its data (plan ai-agent R5).
+ * Only fixed, locally built text: the label is the saved connection name.
+ */
+export function DataAccessRequestPart(props: {
+  label?: string;
+  state: "pending" | "allowed" | "declined";
+  /** The permission is being saved: no second answer. */
+  saving?: boolean;
+  onAnswer?: (allow: boolean) => void;
+}) {
+  const { label, state, saving, onAnswer } = props;
+  const name = label || "this connection";
+  return (
+    <div class="w-full min-w-0 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      <div class="font-medium">Allow AI to read data from {name}?</div>
+      <p class="mt-1 text-xs text-amber-900">
+        Query results from this connection will be sent to the selected AI
+        provider. Data queries are read-only; in safe and production mode each
+        one asks for Touch ID or your password.
+      </p>
+      {state === "pending" && onAnswer ? (
+        <div class="mt-2 flex gap-2">
+          <Button
+            variant="primary"
+            class="px-2 py-1 text-xs"
+            disabled={saving}
+            loading={saving}
+            onClick={() => onAnswer(true)}
+          >
+            Allow
+          </Button>
+          <Button
+            variant="ghost"
+            class="px-2 py-1 text-xs"
+            disabled={saving}
+            onClick={() => onAnswer(false)}
+          >
+            Not now
+          </Button>
+        </div>
+      ) : (
+        <div class="mt-2 text-xs text-amber-800">
+          {state === "allowed"
+            ? "Allowed."
+            : state === "declined"
+              ? "Not allowed."
+              : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What an agent run looked at, collapsed by default (plan ai-agent R6). */
+export function AgentStepsPart(props: { steps: AgentStepSummary[] }) {
+  const { steps } = props;
+  if (!steps.length) return null;
+  return (
+    <details class="group/steps text-[11px] text-neutral-500">
+      <summary class="cursor-pointer list-none select-none hover:text-neutral-700">
+        <span class="mr-1 inline-block transition group-open/steps:rotate-90">
+          ›
+        </span>
+        Checked the database ({steps.length}{" "}
+        {steps.length === 1 ? "step" : "steps"})
+      </summary>
+      <ol class="mt-1 space-y-0.5 pl-4">
+        {steps.map((step, index) => (
+          <li key={index} class={step.ok ? undefined : "text-amber-700"}>
+            {AGENT_STEP_LABELS[step.tool] ?? "Used a database tool"}
+            {step.ok ? "" : " (failed)"}
+            {step.truncated ? " (partial)" : ""}
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }

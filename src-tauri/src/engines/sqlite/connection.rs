@@ -10,7 +10,6 @@ pub struct SqliteConn {
     pub id: Uuid,
     pub label: String,
     /// SQLite path / URI used to open `conn` (e.g. `:memory:`).
-    #[allow(dead_code)]
     pub db_path: String,
     pub conn: Arc<Mutex<Connection>>,
     pub default_statement_timeout_ms: Option<u64>,

@@ -1,3 +1,4 @@
+import { PROFILE_CHANGED_EVENT } from "src/lib/tauri/profile";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { AiChatSession, ChatMessage } from "src/types";
 
@@ -5,6 +6,17 @@ const aiChatSessionMap = new Map<string, AiChatSession[]>();
 const AI_CHAT_SESSION_PREFIX = "politedb.ai.chat.";
 const MAX_PERSISTED_MESSAGES = 80;
 const MAX_SESSIONS_PER_SCOPE = 20;
+/** Stored chat history per scope (plan ai-agent R6). History is plain text on disk. */
+export const MAX_PERSISTED_BYTES = 2 * 1024 * 1024;
+
+/** Bounds for fields read back from storage (legacy records were unbounded). */
+const MAX_ID_CHARS = 64;
+const MAX_TITLE_CHARS = 120;
+const MAX_NAME_CHARS = 256;
+
+function boundedString(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.length <= max ? value : null;
+}
 
 function makeId() {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -64,23 +76,31 @@ function normalizeSession(scopeKey: string, raw: any): AiChatSession {
   const now = Date.now();
   const messages = Array.isArray(raw?.messages)
     ? (raw.messages as ChatMessage[])
-        .filter((message) => !message.streaming)
+        .filter(
+          (message) =>
+            !message?.streaming &&
+            (message?.role === "user" || message?.role === "assistant") &&
+            typeof message.text === "string"
+        )
+        .map((message) => ({
+          ...message,
+          id: boundedString(message.id, MAX_ID_CHARS) ?? makeId(),
+        }))
         .map(migrateMessage)
     : [];
   const firstUser = messages.find((message) => message.role === "user");
   return {
-    id: typeof raw?.id === "string" && raw.id ? raw.id : makeId(),
+    id: boundedString(raw?.id, MAX_ID_CHARS) || makeId(),
     scopeKey,
     title:
       typeof raw?.title === "string" && raw.title.trim()
-        ? raw.title.trim()
+        ? raw.title.trim().slice(0, MAX_TITLE_CHARS)
         : firstUser
           ? titleFromText(firstUser.text)
           : "New Chat",
-    providerId: raw?.providerId ?? null,
-    replyLanguageCode:
-      typeof raw?.replyLanguageCode === "string" ? raw.replyLanguageCode : null,
-    targetTable: typeof raw?.targetTable === "string" ? raw.targetTable : null,
+    providerId: boundedString(raw?.providerId, MAX_NAME_CHARS),
+    replyLanguageCode: boundedString(raw?.replyLanguageCode, 16),
+    targetTable: boundedString(raw?.targetTable, MAX_NAME_CHARS),
     messages,
     createdAt: Number(raw?.createdAt) || now,
     updatedAt: Number(raw?.updatedAt) || now,
@@ -138,32 +158,224 @@ function loadPersistedSessions(chatSessionKey: string) {
   }
 }
 
+function byteSize(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).length;
+}
+
+/** Stand-in for a single message too large to keep within the byte cap. */
+export const OVERSIZED_MESSAGE_TEXT =
+  "This message was too large to keep in chat history.";
+
+/** Exactly what `persistSessions` writes for a scope. */
+function storageEnvelope(
+  chatSessionKey: string,
+  sessions: AiChatSession[],
+  activeSessionId: string,
+  updatedAt: number
+) {
+  return {
+    scopeKey: chatSessionKey,
+    activeSessionId,
+    sessions,
+    updatedAt,
+  };
+}
+
+/**
+ * Applies the history limits (plan ai-agent R6) to the sessions themselves, so the
+ * in-memory list, what is shown and what is stored are the same. Keeps the last
+ * {@link MAX_PERSISTED_MESSAGES} messages and {@link MAX_SESSIONS_PER_SCOPE} newest
+ * sessions; then, while the stored envelope is over `maxBytes`, drops the oldest
+ * other sessions, then the active session's oldest messages, and finally replaces a
+ * lone oversized message with a short note. Returns the input array unchanged when
+ * nothing had to go.
+ */
+export function fitSessionsForStorage(
+  chatSessionKey: string,
+  sessions: AiChatSession[],
+  activeSessionId: string,
+  maxBytes: number = MAX_PERSISTED_BYTES
+): { sessions: AiChatSession[]; changed: boolean } {
+  let changed = false;
+  let kept = sessions.map((session) => {
+    const messages = session.messages.filter((message) => !message.streaming);
+    if (
+      messages.length === session.messages.length &&
+      messages.length <= MAX_PERSISTED_MESSAGES
+    )
+      return session;
+    changed = true;
+    return { ...session, messages: messages.slice(-MAX_PERSISTED_MESSAGES) };
+  });
+  const oldestOther = () =>
+    kept
+      .filter((session) => session.id !== activeSessionId)
+      .reduce<AiChatSession | null>(
+        (oldest, session) =>
+          !oldest || session.updatedAt < oldest.updatedAt ? session : oldest,
+        null
+      );
+  const drop = (session: AiChatSession) => {
+    kept = kept.filter((item) => item !== session);
+    changed = true;
+  };
+  while (kept.length > MAX_SESSIONS_PER_SCOPE) {
+    const oldest = oldestOther();
+    if (!oldest) break;
+    drop(oldest);
+  }
+  // Fixed-width stand-in for the timestamp written at save time.
+  const size = () =>
+    byteSize(
+      storageEnvelope(chatSessionKey, kept, activeSessionId, 1_000_000_000_000)
+    );
+  while (kept.length > 1 && size() > maxBytes) {
+    const oldest = oldestOther();
+    if (!oldest) break;
+    drop(oldest);
+  }
+  const targeted = (session: AiChatSession) =>
+    session.id === activeSessionId || kept.length === 1;
+  const trimMessages = (update: (messages: ChatMessage[]) => ChatMessage[]) => {
+    kept = kept.map((session) =>
+      targeted(session)
+        ? { ...session, messages: update(session.messages) }
+        : session
+    );
+    changed = true;
+  };
+  while (
+    size() > maxBytes &&
+    kept.some((session) => targeted(session) && session.messages.length > 1)
+  ) {
+    trimMessages((messages) => messages.slice(1));
+  }
+  if (size() > maxBytes) {
+    trimMessages((messages) =>
+      messages.map((message, index) => ({
+        id: boundedString(message.id, MAX_ID_CHARS) ?? `m${index}`,
+        role: message.role,
+        text: OVERSIZED_MESSAGE_TEXT,
+        createdAt: message.createdAt,
+      }))
+    );
+  }
+  if (size() > maxBytes) {
+    // Even the minimal record is too large (oversized metadata): keep one empty
+    // session with bounded fields. It always fits, so fitting it again is a no-op.
+    const keep = kept.find(targeted) ?? kept[0];
+    kept = [
+      {
+        id: boundedString(keep?.id, MAX_ID_CHARS) ?? "session",
+        scopeKey: chatSessionKey,
+        title: "New Chat",
+        messages: [],
+        createdAt: Number(keep?.createdAt) || 0,
+        updatedAt: Number(keep?.updatedAt) || 0,
+      },
+    ];
+    changed = true;
+  }
+  return { sessions: changed ? kept : sessions, changed };
+}
+
 function persistSessions(
   chatSessionKey: string,
   sessions: AiChatSession[],
   activeSessionId: string
 ) {
-  const compact = sessions
-    .map((session) => ({
-      ...session,
-      messages: session.messages
-        .filter((message) => !message.streaming)
-        .slice(-MAX_PERSISTED_MESSAGES),
-    }))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, MAX_SESSIONS_PER_SCOPE);
-  aiChatSessionMap.set(chatSessionKey, compact);
+  aiChatSessionMap.set(chatSessionKey, sessions);
   try {
     localStorage.setItem(
       storageKey(chatSessionKey),
-      JSON.stringify({
-        scopeKey: chatSessionKey,
-        activeSessionId,
-        sessions: compact,
-        updatedAt: Date.now(),
-      })
+      JSON.stringify(
+        storageEnvelope(chatSessionKey, sessions, activeSessionId, Date.now())
+      )
     );
   } catch {}
+}
+
+const AI_CHAT_PURGED_EVENT = "politedb:ai-chat-purged";
+/** Which saved connection each chat scope belongs to, kept after its tab closes. */
+const AI_CHAT_OWNERS_KEY = "politedb.ai.chatOwners";
+
+function readOwners(): Record<string, string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AI_CHAT_OWNERS_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOwners(owners: Record<string, string>) {
+  try {
+    localStorage.setItem(AI_CHAT_OWNERS_KEY, JSON.stringify(owners));
+  } catch {}
+}
+
+/** Records that a chat scope (a connection tab) belongs to a saved connection. */
+export function rememberAiChatOwner(scopeKey: string, profileId: string) {
+  const owners = readOwners();
+  if (owners[scopeKey] === profileId) return;
+  owners[scopeKey] = profileId;
+  writeOwners(owners);
+}
+
+/** Every chat scope that belongs to a saved connection, open or closed. */
+export function aiChatScopesOwnedBy(profileId: string): string[] {
+  return Object.entries(readOwners())
+    .filter(([, owner]) => owner === profileId)
+    .map(([scope]) => scope);
+}
+
+/**
+ * Deletes the chat history of these scopes from memory and storage, and resets any
+ * mounted chat showing one of them (revoked AI data access, plan ai-agent R6).
+ */
+export function purgeAiChatScopes(scopeKeys: string[]) {
+  // Ownership stays: the same tab may chat again and be revoked again later.
+  for (const key of scopeKeys) {
+    aiChatSessionMap.delete(key);
+    try {
+      localStorage.removeItem(storageKey(key));
+    } catch {}
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent<string[]>(AI_CHAT_PURGED_EVENT, { detail: scopeKeys })
+    );
+  }
+}
+
+function scopeHasData(scopeKey: string): boolean {
+  const memory = aiChatSessionMap.get(scopeKey);
+  if (memory) {
+    return memory.some((session) => session.messages.some((m) => m.dataRead));
+  }
+  try {
+    return (localStorage.getItem(storageKey(scopeKey)) ?? "").includes(
+      '"dataRead":true'
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A saved connection was edited or deleted: chats holding its data came from the old
+ * target, which consent for the new one does not cover (plan ai-agent R5). Remove them.
+ */
+export function purgeAiDataChatsOfProfile(profileId: string) {
+  const scopes = aiChatScopesOwnedBy(profileId).filter(scopeHasData);
+  if (scopes.length) purgeAiChatScopes(scopes);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener(PROFILE_CHANGED_EVENT, (event) => {
+    const profileId = (event as CustomEvent<string>).detail;
+    if (profileId) purgeAiDataChatsOfProfile(profileId);
+  });
 }
 
 export function useAiChatSession(chatSessionKey: string) {
@@ -202,12 +414,34 @@ export function useAiChatSession(chatSessionKey: string) {
   }, [chatSessionKey]);
 
   useEffect(() => {
+    const onPurged = (event: Event) => {
+      const keys = (event as CustomEvent<string[]>).detail ?? [];
+      if (!keys.includes(chatSessionKey)) return;
+      const fresh = makeEmptySession(chatSessionKey);
+      setSessions([fresh]);
+      setActiveSessionId(fresh.id);
+    };
+    window.addEventListener(AI_CHAT_PURGED_EVENT, onPurged);
+    return () => window.removeEventListener(AI_CHAT_PURGED_EVENT, onPurged);
+  }, [chatSessionKey]);
+
+  useEffect(() => {
     if (!sessions.length || !activeSessionId) return;
     if (
       sessions.some((session) =>
         session.messages.some((message) => message.streaming)
       )
     ) {
+      return;
+    }
+    const fitted = fitSessionsForStorage(
+      chatSessionKey,
+      sessions,
+      activeSessionId
+    );
+    if (fitted.changed) {
+      // Evict from the visible state too; this effect runs again and saves it.
+      setSessions(fitted.sessions);
       return;
     }
     persistSessions(chatSessionKey, sessions, activeSessionId);
@@ -288,7 +522,10 @@ export function useAiChatSession(chatSessionKey: string) {
     });
   };
 
-  const appendUserMessage = (text: string) => {
+  const appendUserMessage = (
+    text: string,
+    extra?: Pick<ChatMessage, "dataRead">
+  ) => {
     updateActiveSession((session) => ({
       ...session,
       title: session.messages.length ? session.title : titleFromText(text),
@@ -300,6 +537,7 @@ export function useAiChatSession(chatSessionKey: string) {
           text,
           parts: [{ type: "text" as const, text }],
           createdAt: Date.now(),
+          ...extra,
         },
       ],
       updatedAt: Date.now(),
@@ -347,7 +585,8 @@ export function useAiChatSession(chatSessionKey: string) {
       if (!pending) return;
       setActiveMessages((prev) =>
         prev.map((message) =>
-          message.id === pending.id
+          // A finalized message keeps its answer: a late frame never overwrites it.
+          message.id === pending.id && message.streaming
             ? { ...message, text: pending.text }
             : message
         )
@@ -360,6 +599,10 @@ export function useAiChatSession(chatSessionKey: string) {
     message: Omit<ChatMessage, "id" | "role" | "streaming">,
     startedAt = Date.now()
   ) => {
+    // Drop a queued streaming update for this message: the final text wins.
+    if (pendingStreamingTextRef.current?.id === id) {
+      pendingStreamingTextRef.current = null;
+    }
     setActiveMessages((prev) =>
       prev.map((item) =>
         item.id === id

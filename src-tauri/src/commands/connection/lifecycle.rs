@@ -395,6 +395,10 @@ pub async fn connection_remove(
     state.sql_busy.force_release_conn(connection_id);
 
     // 2) close DB connection resources
+    // Agent runs reading this connection stop before it goes away (they own their
+    // sessions and finish cleanup on cancel).
+    state.ai_agent_runs.cancel_on_connections(&[connection_id]);
+    state.connection_profiles.remove(&connection_id);
     if let Some((_id, conn)) = state.connections.remove(&connection_id) {
         conn.close().await;
     }

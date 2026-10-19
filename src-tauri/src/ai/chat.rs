@@ -4,7 +4,7 @@
 //! [`transport::client_for`]; errors carry codes only (no URLs, hosts, prompts or bodies).
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::provider::{self, AiProviderConfig, AiProviderKind};
 use super::transport;
@@ -67,14 +67,29 @@ pub fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
     }
 }
 
-async fn post_json(
+/// POSTs JSON and returns the status with the (size-capped) body. No error mapping, so
+/// callers can recognise specific provider signals before redacting.
+pub(crate) async fn send_json(
     config: &AiProviderConfig,
     path: &str,
     payload: &serde_json::Value,
     headers: &[(&str, &str)],
     bearer: Option<&str>,
-) -> Result<serde_json::Value, String> {
+) -> Result<(reqwest::StatusCode, String), String> {
     let url = provider::endpoint(config, path)?;
+    send_json_to(config, url, payload, headers, bearer).await
+}
+
+/// [`send_json`] to an already validated full URL (Ollama's native endpoints).
+pub(crate) async fn send_json_to(
+    config: &AiProviderConfig,
+    url: url::Url,
+    payload: &serde_json::Value,
+    headers: &[(&str, &str)],
+    bearer: Option<&str>,
+) -> Result<(reqwest::StatusCode, String), String> {
+    // Re-validated like every provider request (plan D12 R1).
+    let url = crate::ai::url_policy::validate(url.as_str(), config.kind.class())?;
     let client = transport::client_for(&url, transport::CHAT_TIMEOUT)?;
     let mut builder = client.post(url).json(payload);
     for (name, value) in headers {
@@ -89,10 +104,18 @@ async fn post_json(
         .map_err(|e| transport::request_error(&e))?;
     let status = response.status();
     transport::reject_redirect(status)?;
-    let body = response
-        .text()
-        .await
-        .map_err(|_| "AI_CHAT_RESPONSE_READ_FAILED".to_string())?;
+    let body = transport::read_body_limited(response, transport::CHAT_MAX_BYTES).await?;
+    Ok((status, body))
+}
+
+async fn post_json(
+    config: &AiProviderConfig,
+    path: &str,
+    payload: &serde_json::Value,
+    headers: &[(&str, &str)],
+    bearer: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let (status, body) = send_json(config, path, payload, headers, bearer).await?;
     if !status.is_success() {
         return Err(provider_http_error(status, &body));
     }
@@ -125,11 +148,12 @@ fn first_text_from_openai_like(value: &serde_json::Value) -> String {
     }
 }
 
-async fn complete_openai_like(
-    config: &AiProviderConfig,
-    request: &AiChatCompleteRequest,
-    api_key: Option<&str>,
-) -> Result<String, String> {
+/// Output floor for Ollama chat. Local models such as qwen3 think before answering and
+/// cannot always turn it off; the thinking counts against `max_tokens`, so a small
+/// budget ends in HTTP 200 with empty content. Short answers stay short.
+const OLLAMA_MIN_MAX_TOKENS: u32 = 4096;
+
+fn openai_like_payload(config: &AiProviderConfig, request: &AiChatCompleteRequest) -> Value {
     let model = request.model.as_deref().unwrap_or(&config.default_model);
     let is_groq_gpt_oss =
         matches!(config.kind, AiProviderKind::Groq) && model.starts_with("openai/gpt-oss-");
@@ -145,9 +169,23 @@ async fn complete_openai_like(
         payload["max_completion_tokens"] = json!(request.max_tokens.unwrap_or(4096).max(4096));
         payload["reasoning_effort"] = json!("low");
         payload["include_reasoning"] = json!(false);
+    } else if matches!(config.kind, AiProviderKind::Ollama) {
+        payload["max_tokens"] = json!(request
+            .max_tokens
+            .unwrap_or(OLLAMA_MIN_MAX_TOKENS)
+            .max(OLLAMA_MIN_MAX_TOKENS));
     } else if let Some(max_tokens) = request.max_tokens {
         payload["max_tokens"] = json!(max_tokens);
     }
+    payload
+}
+
+async fn complete_openai_like(
+    config: &AiProviderConfig,
+    request: &AiChatCompleteRequest,
+    api_key: Option<&str>,
+) -> Result<String, String> {
+    let payload = openai_like_payload(config, request);
     let value = post_json(config, "chat/completions", &payload, &[], api_key).await?;
     let text = first_text_from_openai_like(&value);
     if text.is_empty() {
@@ -168,7 +206,7 @@ async fn complete_openai_like(
 const ANTHROPIC_ALWAYS_THINKING_FROM: (u32, u32) = (4, 7);
 
 /// Room for adaptive thinking plus a short answer on always-thinking models.
-const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
+pub(crate) const ANTHROPIC_MIN_MAX_TOKENS: u32 = 4096;
 
 /// `(major, minor)` from ids like `claude-opus-4-1-20250805`, `claude-3-5-sonnet-20241022`
 /// or `claude-opus-5-5`. Date suffixes (8 digits) are not versions.
@@ -183,7 +221,7 @@ fn anthropic_version(model: &str) -> Option<(u32, u32)> {
     Some((major, numbers.next().unwrap_or(0)))
 }
 
-fn anthropic_always_thinks(model: &str) -> bool {
+pub(crate) fn anthropic_always_thinks(model: &str) -> bool {
     anthropic_version(model).map_or(true, |version| version >= ANTHROPIC_ALWAYS_THINKING_FROM)
 }
 
@@ -428,6 +466,30 @@ mod tests {
         let mut request = probe_request(&anthropic_config());
         request.model = Some(model.into());
         request
+    }
+
+    #[test]
+    fn ollama_chat_leaves_room_to_think() {
+        let config = local(11434);
+        let mut request = probe_request(&config);
+        for (asked, sent) in [(Some(96), 4096), (None, 4096), (Some(8192), 8192)] {
+            request.max_tokens = asked;
+            assert_eq!(
+                openai_like_payload(&config, &request)["max_tokens"],
+                sent,
+                "{asked:?}"
+            );
+        }
+        // Other OpenAI-compatible providers keep the requested budget.
+        let mut openai =
+            provider::normalize_fields(provider(AiProviderKind::Openai, "https://api.openai.com"));
+        openai.default_model = "gpt-5".into();
+        request.max_tokens = Some(96);
+        assert_eq!(openai_like_payload(&openai, &request)["max_tokens"], 96);
+        request.max_tokens = None;
+        assert!(openai_like_payload(&openai, &request)
+            .get("max_tokens")
+            .is_none());
     }
 
     #[test]

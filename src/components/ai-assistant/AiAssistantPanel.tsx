@@ -1,3 +1,4 @@
+import { aiAgentDataAccessGrant } from "src/lib/tauri/aiAgent";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   AiAssistantChatArea,
@@ -389,37 +390,60 @@ export function AiAssistantPanel(props: Props) {
   );
   const submitBlocked = Boolean(pendingFallback) || sessionProviderUnavailable;
 
-  const { canSubmit, handleSubmit, handleCancelSubmit } = useAiAssistantSubmit({
-    prompt,
-    setPrompt,
-    messages,
-    appendUserMessage,
-    appendAssistantMessage,
-    beginStreamingAssistantMessage,
-    updateStreamingAssistantText,
-    finalizeStreamingAssistantMessage,
-    clearStreamingMessages,
-    setSubmitting,
-    setAssistantStatus,
-    // Blocked until the user confirms a replacement provider (plan R6).
-    providerId: submitBlocked ? "" : providerId,
-    isLocalProvider: Boolean(
-      selectedProviderOption &&
-      isLocalAiProviderKind(selectedProviderOption.kind)
-    ),
-    model: providerModel,
-    engine,
-    runtimeConnectionId,
-    activeSchema: effectiveActiveSchema,
-    activeTable: effectiveActiveTable,
-    tables: effectiveTables,
-    columnsByTable: effectiveColumnsByTable,
-    columnDetailsByTable: effectiveColumnDetailsByTable,
-    currentSql: effectiveCurrentSql,
-    savedConnections,
-    conversationState,
-    updateConversationState,
-  });
+  const { canSubmit, handleSubmit, submitQuestion, handleCancelSubmit } =
+    useAiAssistantSubmit({
+      prompt,
+      setPrompt,
+      messages,
+      appendUserMessage,
+      appendAssistantMessage,
+      beginStreamingAssistantMessage,
+      updateStreamingAssistantText,
+      finalizeStreamingAssistantMessage,
+      clearStreamingMessages,
+      setSubmitting,
+      setAssistantStatus,
+      // Blocked until the user confirms a replacement provider (plan R6).
+      providerId: submitBlocked ? "" : providerId,
+      isLocalProvider: Boolean(
+        selectedProviderOption &&
+        isLocalAiProviderKind(selectedProviderOption.kind)
+      ),
+      model: providerModel,
+      engine,
+      runtimeConnectionId,
+      querySafetyMode,
+      activeSchema: effectiveActiveSchema,
+      activeTable: effectiveActiveTable,
+      tables: effectiveTables,
+      columnsByTable: effectiveColumnsByTable,
+      columnDetailsByTable: effectiveColumnDetailsByTable,
+      currentSql: effectiveCurrentSql,
+      savedConnections,
+      conversationState,
+      updateConversationState,
+    });
+  // Read by async continuations (data-access Allow) after awaits.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  // Any change of chat, connection, provider or safety mode, or a cancel, invalidates
+  // a pending "Allow" so its continuation never starts a run in a different context.
+  const allowGenerationRef = useRef(0);
+  useEffect(() => {
+    allowGenerationRef.current += 1;
+  }, [activeSessionId, runtimeConnectionId, providerId, querySafetyMode]);
+  // The continuation asks again with the context current at that moment.
+  const submitQuestionRef = useRef(submitQuestion);
+  submitQuestionRef.current = submitQuestion;
+  const cancelSubmit = () => {
+    allowGenerationRef.current += 1;
+    handleCancelSubmit();
+  };
   const cancelSubmitRef = useRef(handleCancelSubmit);
   useEffect(() => {
     cancelSubmitRef.current = handleCancelSubmit;
@@ -522,12 +546,41 @@ export function AiAssistantPanel(props: Props) {
           prompt={prompt}
           onPromptChange={setPrompt}
           onSubmit={handleSubmit}
-          onCancelSubmit={handleCancelSubmit}
+          onCancelSubmit={cancelSubmit}
           canSubmit={canSubmit}
           assistantStatus={assistantStatus}
           runtimeConnectionId={runtimeConnectionId}
           querySafetyMode={querySafetyMode}
           onUpdateMessage={updateMessage}
+          onAllowDataAccess={async (question) => {
+            const connectionId = runtimeConnectionId;
+            const provider = providerId;
+            const generation = allowGenerationRef.current;
+            if (!connectionId || !provider || submitBlocked) return false;
+            try {
+              await aiAgentDataAccessGrant(connectionId, provider);
+            } catch (error) {
+              const code =
+                error instanceof Error ? error.message : String(error);
+              if (mountedRef.current) {
+                appendAssistantMessage({
+                  text: code.includes("AI_DATA_ACCESS_RECONNECT")
+                    ? "This connection's settings changed since it was opened. Reconnect, then ask again."
+                    : "Could not save the data access permission. Try again.",
+                });
+              }
+              return false;
+            }
+            // Never start a run for a panel that closed, after a cancel, or in another
+            // chat, connection or provider than the one the user just allowed.
+            if (
+              mountedRef.current &&
+              generation === allowGenerationRef.current
+            ) {
+              void submitQuestionRef.current(question);
+            }
+            return true;
+          }}
           providerLabel={providerLabel}
           providerModel={providerModel}
           providerOptions={selectableProviderOptions}

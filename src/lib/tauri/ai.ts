@@ -63,6 +63,36 @@ export async function aiProviderCancelListModels(requestId: string) {
   }
 }
 
+export type OllamaStatusKind =
+  | "native"
+  | "native_no_model"
+  | "metadata_unavailable"
+  | "model_not_found"
+  | "too_old"
+  | "compatible"
+  | "unreachable"
+  | "not_ollama_kind";
+
+export type OllamaStatus = {
+  requestId: string;
+  kind: OllamaStatusKind;
+  version?: string | null;
+  trainedMax?: number | null;
+  /** The context size a run would send: min(setting or default, trainedMax). */
+  effective?: number | null;
+};
+
+/**
+ * What the server behind an (unsaved) Ollama draft supports. Persists nothing.
+ * Cancel with {@link aiProviderCancelListModels} and the same `requestId`.
+ */
+export async function aiOllamaStatus(
+  config: AiProviderConfig,
+  requestId: string
+) {
+  return invoke<OllamaStatus>(CMD.aiOllamaStatus, { config, requestId });
+}
+
 /** Sends a short test completion for an unsaved draft; persists nothing. */
 export async function aiProviderTestDraft(
   config: AiProviderConfig,

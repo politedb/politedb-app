@@ -219,6 +219,7 @@ export function AiAssistantChatArea(props: {
   runtimeConnectionId?: string;
   querySafetyMode?: QuerySafetyMode;
   onUpdateMessage: (id: string, patch: Partial<ChatMessage>) => void;
+  onAllowDataAccess?: (question: string) => Promise<boolean>;
   providerLabel: string;
   providerModel: string;
   providerOptions: AiProviderConfig[];
@@ -255,6 +256,7 @@ export function AiAssistantChatArea(props: {
     runtimeConnectionId,
     querySafetyMode = "default",
     onUpdateMessage,
+    onAllowDataAccess,
     providerLabel,
     providerModel,
     providerOptions,
@@ -410,7 +412,7 @@ export function AiAssistantChatArea(props: {
   return (
     <>
       {floating ? (
-        <div class="relative flex shrink-0 items-center justify-between p-2">
+        <div class="relative flex shrink-0 items-center justify-between p-2 shadow-xs">
           <div class="flex min-w-0 items-center gap-2">
             <Popover
               open={titleOpen}
@@ -551,6 +553,7 @@ export function AiAssistantChatArea(props: {
                 runtimeConnectionId={runtimeConnectionId}
                 querySafetyMode={querySafetyMode}
                 onUpdateMessage={onUpdateMessage}
+                onAllowDataAccess={onAllowDataAccess}
               />
             ))}
 

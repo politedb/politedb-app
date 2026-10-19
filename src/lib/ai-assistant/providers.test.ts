@@ -6,6 +6,7 @@ import {
   isLegacyBundledProvider,
   makeDefaultAiProvider,
   normalizeAiProviderConfig,
+  parseContextSize,
   resolveSelectedAiProvider,
   setSelectedAiProviderId,
   splitBaseUrl,
@@ -183,5 +184,34 @@ describe("legacy bundled provider signature (plan D11)", () => {
     ]) {
       expect(isLegacyBundledProvider(variant)).toBe(false);
     }
+  });
+});
+
+describe("Ollama context size", () => {
+  it("parses the field into a bounded integer, null or invalid", () => {
+    expect(parseContextSize("")).toBeNull();
+    expect(parseContextSize("  ")).toBeNull();
+    expect(parseContextSize("2048")).toBe(2048);
+    expect(parseContextSize(" 16384 ")).toBe(16384);
+    expect(parseContextSize("262144")).toBe(262144);
+    for (const bad of ["2047", "262145", "4096.5", "-4096", "1e4", "abc"]) {
+      expect(parseContextSize(bad), bad).toBeUndefined();
+    }
+  });
+
+  it("keeps it for Ollama only", () => {
+    const ollama = normalizeAiProviderConfig({
+      ...makeDefaultAiProvider("ollama"),
+      contextSize: 8192,
+    });
+    expect(ollama.contextSize).toBe(8192);
+    expect(
+      normalizeAiProviderConfig(makeDefaultAiProvider("ollama")).contextSize
+    ).toBeNull();
+    const cloud = normalizeAiProviderConfig({
+      ...makeDefaultAiProvider("openai"),
+      contextSize: 8192,
+    });
+    expect(cloud.contextSize).toBeNull();
   });
 });

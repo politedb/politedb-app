@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   cancelListModels: vi.fn(),
   testDraft: vi.fn(),
   legacyInfo: vi.fn(),
+  status: vi.fn(),
 }));
 
 vi.mock("src/lib/tauri/ai", () => ({
@@ -24,6 +25,7 @@ vi.mock("src/lib/tauri/ai", () => ({
   aiProviderCancelListModels: (...args: any[]) =>
     mocks.cancelListModels(...args),
   aiProviderTestDraft: (...args: any[]) => mocks.testDraft(...args),
+  aiOllamaStatus: (...args: any[]) => mocks.status(...args),
   aiLegacyModelInfo: (...args: any[]) => mocks.legacyInfo(...args),
   aiLegacyModelDelete: vi.fn(),
 }));
@@ -78,6 +80,13 @@ beforeEach(() => {
   mocks.legacyInfo.mockResolvedValue({ files: [] });
   mocks.cancelListModels.mockResolvedValue(undefined);
   mocks.listModels.mockResolvedValue([]);
+  mocks.status.mockImplementation(async (_config: any, requestId: string) => ({
+    requestId,
+    kind: "native",
+    version: "0.40.4",
+    trainedMax: 8192,
+    effective: 8192,
+  }));
 });
 
 describe("AiAssistantSettingsDialog", () => {
@@ -87,7 +96,7 @@ describe("AiAssistantSettingsDialog", () => {
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:11434"), {
       target: { value: "http://192.168.1.9:11434" },
@@ -108,7 +117,7 @@ describe("AiAssistantSettingsDialog", () => {
     await settleAutoDiscovery();
     mocks.listModels.mockResolvedValue(["llama3:8b", "qwen"]);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     // Manual load opens the picker with the server's models.
     const option = await screen.findByRole("option", { name: "llama3:8b" });
     // Already-selected `qwen` is not offered again; nothing was added automatically.
@@ -194,7 +203,7 @@ describe("AiAssistantSettingsDialog", () => {
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     const requestId = mocks.listModels.mock.calls[0][2];
     expect(requestId).toMatch(/^settings-/);
@@ -322,5 +331,226 @@ describe("AiAssistantSettingsDialog", () => {
     expect(
       screen.queryByRole("option", { name: "old-server-model" })
     ).not.toBeInTheDocument();
+  });
+
+  it("has no agent opt-in", async () => {
+    await openDialog();
+    expect(
+      screen.queryByRole("checkbox", { name: /AI agent/ })
+    ).not.toBeInTheDocument();
+  });
+
+  it("has no column-details opt-out and discloses storage", async () => {
+    await openDialog();
+    expect(
+      screen.getByText(
+        /Chat history is stored on this device without encryption/
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", { name: /column comments/ })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Data access")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/sent to the selected provider/)
+    ).not.toBeInTheDocument();
+  });
+
+  describe("Ollama context size and server status", () => {
+    it("shows the effective agent context for a native server", async () => {
+      await openDialog();
+      await screen.findByText(
+        "Ollama 0.40.4. Agent context: 8192 tokens (model max 8192)."
+      );
+      const [config, requestId] = mocks.status.mock.calls[0];
+      expect(config.baseUrl).toBe("http://127.0.0.1:11434/v1");
+      expect(requestId).toMatch(/^settings-.*:status:/);
+    });
+
+    it("validates the context size and clamps the shown value locally", async () => {
+      mocks.status.mockImplementation(async (_c: any, requestId: string) => ({
+        requestId,
+        kind: "native",
+        version: "0.40.4",
+        trainedMax: 262144,
+        effective: 16384,
+      }));
+      mocks.save.mockImplementation(async (config: any) => config);
+      await openDialog();
+      await screen.findByText(/Agent context: 16384 tokens/);
+      const field = screen.getByPlaceholderText("16384");
+      fireEvent.input(field, { target: { value: "4096" } });
+      await screen.findByText(/Agent context: 4096 tokens/);
+      // No server call per keystroke.
+      expect(mocks.status).toHaveBeenCalledTimes(1);
+
+      fireEvent.input(field, { target: { value: "100" } });
+      await screen.findByRole("alert");
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(mocks.save).not.toHaveBeenCalled();
+
+      fireEvent.input(field, { target: { value: "8192" } });
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+      expect(mocks.save.mock.calls[0][0].contextSize).toBe(8192);
+    });
+
+    it("an empty context size saves as the default", async () => {
+      mocks.list.mockResolvedValue([{ ...LOCAL, contextSize: 4096 }]);
+      mocks.save.mockImplementation(async (config: any) => config);
+      await openDialog();
+      const field = await screen.findByDisplayValue("4096");
+      fireEvent.input(field, { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+      expect(mocks.save.mock.calls[0][0].contextSize).toBeNull();
+    });
+
+    it("a URL edit clears the status and aborts its request in the backend", async () => {
+      const pending = deferred<any>();
+      mocks.status.mockReturnValueOnce(pending.promise);
+      await openDialog();
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1));
+      const requestId = mocks.status.mock.calls[0][1];
+      await screen.findByText("Checking the server...");
+
+      fireEvent.input(screen.getByDisplayValue("http://127.0.0.1:11434"), {
+        target: { value: "http://127.0.0.1:11435" },
+      });
+      expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+      // The late answer for the old URL is ignored.
+      pending.resolve({ requestId, kind: "too_old", version: "0.1.0" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByText(/Update Ollama/)).toBeNull();
+    });
+
+    it("closing the dialog aborts a pending status request", async () => {
+      const pending = deferred<any>();
+      mocks.status.mockReturnValueOnce(pending.promise);
+      const view = render(
+        <AiAssistantSettingsDialog open onClose={() => {}} />
+      );
+      await screen.findByDisplayValue("My Ollama");
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1));
+      const requestId = mocks.status.mock.calls[0][1];
+      view.rerender(
+        <AiAssistantSettingsDialog open={false} onClose={() => {}} />
+      );
+      await waitFor(() =>
+        expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId)
+      );
+      pending.resolve({ requestId, kind: "native", version: "0.40.4" });
+    });
+
+    it("changing the default model re-queries the status", async () => {
+      mocks.list.mockResolvedValue([
+        { ...LOCAL, models: ["qwen", "llama"], defaultModel: "qwen" },
+      ]);
+      await openDialog();
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1));
+      fireEvent.click(screen.getByRole("button", { name: "llama" }));
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(2));
+      expect(mocks.status.mock.calls[1][0].defaultModel).toBe("llama");
+    });
+
+    it("removing the default model re-queries for the next one, and drops a late answer", async () => {
+      mocks.list.mockResolvedValue([
+        { ...LOCAL, models: ["qwen", "llama"], defaultModel: "qwen" },
+      ]);
+      const pending = deferred<any>();
+      mocks.status.mockReturnValueOnce(pending.promise);
+      await openDialog();
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1));
+      const firstId = mocks.status.mock.calls[0][1];
+      fireEvent.click(screen.getByRole("button", { name: "Remove qwen" }));
+      await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(2));
+      expect(mocks.status.mock.calls[1][0].defaultModel).toBe("llama");
+      expect(mocks.cancelListModels).toHaveBeenCalledWith(firstId);
+      // qwen's late answer must not replace llama's status.
+      pending.resolve({
+        requestId: firstId,
+        kind: "native",
+        version: "0.40.4",
+        trainedMax: 1111,
+      });
+      await screen.findByText(/model max 8192/);
+      expect(screen.queryByText(/model max 1111/)).toBeNull();
+    });
+
+    it("removing the last model asks again with no model", async () => {
+      mocks.status.mockImplementation(async (config: any, requestId: string) =>
+        config.defaultModel
+          ? { requestId, kind: "native", version: "0.40.4", trainedMax: 8192 }
+          : { requestId, kind: "native_no_model", version: "0.40.4" }
+      );
+      await openDialog();
+      await screen.findByText(/model max 8192/);
+      fireEvent.click(screen.getByRole("button", { name: "Remove qwen" }));
+      await screen.findByText(/Choose a model to see its context size/);
+      expect(screen.queryByText(/model max 8192/)).toBeNull();
+    });
+
+    it("adding the first model asks for its status", async () => {
+      mocks.list.mockResolvedValue([
+        { ...LOCAL, models: [], defaultModel: "" },
+      ]);
+      mocks.status.mockImplementation(async (config: any, requestId: string) =>
+        config.defaultModel
+          ? { requestId, kind: "native", version: "0.40.4", trainedMax: 4096 }
+          : { requestId, kind: "native_no_model", version: "0.40.4" }
+      );
+      await openDialog();
+      await screen.findByText(/Choose a model to see its context size/);
+      const picker = screen.getByRole("combobox");
+      fireEvent.input(picker, { target: { value: "phi-4" } });
+      fireEvent.keyDown(picker, { key: "Enter" });
+      await screen.findByText(/model max 4096/);
+      expect(
+        mocks.status.mock.calls[mocks.status.mock.calls.length - 1][0]
+          .defaultModel
+      ).toBe("phi-4");
+    });
+
+    it("explains old, compatible and unreachable servers", async () => {
+      for (const [kind, text] of [
+        ["too_old", /Update Ollama to 0\.12\.6 or newer/],
+        ["compatible", /Context size can't be set for this server/],
+        ["unreachable", /Couldn't reach the server/],
+        ["metadata_unavailable", /Couldn't read this model's context size/],
+        ["native_no_model", /Choose a model to see its context size/],
+      ] as const) {
+        cleanup();
+        mocks.status.mockImplementation(async (_c: any, requestId: string) => ({
+          requestId,
+          kind,
+          version: "0.1.0",
+        }));
+        await openDialog();
+        await screen.findByText(text);
+      }
+    });
+
+    it("is not shown for cloud providers", async () => {
+      mocks.list.mockResolvedValue([
+        {
+          id: "openai-1",
+          kind: "openai",
+          label: "My OpenAI",
+          host: "https://api.openai.com",
+          subPath: "/v1",
+          baseUrl: "https://api.openai.com/v1",
+          defaultModel: "gpt-5",
+          models: ["gpt-5"],
+          enabled: true,
+          apiKeyRef: "k",
+        },
+      ]);
+      localStorage.setItem("politedb.ai.provider.selected", "openai-1");
+      render(<AiAssistantSettingsDialog open onClose={() => {}} />);
+      await screen.findByDisplayValue("My OpenAI");
+      expect(screen.queryByPlaceholderText("16384")).toBeNull();
+      expect(mocks.status).not.toHaveBeenCalled();
+    });
   });
 });

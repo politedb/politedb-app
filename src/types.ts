@@ -259,6 +259,12 @@ export type ChatMessage = {
   createdAt?: number;
   durationMs?: number;
   sql?: string;
+  /**
+   * The AI agent queried database data for this answer (plan ai-agent R5). From this
+   * message on, the chat counts as holding that connection's data: it is sent only
+   * while data-access consent holds for the provider in use.
+   */
+  dataRead?: boolean;
   assumptions?: string[];
   clarification?: string;
   resultPreview?: Record<string, unknown>[];
@@ -289,6 +295,8 @@ export type AiProviderConfig = {
   apiKeyRef?: string | null;
   enabled: boolean;
   isDefault?: boolean;
+  /** Ollama only: the agent's context size in tokens; empty means the default. */
+  contextSize?: number | null;
 };
 
 export type AiChatSession = {
@@ -306,9 +314,22 @@ export type AiChatSession = {
 export type ChatMessagePart =
   | { type: "text"; text: string }
   | {
+      /** The agent needs the user's permission to read data (plan ai-agent R5). */
+      type: "dataAccessRequest";
+      question: string;
+      /** Saved connection name, from the backend. */
+      label?: string;
+      state?: "pending" | "allowed" | "declined";
+    }
+  | {
       type: "sqlPreview";
       sql: string;
       safety?: "read_only" | "mutating" | "ddl" | "unknown";
+      /**
+       * Suggested by the AI agent. `safety` then only describes the check made when
+       * the answer arrived: Run re-checks the SQL against the current connection.
+       */
+      agent?: boolean;
       confirmationState?:
         | "pending"
         | "inserted"
@@ -332,4 +353,16 @@ export type ChatMessagePart =
       rowCount?: number | null;
       confidence?: "high" | "medium" | "low";
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      /** What an AI agent run looked at (plan ai-agent R6): no arguments or data. */
+      type: "agentSteps";
+      steps: AgentStepSummary[];
+    };
+
+export type AgentStepSummary = {
+  tool: string;
+  ok: boolean;
+  truncated: boolean;
+  durationMs: number;
+};

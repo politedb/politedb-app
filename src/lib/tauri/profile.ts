@@ -605,7 +605,29 @@ function buildCmdPayload(
  * - profileSave
  * - profileSaveAndConnect
  */
+/** Sent after a saved profile was edited or removed; `detail` is its id. */
+export const PROFILE_CHANGED_EVENT = "politedb:profile-changed";
+
+function announceProfileChanged(profileId: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<string>(PROFILE_CHANGED_EVENT, { detail: profileId })
+  );
+}
+
 async function profileSaveCore<K extends SaveKind>(
+  kind: K,
+  input: SaveAndConnectInput & SaveAction
+): Promise<SaveResultMap[K]> {
+  try {
+    return await profileSaveCoreInner(kind, input);
+  } finally {
+    // The edit may be committed even if a later step (connecting) failed.
+    if (input.mode === "update") announceProfileChanged(input.profileId);
+  }
+}
+
+async function profileSaveCoreInner<K extends SaveKind>(
   kind: K,
   input: SaveAndConnectInput & SaveAction
 ): Promise<SaveResultMap[K]> {
@@ -765,7 +787,12 @@ export async function profileConnect(
 }
 
 export async function profileRemove(profileId: string): Promise<void> {
-  await invoke(CMD.profileRemove, { profileId });
+  try {
+    await invoke(CMD.profileRemove, { profileId });
+  } finally {
+    // Removal may be committed even if cleaning up its consent failed.
+    announceProfileChanged(profileId);
+  }
 }
 
 export async function profileExport(): Promise<string> {
@@ -808,9 +835,12 @@ export async function profileIsEncryptedExport(json: string): Promise<boolean> {
 export async function profileImport(
   json: string
 ): Promise<ProfileImportResult> {
-  return invoke<ProfileImportResult>(CMD.profileImport, {
+  const result = await invoke<ProfileImportResult>(CMD.profileImport, {
     payload: { json },
   });
+  // A replaced profile may point at another target now.
+  for (const id of result.importedIds ?? []) announceProfileChanged(id);
+  return result;
 }
 
 export async function profileImportExternal(

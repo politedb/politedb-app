@@ -299,6 +299,8 @@ export type ProfileImportResult = {
   updated: number;
   total: number;
   profiles: ConnectionProfile[];
+  /** Ids written by this import (new or replaced). */
+  importedIds?: string[];
 };
 
 export type ExternalImportSource = "dbeaver" | "env" | "tableplus";

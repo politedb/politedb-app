@@ -57,12 +57,20 @@ pub fn ai_provider_save(
     key_change: KeyChangeInput,
 ) -> Result<AiProviderConfig, String> {
     let _guard = lock_providers(&state)?;
-    provider_store::save(
+    // A changed config (URL, model, key, context size) may change what the model can
+    // do. The store trims the id: forget both spellings so no stale entry survives.
+    let raw_id = config.id.clone();
+    state.forget_ai_provider(&raw_id);
+    let saved = provider_store::save(
         &AppProviderFiles(&app),
         &AppSecrets(&app),
         config,
         key_change.into(),
-    )
+    )?;
+    if saved.id != raw_id {
+        state.forget_ai_provider(&saved.id);
+    }
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -72,6 +80,10 @@ pub fn ai_provider_delete(
     provider_id: String,
 ) -> Result<(), String> {
     let _guard = lock_providers(&state)?;
+    state.forget_ai_provider(&provider_id);
+    if provider_id.trim() != provider_id {
+        state.forget_ai_provider(provider_id.trim());
+    }
     provider_store::delete(&AppProviderFiles(&app), &AppSecrets(&app), &provider_id)
 }
 
@@ -98,21 +110,21 @@ pub async fn ai_provider_list_models(
     auth: KeyChangeInput,
     request_id: String,
 ) -> Result<Vec<String>, String> {
-    // Register before any waiting so a cancel sent meanwhile is never lost.
-    let cancel_rx = state.ai_discovery_cancel.register(&request_id);
-    let result = async {
-        let config = provider::validate_for_discovery(config)?;
-        let key = draft_key(&app, &state, &config, auth)?;
-        tokio::select! {
-            _ = cancel_rx => Err("AI_PROVIDER_MODELS_CANCELED".to_string()),
-            result = chat::list_models(&config, key.as_deref()) => result,
-        }
-    }
-    .await;
-    state.ai_discovery_cancel.finish(&request_id);
-    result
+    // Registered before any waiting so a cancel sent meanwhile is never lost.
+    crate::ai::cancel::run_cancellable(
+        &state.ai_discovery_cancel,
+        &request_id,
+        "AI_PROVIDER_MODELS_CANCELED",
+        async {
+            let config = provider::validate_for_discovery(config)?;
+            let key = draft_key(&app, &state, &config, auth)?;
+            chat::list_models(&config, key.as_deref()).await
+        },
+    )
+    .await
 }
 
+/// Cancels a model discovery or an Ollama status request by its request id.
 #[tauri::command]
 pub fn ai_provider_cancel_list_models(
     state: tauri::State<'_, AppState>,
@@ -120,6 +132,36 @@ pub fn ai_provider_cancel_list_models(
 ) -> Result<(), String> {
     state.ai_discovery_cancel.cancel(&request_id);
     Ok(())
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaStatusResponse {
+    pub request_id: String,
+    #[serde(flatten)]
+    pub status: crate::ai::ollama::ServerStatus,
+}
+
+/// The settings notice for an Ollama provider draft (plan ollama-native-context A10).
+/// Persists nothing. Non-Ollama kinds answer without network I/O. Cancel with
+/// [`ai_provider_cancel_list_models`] and the same `request_id`.
+#[tauri::command]
+pub async fn ai_ollama_status(
+    state: tauri::State<'_, AppState>,
+    config: AiProviderConfig,
+    request_id: String,
+) -> Result<OllamaStatusResponse, String> {
+    let status = crate::ai::cancel::run_cancellable(
+        &state.ai_discovery_cancel,
+        &request_id,
+        "AI_PROVIDER_STATUS_CANCELED",
+        async {
+            let config = provider::validate_for_discovery(config)?;
+            Ok(crate::ai::ollama::server_status(&config).await)
+        },
+    )
+    .await?;
+    Ok(OllamaStatusResponse { request_id, status })
 }
 
 /// Tests an unsaved draft with a short completion. Persists nothing and ignores
