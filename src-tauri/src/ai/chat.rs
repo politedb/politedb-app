@@ -4,7 +4,7 @@
 //! [`transport::client_for`]; errors carry codes only (no URLs, hosts, prompts or bodies).
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::provider::{self, AiProviderConfig, AiProviderKind};
 use super::transport;
@@ -148,11 +148,12 @@ fn first_text_from_openai_like(value: &serde_json::Value) -> String {
     }
 }
 
-async fn complete_openai_like(
-    config: &AiProviderConfig,
-    request: &AiChatCompleteRequest,
-    api_key: Option<&str>,
-) -> Result<String, String> {
+/// Output floor for Ollama chat. Local models such as qwen3 think before answering and
+/// cannot always turn it off; the thinking counts against `max_tokens`, so a small
+/// budget ends in HTTP 200 with empty content. Short answers stay short.
+const OLLAMA_MIN_MAX_TOKENS: u32 = 4096;
+
+fn openai_like_payload(config: &AiProviderConfig, request: &AiChatCompleteRequest) -> Value {
     let model = request.model.as_deref().unwrap_or(&config.default_model);
     let is_groq_gpt_oss =
         matches!(config.kind, AiProviderKind::Groq) && model.starts_with("openai/gpt-oss-");
@@ -168,9 +169,23 @@ async fn complete_openai_like(
         payload["max_completion_tokens"] = json!(request.max_tokens.unwrap_or(4096).max(4096));
         payload["reasoning_effort"] = json!("low");
         payload["include_reasoning"] = json!(false);
+    } else if matches!(config.kind, AiProviderKind::Ollama) {
+        payload["max_tokens"] = json!(request
+            .max_tokens
+            .unwrap_or(OLLAMA_MIN_MAX_TOKENS)
+            .max(OLLAMA_MIN_MAX_TOKENS));
     } else if let Some(max_tokens) = request.max_tokens {
         payload["max_tokens"] = json!(max_tokens);
     }
+    payload
+}
+
+async fn complete_openai_like(
+    config: &AiProviderConfig,
+    request: &AiChatCompleteRequest,
+    api_key: Option<&str>,
+) -> Result<String, String> {
+    let payload = openai_like_payload(config, request);
     let value = post_json(config, "chat/completions", &payload, &[], api_key).await?;
     let text = first_text_from_openai_like(&value);
     if text.is_empty() {
@@ -451,6 +466,30 @@ mod tests {
         let mut request = probe_request(&anthropic_config());
         request.model = Some(model.into());
         request
+    }
+
+    #[test]
+    fn ollama_chat_leaves_room_to_think() {
+        let config = local(11434);
+        let mut request = probe_request(&config);
+        for (asked, sent) in [(Some(96), 4096), (None, 4096), (Some(8192), 8192)] {
+            request.max_tokens = asked;
+            assert_eq!(
+                openai_like_payload(&config, &request)["max_tokens"],
+                sent,
+                "{asked:?}"
+            );
+        }
+        // Other OpenAI-compatible providers keep the requested budget.
+        let mut openai =
+            provider::normalize_fields(provider(AiProviderKind::Openai, "https://api.openai.com"));
+        openai.default_model = "gpt-5".into();
+        request.max_tokens = Some(96);
+        assert_eq!(openai_like_payload(&openai, &request)["max_tokens"], 96);
+        request.max_tokens = None;
+        assert!(openai_like_payload(&openai, &request)
+            .get("max_tokens")
+            .is_none());
     }
 
     #[test]
