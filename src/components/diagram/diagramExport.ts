@@ -299,3 +299,37 @@ export function buildDiagramSvg(state: DiagramState) {
       ${relations}
     </svg>`;
 }
+
+/**
+ * The diagram's structure as JSON: tables with their columns and primary keys, and the
+ * relationships between them (from foreign keys).
+ */
+export function buildDiagramJson(
+  state: DiagramState,
+  source: { database?: string | null; schema?: string | null } = {}
+) {
+  const document = {
+    format: "politedb.er-diagram",
+    version: 1,
+    database: source.database ?? null,
+    schema: source.schema ?? null,
+    tables: state.tables.map((table) => ({
+      schema: table.schema,
+      name: table.name,
+      columns: table.columns.map((column) => ({
+        name: column.name,
+        type: column.type,
+        primaryKey: Boolean(column.isPrimaryKey),
+      })),
+    })),
+    relationships: state.relations.map((relation) => ({
+      fromTable: relation.fromTable,
+      fromColumn: relation.fromColumn ?? null,
+      toTable: relation.toTable,
+      toColumn: relation.toColumn ?? null,
+      cardinality: relation.cardinality,
+      label: relation.label,
+    })),
+  };
+  return `${JSON.stringify(document, null, 2)}\n`;
+}

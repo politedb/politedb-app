@@ -44,7 +44,6 @@ import { v4 as uuid } from "uuid";
 import { useConnectionRuntimeCtx } from "./ConnectionRuntimeContext";
 import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
 import { useProGate } from "src/hooks/useProGate";
-import { ProIcon } from "src/components/license/ProBadge";
 import { useConnectionHealthCheck } from "../hooks/useConnectionHealthCheck";
 import { MetaPill } from "src/components/common/MetaPill";
 import { resolveMenuBarConnectionChrome } from "./menuBarConnectionChrome";
@@ -760,9 +759,7 @@ export function MenuBar({
               !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
             }
           >
-            <ProIcon>
-              <BackupIcon className="size-4.5 text-neutral-700" />
-            </ProIcon>
+            <BackupIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <IconButton
@@ -775,9 +772,7 @@ export function MenuBar({
               dbRestoreRunning
             }
           >
-            <ProIcon>
-              <RestoreIcon className="size-4.5 text-neutral-700" />
-            </ProIcon>
+            <RestoreIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <ToolbarDivider />
@@ -808,9 +803,7 @@ export function MenuBar({
             }}
             disabled={!rt.runtimeConnectionId || rt.engine !== "postgres"}
           >
-            <ProIcon>
-              <DbInspectorIcon className="size-4.5 text-neutral-700" />
-            </ProIcon>
+            <DbInspectorIcon className="size-4.5 text-neutral-700" />
           </IconButton>
 
           <IconButton

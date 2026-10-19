@@ -960,6 +960,11 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
 - **Frontend:** Vitest with `VITE_POLITEDB_API_BASE` set: 137 files / 814 tests passed. `tsc`, Prettier and the build pass.
 - `git diff --check` is clean.
 
+### UI adjustments after local testing (user, 2026-10-19)
+
+- **Toolbar badges removed:** the corner "Pro" badges on the Backup, Restore and Health Inspector toolbar icons are gone ("bỏ mấy chữ pro này ở đây đi"). This is a deliberate exception to D8 for these icon-only buttons. Their tooltips still say "(Pro)", and the gates are unchanged.
+- **Export menu:** the ER diagram's "Export as PNG" and "Export as SVG" buttons are now one "Export as..." menu that opens upwards. The SVG entry carries the Pro badge; PNG stays free.
+
 ## Plan Review
 
 (empty)
