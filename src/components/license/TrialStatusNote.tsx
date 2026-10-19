@@ -62,14 +62,16 @@ export function TrialStatusNote(props: {
       class={cn(
         "px-3 py-2 text-sm",
         note.tone === "warning"
-          ? "bg-amber-50 text-amber-700"
-          : "bg-slate-50 text-slate-700",
+          ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+          : "bg-slate-50 text-slate-700 dark:text-neutral-300",
         props.className
       )}
     >
       <div>{note.text}</div>
       {note.syncText ? (
-        <div class="mt-0.5 text-xs text-slate-500">{note.syncText}</div>
+        <div class="mt-0.5 text-xs text-slate-500 dark:text-neutral-400">
+          {note.syncText}
+        </div>
       ) : null}
     </div>
   );

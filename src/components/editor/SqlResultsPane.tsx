@@ -82,12 +82,12 @@ function ErrorCard(props: { title?: string; right?: string; error?: string }) {
 /** Shown above raw EXPLAIN rows when the visual analyzer is locked. */
 function AnalyzerUpgradeBanner(props: { onUpgrade: () => void }) {
   return (
-    <div class="flex shrink-0 items-center gap-2 border-b border-neutral-200 bg-blue-50/60 px-3 py-1.5 text-xs text-neutral-700">
+    <div class="flex shrink-0 items-center gap-2 border-b border-neutral-200 bg-blue-50/60 px-3 py-1.5 text-xs text-neutral-700 dark:bg-blue-950/40 dark:text-neutral-300">
       <ProBadge />
       <span>Visual analyzer and recommendations are Pro</span>
       <Button
         variant="ghost"
-        class="ml-auto rounded-md px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+        class="ml-auto rounded-md px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/40"
         onClick={props.onUpgrade}
       >
         Upgrade

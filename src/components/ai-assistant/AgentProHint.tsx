@@ -24,7 +24,7 @@ function dismissAgentProHint() {
 /** One line under a basic-chat answer that agent mode would have handled with Pro. */
 export function AgentProHint(props: { onClose: () => void }) {
   return (
-    <div class="mx-3 mt-2 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-blue-900">
+    <div class="mx-3 mt-2 flex items-center gap-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs text-blue-900 dark:border-blue-500/40 dark:bg-blue-950/40 dark:text-blue-100">
       <ProBadge />
       <span class="min-w-0 flex-1">
         Agent mode (looks up your schema and runs read-only queries) is a Pro
@@ -32,14 +32,14 @@ export function AgentProHint(props: { onClose: () => void }) {
       </span>
       <button
         type="button"
-        class="font-medium text-blue-700 hover:underline"
+        class="font-medium text-blue-700 hover:underline dark:text-blue-300"
         onClick={() => useProUpgradeStore.getState().open("ai-agent")}
       >
         Upgrade
       </button>
       <button
         type="button"
-        class="text-blue-400 hover:text-blue-700"
+        class="text-blue-400 hover:text-blue-700 dark:hover:text-blue-200"
         aria-label="Dismiss"
         onClick={() => {
           dismissAgentProHint();
