@@ -325,6 +325,23 @@ describe("useAiAssistantSubmit with the AI agent", () => {
       );
     });
 
+    it("uses basic chat in manual mode, with no upgrade hint", async () => {
+      localStorage.setItem("politedb.ai.mode", "manual");
+      try {
+        mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
+        const onAgentProLocked = vi.fn();
+        for (const pro of [true, false]) {
+          setPro(pro);
+          const { result } = setup({ onAgentProLocked });
+          await act(() => result.current.handleSubmit());
+        }
+        expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+        expect(onAgentProLocked).not.toHaveBeenCalled();
+      } finally {
+        localStorage.removeItem("politedb.ai.mode");
+      }
+    });
+
     it("does not show the hint where the agent would not run anyway", async () => {
       setPro(false);
       mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });

@@ -963,6 +963,11 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
 ### UI adjustments after local testing (user, 2026-10-19)
 
 - **Toolbar badges removed:** the corner "Pro" badges on the Backup, Restore and Health Inspector toolbar icons are gone ("bỏ mấy chữ pro này ở đây đi"). This is a deliberate exception to D8 for these icon-only buttons. Their tooltips still say "(Pro)", and the gates are unchanged.
+- **Assistant mode:** the "Agent · Pro" chip (V7) is replaced by an Agent / Manual mode picker at the bottom left of the composer.
+  - **Choice:** stored per device in `politedb.ai.mode`; Agent is the default.
+  - **Manual:** always answers with basic chat, and shows no upgrade hint.
+  - **Without Pro:** the picker shows Manual. Choosing Agent opens the upgrade dialog. The hint still appears when the stored mode is Agent.
+- **Diagram panel and JSON export:** the "Database Structure" panel was removed (taking "Copy Mermaid" with it) and replaced by a free JSON export. The export menu now sits in the diagram canvas, with the export logic in `useDiagramExport`.
 - **Export menu:** the ER diagram's "Export as PNG" and "Export as SVG" buttons are now one "Export as..." menu that opens upwards. The SVG entry carries the Pro badge; PNG stays free.
 
 ## Plan Review

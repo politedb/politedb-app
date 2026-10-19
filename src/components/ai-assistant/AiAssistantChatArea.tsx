@@ -1,6 +1,6 @@
 import type { Ref } from "preact";
 import { useLayoutEffect, useState } from "preact/hooks";
-import { AgentModeChip } from "./AgentModeChip";
+import { AssistantModePicker } from "./AssistantModePicker";
 import {
   AiAssistantMessageCard,
   AssistantStreamingPlaceholder,
@@ -332,7 +332,7 @@ export function AiAssistantChatArea(props: {
       onSelect: () => setHistoryOpen(true),
     },
     {
-      label: "Settings..",
+      label: "Settings...",
       separatorBefore: true,
       onSelect: onOpenSettings,
     },
@@ -596,8 +596,7 @@ export function AiAssistantChatArea(props: {
             "rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm"
           )}
         >
-          <div class={cn("mb-2 flex items-center justify-between gap-2")}>
-            {runtimeConnectionId ? <AgentModeChip /> : <span />}
+          <div class={cn("mb-2 flex items-center justify-end gap-2")}>
             <div class="text-xs text-neutral-400">
               {submitting
                 ? assistantStatus === "loading_model"
@@ -666,9 +665,8 @@ export function AiAssistantChatArea(props: {
 
           <div class="mt-2 flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-2">
-              {floating ? (
-                <div />
-              ) : (
+              {runtimeConnectionId ? <AssistantModePicker /> : null}
+              {floating ? null : (
                 <>
                   <span class="inline-flex max-w-34 items-center gap-1 truncate rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
                     <VaultIcon className="size-3.5 shrink-0" />

@@ -18,6 +18,7 @@ import type {
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
 import { hasProAccessNow } from "src/stores/license";
+import { getAssistantMode } from "src/lib/ai-assistant/assistantMode";
 import {
   AI_DATA_ACCESS_REQUIRED,
   aiAgentDataAccessStatus,
@@ -380,8 +381,12 @@ export function useAiAssistantSubmit(args: {
       // cannot run here (provider/model/engine unsupported) falls back silently.
       // It is a Pro feature: without Pro the turn goes to basic chat, like an
       // unsupported engine, and the panel shows an upgrade hint.
+      // Manual mode always answers with basic chat; agent mode needs Pro.
       const agentEligible = Boolean(
-        hasDbContext && runtimeConnectionId && AGENT_ENGINES.includes(engine)
+        hasDbContext &&
+        runtimeConnectionId &&
+        AGENT_ENGINES.includes(engine) &&
+        getAssistantMode() === "agent"
       );
       const agentAllowed = agentEligible && hasProAccessNow();
       if (agentEligible && !agentAllowed) onAgentProLocked?.();

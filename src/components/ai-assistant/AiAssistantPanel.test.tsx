@@ -638,7 +638,7 @@ describe("AiAssistantPanel", () => {
     expect(screen.getByText("Renamed chat")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("Chat menu"));
-    fireEvent.click(screen.getByRole("button", { name: "Settings.." }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings..." }));
 
     await screen.findByText("AI Provider Settings");
   });
