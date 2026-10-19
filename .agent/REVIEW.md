@@ -1809,3 +1809,31 @@ No new P0/P1/P2 found. Shared session mode remains authoritative for picker, pan
 - `npm run build`: **passed**, exit 0. Existing `node:zlib` browser externalization, mixed static/dynamic import and large-chunk warnings remain.
 - `git diff --check HEAD`: **passed** before append.
 - No live desktop/browser or screen-reader run performed. Lifecycle regressions use jsdom and substitute third-party positioning; real portal/layout behavior, visual appearance and platform focus behavior remain unverified. Real-wrapper regressions initialize selected Agent with Pro; selected Manual/Free initial focus follows the same indexed implementation but is not separately exercised in that suite. Native dialog close/Escape on each OS remains manual, as stated in the plan. These are verification limits, not additional findings or reopened product decisions.
+
+
+## Review: lost-key portal link (dbaefce)
+
+**Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). No P0/P1 or confirmed functional regression found. P2 coverage follow-up below is non-blocking.
+
+Scope: read AGENTS.md and .agent/WORKFLOW.md first, then referenced RTK guidance. Reviewed `git show dbaefce` against parent `f886bbc` on `feat/pro-gating`; HEAD is `dbaefcebad0465bcf80d15a21273a10245310f6b`. Inspected both screens, distribution configuration, native command policy, shared opener and adjacent tests. Only this section appended; code, tests, plan and existing review content preserved. Unrelated `.claude/launch.json` left untouched. No staging or commit.
+
+### Findings (ranked)
+
+- **P2 — recovery coverage is incomplete (non-blocking).** `src/components/settings/LicenseKeySettings.lostKey.test.tsx:31-39` checks only the Direct Settings portal call with the entire opener mocked. No LicenseDialog recovery test exists; the new App Store branches at `src/components/modal/LicenseDialog.tsx:74-78` and `src/components/settings/LicenseKeySettings.tsx:55-59` are not exercised. **Concrete fix:** add rendered tests for both screens with Direct/App Store features explicitly selected; assert the exact portal URL and unchanged activation view on Direct, no portal/pricing call and visible support instructions on App Store, dialog Back returning to the prior active/inactive view, close/reopen reset, and Settings recovery reset on reactivation. Exercise each mail action with native-opener rejection and assert the supplied fallback navigates to the static encoded mailto; separately verify policy rejection cannot invoke either browser fallback. Existing helper tests cover injected fallback success/failure/policy suppression but not either screen's mailto wiring or default window.open behavior. Add a default-fallback assertion for `_blank`, `noopener,noreferrer`, and explicit Rust policy assertions accepting the exact portal URL on Direct and rejecting it on App Store.
+
+### Correctness and regression assessment
+
+- `src/lib/license/proAccess.ts:28` defines one fixed `https://polar.sh/politedb/portal` destination. Both handlers call `openExternalUrl` only with `externalPurchase=true`; otherwise they retain the previous `setLostKeyHelp(true)` behavior. Direct clicks leave the existing form and typed key intact. No license activation, refresh, deactivation or entitlement logic changed.
+- Native enforcement remains authoritative: `src-tauri/src/commands/license.rs:69-70` checks `Distribution::current().allows_external_url` before opening. `src-tauri/src/distribution.rs:40-44,69-94` accepts the portal on Direct and rejects its host on App Store; mailto remains allowed. App Store frontend mode disables external purchase (`src/lib/distribution/index.ts:31-36`); `tauri.appstore.conf.json` and `scripts/tauri-appstore.sh` pair that mode with the Rust feature. No allowlist expansion or policy bypass introduced.
+- `src/lib/tauri/license.ts:170-187` opens through the backend, suppresses fallback for `FEATURE_UNAVAILABLE_IN_DISTRIBUTION`, and uses `window.open(url, "_blank", "noopener,noreferrer")` on other failures. Both retained mail handlers supply `window.location.href` instead (`LicenseDialog.tsx:82-92`, `LicenseKeySettings.tsx:63-71`). Thus policy denial cannot fall through to either fallback; ordinary opener failure preserves the existing browser/mail behavior. The helper cannot report whether a fallback actually opens a browser; that pre-existing limitation remains.
+- App Store dialog recovery still replaces content, hides Lost license key?, and exposes Back (`LicenseDialog.tsx:109-158,224-235`); Back preserves the active/inactive branch and input, while opening/reset effects clear recovery state. Settings still adds inline support help and resets it when its active effect runs (`LicenseKeySettings.tsx:36-44,190-233`); it has no Back button before or after this commit. Direct no longer enters email help, as requested.
+- Upgrade prompt now uses exactly `See plans & pricing` (`ProUpgradeDialogHost.tsx:31-35`), retaining the external-purchase gate, pricing destination, primary activation action, cancellation and single-flight behavior. Updated host and system-dialog tests pass.
+- Privacy: portal and pricing URLs are static, with no email, license key, token, device identifier or account query parameters. Recovery mailto includes only the fixed support inbox and generic encoded subject/body; it does not interpolate stored customer data. No new logging, analytics or sensitive persistence introduced.
+
+### Verification and limitations
+
+- `npx tsc --noEmit`: **passed**, exit 0.
+- Full `npm run test:run`: **144 files / 843 tests passed**, 21.16 seconds, exit 0.
+- `npm run build`: **passed**, exit 0. Warnings: node:zlib browser externalization, mixed static/dynamic imports and large chunks, outside this commit's changes.
+- `git diff --check f886bbc dbaefce`: **passed**.
+- No live desktop/browser, native opener/mail client, Polar sign-in/recovery, or packaged App Store smoke run performed. No Rust tests or App Store build run: backend/configuration unchanged; their behavior was checked by source inspection. Passing jsdom tests do not establish native navigation or the external portal's availability/key-recovery behavior. These limits and the P2 coverage gap prevent an unqualified VERIFIED verdict.

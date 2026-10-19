@@ -136,6 +136,8 @@ mod tests {
         let d = Distribution::Direct;
         assert!(d.allows_external_url("https://politedb.com/pricing"));
         assert!(d.allows_external_url("https://github.com/sponsors/tonyphamvn"));
+        // "Lost license key?" opens the Polar customer portal.
+        assert!(d.allows_external_url("https://polar.sh/politedb/portal"));
     }
 
     #[test]
@@ -143,6 +145,7 @@ mod tests {
         let d = Distribution::AppStore;
         for url in [
             "https://politedb.com/pricing",
+            "https://polar.sh/politedb/portal",
             "https://politedb.com/checkout?plan=pro",
             "https://github.com/sponsors/tonyphamvn",
             "https://github.com/politedb/PoliteDB/issues/../../../sponsors/tonyphamvn",
