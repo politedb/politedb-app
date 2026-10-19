@@ -325,8 +325,9 @@ async fn drive(
         }
         // Data read earlier in the run goes out only while its consent still holds.
         input.gate.check()?;
-        // Tools stay declared on the final step (some providers require it once the
-        // transcript has tool calls) but calling them is disabled.
+        // Calling tools is disabled on the final step. Most wires keep them declared
+        // (some providers require it once the transcript has tool calls); Ollama's
+        // native wire omits them (see `StepRequest::allow_tools`).
         let request = StepRequest {
             model: input.model_id,
             system: if finalizing && !specs.is_empty() {

@@ -65,6 +65,45 @@ export function formatAssistantRequestError(args: {
       : "The AI needs permission to read data from this connection to answer.";
   }
 
+  // Ollama native agent wire and context size (plan ollama-native-context A9').
+  // Fixed codes, matched before the generic agent and provider branches; provider
+  // text that may follow a code is never shown.
+  if (raw.includes("AI_AGENT_CONTEXT_FULL")) {
+    return vi
+      ? "Yêu cầu vượt quá context của model. Hãy tăng Context size trong AI settings, hoặc hỏi ngắn gọn hơn."
+      : "The request did not fit the model's context. Increase Context size in AI settings, or ask a shorter question.";
+  }
+  if (raw.includes("AI_OLLAMA_UPDATE_REQUIRED")) {
+    return vi
+      ? "Cần cập nhật Ollama lên 0.12.6 trở lên để dùng AI agent."
+      : "Update Ollama to 0.12.6 or newer to use the AI agent.";
+  }
+  if (raw.includes("AI_OLLAMA_MODEL_NOT_FOUND")) {
+    return vi
+      ? "Không tìm thấy model này trên server Ollama. Hãy tải model hoặc chọn model khác."
+      : "This model was not found on the Ollama server. Pull it or choose another model.";
+  }
+  if (raw.includes("AI_OLLAMA_MODEL_INFO_UNAVAILABLE")) {
+    return vi
+      ? "Không đọc được kích thước context của model này nên AI agent chưa chạy được. Hãy kiểm tra model trên server Ollama."
+      : "Couldn't read this model's context size, so the AI agent can't run. Check the model on the Ollama server.";
+  }
+  if (raw.includes("AI_OLLAMA_LOAD_FAILED")) {
+    return vi
+      ? "Ollama không đủ bộ nhớ để nạp model với context size này. Hãy giảm Context size trong AI settings."
+      : "Ollama doesn't have enough memory to load the model at this context size. Lower Context size in AI settings.";
+  }
+  if (raw.includes("AI_PROVIDER_UNREACHABLE")) {
+    return vi
+      ? "Không kết nối được tới server AI. Hãy kiểm tra server đang chạy và URL trong AI settings."
+      : "Couldn't reach the AI server. Check that it is running and the URL in AI settings.";
+  }
+  if (raw.includes("AI_PROVIDER_CONTEXT_SIZE_INVALID")) {
+    return vi
+      ? "Context size trong AI settings không hợp lệ (2048–262144)."
+      : "The Context size in AI settings is invalid (2048–262144).";
+  }
+
   // AI agent run limits and connection state (plan ai-agent R1).
   if (
     raw.includes("AI_AGENT_DEADLINE") ||

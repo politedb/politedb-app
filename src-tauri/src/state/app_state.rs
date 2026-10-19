@@ -55,8 +55,12 @@ pub struct AppState {
     pub ai_discovery_cancel: Arc<crate::ai::cancel::CancelRegistry>,
     /// Active agent runs (plan ai-agent R1).
     pub ai_agent_runs: Arc<crate::ai::agent::run::RunRegistry>,
+    /// Per-provider config generations shared by the caches below.
+    pub ai_provider_generations: Arc<crate::ai::generations::ProviderGenerations>,
     /// Models known to lack tool support (plan ai-agent R2).
     pub ai_agent_capabilities: Arc<crate::ai::agent::model::CapabilityCache>,
+    /// Ollama server identities and model context lengths (plan ollama-native-context A6).
+    pub ai_ollama_probes: Arc<crate::ai::ollama::OllamaProbeCache>,
     /// Runtime connection → the saved profile it was opened from. Set only by
     /// `profile_connect`, so agent consent never relies on ids from the frontend.
     pub connection_profiles: Arc<DashMap<Uuid, crate::ai::agent::consent::ProfileBinding>>,
@@ -66,6 +70,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(engines: EngineRegistry) -> Self {
+        let generations = Arc::new(crate::ai::generations::ProviderGenerations::default());
         Self {
             engines,
             connections: Arc::new(DashMap::new()),
@@ -82,9 +87,23 @@ impl AppState {
             ai_providers_lock: Arc::new(std::sync::Mutex::new(())),
             ai_discovery_cancel: Arc::new(crate::ai::cancel::CancelRegistry::default()),
             ai_agent_runs: Arc::new(crate::ai::agent::run::RunRegistry::default()),
-            ai_agent_capabilities: Arc::new(crate::ai::agent::model::CapabilityCache::default()),
+            ai_provider_generations: generations.clone(),
+            ai_agent_capabilities: Arc::new(
+                crate::ai::agent::model::CapabilityCache::with_generations(generations.clone()),
+            ),
+            ai_ollama_probes: Arc::new(crate::ai::ollama::OllamaProbeCache::new(generations)),
             connection_profiles: Arc::new(DashMap::new()),
             ai_consent_lock: Arc::new(std::sync::Mutex::new(())),
         }
+    }
+}
+
+impl AppState {
+    /// A provider's config was saved or deleted: bump its generation (stale runs can no
+    /// longer write any cache) and drop what every cache learned about it.
+    pub fn forget_ai_provider(&self, provider_id: &str) {
+        self.ai_provider_generations.bump(provider_id);
+        self.ai_agent_capabilities.drop_entries(provider_id);
+        self.ai_ollama_probes.forget_provider(provider_id);
     }
 }

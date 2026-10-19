@@ -105,7 +105,11 @@ struct Outcome {
     elapsed: Duration,
 }
 
-fn model() -> (HttpModel, String) {
+/// The model a real run would use: built by the same preparation as the command
+/// (server identification → model metadata → wire), so this smoke exercises Ollama's
+/// native wire and cannot silently stay on `/v1` (plan ollama-native-context A11).
+/// `AGENT_SMOKE_CONTEXT_SIZE` overrides the provider's context size.
+async fn model_with(context_size: Option<u32>) -> (HttpModel, String) {
     let var = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
     assert_eq!(
         var("AGENT_SMOKE_KIND").as_deref(),
@@ -113,12 +117,34 @@ fn model() -> (HttpModel, String) {
         "this e2e smoke drives a local Ollama model"
     );
     let host = var("AGENT_SMOKE_HOST").unwrap_or_else(|| "http://127.0.0.1:11434".into());
-    let config =
-        provider::normalize_fields(provider::tests::provider(AiProviderKind::Ollama, &host));
-    (
-        HttpModel::new(config, None).unwrap(),
-        var("AGENT_SMOKE_MODEL").expect("set AGENT_SMOKE_MODEL"),
+    let mut config = provider::tests::provider(AiProviderKind::Ollama, &host);
+    config.context_size =
+        context_size.or_else(|| var("AGENT_SMOKE_CONTEXT_SIZE").map(|v| v.parse().unwrap()));
+    let config = provider::normalize_fields(config);
+    let model_id = var("AGENT_SMOKE_MODEL").expect("set AGENT_SMOKE_MODEL");
+    let generations = Arc::new(crate::ai::generations::ProviderGenerations::default());
+    let prepared = super::prepare::prepare(
+        super::prepare::PrepareInput {
+            config,
+            key: None,
+            model_id: model_id.clone(),
+            generation: 0,
+        },
+        Arc::new(crate::ai::ollama::OllamaProbeCache::new(
+            generations.clone(),
+        )),
+        Arc::new(super::model::CapabilityCache::with_generations(generations)),
+        CancellationToken::new(),
     )
+    .await
+    .expect("preparation");
+    if var("AGENT_SMOKE_REQUIRE_NATIVE").is_some() {
+        assert_eq!(prepared.model.wire(), super::wire::Wire::OllamaNative);
+    }
+    if let Some(target) = prepared.model.native_target() {
+        println!("  [prepare] native wire, num_ctx={}", target.num_ctx);
+    }
+    (prepared.model, model_id)
 }
 
 async fn ask(
@@ -127,7 +153,17 @@ async fn ask(
     consent: bool,
     cancel_on_first_tool: bool,
 ) -> Outcome {
-    let (model, model_id) = model();
+    ask_with(connection, question, consent, cancel_on_first_tool, None).await
+}
+
+async fn ask_with(
+    connection: &EngineConnection,
+    question: &str,
+    consent: bool,
+    cancel_on_first_tool: bool,
+    context_size: Option<u32>,
+) -> Outcome {
+    let (model, model_id) = model_with(context_size).await;
     let executor = catalog::executor_for(connection).expect("catalog executor");
     let dialect = executor.dialect();
     let alive: catalog::tools::Alive = Arc::new(|| true);
@@ -403,4 +439,70 @@ async fn live_agent_e2e_postgres() {
         .unwrap()
     };
     scenarios("postgres", &connection, &count).await;
+}
+
+/// Throwaway SQLite connection with one small table, for the context gates.
+async fn small_sqlite() -> (EngineConnection, std::path::PathBuf) {
+    let path = std::env::temp_dir().join(format!("politedb-agent-ctx-{}.db", Uuid::new_v4()));
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT); INSERT INTO notes (body) VALUES ('a');")
+        .unwrap();
+    let lite = crate::engines::sqlite::driver::connect_sqlite(
+        Uuid::new_v4(),
+        "Smoke SQLite".into(),
+        crate::types::SqliteConnectInput {
+            path: path.to_string_lossy().into_owned(),
+            statement_timeout_ms: None,
+        },
+    )
+    .await
+    .unwrap();
+    (EngineConnection::Sqlite(lite), path)
+}
+
+/// Gate (plan ollama-native-context A11): with the minimum `context_size` (2048), a first
+/// message
+/// larger than the window is rejected by Ollama (`truncate:false`) and surfaces as
+/// `AI_AGENT_CONTEXT_FULL`, never as a silently truncated answer.
+#[tokio::test]
+#[ignore]
+async fn live_agent_context_full() {
+    let (connection, path) = small_sqlite().await;
+    // ≈ 3 000+ tokens of synthetic text, plus the system prompt and tool declarations.
+    let question = format!("{}\nHow many notes are there?", "word ".repeat(3_200));
+    let o = ask_with(&connection, &question, true, false, Some(2048)).await;
+    report("sqlite", "context full (2048)", &o, None);
+    assert_eq!(o.status, RunStatus::Failed);
+    assert_eq!(o.recorder.error().as_deref(), Some("AI_AGENT_CONTEXT_FULL"));
+    assert!(o.recorder.tools().is_empty(), "nothing ran");
+    drop(connection);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Gate (A11, A5'): output that reaches the window stops with `length` (`shift:false`):
+/// the run answers with the partial text or fails with the output-limit code, never a
+/// context shift, and no tool runs from a truncated turn.
+#[tokio::test]
+#[ignore]
+async fn live_agent_generation_overflow() {
+    let (connection, path) = small_sqlite().await;
+    let question = format!(
+        "{}\nIgnore the database. Write a story about databases of at least 3000 words.",
+        "word ".repeat(2_400)
+    );
+    let o = ask_with(&connection, &question, true, false, Some(4096)).await;
+    report("sqlite", "generation overflow (4096)", &o, None);
+    assert!(
+        o.status == RunStatus::Answered
+            || matches!(
+                o.recorder.error().as_deref(),
+                Some("AI_CHAT_OUTPUT_TOKEN_LIMIT" | "AI_AGENT_CONTEXT_FULL" | "AI_AGENT_DEADLINE")
+            ),
+        "unexpected outcome {:?} {:?}",
+        o.status,
+        o.recorder.error()
+    );
+    drop(connection);
+    let _ = std::fs::remove_file(&path);
 }

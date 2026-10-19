@@ -77,6 +77,19 @@ pub(crate) async fn send_json(
     bearer: Option<&str>,
 ) -> Result<(reqwest::StatusCode, String), String> {
     let url = provider::endpoint(config, path)?;
+    send_json_to(config, url, payload, headers, bearer).await
+}
+
+/// [`send_json`] to an already validated full URL (Ollama's native endpoints).
+pub(crate) async fn send_json_to(
+    config: &AiProviderConfig,
+    url: url::Url,
+    payload: &serde_json::Value,
+    headers: &[(&str, &str)],
+    bearer: Option<&str>,
+) -> Result<(reqwest::StatusCode, String), String> {
+    // Re-validated like every provider request (plan D12 R1).
+    let url = crate::ai::url_policy::validate(url.as_str(), config.kind.class())?;
     let client = transport::client_for(&url, transport::CHAT_TIMEOUT)?;
     let mut builder = client.post(url).json(payload);
     for (name, value) in headers {

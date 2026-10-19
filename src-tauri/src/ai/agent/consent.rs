@@ -273,6 +273,7 @@ mod tests {
             api_key_ref: None,
             enabled: true,
             is_default: None,
+            context_size: None,
         }
     }
 

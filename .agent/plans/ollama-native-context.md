@@ -2,7 +2,7 @@
 
 ## Status
 
-APPROVED
+VERIFIED WITH LIMITATIONS
 
 ## Task
 
@@ -21,6 +21,7 @@ APPROVED
   5. Claude `/security-review` (provider wire + destination change).
 - Codex plan critique of Revision 3: NOT READY (R1–R5). The user settled E1 = (b) and **approved Phase 0 only** on 2026-10-16 ("chốt E1b, duyệt phase 0, chạy probe đi"). Phase 0 is done (below). **Revision 4** below answers R1, R3, R4 and the should-fix items (user: "viết revision 4 rồi gọi codex review lại đi"). **Revision 5** (user: "viết revision 5 rồi gọi codex review lại đi") closes the Revision 4 re-review. **Revision 6** (user: "viết revision 6 rồi gọi codex review lại đi") closes the Revision 5 re-review. Phase 1 still needs a Codex re-review and the user's approval.
 - **Approved by the user on 2026-10-16** ("tôi duyệt, làm phase 1 đi"): Phase 1 = A1–A11 as amended by Revisions 4, 5 and 6, after Codex's READY in the Revision 6 re-review.
+- Phase 1 implemented. Codex review: VERIFIED WITH LIMITATIONS after 3 rounds (socket fixtures could not run in Codex's sandbox; Claude's local runs pass). Claude `/security-review` on 2026-10-19: no findings at confidence 8 or higher (URL policy, key/header leakage, cache keys, provider text, logging, consent gate, response parsing, `contextSize` checked). Committed on the user's request ("ok bạn làm đi").
 - No commit/push unless requested.
 
 ## Problem
@@ -671,6 +672,155 @@ Everything else is the generic request failure, still fail-closed:
   - transport-level fixtures for every id shape (absent, null, string, invalid types, duplicates, mixed);
   - the live smoke as an implementation gate.
 - The statement that allowed ids make replay decodable is limited to the **id field**. The whole response must still pass A5's shape validation; unknown nested fields are replayed as received and are covered by the "unknown fields preserved" fixture, not by a decodability guarantee.
+
+## Phase 1 — Implementation evidence (Claude, 2026-10-16)
+
+Branch `feat/ollama-native-context` (from `feat/ai-agent` @ `b35ed79`), uncommitted.
+
+### Backend
+
+- **`ai/cancel.rs`** (Revision 6 D1):
+  - `register` returns `Registration { token, rx }`; `finish(id, token)` removes only the matching owner;
+  - new `FinishGuard`;
+  - supersession and early cancel are unchanged;
+  - discovery (`ai_provider_list_models`) and the new status command both use the guard, installed right after registration.
+- **`ai/provider.rs`:**
+  - `context_size: Option<u32>` (`contextSize`, omitted on disk when `None`, ignored and cleared for non-Ollama kinds);
+  - bounds 2048..=262144 (`validate_context_size`, also called in `validate_for_discovery` and in `provider_store::snapshot_for_chat`);
+  - `requested_context_size`, `ollama_server_prefix` (A1: only `P/v1`), `ollama_endpoint` (re-validated; origin and prefix fixed).
+- **`ai/transport.rs`:** `probe_client` (1 s connect / 2 s total, same redirect, proxy and pinning policy), `PROBE_MAX_BYTES = 64 KiB`. `client_for` is unchanged.
+- **`ai/generations.rs`:** `ProviderGenerations` with `publish_if_current` (generations lock → cache lock).
+- **`ai/ollama.rs`:**
+  - `supports_native` (SemVer precedence, C1);
+  - `identify` (the A2' routing table);
+  - `trained_max` (exactly one `*.context_length`, 1..=10M);
+  - `classify_chat_error` (D2 both forms at 400; `requires more system memory` → `AI_OLLAMA_LOAD_FAILED`; 404 model → `AI_OLLAMA_MODEL_NOT_FOUND`; everything else generic, including 413);
+  - `server_status` (C5);
+  - `ProbeCache<K,V>`: TTL, a cache-owned shared lookup via `tokio::spawn` + `Shared`, detaching waiters, a global in-flight cap of 8, an `InFlightGuard` that removes only its own entry (panics included), generation-checked publish, oldest-insert eviction at 256;
+  - `OllamaProbeCache` (identity 24 h, trained max 1 h).
+- **`ai/agent/wire_ollama.rs`:**
+  - body: `truncate:false`, `shift:false`, `options.num_ctx`/`num_predict`, no `think`, tools only when allowed, verbatim assistant replay, results by order with `tool_call_id` only when the whole batch has unique non-empty string ids;
+  - parse: full A5/C3 validation before any side effect, internal ids `ollama-<position>`, stop mapping, usage from `prompt_eval_count` / `eval_count`.
+- **`ai/agent/wire.rs`:** `Wire::OllamaNative` (Hash); shared `function_tools`; `replay` / `usage_from` / `tool_content` made `pub(super)`. Comments in `protocol.rs` and `run.rs` name the native final-step exception.
+- **`ai/agent/model.rs`:**
+  - `NativeTarget`, `HttpModel::ollama_native` with native error classification;
+  - `CapabilityKey` gains `wire` + `destination` (A7);
+  - `CapabilityCache` uses the shared generations.
+- **`ai/chat.rs`:** `send_json_to(url)`, re-validating the URL.
+- **`ai/agent/prepare.rs`:**
+  - `begin` (fixed-wire kinds prepare without I/O and fail up front, as before);
+  - `prepare_ollama` (identity → TooOld = `AI_OLLAMA_UPDATE_REQUIRED` / Compatible = `/v1` / Native = trained max, `num_ctx = min(setting, trained)` frozen per run → capability check with the native key);
+  - `prepare_within` (absolute deadline, biased cancel);
+  - `emit_end` (C6: Error + Done{Failed}, Done{Canceled} alone, deadline);
+  - `remaining`.
+- **`ai/agent/start.rs`:** `RunSnapshot.generation`, read under `ai_providers_lock`.
+- **`commands/ai_agent.rs`:**
+  - unchanged validation, then `start_on`;
+  - the spawned task holds one 120 s deadline → preparation → `run_turn` with the remaining time;
+  - a `PlainSink` for preparation terminals.
+- **`commands/ai.rs`:**
+  - save/delete call `AppState::forget_ai_provider`, for both the raw and the normalized id;
+  - new `ai_ollama_status(config, request_id)` (registered in `main.rs`), cancelled through the existing `ai_provider_cancel_list_models`.
+- **`state/app_state.rs`:** `ai_provider_generations`, `ai_ollama_probes`, `forget_ai_provider`.
+
+### Frontend
+
+- `src/types.ts` `contextSize`;
+- `providers.ts`: `parseContextSize`, bounds, normalization (Ollama only), re-export of `aiOllamaStatus`;
+- `src/lib/tauri/ai.ts` + `commands.ts`: `aiOllamaStatus`, `OllamaStatus`;
+- `formatAssistantRequestError`: fixed EN/VI copy for the seven new codes, matched before the generic branches;
+- `AiAssistantSettingsDialog`:
+  - an Ollama-only "Context size (tokens)" field with validation (blocks save);
+  - an `OllamaStatusLine` with the C5 copy and the effective size computed locally from the field;
+  - the status query runs on open, on URL blur, after Test and on default-model change, and never per keystroke;
+  - stale responses are ignored by token and request id;
+  - edits, close and provider switches cancel the backend request.
+
+### Verification
+
+- **`cargo test --locked`** → 391 passed / 15 ignored, and the same with **`--features app-store`**. New tests include:
+  - cancel registry: 8, including supersede, cancel→re-register, panic guard, concurrent;
+  - provider: prefix rows, endpoint origin and prefix, bounds, serde round trip;
+  - transport: probe policy and timeout;
+  - generations: barrier race;
+  - ollama: SemVer table, classifier positives and negatives with sensitive text, trained max shapes, model list shapes, every routing row with the asserted URLs and no chat sends, timeouts, trained-max lookup, status kinds;
+  - cache: cold/hit, uncacheable retry, expiry, save during lookup, shared lookup + detached waiter, panic, in-flight cap, eviction;
+  - wire_ollama: same-function calls, id rules, invalid ids (number/object/array/bool/257 bytes) and malformed responses rejected, stops, final step without tools, two batches, replay mismatch;
+  - model: per-wire capability keys;
+  - prepare: clamping table, too old / metadata unavailable with no chat, compatible keeping `/v1`, a `/v1` negative not blocking native, cache reuse, static kinds, deadline, cancel ordering, terminal events, closed channel, cancel during routing.
+- **`cargo clippy --locked --all-targets`:** 8 warnings with the default features and 9 with `app-store`, identical to the baseline (none in changed code).
+- **Frontend:**
+  - `npm run build` OK;
+  - Vitest: 129 files, 744 tests passed. New tests: settings (8: effective size, validation and save, empty = default, URL edit cancels and drops late status, close cancels, model change re-queries, every status kind, cloud providers have no field), formatter codes EN/VI without echoed text, E1b no fallback for every preparation code (async and IPC), `parseContextSize`;
+  - prettier clean.
+- **Live (local Ollama 0.40.4, `qwen3:4b`, server default context, no `OLLAMA_CONTEXT_LENGTH`, synthetic data only):**
+  - `live_agent_e2e_postgres` + `live_agent_e2e_sqlite` with `AGENT_SMOKE_REQUIRE_NATIVE=1`: **both ok** (904 s).
+    - Every case ran on the **native wire with `num_ctx = 16384`**: no context error and no writes, consent was respected, cancel ended runs.
+    - SQLite: all six cases answered or behaved as designed, including `explain_query`.
+    - Postgres: metadata and data answers were correct. Three cases hit the 120 s deadline on this loaded machine; deadline failures are allowed by the smoke.
+  - `live_agent_context_full`: `context_size = 2048` with a large synthetic question → **`AI_AGENT_CONTEXT_FULL` in 1.1 s**, no tool ran.
+  - `live_agent_generation_overflow`: `context_size = 4096` → `AI_CHAT_OUTPUT_TOKEN_LIMIT` (a `length` stop with empty text), no tool ran.
+  - The `0.12.5` gate is covered by stub-server unit tests (routing and prepare). There is no real old install.
+
+### Not done
+
+- No desktop UI run of the settings field and status line; the Vitest coverage only.
+- No real Ollama < 0.12.6 server.
+- Load-failure classification is from upstream test strings, not a captured failure.
+- Plan 2 (meter, accounting) is not started.
+
+### Fixes for Codex review round 1 (Claude, 2026-10-17)
+
+`.agent/REVIEW.md` "Review: ollama-native-context Phase 1": CHANGES REQUIRED, 4 P2. All fixed:
+
+1. **P2: malformed versions passed, and server text could reach the UI.** `parse_version` now enforces strict SemVer 2.0.0:
+   - numeric core without leading zeros;
+   - prerelease and build are dot-separated non-empty `[0-9A-Za-z-]` identifiers, and prerelease numerics have no leading zeros;
+   - a single `+`, no whitespace, at most 64 bytes.
+
+   Anything else returns `None`, which routes to `AI_PROVIDER_UNREACHABLE` (no chat, not cached), so only valid SemVer can reach `ServerStatus.version`.
+
+   New fixtures: `0.12.6+`, `0.12.6+a+b`, `00.12.6`, `0.012.6`, `0.12.7-rc..1`, `0.12.7-rc.01`, `0.12.7-rc_1`, a newline plus provider text, leading or trailing spaces, an over-length build, valid `+build.007` / `-rc.1` / `-0`. Routing rows also cover a sensitive-suffix version and `00.40.4`.
+2. **P2: the tools classifier overrode native errors.** `HttpModel::step_native` now runs `ollama::classify_chat_error` **before** `tools_unsupported`. A context, load or model error with an appended "does not support tools" stays `AI_AGENT_CONTEXT_FULL` (etc.), records no capability, and triggers no fallback.
+
+   A native HTTP fixture covers the overlap. Mutation check: with the old order that case fails (`TOOLS_UNSUPPORTED` ≠ `CONTEXT_FULL`).
+3. **P2: a stale status after default-model changes.** All transitions go through `defaultModelChanged` (invalidate, cancel the pending request, re-query for the new model): picking a default, removing the default (falls back to the next model, or to none), and adding the first model.
+
+   Tests: removal with a fallback model (the late answer for the old model is ignored and its request cancelled), removal of the last model (`native_no_model`), adding the first model.
+4. **P2: missing native HTTP and lifecycle gates:**
+   - **Native HTTP through `HttpModel`** (`model.rs`), on a local server:
+     - two-step round trips for `/v1`, the `/x/v1` prefix and IPv6 `[::1]` (skipped if IPv6 loopback is unavailable);
+     - the path, `truncate:false`, `shift:false`, `stream:false`, `num_ctx` on every step, no `think`, tools only on step 1, `num_predict`, verbatim replay with `thinking`, `tool_call_id`s;
+     - errors: both context forms, the context + tools overlap, genuine tools-unsupported, 404 model, a memory error, 413 (generic), malformed 200, non-JSON, a body over 2 MiB. No provider text appears in any code.
+   - **Run task:** the spawned task body moved to `prepare::drive_turn`, which takes the `RunGuard` and releases it on every path; the command now calls it. Tests use a real `RunRegistry`:
+     - preparation alone exceeding the turn → `Error{AI_AGENT_DEADLINE}` + `Done{Failed}`, no chat, slot released;
+     - preparation time is deducted from the model's budget;
+     - cancel **and** connection close (`cancel_on_connections`) while `/api/show` hangs → `Done{Canceled}` only, no chat, slot released;
+     - too old → one terminal pair, slot released;
+     - a ready model runs with ≈ the whole turn.
+   - **Discovery and status cancellation:** both commands now use the shared `cancel::run_cancellable` (register before work, biased cancel, `FinishGuard`). Tests cancel the status while `/api/version` hangs and while `/api/show` hangs: returns within 1 s and the registry is empty. Success and error exits also leave the registry empty.
+
+**Verification:**
+- `cargo test --locked` → 397 passed / 15 ignored, and the same with `--features app-store`.
+- `cargo clippy --locked --all-targets` → 8 warnings (default) / 9 (app-store), the baseline; two test-only `MutexGuard`-across-await warnings were fixed with scoped blocks.
+- Vitest: 129 files / 757 tests passed. An earlier full run showed 8 failures while several overlapping Vitest runs had pushed the load average to 53–67; a single clean run passed everything.
+- `tsc` clean; prettier clean.
+- Unrelated working-tree edits to `src/lib/politedbBackend/ai.ts` and its test are not part of this task and are left untouched.
+
+### Fixes for Codex review round 2 (Claude, 2026-10-17)
+
+`.agent/REVIEW.md` "Re-review: ollama-native-context Phase 1 round 2": CHANGES REQUIRED, 2 P2. Both fixed:
+
+1. **P2: the native round trip passed when IPv4 binding failed.** `native_round_trip_over_http_keeps_flags_and_size_on_every_step` now asserts that both IPv4 listeners bind (a bind failure fails the test). Only the IPv6 `[::1]` case may skip, and it prints the skip. The test then asserts that at least the two mandatory IPv4 cases executed. In a sandbox that denies loopback sockets this test now fails, as it should, instead of reporting a false pass.
+2. **P2: lifecycle gates through the real coordinator.** New `prepare.rs` tests run `drive_turn` with the real `run::run_turn`, a real `RunRegistry` and a synthetic `AgentModel`:
+   - `preparation_and_a_slow_model_share_one_turn_deadline`: 600 ms `/api/version` delay, a 3 s model step, a 1.5 s turn. Elapsed time is between 1.4 s and 2 s (a fresh full deadline for the model would take about 2.1 s), the model is called once, `Error{AI_AGENT_DEADLINE}` is emitted, there is exactly one `Done`, and the slot is released;
+   - `consent_revoked_during_preparation_sends_no_chat`: the gate closes 100 ms into a 400 ms preparation. The model is never called; `Error{AI_DATA_ACCESS_REQUIRED}` plus one `Done`; slot released;
+   - `a_closed_channel_stops_the_task_and_releases_the_slot`: a closed sink on a failing preparation (too old) makes exactly one send attempt, then releases the slot; a closed sink on a ready preparation sends no model request and releases the slot.
+
+**Verification:**
+- `cargo test --locked` → 400 passed / 15 ignored, and the same with `--features app-store`.
+- `cargo clippy --locked --all-targets` → 8 (default) / 9 (app-store), the baseline.
+- No frontend change in this round (Vitest 757/757 from round 1 still applies).
 
 ## Out of scope (Plan 2)
 

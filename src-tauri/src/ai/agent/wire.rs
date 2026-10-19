@@ -16,12 +16,15 @@ pub const RESPONSE_INVALID: &str = "AI_AGENT_RESPONSE_INVALID";
 /// Prefix for Gemini call ids we had to invent (older API versions send none).
 const GEMINI_SYNTHETIC_ID: &str = "gemini-call-";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Wire {
     /// Chat Completions `tools` / `tool_calls` / `role: tool`.
     OpenAi,
     Anthropic,
     Gemini,
+    /// Ollama's native `/api/chat` (plan ollama-native-context): selected per run after
+    /// identifying the server, never by [`wire_for`]. See `wire_ollama`.
+    OllamaNative,
 }
 
 /// Providers whose tool-calling replay contract is verified for v1 (plan R2 matrix).
@@ -65,6 +68,8 @@ pub fn build(
             ),
             gemini_body(request)?,
         )),
+        // Built by `wire_ollama::body` with the run's context size and native URL.
+        Wire::OllamaNative => Err(RESPONSE_INVALID.into()),
     }
 }
 
@@ -78,11 +83,12 @@ pub fn parse(
         Wire::OpenAi => openai_parse(kind, model, value),
         Wire::Anthropic => anthropic_parse(model, value),
         Wire::Gemini => gemini_parse(model, value),
+        Wire::OllamaNative => super::wire_ollama::parse(model, value),
     }
 }
 
 /// Replayed assistant content must come from the same destination.
-fn replay(
+pub(super) fn replay(
     envelope: &AssistantEnvelope,
     kind: AiProviderKind,
     model: &str,
@@ -95,7 +101,7 @@ fn replay(
 
 /// Token usage, or `None` when the output count is missing or not a number: unknown
 /// usage is charged conservatively by the coordinator, never as zero.
-fn usage_from(
+pub(super) fn usage_from(
     usage: Option<&Value>,
     input: &str,
     output: &str,
@@ -115,6 +121,25 @@ fn usage_from(
 }
 
 // ---------------------------------------------------------------- OpenAI-compatible
+
+/// Chat Completions tool declarations, also used by Ollama's native API.
+pub(super) fn function_tools(tools: &[ToolSpec]) -> Value {
+    Value::Array(
+        tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    }
+                })
+            })
+            .collect(),
+    )
+}
 
 fn openai_body(kind: AiProviderKind, request: &StepRequest<'_>) -> Result<Value, String> {
     let mut messages = Vec::new();
@@ -139,22 +164,7 @@ fn openai_body(kind: AiProviderKind, request: &StepRequest<'_>) -> Result<Value,
     }
     let mut body = json!({ "model": request.model, "messages": messages, "stream": false });
     if !request.tools.is_empty() {
-        body["tools"] = Value::Array(
-            request
-                .tools
-                .iter()
-                .map(|tool| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": tool.name,
-                            "description": tool.description,
-                            "parameters": tool.parameters,
-                        }
-                    })
-                })
-                .collect(),
-        );
+        body["tools"] = function_tools(request.tools);
         body["tool_choice"] = json!(if request.allow_tools { "auto" } else { "none" });
     }
     let groq_gpt_oss = kind == AiProviderKind::Groq && request.model.starts_with("openai/gpt-oss-");
@@ -171,7 +181,7 @@ fn openai_body(kind: AiProviderKind, request: &StepRequest<'_>) -> Result<Value,
     Ok(body)
 }
 
-fn tool_content(result: &ToolResult) -> String {
+pub(super) fn tool_content(result: &ToolResult) -> String {
     if result.is_error {
         format!("ERROR: {}", result.content)
     } else {

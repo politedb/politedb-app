@@ -92,7 +92,9 @@ pub struct StepRequest<'a> {
     pub system: &'a str,
     pub turns: &'a [Turn],
     pub tools: &'a [ToolSpec],
-    /// `false` keeps the tools declared but forbids calling them (final step).
+    /// `false` forbids calling tools (final step). Most wires keep the tools declared
+    /// (some providers require it once the transcript has tool calls); Ollama's native
+    /// wire omits them instead, which its replay accepts (plan ollama-native-context A5).
     pub allow_tools: bool,
     pub max_tokens: u32,
 }

@@ -140,6 +140,7 @@ fn main() {
             commands::ai::ai_provider_list_models,
             commands::ai::ai_provider_cancel_list_models,
             commands::ai::ai_provider_test_draft,
+            commands::ai::ai_ollama_status,
             commands::ai::ai_legacy_model_info,
             commands::ai::ai_legacy_model_delete,
             commands::ai::ai_chat_complete,

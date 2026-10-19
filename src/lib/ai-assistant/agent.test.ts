@@ -146,6 +146,37 @@ describe("runAgentTurn", () => {
     await expect(late).rejects.not.toBeInstanceOf(AgentFallback);
   });
 
+  it("never falls back to the legacy assistant for Ollama preparation errors", async () => {
+    // Plan ollama-native-context E1b: an old server is a hard error, not a silent
+    // switch to the /v1 assistant; the same holds for the other preparation codes.
+    for (const code of [
+      "AI_OLLAMA_UPDATE_REQUIRED",
+      "AI_OLLAMA_MODEL_INFO_UNAVAILABLE",
+      "AI_OLLAMA_MODEL_NOT_FOUND",
+      "AI_OLLAMA_LOAD_FAILED",
+      "AI_PROVIDER_UNREACHABLE",
+      "AI_AGENT_CONTEXT_FULL",
+    ]) {
+      const run = capture();
+      const turn = runAgentTurn(base);
+      await Promise.resolve();
+      run.emit()({ type: "error", code });
+      run.emit()({
+        type: "done",
+        status: "failed",
+        steps: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      await expect(turn).rejects.toThrow(code);
+      await expect(turn).rejects.not.toBeInstanceOf(AgentFallback);
+      mocks.start.mockRejectedValueOnce(new Error(code));
+      await expect(runAgentTurn(base)).rejects.not.toBeInstanceOf(
+        AgentFallback
+      );
+    }
+  });
+
   it("aborting cancels the backend run", async () => {
     capture();
     const controller = new AbortController();

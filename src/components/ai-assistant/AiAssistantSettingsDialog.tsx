@@ -18,6 +18,11 @@ import {
   aiProviderCancelListModels,
   aiProviderListModels,
   aiProviderTestDraft,
+  aiOllamaStatus,
+  DEFAULT_CONTEXT_SIZE,
+  MAX_CONTEXT_SIZE,
+  MIN_CONTEXT_SIZE,
+  parseContextSize,
   buildBaseUrl,
   dismissLegacyLocalNotice,
   getSelectedAiProviderId,
@@ -35,6 +40,7 @@ import {
   aiLegacyModelDelete,
   aiLegacyModelInfo,
   type AiLegacyModelInfo,
+  type OllamaStatus,
 } from "src/lib/tauri/ai";
 import type { AiProviderConfig, AiProviderKind } from "src/types";
 import { cn } from "src/utils/cn";
@@ -102,6 +108,27 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [serverHint, setServerHint] = useState<string | null>(null);
   /** Bumped to focus the model picker and open its suggestions. */
   const [pickerFocusRequest, setPickerFocusRequest] = useState(0);
+  /** Ollama only: the context size field as typed, and the server status line. */
+  const [contextInput, setContextInput] = useState("");
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const statusTokenRef = useRef(0);
+  const statusIdRef = useRef<string | null>(null);
+
+  /**
+   * Drops the shown server status and aborts its request in the backend (plan
+   * ollama-native-context C2). Called on every draft edit that changes what the status
+   * describes, even when no new request follows.
+   */
+  const invalidateStatus = () => {
+    statusTokenRef.current += 1;
+    setOllamaStatus(null);
+    setStatusLoading(false);
+    const requestId = statusIdRef.current;
+    statusIdRef.current = null;
+    if (requestId) void aiProviderCancelListModels(requestId);
+  };
 
   /** Drops any in-flight model discovery: its result no longer matches the form. */
   const invalidateDiscovery = () => {
@@ -131,6 +158,30 @@ export function AiAssistantSettingsDialog(props: Props) {
     return next;
   };
 
+  /** Asks the server behind an Ollama draft what it supports (explicit actions only). */
+  const loadOllamaStatus = async (config: AiProviderConfig) => {
+    invalidateStatus();
+    if (config.kind !== "ollama") return;
+    const token = statusTokenRef.current;
+    const requestId = `${instanceIdRef.current}:status:${token}`;
+    statusIdRef.current = requestId;
+    setStatusLoading(true);
+    try {
+      const response = await aiOllamaStatus(config, requestId);
+      if (token !== statusTokenRef.current || response?.requestId !== requestId)
+        return;
+      setOllamaStatus(response);
+    } catch {
+      if (token !== statusTokenRef.current) return;
+      setOllamaStatus(null);
+    } finally {
+      if (token === statusTokenRef.current) {
+        setStatusLoading(false);
+        statusIdRef.current = null;
+      }
+    }
+  };
+
   const refreshLegacyModel = async () => {
     try {
       setLegacyModel(await aiLegacyModelInfo());
@@ -148,23 +199,27 @@ export function AiAssistantSettingsDialog(props: Props) {
     provider?: AiProviderConfig
   ) => {
     invalidateDiscovery();
+    invalidateStatus();
     const next = normalizeAiProviderConfig(
       provider ?? makeDefaultAiProvider(kind)
     );
     setSelectedKind(kind);
     setSelectedId(provider?.id ?? null);
     setDraft(next);
+    setContextInput(next.contextSize ? String(next.contextSize) : "");
+    setContextError(null);
     clearSecrets();
     setDiscoveredModels([]);
     setServerHint(null);
     setStatus("");
     // Local servers expose whatever is installed: look it up right away.
     if (isLocalAiProviderKind(kind)) {
-      void loadModels({
-        silent: true,
-        config: { ...next, baseUrl: buildBaseUrl(next.host, next.subPath) },
-        auth: { action: "keep" },
-      });
+      const config = {
+        ...next,
+        baseUrl: buildBaseUrl(next.host, next.subPath),
+      };
+      void loadModels({ silent: true, config, auth: { action: "keep" } });
+      void loadOllamaStatus(config);
     }
   };
 
@@ -172,6 +227,7 @@ export function AiAssistantSettingsDialog(props: Props) {
     if (!props.open) {
       // Never keep a typed secret around after the dialog closes.
       invalidateDiscovery();
+      invalidateStatus();
       clearSecrets();
       return;
     }
@@ -194,6 +250,11 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   /** Merges into the latest draft so edits made while a request was running survive. */
   const addModels = (ids: string[]) => {
+    // The first model added becomes the default: the shown status is then stale.
+    const firstDefault = draft.defaultModel.trim()
+      ? null
+      : (ids.map((id) => id.trim()).find(Boolean) ?? null);
+    if (firstDefault) defaultModelChanged(firstDefault);
     setDraft((current) => {
       const models = Array.from(
         new Set(
@@ -213,6 +274,7 @@ export function AiAssistantSettingsDialog(props: Props) {
   /** URL or auth edits make an in-flight discovery stale. */
   const updateConnection = (patch: Partial<AiProviderConfig>) => {
     invalidateDiscovery();
+    invalidateStatus();
     // Models found on the previous URL no longer apply.
     setDiscoveredModels([]);
     setServerHint(null);
@@ -224,13 +286,41 @@ export function AiAssistantSettingsDialog(props: Props) {
     [discoveredModels, selectedKind]
   );
 
+  /** Choosing another default model makes the shown context status stale. */
+  /**
+   * Every change of the default model (picked, removed, first added) drops the shown
+   * status and its pending request, then asks again for the new model (C2/C5).
+   */
+  const defaultModelChanged = (model: string) => {
+    if (selectedKind !== "ollama") return;
+    void loadOllamaStatus({ ...draftConfig(), defaultModel: model });
+  };
+
+  const setDefaultModel = (model: string) => {
+    if (model === draft.defaultModel) return;
+    updateDraft({ defaultModel: model });
+    defaultModelChanged(model);
+  };
+
+  const updateContextSize = (raw: string) => {
+    setContextInput(raw);
+    const parsed = parseContextSize(raw);
+    if (parsed === undefined) {
+      setContextError(
+        `Enter a whole number from ${MIN_CONTEXT_SIZE} to ${MAX_CONTEXT_SIZE}, or leave it empty for ${DEFAULT_CONTEXT_SIZE}.`
+      );
+      return;
+    }
+    setContextError(null);
+    updateDraft({ contextSize: parsed });
+  };
+
   const removeModel = (model: string) => {
     const models = (draft.models ?? []).filter((item) => item !== model);
-    updateDraft({
-      models,
-      defaultModel:
-        draft.defaultModel === model ? (models[0] ?? "") : draft.defaultModel,
-    });
+    const defaultModel =
+      draft.defaultModel === model ? (models[0] ?? "") : draft.defaultModel;
+    updateDraft({ models, defaultModel });
+    if (defaultModel !== draft.defaultModel) defaultModelChanged(defaultModel);
   };
 
   /** Draft as the backend expects it; nothing here touches storage. */
@@ -305,10 +395,16 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   /** Re-discovers after the server URL was edited (local servers only). */
   const reloadModelsAfterUrlEdit = () => {
-    if (isLocal) void loadModels({ silent: true });
+    if (!isLocal) return;
+    void loadModels({ silent: true });
+    void loadOllamaStatus(draftConfig());
   };
 
   const saveProvider = async () => {
+    if (contextError) {
+      setStatus(contextError);
+      return;
+    }
     setBusy(true);
     setStatus("Saving provider...");
     try {
@@ -351,6 +447,7 @@ export function AiAssistantSettingsDialog(props: Props) {
     try {
       await aiProviderTestDraft(draftConfig(), keyChange());
       setStatus("Provider connection succeeded.");
+      if (selectedKind === "ollama") void loadOllamaStatus(draftConfig());
     } catch (error) {
       setStatus(errorText(error));
     } finally {
@@ -638,7 +735,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                         type="button"
                         class="min-w-0 flex-1 truncate text-left text-sm"
                         title="Use as default model"
-                        onClick={() => updateDraft({ defaultModel: model })}
+                        onClick={() => setDefaultModel(model)}
                       >
                         {model}
                       </button>
@@ -672,6 +769,27 @@ export function AiAssistantSettingsDialog(props: Props) {
                 )}
               </div>
             </section>
+            {selectedKind === "ollama" ? (
+              <section class="space-y-1.5">
+                <Input
+                  label="Context size (tokens)"
+                  value={contextInput}
+                  placeholder={String(DEFAULT_CONTEXT_SIZE)}
+                  onValueChange={updateContextSize}
+                  className="h-10 border border-neutral-300 px-3 text-sm"
+                />
+                {contextError ? (
+                  <div class="text-xs text-red-600" role="alert">
+                    {contextError}
+                  </div>
+                ) : null}
+                <OllamaStatusLine
+                  status={ollamaStatus}
+                  loading={statusLoading}
+                  setting={parseContextSize(contextInput) ?? null}
+                />
+              </section>
+            ) : null}
             <label class="flex items-center gap-2 text-sm text-neutral-700">
               <input
                 type="checkbox"
@@ -729,5 +847,60 @@ export function AiAssistantSettingsDialog(props: Props) {
         </main>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** What the agent can do with this Ollama server (plan ollama-native-context C5). */
+function OllamaStatusLine(props: {
+  status: OllamaStatus | null;
+  loading: boolean;
+  setting: number | null;
+}) {
+  const { status } = props;
+  let text: string;
+  if (props.loading) {
+    text = "Checking the server...";
+  } else if (!status) {
+    text = `The AI agent uses up to ${DEFAULT_CONTEXT_SIZE} tokens unless you set a size.`;
+  } else {
+    switch (status.kind) {
+      case "native": {
+        const trained = status.trainedMax ?? null;
+        const requested = props.setting ?? DEFAULT_CONTEXT_SIZE;
+        const effective =
+          trained !== null ? Math.min(requested, trained) : requested;
+        text = `Ollama ${status.version ?? ""}. Agent context: ${effective} tokens${
+          trained !== null ? ` (model max ${trained})` : ""
+        }.`;
+        break;
+      }
+      case "native_no_model":
+        text = "Choose a model to see its context size.";
+        break;
+      case "metadata_unavailable":
+        text =
+          "Couldn't read this model's context size; the agent won't run until it can.";
+        break;
+      case "model_not_found":
+        text = "Model not found on this server.";
+        break;
+      case "too_old":
+        text = "Update Ollama to 0.12.6 or newer to use the AI agent.";
+        break;
+      case "compatible":
+        text = "Context size can't be set for this server.";
+        break;
+      case "unreachable":
+        text = "Couldn't reach the server.";
+        break;
+      default:
+        text = "";
+    }
+  }
+  if (!text) return null;
+  return (
+    <div class="text-xs text-neutral-500" aria-live="polite">
+      {text}
+    </div>
   );
 }

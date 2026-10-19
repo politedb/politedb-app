@@ -10,12 +10,14 @@ pub mod data;
 #[cfg(test)]
 mod live_smoke;
 pub mod model;
+pub mod prepare;
 pub mod protocol;
 pub mod query_guard;
 pub mod run;
 pub mod sql_safety;
 pub mod start;
 pub mod wire;
+pub mod wire_ollama;
 
 use serde::Deserialize;
 

@@ -6,6 +6,7 @@ export const CMD = {
   aiProviderListModels: "ai_provider_list_models",
   aiProviderCancelListModels: "ai_provider_cancel_list_models",
   aiProviderTestDraft: "ai_provider_test_draft",
+  aiOllamaStatus: "ai_ollama_status",
   aiLegacyModelInfo: "ai_legacy_model_info",
   aiLegacyModelDelete: "ai_legacy_model_delete",
   aiChatComplete: "ai_chat_complete",

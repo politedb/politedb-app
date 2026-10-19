@@ -8,7 +8,8 @@ use tauri::AppHandle;
 
 use crate::ai::adapters::{AppProviderFiles, AppSecrets};
 use crate::ai::agent::consent::DATA_ACCESS_REQUIRED;
-use crate::ai::agent::model::{CapabilityCache, CapabilityKey, HttpModel, TOOLS_UNSUPPORTED};
+use crate::ai::agent::model::{CapabilityCache, CapabilityKey, TOOLS_UNSUPPORTED};
+use crate::ai::agent::prepare::{self, PrepareInput};
 use crate::ai::agent::run::{self, AgentEvent, EventSink, RunInput, ToolRegistry};
 use crate::ai::agent::sql_safety::{self, SqlSafety};
 use crate::ai::agent::start::{self, RunSnapshot};
@@ -85,7 +86,7 @@ pub async fn ai_agent_start(
         config,
         key,
         model_id,
-        capability_key,
+        generation,
     } = start::snapshot_for_run(
         &state.ai_providers_lock,
         &AppProviderFiles(&app),
@@ -94,11 +95,15 @@ pub async fn ai_agent_start(
         &input.provider_id,
         input.model.as_deref(),
     )?;
-    if state.ai_agent_capabilities.get(&capability_key) == Some(false) {
-        return Err(TOOLS_UNSUPPORTED.into());
-    }
     let provider = config.clone();
-    let model = HttpModel::new(config, key)?;
+    let prepare_input = PrepareInput {
+        config,
+        key,
+        model_id: model_id.clone(),
+        generation,
+    };
+    // Fixed-wire kinds fail up front as before; Ollama is identified in the run task.
+    let preparation = prepare::begin(prepare_input, &state.ai_agent_capabilities)?;
     let mode = super::ai_agent_data::SafetyMode::parse(input.safety_mode.as_deref());
     let mut gate: Box<dyn run::RequestGate + Send> = Box::new(run::OpenGate);
     let mut bound_to = None;
@@ -163,26 +168,48 @@ pub async fn ai_agent_start(
         },
     )?;
     let guard = state.ai_agent_runs.start_on(&input.run_id, bound_to)?;
-    let sink = ChannelSink {
-        channel: on_event,
-        capabilities: Arc::clone(&state.ai_agent_capabilities),
-        capability_key,
-    };
+    let capabilities = Arc::clone(&state.ai_agent_capabilities);
+    let probes = Arc::clone(&state.ai_ollama_probes);
     let system = agent::system_prompt(dialect, with_data);
     tauri::async_runtime::spawn(async move {
-        let input = RunInput {
-            model_id: &model_id,
-            system: &system,
-            question: &question,
-            deadline: run::TURN_DEADLINE,
-            tool_timeout: run::TOOL_TIMEOUT,
-            cleanup_grace: run::CLEANUP_GRACE,
-            gate: gate.as_ref(),
-        };
-        run::run_turn(&model, &tools, input, &sink, &guard.cancel).await;
-        drop(guard);
+        let terminal = PlainSink(on_event.clone());
+        prepare::drive_turn(
+            preparation,
+            probes,
+            Arc::clone(&capabilities),
+            guard,
+            run::TURN_DEADLINE,
+            &terminal,
+            |prepared, remaining, cancel| async move {
+                let sink = ChannelSink {
+                    channel: on_event,
+                    capabilities,
+                    capability_key: prepared.capability_key,
+                };
+                let input = RunInput {
+                    model_id: &model_id,
+                    system: &system,
+                    question: &question,
+                    deadline: remaining,
+                    tool_timeout: run::TOOL_TIMEOUT,
+                    cleanup_grace: run::CLEANUP_GRACE,
+                    gate: gate.as_ref(),
+                };
+                run::run_turn(&prepared.model, &tools, input, &sink, &cancel).await;
+            },
+        )
+        .await;
     });
     Ok(())
+}
+
+/// Sends preparation's terminal events; it records nothing in the capability cache.
+struct PlainSink(Channel<AgentEvent>);
+
+impl EventSink for PlainSink {
+    fn send(&self, event: AgentEvent) -> bool {
+        self.0.send(event).is_ok()
+    }
 }
 
 /// Cancels a run. Safe to call before the run started or after it finished.

@@ -143,6 +143,8 @@ pub fn snapshot_for_chat(
     if !config.enabled {
         return Err("AI_PROVIDER_DISABLED".into());
     }
+    // A hand-edited file can hold an out-of-range value: nothing is sent with it.
+    provider::validate_context_size(&config)?;
     let key = request_key(secrets, &config, &KeyChange::Keep)?;
     Ok((config, key))
 }

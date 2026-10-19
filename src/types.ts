@@ -295,6 +295,8 @@ export type AiProviderConfig = {
   apiKeyRef?: string | null;
   enabled: boolean;
   isDefault?: boolean;
+  /** Ollama only: the agent's context size in tokens; empty means the default. */
+  contextSize?: number | null;
 };
 
 export type AiChatSession = {

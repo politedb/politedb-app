@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use super::model::{CapabilityCache, CapabilityKey};
+use super::model::CapabilityCache;
 use crate::ai::provider::AiProviderConfig;
 use crate::ai::provider_store::{self, ProviderFilePort, SecretPort};
 
@@ -10,7 +10,9 @@ pub struct RunSnapshot {
     pub config: AiProviderConfig,
     pub key: Option<String>,
     pub model_id: String,
-    pub capability_key: CapabilityKey,
+    /// The provider's config generation, read together with the config. Every cache
+    /// write learned from this run (capabilities, Ollama probes) carries it.
+    pub generation: u64,
 }
 
 /// Reads the provider config, its key, the model to use and the capability-cache
@@ -38,12 +40,12 @@ pub fn snapshot_for_run(
     if model_id.is_empty() {
         return Err("AI_PROVIDER_MODEL_REQUIRED".into());
     }
-    let capability_key = capabilities.key(&config, &model_id);
+    let generation = capabilities.generation(&config.id);
     Ok(RunSnapshot {
         config,
         key,
         model_id,
-        capability_key,
+        generation,
     })
 }
 
@@ -114,9 +116,18 @@ mod tests {
         });
 
         assert_eq!(snapshot.config.sub_path.as_deref(), Some("/v2"));
-        // Its key is the current one, so what this run learns is about the new config.
-        cache.record(snapshot.capability_key.clone(), false);
-        let current = cache.key(&snapshot.config, &snapshot.model_id);
+        // Its generation is the current one, so what this run learns is about the new
+        // config.
+        let key = |generation| {
+            super::super::model::CapabilityKey::for_default_wire(
+                &snapshot.config,
+                &snapshot.model_id,
+                generation,
+            )
+            .unwrap()
+        };
+        cache.record(key(snapshot.generation), false);
+        let current = key(cache.generation("p1"));
         assert_eq!(cache.get(&current), Some(false));
         assert_eq!(snapshot.model_id, "model-a");
         assert_eq!(snapshot.key.as_deref(), Some("k"));

@@ -5,6 +5,7 @@ import {
   aiProviderSave,
   aiProviderListModels,
   aiProviderCancelListModels,
+  aiOllamaStatus,
   aiProviderTestDraft,
   type AiProviderKeyChange,
 } from "src/lib/tauri/ai";
@@ -146,6 +147,24 @@ export function makeDefaultAiProvider(
   };
 }
 
+/** Bounds and default of the Ollama agent context size (mirror the backend). */
+export const MIN_CONTEXT_SIZE = 2048;
+export const MAX_CONTEXT_SIZE = 262144;
+export const DEFAULT_CONTEXT_SIZE = 16384;
+
+/**
+ * The context size to save: an integer in bounds, or `null` for the default. Returns
+ * `undefined` for an invalid entry so the form can show an error instead of saving it.
+ */
+export function parseContextSize(raw: string): number | null | undefined {
+  const text = raw.trim();
+  if (!text) return null;
+  if (!/^\d+$/.test(text)) return undefined;
+  const value = Number(text);
+  if (value < MIN_CONTEXT_SIZE || value > MAX_CONTEXT_SIZE) return undefined;
+  return value;
+}
+
 export function buildBaseUrl(host?: string | null, subPath?: string | null) {
   const h = (host ?? "").trim().replace(/\/+$/, "");
   const p = (subPath ?? "").trim();
@@ -202,6 +221,8 @@ export function normalizeAiProviderConfig(
     baseUrl: buildBaseUrl(host, subPath),
     defaultModel,
     models,
+    // Meaningful for Ollama only, as in the backend.
+    contextSize: kind === "ollama" ? (provider.contextSize ?? null) : null,
   };
 }
 
@@ -319,6 +340,7 @@ export async function aiProviderDelete(providerId: string) {
 export {
   aiProviderListModels,
   aiProviderCancelListModels,
+  aiOllamaStatus,
   aiProviderTestDraft,
 };
 export type { AiProviderKeyChange };
