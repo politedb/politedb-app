@@ -2,7 +2,7 @@
 
 ## Status
 
-APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) committed on `politedb-backend` branch `feat/trial-endpoint` (Codex: VERIFIED WITH LIMITATIONS after 2 rounds; not deployed). Phase 3 committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Next: Claude /security-review, backend push/deploy, then release (D9).
+APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) committed on `politedb-backend` branch `feat/trial-endpoint` (Codex: VERIFIED WITH LIMITATIONS after 2 rounds; not deployed). Phase 3 committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Claude /security-review on 2026-10-19: no findings at confidence 8 or higher (app `origin/main...cb3c2ed`, backend `origin/main...8b1290b`). Next: backend push/deploy with TRUST_PROXY and smoke checks, then release (D9).
 
 ## Task
 
