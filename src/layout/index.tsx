@@ -8,6 +8,7 @@ import { trackScreenView } from "src/lib/analytics";
 import { UnsavedChangesDialogHost } from "src/screens/connection/workspace/UnsavedChangesDialogHost";
 import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
 import { WelcomeDialogHost } from "src/components/modal/WelcomeDialogHost";
+import { ProUpgradeDialogHost } from "src/components/license/ProUpgradeDialogHost";
 import { Spinner } from "src/components/common/Spinner";
 import { Toast } from "@root/src/components/common/Toast";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
@@ -63,6 +64,7 @@ export function MainLayout() {
       <FloatingAssistantLauncher />
       <WelcomeDialogHost />
       <UnsavedChangesDialogHost />
+      <ProUpgradeDialogHost />
       <Toast />
     </div>
   );

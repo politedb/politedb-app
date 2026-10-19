@@ -41,6 +41,12 @@ pub struct LicenseState {
     pub trial_started_at: Option<i64>,
     pub trial_expires_at: Option<i64>,
     pub message: Option<String>,
+    /// Feature tier reported by the license API ("pro" or "free"); absent on older servers.
+    #[serde(default)]
+    pub plan: Option<String>,
+    /// Whether Pro features are unlocked. Derived in `finalize_state`; never trusted from input.
+    #[serde(default)]
+    pub pro_access: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +82,7 @@ struct LicenseApiResponse {
     seats_allowed: Option<u32>,
     #[serde(alias = "devicesUsed")]
     devices_used: Option<u32>,
+    plan: Option<String>,
     message: Option<String>,
     error: Option<String>,
 }
@@ -127,6 +134,8 @@ impl LicenseState {
             trial_started_at: Some(trial_started_at),
             trial_expires_at: Some(trial_expires_at),
             message: None,
+            plan: None,
+            pro_access: false,
         }
     }
 
@@ -162,7 +171,34 @@ fn apply_trial_policy(mut state: LicenseState, distribution: Distribution) -> Li
 
 /// Single exit path for license state handed to storage and the frontend.
 fn finalize_state(state: LicenseState) -> LicenseState {
-    apply_local_expiry(apply_trial_policy(state, Distribution::current()))
+    apply_pro_access(
+        apply_local_expiry(apply_trial_policy(state, Distribution::current())),
+        Distribution::current(),
+        chrono::Utc::now().timestamp_millis(),
+    )
+}
+
+/// Pro features unlock with an active paid license or a running trial. Flavors that do not
+/// gate Pro features (App Store) always unlock them.
+fn has_pro_access(state: &LicenseState, distribution: Distribution, now: i64) -> bool {
+    if !distribution.gates_pro_features() {
+        return true;
+    }
+    let licensed = state.status.trim().eq_ignore_ascii_case("active")
+        && !state
+            .plan
+            .as_deref()
+            .is_some_and(|plan| plan.trim().eq_ignore_ascii_case("free"));
+    let in_trial = distribution.supports_local_trial()
+        && state
+            .trial_expires_at
+            .is_some_and(|expires_at| expires_at > now);
+    licensed || in_trial
+}
+
+fn apply_pro_access(mut state: LicenseState, distribution: Distribution, now: i64) -> LicenseState {
+    state.pro_access = has_pro_access(&state, distribution, now);
+    state
 }
 
 fn apply_local_expiry(mut state: LicenseState) -> LicenseState {
@@ -376,7 +412,11 @@ pub fn license_state_clear(app: &tauri::AppHandle) -> Result<LicenseState, Strin
     let next = apply_trial_policy(next, Distribution::current());
 
     storage::json_write_atomic(&path, &next)?;
-    Ok(apply_local_expiry(next))
+    Ok(apply_pro_access(
+        apply_local_expiry(next),
+        Distribution::current(),
+        chrono::Utc::now().timestamp_millis(),
+    ))
 }
 
 fn pick_string(values: &[Option<String>]) -> Option<String> {
@@ -478,6 +518,8 @@ fn normalize_api_state(
             payload.error,
             previous.and_then(|state| state.message.clone()),
         ]),
+        plan: pick_string(&[payload.plan, previous.and_then(|state| state.plan.clone())]),
+        pro_access: false,
     };
     normalize_state_timestamps(&mut state);
     state
@@ -680,6 +722,7 @@ mod tests {
             last_validated_at: None,
             seats_allowed: None,
             devices_used: None,
+            plan: None,
             message: None,
             error: None,
         }
@@ -773,5 +816,109 @@ mod tests {
         state.message = Some("License key is invalid.".to_string());
         let next = apply_trial_policy(state, Distribution::AppStore);
         assert_eq!(next.message.as_deref(), Some("License key is invalid."));
+    }
+
+    const NOW: i64 = 1_800_000_000_000;
+
+    fn licensed(status: &str, plan: Option<&str>) -> LicenseState {
+        LicenseState {
+            status: status.to_string(),
+            plan: plan.map(str::to_string),
+            trial_started_at: None,
+            trial_expires_at: None,
+            ..LicenseState::inactive(&test_device())
+        }
+    }
+
+    #[test]
+    fn active_paid_license_unlocks_pro() {
+        assert!(has_pro_access(
+            &licensed("active", None),
+            Distribution::Direct,
+            NOW
+        ));
+        assert!(has_pro_access(
+            &licensed("active", Some("pro")),
+            Distribution::Direct,
+            NOW
+        ));
+        assert!(has_pro_access(
+            &licensed(" Active ", Some("PRO")),
+            Distribution::Direct,
+            NOW
+        ));
+    }
+
+    #[test]
+    fn inactive_expired_or_free_plan_does_not_unlock_pro() {
+        for status in ["inactive", "expired", "invalid", "error"] {
+            assert!(!has_pro_access(
+                &licensed(status, None),
+                Distribution::Direct,
+                NOW
+            ));
+        }
+        assert!(!has_pro_access(
+            &licensed("active", Some("free")),
+            Distribution::Direct,
+            NOW
+        ));
+    }
+
+    #[test]
+    fn running_trial_unlocks_pro_until_it_expires() {
+        assert!(has_pro_access(
+            &with_trial("inactive", NOW + 1),
+            Distribution::Direct,
+            NOW
+        ));
+        assert!(!has_pro_access(
+            &with_trial("inactive", NOW),
+            Distribution::Direct,
+            NOW
+        ));
+        assert!(!has_pro_access(
+            &with_trial("inactive", NOW - 1),
+            Distribution::Direct,
+            NOW
+        ));
+    }
+
+    #[test]
+    fn app_store_keeps_pro_unlocked() {
+        assert!(has_pro_access(
+            &licensed("inactive", None),
+            Distribution::AppStore,
+            NOW
+        ));
+        assert!(has_pro_access(
+            &licensed("active", Some("free")),
+            Distribution::AppStore,
+            NOW
+        ));
+    }
+
+    #[test]
+    fn pro_access_from_input_is_recomputed() {
+        let mut forged = licensed("inactive", None);
+        forged.pro_access = true;
+        let next = apply_pro_access(forged, Distribution::Direct, NOW);
+        assert!(!next.pro_access);
+    }
+
+    #[test]
+    fn normalize_api_state_keeps_plan_from_payload_or_previous() {
+        let device = test_device();
+        let mut payload = empty_payload();
+        payload.plan = Some("pro".to_string());
+        let state = normalize_api_state(payload, &device, None, None);
+        assert_eq!(state.plan.as_deref(), Some("pro"));
+
+        let previous = LicenseState {
+            plan: Some("pro".to_string()),
+            ..LicenseState::inactive(&device)
+        };
+        let state = normalize_api_state(empty_payload(), &device, Some(&previous), None);
+        assert_eq!(state.plan.as_deref(), Some("pro"));
     }
 }

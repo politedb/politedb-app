@@ -11,6 +11,8 @@ import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeFile } from "src/lib/system-fs";
 import type { DatabaseEngine } from "src/types";
 import { OverlayModal } from "./OverlayModal";
+import { ProBadge } from "src/components/license/ProBadge";
+import { useProGate } from "src/hooks/useProGate";
 
 type DiagramGeneratorDialogProps = {
   open: boolean;
@@ -34,6 +36,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
     metaKey,
     metadata,
   } = props;
+  const { hasPro, requirePro } = useProGate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -94,6 +97,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
 
   async function handleDownloadPng() {
     if (!diagram) return;
+    if (!requirePro("er-diagram-export")) return;
     let objectUrl: string | null = null;
     try {
       const path = await saveDialog({
@@ -249,6 +253,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
             >
               <DownloadIcon className="size-4" />
               Export as PNG
+              {!hasPro && <ProBadge className="bg-white/20 text-white" />}
             </Button>
           </div>
         </div>

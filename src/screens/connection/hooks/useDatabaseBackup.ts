@@ -16,6 +16,7 @@ import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { formatSqlInsertChunk } from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
+import { useProGate } from "src/hooks/useProGate";
 import {
   packSqlToDumb,
   unpackDumpBytes,
@@ -583,10 +584,12 @@ export function useDatabaseBackup() {
   const rt = useConnectionRuntimeCtx();
   const [dbBackupRunning, setDbBackupRunning] = useState(false);
   const [dbRestoreRunning, setDbRestoreRunning] = useState(false);
+  const { requirePro } = useProGate();
 
   const onBackupDatabase = useCallback(
     async (databaseName?: string) => {
       if (!rt.runtimeConnectionId) return;
+      if (!requirePro("backup-restore")) return;
 
       setDbBackupRunning(true);
 
@@ -743,7 +746,7 @@ export function useDatabaseBackup() {
         setDbBackupRunning(false);
       }
     },
-    [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine]
+    [rt.runtimeConnectionId, rt.metadata, rt.metaKey, rt.engine, requirePro]
   );
 
   const runSqlDumpImport = useCallback(
@@ -855,22 +858,24 @@ export function useDatabaseBackup() {
 
   const onRestoreDatabase = useCallback(
     async (onRefresh?: () => void) => {
+      if (!requirePro("backup-restore")) return;
       await runSqlDumpImport(onRefresh, {
         dialogTitle: "Restore database from dump",
         successToast: "Database restore completed.",
       });
     },
-    [runSqlDumpImport]
+    [requirePro, runSqlDumpImport]
   );
 
   const onImportSqlDump = useCallback(
     async (onRefresh?: () => void) => {
+      if (!requirePro("backup-restore")) return;
       await runSqlDumpImport(onRefresh, {
         dialogTitle: "Import SQL dump",
         successToast: "SQL dump imported.",
       });
     },
-    [runSqlDumpImport]
+    [requirePro, runSqlDumpImport]
   );
 
   return {

@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildDefaultMaskedPolicy,
   withColumnRule,
 } from "src/lib/export-masking";
 import { prepareFrozenExportRun } from "./runStreamingExport";
 import type { ExportConfig, ExportOptions } from "./types";
+import { useLicenseStore } from "src/stores/license";
+import type { LicenseState } from "src/lib/tauri/license";
+
+function setProAccess(pro_access: boolean) {
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+}
 
 const config: ExportConfig = {
   connectionId: "c1",
@@ -20,6 +26,45 @@ const config: ExportConfig = {
 };
 
 describe("prepareFrozenExportRun", () => {
+  beforeEach(() => setProAccess(true));
+
+  it("requires Pro for an active masking treatment", () => {
+    setProAccess(false);
+    const policy = withColumnRule(
+      buildDefaultMaskedPolicy(["id", "email", "note"]),
+      "email",
+      "redact"
+    );
+    const opts: ExportOptions = {
+      format: "csv",
+      fileName: "users_masked",
+      columns: ["id", "email", "note"],
+      csvOptions: {},
+      nullToEmpty: true,
+      masked: true,
+      maskingPolicy: policy,
+    };
+    expect(() => prepareFrozenExportRun("/tmp/out.csv", config, opts)).toThrow(
+      /PRO_REQUIRED/
+    );
+  });
+
+  it("keeps all-Keep exports free without Pro", () => {
+    setProAccess(false);
+    const opts: ExportOptions = {
+      format: "csv",
+      fileName: "users",
+      columns: ["id", "email", "note"],
+      csvOptions: {},
+      nullToEmpty: true,
+      masked: true,
+      maskingPolicy: buildDefaultMaskedPolicy(["id", "email", "note"]),
+    };
+    expect(() =>
+      prepareFrozenExportRun("/tmp/out.csv", config, opts)
+    ).not.toThrow();
+  });
+
   it("freezes masked config and excludes omit from projection", () => {
     let policy = buildDefaultMaskedPolicy(["id", "email", "note"]);
     policy = withColumnRule(policy, "email", "omit");

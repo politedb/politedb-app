@@ -50,6 +50,12 @@ impl Distribution {
         matches!(self, Self::Direct)
     }
 
+    /// Whether Pro features require a license or trial. App Store builds keep everything
+    /// unlocked until In-App Purchase exists (guideline 3.1.1 forbids unlocking otherwise).
+    pub const fn gates_pro_features(self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
     /// Engines whose client libraries cannot load inside the App Store sandbox are excluded.
     pub const fn supports_engine(self, kind: EngineKind) -> bool {
         match self {

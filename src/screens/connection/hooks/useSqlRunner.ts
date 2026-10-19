@@ -17,6 +17,7 @@ import { operationCancel } from "src/lib/tauri/operation";
 import { isMutatingStatement } from "src/lib/sql/detect";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import { buildExplainSql } from "src/lib/queries/sql/explain";
+import { useProGate } from "src/hooks/useProGate";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 
 function formatQueryError(err: unknown, index: number) {
@@ -145,6 +146,8 @@ export function useSqlRunner(args: {
     onRunSql,
     stopOnError = false,
   } = args;
+
+  const { requirePro } = useProGate();
 
   const getSaved = useCallback((): WindowState => {
     if (!activeSqlWindowId) return emptyWindowState();
@@ -516,6 +519,7 @@ export function useSqlRunner(args: {
     async (payload: { windowId: string; sql: string }) => {
       const winId = payload.windowId;
       if (!runtimeConnectionId) return;
+      if (!requirePro("query-analyzer")) return;
 
       const now = Date.now();
       const lastAt = lastRunAtByWindow.get(winId) ?? 0;
@@ -555,7 +559,14 @@ export function useSqlRunner(args: {
         inflightByWindow.set(winId, false);
       }
     },
-    [appendRun, bumpRunId, engine, runStatements, runtimeConnectionId]
+    [
+      appendRun,
+      bumpRunId,
+      engine,
+      requirePro,
+      runStatements,
+      runtimeConnectionId,
+    ]
   );
 
   const reset = useCallback(() => {

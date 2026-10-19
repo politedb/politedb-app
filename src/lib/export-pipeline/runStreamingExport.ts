@@ -17,6 +17,8 @@ import { operationCancel } from "src/lib/tauri";
 import { operationBus } from "src/lib/tauri/operationBus";
 import { isAbortError, startSqlQueryStream } from "src/lib/tauri/query";
 import { resolveDefaultTableSort } from "src/utils/tableSort";
+import { hasProAccess, proRequiredError } from "src/lib/license/proAccess";
+import { useLicenseStore } from "src/stores/license";
 import { createSerialWriter } from "./serialWriter";
 import { serializeExportChunk, serializeExportTrailer } from "./serializeChunk";
 import type { TableChunk } from "src/lib/tauri/types";
@@ -95,6 +97,8 @@ function buildFrozenRun(
     // All-Keep is passthrough: collapse to ordinary semantics (SQL + nulls).
     if (!policyHasActiveMasking(policy)) {
       policy = freezePolicy({ ...policy, masked: false });
+    } else if (!hasProAccess(useLicenseStore.getState().state)) {
+      throw proRequiredError("export-masking");
     } else if (opts.format === "sql") {
       throw new Error("SQL format is disabled when column masking is applied.");
     }

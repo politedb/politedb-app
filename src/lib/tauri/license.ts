@@ -36,6 +36,10 @@ export type LicenseState = {
   trial_started_at?: number | null;
   trial_expires_at?: number | null;
   message?: string | null;
+  /** Feature tier from the license API ("pro" | "free"); absent on older servers. */
+  plan?: string | null;
+  /** Pro features unlocked (license or trial). Computed by the Rust side on every load/save. */
+  pro_access?: boolean;
 };
 
 /** UI label from backend `plan_name` (e.g. "ultimate" → "Ultimate plan"). */

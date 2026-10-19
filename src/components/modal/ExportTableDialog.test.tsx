@@ -5,6 +5,8 @@ import {
   buildDefaultMaskedPolicy,
   withColumnRule,
 } from "src/lib/export-masking";
+import { useLicenseStore } from "src/stores/license";
+import type { LicenseState } from "src/lib/tauri/license";
 
 const hookState = {
   format: "csv" as const,
@@ -82,6 +84,7 @@ function renderDialog(
 
 describe("ExportTableDialog UX", () => {
   beforeEach(() => {
+    useLicenseStore.setState({ state: { pro_access: true } as LicenseState });
     hookState.format = "csv";
     hookState.exporting = false;
     hookState.progress = null;

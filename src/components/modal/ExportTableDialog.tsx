@@ -30,6 +30,7 @@ import {
 } from "src/lib/export-masking";
 import { cn } from "src/utils/cn";
 import { showMessage } from "src/lib/system-dialog";
+import { useProGate } from "src/hooks/useProGate";
 
 interface Props {
   open: boolean;
@@ -77,6 +78,7 @@ export function ExportTableDialog({
     clearMaskState,
     requestCancel,
   } = useExportTableData();
+  const { requirePro } = useProGate();
 
   useEffect(() => {
     if (!open) return;
@@ -214,6 +216,7 @@ export function ExportTableDialog({
 
   const handleRuleChange = useCallback(
     (name: string, rule: MaskRuleKind) => {
+      if (rule !== "keep" && !requirePro("export-masking")) return;
       setExportOptions((prev) => {
         if (!prev.maskingPolicy) return prev;
         return {
@@ -231,7 +234,13 @@ export function ExportTableDialog({
         handleChangeFormat("csv");
       }
     },
-    [setExportOptions, exportOptions.maskingPolicy, format, handleChangeFormat]
+    [
+      setExportOptions,
+      exportOptions.maskingPolicy,
+      format,
+      handleChangeFormat,
+      requirePro,
+    ]
   );
 
   const onClose = useCallback(() => {
