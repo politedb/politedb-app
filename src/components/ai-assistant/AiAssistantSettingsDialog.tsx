@@ -81,7 +81,7 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
   const [apiKey, setApiKey] = useState("");
-  // Ids the server reported on the last Load models, offered again as suggestions.
+  // Ids the server reported on the last discovery, offered again as suggestions.
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatus] = useState("");
   const [agentEnabled, setAgentEnabled] = useState(isAiAgentEnabled);
@@ -380,7 +380,7 @@ export function AiAssistantSettingsDialog(props: Props) {
       setDiscoveredModels([]);
       if (options.silent) {
         setServerHint(
-          "Couldn't reach the server. Start it, then click Load models — or type a model ID above."
+          "Couldn't reach the server. Start it, then click Reload (↻) — or type a model ID above."
         );
       } else {
         setStatus(errorText(error));
@@ -710,11 +710,14 @@ export function AiAssistantSettingsDialog(props: Props) {
                 {isLocal ? (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
+                    className="px-1.5"
+                    title="Reload models from the server"
+                    aria-label="Reload models"
                     loading={loadingModels}
                     onClick={() => void loadModels()}
                   >
-                    <RefreshCwIcon className="size-3.5" /> Load models
+                    <RefreshCwIcon className="size-3.5" />
                   </Button>
                 ) : null}
               </div>
@@ -764,7 +767,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                         : discoveredModels.length
                           ? `${discoveredModels.length} model${discoveredModels.length === 1 ? "" : "s"} found on the server — pick from the list above.`
                           : (serverHint ??
-                            "Start the server, then click Load models — or type a model ID above.")}
+                            "Start the server, then click Reload (↻) — or type a model ID above.")}
                   </div>
                 )}
               </div>

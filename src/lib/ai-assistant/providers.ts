@@ -40,13 +40,13 @@ export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   deepseek: "deepseek-chat",
   github_copilot: "gpt-4.1",
   groq: "openai/gpt-oss-120b",
-  // Local servers expose whatever the user installed: pick via "Load models".
+  // Local servers expose whatever the user installed: listed automatically, reloadable.
   ollama: "",
 };
 
 /**
  * Common model ids offered as suggestions in Settings. Not a whitelist: any id can be
- * typed, and "Load models" adds what the server actually reports.
+ * typed, and model discovery adds what the server actually reports.
  */
 export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
   openai: [

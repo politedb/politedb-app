@@ -48,7 +48,7 @@ export function AiModelCombobox(props: {
   /** Already selected ids; hidden from suggestions. */
   selected: string[];
   onAdd: (model: string) => void;
-  /** Changing this focuses the input and opens the suggestions (e.g. after Load models). */
+  /** Changing this focuses the input and opens the suggestions (e.g. after reloading models). */
   focusRequest?: number;
 }) {
   const [query, setQuery] = useState("");

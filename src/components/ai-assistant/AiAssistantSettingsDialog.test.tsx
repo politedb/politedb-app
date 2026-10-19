@@ -96,7 +96,7 @@ describe("AiAssistantSettingsDialog", () => {
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     fireEvent.change(screen.getByDisplayValue("http://127.0.0.1:11434"), {
       target: { value: "http://192.168.1.9:11434" },
@@ -117,7 +117,7 @@ describe("AiAssistantSettingsDialog", () => {
     await settleAutoDiscovery();
     mocks.listModels.mockResolvedValue(["llama3:8b", "qwen"]);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     // Manual load opens the picker with the server's models.
     const option = await screen.findByRole("option", { name: "llama3:8b" });
     // Already-selected `qwen` is not offered again; nothing was added automatically.
@@ -203,7 +203,7 @@ describe("AiAssistantSettingsDialog", () => {
     const pending = deferred<string[]>();
     mocks.listModels.mockReturnValue(pending.promise);
 
-    fireEvent.click(screen.getByRole("button", { name: /Load models/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Reload models/ }));
     await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
     const requestId = mocks.listModels.mock.calls[0][2];
     expect(requestId).toMatch(/^settings-/);
