@@ -2,7 +2,7 @@
 
 ## Status
 
-APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) in progress; Phase 3 not started.
+APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Revision 5 overrides Revisions 2–4 where they differ.** Codex re-review of Revision 5: **READY**. **APPROVED by the user on 2026-10-19** ("tôi duyệt, làm phase 1 đi"). Phase 1 IMPLEMENTED and committed (Codex: VERIFIED WITH LIMITATIONS after 2 rounds). Phase 2 (backend) committed on `politedb-backend` branch `feat/trial-endpoint` (Codex: VERIFIED WITH LIMITATIONS after 2 rounds; not deployed). Phase 3 in progress.
 
 ## Task
 
@@ -801,6 +801,69 @@ The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e
   - Vitest with `VITE_POLITEDB_API_BASE=http://localhost:4000/api`: 134 files / 796 tests passed.
   - `tsc` and `npm run build` pass.
   - `git diff --check` is clean.
+
+## Phase 2 — Implementation evidence (Claude, 2026-10-19)
+
+**Repo:** `politedb-backend`, new branch `feat/trial-endpoint`, created from the local, unpushed `feat/license-plan-tier` (`31c2c37`, which adds the `plan` field the app relies on). Uncommitted.
+
+- **Endpoint.** `POST /api/v1/trial` (`src/routes/license.ts`) uses `licenseRateLimit`. It takes `{ product, device, legacyStartedAt? }` and returns `{ trialStartedAt, trialExpiresAt }` in epoch ms. There is no `now` field, per D2c.
+- **Service (`src/services/trial-service.ts`):**
+  - **Product.** It is trimmed and lowercased, then must be in `TRIAL_PRODUCTS` (env, default `politedb`). Anything else returns `400 TRIAL_PRODUCT_UNSUPPORTED`.
+  - **Device.** `src/validation/device.ts` is now shared with the license endpoints and bounds the fields: `device_id` ≤ 128, `device_name` ≤ 256, `platform` and `arch` ≤ 32.
+  - **`legacyStartedAt`.** It must be an integer. When it is a safe integer between 2026-01-01 and now, it becomes the start of a **new** row (`newTrialStart`); otherwise it is ignored.
+  - **Insert.** A query-builder insert with `onConflict(['product','deviceId']).ignore()`. The row is then read through a fresh forked entity manager, and only `lastSeenAt` and the device name, platform and arch are updated. The winning dates never change.
+  - **Errors.** Any database failure becomes `AppError(503, "TRIAL_UNAVAILABLE")`. That path returns early in `app.ts` and is neither logged nor reported.
+- **Storage.**
+  - The `Trial` entity (`trials` table) is registered in `entities`, with a unique constraint on `(product, device_id)`.
+  - Migration `Migration20261019000000AddTrials`: its SQL came from `npm run db:diff`, run against a throwaway Postgres migrated to the previous schema. It is registered in `src/migrations/index.ts`.
+- **Docs.** The README documents the endpoint, `TRIAL_PRODUCTS` and the error codes.
+- **Tests:**
+  - `test/trial.test.ts`, on SQLite, 14 tests:
+    - the first request creates the row and later requests return it unchanged, with metadata updated;
+    - an expired window is kept;
+    - one row per normalized product and device;
+    - the legacy start is used only on create;
+    - an exhausted legacy trial is already expired;
+    - legacy bounds;
+    - five racing requests make one row;
+    - over HTTP: ms units, an unknown product, a 400 for each of four invalid payloads;
+    - a database failure gives a fixed 503 that contains no device id, with no `console.error` and no report.
+  - `test/migrations.pg.test.ts`, on Postgres:
+    - the expected migration list now includes the trials migration;
+    - **new:** an upgrade from the previous schema adds `trials` with no remaining diff;
+    - **new:** 12 first requests racing on separate connections make one row, with identical dates for every caller and later reads unchanged.
+- **Verification:**
+  - With `TEST_POSTGRES_URL` set to the throwaway `politedb-smoke-pg` container: 6 files / 77 tests passed, including the Postgres concurrency and migration cases. This is the evidence R8 requires before deploy.
+  - `npm run build` passes.
+  - The temporary diff database was dropped.
+- **Deploy prerequisites (user):**
+  - Set `TRUST_PROXY` to a hop count on Render, so rate limiting is on (see README "Docker and Render").
+  - After deploy, smoke-check `POST /api/v1/trial`: ms units, the same answer on two calls, and a 400 on a bad product.
+  - Phase 3 must not ship before this is live (D9).
+
+### Fixes for Codex review "pro-gating Phase 2" (Claude, 2026-10-19)
+
+Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
+
+1. **P2: device-name length.**
+   - **Problem:** the schema accepted 256 characters while the columns are `varchar(255)`. The trial and activation inserts failed on Postgres.
+   - **Fix:** `device_name` is now limited to **255**, matching the existing `varchar(255)` columns in `trials` and `activations`. This is a deliberate change from R5's "≤ 256", which was an arbitrary number: matching the columns avoids a migration of `activations`.
+   - **Tests:**
+     - HTTP: 255 characters accepted, 256 rejected.
+     - Postgres: a 255-character name stored on both the first and a repeated request.
+2. **P2: timestamp domain.**
+   - **Fix:** `newTrialWindow` checks the server `now`, the legacy candidate and the computed expiry against `[2026-01-01, 2100-01-01)` with safe integers. A legacy date outside the domain is ignored, as approved. When no valid window can be produced, the endpoint returns `503 TRIAL_UNAVAILABLE`, never 404.
+   - **Tests:** exact lower and upper bounds, an expiry crossing the upper bound, and a server clock out of range (no row written).
+
+**Coverage gaps closed:**
+- every caller of a race with **different** legacy starts gets the winner's dates;
+- a second allowed product gets its own trial;
+- a failure after the insert (fresh-manager read) returns a fixed 503, with no `console.error` and no report;
+- the shared device bounds now reject a 129-character `device_id` on `validate` before Polar is called. This tightening is intended and is documented in the README.
+
+**Verification:**
+- 6 files / 86 tests pass with `TEST_POSTGRES_URL` set to the throwaway Postgres.
+- `tsc` is clean, and `git diff --check` is clean.
 
 ## Plan Review
 
