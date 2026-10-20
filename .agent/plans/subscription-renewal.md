@@ -2,7 +2,15 @@
 
 ## Status
 
-IMPLEMENTED
+IMPLEMENTED. Phase 1 (backend `92b13f2`) and Phase 2 (app `1db7159`) committed and pushed on branch `feat/subscription-renewal` in both repos; Codex: VERIFIED WITH LIMITATIONS for both phases after 3 rounds each (loopback/PostgreSQL limits of its sandbox; the suites pass locally). Claude /security-review on 2026-10-20 (app `1db7159`, backend `92b13f2`): no findings at confidence 8 or higher. It checked:
+
+- renewal data is only returned for the caller's own Polar-validated key;
+- renewal fields never feed entitlement;
+- the email HTML is escaped, and the app UI is JSX only;
+- logs carry static categories only, with no ids, emails or keys;
+- a lookup failure is isolated from the license response and the email.
+
+Next: the user's manual UI check, then token scopes (`benefits:read`, `subscriptions:read`) and a backend deploy before the app release.
 
 ## Task
 
