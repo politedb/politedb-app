@@ -36,18 +36,18 @@ VERIFIED WITH LIMITATIONS
 
 Setup: Ollama **0.40.4** (`/api/version`), model `qwen3:4b`, local server started with `ollama serve` and no env vars. Synthetic prompts only (`"word " × N`). Commands are reproducible with `curl -s http://127.0.0.1:11434/...`.
 
-| # | Request (abridged) | Result |
-| --- | --- | --- |
-| 1 | `POST /v1/chat/completions` with `options.num_ctx: 16384`, and again with top-level `num_ctx: 16384` | 200. `GET /api/ps` → `context_length: 4096` both times (ignored) |
-| 2 | `POST /api/chat` `{stream:false, think:false, options:{num_ctx:16384, num_predict:5}}` | 200. `/api/ps` → `16384` |
-| 3 | `POST /v1/chat/completions` after #2 | 200. `/api/ps` → `4096` (reloaded) |
-| 4 | `POST /api/chat` `{stream:false, think:false, truncate:false, options:{num_ctx:4096, num_predict:5}}`, prompt ≈ 6000 tokens | **HTTP 400**-class error body: `{"error":"request (6012 tokens) exceeds the available context size (4096 tokens), try increasing it"}` |
-| 5 | Same as #4 without `truncate` | 200, `done:true`, `done_reason:"length"`, **`prompt_eval_count: 2050`** (silently truncated, and far below the window) |
-| 6 | `POST /api/chat` `{stream:false, think:false, truncate:false, shift:true, options:{num_ctx:4096, num_predict:1500}}`, prompt 3428 tokens | 200, `done_reason:"length"`, `eval_count: 1500` (3428 + 1500 > 4096: the context was shifted) |
-| 7 | Same as #6 with **`shift:false`** | 200, `done_reason:"length"`, **`eval_count: 668`** (3428 + 668 = 4096: generation stops at the window, nothing dropped) |
-| 8 | `POST /api/chat` with one `tools` entry, `think:true`, `num_predict:1500` | 200, `done:true`, `done_reason:"stop"`. `message = {role, content:"", thinking:"…", tool_calls:[{id:"call_…", function:{index:0, name, arguments:{table:"orders"}}}, {id:"call_…", function:{index:1, …}}]}` |
-| 9 | Final step: replay of #8's assistant message verbatim + `{role:"tool", tool_name, tool_call_id, content}` per call, **no `tools` field** | 200, `done_reason:"stop"`, `tool_calls:null`, an answer using the results |
-| 10 | `POST /api/show {model}` | `model_info["qwen3.context_length"] = 262144` |
+| #   | Request (abridged)                                                                                                                       | Result                                                                                                                                                                                                       |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | `POST /v1/chat/completions` with `options.num_ctx: 16384`, and again with top-level `num_ctx: 16384`                                     | 200. `GET /api/ps` → `context_length: 4096` both times (ignored)                                                                                                                                             |
+| 2   | `POST /api/chat` `{stream:false, think:false, options:{num_ctx:16384, num_predict:5}}`                                                   | 200. `/api/ps` → `16384`                                                                                                                                                                                     |
+| 3   | `POST /v1/chat/completions` after #2                                                                                                     | 200. `/api/ps` → `4096` (reloaded)                                                                                                                                                                           |
+| 4   | `POST /api/chat` `{stream:false, think:false, truncate:false, options:{num_ctx:4096, num_predict:5}}`, prompt ≈ 6000 tokens              | **HTTP 400**-class error body: `{"error":"request (6012 tokens) exceeds the available context size (4096 tokens), try increasing it"}`                                                                       |
+| 5   | Same as #4 without `truncate`                                                                                                            | 200, `done:true`, `done_reason:"length"`, **`prompt_eval_count: 2050`** (silently truncated, and far below the window)                                                                                       |
+| 6   | `POST /api/chat` `{stream:false, think:false, truncate:false, shift:true, options:{num_ctx:4096, num_predict:1500}}`, prompt 3428 tokens | 200, `done_reason:"length"`, `eval_count: 1500` (3428 + 1500 > 4096: the context was shifted)                                                                                                                |
+| 7   | Same as #6 with **`shift:false`**                                                                                                        | 200, `done_reason:"length"`, **`eval_count: 668`** (3428 + 668 = 4096: generation stops at the window, nothing dropped)                                                                                      |
+| 8   | `POST /api/chat` with one `tools` entry, `think:true`, `num_predict:1500`                                                                | 200, `done:true`, `done_reason:"stop"`. `message = {role, content:"", thinking:"…", tool_calls:[{id:"call_…", function:{index:0, name, arguments:{table:"orders"}}}, {id:"call_…", function:{index:1, …}}]}` |
+| 9   | Final step: replay of #8's assistant message verbatim + `{role:"tool", tool_name, tool_call_id, content}` per call, **no `tools` field** | 200, `done_reason:"stop"`, `tool_calls:null`, an answer using the results                                                                                                                                    |
+| 10  | `POST /api/show {model}`                                                                                                                 | `model_info["qwen3.context_length"] = 262144`                                                                                                                                                                |
 
 ### External (to be confirmed in Phase 0)
 
@@ -135,29 +135,35 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
 ### A5 Replay, identity and stop contract (B4)
 
 **Response validation, before any side effect:**
+
 - the top level is an object with `done: true`; `message` is an object, `role == "assistant"`, `content` is a string (may be empty), and `thinking` is a string if present;
 - `tool_calls` is absent, `null` or an array. Each element is an object with `function.name` (a non-empty string) and `function.arguments` (an object). Anything else → `AI_AGENT_RESPONSE_INVALID`, and nothing executes.
 
 **Stop mapping:**
+
 - `done_reason: "stop"` with ≥ 1 valid call → `ToolUse`;
 - `"stop"` without calls → `EndTurn`;
 - `"length"` → `MaxTokens`; its calls are **never** executed;
 - any other or missing reason, or `done` not `true` → `AI_AGENT_RESPONSE_INVALID`.
 
 **Internal ids:**
+
 - `protocol::ToolCall.id = "ollama-" + <position in the batch>`, generated by the native parser;
 - the coordinator's duplicate check only needs uniqueness within a batch, so no step number is needed.
 
 **Native ids:**
-- a native `id` is *valid* when it is a string of 1..=128 chars from `[A-Za-z0-9_-]` and unique in its batch;
+
+- a native `id` is _valid_ when it is a string of 1..=128 chars from `[A-Za-z0-9_-]` and unique in its batch;
 - if **every** call in the batch has a valid native id, the result messages carry `tool_call_id = native id`;
 - otherwise (any missing, invalid or duplicate) **no** result in that batch carries `tool_call_id`, and correlation is by order and `tool_name` (Ollama's documented contract). Invalid ids are never echoed.
 
 **Replay:**
+
 - the assistant message is replayed **verbatim** from the raw response (content, thinking, tool_calls with native ids, index and order), never rebuilt;
 - results go out in call order: `{role: "tool", tool_name, content, tool_call_id?}`.
 
 **Final step:**
+
 - the request **omits `tools`** (P0 #9);
 - update the `StepRequest` / `run.rs` comment that says declarations stay on final steps: it now names the Ollama native exception;
 - calls in a final response are ignored, as `drive` already does when finalizing.
@@ -169,6 +175,7 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
 **Context errors:** an HTTP error whose body is the context-size message (P0 #4; matched on a fixed prefix, code only) → `AI_AGENT_CONTEXT_FULL`. The provider text is never displayed.
 
 **Fixtures** (wire unit + `HttpModel` transport-level, asserting the actual outbound JSON):
+
 - two calls to the same function with different arguments;
 - two batches in one run;
 - missing ids; one invalid id (non-string, spaces, 200 chars); duplicate ids;
@@ -185,18 +192,21 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
 ### A6 Probe cache, generations and cancellation (B6, Ollama part)
 
 **Shared generation:**
+
 - move the per-provider generation counter out of `CapabilityCache` into a `ProviderGenerations` owned by `AppState`;
 - `snapshot_for_run` reads `(config, key, model, generation)` **under `ai_providers_lock`**;
 - `forget_provider` (save/delete) bumps it once for every cache;
 - `CapabilityCache` and the new cache both use it.
 
 **`OllamaProbeCache`** (owned by `AppState`):
+
 - `version`: key `(provider id, generation, server prefix)` → `Native(version) | TooOld(version) | Compatible`. TTL 24 h. Indeterminate failures are **not cached**;
 - `trained_max`: key `(provider id, generation, server prefix, model)` → `u32`. TTL 1 h (a model can be replaced under the same name);
 - a write whose generation is no longer current is dropped (no late writes after save/delete/recreate);
 - at most 256 entries; when inserting into a full cache, expired entries are pruned, then the **oldest-inserted** live entry is evicted.
 
 **In-flight requests:**
+
 - concurrent misses for one key share one lookup (a per-key shared future);
 - at most 8 lookups in flight in total; beyond that → `AI_PROVIDER_UNREACHABLE` for that run (fail closed);
 - a guard removes the in-flight key on success, error, timeout, cancellation or panic, so waiters get the result or an error and nothing stays stuck;
@@ -204,11 +214,13 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
 - tasks are owned by the run's tracker or a cache-owned tracker with the same timeouts.
 
 **Cancellation:**
+
 - `ai_agent_start` registers the run (`start_on`) **before** A2/A4 lookups;
 - the lookups race the run's cancel token, so cancelling during them ends the run with no conversation request;
 - the 120 s turn deadline includes the lookups.
 
 **Tests (by name):**
+
 - cold cache;
 - timeout; malformed and oversized bodies;
 - expiry;
@@ -248,6 +260,7 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
   - `AI_AGENT_CONTEXT_FULL`: "The request did not fit the model's context. Increase Context size in AI settings." The existing copy saying content was shortened does not apply.
 
   Provider text is never shown.
+
 - **Settings:**
   - the Ollama "Context size (tokens)" field with bounds and default;
   - the compatibility-path notice (A2.3).
@@ -258,6 +271,7 @@ The selection is fixed for the run: no mid-run retry, no destination switch, no 
 Approved by the user for Phase 0 only. Synthetic prompts, local server, no user data.
 
 The scripts are kept in the repo and run with `python3 -I`:
+
 - `.agent/plans/probes/ollama-native-p0.py` (cases 4–10);
 - `.agent/plans/probes/ollama-native-p0-correlation.py`.
 
@@ -279,29 +293,31 @@ The scripts are kept in the repo and run with `python3 -I`:
   ```
 
   Both are pointer types, so omission means the server default (true).
+
 - **Context error forms** in upstream `llm/llama_server_test.go` (L2746–2777): a runner body `{"error":{"message":"request (302 tokens) exceeds the available context size (256 tokens), try increasing it"}}` (400 from the runner) is mapped by the server to **HTTP 413** `"the input length exceeds the context length"`. An unrelated error stays 500 with its own text.
   - The local 0.40.4 build returns **HTTP 400** with the runner text (case 4). The classifier must accept both forms (Revision 4).
 - **Load failure:** upstream integration tests (`integration/thinking_test.go`, `integration/generate_jinja_test.go`) match `"requires more system memory"` on load errors. No load failure was provoked here, to avoid exhausting the machine. The classifier uses this fixed substring only; anything else is a generic failure.
 
 ### Local probes (Ollama 0.40.4, `qwen3:4b`; server default context, no env vars)
 
-| Case | Request (abridged) | Result |
-| --- | --- | --- |
-| version | `GET /api/version` | 200 `{"version":"0.40.4"}` |
-| show | `POST /api/show` | exactly one `*.context_length` key: `qwen3.context_length = 262144` |
-| 4 | prompt ≈ 6000 tokens, `num_ctx 4096`, `truncate:false, shift:false` | **400** `{"error":"request (6011 tokens) exceeds the available context size (4096 tokens), try increasing it"}` |
-| 5 | same, no flags | 200, `done_reason:"length"`, `prompt_eval_count: 2050` (silent truncation) |
-| 6 | prompt 3428 tokens, `num_predict 1500`, `shift:true` | 200, `length`, `eval_count 1500` (shifted past the window) |
-| 7 | same, **`shift:false`** | 200, `length`, **`eval_count 668`** (3428 + 668 = 4096: stops at the window, no error, partial content) |
-| — | `/api/ps` after 7 | `context_length 4096` = the `num_ctx` sent |
-| 8 | tools, `think` omitted | 200, `stop`. `thinking` present (2955 chars): qwen3 thinks **by default**, so `think` must stay a replayed field. Two calls `{id:"call_…", function:{index, name, arguments:{…}}}` |
-| 9a | final: verbatim assistant + results with `tool_call_id`, **no `tools`** | `stop`, no calls, correct answer |
-| 9b | final: ids stripped from calls and results | `stop`, no calls, correct answer |
-| 9c | final: duplicate ids in calls, results without ids | `stop`, no calls, correct answer |
-| 9d | final: valid ids in calls, results without ids | `stop`, no calls, correct answer |
-| 10 | unknown model | **404** `{"error":"model '…' not found"}` |
+| Case    | Request (abridged)                                                      | Result                                                                                                                                                                             |
+| ------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| version | `GET /api/version`                                                      | 200 `{"version":"0.40.4"}`                                                                                                                                                         |
+| show    | `POST /api/show`                                                        | exactly one `*.context_length` key: `qwen3.context_length = 262144`                                                                                                                |
+| 4       | prompt ≈ 6000 tokens, `num_ctx 4096`, `truncate:false, shift:false`     | **400** `{"error":"request (6011 tokens) exceeds the available context size (4096 tokens), try increasing it"}`                                                                    |
+| 5       | same, no flags                                                          | 200, `done_reason:"length"`, `prompt_eval_count: 2050` (silent truncation)                                                                                                         |
+| 6       | prompt 3428 tokens, `num_predict 1500`, `shift:true`                    | 200, `length`, `eval_count 1500` (shifted past the window)                                                                                                                         |
+| 7       | same, **`shift:false`**                                                 | 200, `length`, **`eval_count 668`** (3428 + 668 = 4096: stops at the window, no error, partial content)                                                                            |
+| —       | `/api/ps` after 7                                                       | `context_length 4096` = the `num_ctx` sent                                                                                                                                         |
+| 8       | tools, `think` omitted                                                  | 200, `stop`. `thinking` present (2955 chars): qwen3 thinks **by default**, so `think` must stay a replayed field. Two calls `{id:"call_…", function:{index, name, arguments:{…}}}` |
+| 9a      | final: verbatim assistant + results with `tool_call_id`, **no `tools`** | `stop`, no calls, correct answer                                                                                                                                                   |
+| 9b      | final: ids stripped from calls and results                              | `stop`, no calls, correct answer                                                                                                                                                   |
+| 9c      | final: duplicate ids in calls, results without ids                      | `stop`, no calls, correct answer                                                                                                                                                   |
+| 9d      | final: valid ids in calls, results without ids                          | `stop`, no calls, correct answer                                                                                                                                                   |
+| 10      | unknown model                                                           | **404** `{"error":"model '…' not found"}`                                                                                                                                          |
 
 **Correlation probe (results carry only `{"rows": N}`, no table names):**
+
 - calls in the order `orders`, `customers`;
 - no ids, values in call order → "300 in orders, 50 in customers";
 - no ids, **swapped** values → "50 in orders, 300 in customers": the model follows **order**;
@@ -326,14 +342,14 @@ All probes send no conversation data. Each uses the existing transport policy (U
 
 Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is exactly `P/v1` or `P/v1/`.
 
-| # | Condition | Probe | Outcome |
-| --- | --- | --- | --- |
-| 1 | A1 derives `P` | `GET P/api/version` | see 2–6 |
-| 2 | 200, JSON object, `version` is a string parsing as `MAJOR.MINOR.PATCH` (optional `-pre` / `+build`, compared by numeric core) with core ≥ 0.12.6 | — | **Native** (A3) |
-| 3 | 200, valid `version`, core < 0.12.6 | — | **`AI_OLLAMA_UPDATE_REQUIRED`** (E1b). No agent request |
-| 4 | 200 with a JSON object **without** a `version` key, or **404** | `GET provider::endpoint(config, "models")` (the existing discovery URL, already `P/v1/models`) | 200 with `{"object":"list","data":[{"id":string,…}…]}` → **Compatible** (`/v1` wire, context unknown). Anything else → `AI_PROVIDER_UNREACHABLE` |
-| 5 | 200 with a JSON `version` that is not a string or not semver, a non-JSON or oversized body, a redirect, 401/403, 5xx, timeout, connection error | — | **`AI_PROVIDER_UNREACHABLE`**. No agent request, not cached |
-| 6 | A1 cannot derive `P` (base path not `…/v1`) | `GET provider::endpoint(config, "models")` | as row 4 (**Compatible** only on a valid model list; else `AI_PROVIDER_UNREACHABLE`) |
+| #   | Condition                                                                                                                                        | Probe                                                                                          | Outcome                                                                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | A1 derives `P`                                                                                                                                   | `GET P/api/version`                                                                            | see 2–6                                                                                                                                          |
+| 2   | 200, JSON object, `version` is a string parsing as `MAJOR.MINOR.PATCH` (optional `-pre` / `+build`, compared by numeric core) with core ≥ 0.12.6 | —                                                                                              | **Native** (A3)                                                                                                                                  |
+| 3   | 200, valid `version`, core < 0.12.6                                                                                                              | —                                                                                              | **`AI_OLLAMA_UPDATE_REQUIRED`** (E1b). No agent request                                                                                          |
+| 4   | 200 with a JSON object **without** a `version` key, or **404**                                                                                   | `GET provider::endpoint(config, "models")` (the existing discovery URL, already `P/v1/models`) | 200 with `{"object":"list","data":[{"id":string,…}…]}` → **Compatible** (`/v1` wire, context unknown). Anything else → `AI_PROVIDER_UNREACHABLE` |
+| 5   | 200 with a JSON `version` that is not a string or not semver, a non-JSON or oversized body, a redirect, 401/403, 5xx, timeout, connection error  | —                                                                                              | **`AI_PROVIDER_UNREACHABLE`**. No agent request, not cached                                                                                      |
+| 6   | A1 cannot derive `P` (base path not `…/v1`)                                                                                                      | `GET provider::endpoint(config, "models")`                                                     | as row 4 (**Compatible** only on a valid model list; else `AI_PROVIDER_UNREACHABLE`)                                                             |
 
 - **What Compatible means.** The server is positively an OpenAI-compatible server that is **not** an Ollama ≥ 0.12.6 or a recognized older Ollama: rows 2–3 must not have matched, and a model list must have answered. A recognized old Ollama always hits row 3 (E1b), never Compatible.
 - The serde alias `local_openai_compatible` is **not** used as a signal: such providers load as `Ollama` and go through this table like any other.
@@ -365,12 +381,14 @@ Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is
   - starts with `the input length exceeds the context length` (Phase 0: local 0.40.4 sends the first form, upstream maps it to the second)
 
   → `AI_AGENT_CONTEXT_FULL`. Status alone (413 without a matching body) → also `AI_AGENT_CONTEXT_FULL`. Other 400s → generic.
+
 - **Output overflow** (`shift:false`): Phase 0 #7 shows generation stops with `done_reason:"length"`, **no error**. This maps to `StopReason::MaxTokens`, and the existing `drive` behavior is **kept on purpose** for every wire:
   - calls in a `length` response are never executed;
   - an **empty** `length` response → `AI_CHAT_OUTPUT_TOKEN_LIMIT`;
   - a **nonempty** `length` response is the final answer (today's behavior, `run.rs` L404–412).
 
   The plan therefore does **not** promise a context-full error for generation overflow.
+
 - **Tests:**
   - both context-error forms; 413 with an unrelated body; an unrelated 400;
   - empty and nonempty `length`, each with calls (no tool runs);
@@ -380,11 +398,13 @@ Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is
 ### A6' Preparation, deadline and terminal outcome (R3, should-fix 1)
 
 **Order in `ai_agent_start`** (IPC future, unchanged up-front checks):
+
 1. Snapshot under `ai_providers_lock`: config, key, model, generation (A6), context-size setting.
 2. Existing validation, unchanged: provider enabled/kind, connection lookup + binding, data tools / consent gate / history gate, question composition, `start_on` (run slot + cancel token).
 3. Return `Ok(())` immediately, as today. **Everything below runs in the spawned task.**
 
 **Spawned task:**
+
 1. `started = Instant::now()`, `deadline = started + TURN_DEADLINE` (one absolute deadline for the whole turn).
 2. **Preparation**, raced against the run's cancel token and the deadline:
    - routing (A2');
@@ -399,6 +419,7 @@ Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is
 - A connection closed or consent revoked during preparation is caught by that gate on the first send (`alive` / consent checks), so no chat request is sent.
 
 **Shared lookups (A6 in-flight):**
+
 - one shared future per key, owned by the cache (not by a waiter);
 - a waiter that is cancelled **detaches** (stops waiting), while the lookup continues for the others and is still bounded by its own 2 s timeout;
 - the in-flight cap (8) counts all probe kinds together;
@@ -406,10 +427,12 @@ Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is
 - publication checks the generation and inserts **under the cache lock** (one critical section).
 
 **Generation ids:**
+
 - `ai_provider_save` bumps the generation for the **normalized** id returned by `provider_store::save` (and the raw input id, if different);
 - delete bumps the stored id.
 
 **Tests:**
+
 - preparation + model steps share one short test deadline (paused tokio clock);
 - cancel during routing, during metadata and during `run_turn`: no chat send, one terminal pair, slot freed;
 - revoke / connection close during preparation: no chat send;
@@ -421,11 +444,13 @@ Let `B` = the validated saved base. A1 yields prefix `P` only when `B`'s path is
 ### A9' Frontend errors and settings (should-fix 2)
 
 **Types:**
+
 - `contextSize?: number | null` on `AiProviderConfig` in `src/types.ts`;
 - defaults/normalization in `src/lib/ai-assistant/providers.ts`, with its tests updated;
 - the backend validates on save **and** in `snapshot_for_chat` / `snapshot_for_run`. A stored out-of-range value from a hand-edited file → `AI_PROVIDER_CONFIG_INVALID`, and nothing is sent.
 
 **Error copy:** in `formatAssistantRequestError` (`hooks/useAiAssistantSubmit.ts`), fixed codes are matched **before** the generic `AI_AGENT_` branch and before the provider-request filter, with English and Vietnamese copy:
+
 - `AI_OLLAMA_UPDATE_REQUIRED`;
 - `AI_OLLAMA_MODEL_INFO_UNAVAILABLE`;
 - `AI_OLLAMA_MODEL_NOT_FOUND`;
@@ -441,6 +466,7 @@ Tests in `formatAssistantRequestError.test.ts`, with provider-looking text appen
 ### A10 Status for the settings notice (R4)
 
 **New thin command** `ai_ollama_status(draft: AiProviderConfig, auth: DraftAuthInput, request_id: string) -> OllamaStatus`, following `ai_provider_test_draft`:
+
 - same draft validation and `draft_key` handling;
 - persists nothing;
 - returns `{ request_id, kind: "native" | "too_old" | "compatible" | "unreachable" | "not_ollama_kind", version?: string, trained_max?: number }`, with fixed fields only. `version` is the semver string (no other server text); `trained_max` comes from `/api/show` for the draft's default model when native.
@@ -448,6 +474,7 @@ Tests in `formatAssistantRequestError.test.ts`, with provider-looking text appen
 - results are not written to the run cache.
 
 **Settings dialog:**
+
 - calls it only on explicit actions, never on every keystroke: opening an Ollama provider, the existing **Test** button, and leaving the base URL field after a change;
 - shows loading → result; each request carries a new `request_id`, and a response whose id is not the latest for the open provider/draft is ignored;
 - switching or closing the provider cancels the pending request (ignore + abort);
@@ -459,6 +486,7 @@ Tests in `formatAssistantRequestError.test.ts`, with provider-looking text appen
 - the status is **never** persisted in `AiProviderConfig`.
 
 **Tests:**
+
 - each status;
 - a stale response after an edit, after switching providers, and after delete;
 - cancel on close;
@@ -489,18 +517,19 @@ Answers the three remaining blockers and the should-fix clarifications of "Re-re
 
 **Invalid-id replay** (local 0.40.4, synthetic). Script `.agent/plans/probes/ollama-native-p0-ids.py`. The replayed assistant has one call; the result is `{"rows":300}`.
 
-| `tool_calls[0].id` in the replayed assistant message | Result |
-| --- | --- |
-| `"call_abc"` | 200 `stop`, correct answer |
-| `"bad id !"` (spaces/punctuation) | 200 `stop`, correct |
-| `""` | 200 `stop`, correct |
-| `null` | 200 `stop`, correct |
-| absent | 200 `stop`, correct |
-| `123` (number) | **400** `json: cannot unmarshal number into Go struct field Alias.tool_calls.0.id of type string` |
-| `{"x":1}` (object) | **400** `… cannot unmarshal object … of type string` |
-| result `tool_call_id: 7` | **400** `… Alias.tool_call_id of type string` |
+| `tool_calls[0].id` in the replayed assistant message | Result                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `"call_abc"`                                         | 200 `stop`, correct answer                                                                        |
+| `"bad id !"` (spaces/punctuation)                    | 200 `stop`, correct                                                                               |
+| `""`                                                 | 200 `stop`, correct                                                                               |
+| `null`                                               | 200 `stop`, correct                                                                               |
+| absent                                               | 200 `stop`, correct                                                                               |
+| `123` (number)                                       | **400** `json: cannot unmarshal number into Go struct field Alias.tool_calls.0.id of type string` |
+| `{"x":1}` (object)                                   | **400** `… cannot unmarshal object … of type string`                                              |
+| result `tool_call_id: 7`                             | **400** `… Alias.tool_call_id of type string`                                                     |
 
 **Chat context error, pinned upstream:**
+
 - `server/routes.go` at **tag v0.12.6** forwards `Truncate` / `Shift` into the chat completion request (`Shift: req.Shift == nil || *req.Shift`, `Truncate: truncate` near L2078–2079).
 - The overflow error comes from the runner as **400 `request (N tokens) exceeds the available context size (M tokens), try increasing it`**, which matches local case 4.
 - The `the input length exceeds the context length` form and its 413 mapping belong to the **embedding** path (`normalizeEmbeddingError`, `TestNormalizeEmbeddingError` in `llm/llama_server_test.go`; `embedWithRetry` in `server/routes.go`, main @ `d9b86018cba1`). The earlier attribution to chat was wrong.
@@ -515,20 +544,24 @@ Answers the three remaining blockers and the should-fix clarifications of "Re-re
 ### C2 Status cancellation (blocker 2)
 
 `ai_ollama_status(draft, auth, request_id)` **reuses the existing scoped cancel registry** (`AppState.ai_discovery_cancel`, `ai::cancel::CancelRegistry`):
+
 - `register(&request_id)` happens **before** any await;
 - `/api/version`, the `/v1/models` probe and `/api/show` are each raced (`tokio::select!`, biased to cancel) against the receiver;
 - `finish(&request_id)` runs on **every** exit through a drop guard;
 - cancelling uses the existing command `ai_provider_cancel_list_models(request_id)`. Its doc is updated to "cancels a discovery or status request". No new command is needed.
 
 `request_id`:
+
 - a fresh UUID per call from the frontend;
 - an id that is already registered is rejected (`AI_PROVIDER_REQUEST_ID_IN_USE`), as `register` already does for discovery or by adding that check.
 
 Frontend:
+
 - the settings dialog calls cancel for the previous id on close, provider switch, and before starting a new status call;
 - the shown status is **cleared immediately** on any edit to base URL, kind, default model or context size, even if no new call starts.
 
 Tests:
+
 - cancel before / during each probe: the backend stops, the registry is empty afterwards;
 - close and switch abort backend work, not only ignore the response;
 - the draft edit clears the status;
@@ -537,6 +570,7 @@ Tests:
 ### C3 Tool-call id contract (blocker 3)
 
 Validated **before any tool executes**:
+
 - **Response shape:** for each call, `id` must be **absent, `null`, or a JSON string of at most 256 UTF-8 bytes**. Any other type (number, object, array, bool) or a longer string → `AI_AGENT_RESPONSE_INVALID`, and nothing executes. With only these values allowed, the verbatim replay is always decodable by the server (addendum table). The replay stays verbatim.
 - **Result `tool_call_id`:** sent only when **every** call in the batch has a non-empty string id and those ids are unique within the batch. Otherwise no result in that batch carries `tool_call_id`.
   - Strings of any content are allowed, since the server accepts them. Ids are never synthesized into the outbound JSON.
@@ -554,6 +588,7 @@ Validated **before any tool executes**:
 ### C4 Context-error classifier (should-fix: attribution)
 
 Replaces A5' "Prompt overflow":
+
 - **Context full:** HTTP **400** whose `error` string matches `^request \(\d+ tokens\) exceeds the available context size \(\d+ tokens\)` → `AI_AGENT_CONTEXT_FULL` (pinned to v0.12.6 chat behavior and local case 4).
 - **Everything else:**
   - 413 (e.g. the 32 MiB body limit);
@@ -561,12 +596,14 @@ Replaces A5' "Prompt overflow":
   - other 400s
 
   → the generic request failure.
+
 - If a future server changes the message, this degrades to a generic error (still fail-closed: nothing is truncated). Phase 1 tests pin both outcomes.
 - Load and model errors stay as in A4'. No provider text is displayed or logged.
 
 ### C5 Settings status states (should-fix: metadata)
 
 `OllamaStatus.kind` becomes one of `native`, `native_no_model`, `metadata_unavailable`, `model_not_found`, `too_old`, `compatible`, `unreachable`, `not_ollama_kind`. Fixed fields: `version?`, `trained_max?`, `effective?`.
+
 - **`native`:** "Ollama <version>. Agent context: <effective> tokens (model max <trained_max>)", where `effective = min(setting or 16384, trained_max)`, the same value a run would send.
 - **`native_no_model`:** the draft has no default model. "Choose a model to see its context size."
 - **`metadata_unavailable`:** `/api/show` failed or was invalid. "Couldn't read this model's context size; the agent won't run until it can."
@@ -576,6 +613,7 @@ Replaces A5' "Prompt overflow":
 ### C6 Preparation terminal events (should-fix)
 
 Fixed codes and one terminal outcome:
+
 - **Preparation failure** → `Error{code}` + `Done{Failed, steps 0}`.
 - **Preparation cancel** → `Done{Canceled}` only (as `run_turn` does), no `Error`.
 - **Preparation deadline** → `Error{AI_AGENT_DEADLINE}` + `Done{Failed}`.
@@ -589,11 +627,13 @@ Fixed codes and one terminal outcome:
 ### C7 Locks and transport (should-fix)
 
 **Lock order:**
+
 - `ProviderGenerations` has its own mutex. Every publisher (probe cache, capability cache) takes **generations → its cache map**, checks the generation, inserts, then releases.
 - `forget_provider` takes **generations only** and bumps it.
 - No path takes a cache map lock and then the generations lock. Documented in code, and tested by a barrier race (bump between check and insert is impossible).
 
 **Transport:**
+
 - a new `transport::probe_client(class)` with **1 s connect / 2 s total** and the same redirect / proxy / pinning policy;
 - `client_for` is unchanged for existing callers (10 s connect);
 - body caps: 64 KiB for probes, `CHAT_MAX_BYTES` for native chat.
@@ -614,6 +654,7 @@ Answers B1, B2, S1 and S2 of "Re-review — Revision 5". Where this section conf
 ### D1 Cancel registry ownership (B1): replaces C2's registration rules
 
 `ai::cancel::CancelRegistry` gains per-registration tokens. **One semantics for both discovery and status**, compatible with today's discovery behavior:
+
 - `register(id) -> Registration { token: u64, rx }`, where `token` is a counter that increases on every call:
   - if an **early cancel** for `id` is remembered, the new receiver fires at once (unchanged);
   - if `id` is already active, the incumbent is **superseded**: its sender fires and the entry is replaced by the new `(token, tx)`. This is today's discovery behavior; no rejection, no new error code.
@@ -626,6 +667,7 @@ Because a stale `finish` can no longer remove a newer registration, the B1 inter
 The C2 text "an id that is already registered is rejected (`AI_PROVIDER_REQUEST_ID_IN_USE`)" is withdrawn. The frontend still sends a fresh UUID per call, and the backend handles reuse by supersession.
 
 **Tests** (`ai/cancel.rs`, plus each command):
+
 - concurrent register of one id: exactly one active entry, and the other is fired;
 - cancel → re-register before the old cleanup → old `finish` → the new registration is still active and not fired;
 - old cleanup after a replacement;
@@ -639,20 +681,24 @@ The C2 text "an id that is already registered is rejected (`AI_PROVIDER_REQUEST_
 ### D2 Chat context-error classifier (B2): replaces C4 "Context full"
 
 `AI_AGENT_CONTEXT_FULL` when the native `/api/chat` response is HTTP **400** and the `error` string, trimmed, matches **either**:
+
 - **(a)** it starts with `the input length exceeds the context length`. This is the v0.12.6 runner error `errorInputTooLong` ([ollamarunner L108](https://github.com/ollama/ollama/blob/v0.12.6/runner/ollamarunner/runner.go#L108-L130) and [llamarunner L99](https://github.com/ollama/ollama/blob/v0.12.6/runner/llamarunner/runner.go#L99-L124) at tag v0.12.6), returned as 400 by the completion handler and forwarded by `llm/server.go` and the chat handler.
 - **(b)** it matches `^request \(\d+ tokens\) exceeds the available context size \(\d+ tokens\)`. This is the form **observed on the local 0.40.4 build** (Phase 0 case 4). Its upstream provenance is not pinned: it is reported local evidence only.
 
 Everything else is the generic request failure, still fail-closed:
+
 - 413 (e.g. the 32 MiB body limit);
 - other 400s;
 - 5xx.
 
 **Provenance correction:**
+
 - The Revision 5 addendum claimed the numeric form for v0.12.6, and claimed the `the input length…` form was embedding-only. Both claims are **wrong**.
 - `the input length exceeds the context length` is the chat (and embedding) runner error at v0.12.6.
 - The numeric form is a later/local runner message. Its origin version is not established.
 
 **Fixtures** (transport-level, `HttpModel`):
+
 - (a) with and without a trailing newline;
 - (b);
 - 400 `Bad request`; 400 with `bad request: …`;
@@ -781,12 +827,15 @@ Branch `feat/ollama-native-context` (from `feat/ai-agent` @ `b35ed79`), uncommit
    Anything else returns `None`, which routes to `AI_PROVIDER_UNREACHABLE` (no chat, not cached), so only valid SemVer can reach `ServerStatus.version`.
 
    New fixtures: `0.12.6+`, `0.12.6+a+b`, `00.12.6`, `0.012.6`, `0.12.7-rc..1`, `0.12.7-rc.01`, `0.12.7-rc_1`, a newline plus provider text, leading or trailing spaces, an over-length build, valid `+build.007` / `-rc.1` / `-0`. Routing rows also cover a sensitive-suffix version and `00.40.4`.
+
 2. **P2: the tools classifier overrode native errors.** `HttpModel::step_native` now runs `ollama::classify_chat_error` **before** `tools_unsupported`. A context, load or model error with an appended "does not support tools" stays `AI_AGENT_CONTEXT_FULL` (etc.), records no capability, and triggers no fallback.
 
    A native HTTP fixture covers the overlap. Mutation check: with the old order that case fails (`TOOLS_UNSUPPORTED` ≠ `CONTEXT_FULL`).
+
 3. **P2: a stale status after default-model changes.** All transitions go through `defaultModelChanged` (invalidate, cancel the pending request, re-query for the new model): picking a default, removing the default (falls back to the next model, or to none), and adding the first model.
 
    Tests: removal with a fallback model (the late answer for the old model is ignored and its request cancelled), removal of the last model (`native_no_model`), adding the first model.
+
 4. **P2: missing native HTTP and lifecycle gates:**
    - **Native HTTP through `HttpModel`** (`model.rs`), on a local server:
      - two-step round trips for `/v1`, the `/x/v1` prefix and IPv6 `[::1]` (skipped if IPv6 loopback is unavailable);
@@ -801,6 +850,7 @@ Branch `feat/ollama-native-context` (from `feat/ai-agent` @ `b35ed79`), uncommit
    - **Discovery and status cancellation:** both commands now use the shared `cancel::run_cancellable` (register before work, biased cancel, `FinishGuard`). Tests cancel the status while `/api/version` hangs and while `/api/show` hangs: returns within 1 s and the registry is empty. Success and error exits also leave the registry empty.
 
 **Verification:**
+
 - `cargo test --locked` → 397 passed / 15 ignored, and the same with `--features app-store`.
 - `cargo clippy --locked --all-targets` → 8 warnings (default) / 9 (app-store), the baseline; two test-only `MutexGuard`-across-await warnings were fixed with scoped blocks.
 - Vitest: 129 files / 757 tests passed. An earlier full run showed 8 failures while several overlapping Vitest runs had pushed the load average to 53–67; a single clean run passed everything.
@@ -818,6 +868,7 @@ Branch `feat/ollama-native-context` (from `feat/ai-agent` @ `b35ed79`), uncommit
    - `a_closed_channel_stops_the_task_and_releases_the_slot`: a closed sink on a failing preparation (too old) makes exactly one send attempt, then releases the slot; a closed sink on a ready preparation sends no model request and releases the slot.
 
 **Verification:**
+
 - `cargo test --locked` → 400 passed / 15 ignored, and the same with `--features app-store`.
 - `cargo clippy --locked --all-targets` → 8 (default) / 9 (app-store), the baseline.
 - No frontend change in this round (Vitest 757/757 from round 1 still applies).
@@ -878,6 +929,7 @@ Plan 1 shows a context size only in AI settings (the field and the C5 status lin
   - provider form tests.
 
 **Revision 4 file additions:**
+
 - **Backend:**
   - the `ai_ollama_status` command (`commands/ai.rs` + `main.rs` registration);
   - the spawned-task preparation in `commands/ai_agent.rs`;
@@ -904,19 +956,19 @@ Plan 1 shows a context size only in AI settings (the field and the C5 status lin
 
 #### Disposition of prior items
 
-| Prior item | Disposition in Plan 1 |
-| --- | --- |
-| **B1** | **Partially resolved.** A3 now requires both `truncate:false` and `shift:false`, rejects incomplete/unknown stops, fixes wire selection for the run, and avoids fallback on indeterminate transport failures. Minimum-version support and the exact native contract still need Phase 0 evidence. A2's incompatible branches and E1 integration remain blockers below. |
-| **B2** | **Resolved at the planning-contract level.** A4 requires bounded metadata before native chat, validates a unique positive trained maximum, clamps even on cold cache, freezes the value, forbids smaller-context retries, and names load/adjustment cases. This honors D1a. Preserve these requirements in tests; reported P0 alone does not verify them. |
-| **B3** | **Resolved at the planning-contract level.** A7 selects the wire before capability lookup and carries wire/destination through `ChannelSink` and negative recording. This corrects the current early lookup in `commands/ai_agent.rs` and the current wire-less `CapabilityKey` in `agent/model.rs`. Shared-generation integration remains subject to the B6 notes below. |
-| **B4** | **Mostly resolved, with evidence gate remaining.** A5 validates the entire batch before execution, defines null/absent calls, separates internal batch-local IDs from native IDs, gives an all-or-none rule for result IDs, preserves raw replay, and excludes truncated/final calls from execution. Batch-local IDs match `drive`'s per-batch `HashSet`; no step ordinal is needed. Name/order correlation for invalid or missing IDs must be established in Phase 0 and exercised through actual outbound JSON, not inferred from P0's valid-ID example. |
-| **B6 — Ollama only** | **Substantially resolved, integration incomplete.** A6 identifies one generation owner, locked snapshots, late-write rejection, TTLs, deterministic eviction, in-flight bounds and cleanup. It also requires early run registration. Deadline/event ownership and shared-lookup cancellation still need the explicit contracts below. Gemini/accounting remain Plan 2 scope. |
-| **S2** | **Endpoint representation resolved; routing not fully resolved.** A1 defines a server prefix and three derived endpoints, prohibits `provider::endpoint` for native calls, and requires outbound URL tests. A2 still misstates the compatible discovery URL and contradicts its own identification rule. |
-| **S3 — Ollama only** | **Partially resolved.** The split removes meter/admission claims and names state/protocol/error/settings scope. Several listed frontend files/types are not where the plan says, and settings cannot currently consume probe results. Correct the file and IPC scope below. |
+| Prior item           | Disposition in Plan 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **B1**               | **Partially resolved.** A3 now requires both `truncate:false` and `shift:false`, rejects incomplete/unknown stops, fixes wire selection for the run, and avoids fallback on indeterminate transport failures. Minimum-version support and the exact native contract still need Phase 0 evidence. A2's incompatible branches and E1 integration remain blockers below.                                                                                                                                                                                      |
+| **B2**               | **Resolved at the planning-contract level.** A4 requires bounded metadata before native chat, validates a unique positive trained maximum, clamps even on cold cache, freezes the value, forbids smaller-context retries, and names load/adjustment cases. This honors D1a. Preserve these requirements in tests; reported P0 alone does not verify them.                                                                                                                                                                                                  |
+| **B3**               | **Resolved at the planning-contract level.** A7 selects the wire before capability lookup and carries wire/destination through `ChannelSink` and negative recording. This corrects the current early lookup in `commands/ai_agent.rs` and the current wire-less `CapabilityKey` in `agent/model.rs`. Shared-generation integration remains subject to the B6 notes below.                                                                                                                                                                                  |
+| **B4**               | **Mostly resolved, with evidence gate remaining.** A5 validates the entire batch before execution, defines null/absent calls, separates internal batch-local IDs from native IDs, gives an all-or-none rule for result IDs, preserves raw replay, and excludes truncated/final calls from execution. Batch-local IDs match `drive`'s per-batch `HashSet`; no step ordinal is needed. Name/order correlation for invalid or missing IDs must be established in Phase 0 and exercised through actual outbound JSON, not inferred from P0's valid-ID example. |
+| **B6 — Ollama only** | **Substantially resolved, integration incomplete.** A6 identifies one generation owner, locked snapshots, late-write rejection, TTLs, deterministic eviction, in-flight bounds and cleanup. It also requires early run registration. Deadline/event ownership and shared-lookup cancellation still need the explicit contracts below. Gemini/accounting remain Plan 2 scope.                                                                                                                                                                               |
+| **S2**               | **Endpoint representation resolved; routing not fully resolved.** A1 defines a server prefix and three derived endpoints, prohibits `provider::endpoint` for native calls, and requires outbound URL tests. A2 still misstates the compatible discovery URL and contradicts its own identification rule.                                                                                                                                                                                                                                                   |
+| **S3 — Ollama only** | **Partially resolved.** The split removes meter/admission claims and names state/protocol/error/settings scope. Several listed frontend files/types are not where the plan says, and settings cannot currently consume probe results. Correct the file and IPC scope below.                                                                                                                                                                                                                                                                                |
 
 #### Approval blockers
 
-1. **R1 — A2 must have one executable routing table.** Step 1 sends a non-derivable base directly to step 4, but step 4 says compatibility is selected *only* through positive identification. Define the bounded positive probe or explicit unavailable result for that branch; never guess a native prefix from an arbitrary saved path. Also replace `GET base/v1/models` with the actual existing discovery destination: `provider::endpoint(config, "models")`, which is already `P/v1/models` for a saved `P/v1` base. Appending `/v1/models` literally doubles `/v1`. The serde alias `local_openai_compatible` becomes `AiProviderKind::Ollama` on load (`provider.rs`); it is not a surviving kind/identity signal. A models list establishes compatibility, not proof that the backend is non-Ollama. State exactly what evidence permits the unknown-context exception, without allowing a recognized old Ollama to bypass E1. Distinguish a valid non-Ollama JSON body from malformed JSON and malformed/missing version fields; define invalid semver/prerelease handling. Give the compatibility probe its own total timeout/body limit. Tests must assert destination and **zero chat sends** on auth, timeout, redirect, malformed/oversized body, 5xx and ambiguous identity, plus successful alias/custom-prefix compatibility.
+1. **R1 — A2 must have one executable routing table.** Step 1 sends a non-derivable base directly to step 4, but step 4 says compatibility is selected _only_ through positive identification. Define the bounded positive probe or explicit unavailable result for that branch; never guess a native prefix from an arbitrary saved path. Also replace `GET base/v1/models` with the actual existing discovery destination: `provider::endpoint(config, "models")`, which is already `P/v1/models` for a saved `P/v1` base. Appending `/v1/models` literally doubles `/v1`. The serde alias `local_openai_compatible` becomes `AiProviderKind::Ollama` on load (`provider.rs`); it is not a surviving kind/identity signal. A models list establishes compatibility, not proof that the backend is non-Ollama. State exactly what evidence permits the unknown-context exception, without allowing a recognized old Ollama to bypass E1. Distinguish a valid non-Ollama JSON body from malformed JSON and malformed/missing version fields; define invalid semver/prerelease handling. Give the compatibility probe its own total timeout/body limit. Tests must assert destination and **zero chat sends** on auth, timeout, redirect, malformed/oversized body, 5xx and ambiguous identity, plus successful alias/custom-prefix compatibility.
 
 2. **R2 — E1 recommendation assumes fallback that does not exist.** `src/lib/ai-assistant/agent.ts::FALLBACK_CODES` contains only disabled/provider/tools/engine-unsupported; `AI_OLLAMA_UPDATE_REQUIRED` currently becomes an ordinary failure. If the user chooses the recommendation, add explicit frontend fallback integration and its file/tests to scope. Cover both an IPC rejection and an asynchronous `error`/`done` result, retain the no-tool-ran rule, and preserve the existing history-data stripping/consent behavior in `useAiAssistantSubmit.ts`. Do not add metadata, unreachable, load or context-full codes to automatic fallback. Explain that the selected legacy fallback can send a new conversation request through `/v1` without D1a's context guarantee; A2's “No request is sent” must mean no **agent conversation** request before that explicit fallback, not no request at all. If E1 instead chooses a hard error or warned compatibility wire, rewrite the corresponding flow and tests. E1 must be settled before implementation approval.
 
@@ -924,7 +976,7 @@ Plan 1 shows a context size only in AI settings (the field and the C5 status lin
 
 4. **R4 — A9 settings status has no defined backend-to-frontend path.** `AppState` owns caches only in Rust; `aiProviderList()` returns saved configs and `aiProviderListModels()` returns `string[]`. Neither exposes native/compatible/too-old/unknown status, and the settings dialog supports unsaved drafts. Define a narrow typed status surface, when it is queried, and how results are bound to provider generation or draft identity. Specify loading/unknown/failure versus positively compatible states, stale response rejection after edit/delete/provider switch, and cancellation. Do not persist transient probe status in `AiProviderConfig` or infer “compatible” from failed discovery. Include command registration/IPC types if adding a command, and tests for the actual settings notice before/after a run and after endpoint edits. Otherwise the required compatibility/update notice is not implementable as scoped.
 
-5. **R5 — Phase 0 must close the protocol gate before Phase 1, not merely adjust a constant.** A version threshold controls silent-truncation protection. Record primary upstream evidence for *both* chat flags and their semantics, sanitized reproducible requests/responses, version provenance, prompt-overflow **and prompt-plus-output boundary** cases. If evidence differs from assumptions, revisit request/parser/error contracts and minimum version together; “the constant ... changes and nothing else” is too strong. Re-run missing/duplicate/invalid-ID same-name result correlation and final replay, including thinking, with the supported native contract. P0 #8/#9 only demonstrate valid native IDs and do not establish the fallback correlation rule. Define a stable load-error classifier from evidence or use a safe generic failure until one is validated; A4/A5 cannot promise `AI_OLLAMA_LOAD_FAILED` from unspecified text. No intentionally memory-exhausting probe is required: use a captured sanitized/stubbed load failure if reproducing it would disrupt the machine. An unresolved protection/replay gate cannot be waived as `VERIFIED WITH LIMITATIONS` for Plan 1 merely because Plan 2 can proceed. Current review authorizes no live probes.
+5. **R5 — Phase 0 must close the protocol gate before Phase 1, not merely adjust a constant.** A version threshold controls silent-truncation protection. Record primary upstream evidence for _both_ chat flags and their semantics, sanitized reproducible requests/responses, version provenance, prompt-overflow **and prompt-plus-output boundary** cases. If evidence differs from assumptions, revisit request/parser/error contracts and minimum version together; “the constant ... changes and nothing else” is too strong. Re-run missing/duplicate/invalid-ID same-name result correlation and final replay, including thinking, with the supported native contract. P0 #8/#9 only demonstrate valid native IDs and do not establish the fallback correlation rule. Define a stable load-error classifier from evidence or use a safe generic failure until one is validated; A4/A5 cannot promise `AI_OLLAMA_LOAD_FAILED` from unspecified text. No intentionally memory-exhausting probe is required: use a captured sanitized/stubbed load failure if reproducing it would disrupt the machine. An unresolved protection/replay gate cannot be waived as `VERIFIED WITH LIMITATIONS` for Plan 1 merely because Plan 2 can proceed. Current review authorizes no live probes.
 
 #### Should-fix contracts and verification
 
@@ -950,23 +1002,23 @@ Codex, 2026-10-16. **Conclusion: NOT READY for human approval of Phase 1.** E1 =
 
 #### Disposition of R1–R5
 
-| Item | Revision 4 disposition |
-| --- | --- |
-| **R1** | **Mostly resolved; version qualification still blocks.** A2' is executable for derivable and arbitrary saved paths; the models endpoint now matches `provider::endpoint(config, "models")`. Alias handling, positive compatibility evidence, bounded probes, malformed-version handling and no-chat failure cases are explicit. Compatibility proves the protocol, not absence of Ollama; the stated row precedence correctly prevents a *recognized* old server bypass. Numeric-core prerelease comparison remains unsafe at the support boundary (blocker 1 below). |
-| **R2** | **Closed as moot by user decision E1b.** No fallback integration is needed. Existing `FALLBACK_CODES` excludes the new errors, so preserve that set. Add an asynchronous preparation-error regression proving `AI_OLLAMA_UPDATE_REQUIRED` rejects the turn without a legacy request; also cover direct error formatting. |
+| Item   | Revision 4 disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **R1** | **Mostly resolved; version qualification still blocks.** A2' is executable for derivable and arbitrary saved paths; the models endpoint now matches `provider::endpoint(config, "models")`. Alias handling, positive compatibility evidence, bounded probes, malformed-version handling and no-chat failure cases are explicit. Compatibility proves the protocol, not absence of Ollama; the stated row precedence correctly prevents a _recognized_ old server bypass. Numeric-core prerelease comparison remains unsafe at the support boundary (blocker 1 below).                                                                              |
+| **R2** | **Closed as moot by user decision E1b.** No fallback integration is needed. Existing `FALLBACK_CODES` excludes the new errors, so preserve that set. Add an asynchronous preparation-error regression proving `AI_OLLAMA_UPDATE_REQUIRED` rejects the turn without a legacy request; also cover direct error formatting.                                                                                                                                                                                                                                                                                                                           |
 | **R3** | **Resolved at the planning-contract level.** A6' preserves immediate IPC return, performs preparation after `start_on` in spawned work, shares one turn budget, passes remaining duration to `run_turn`, and defines terminal events/guard release. Existing connection close and consent revoke cancel registered bound runs; `ConsentGate` itself does not universally check connection liveness. Implement the promised no-send checks using that cancellation path plus the request gate, rather than assuming an `alive` check already exists on every send. Cancellation must win ties and an exhausted remaining budget must not send chat. |
-| **R4** | **Partially resolved.** A10 supplies a draft-aware, nonpersisted typed status command, registration/wrappers, triggers and stale-result tests. Actual abort ownership is still unspecified: a request id alone cannot cancel a Tauri invocation (blocker 2). Metadata-unavailable status/copy also needs the should-fix below. |
-| **R5** | **Partially resolved.** Stable MIN_NATIVE, omitted `think`, both flags, ordered same-name results, final replay and deliberate `length` behavior now have useful evidence/contracts. A fixed memory-error substring with stub tests is acceptable without exhausting RAM. The saved scripts cover missing/duplicate/valid IDs, but never invalid IDs; A5's invalid-ID/replay contradiction remains (blocker 3). The cited 413 evidence is also misattributed, as detailed below. No fresh runtime gate passed in this review. |
+| **R4** | **Partially resolved.** A10 supplies a draft-aware, nonpersisted typed status command, registration/wrappers, triggers and stale-result tests. Actual abort ownership is still unspecified: a request id alone cannot cancel a Tauri invocation (blocker 2). Metadata-unavailable status/copy also needs the should-fix below.                                                                                                                                                                                                                                                                                                                     |
+| **R5** | **Partially resolved.** Stable MIN_NATIVE, omitted `think`, both flags, ordered same-name results, final replay and deliberate `length` behavior now have useful evidence/contracts. A fixed memory-error substring with stub tests is acceptable without exhausting RAM. The saved scripts cover missing/duplicate/valid IDs, but never invalid IDs; A5's invalid-ID/replay contradiction remains (blocker 3). The cited 413 evidence is also misattributed, as detailed below. No fresh runtime gate passed in this review.                                                                                                                      |
 
 #### Disposition of the five should-fix items
 
-| Item | Disposition |
-| --- | --- |
+| Item                               | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **1 — Shared lookup cancellation** | **Resolved in intent by A6'.** Cache-owned work survives waiter cancellation; cap is global; entry ids protect replacement work; owner panic and normalized-id invalidation have tests. Preserve truly atomic generation validation/publication when moving generations out of `CapabilityCache`: holding only a probe-cache mutex does not exclude a bump in a separate generation owner. Specify shared synchronization or a consistent lock order that both publication and invalidation obey, including capability writes. |
-| **2 — Frontend scope** | **Resolved by A9' and file additions.** Authoritative types/helpers and the actual formatter location are now named. Fixed-code branches precede generic handling; nullable defaults, IPC/stored bounds, bilingual copy and sensitive-suffix tests are in scope. Keep the old nonexistent formatter path only as superseded historical text. |
-| **3 — Result/output semantics** | **Substantially resolved by A5'.** `tool_content` preserves errors; nonempty `MaxTokens` intentionally remains answered and empty output remains an error, matching `drive`. Calls never run for `length` or finalization. Retain explicit fixtures for unknown/missing stop and malformed role/content/thinking, not merely happy-path outbound JSON. Invalid-ID handling remains blocker 3. |
-| **4 — Endpoint/consent tests** | **Resolved by A11.** Actual outbound origin and prefix confinement, saved-config grant continuity, revocation, injected HTTPS fixtures and unchanged existing wires are explicit. Native transport must retain validation and body limits. `transport::client_for` currently has a fixed 10 s connect timeout; the promised 1 s connect timeout requires a narrow transport option, with old callers' defaults preserved. |
-| **5 — Freshness and gates** | **Resolved by A11.** Cached upgrade/replacement recognition is explicitly delayed until expiry/save, old-version recovery and indeterminate failures are covered, and smoke uses shared preparation. Default-context, small-context, bounded generation-overflow and old-version stub gates are distinguished. These remain future implementation gates, not Phase 0 passes. |
+| **2 — Frontend scope**             | **Resolved by A9' and file additions.** Authoritative types/helpers and the actual formatter location are now named. Fixed-code branches precede generic handling; nullable defaults, IPC/stored bounds, bilingual copy and sensitive-suffix tests are in scope. Keep the old nonexistent formatter path only as superseded historical text.                                                                                                                                                                                   |
+| **3 — Result/output semantics**    | **Substantially resolved by A5'.** `tool_content` preserves errors; nonempty `MaxTokens` intentionally remains answered and empty output remains an error, matching `drive`. Calls never run for `length` or finalization. Retain explicit fixtures for unknown/missing stop and malformed role/content/thinking, not merely happy-path outbound JSON. Invalid-ID handling remains blocker 3.                                                                                                                                  |
+| **4 — Endpoint/consent tests**     | **Resolved by A11.** Actual outbound origin and prefix confinement, saved-config grant continuity, revocation, injected HTTPS fixtures and unchanged existing wires are explicit. Native transport must retain validation and body limits. `transport::client_for` currently has a fixed 10 s connect timeout; the promised 1 s connect timeout requires a narrow transport option, with old callers' defaults preserved.                                                                                                      |
+| **5 — Freshness and gates**        | **Resolved by A11.** Cached upgrade/replacement recognition is explicitly delayed until expiry/save, old-version recovery and indeterminate failures are covered, and smoke uses shared preparation. Default-context, small-context, bounded generation-overflow and old-version stub gates are distinguished. These remain future implementation gates, not Phase 0 passes.                                                                                                                                                   |
 
 #### Remaining approval blockers
 
@@ -985,7 +1037,6 @@ Codex, 2026-10-16. **Conclusion: NOT READY for human approval of Phase 1.** E1 =
 
 **Approval exit:** close the three blockers, carry the should-fix clarifications into the implementation/test contract, and obtain explicit human approval of Phase 1. Preserve E1b, D1a, the Phase 0-only authorization, and Plan 2's separate scope. Implementation and all runtime/build gates remain pending.
 
-
 ### Re-review — Revision 5
 
 Codex, 2026-10-16. **Conclusion: NOT READY for human approval of Phase 1.** DRAFT and Phase 0-only authorization remain unchanged. D1a and E1b remain settled.
@@ -994,29 +1045,29 @@ Codex, 2026-10-16. **Conclusion: NOT READY for human approval of Phase 1.** DRAF
 
 #### Prior approval blockers
 
-| Revision 4 blocker | Disposition |
-| --- | --- |
-| **1 — Version precedence** | **Closed by C1.** Stable SemVer comparison, build metadata and boundary prerelease tests are explicit. `0.12.6-rc1` cannot send chat. `0.12.7-rc1` follows the chosen normal SemVer policy; this is not fresh runtime evidence for that prerelease. |
-| **2 — Status cancellation** | **Partially closed by C2; ownership remains blocking (B1 below).** Registry/command reuse, early registration, cancellation-biased probe waits, frontend aborts and drop cleanup are now concrete. Existing `register` does **not** reject duplicates: it replaces the sender and signals the older request (`ai/cancel.rs:35–38`). C2 permits adding the check, so this is an implementation obligation, not existing behavior. The check and cleanup must also address reuse after cancellation. |
-| **3 — Invalid native IDs** | **Closed at the planning-contract level by C3.** Absent/null/string replay and non-string/overlong rejection before tools remove the verbatim-replay contradiction. Result IDs are all-or-none, strings only; internal IDs stay local; same-name order and mixed-ID fixtures are explicit. The script covers the addendum's numeric/object/null/missing/string cases; array/bool/overlong and mixed batches remain implementation fixtures. Preserve raw assistant replay separately from internal protocol IDs. |
+| Revision 4 blocker          | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1 — Version precedence**  | **Closed by C1.** Stable SemVer comparison, build metadata and boundary prerelease tests are explicit. `0.12.6-rc1` cannot send chat. `0.12.7-rc1` follows the chosen normal SemVer policy; this is not fresh runtime evidence for that prerelease.                                                                                                                                                                                                                                                              |
+| **2 — Status cancellation** | **Partially closed by C2; ownership remains blocking (B1 below).** Registry/command reuse, early registration, cancellation-biased probe waits, frontend aborts and drop cleanup are now concrete. Existing `register` does **not** reject duplicates: it replaces the sender and signals the older request (`ai/cancel.rs:35–38`). C2 permits adding the check, so this is an implementation obligation, not existing behavior. The check and cleanup must also address reuse after cancellation.               |
+| **3 — Invalid native IDs**  | **Closed at the planning-contract level by C3.** Absent/null/string replay and non-string/overlong rejection before tools remove the verbatim-replay contradiction. Result IDs are all-or-none, strings only; internal IDs stay local; same-name order and mixed-ID fixtures are explicit. The script covers the addendum's numeric/object/null/missing/string cases; array/bool/overlong and mixed batches remain implementation fixtures. Preserve raw assistant replay separately from internal protocol IDs. |
 
 #### Prior should-fix disposition
 
-| Item | Disposition |
-| --- | --- |
-| **Original 1 — Shared lookup cancellation** | **Closed in contract by A6' + C7.** Cache-owned work, detached waiters, global eight-lookup cap, entry ownership, panic cleanup and generation-before-cache lock order address the prior concerns. Include capability publication under that same order; snapshot/save serialization still uses `ai_providers_lock`. |
-| **Original 2 — Frontend scope** | **Closed by A9' + C8.** Authoritative types/helpers, actual formatter location, fixed-code ordering, bilingual copy, stored/IPC validation and sensitive-suffix tests remain required. |
-| **Original 3 — Result/output semantics** | **Closed by A5' + C3.** Error-result content survives; malformed response fixtures remain required; empty/nonempty `length` deliberately retain coordinator behavior and execute no tools. |
-| **Original 4 — Endpoint/consent** | **Closed by A11 + C6/C7.** Origin/prefix confinement and unchanged grants/wires remain gates; bound-run cancellation plus request gates supply no-send protection. Dedicated probe client must preserve validation, redirects, plaintext proxy avoidance and localhost pinning with 1 s connect / 2 s total. |
-| **Original 5 — Freshness/gates** | **Closed in contract by A11 + C8.** Upgrade detection is TTL/save-bound, smoke shares preparation and bounded generation overflow is explicit. No implementation gate has passed through this review. |
-| **Additional — Error attribution** | **Not closed; C4 introduces B2 below.** Removing unconditional 413 classification is correct, but the claimed embedding-only message is also emitted by minimum-supported chat runners. |
-| **Additional — Settings metadata** | **Closed by C5.** Native identity survives missing model/metadata, fixed copy avoids undefined values, effective size is clamped, model edits clear/re-query. Keep draft identity invalidation on auth edits too, as existing `updateConnection` does. |
-| **Additional — Authoritative phase scope** | **Closed by C8 precedence.** Approval scope includes A1–A11 and both revisions, status command/UI and all added gates. Remaining obsolete bullets are editorial should-fix S1. |
-| **Additional — Preparation terminals** | **Closed by C6.** Failure/deadline emit Error + Done(Failed); cancel emits only Done(Canceled); zero remaining budget sends nothing. Frontend event handling supports these sequences; unchanged `FALLBACK_CODES` plus C8's async regression preserves E1b. Failed channel delivery stops preparation and releases the run guard. |
+| Item                                        | Disposition                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Original 1 — Shared lookup cancellation** | **Closed in contract by A6' + C7.** Cache-owned work, detached waiters, global eight-lookup cap, entry ownership, panic cleanup and generation-before-cache lock order address the prior concerns. Include capability publication under that same order; snapshot/save serialization still uses `ai_providers_lock`.              |
+| **Original 2 — Frontend scope**             | **Closed by A9' + C8.** Authoritative types/helpers, actual formatter location, fixed-code ordering, bilingual copy, stored/IPC validation and sensitive-suffix tests remain required.                                                                                                                                            |
+| **Original 3 — Result/output semantics**    | **Closed by A5' + C3.** Error-result content survives; malformed response fixtures remain required; empty/nonempty `length` deliberately retain coordinator behavior and execute no tools.                                                                                                                                        |
+| **Original 4 — Endpoint/consent**           | **Closed by A11 + C6/C7.** Origin/prefix confinement and unchanged grants/wires remain gates; bound-run cancellation plus request gates supply no-send protection. Dedicated probe client must preserve validation, redirects, plaintext proxy avoidance and localhost pinning with 1 s connect / 2 s total.                      |
+| **Original 5 — Freshness/gates**            | **Closed in contract by A11 + C8.** Upgrade detection is TTL/save-bound, smoke shares preparation and bounded generation overflow is explicit. No implementation gate has passed through this review.                                                                                                                             |
+| **Additional — Error attribution**          | **Not closed; C4 introduces B2 below.** Removing unconditional 413 classification is correct, but the claimed embedding-only message is also emitted by minimum-supported chat runners.                                                                                                                                           |
+| **Additional — Settings metadata**          | **Closed by C5.** Native identity survives missing model/metadata, fixed copy avoids undefined values, effective size is clamped, model edits clear/re-query. Keep draft identity invalidation on auth edits too, as existing `updateConnection` does.                                                                            |
+| **Additional — Authoritative phase scope**  | **Closed by C8 precedence.** Approval scope includes A1–A11 and both revisions, status command/UI and all added gates. Remaining obsolete bullets are editorial should-fix S1.                                                                                                                                                    |
+| **Additional — Preparation terminals**      | **Closed by C6.** Failure/deadline emit Error + Done(Failed); cancel emits only Done(Canceled); zero remaining budget sends nothing. Frontend event handling supports these sequences; unchanged `FALLBACK_CODES` plus C8's async regression preserves E1b. Failed channel delivery stops preparation and releases the run guard. |
 
 #### Remaining blockers
 
-1. **B1 — C2 must specify registration ownership across both status and discovery.** `CancelRegistry::cancel` removes the active entry immediately (`ai/cancel.rs:43–54`), and `finish(id)` blindly removes whatever now owns that id (`:59–61`). Interleaving: status A registers X; cancel X removes A's sender; discovery/status B registers X before A unwinds; A's drop guard calls `finish(X)` and removes B. B's receiver then closes and its work is canceled despite no cancel for B. Rejecting only *currently registered* duplicates does not cover this gap. Require atomic registration/rejection and ownership-safe cleanup: either retain canceled ownership until its guard finishes (reject reuse meanwhile), or return a registration token and finish only the matching token. Apply compatible ownership semantics to **both** commands using this shared registry; scope `ai/cancel.rs` and discovery changes explicitly. Test concurrent duplicate registration, cancel → re-register before old cleanup, old cleanup after replacement, early cancel, and normal success/error cleanup. A rejected duplicate must never finish the incumbent registration. Fresh frontend UUIDs reduce accidental collisions but do not establish the backend reuse contract C2 promises.
+1. **B1 — C2 must specify registration ownership across both status and discovery.** `CancelRegistry::cancel` removes the active entry immediately (`ai/cancel.rs:43–54`), and `finish(id)` blindly removes whatever now owns that id (`:59–61`). Interleaving: status A registers X; cancel X removes A's sender; discovery/status B registers X before A unwinds; A's drop guard calls `finish(X)` and removes B. B's receiver then closes and its work is canceled despite no cancel for B. Rejecting only _currently registered_ duplicates does not cover this gap. Require atomic registration/rejection and ownership-safe cleanup: either retain canceled ownership until its guard finishes (reject reuse meanwhile), or return a registration token and finish only the matching token. Apply compatible ownership semantics to **both** commands using this shared registry; scope `ai/cancel.rs` and discovery changes explicitly. Test concurrent duplicate registration, cancel → re-register before old cleanup, old cleanup after replacement, early cancel, and normal success/error cleanup. A rejected duplicate must never finish the incumbent registration. Fresh frontend UUIDs reduce accidental collisions but do not establish the backend reuse contract C2 promises.
 
 2. **B2 — C4 excludes a known chat overflow form at MIN_NATIVE.** The assertion that `the input length exceeds the context length` belongs only to embeddings is false for v0.12.6. Both [ollamarunner](https://github.com/ollama/ollama/blob/v0.12.6/runner/ollamarunner/runner.go#L125) and [llamarunner](https://github.com/ollama/ollama/blob/v0.12.6/runner/llamarunner/runner.go#L120) return that error when prompt truncation is disabled; their **completion** handlers return 400. [Completion transport](https://github.com/ollama/ollama/blob/v0.12.6/llm/server.go#L1393) preserves the status and trimmed body in `api.StatusError`; the [chat handler](https://github.com/ollama/ollama/blob/v0.12.6/server/routes.go#L2026) forwards that status/error into its nonstream response path. C4 would therefore turn known minimum-version prompt overflow into generic failure, contrary to the dedicated context-full contract. Add this evidenced 400 form to the classifier and transport-level fixtures alongside the reported newer numeric form; keep unrelated 400/413 generic. Correct the addendum's claimed v0.12.6 provenance for the numeric form. This is an error-contract/evidence blocker, **not** evidence that `truncate:false` fails to protect data.
 
@@ -1027,7 +1078,6 @@ Codex, 2026-10-16. **Conclusion: NOT READY for human approval of Phase 1.** DRAF
 
 **Approval exit:** resolve B1 and B2 in the plan, carry S1/S2 into the implementation handoff, then seek explicit human approval for Phase 1. No application implementation is authorized by this review; all build/runtime gates remain pending.
 
-
 ### Re-review — Revision 6
 
 Codex, 2026-10-16. **Conclusion: READY for human approval of Phase 1.** No remaining approval blockers found in Revision 6. This is readiness of the planning contract, not implementation approval or verification. Status stays **DRAFT**; the existing authorization remains Phase 0 only. D1a, E1b and Plan 2's separate scope remain unchanged.
@@ -1036,12 +1086,12 @@ Codex, 2026-10-16. **Conclusion: READY for human approval of Phase 1.** No remai
 
 #### Disposition of B1, B2, S1 and S2
 
-| Item | Disposition |
-| --- | --- |
-| **B1 — Cancel-registry ownership** | **Closed in the planning contract by D1.** Existing `register` supersedes the incumbent (`ai/cancel.rs:30–38`), `cancel` removes it (`:43–54`), and `finish(id)` unconditionally removes the current entry (`:59–61`). Discovery currently registers before validation/waiting and finishes explicitly after the awaited result (`commands/ai.rs:104–115`). D1 preserves supersession and early-cancel behavior, adds registration identity, and makes cleanup conditional on the matching token. Therefore A's stale cleanup cannot remove B after either cancel/re-register or direct replacement. Both discovery and status must adopt the token-aware drop guard; changing only the registry or status would be incomplete. D1 explicitly scopes both command guards and covers the required interleavings, concurrent supersession and success/error cleanup. The withdrawn duplicate-rejection policy is no longer an implementation requirement. |
-| **B2 — Chat context-error classifier** | **Closed by D2.** HTTP 400 plus either the minimum-version runner prefix or the reported newer numeric form now maps to `AI_AGENT_CONTEXT_FULL`; unrelated 400/413/5xx stay generic. The v0.12.6 completion-to-chat forwarding chain independently confirms the first form (links below). D2 corrects the embedding-only and numeric-form provenance claims and requires transport-level positive/negative fixtures, newline handling and sensitive-suffix containment. Neither the numeric form nor 413 normalization is presented as independently established v0.12.6 chat behavior. |
-| **S1 — Authoritative scope** | **Substantively closed; minor editorial cleanup remains below.** `Phases` now includes A1–A11 as amended by Revisions 4–6. D1/D3 explicitly include registry and both discovery/status callers, probe transport changes and the actual formatter location. Revision 6's precedence removes ambiguity about the intended implementation. |
-| **S2 — Evidence scope** | **Closed by D4.** Local replay results are bounded to the reported 0.40.4/qwen3:4b environment. ID-field decodability is separated from whole-response validation; unknown nested fields have preservation fixtures, not a universal guarantee. Missing/null/string/invalid/duplicate/mixed ID fixtures and live smoke remain implementation gates. |
+| Item                                   | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **B1 — Cancel-registry ownership**     | **Closed in the planning contract by D1.** Existing `register` supersedes the incumbent (`ai/cancel.rs:30–38`), `cancel` removes it (`:43–54`), and `finish(id)` unconditionally removes the current entry (`:59–61`). Discovery currently registers before validation/waiting and finishes explicitly after the awaited result (`commands/ai.rs:104–115`). D1 preserves supersession and early-cancel behavior, adds registration identity, and makes cleanup conditional on the matching token. Therefore A's stale cleanup cannot remove B after either cancel/re-register or direct replacement. Both discovery and status must adopt the token-aware drop guard; changing only the registry or status would be incomplete. D1 explicitly scopes both command guards and covers the required interleavings, concurrent supersession and success/error cleanup. The withdrawn duplicate-rejection policy is no longer an implementation requirement. |
+| **B2 — Chat context-error classifier** | **Closed by D2.** HTTP 400 plus either the minimum-version runner prefix or the reported newer numeric form now maps to `AI_AGENT_CONTEXT_FULL`; unrelated 400/413/5xx stay generic. The v0.12.6 completion-to-chat forwarding chain independently confirms the first form (links below). D2 corrects the embedding-only and numeric-form provenance claims and requires transport-level positive/negative fixtures, newline handling and sensitive-suffix containment. Neither the numeric form nor 413 normalization is presented as independently established v0.12.6 chat behavior.                                                                                                                                                                                                                                                                                                                                                                 |
+| **S1 — Authoritative scope**           | **Substantively closed; minor editorial cleanup remains below.** `Phases` now includes A1–A11 as amended by Revisions 4–6. D1/D3 explicitly include registry and both discovery/status callers, probe transport changes and the actual formatter location. Revision 6's precedence removes ambiguity about the intended implementation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **S2 — Evidence scope**                | **Closed by D4.** Local replay results are bounded to the reported 0.40.4/qwen3:4b environment. ID-field decodability is separated from whole-response validation; unknown nested fields have preservation fixtures, not a universal guarantee. Missing/null/string/invalid/duplicate/mixed ID fixtures and live smoke remain implementation gates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 #### Pinned upstream verification
 

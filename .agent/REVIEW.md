@@ -1127,7 +1127,6 @@ The end-to-end control flow now fails closed: `remove_grants` handles read failu
 
 Handoff: code re-review is complete with limitations. Keep R7/user-dependent evidence and MAS/analytics scope disposition open; this verdict does not authorize activation, release, commit or merge.
 
-
 ## Review: legacy-webkit-storage Phase 1
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-14.
@@ -1231,7 +1230,6 @@ Commands below used the required `rtk` prefix; Rust commands ran in `src-tauri/`
 - Signed-app ACL prompts, access-group behavior, actual file-to-data-protection transitions and Windows/Linux execution were not verified. Downgrade credential loss after approved D2a retirement remains intentional.
 - Workflow requires Claude's security review after Codex review. The plan records one before this review; Claude should perform the required post-review pass, including these limits, before release handoff.
 
-
 ## Review: AI agent markdown and activity (669c1ff)
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-16. **1 P1, 2 P2; no P0 found.**
@@ -1267,7 +1265,6 @@ All shell verification used `rtk` after reading RTK guidance.
 ### Limits and handoff
 
 No native desktop/manual visual inspection, live provider calls, browser network capture, full frontend suite or Rust suite run. DOM probes establish absence of resource-capable elements for tested payloads, not a native-webview security audit. Pure parser benchmarks establish the algorithmic issue; exact native freeze durations remain unmeasured. No Context7 lookup needed for this code review/business-logic scope. Claude should fix the P1 and the two concrete P2 regressions, add permanent focused tests, record verification and request re-review. Earlier provider/native-auth/MAS release limitations remain unchanged. No commit, push or application edits.
-
 
 ## Re-review: AI agent markdown and activity round 2
 
@@ -1340,7 +1337,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md`, RTK guidance, round 2 
 
 Limits: no full frontend suite, native/manual UI inspection, live provider/DB calls, browser network capture or Rust checks. Timings are Node/V8, not native WebKit. No Context7 lookup needed for this code-review/business-logic scope. Existing provider/native-auth/MAS/analytics release gates remain outside this re-review. Claude should fix the remaining P2 composition case, record verification and request re-review. No commit or push.
 
-
 ## Re-review: AI agent markdown and activity round 4
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-16. **No new P0/P1/P2 findings.**
@@ -1378,7 +1374,6 @@ The plan's documented formatting fallback remains: repeated valid split triples 
 
 No full frontend suite rerun, native/manual UI inspection, live provider/DB calls, network capture or Rust checks. Timings are Node/V8, not WebKit. Existing DOM test and renderer inspection do not constitute a native-webview security audit. No Context7 lookup needed for this code-review/business-logic scope. Earlier provider/native-auth/MAS/analytics gates remain outside this review. Round 3 finding is closed; no further change requested within this re-review scope. No commit or push.
 
-
 ## Review: ollama-native-context Phase 1
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-16. No P0/P1 found; four P2 findings below require correction against the approved Phase 1 contracts.
@@ -1412,7 +1407,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK guidance and `.agent/plans/ol
 - `rtk git diff --check`: **passed** before report append; repeated afterwards.
 
 Limitations: no native desktop settings inspection, real-provider generation, independent `/api/ps` allocation check, old-version runtime, or live database smoke. Loopback restrictions blocked local HTTP fixture execution, so implementation evidence's Ollama 0.40.4/qwen3:4b smoke remains implementer-reported and was not independently reproduced. No full app-store test suite or clippy rerun. No Context7 lookup needed for this code-review/business-logic task. Fix findings and complete the missing approved regression gates before re-review; no commit or push performed.
-
 
 ## Re-review: ollama-native-context Phase 1 round 2
 
@@ -1451,7 +1445,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance; revie
 
 Limitations: socket policy prevents independent native HTTP/routing/status/lifecycle fixture execution; no escalation available. No full frontend suite, app-store Rust test suite, clippy, native UI inspection, real Ollama generation, allocation check or database smoke rerun. Implementer-reported successful full suites/live evidence remain attributed to Claude. No Context7 lookup needed for this code-review/business-logic scope. Correct the false-green gate and finish retained lifecycle coverage, then request re-review. No commit or push.
 
-
 ## Re-review: ollama-native-context Phase 1 round 3
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-17. Both round-2 P2 findings are resolved in the reviewed implementation and regression gates. No new actionable P0/P1/P2 found. This verdict supersedes round 2 for the current Phase 1 working tree; socket-dependent execution remains unverified here.
@@ -1478,7 +1471,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md`, RTK guidance, the prio
 - `rtk git diff --check`: **passed** before append; repeated after append.
 
 Limitations: native HTTP round trips and socket-dependent lifecycle/routing/status assertions could not execute under this sandbox. Claude's reported 400-pass default/app-store suites remain implementer-reported evidence, not independently reproduced passes. No full frontend suite, app-store Rust test suite, clippy, desktop UI inspection, real Ollama generation/allocation check or database smoke rerun. No Context7 lookup needed for this code-review/business-logic task. No commit or push.
-
 
 ## Review: AI agent always on (uncommitted, feat/ai-agent)
 
@@ -1511,7 +1503,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Revie
 
 Limitations: no native desktop/browser visual inspection, live provider/database run or Touch ID/password prompt interaction. Frontend tests use mocked IPC and cannot independently prove native enforcement; native paths were inspected, not rerun, because this scoped diff changes no Rust. Existing release smoke gates remain open. No Context7 lookup needed for this code-review scope. Build necessarily includes the current working tree, including the excluded backend-client files, without reviewing those unrelated changes. No commit performed.
 
-
 ## Re-review: AI agent always on round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-19. Prior P2 resolved; no new P0/P1/P2 found.
@@ -1532,7 +1523,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Re-re
 - `rtk git diff --check`: **passed** before append; repeated after append.
 
 Limitations: no desktop/browser visual smoke, live provider/database run or native Touch ID/password interaction performed; this re-review targets a consent-copy fix and frontend regression coverage. Tests mock IPC and do not independently prove native enforcement; Rust checks were not rerun because no Rust changed. Existing release smoke gates remain open. Build includes the full current working tree, including the excluded backend-client files; those changes are not approved by this review. No Context7 lookup needed for this code-review scope. Only this new review section was appended; no code, tests or plans edited, no staging or commit.
-
 
 ## Review: pro-gating Phase 1
 
@@ -1570,7 +1560,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 
 Limitations: socket-dependent timeout/HTTP/credential-ordering behavior was inspected but could not be independently executed here. No desktop visual inspection, live provider/database/native-approval smoke or App Store artifact run. No Context7 lookup needed for this business-logic/code-review task. D9's later phases and separate security-review/release gates remain open. Only this new review section appended; no application code, tests or plan edited, no staging or commit.
 
-
 ## Re-review: pro-gating Phase 1 round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-19. All four prior findings resolved by inspection; their non-socket regression tests pass. No new P0/P1/P2 issue found in the fixes or their integration.
@@ -1579,12 +1568,12 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 
 ### Disposition of the four findings
 
-| Prior finding | Result | File:line evidence |
-|---|---|---|
-| P1 — expiry normalization | **Resolved** | `src-tauri/src/license.rs:788-790` takes expiry exclusively from the response; missing/null becomes `None`, while blank/whitespace remains a present invalid string. `:276-282` grants unlimited only for `None`; malformed or blank values cannot grant paid access. Trial union remains independent at `:342-356`. Tests at `:1581-1615` cover an unlimited renewal after an expired deadline, blank/whitespace/malformed values and a future date; `:1618-1635` covers invalid paid expiry with a valid trial through commit/reload. Existing malformed save/reload coverage remains at `:1465-1486`. These tests passed in both flavors. |
+| Prior finding                             | Result       | File:line evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — expiry normalization                 | **Resolved** | `src-tauri/src/license.rs:788-790` takes expiry exclusively from the response; missing/null becomes `None`, while blank/whitespace remains a present invalid string. `:276-282` grants unlimited only for `None`; malformed or blank values cannot grant paid access. Trial union remains independent at `:342-356`. Tests at `:1581-1615` cover an unlimited renewal after an expired deadline, blank/whitespace/malformed values and a future date; `:1618-1635` covers invalid paid expiry with a valid trial through commit/reload. Existing malformed save/reload coverage remains at `:1465-1486`. These tests passed in both flavors.                                                         |
 | P1 — remove-before-replace license writes | **Resolved** | `src-tauri/src/license.rs:594-602` now calls `json_replace_private` and returns the incremented state only after success. The existing helper at `src-tauri/src/file_storage.rs:166-204` creates a unique private sibling, writes and syncs it, then replaces the destination without unlinking the old file; error cleanup removes only the temporary sibling. Unix replacement is rename-over-existing (`:130-134`); Windows uses `MoveFileExW` with replacement/write-through (`:136-155`). License regression `src-tauri/src/license.rs:1640-1666` passes in both flavors: failed clear preserves key, revision and original trial start, successful initial write has revision 1 and mode 0600. |
-| P2 — old version reset | **Resolved** | `src-tauri/src/license.rs:570-590` rejects newer versions without resetting and migrates decodable older versions while retaining state, normalizing timestamps and capturing original legacy provenance. `:236-242` sets the current version; `:619-627` persists migration, and `:647-652` applies the same decoder to mutation entry paths while carrying device-owned fields. Tests at `:1679-1709` cover version 0 with an exhausted trial, load/clear/credential-commit before first load, retained key on load and subsequent reload; `:1713-1721` verifies newer-version load/clear errors leave bytes unchanged. Both pass in both flavors. |
-| P2 — App Store gate depends on storage | **Resolved** | `src-tauri/src/license.rs:683-699` passes the loader as a closure and returns before invoking it for ungated distributions. Both native entry points use this gate before provider/profile/database work: `src-tauri/src/commands/ai_agent.rs:88` and `src-tauri/src/commands/ai_agent_data.rs:232`. Regression `src-tauri/src/license.rs:1555-1577` passes in both flavors: App Store's loader panics if invoked, while Direct denies free or unreadable state and permits Pro. Thus malformed/missing/unwritable license storage cannot affect either App Store entitlement check. |
+| P2 — old version reset                    | **Resolved** | `src-tauri/src/license.rs:570-590` rejects newer versions without resetting and migrates decodable older versions while retaining state, normalizing timestamps and capturing original legacy provenance. `:236-242` sets the current version; `:619-627` persists migration, and `:647-652` applies the same decoder to mutation entry paths while carrying device-owned fields. Tests at `:1679-1709` cover version 0 with an exhausted trial, load/clear/credential-commit before first load, retained key on load and subsequent reload; `:1713-1721` verifies newer-version load/clear errors leave bytes unchanged. Both pass in both flavors.                                                 |
+| P2 — App Store gate depends on storage    | **Resolved** | `src-tauri/src/license.rs:683-699` passes the loader as a closure and returns before invoking it for ungated distributions. Both native entry points use this gate before provider/profile/database work: `src-tauri/src/commands/ai_agent.rs:88` and `src-tauri/src/commands/ai_agent_data.rs:232`. Regression `src-tauri/src/license.rs:1555-1577` passes in both flavors: App Store's loader panics if invoked, while Direct denies free or unreadable state and permits Pro. Thus malformed/missing/unwritable license storage cannot affect either App Store entitlement check.                                                                                                                 |
 
 ### Regression assessment and evidence limits
 
@@ -1602,7 +1591,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `git diff --check`: **passed** before and after append.
 
 Limitations: no desktop visual inspection, live provider/database/approval smoke or App Store artifact validation. Socket-dependent HTTP deadlines and credential sequencing require a loopback-capable environment. D9 and separate security-review/release gates remain unchanged. Only this new section appended; no code, tests, plan, staging or commit changed by this review.
-
 
 ## Review: pro-gating Phase 2 (backend trial endpoint)
 
@@ -1659,7 +1647,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - Direct validation/window probes passed using `node --import tsx --input-type=module`; the initial tsx CLI probe was blocked by its IPC socket, then rerun without that socket.
 - Claude reports **86/86 against throwaway Postgres** in the fix section. This is implementer-reported evidence, not independently reproduced here. Postgres storage/migration/concurrency and HTTP response/privacy execution therefore remain independent-verification limitations, rather than unresolved code findings. Existing separate security-review, TRUST_PROXY and deployed smoke-check prerequisites still apply; this verdict is not deployment approval.
 
-
 ## Review: pro-gating Phase 3
 
 **Verdict: CHANGES REQUIRED** (2026-10-19). No P0/P1 found; three P2 correctness/compatibility issues below.
@@ -1693,7 +1680,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `git diff --check`: **passed** before review append. Supplemental scheduler/presentation probes ran from memory without modifying source/tests.
 - No live native UI or deployed endpoint smoke run. Local server binding is restricted, and the Phase 2 endpoint is not deployed per handoff. D9 release gates remain: resolve findings, rerun affected regressions, complete deployed backend smoke checks and the separate license-sensitive security review. This verdict is not release approval.
 
-
 ## Re-review: pro-gating Phase 3 round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). All three prior P2 findings are resolved by inspection; no new P0/P1/P2 introduced by the fixes found. Native HTTP regression execution remains limited by denied loopback binding.
@@ -1722,7 +1708,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `cargo clippy --locked --all-targets`, default and `--features app-store`: **passed**. Warnings remain in unchanged export/MSRV, MySQL formatting and credential-identity test code; App Store additionally warns to use its dedicated build script for distributable artifacts.
 - `git diff --check`: **passed** before this append.
 - No live native UI or deployed-endpoint smoke run. D9 deployed-backend checks and the separate license-sensitive security review remain release gates; this verdict is not release approval.
-
 
 ## Review: pro-gating UI follow-ups (a122a98..06d1374)
 
@@ -1785,7 +1770,6 @@ Scope: read AGENTS.md, .agent/WORKFLOW.md and referenced RTK guidance first. Rev
 - git diff --check HEAD: **passed** before append.
 - No live desktop/browser, screen-reader or native-dialog smoke run. Real positioning, close-animation focus behavior, light/dark and platform dialog close/Escape remain unverified. These limits do not reopen settled decisions.
 
-
 ## Re-review: pro-gating UI follow-ups round 3
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). Remaining initial-focus P2 resolved; no new P0/P1/P2 found in the scoped changes.
@@ -1809,7 +1793,6 @@ No new P0/P1/P2 found. Shared session mode remains authoritative for picker, pan
 - `npm run build`: **passed**, exit 0. Existing `node:zlib` browser externalization, mixed static/dynamic import and large-chunk warnings remain.
 - `git diff --check HEAD`: **passed** before append.
 - No live desktop/browser or screen-reader run performed. Lifecycle regressions use jsdom and substitute third-party positioning; real portal/layout behavior, visual appearance and platform focus behavior remain unverified. Real-wrapper regressions initialize selected Agent with Pro; selected Manual/Free initial focus follows the same indexed implementation but is not separately exercised in that suite. Native dialog close/Escape on each OS remains manual, as stated in the plan. These are verification limits, not additional findings or reopened product decisions.
-
 
 ## Review: lost-key portal link (dbaefce)
 
@@ -1838,7 +1821,6 @@ Scope: read AGENTS.md and .agent/WORKFLOW.md first, then referenced RTK guidance
 - `git diff --check f886bbc dbaefce`: **passed**.
 - No live desktop/browser, native opener/mail client, Polar sign-in/recovery, or packaged App Store smoke run performed. No Rust tests or App Store build run: backend/configuration unchanged; their behavior was checked by source inspection. Passing jsdom tests do not establish native navigation or the external portal's availability/key-recovery behavior. These limits and the P2 coverage gap prevent an unqualified VERIFIED verdict.
 
-
 ## Re-review: lost-key portal link round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). The original non-blocking P2 is **partially resolved, not closed**. No new P0/P1/P2 or functional regression found in this commit.
@@ -1864,7 +1846,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - From `src-tauri/`, `cargo test --locked distribution --features app-store`: **passed**, 8 distribution tests, 442 filtered out, exit 0 (library target has 0 matching tests). Build warns that invoking Cargo without the Tauri CLI leaves `macos-private-api` enabled; this verifies feature-selected policy tests, not an App Store submission artifact.
 - `git diff --check dbaefce 5d03370`: **passed**.
 - No live desktop/native mail client, Polar recovery, visual UI or packaged App Store smoke run performed. No new runtime behavior is introduced by this commit; passing tests and source inspection support retaining the prior non-blocking verdict, but do not justify declaring the original P2 fully resolved.
-
 
 ## Review: subscription-renewal Phase 1 (backend)
 
@@ -1951,7 +1932,6 @@ No new P0–P3 finding identified. Both remaining requested test gaps are addres
 - PostgreSQL integration tests skipped; no database server, live Polar, SMTP or deployment checks attempted. The plan's **219/219 with PostgreSQL** remains implementer evidence, not independently reproduced. Existing Vite CommonJS/native-config-loader warning remains non-blocking.
 - Remaining verification: run the unchanged full suite with permitted loopback and PostgreSQL. Status reflects these environmental limits; neither prior P2 remains an implementation/test-coverage change request.
 
-
 ## Review: subscription-renewal Phase 2 (app)
 
 Status: CHANGES REQUIRED
@@ -1983,7 +1963,6 @@ Reviewed 2026-10-20 against the Goal table, R1, R6, Tests and Phase 2 implementa
 - Focused `cargo test renewal_fields_`: **4 passed, 1 failed** (450 filtered). Parsing, payload clearing, entitlement independence and old-state loading passed; lifecycle case stops at loopback server creation (`src-tauri/src/license.rs:2055`) with PermissionDenied.
 - App Store build/Cargo-feature runs reported by the implementer were not independently rerun; permitted default checks plus static flavor-policy review are recorded above. No live desktop visual check, external network calls, backend execution, Polar lookup or backend restart performed. Lifecycle HTTP coverage still needs a loopback-enabled environment; UI layout still needs the planned manual check.
 - Only `.agent/REVIEW.md` edited. No application changes, staging or commits.
-
 
 ## Re-review: subscription-renewal Phase 2 (app) round 1
 
@@ -2017,7 +1996,6 @@ No new P0–P2 production correctness, security or privacy finding identified. S
 - Focused `cargo test --offline renewal_` and `cargo test --offline --features app-store renewal_`: each **5 passed, 1 failed**, 450 filtered. Alias parsing (including non-null end dates), payload clearing, entitlement independence and old-state loading pass. The same lifecycle test is blocked by loopback binding under both feature sets. App Store emits the existing warning about direct Cargo invocation retaining `macos-private-api`; this is not an App Store artifact build.
 - No emitting frontend builds, full App Store Rust suite, desktop visual inspection, live Polar/backend calls or network documentation lookup performed. Plan-reported Direct/App Store builds and unrestricted 441/15 Cargo results remain implementer evidence. Persistence/HTTP lifecycle execution still needs a loopback-enabled environment; layout still needs the planned manual inspection.
 - Status reflects the two small remaining P3 test fixes above, separately from environmental verification limits. Only `.agent/REVIEW.md` edited; no staging or commits.
-
 
 ## Re-review: subscription-renewal Phase 2 (app) round 2
 
