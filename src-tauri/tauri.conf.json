@@ -44,6 +44,7 @@
       "signingIdentity": "Developer ID Application: Tony Pham (B3X2G545LX)",
       "entitlements": "entitlements.mac.plist",
       "hardenedRuntime": true,
+      "minimumSystemVersion": "13.3",
       "dmg": {
         "windowSize": {
           "width": 660,
