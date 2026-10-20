@@ -9,6 +9,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import { showMessage } from "src/lib/system-dialog";
+import { KeyIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -52,10 +53,13 @@ export function RenameRedisKeyDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
-      <DialogHeader>
-        <DialogTitle>Rename Redis key</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <KeyIcon className="size-4 text-neutral-600" />
+          Rename Redis key
+        </DialogTitle>
       </DialogHeader>
-      <DialogContent className="gap-2 pt-0">
+      <DialogContent className="gap-2">
         <p className="text-sm text-neutral-700">
           Enter a new name for <strong>{keyName}</strong>.
         </p>
@@ -63,11 +67,11 @@ export function RenameRedisKeyDialog({
           value={nextName}
           onInput={(e) => setNextName((e.target as HTMLInputElement).value)}
           placeholder="New key name"
-          className="h-10 rounded-lg border border-neutral-300 text-sm"
+          className="h-9 rounded-lg border border-neutral-300 text-sm"
           autoFocus
         />
       </DialogContent>
-      <DialogFooter>
+      <DialogFooter className="justify-end">
         <Button variant="outline" onClick={onClose} disabled={renaming}>
           Cancel
         </Button>

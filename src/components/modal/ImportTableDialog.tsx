@@ -20,6 +20,7 @@ import { Table } from "src/components/common/Table";
 import { showMessage } from "src/lib/system-dialog";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import { RestoreIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -145,20 +146,23 @@ export function ImportTableDialog({
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} size={progress ? "sm" : "lg"}>
-        <DialogHeader>
-          <DialogTitle className="text-base">Import CSV data</DialogTitle>
-          <DialogDescription>
+      <Dialog open={open} onClose={onClose} size={progress ? "sm" : "xl"}>
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <RestoreIcon className="size-4 text-neutral-600" />
+            Import CSV data
+          </DialogTitle>
+          <DialogDescription className="truncate dark:text-neutral-400">
             Import the CSV data into the selected table.
           </DialogDescription>
         </DialogHeader>
-        <DialogContent className="py-0">
+        <DialogContent className="gap-2">
           {dataPreview && (
             <>
               <div class="space-y-2">
                 <p class="flex items-center gap-2 text-sm font-medium">
                   Table{" "}
-                  <span class="rounded border border-neutral-200 px-2 py-0.5 font-mono text-xs shadow">
+                  <span class="rounded-md border border-neutral-200 px-2 py-1 font-mono text-xs shadow">
                     {schema}.{tableName}
                   </span>
                 </p>
@@ -197,32 +201,28 @@ export function ImportTableDialog({
               </div>
 
               <OverlayScrollArea
-                className="max-h-40 rounded border border-neutral-200"
+                className="max-h-40 rounded-lg border border-neutral-200"
                 horizontal
                 vertical
               >
-                <table class="w-full text-xs">
-                  <thead class="sticky top-0 bg-neutral-50">
+                <table class="w-full">
+                  <thead class="sticky top-0 bg-neutral-50 text-sm">
                     <tr>
-                      <th class="px-2 py-1 text-left font-medium">
-                        Table column
-                      </th>
-                      <th class="px-2 py-1 text-left font-medium">Type</th>
-                      <th class="px-2 py-1 text-left font-medium">
-                        CSV column
-                      </th>
+                      <th class="p-2 text-left font-medium">Table column</th>
+                      <th class="p-2 text-left font-medium">Data type</th>
+                      <th class="p-2 text-left font-medium">CSV column</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody class="text-xs">
                     {columns.map((column) => (
                       <tr key={column.name} class="border-t border-neutral-100">
                         <td class="px-2 py-1 font-mono">{column.name}</td>
-                        <td class="px-2 py-1 text-neutral-500">
+                        <td class="px-2 py-1 font-mono">
                           {column.db_type || "text"}
                         </td>
                         <td class="px-2 py-1">
                           <select
-                            class="w-full rounded border border-neutral-200 bg-white px-2 py-1"
+                            class="h-6 w-full rounded border border-neutral-200 bg-white px-2 py-1 font-mono! text-xs!"
                             value={
                               columnMapping[column.name] == null
                                 ? ""
@@ -255,12 +255,14 @@ export function ImportTableDialog({
                 </table>
               </OverlayScrollArea>
 
-              <div class="h-48 overflow-hidden rounded border border-neutral-200">
+              <div class="mt-2 max-h-48 overflow-hidden rounded-lg">
+                <p class="mb-1 py-1 text-sm font-medium">Table preview</p>
                 <Table
                   columns={tableColumns}
                   data={tableData}
                   showEmptyMessage={true}
                   keyExtractor={(_, i) => i}
+                  className="rounded-lg"
                 />
               </div>
               <p class="text-xs text-neutral-600">

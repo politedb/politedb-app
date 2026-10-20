@@ -12,6 +12,8 @@ import {
   ArrowRightIcon,
   ChatPlusIcon,
   ChevronDownIcon,
+  ClockIcon,
+  EditIcon,
   MinusIcon,
   MoreVerticalIcon,
   ShareIcon,
@@ -747,24 +749,28 @@ export function AiAssistantChatArea(props: {
         </div>
       </div>
 
-      <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} size="sm">
+      <Dialog open={renameOpen} onClose={() => setRenameOpen(false)} size="md">
         <form
           onSubmit={(event) => {
             event.preventDefault();
             submitRename();
           }}
         >
-          <DialogHeader>
-            <DialogTitle>Rename Chat</DialogTitle>
+          <DialogHeader className="border-b border-neutral-200">
+            <DialogTitle className="flex items-center gap-2 font-semibold">
+              <EditIcon className="size-4.5 shrink-0" />
+              Rename Chat
+            </DialogTitle>
           </DialogHeader>
-          <DialogContent className="pt-0">
+          <DialogContent className="pt-2">
             <Input
+              label="Chat name"
               value={renameTitle}
               onValueChange={setRenameTitle}
-              placeholder="Chat name"
+              placeholder="Enter new name..."
               aria-label="Chat name"
               autofocus
-              className="border border-neutral-200 bg-white text-sm"
+              className="h-9 border border-neutral-200 bg-white text-sm"
             />
           </DialogContent>
           <DialogFooter className="pt-0">
@@ -785,46 +791,56 @@ export function AiAssistantChatArea(props: {
       <Dialog
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        size="sm"
+        size="md"
+        // The header stays put; only the session list scrolls.
+        className="flex max-h-[min(50rem,86vh)] min-h-200 flex-col overflow-hidden"
       >
-        <DialogHeader>
-          <DialogTitle>Chat History</DialogTitle>
+        <DialogHeader className="shrink-0 border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2 font-semibold">
+            <ClockIcon className="size-4.5 shrink-0" />
+            Chat History
+          </DialogTitle>
         </DialogHeader>
-        <DialogContent className="gap-2 pt-0 pb-6">
-          {chatSessions.map((session) => (
-            <div
-              key={session.id}
-              class={cn(
-                "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
-                session.id === activeSessionId
-                  ? "border-blue-200 bg-blue-50"
-                  : "border-neutral-200 bg-white"
-              )}
-            >
-              <button
-                type="button"
-                class="min-w-0 flex-1 text-left"
-                onClick={() => {
-                  onSwitchSession(session.id);
-                  setHistoryOpen(false);
-                }}
+        <DialogContent className="min-h-0 flex-1 p-0">
+          <OverlayScrollArea
+            className="min-h-0 flex-1"
+            contentClassName="space-y-2 px-6 py-4"
+          >
+            {chatSessions.map((session) => (
+              <div
+                key={session.id}
+                class={cn(
+                  "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                  session.id === activeSessionId
+                    ? "border-blue-200 bg-blue-50"
+                    : "border-neutral-200 bg-white"
+                )}
               >
-                <div class="truncate text-sm font-semibold text-neutral-900">
-                  {session.title || "New Chat"}
-                </div>
-                <div class="text-xs text-neutral-500">
-                  {new Date(session.updatedAt).toLocaleString()}
-                </div>
-              </button>
-              <button
-                type="button"
-                class="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                onClick={() => onDeleteSession(session.id)}
-              >
-                Delete
-              </button>
-            </div>
-          ))}
+                <button
+                  type="button"
+                  class="min-w-0 flex-1 text-left"
+                  onClick={() => {
+                    onSwitchSession(session.id);
+                    setHistoryOpen(false);
+                  }}
+                >
+                  <div class="truncate text-sm font-semibold text-neutral-900">
+                    {session.title || "New Chat"}
+                  </div>
+                  <div class="text-xs text-neutral-500">
+                    {new Date(session.updatedAt).toLocaleString()}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                  onClick={() => onDeleteSession(session.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </OverlayScrollArea>
         </DialogContent>
       </Dialog>
     </>

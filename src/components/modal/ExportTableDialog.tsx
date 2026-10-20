@@ -33,6 +33,7 @@ import { cn } from "src/utils/cn";
 import { showMessage } from "src/lib/system-dialog";
 import { useProGate } from "src/hooks/useProGate";
 import { ProBadge } from "src/components/license/ProBadge";
+import { BackupIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -328,8 +329,6 @@ export function ExportTableDialog({
     !maskingPolicy ||
     !maskValidation?.ok;
 
-  const formatLabel = (format || "csv").toUpperCase();
-
   return (
     <>
       <Dialog
@@ -342,8 +341,9 @@ export function ExportTableDialog({
           "max-h-[80vh]"
         )}
       >
-        <DialogHeader className="shrink-0 pr-10">
-          <DialogTitle className="text-base dark:text-neutral-100">
+        <DialogHeader className="shrink-0 border-b border-neutral-200 pr-10">
+          <DialogTitle className="flex items-center gap-2 text-base dark:text-neutral-100">
+            <BackupIcon className="size-4.5 text-neutral-600" />
             Export data
           </DialogTitle>
           <DialogDescription className="truncate dark:text-neutral-400">
@@ -361,7 +361,7 @@ export function ExportTableDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <DialogContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden py-0">
+        <DialogContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           {!progress ? (
             <>
               <div class="shrink-0 space-y-3">
@@ -515,7 +515,7 @@ export function ExportTableDialog({
                 onClick={onExport}
                 disabled={exportDisabled}
               >
-                {exporting ? "Exporting..." : `Export ${formatLabel}`}
+                {exporting ? "Exporting..." : "Export"}
               </Button>
             )}
           </div>

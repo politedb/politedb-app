@@ -14,6 +14,7 @@ import { Field } from "src/components/form";
 import { Select } from "src/components/common/Select";
 import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
+import { KeyIcon } from "../icons";
 
 const REFERENTIAL_ACTIONS = [
   "NO ACTION",
@@ -137,24 +138,27 @@ export function ForeignKeyDialog(props: {
     <Dialog
       open={open}
       onClose={onClose}
-      size="sm"
+      size="md"
       showCloseButton={true}
       closeOnOutsideClick={true}
     >
-      <DialogHeader>
-        <DialogTitle>Foreign Key</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <KeyIcon className="size-4 text-neutral-600" />
+          Foreign Key
+        </DialogTitle>
         <DialogDescription>Configure the foreign key.</DialogDescription>
       </DialogHeader>
-      <DialogContent className="gap-4 pt-0">
-        <Field className="grid-cols-[120px_1fr]" label="Table">
+      <DialogContent className="gap-2">
+        <Field className="h-9 grid-cols-[140px_1fr]" label="Table">
           <p class="text-sm font-medium text-neutral-600">
             {fk?.table_name ?? tableName}
           </p>
         </Field>
-        <Field className="grid-cols-[120px_1fr]" label="Columns">
+        <Field className="h-9 grid-cols-[140px_1fr]" label="Columns">
           <p class="text-sm font-medium text-neutral-600">{originColumn}</p>
         </Field>
-        <Field className="grid-cols-[120px_1fr]" label="Referenced Table">
+        <Field className="grid-cols-[140px_1fr]" label="Referenced Table">
           <Select
             value={refTable ?? ""}
             class="text-sm! font-medium! text-neutral-600!"
@@ -173,7 +177,7 @@ export function ForeignKeyDialog(props: {
             ))}
           </Select>
         </Field>
-        <Field className="grid-cols-[120px_1fr]" label="Referenced Columns">
+        <Field className="grid-cols-[140px_1fr]" label="Referenced Columns">
           <Select
             value={refColumn ?? ""}
             class="text-sm! font-medium! text-neutral-600!"
@@ -193,7 +197,7 @@ export function ForeignKeyDialog(props: {
             ))}
           </Select>
         </Field>
-        <Field className="grid-cols-[120px_1fr]" label="On Update">
+        <Field className="grid-cols-[140px_1fr]" label="On Update">
           <Select
             value={onUpdate ?? "NO ACTION"}
             class="text-sm! font-medium! text-neutral-600!"
@@ -210,7 +214,7 @@ export function ForeignKeyDialog(props: {
             ))}
           </Select>
         </Field>
-        <Field className="grid-cols-[120px_1fr]" label="On Delete">
+        <Field className="grid-cols-[140px_1fr]" label="On Delete">
           <Select
             value={onDeleteAction ?? "NO ACTION"}
             class="text-sm! font-medium! text-neutral-600!"
@@ -228,19 +232,19 @@ export function ForeignKeyDialog(props: {
           </Select>
         </Field>
       </DialogContent>
-      <DialogFooter className="justify-end pt-1">
+      <DialogFooter className="justify-end">
         {onDelete && fk && (
           <Button variant="outline" onClick={onDelete}>
             Delete
           </Button>
         )}
         <Button
-          className="px-6!"
+          className="px-6"
           variant="default"
           onClick={handleSubmit(onSubmit)}
           disabled={!isDirty}
         >
-          OK
+          Save
         </Button>
       </DialogFooter>
     </Dialog>

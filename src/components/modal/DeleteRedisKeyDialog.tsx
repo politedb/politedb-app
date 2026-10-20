@@ -8,6 +8,7 @@ import {
 } from "src/components/common/Dialog";
 import { Button } from "src/components/common/Button";
 import { showMessage } from "src/lib/system-dialog";
+import { KeyIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -40,12 +41,16 @@ export function DeleteRedisKeyDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
-      <DialogHeader>
-        <DialogTitle>Delete Redis key '{keyName}'</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <KeyIcon className="size-4.5 text-neutral-600" />
+          Delete Redis key "{keyName}"
+        </DialogTitle>
       </DialogHeader>
-      <DialogContent className="py-1">
+      <DialogContent className="gap-2">
         <p className="text-sm text-neutral-800">
-          Permanently delete the Redis key <strong>{keyName}</strong>? This
+          Permanently delete the Redis key{" "}
+          <span class="font-semibold text-neutral-900">{keyName}</span>? This
           cannot be undone.
         </p>
       </DialogContent>

@@ -9,6 +9,7 @@ import {
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import type { DatabaseEditorMode } from "src/hooks/useDatabases";
+import { DatabaseIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -32,20 +33,21 @@ export function DatabaseEditorDialog({
   return (
     <Dialog
       open={open}
-      size="xs"
+      size="sm"
       onClose={onClose}
       closeOnOutsideClick={!busy}
       closeOnEsc={!busy}
     >
-      <DialogHeader>
-        <DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <DatabaseIcon className="size-4.5 text-neutral-600" />
           {mode === "create" ? "New database" : "Rename database"}
         </DialogTitle>
         <DialogDescription>
           Configure the name for your database.
         </DialogDescription>
       </DialogHeader>
-      <DialogContent className="gap-2 pt-0">
+      <DialogContent className="gap-2">
         <Input
           value={nameDraft}
           label="Database name"

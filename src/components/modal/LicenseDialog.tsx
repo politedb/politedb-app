@@ -27,6 +27,7 @@ import {
   LICENSE_SUPPORT_EMAIL,
   openLicenseRecoveryMail,
 } from "src/lib/license/support";
+import { KeyIcon } from "../icons";
 
 const PRICING_URL = "https://politedb.com/pricing";
 /** Inbox for license recovery; send from the email used at purchase. */
@@ -97,8 +98,9 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
   return (
     <>
       <Dialog open={open} onClose={onClose} size="md">
-        <DialogHeader>
-          <DialogTitle>
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <KeyIcon className="size-4 text-neutral-600" />
             {lostKeyHelp ? "Recover license key" : "License Key"}
           </DialogTitle>
           <DialogDescription>
@@ -108,9 +110,9 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
           </DialogDescription>
         </DialogHeader>
 
-        <DialogContent className="gap-3 pt-0">
+        <DialogContent className="gap-2">
           {lostKeyHelp ? (
-            <div class="space-y-3 text-sm text-slate-700">
+            <div class="space-y-2 text-sm text-slate-700">
               <ol class="list-decimal space-y-2 pl-5">
                 <li>
                   Send an email{" "}
@@ -216,7 +218,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
           )}
         </DialogContent>
 
-        <DialogFooter className="justify-between pt-1">
+        <DialogFooter className="justify-between">
           {!lostKeyHelp && (
             <Button variant="shadow" onClick={() => void handleLostKey()}>
               Lost license key?

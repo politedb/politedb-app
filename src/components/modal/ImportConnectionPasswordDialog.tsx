@@ -9,6 +9,7 @@ import {
 } from "src/components/common/Dialog";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
+import { LockIcon } from "../icons";
 
 export function ImportConnectionPasswordDialog(props: {
   open: boolean;
@@ -43,12 +44,15 @@ export function ImportConnectionPasswordDialog(props: {
 
   return (
     <Dialog open={open} onClose={onClose} size="sm" closeOnOutsideClick={!busy}>
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <LockIcon className="size-4 text-neutral-600" />
+          {title}
+        </DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="pt-1">
+      <DialogContent className="gap-2">
         <Input
           type="password"
           value={password}
@@ -62,18 +66,12 @@ export function ImportConnectionPasswordDialog(props: {
         ) : null}
       </DialogContent>
 
-      <DialogFooter className="gap-2 pt-1">
-        <Button
-          variant="shadow"
-          className="py-1.5"
-          onClick={onClose}
-          disabled={busy}
-        >
+      <DialogFooter className="gap-2">
+        <Button variant="shadow" onClick={onClose} disabled={busy}>
           Cancel
         </Button>
         <Button
           variant="default"
-          className="py-1.5"
           onClick={handleSubmit}
           loading={busy}
           disabled={!password.trim()}

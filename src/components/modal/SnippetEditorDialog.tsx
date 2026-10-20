@@ -137,7 +137,7 @@ export function SnippetEditorDialog({
   return (
     <Dialog open={open} onClose={onClose} size="lg" showCloseButton>
       <DialogHeader className="border-b border-neutral-200">
-        <DialogTitle>
+        <DialogTitle className="flex items-center gap-2">
           {title ?? (initial?.id ? "Edit snippet" : "Save snippet")}
         </DialogTitle>
       </DialogHeader>

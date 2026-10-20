@@ -49,8 +49,8 @@ const SECTIONS: Array<{
     label: "Privacy & Analytics",
     caption: "Telemetry controls",
   },
-  { id: "license", label: "License key", caption: "Activation and plan" },
   { id: "keyboard", label: "Keyboard shortcuts", caption: "Command hotkeys" },
+  { id: "license", label: "License key", caption: "Activation and plan info" },
 ];
 
 export function SettingsDialog(props: Props) {
@@ -135,7 +135,7 @@ export function SettingsDialog(props: Props) {
       className="flex h-[min(620px,86vh)] max-w-5xl flex-col overflow-hidden"
     >
       <DialogHeader className="border-b border-slate-200">
-        <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
+        <DialogTitle className="flex items-center gap-2 font-semibold">
           <SettingsIcon className="size-4.5" />
           General settings
         </DialogTitle>
@@ -161,14 +161,6 @@ export function SettingsDialog(props: Props) {
                   onClick={() => setActiveSection(section.id)}
                 >
                   <div class="text-sm font-semibold">{section.label}</div>
-                  <div
-                    class={cn(
-                      "mt-0.5 truncate text-xs",
-                      selected ? "text-white" : "text-slate-500"
-                    )}
-                  >
-                    {section.caption}
-                  </div>
                 </button>
               );
             })}

@@ -338,14 +338,16 @@ export function SaveChangesDialog({
       closeOnOutsideClick={false}
       className="flex max-h-[min(90vh,50rem)] flex-col overflow-hidden"
     >
-      <DialogHeader className="shrink-0">
-        <DialogTitle>Review changes before saving</DialogTitle>
+      <DialogHeader className="shrink-0 border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          Review changes before saving
+        </DialogTitle>
         <DialogDescription>
           Review all changes before saving to the database.
         </DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="min-h-0 flex-1 overflow-hidden py-1">
+      <DialogContent className="min-h-0 flex-1 gap-2 overflow-hidden">
         <OverlayScrollArea
           className="h-full min-h-0"
           contentClassName="space-y-4"
@@ -510,10 +512,10 @@ export function SaveChangesDialog({
       </DialogContent>
 
       <DialogFooter className="shrink-0">
-        <Button className="py-1.5" variant="outline" onClick={onClose}>
+        <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button className="py-1.5" variant="default" onClick={onConfirm}>
+        <Button variant="default" onClick={onConfirm}>
           Confirm & Apply
         </Button>
       </DialogFooter>

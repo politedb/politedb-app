@@ -11,6 +11,7 @@ import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import { Checkbox } from "src/components/common/Checkbox";
 import { showMessage } from "src/lib/system-dialog";
+import { TableIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -75,21 +76,25 @@ export function CloneTableDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="md">
-      <DialogHeader>
-        <DialogTitle>Clone table '{sourceTableName}'</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <TableIcon className="size-4 text-neutral-600" />
+          Clone table "{sourceTableName}"
+        </DialogTitle>
         <DialogDescription>
-          Create a copy of <strong>{sourceTableName}</strong> in the same
-          schema.
+          Create a copy of{" "}
+          <span class="font-semibold text-neutral-900">{sourceTableName}</span>{" "}
+          in the same schema.
         </DialogDescription>
       </DialogHeader>
-      <DialogContent className="py-0">
-        <div class="space-y-3">
+      <DialogContent>
+        <div class="space-y-1">
           <Input
             label="New table name"
             value={newTableName}
             onValueChange={setNewTableName}
             placeholder="e.g. my_table_copy"
-            className="mb-1 rounded-md border border-neutral-300 px-2 py-1 text-sm"
+            className="mb-1 h-10 rounded-md border border-neutral-300 px-2 py-1 text-sm"
             disabled={loading}
           />
           {showCopyDataOption && (

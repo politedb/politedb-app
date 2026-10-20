@@ -14,7 +14,8 @@ import {
 } from "src/components/icons";
 import type { NavId, NavItem } from "src/types";
 import { useAppUpdater } from "src/hooks/useAppUpdater";
-import { formatLicensePlanLabel, openExternalUrl } from "src/lib/tauri";
+import { openExternalUrl } from "src/lib/tauri";
+import { accountPlanLabel } from "src/lib/license/planLabel";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import {
@@ -49,9 +50,7 @@ export function LeftNav(props: {
   const { active, onChange } = props;
 
   const { updateAvailable, isUpdating, installUpdate } = useAppUpdater();
-  const planLabel = useLicenseStore((s) =>
-    formatLicensePlanLabel(s.state?.plan_name)
-  );
+  const planLabel = useLicenseStore((s) => accountPlanLabel(s.state ?? null));
   const [openSettings, setOpenSettings] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =

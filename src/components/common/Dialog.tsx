@@ -122,7 +122,7 @@ export function Dialog({
               type="button"
               onClick={onClose}
               class={cn(
-                "absolute top-4 right-4 z-10 rounded-full p-1 text-neutral-400 transition-colors",
+                "absolute top-3 right-4 z-10 rounded-full p-1 text-neutral-400 transition-colors",
                 "hover:bg-neutral-100 hover:text-neutral-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none"
               )}
               aria-label="Close dialog"
@@ -139,7 +139,7 @@ export function Dialog({
 }
 
 export function DialogHeader({ children, className }: DialogHeaderProps) {
-  return <div class={cn("px-6 py-4", className)}>{children}</div>;
+  return <div class={cn("px-6 py-3", className)}>{children}</div>;
 }
 
 export function DialogTitle({

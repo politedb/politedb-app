@@ -40,10 +40,12 @@ export function DropTableDialog({
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
-      <DialogHeader>
-        <DialogTitle>Drop table '{tableName}'</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          Drop table "{tableName}"
+        </DialogTitle>
       </DialogHeader>
-      <DialogContent className="py-1">
+      <DialogContent className="pb-1">
         <p className="text-sm text-neutral-800">
           Permanently drop the table <strong>{tableName}</strong> and all its
           data? This cannot be undone.

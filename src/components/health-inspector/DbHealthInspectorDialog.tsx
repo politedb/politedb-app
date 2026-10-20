@@ -2,6 +2,7 @@ import { useMemo, useState } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -13,6 +14,7 @@ import { Skeleton } from "src/components/common/Skeleton";
 import {
   CopyCheckIcon,
   CopyIcon,
+  DbInspectorIcon,
   RefreshCwIcon,
   StopIcon,
 } from "src/components/icons";
@@ -730,14 +732,17 @@ export function DbHealthInspectorDialog(props: Props) {
       className="flex h-[80vh] flex-col overflow-hidden"
     >
       <DialogHeader className="shrink-0 border-b border-neutral-200 pr-12">
-        <DialogTitle>Database Health Inspector</DialogTitle>
-        <p class="mt-1 text-sm text-neutral-600">
+        <DialogTitle className="flex items-center gap-2">
+          <DbInspectorIcon className="size-4 text-neutral-600" />
+          Database Health Inspector
+        </DialogTitle>
+        <DialogDescription>
           Read-only PostgreSQL snapshot
           {databaseLabel ? ` · ${databaseLabel}` : ""}
           {snapshot?.startedAt
             ? ` · Started ${formatCollectedAt(snapshot.startedAt)}`
             : ""}
-        </p>
+        </DialogDescription>
       </DialogHeader>
 
       {!hasPro ? (
