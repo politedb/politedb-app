@@ -298,7 +298,7 @@ export function DatabaseManagerDialog({
             ? This cannot be undone.
           </p>
         </DialogContent>
-        <DialogFooter>
+        <DialogFooter className="pt-1">
           <Button
             variant="outline"
             onClick={() => {
