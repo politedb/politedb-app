@@ -16,6 +16,7 @@ describe("ExportColumnEditor", () => {
         columnNames={columns}
         selectedColumns={columns}
         policy={policy}
+        maskingEnabled
         selectedCount={columns.length}
         outputCount={columns.length}
         onToggleColumn={vi.fn()}
@@ -34,7 +35,7 @@ describe("ExportColumnEditor", () => {
     expect(selectAll.checked).toBe(true);
     expect(screen.getByText("Treatment")).toBeTruthy();
     expect(screen.getByTitle("Synthetic preview — not live data")).toBeTruthy();
-    expect(screen.getByText("Masking & null export notes")).toBeTruthy();
+    expect(screen.getByText("Notes")).toBeTruthy();
     for (const name of columns) {
       expect(screen.getByLabelText(`Include column ${name}`)).toBeTruthy();
       const treatment = screen.getByLabelText(
@@ -44,7 +45,29 @@ describe("ExportColumnEditor", () => {
     }
   });
 
-  it("shows synthetic Keep preview by default and Redact when chosen", () => {
+  it("is a plain column picker while masking is off", () => {
+    const policy = buildDefaultMaskedPolicy(columns);
+    render(
+      <ExportColumnEditor
+        columnNames={columns}
+        selectedColumns={columns}
+        policy={policy}
+        maskingEnabled={false}
+        selectedCount={columns.length}
+        outputCount={columns.length}
+        onToggleColumn={vi.fn()}
+        onToggleSelectAll={vi.fn()}
+        onRuleChange={vi.fn()}
+      />
+    );
+    expect(screen.getByLabelText("Include column email")).toBeTruthy();
+    expect(screen.queryByText("Treatment")).toBeNull();
+    expect(screen.queryByLabelText("Treatment for email")).toBeNull();
+    expect(screen.queryByTitle("Synthetic preview — not live data")).toBeNull();
+    expect(screen.queryByText("Notes")).toBeNull();
+  });
+
+  it("shows a synthetic preview only for masked columns", () => {
     let policy = buildDefaultMaskedPolicy(columns);
     policy = withColumnRule(policy, "email", "redact");
     render(
@@ -52,6 +75,7 @@ describe("ExportColumnEditor", () => {
         columnNames={columns}
         selectedColumns={columns}
         policy={policy}
+        maskingEnabled
         selectedCount={columns.length}
         outputCount={columns.length}
         onToggleColumn={vi.fn()}
@@ -64,7 +88,8 @@ describe("ExportColumnEditor", () => {
     expect(screen.getByTitle("Synthetic preview — not live data")).toBeTruthy();
     expect(screen.getByLabelText("Treatment for email")).toBeTruthy();
     expect(screen.getAllByText("[REDACTED]").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("ORIGINAL_VALUE").length).toBeGreaterThan(0);
+    // Kept columns have no synthetic value to preview.
+    expect(screen.queryByText("ORIGINAL_VALUE")).toBeNull();
   });
 
   it("keeps unchecked columns visible with disabled treatment", () => {
@@ -74,6 +99,7 @@ describe("ExportColumnEditor", () => {
         columnNames={columns}
         selectedColumns={["id", "email"]}
         policy={policy}
+        maskingEnabled
         selectedCount={2}
         outputCount={2}
         onToggleColumn={vi.fn()}
@@ -97,6 +123,7 @@ describe("ExportColumnEditor", () => {
     const onToggleSelectAll = vi.fn();
     render(
       <ExportColumnEditor
+        maskingEnabled
         columnNames={columns}
         selectedColumns={columns}
         policy={buildDefaultMaskedPolicy(columns)}
@@ -121,6 +148,7 @@ describe("ExportColumnEditor", () => {
     const onToggleSelectAll = vi.fn();
     render(
       <ExportColumnEditor
+        maskingEnabled
         columnNames={columns}
         selectedColumns={["id"]}
         policy={buildDefaultMaskedPolicy(["id"])}
@@ -138,7 +166,7 @@ describe("ExportColumnEditor", () => {
     expect(onToggleSelectAll).toHaveBeenCalledTimes(1);
   });
 
-  it("marks keep-original rows with amber indicator; internal omit still previews as omitted", () => {
+  it("shows no preview for kept rows; internal omit still previews as omitted", () => {
     let policy = buildDefaultMaskedPolicy(["email", "note"]);
     policy = withColumnRule(policy, "email", "keep");
     policy = withColumnRule(policy, "note", "omit");
@@ -148,6 +176,7 @@ describe("ExportColumnEditor", () => {
         columnNames={["email", "note"]}
         selectedColumns={["email", "note"]}
         policy={policy}
+        maskingEnabled
         selectedCount={2}
         outputCount={1}
         onToggleColumn={vi.fn()}
@@ -156,18 +185,24 @@ describe("ExportColumnEditor", () => {
       />
     );
 
-    expect(container.querySelector('[title="Keep original"]')).toBeTruthy();
+    // The per-row "keep" marker is gone; the footer summarises kept columns.
+    expect(container.querySelector('[title="Keep original"]')).toBeNull();
     // Internal omit compatibility: selected+omit still shows synthetic omitted preview
     expect(screen.getByText("(omitted)")).toBeTruthy();
   });
 
   it("expanded Preview disclosure stays in the fixed-height grid row", () => {
-    const policy = buildDefaultMaskedPolicy(["email", "note"]);
+    const policy = withColumnRule(
+      buildDefaultMaskedPolicy(["email", "note"]),
+      "email",
+      "redact"
+    );
     const { container } = render(
       <ExportColumnEditor
         columnNames={["email", "note"]}
         selectedColumns={["email", "note"]}
         policy={policy}
+        maskingEnabled
         selectedCount={2}
         outputCount={2}
         onToggleColumn={vi.fn()}
@@ -200,6 +235,7 @@ describe("ExportColumnEditor", () => {
         columnNames={["email"]}
         selectedColumns={["email"]}
         policy={policy}
+        maskingEnabled
         selectedCount={1}
         outputCount={1}
         onToggleColumn={vi.fn()}
@@ -223,6 +259,7 @@ describe("ExportColumnEditor", () => {
         columnNames={columns}
         selectedColumns={columns}
         policy={policy}
+        maskingEnabled
         selectedCount={columns.length}
         outputCount={columns.length}
         onToggleColumn={vi.fn()}
@@ -231,7 +268,7 @@ describe("ExportColumnEditor", () => {
       />
     );
 
-    const trigger = screen.getByText("Masking & null export notes");
+    const trigger = screen.getByText("Notes");
     const note = /Masking reduces data exposure/;
     expect(screen.queryByText(note)).toBeNull();
 

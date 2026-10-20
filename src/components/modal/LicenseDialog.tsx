@@ -13,11 +13,19 @@ import { useLicenseStore } from "src/stores/license";
 import { showMessage } from "src/lib/system-dialog";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import {
+  TrialStatusNote,
+  trialNote,
+} from "src/components/license/TrialStatusNote";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  LICENSE_SUPPORT_EMAIL,
+  openLicenseRecoveryMail,
+} from "src/lib/license/support";
 
 const PRICING_URL = "https://politedb.com/pricing";
 /** Inbox for license recovery; send from the email used at purchase. */
-const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
 
 export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
   const { open, onClose } = props;
@@ -31,6 +39,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
     refresh,
     deactivate,
     clearError,
+    trialSync: { status: trialSyncStatus },
   } = useLicenseStore();
   const [licenseKey, setLicenseKey] = useState("");
   const [lostKeyHelp, setLostKeyHelp] = useState(false);
@@ -50,10 +59,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
   }, [open, state?.license_key]);
 
   const isActive = (state?.status ?? "").toLowerCase() === "active";
-  const trialExpiresAt =
-    typeof state?.trial_expires_at === "number" ? state.trial_expires_at : null;
-  const isTrialExpired =
-    trialExpiresAt != null && trialExpiresAt <= Date.now() && !isActive;
+  const trial = trialNote(state ?? null, trialSyncStatus);
   const daysUntilExpires = formatDaysUntil(state?.expires_at);
 
   const handleActivate = async () => {
@@ -67,15 +73,14 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
     await openExternalUrl(PRICING_URL);
   };
 
-  const handleOpenRecoveryMail = async () => {
-    const subject = encodeURIComponent("PoliteDB license key recovery");
-    const body = encodeURIComponent(
-      "Please help me recover my license key. I purchased using this email address.\n"
-    );
-    const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    await openExternalUrl(mailto, (url) => {
-      window.location.href = url;
-    });
+  // Direct builds open the Polar customer portal, where buyers find their keys by
+  // purchase email; App Store builds cannot open it and show the email help instead.
+  const handleLostKey = async () => {
+    if (!DISTRIBUTION_FEATURES.externalPurchase) {
+      setLostKeyHelp(true);
+      return;
+    }
+    await openExternalUrl(LICENSE_PORTAL_URL);
   };
 
   useEffect(() => {
@@ -114,7 +119,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                   <button
                     type="button"
                     class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                    onClick={() => void handleOpenRecoveryMail()}
+                    onClick={() => void openLicenseRecoveryMail()}
                   >
                     {LICENSE_SUPPORT_EMAIL}
                   </button>
@@ -129,7 +134,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                 <button
                   type="button"
                   class="font-medium text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                  onClick={() => void handleOpenRecoveryMail()}
+                  onClick={() => void openLicenseRecoveryMail()}
                 >
                   open in mail app
                 </button>{" "}
@@ -154,23 +159,18 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                 If you have purchased a license key, please check your email to
                 see the license key.
               </div>
-              {trialExpiresAt ? (
-                <div
-                  class={cn(
-                    "rounded-xl border px-3 py-2 text-sm",
-                    isTrialExpired
-                      ? "border-amber-200 bg-amber-50 text-amber-700"
-                      : "border-slate-200 bg-slate-50 text-slate-600"
-                  )}
-                >
-                  {isTrialExpired
-                    ? `Free trial expired on ${formatDateTime(trialExpiresAt)}.`
-                    : `Free trial ends on ${formatDateTime(trialExpiresAt)}.`}
-                </div>
+              {trial ? (
+                <TrialStatusNote
+                  note={trial}
+                  className="rounded-xl border border-slate-200"
+                />
               ) : null}
             </div>
           ) : (
             <div class="rounded-xl border border-slate-200 p-3 text-sm">
+              {trial ? (
+                <TrialStatusNote note={trial} className="mb-3 rounded-lg" />
+              ) : null}
               <div class="space-y-2 text-neutral-500">
                 <div class="space-x-1">
                   <p>Managed by email:</p>
@@ -215,7 +215,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
 
         <DialogFooter className="justify-between pt-1">
           {!lostKeyHelp && (
-            <Button variant="shadow" onClick={() => setLostKeyHelp(true)}>
+            <Button variant="shadow" onClick={() => void handleLostKey()}>
               Lost license key?
             </Button>
           )}

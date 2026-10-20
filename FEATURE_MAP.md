@@ -88,7 +88,7 @@ Use this map to find the owning area before changing a feature. Prefer extending
 | App shell     | `src/main.tsx`, `src-tauri/src/main.rs`, `src-tauri/src/lib.rs`                      | App startup and Tauri plugin setup.       |
 | Window chrome | `src-tauri/src/window_chrome.rs`, frontend layout components                         | macOS window behavior and custom chrome.  |
 | Updater       | `src/lib/updater/`, `src-tauri/src/commands/updater.rs`                              | Release update checks and install flow.   |
-| License       | `src-tauri/src/license.rs`, `src-tauri/src/commands/license.rs`, frontend license UI | Activation, validation, and trial gating. |
+| License       | `src-tauri/src/license.rs`, `src-tauri/src/commands/license.rs`, `src/stores/license.ts`, `src/lib/license/proAccess.ts`, `src/hooks/useProGate.ts`, frontend license UI | Activation and validation. Pro access (paid license or trial) gates only the Pro features: AI agent mode, database backup/restore, the visual query analyzer, the health inspector, ER diagram SVG export and export masking. |
 
 ## Tests And Verification
 

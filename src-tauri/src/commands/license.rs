@@ -3,7 +3,7 @@ use std::process::Command;
 use tauri::AppHandle;
 
 use crate::distribution::{self, Distribution};
-use crate::license::{self, LicenseDeviceInfo, LicenseState};
+use crate::license::{self, LicenseDeviceInfo, LicenseOpError, LicenseState};
 
 #[tauri::command]
 pub fn license_device_info() -> Result<LicenseDeviceInfo, String> {
@@ -11,18 +11,21 @@ pub fn license_device_info() -> Result<LicenseDeviceInfo, String> {
 }
 
 #[tauri::command]
-pub fn license_state_load(app: AppHandle) -> Result<LicenseState, String> {
+pub async fn license_state_load(app: AppHandle) -> Result<LicenseState, LicenseOpError> {
     license::license_state_load(&app)
 }
 
 #[tauri::command]
-pub fn license_state_save(app: AppHandle, state: LicenseState) -> Result<LicenseState, String> {
-    license::license_state_save(&app, state)
+pub async fn license_state_save(
+    app: AppHandle,
+    state: LicenseState,
+) -> Result<LicenseState, LicenseOpError> {
+    license::license_state_save(&app, state).await
 }
 
 #[tauri::command]
-pub fn license_state_clear(app: AppHandle) -> Result<LicenseState, String> {
-    license::license_state_clear(&app)
+pub async fn license_state_clear(app: AppHandle) -> Result<LicenseState, LicenseOpError> {
+    license::license_state_clear(&app).await
 }
 
 #[tauri::command]
@@ -31,7 +34,7 @@ pub async fn license_activate(
     api_base: String,
     product: String,
     license_key: String,
-) -> Result<LicenseState, String> {
+) -> Result<LicenseState, LicenseOpError> {
     license::license_activate(&app, api_base, product, license_key).await
 }
 
@@ -40,8 +43,17 @@ pub async fn license_refresh(
     app: AppHandle,
     api_base: String,
     product: String,
-) -> Result<LicenseState, String> {
+) -> Result<LicenseState, LicenseOpError> {
     license::license_refresh(&app, api_base, product).await
+}
+
+#[tauri::command]
+pub async fn license_trial_sync(
+    app: AppHandle,
+    api_base: String,
+    product: String,
+) -> Result<LicenseState, LicenseOpError> {
+    license::license_trial_sync(&app, api_base, product).await
 }
 
 #[tauri::command]
@@ -49,7 +61,7 @@ pub async fn license_deactivate(
     app: AppHandle,
     api_base: String,
     product: String,
-) -> Result<LicenseState, String> {
+) -> Result<LicenseState, LicenseOpError> {
     license::license_deactivate(&app, api_base, product).await
 }
 

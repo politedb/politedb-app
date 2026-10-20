@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   grant: vi.fn(),
   submitQuestion: vi.fn(),
   cancel: vi.fn(),
+  submitArgs: null as null | { onAgentProLocked?: () => void },
 }));
 
 vi.mock("src/lib/tauri/aiAgent", async (importOriginal) => ({
@@ -18,7 +19,8 @@ vi.mock("src/lib/tauri/aiAgent", async (importOriginal) => ({
   aiAgentDataAccessGrant: (...a: unknown[]) => mocks.grant(...a),
 }));
 vi.mock("src/components/ai-assistant/hooks/useAiAssistantSubmit", () => ({
-  useAiAssistantSubmit: () => ({
+  useAiAssistantSubmit: (args: any) => ({
+    ...((mocks.submitArgs = args), {}),
     canSubmit: false,
     handleSubmit: vi.fn(),
     submitQuestion: mocks.submitQuestion,
@@ -92,7 +94,16 @@ vi.mock("src/components/icons", () => ({
   XIcon: () => <span>x</span>,
 }));
 
+import { act } from "@testing-library/preact";
+import type { LicenseState } from "src/lib/tauri";
+import { useLicenseStore } from "src/stores/license";
+import { useProUpgradeStore } from "src/stores/proUpgrade";
 import { AiAssistantPanel } from "./AiAssistantPanel";
+import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
+
+function setPro(pro_access: boolean) {
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+}
 
 function seedChat(scope: string) {
   localStorage.setItem(
@@ -139,6 +150,8 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  setPro(true);
+  useProUpgradeStore.setState({ feature: null });
   Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     value: vi.fn(),
@@ -180,5 +193,85 @@ describe("a pending Allow", () => {
     finish();
     await new Promise((r) => setTimeout(r, 20));
     expect(mocks.submitQuestion).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent mode without Pro", () => {
+  it("opens the upgrade dialog from a saved consent card instead of granting", async () => {
+    setPro(false);
+    seedChat("d");
+    render(panel("d", "default"));
+    fireEvent.click(await screen.findByText("allow-m"));
+    await waitFor(() =>
+      expect(useProUpgradeStore.getState().feature).toBe("ai-agent")
+    );
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(mocks.submitQuestion).not.toHaveBeenCalled();
+  });
+
+  it("does not ask again when Pro ended while the grant was saving", async () => {
+    seedChat("e");
+    const finish = pendingGrant();
+    render(panel("e", "default"));
+    fireEvent.click(await screen.findByText("allow-m"));
+    await waitFor(() => expect(mocks.grant).toHaveBeenCalled());
+    act(() => setPro(false));
+    finish();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mocks.submitQuestion).not.toHaveBeenCalled();
+  });
+
+  it("maps a backend Pro refusal to the upgrade dialog", async () => {
+    seedChat("f");
+    mocks.grant.mockRejectedValue(new Error("AI_AGENT_PRO_REQUIRED"));
+    render(panel("f", "default"));
+    fireEvent.click(await screen.findByText("allow-m"));
+    await waitFor(() =>
+      expect(useProUpgradeStore.getState().feature).toBe("ai-agent")
+    );
+    expect(mocks.submitQuestion).not.toHaveBeenCalled();
+  });
+
+  it("allows again only on an explicit click after upgrading", async () => {
+    setPro(false);
+    seedChat("g");
+    render(panel("g", "default"));
+    fireEvent.click(await screen.findByText("allow-m"));
+    act(() => setPro(true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(mocks.grant).not.toHaveBeenCalled();
+    mocks.grant.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByText("allow-m"));
+    await waitFor(() =>
+      expect(mocks.submitQuestion).toHaveBeenCalledWith("top customers?")
+    );
+  });
+
+  it("shows the upgrade hint once per chat and remembers a dismissal", async () => {
+    setPro(false);
+    seedChat("h");
+    render(panel("h", "default"));
+    await screen.findByText("allow-m");
+    act(() => mocks.submitArgs?.onAgentProLocked?.());
+    expect(await screen.findByText(/is a Pro feature/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Dismiss"));
+    expect(screen.queryByText(/is a Pro feature/)).toBeNull();
+    act(() => mocks.submitArgs?.onAgentProLocked?.());
+    expect(screen.queryByText(/is a Pro feature/)).toBeNull();
+    expect(localStorage.getItem("politedb.ai.agentProHint.dismissed")).toBe(
+      "1"
+    );
+  });
+
+  it("hides a shown upgrade hint once Manual is chosen", async () => {
+    setPro(false);
+    seedChat("i");
+    render(panel("i", "default"));
+    await screen.findByText("allow-m");
+    act(() => mocks.submitArgs?.onAgentProLocked?.());
+    expect(await screen.findByText(/is a Pro feature/)).toBeInTheDocument();
+    act(() => setAssistantMode("manual"));
+    expect(screen.queryByText(/is a Pro feature/)).toBeNull();
+    act(() => setAssistantMode("agent"));
   });
 });

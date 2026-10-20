@@ -14,6 +14,7 @@ use crate::ai::agent::run::{self, AgentEvent, EventSink, RunInput, ToolRegistry}
 use crate::ai::agent::sql_safety::{self, SqlSafety};
 use crate::ai::agent::start::{self, RunSnapshot};
 use crate::ai::agent::{self, catalog};
+use crate::license;
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +52,8 @@ pub struct AgentStartInput {
 
 /// The connection's engine has no agent tools in v1: use the legacy assistant.
 pub const ENGINE_UNSUPPORTED: &str = "AI_AGENT_ENGINE_UNSUPPORTED";
+/// Agent mode and its data access need Pro (or a running trial).
+pub const AGENT_PRO_REQUIRED: &str = "AI_AGENT_PRO_REQUIRED";
 
 /// Forwards events to the frontend and remembers models that cannot use tools.
 struct ChannelSink {
@@ -82,6 +85,8 @@ pub async fn ai_agent_start(
     input: AgentStartInput,
     on_event: Channel<AgentEvent>,
 ) -> Result<(), String> {
+    // Agent mode is a Pro feature; checked before any provider or database work.
+    license::require_pro(&app, AGENT_PRO_REQUIRED)?;
     let RunSnapshot {
         config,
         key,

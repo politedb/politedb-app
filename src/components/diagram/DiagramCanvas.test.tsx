@@ -3,6 +3,11 @@ import { fireEvent, render } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DiagramCanvas } from "./DiagramCanvas";
 
+// The export menu's popover needs layout APIs jsdom lacks.
+vi.mock("src/components/common/Popover", () => ({
+  Popover: ({ children }: any) => h("div", null, children),
+}));
+
 class ResizeObserverMock {
   observe() {}
   disconnect() {}

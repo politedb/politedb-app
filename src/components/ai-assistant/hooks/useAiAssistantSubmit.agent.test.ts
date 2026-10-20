@@ -29,7 +29,14 @@ vi.mock("src/lib/tauri/aiAgent", () => ({
 vi.mock("src/lib/tauri/ai", () => ({ aiChatCancel: vi.fn() }));
 
 import { AgentFallback } from "src/lib/ai-assistant/agent";
+import type { LicenseState } from "src/lib/tauri";
+import { useLicenseStore } from "src/stores/license";
+import { setAssistantMode } from "src/lib/ai-assistant/assistantMode";
 import { useAiAssistantSubmit } from "./useAiAssistantSubmit";
+
+function setPro(pro_access: boolean) {
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+}
 
 function setup(overrides: Record<string, unknown> = {}) {
   const finalize = vi.fn();
@@ -63,6 +70,8 @@ function setup(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Agent mode is a Pro feature; these cases run with Pro unless they say otherwise.
+  setPro(true);
   mocks.safety = "read_only";
   mocks.granted = false;
   mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
@@ -291,5 +300,64 @@ describe("useAiAssistantSubmit with the AI agent", () => {
     await act(() => result.current.handleSubmit());
     expect(mocks.plan).not.toHaveBeenCalled();
     expect(finalize).not.toHaveBeenCalled();
+  });
+
+  describe("without Pro", () => {
+    it("answers with basic chat, filtered history, and asks for the upgrade hint", async () => {
+      setPro(false);
+      mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
+      const onAgentProLocked = vi.fn();
+      const messages = [
+        { id: "1", role: "user", text: "top customers?" },
+        {
+          id: "2",
+          role: "assistant",
+          text: "The top customer is alice@corp.com",
+          dataRead: true,
+        },
+      ];
+      const { result, finalize } = setup({ messages, onAgentProLocked });
+      await act(() => result.current.handleSubmit());
+      expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+      expect(onAgentProLocked).toHaveBeenCalledTimes(1);
+      expect(finalize.mock.calls[0][1].text).toBe("legacy answer");
+      expect(JSON.stringify(mocks.plan.mock.calls[0][0].history)).not.toContain(
+        "alice@corp.com"
+      );
+    });
+
+    it("uses basic chat in manual mode, with no upgrade hint", async () => {
+      setAssistantMode("manual");
+      try {
+        mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
+        const onAgentProLocked = vi.fn();
+        for (const pro of [true, false]) {
+          setPro(pro);
+          const { result } = setup({ onAgentProLocked });
+          await act(() => result.current.handleSubmit());
+        }
+        expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+        expect(onAgentProLocked).not.toHaveBeenCalled();
+      } finally {
+        setAssistantMode("agent");
+      }
+    });
+
+    it("does not show the hint where the agent would not run anyway", async () => {
+      setPro(false);
+      mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
+      const onAgentProLocked = vi.fn();
+      const { result } = setup({ engine: "mongodb", onAgentProLocked });
+      await act(() => result.current.handleSubmit());
+      expect(onAgentProLocked).not.toHaveBeenCalled();
+    });
+
+    it("checks access when the question is sent, not when the hook rendered", async () => {
+      const { result } = setup();
+      setPro(false);
+      mocks.plan.mockResolvedValue({ kind: "chat", answer: "legacy answer" });
+      await act(() => result.current.handleSubmit());
+      expect(mocks.runAgentTurn).not.toHaveBeenCalled();
+    });
   });
 });

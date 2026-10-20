@@ -159,6 +159,7 @@ fn main() {
             commands::license::license_activate,
             commands::license::license_refresh,
             commands::license::license_deactivate,
+            commands::license::license_trial_sync,
             commands::license::license_open_external_url,
             commands::security::security_touch_id_authenticate,
             // Connections

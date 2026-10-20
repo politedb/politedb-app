@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { Checkbox } from "src/components/common/Checkbox";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,8 @@ import {
 } from "src/lib/export-masking";
 import { cn } from "src/utils/cn";
 import { showMessage } from "src/lib/system-dialog";
+import { useProGate } from "src/hooks/useProGate";
+import { ProBadge } from "src/components/license/ProBadge";
 
 interface Props {
   open: boolean;
@@ -77,6 +80,9 @@ export function ExportTableDialog({
     clearMaskState,
     requestCancel,
   } = useExportTableData();
+  const { requirePro } = useProGate();
+  // Column masking is opt-in (Pro); off, the editor is a plain column picker.
+  const [maskingEnabled, setMaskingEnabled] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -88,6 +94,7 @@ export function ExportTableDialog({
       void requestCancel();
       clearMaskState();
       setProgress(null);
+      setMaskingEnabled(false);
     }
   }, [open, clearMaskState, setProgress, requestCancel]);
 
@@ -214,6 +221,7 @@ export function ExportTableDialog({
 
   const handleRuleChange = useCallback(
     (name: string, rule: MaskRuleKind) => {
+      if (rule !== "keep" && !requirePro("export-masking")) return;
       setExportOptions((prev) => {
         if (!prev.maskingPolicy) return prev;
         return {
@@ -231,8 +239,32 @@ export function ExportTableDialog({
         handleChangeFormat("csv");
       }
     },
-    [setExportOptions, exportOptions.maskingPolicy, format, handleChangeFormat]
+    [
+      setExportOptions,
+      exportOptions.maskingPolicy,
+      format,
+      handleChangeFormat,
+      requirePro,
+    ]
   );
+
+  const handleToggleMasking = useCallback(() => {
+    if (maskingEnabled) {
+      // Turning masking off resets every rule, so nothing stays masked out of sight.
+      setExportOptions((prev) => {
+        if (!prev.maskingPolicy) return prev;
+        const reset = prev.maskingPolicy.selectedColumns.reduce(
+          (policy, column) => withColumnRule(policy, column, "keep"),
+          prev.maskingPolicy
+        );
+        return { ...prev, maskingPolicy: reset };
+      });
+      setMaskingEnabled(false);
+      return;
+    }
+    if (!requirePro("export-masking")) return;
+    setMaskingEnabled(true);
+  }, [maskingEnabled, requirePro, setExportOptions]);
 
   const onClose = useCallback(() => {
     if (exporting) return;
@@ -383,10 +415,22 @@ export function ExportTableDialog({
                 </div>
               </div>
 
+              <Checkbox
+                checked={maskingEnabled}
+                disabled={exporting}
+                onChange={handleToggleMasking}
+                aria-label="Mask sensitive columns"
+              >
+                <span class="inline-flex items-center gap-1.5 text-sm text-neutral-700 dark:text-neutral-200">
+                  Mask sensitive columns
+                  <ProBadge />
+                </span>
+              </Checkbox>
               <ExportColumnEditor
                 columnNames={columnNames}
                 selectedColumns={selectedColumns}
                 policy={maskingPolicy}
+                maskingEnabled={maskingEnabled}
                 disabled={exporting}
                 selectedCount={selectedColumns.length}
                 outputCount={outputCount}
@@ -439,14 +483,14 @@ export function ExportTableDialog({
         </DialogContent>
 
         <DialogFooter className="shrink-0 flex-wrap items-center justify-between gap-2">
-          <div class="h-10 min-w-0 flex-1 text-sm text-neutral-600 dark:text-neutral-300">
+          <div class="min-w-0 flex-1 text-xs text-neutral-600 dark:text-neutral-300">
             {!progress && (
               <div class="flex h-full flex-wrap items-center gap-x-3">
                 <span class="tabular-nums">
                   {outputCount} / {columnNames.length} output column
                   {outputCount === 1 ? "" : "s"}
                 </span>
-                {keepColumns.length > 0 && (
+                {maskingEnabled && keepColumns.length > 0 && (
                   <span
                     class="inline-flex items-center text-amber-700"
                     title={`Keeping original values: ${keepColumns.join(", ")}`}

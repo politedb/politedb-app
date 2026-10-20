@@ -17,6 +17,8 @@ import {
   StopIcon,
 } from "src/components/icons";
 import { useDbHealthInspector } from "@root/src/hooks/useDbHealthInspector";
+import { useProGate } from "src/hooks/useProGate";
+import { ProBadge } from "src/components/license/ProBadge";
 import type { DatabaseEngine } from "src/types";
 import { formatBytesSize } from "src/utils/convert";
 import { cn } from "src/utils/cn";
@@ -661,6 +663,8 @@ export function DbHealthInspectorDialog(props: Props) {
     databaseLabel,
   } = props;
   const [tab, setTab] = useState<SectionKey>("overview");
+  const { hasPro, requirePro } = useProGate();
+  // The hook re-checks Pro access itself, so collection never starts while locked.
   const { snapshot, loading, error, refresh, cancel, supported } =
     useDbHealthInspector({
       open,
@@ -736,69 +740,94 @@ export function DbHealthInspectorDialog(props: Props) {
         </p>
       </DialogHeader>
 
-      <DialogContent className="flex min-h-0 flex-1 flex-col overflow-hidden py-3">
-        {!supported && engine ? (
-          <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50">
-            Database Health Inspector currently supports PostgreSQL only.
-            Connected engine: {engine}.
-          </div>
-        ) : null}
+      {!hasPro ? (
+        <>
+          <DialogContent className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-3 text-center">
+            <p class="inline-flex items-center gap-2 text-sm text-neutral-700">
+              The database health inspector is a Pro feature.
+              <ProBadge />
+            </p>
+            <Button
+              type="button"
+              variant="default"
+              onClick={() => requirePro("health-inspector")}
+            >
+              Upgrade
+            </Button>
+          </DialogContent>
+          <DialogFooter className="shrink-0 border-t border-neutral-200">
+            <Button type="button" variant="outline" onClick={handleClose}>
+              Close
+            </Button>
+          </DialogFooter>
+        </>
+      ) : (
+        <>
+          <DialogContent className="flex min-h-0 flex-1 flex-col overflow-hidden py-3">
+            {!supported && engine ? (
+              <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50">
+                Database Health Inspector currently supports PostgreSQL only.
+                Connected engine: {engine}.
+              </div>
+            ) : null}
 
-        {error ? (
-          <div class="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-50">
-            {error}
-          </div>
-        ) : null}
+            {error ? (
+              <div class="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-700 dark:bg-red-950 dark:text-red-50">
+                {error}
+              </div>
+            ) : null}
 
-        {snapshot?.cancelled ? (
-          <div class="mb-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-            Snapshot cancelled. Partial section results above may be stale.
-          </div>
-        ) : null}
+            {snapshot?.cancelled ? (
+              <div class="mb-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+                Snapshot cancelled. Partial section results above may be stale.
+              </div>
+            ) : null}
 
-        <div class="flex min-h-0 flex-1 flex-col">
-          <Tabs
-            value={tab}
-            onValueChange={handleTabChange}
-            tabs={tabs}
-            disabled={loading}
-            listClassName="rounded-t-md"
-            contentClassName="mt-2 flex min-h-0 flex-col"
-          />
-        </div>
-      </DialogContent>
+            <div class="flex min-h-0 flex-1 flex-col">
+              <Tabs
+                value={tab}
+                onValueChange={handleTabChange}
+                tabs={tabs}
+                disabled={loading}
+                listClassName="rounded-t-md"
+                contentClassName="mt-2 flex min-h-0 flex-col"
+              />
+            </div>
+          </DialogContent>
 
-      <DialogFooter className="shrink-0 border-t border-neutral-200">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void refresh()}
-          disabled={loading || !supported || !runtimeConnectionId}
-          title="Refresh snapshot"
-        >
-          <span class="inline-flex items-center gap-1.5">
-            <RefreshCwIcon
-              className={cn("size-4", loading && "animate-spin")}
-            />
-            Refresh
-          </span>
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => cancel()}
-          disabled={!loading}
-          title="Cancel in-flight inspector queries"
-        >
-          <span class="inline-flex items-center gap-1.5">
-            <StopIcon className="size-4" />
-            Cancel
-          </span>
-        </Button>
-        <Button type="button" variant="default" onClick={handleClose}>
-          Close
-        </Button>
-      </DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-neutral-200">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void refresh()}
+              disabled={loading || !supported || !runtimeConnectionId}
+              title="Refresh snapshot"
+            >
+              <span class="inline-flex items-center gap-1.5">
+                <RefreshCwIcon
+                  className={cn("size-4", loading && "animate-spin")}
+                />
+                Refresh
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => cancel()}
+              disabled={!loading}
+              title="Cancel in-flight inspector queries"
+            >
+              <span class="inline-flex items-center gap-1.5">
+                <StopIcon className="size-4" />
+                Cancel
+              </span>
+            </Button>
+            <Button type="button" variant="default" onClick={handleClose}>
+              Close
+            </Button>
+          </DialogFooter>
+        </>
+      )}
     </Dialog>
   );
 }

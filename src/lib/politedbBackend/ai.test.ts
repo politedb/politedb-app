@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { planFromLicensePlanName, politeDbAiListModels } from "./ai";
+import { gatewayPlan, politeDbAiListModels } from "./ai";
 
 vi.mock("src/lib/tauri", () => ({
   licenseStateLoad: vi.fn().mockResolvedValue({
     license_id: "license_test",
     plan_name: "ultimate",
+    paid_license: true,
   }),
 }));
 
@@ -12,20 +13,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("planFromLicensePlanName", () => {
-  it.each(["Pro", "pro", " Pro plan ", "Ultimate", "ultimate"])(
-    "maps paid plan %j to the ultimate AI tier",
-    (planName) => {
-      expect(planFromLicensePlanName(planName)).toBe("ultimate");
+describe("gatewayPlan", () => {
+  it("sends the paid tier only for an active paid license", () => {
+    expect(gatewayPlan({ paid_license: true })).toBe("ultimate");
+    // Trials, expired or free licenses, and an unknown state stay free; the plan name
+    // alone never decides.
+    for (const license of [
+      { paid_license: false },
+      { paid_license: false, plan_name: "Ultimate" } as {
+        paid_license: boolean;
+      },
+      {},
+      null,
+      undefined,
+    ]) {
+      expect(gatewayPlan(license)).toBe("free");
     }
-  );
-
-  it.each([null, undefined, "", "Free", "Polar License"])(
-    "maps %j to the free AI tier",
-    (planName) => {
-      expect(planFromLicensePlanName(planName)).toBe("free");
-    }
-  );
+  });
 });
 
 describe("politeDb backend AI client", () => {

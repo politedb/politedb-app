@@ -38,4 +38,24 @@ describe("openExternalUrl", () => {
     await openExternalUrl("https://politedb.com/pricing", fallback);
     expect(fallback).not.toHaveBeenCalled();
   });
+
+  it("falls back to a new window with no opener by default", async () => {
+    invokeMock.mockRejectedValue("FAILED_TO_OPEN_URL: exited with status 1");
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    await openExternalUrl("https://polar.sh/politedb/portal");
+    expect(open).toHaveBeenCalledWith(
+      "https://polar.sh/politedb/portal",
+      "_blank",
+      "noopener,noreferrer"
+    );
+    open.mockRestore();
+  });
+
+  it("does not open a window by default when the policy blocks the URL", async () => {
+    invokeMock.mockRejectedValue(FEATURE_UNAVAILABLE_IN_DISTRIBUTION);
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    await openExternalUrl("https://polar.sh/politedb/portal");
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
 });

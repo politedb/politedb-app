@@ -93,6 +93,41 @@ export async function confirmDialog(
   return tauriConfirm(body, options);
 }
 
+/**
+ * Native message with up to three custom buttons. Resolves to the button picked;
+ * closing the dialog counts as `cancel`. In a browser only `primary` can be offered.
+ */
+export async function chooseDialog(
+  body: string,
+  options: {
+    title?: string;
+    kind?: MessageDialogOptions["kind"];
+    primary: string;
+    secondary?: string;
+    cancel: string;
+  }
+): Promise<"primary" | "secondary" | "cancel"> {
+  const { title, kind, primary, secondary, cancel } = options;
+  if (!isTauriRuntime()) {
+    const text = title ? `${title}\n\n${body}` : body;
+    return window.confirm(text) ? "primary" : "cancel";
+  }
+  const result = await tauriMessage(body, {
+    title,
+    kind,
+    buttons: secondary
+      ? { yes: primary, no: secondary, cancel }
+      : { ok: primary, cancel },
+  });
+  if (result === primary || result === "Yes" || result === "Ok") {
+    return "primary";
+  }
+  if (secondary && (result === secondary || result === "No")) {
+    return "secondary";
+  }
+  return "cancel";
+}
+
 /** Single file pick (convenience). */
 export async function pickOpenFile(
   options?: Omit<OpenDialogOptions, "multiple" | "directory">

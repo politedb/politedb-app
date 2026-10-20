@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { DbHealthInspectorDialog } from "./DbHealthInspectorDialog";
+import { useLicenseStore } from "src/stores/license";
+import { useProUpgradeStore } from "src/stores/proUpgrade";
+import type { LicenseState } from "src/lib/tauri/license";
 
 const hookState = {
   snapshot: null as any,
@@ -16,7 +19,13 @@ vi.mock("@root/src/hooks/useDbHealthInspector", () => ({
   useDbHealthInspector: () => hookState,
 }));
 
+function setProAccess(pro_access: boolean) {
+  useLicenseStore.setState({ state: { pro_access } as LicenseState });
+}
+
 beforeEach(() => {
+  setProAccess(true);
+  useProUpgradeStore.setState({ feature: null });
   hookState.snapshot = {
     runtimeConnectionId: "c1",
     profileId: "p1",
@@ -115,6 +124,28 @@ beforeEach(() => {
 });
 
 describe("DbHealthInspectorDialog", () => {
+  it("shows a locked state without Pro and opens the upgrade dialog", () => {
+    setProAccess(false);
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+
+    expect(
+      screen.getByText("The database health inspector is a Pro feature.")
+    ).toBeTruthy();
+    expect(screen.queryByTitle("Refresh snapshot")).toBeNull();
+    expect(screen.queryByText("Overview")).toBeNull();
+    fireEvent.click(screen.getByText("Upgrade"));
+    expect(useProUpgradeStore.getState().feature).toBe("health-inspector");
+    expect(hookState.refresh).not.toHaveBeenCalled();
+  });
+
   it("renders overview and supports refresh/cancel/close", () => {
     const onClose = vi.fn();
     render(

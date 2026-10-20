@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from "preact/hooks";
 import { Button } from "src/components/common/Button";
+import { ProBadge } from "src/components/license/ProBadge";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   DownloadIcon,
 } from "src/components/icons";
+import { useProGate } from "src/hooks/useProGate";
 import { saveDialog, confirmDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { analyzeQueryPlan } from "src/lib/query-analyzer/findings";
@@ -119,6 +121,7 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const importVersion = useRef(0);
+  const { requirePro } = useProGate();
   const findings = useMemo(() => analyzeQueryPlan(plan), [plan]);
   const filtered = useMemo(
     () =>
@@ -137,6 +140,8 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
   };
 
   async function exportPlan(format: "json" | "md") {
+    // Report exports are Pro; checked before any export work or dialog.
+    if (!requirePro("query-analyzer")) return;
     setSaving(true);
     setMessage("");
     try {
@@ -200,6 +205,7 @@ export function QueryAnalyzer({ plan }: { plan: QueryPlan }) {
     <div class="query-analyzer">
       <div class="qa-toolbar">
         <strong>Query Analyzer</strong>
+        <ProBadge />
         <span class="qa-badge">
           {plan.actual ? "Measured plan" : "Estimated plan"}
         </span>

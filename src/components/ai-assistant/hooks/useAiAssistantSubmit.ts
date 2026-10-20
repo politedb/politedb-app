@@ -17,6 +17,8 @@ import type {
 } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import { aiChatCancel } from "src/lib/tauri/ai";
+import { hasProAccessNow } from "src/stores/license";
+import { getAssistantMode } from "src/lib/ai-assistant/assistantMode";
 import {
   AI_DATA_ACCESS_REQUIRED,
   aiAgentDataAccessStatus,
@@ -116,6 +118,11 @@ export function formatAssistantRequestError(args: {
     return vi
       ? "Kết nối database đã đóng. Hãy kết nối lại rồi thử lại."
       : "The database connection was closed. Reconnect and try again.";
+  }
+  if (raw.includes("AI_AGENT_PRO_REQUIRED")) {
+    return vi
+      ? "Chế độ AI agent thuộc gói Pro. Hãy nâng cấp, hoặc hỏi lại khi chưa chọn kết nối database."
+      : "AI agent mode is a Pro feature. Upgrade, or ask again without a database connection.";
   }
   if (raw.includes("AI_AGENT_")) {
     return vi
@@ -234,6 +241,8 @@ export function useAiAssistantSubmit(args: {
     replyLanguageCode?: string | null;
     targetTable?: string | null;
   }) => void;
+  /** The agent would have answered this turn, but Pro features are locked. */
+  onAgentProLocked?: () => void;
 }) {
   const {
     prompt,
@@ -262,6 +271,7 @@ export function useAiAssistantSubmit(args: {
     savedConnections,
     conversationState,
     updateConversationState,
+    onAgentProLocked,
   } = args;
 
   const requestAbortRef = useRef<AbortController | null>(null);
@@ -369,11 +379,18 @@ export function useAiAssistantSubmit(args: {
 
       // AI agent: inspects the schema with tools before answering. Any reason it
       // cannot run here (provider/model/engine unsupported) falls back silently.
-      if (
+      // It is a Pro feature: without Pro the turn goes to basic chat, like an
+      // unsupported engine, and the panel shows an upgrade hint.
+      // Manual mode always answers with basic chat; agent mode needs Pro.
+      const agentEligible = Boolean(
         hasDbContext &&
         runtimeConnectionId &&
-        AGENT_ENGINES.includes(engine)
-      ) {
+        AGENT_ENGINES.includes(engine) &&
+        getAssistantMode() === "agent"
+      );
+      const agentAllowed = agentEligible && hasProAccessNow();
+      if (agentEligible && !agentAllowed) onAgentProLocked?.();
+      if (agentAllowed && runtimeConnectionId) {
         try {
           const result = await runAgentTurn({
             providerId,

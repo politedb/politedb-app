@@ -50,6 +50,12 @@ impl Distribution {
         matches!(self, Self::Direct)
     }
 
+    /// Whether Pro features require a license or trial. App Store builds keep everything
+    /// unlocked until In-App Purchase exists (guideline 3.1.1 forbids unlocking otherwise).
+    pub const fn gates_pro_features(self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
     /// Engines whose client libraries cannot load inside the App Store sandbox are excluded.
     pub const fn supports_engine(self, kind: EngineKind) -> bool {
         match self {
@@ -130,6 +136,8 @@ mod tests {
         let d = Distribution::Direct;
         assert!(d.allows_external_url("https://politedb.com/pricing"));
         assert!(d.allows_external_url("https://github.com/sponsors/tonyphamvn"));
+        // "Lost license key?" opens the Polar customer portal.
+        assert!(d.allows_external_url("https://polar.sh/politedb/portal"));
     }
 
     #[test]
@@ -137,6 +145,7 @@ mod tests {
         let d = Distribution::AppStore;
         for url in [
             "https://politedb.com/pricing",
+            "https://polar.sh/politedb/portal",
             "https://politedb.com/checkout?plan=pro",
             "https://github.com/sponsors/tonyphamvn",
             "https://github.com/politedb/PoliteDB/issues/../../../sponsors/tonyphamvn",

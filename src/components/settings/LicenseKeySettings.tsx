@@ -5,12 +5,20 @@ import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import {
+  TrialStatusNote,
+  trialNote,
+} from "src/components/license/TrialStatusNote";
 import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  LICENSE_SUPPORT_EMAIL,
+  openLicenseRecoveryMail,
+} from "src/lib/license/support";
 
 const PRICING_URL = "https://politedb.com/pricing";
-const LICENSE_SUPPORT_EMAIL = "support@politedb.com";
 
 export function LicenseKeySettings(props: { active: boolean }) {
   const [licenseKey, setLicenseKey] = useState("");
@@ -25,6 +33,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
     refresh: refreshLicense,
     deactivate: deactivateLicense,
     clearError: clearLicenseError,
+    trialSync: { status: trialSyncStatus },
   } = useLicenseStore();
 
   useEffect(() => {
@@ -44,24 +53,18 @@ export function LicenseKeySettings(props: { active: boolean }) {
     setLicenseKey("");
   }
 
-  async function openRecoveryMail() {
-    const subject = encodeURIComponent("PoliteDB license key recovery");
-    const body = encodeURIComponent(
-      "Please help me recover my license key. I purchased using this email address.\n"
-    );
-    const mailto = `mailto:${LICENSE_SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
-    await openExternalUrl(mailto, (url) => {
-      window.location.href = url;
-    });
+  // Direct builds open the Polar customer portal, where buyers find their keys by
+  // purchase email; App Store builds cannot open it and show the email help instead.
+  async function handleLostKey() {
+    if (!DISTRIBUTION_FEATURES.externalPurchase) {
+      setLostKeyHelp(true);
+      return;
+    }
+    await openExternalUrl(LICENSE_PORTAL_URL);
   }
 
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
-  const trialExpiresAt =
-    typeof licenseState?.trial_expires_at === "number"
-      ? licenseState.trial_expires_at
-      : null;
-  const isTrialExpired =
-    trialExpiresAt != null && trialExpiresAt <= Date.now() && !isActive;
+  const trial = trialNote(licenseState ?? null, trialSyncStatus);
   const daysUntilExpires = formatDaysUntil(licenseState?.expires_at);
 
   return (
@@ -101,24 +104,13 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 placeholder="PLD-XXXX-XXXX-XXXX-XXXX-XXXX"
               />
             </FieldRow>
-            {trialExpiresAt ? (
-              <div
-                class={cn(
-                  "rounded-b-xl px-3 py-2 text-sm",
-                  isTrialExpired
-                    ? "bg-amber-50 text-amber-700"
-                    : "bg-slate-50 text-slate-700"
-                )}
-              >
-                {isTrialExpired
-                  ? `Free trial expired on ${formatDateTime(trialExpiresAt)}.`
-                  : `Free trial ends on ${formatDateTime(trialExpiresAt)}.`}
-              </div>
+            {trial ? (
+              <TrialStatusNote note={trial} className="rounded-b-xl" />
             ) : null}
           </SettingCard>
 
           <div class="flex flex-wrap justify-between gap-2">
-            <Button variant="shadow" onClick={() => setLostKeyHelp(true)}>
+            <Button variant="shadow" onClick={() => void handleLostKey()}>
               Lost license key?
             </Button>
             <div class="flex gap-2">
@@ -141,6 +133,9 @@ export function LicenseKeySettings(props: { active: boolean }) {
         </div>
       ) : (
         <div class="space-y-3">
+          {trial ? (
+            <TrialStatusNote note={trial} className="rounded-xl" />
+          ) : null}
           <SettingCard class="text-sm [&>div>div]:last:pb-4">
             <FieldRow label="Managed by email:">
               <div class="text-neutral-700">
@@ -210,7 +205,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 <button
                   type="button"
                   class="inline rounded font-mono text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
-                  onClick={() => void openRecoveryMail()}
+                  onClick={() => void openLicenseRecoveryMail()}
                 >
                   {LICENSE_SUPPORT_EMAIL}
                 </button>
@@ -221,7 +216,10 @@ export function LicenseKeySettings(props: { active: boolean }) {
           </SettingCard>
 
           <div class="flex justify-end">
-            <Button variant="shadow" onClick={() => void openRecoveryMail()}>
+            <Button
+              variant="shadow"
+              onClick={() => void openLicenseRecoveryMail()}
+            >
               Open Mail
             </Button>
           </div>
