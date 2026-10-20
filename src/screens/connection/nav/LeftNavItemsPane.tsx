@@ -16,7 +16,7 @@ import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { DeleteRedisKeyDialog } from "src/components/modal/DeleteRedisKeyDialog";
 import { RenameRedisKeyDialog } from "src/components/modal/RenameRedisKeyDialog";
 import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
-import { DropTableDialog } from "src/components/modal/DropTableDialog";
+import { confirmDropTable } from "../hooks/useTableDestructiveActions";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableItem } from "src/types";
 import { supportsNewSchema } from "src/lib/engines";
@@ -208,13 +208,19 @@ export function LeftNavItemsPane({
     useState<TableItem | null>(null);
   const [cloneNewTableTarget, setCloneNewTableTarget] =
     useState<TableItem | null>(null);
-  const [dropNewTableTarget, setDropNewTableTarget] =
-    useState<TableItem | null>(null);
-
   const getNewTableDraft = (table: TableItem) => {
     return useConnectionStore.getState().newTableData[profileId]?.[
       tableWindowId(table)
     ];
+  };
+
+  /** An unsaved table only exists as a draft: confirm natively, then discard it. */
+  const dropNewTable = async (table: TableItem) => {
+    const name = getNewTableDraft(table)?.tableName || table.name;
+    if (!(await confirmDropTable(name))) return;
+    const windowId = tableWindowId(table);
+    useConnectionStore.getState().clearNewTableData(profileId, windowId);
+    await actions.closeWindow(windowId, new MouseEvent("click"));
   };
 
   const tableMenuItems: MenuItem[] = tableMenu
@@ -328,7 +334,7 @@ export function LeftNavItemsPane({
             disabled: isProfileLocked || !supportsTableMutations,
             onClick: () => {
               if (tableMenu.table.new) {
-                setDropNewTableTarget(tableMenu.table);
+                void dropNewTable(tableMenu.table);
                 return;
               }
               actions.dropTable(tableMenu.table);
@@ -606,24 +612,6 @@ export function LeftNavItemsPane({
                 primaryKey: sourceDraft?.primaryKey ?? "",
                 columns: structuredClone(sourceDraft?.columns ?? []),
               });
-          }}
-        />
-      )}
-
-      {dropNewTableTarget && (
-        <DropTableDialog
-          open={true}
-          tableName={
-            getNewTableDraft(dropNewTableTarget)?.tableName ||
-            dropNewTableTarget.name
-          }
-          onClose={() => setDropNewTableTarget(null)}
-          onConfirm={async () => {
-            const windowId = tableWindowId(dropNewTableTarget);
-            useConnectionStore
-              .getState()
-              .clearNewTableData(profileId, windowId);
-            await actions.closeWindow(windowId, new MouseEvent("click"));
           }}
         />
       )}

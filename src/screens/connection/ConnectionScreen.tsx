@@ -19,6 +19,8 @@ import { ConnectionWorkspaceLayout } from "./workspace/ConnectionWorkspaceLayout
 import { useConnectionWindows } from "./hooks/useConnectionWindows";
 import { useViewMode } from "./hooks/useViewMode";
 import { useSqlHistoryRunner } from "./hooks/useSqlHistoryRunner";
+import { useTableDestructiveActions } from "./hooks/useTableDestructiveActions";
+import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
 import { useSchemaTablesPanel } from "./hooks/useSchemaTablesPanel";
 import { useDatabaseMetadata } from "src/hooks/useDatabaseMetadata";
 import { useEnsureRuntimeConnection } from "src/hooks/useEnsureRuntimeConnection";
@@ -152,6 +154,8 @@ export function ConnectionScreen() {
     setOffset,
     pendingTableAction,
     setPendingTableAction,
+    staleTableKey,
+    setStaleTableKey,
     error,
     setError,
     showSaveDialog,
@@ -576,6 +580,23 @@ export function ConnectionScreen() {
     void ensureSnippetsLoaded();
   }, [ensureSnippetsLoaded]);
 
+  const {
+    dropTable: dropTableFromTree,
+    openTruncate,
+    truncateTarget,
+    closeTruncate,
+    confirmTruncate,
+  } = useTableDestructiveActions({
+    isProfileLocked,
+    engine,
+    connectionId: runtimeConnectionId,
+    windows: activeWindows,
+    runSqlWithHistory,
+    refreshSchemaAndTables,
+    closeWindow: (id, e) => actionsRef.current.closeWindow(id, e),
+    markTableStale: setStaleTableKey,
+  });
+
   const actions = useMemo(() => {
     return {
       openSql: () => actionsRef.current.openSql(),
@@ -633,18 +654,9 @@ export function ConnectionScreen() {
           setPendingTableAction("clone");
         });
       },
-      truncateTable: (table: TableItem) => {
-        if (isProfileLocked) return;
-        void actionsRef.current.selectTable(table).then(() => {
-          setPendingTableAction("truncate");
-        });
-      },
-      dropTable: (table: TableItem) => {
-        if (isProfileLocked) return;
-        void actionsRef.current.selectTable(table).then(() => {
-          setPendingTableAction("drop");
-        });
-      },
+      // Neither opens the table: drop asks natively, truncate opens its dialog here.
+      truncateTable: (table: TableItem) => openTruncate(table),
+      dropTable: (table: TableItem) => void dropTableFromTree(table),
       renameRedisKey: (table: TableItem, nextName: string) =>
         actionsRef.current.renameRedisKey(table, nextName),
       deleteRedisKey: (table: TableItem) =>
@@ -665,6 +677,8 @@ export function ConnectionScreen() {
   }, [
     isProfileLocked,
     setPendingTableAction,
+    openTruncate,
+    dropTableFromTree,
     setSearchDialogOpen,
     setSnippetPickerOpen,
     triggerRefresh,
@@ -800,6 +814,8 @@ export function ConnectionScreen() {
       objectSaveRef,
       pendingTableAction,
       setPendingTableAction,
+      staleTableKey,
+      setStaleTableKey,
     }),
     [
       activeProfileScreen,
@@ -818,6 +834,8 @@ export function ConnectionScreen() {
       refreshSchemaAndTables,
       pendingTableAction,
       setPendingTableAction,
+      staleTableKey,
+      setStaleTableKey,
     ]
   );
 
@@ -869,6 +887,15 @@ export function ConnectionScreen() {
             activeTableLoadKey={activeTableLoadKey}
             isProfileLocked={isProfileLocked}
           />
+
+          {truncateTarget && (
+            <TruncateTableDialog
+              open={true}
+              tableName={truncateTarget.name}
+              onClose={closeTruncate}
+              onConfirm={confirmTruncate}
+            />
+          )}
 
           {showSaveDialog && (
             <SaveChangesDialog

@@ -1,8 +1,6 @@
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
 import { ImportTableDialog } from "src/components/modal/ImportTableDialog";
 import { CloneTableDialog } from "src/components/modal/CloneTableDialog";
-import { TruncateTableDialog } from "src/components/modal/TruncateTableDialog";
-import { DropTableDialog } from "src/components/modal/DropTableDialog";
 import { SqlPreviewModal } from "src/components/modal/SqlPreviewModal";
 import type { DatabaseEngine } from "src/types";
 import type { TableConstraint } from "src/types";
@@ -24,10 +22,6 @@ export function MainTableDialogs(props: {
   onImportClose: () => void;
   cloneDialogOpen: boolean;
   onCloneClose: () => void;
-  truncateDialogOpen: boolean;
-  onTruncateClose: () => void;
-  dropDialogOpen: boolean;
-  onDropClose: () => void;
   connectionId: string | null;
   schema: string;
   tableName: string;
@@ -49,11 +43,6 @@ export function MainTableDialogs(props: {
     fullValidation: boolean;
   }) => Promise<void>;
   handleClone: (nextName: string, copyData: boolean) => Promise<void>;
-  handleTruncate: (opts: {
-    restartIdentity: boolean;
-    cascade: boolean;
-  }) => Promise<void>;
-  handleDrop: () => Promise<void>;
   dataImportPreview: DataImportPreview | null;
 }) {
   const {
@@ -66,10 +55,6 @@ export function MainTableDialogs(props: {
     onImportClose,
     cloneDialogOpen,
     onCloneClose,
-    truncateDialogOpen,
-    onTruncateClose,
-    dropDialogOpen,
-    onDropClose,
     connectionId,
     schema,
     tableName,
@@ -87,8 +72,6 @@ export function MainTableDialogs(props: {
     importProgressState,
     handleImport,
     handleClone,
-    handleTruncate,
-    handleDrop,
   } = props;
 
   return (
@@ -140,24 +123,6 @@ export function MainTableDialogs(props: {
           onClose={onCloneClose}
           sourceTableName={tableName}
           onConfirm={handleClone}
-        />
-      )}
-
-      {truncateDialogOpen && (
-        <TruncateTableDialog
-          open={truncateDialogOpen}
-          onClose={onTruncateClose}
-          tableName={tableName}
-          onConfirm={handleTruncate}
-        />
-      )}
-
-      {dropDialogOpen && (
-        <DropTableDialog
-          open={dropDialogOpen}
-          onClose={onDropClose}
-          tableName={tableName}
-          onConfirm={handleDrop}
         />
       )}
     </>
