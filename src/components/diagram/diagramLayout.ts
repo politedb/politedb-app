@@ -401,7 +401,10 @@ function laneOffset(slot: number) {
 type Interval = { lo: number; hi: number };
 
 /** A horizontal run entering a gutter from its low or high side, up to lane `x`. */
-type GutterStub = { y: number; side: "lo" | "hi"; x: number };
+type GutterStub = { y: number; side: "lo" | "hi"; x: number; bundle: string };
+
+/** A vertical run in a lane, or a crossing row, owned by a bundle of relations. */
+type Bundled = { bundle: string };
 
 type Point = { x: number; y: number };
 
@@ -436,18 +439,23 @@ class RoutingGrid {
   private readonly columnLeft: number[];
   private readonly gaps: Interval[][];
   /** Per gutter: per lane index, the y spans already running in it. */
-  private readonly gutterLanes = new Map<number, Interval[][]>();
+  private readonly gutterLanes = new Map<
+    number,
+    Array<Array<Interval & Bundled>>
+  >();
+  /** Per gutter and bundle: the lane the bundle's trunk took first. */
+  private readonly bundleLanes = new Map<string, number>();
   /** Per gutter: horizontal runs reaching into it from either side. */
   private readonly gutterStubs = new Map<number, GutterStub[]>();
   /** Per gutter: horizontal steps between two lanes of one relation. */
   private readonly gutterJogs = new Map<
     number,
-    Array<{ y: number; lo: number; hi: number }>
+    Array<{ y: number; lo: number; hi: number } & Bundled>
   >();
-  /** Per column: rows already crossing it, and by which relation. */
+  /** Per column: rows already crossing it, and by which bundle. */
   private readonly crossings = new Map<
     number,
-    Array<{ y: number; owner: number }>
+    Array<{ y: number } & Bundled>
   >();
   overflow = false;
   readonly demand: SpacingDemand = {
@@ -499,11 +507,16 @@ class RoutingGrid {
    * when every single lane would put an entry or exit run on top of a run another
    * relation brings in from the opposite side on the same row, the passage steps across
    * between two lanes on a free row (a jog). Returns the points inside the gutter.
+   *
+   * Relations of one bundle (leaving or reaching the same row of the same card) may
+   * share runs: they reuse the bundle's lane and ignore each other's stubs and jogs, so
+   * a hub fans out from one trunk instead of one lane per relation.
    */
   takeGutterPassage(
     gutter: number,
     entry: { y: number; side: "lo" | "hi" },
-    exit: { y: number; side: "lo" | "hi" }
+    exit: { y: number; side: "lo" | "hi" },
+    bundle: string
   ): Point[] {
     const { lo, hi } = this.gutterBounds(gutter);
     const center = (lo + hi) / 2;
@@ -522,7 +535,12 @@ class RoutingGrid {
       hi: Math.max(y1, y2),
     });
     const verticalFree = (lane: number, y1: number, y2: number) =>
-      !lanes[lane] || !overlaps(lanes[lane]!, spanOf(y1, y2), LANE_CLEARANCE);
+      !lanes[lane] ||
+      !overlaps(
+        lanes[lane]!.filter((run) => run.bundle !== bundle),
+        spanOf(y1, y2),
+        LANE_CLEARANCE
+      );
     // An entry/exit run from the low side covers [lo, x]; from the high side [x, hi].
     const runOf = (side: "lo" | "hi", x: number): Interval =>
       side === "lo" ? { lo, hi: x } : { lo: x, hi };
@@ -532,6 +550,7 @@ class RoutingGrid {
       return (
         stubs.every(
           (other) =>
+            other.bundle === bundle ||
             other.side === stub.side ||
             !sameRow(other.y, stub.y) ||
             (stub.side === "lo"
@@ -540,7 +559,10 @@ class RoutingGrid {
         ) &&
         jogs.every(
           (jog) =>
-            !sameRow(jog.y, stub.y) || jog.hi <= run.lo || jog.lo >= run.hi
+            jog.bundle === bundle ||
+            !sameRow(jog.y, stub.y) ||
+            jog.hi <= run.lo ||
+            jog.lo >= run.hi
         )
       );
     };
@@ -548,12 +570,16 @@ class RoutingGrid {
       const run = spanOf(x1, x2);
       return (
         stubs.every((stub) => {
-          if (!sameRow(stub.y, y)) return true;
+          if (stub.bundle === bundle || !sameRow(stub.y, y)) return true;
           const other = runOf(stub.side, stub.x);
           return other.hi <= run.lo || other.lo >= run.hi;
         }) &&
         jogs.every(
-          (jog) => !sameRow(jog.y, y) || jog.hi <= run.lo || jog.lo >= run.hi
+          (jog) =>
+            jog.bundle === bundle ||
+            !sameRow(jog.y, y) ||
+            jog.hi <= run.lo ||
+            jog.lo >= run.hi
         )
       );
     };
@@ -562,17 +588,26 @@ class RoutingGrid {
       jog?: { y: number; x1: number; x2: number }
     ) => {
       for (const part of parts)
-        (lanes[part.lane] ??= []).push(spanOf(part.y1, part.y2));
+        (lanes[part.lane] ??= []).push({
+          ...spanOf(part.y1, part.y2),
+          bundle,
+        });
       stubs.push(
-        { ...entry, x: xOf(parts[0]!.lane) },
-        { ...exit, x: xOf(parts[parts.length - 1]!.lane) }
+        { ...entry, x: xOf(parts[0]!.lane), bundle },
+        { ...exit, x: xOf(parts[parts.length - 1]!.lane), bundle }
       );
-      if (jog) jogs.push({ y: jog.y, ...spanOf(jog.x1, jog.x2) });
+      if (jog) jogs.push({ y: jog.y, ...spanOf(jog.x1, jog.x2), bundle });
+      if (!this.bundleLanes.has(trunkKey))
+        this.bundleLanes.set(trunkKey, parts[0]!.lane);
       this.noteDemand(gutter, Math.max(...parts.map((part) => part.lane)) + 1);
     };
 
-    // 1. A single lane.
-    for (let lane = 0; lane < capacity; lane++) {
+    // 1. A single lane, the bundle's own first.
+    const trunkKey = `${gutter}|${bundle}`;
+    const trunk = this.bundleLanes.get(trunkKey);
+    const singleLanes = Array.from({ length: capacity }, (_, lane) => lane);
+    if (trunk !== undefined && trunk < capacity) singleLanes.unshift(trunk);
+    for (const lane of singleLanes) {
       const x = xOf(lane);
       if (
         verticalFree(lane, entry.y, exit.y) &&
@@ -651,13 +686,16 @@ class RoutingGrid {
   /**
    * A y crossing `column` through a gap between its cards: on the straight line when it
    * is free, otherwise mid-gap. A crossing runs on into the gutters on both sides, so it
-   * also avoids the rows other relations use to cross the neighbouring columns.
+   * also avoids the rows other bundles use to cross the neighbouring columns. A bundle
+   * crosses each column once: its later relations reuse that row.
    */
-  takeGapY(column: number, desired: number, owner: number): number {
+  takeGapY(column: number, desired: number, bundle: string): number {
     const used = this.crossings.get(column) ?? [];
     this.crossings.set(column, used);
+    const shared = used.find((other) => other.bundle === bundle);
+    if (shared) return shared.y;
     const blocking = [column - 1, column, column + 1].flatMap((c) =>
-      (this.crossings.get(c) ?? []).filter((other) => other.owner !== owner)
+      (this.crossings.get(c) ?? []).filter((other) => other.bundle !== bundle)
     );
     const gaps = (this.gaps[column] ?? [])
       .map((gap) => ({
@@ -685,7 +723,7 @@ class RoutingGrid {
         )
       );
       if (free !== undefined) {
-        used.push({ y: free, owner });
+        used.push({ y: free, bundle });
         const inGap = used.filter(
           (other) => other.y >= gap.lo && other.y <= gap.hi
         ).length;
@@ -702,7 +740,7 @@ class RoutingGrid {
     const y = nearest
       ? Math.min(nearest.hi, Math.max(nearest.lo, desired))
       : desired;
-    used.push({ y, owner });
+    used.push({ y, bundle });
     return y;
   }
 }
@@ -758,11 +796,51 @@ export function routeDiagramRelations(
       return span(a.relation) - span(b.relation) || a.index - b.index;
     });
 
+  // Each relation joins the bundle of its busier end: the card row and side it leaves
+  // or enters by. Relations of one bundle share trunks, so a referenced key fans out
+  // from one line instead of one lane per foreign key.
+  const portsOf = (relation: DiagramRelation) => {
+    const from = itemByKey.get(relation.fromTable);
+    const to = itemByKey.get(relation.toTable);
+    if (!from || !to) return null;
+    const loopsLeft =
+      from.column === to.column &&
+      from.column === grid.numColumns - 1 &&
+      from.column > 0;
+    const rightward =
+      from.column === to.column ? !loopsLeft : to.column > from.column;
+    return {
+      source: `${from.key}|${yMidForTableColumn(from, relation.fromColumn)}|${rightward ? "r" : "l"}`,
+      target: `${to.key}|${yMidForTableColumn(to, relation.toColumn)}|${
+        from.column === to.column
+          ? loopsLeft
+            ? "l"
+            : "r"
+          : rightward
+            ? "l"
+            : "r"
+      }`,
+    };
+  };
+  const ports = relations.map(portsOf);
+  const portUse = new Map<string, number>();
+  for (const port of ports)
+    if (port)
+      for (const key of [`s:${port.source}`, `t:${port.target}`])
+        portUse.set(key, (portUse.get(key) ?? 0) + 1);
+  const bundleOf = (index: number) => {
+    const port = ports[index]!;
+    const source = `s:${port.source}`;
+    const target = `t:${port.target}`;
+    return portUse.get(target)! > portUse.get(source)! ? target : source;
+  };
+
   const routes: Array<RelationGeometry | null> = relations.map(() => null);
   for (const { relation, index } of order) {
     const from = itemByKey.get(relation.fromTable);
     const to = itemByKey.get(relation.toTable);
     if (!from || !to) continue;
+    const bundle = bundleOf(index);
     const startY = yMidForTableColumn(from, relation.fromColumn);
     let endY = yMidForTableColumn(to, relation.toColumn);
 
@@ -779,7 +857,8 @@ export function routeDiagramRelations(
       const passage = grid.takeGutterPassage(
         useLeft ? from.column - 1 : from.column,
         { y: startY, side },
-        { y: endY, side }
+        { y: endY, side },
+        bundle
       );
       routes[index] = geometryOf(
         [{ x: fromEdgeX, y: startY }, ...passage, { x: toEdgeX, y: endY }],
@@ -810,7 +889,7 @@ export function routeDiagramRelations(
     intermediates.forEach((column, step) => {
       const remaining = intermediates.length - step;
       const desired = currentY + (endY - currentY) / (remaining + 1);
-      currentY = grid.takeGapY(column, desired, index);
+      currentY = grid.takeGapY(column, desired, bundle);
       crossYs.push(currentY);
     });
 
@@ -825,7 +904,8 @@ export function routeDiagramRelations(
         ...grid.takeGutterPassage(
           gutter,
           { y: rows[i]!, side: direction > 0 ? "lo" : "hi" },
-          { y: rows[i + 1]!, side: direction > 0 ? "hi" : "lo" }
+          { y: rows[i + 1]!, side: direction > 0 ? "hi" : "lo" },
+          bundle
         )
       );
     });

@@ -186,10 +186,48 @@ function assertRoutes(
 }
 
 /**
- * Segments of different relations never run on top of each other. The only exception is
- * fan-out: end runs of two relations attached to the very same point of a card.
+ * Independent expectation of each relation's bundle: the busier of its two attachment
+ * ports (card, logical row and side), the source on a tie.
  */
-function assertDistinguishable(routes: Array<RelationGeometry | null>) {
+function expectedBundles(
+  layout: DiagramLayout,
+  relations: DiagramRelation[],
+  routes: Array<RelationGeometry | null>
+) {
+  const itemByKey = new Map(layout.items.map((item) => [item.key, item]));
+  const ports = relations.map((rel, index) => {
+    const route = routes[index];
+    if (!route) return null;
+    const from = itemByKey.get(rel.fromTable)!;
+    const leavesRight = route.startX === from.x + from.width;
+    return {
+      source: `s|${rel.fromTable}|${expectedRowY(from, rel.fromColumn)}|${leavesRight}`,
+      target: `t|${rel.toTable}|${expectedRowY(itemByKey.get(rel.toTable)!, rel.toColumn)}|${route.enterFrom}`,
+    };
+  });
+  const uses = new Map<string, number>();
+  for (const port of ports)
+    for (const key of port ? [port.source, port.target] : [])
+      uses.set(key, (uses.get(key) ?? 0) + 1);
+  return ports.map((port) =>
+    !port
+      ? null
+      : uses.get(port.target)! > uses.get(port.source)!
+        ? port.target
+        : port.source
+  );
+}
+
+/**
+ * Segments of different relations never run on top of each other, with two exceptions:
+ * relations of one bundle (`bundles`, see expectedBundles) may share any run, since every
+ * line followed from their other ends leads back to the bundle's port; and end runs of
+ * relations attached to the very same point of a card may coincide (fan-out).
+ */
+function assertDistinguishable(
+  routes: Array<RelationGeometry | null>,
+  bundles: Array<string | null> = []
+) {
   type Run = {
     owner: number;
     fixed: number;
@@ -200,6 +238,8 @@ function assertDistinguishable(routes: Array<RelationGeometry | null>) {
   };
   const vertical: Run[] = [];
   const horizontal: Run[] = [];
+  const bundled = (a: number, b: number) =>
+    bundles[a] != null && bundles[a] === bundles[b];
   routes.forEach((route, owner) => {
     if (!route) return;
     const points = route.points;
@@ -238,7 +278,7 @@ function assertDistinguishable(routes: Array<RelationGeometry | null>) {
         for (let j = i + 1; j < group.length; j++) {
           const a = group[i]!;
           const b = group[j]!;
-          if (a.owner === b.owner) continue;
+          if (a.owner === b.owner || bundled(a.owner, b.owner)) continue;
           if (a.attach.some((point) => b.attach.includes(point))) continue;
           if (Math.min(a.hi, b.hi) - Math.max(a.lo, b.lo) > 0)
             clashes.push(`relations ${a.owner} and ${b.owner} share ${fixed}`);
@@ -247,6 +287,39 @@ function assertDistinguishable(routes: Array<RelationGeometry | null>) {
   }
   expect(clashes).toEqual([]);
 }
+
+describe("assertDistinguishable (test oracle)", () => {
+  const route = (points: Point[]) => ({ points }) as RelationGeometry;
+  // Two routes leaving one point that merge further on, x = 20 for y 20..80.
+  const merging = [
+    route([
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 100 },
+      { x: 60, y: 100 },
+    ]),
+    route([
+      { x: 0, y: 0 },
+      { x: 30, y: 0 },
+      { x: 30, y: 20 },
+      { x: 20, y: 20 },
+      { x: 20, y: 80 },
+      { x: 80, y: 80 },
+    ]),
+  ];
+
+  it("rejects an internal overlap between bundles sharing a start point", () => {
+    expect(() =>
+      assertDistinguishable(merging, ["target-port", "source-port"])
+    ).toThrow();
+  });
+
+  it("accepts the same overlap within one bundle", () => {
+    expect(() =>
+      assertDistinguishable(merging, ["source-port", "source-port"])
+    ).not.toThrow();
+  });
+});
 
 describe("crossesCard (test oracle)", () => {
   const card = { x: 100, y: 100, width: 50, height: 40 } as LayoutItem;
@@ -281,7 +354,7 @@ describe("layoutDiagram", () => {
       const { layout, routes, overflow } = layoutDiagram(tables, relations);
       expect(overflow).toBe(false);
       assertRoutes(layout, relations, routes);
-      assertDistinguishable(routes);
+      assertDistinguishable(routes, expectedBundles(layout, relations, routes));
     }
   );
 
@@ -310,7 +383,7 @@ describe("layoutDiagram", () => {
     assertRoutes(layout, relations, routes);
     // Swapped rows cannot all share one lane per relation without opposite end runs
     // overlapping; relations step between lanes instead, and none ever coincide.
-    assertDistinguishable(routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
   });
 
   it("widens the right margin for many self-references of a one-table diagram", () => {
@@ -328,10 +401,10 @@ describe("layoutDiagram", () => {
 
     expect(overflow).toBe(false);
     assertRoutes(layout, relations, routes);
-    assertDistinguishable(routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
   });
 
-  it("gives every relation crossing one column its own row, even toward a gap edge", () => {
+  it("gives every source crossing one column its own row, even toward a gap edge", () => {
     const tables = makeTables(18, 6);
     const base = buildDiagramLayout(tables, []);
     const left = base.items.filter((item) => item.column === 0);
@@ -344,7 +417,7 @@ describe("layoutDiagram", () => {
 
     expect(overflow).toBe(false);
     assertRoutes(layout, relations, routes);
-    assertDistinguishable(routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
   });
 
   it("keeps opposite end runs on one row apart (a.c0→c, b.c0→d across one gutter)", () => {
@@ -370,7 +443,7 @@ describe("layoutDiagram", () => {
 
     expect(overflow).toBe(false);
     assertRoutes(layout, relations, routes);
-    assertDistinguishable(routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
   });
 
   it("loops a same-column relation through the inner gutter, also in the last column", () => {
@@ -419,6 +492,82 @@ describe("layoutDiagram", () => {
     expect(layoutDiagram(tables, relations).routes).toEqual([null]);
   });
 
+  it("fans a referenced key out from one trunk without widening the layout", () => {
+    // One hub row referenced by 30 tables, like a tenant or user id.
+    const tables = makeTables(31, 21);
+    const hub = tableKey("public", "t0");
+    const relations = tables
+      .slice(1)
+      .map((table) => relation(hub, tableKey(table.schema, table.name)));
+
+    const before = buildDiagramLayout(tables, relations);
+    const { layout, routes, overflow } = layoutDiagram(tables, relations);
+
+    expect(overflow).toBe(false);
+    expect(layout.width).toBe(before.width);
+    assertRoutes(layout, relations, routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
+    // Every relation leaving the hub on one side runs into the same first lane.
+    for (const fromRight of [true, false]) {
+      const firstLanes = new Set(
+        routes
+          .filter(
+            (route) =>
+              route && route.fromRight === fromRight && route.points.length > 2
+          )
+          .map((route) => route!.points[1]!.x)
+      );
+      expect(firstLanes.size).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("fans many foreign keys into one referenced row from one trunk", () => {
+    // 30 tables point their own row at one hub row: the target port is the busier end.
+    const tables = makeTables(31, 22);
+    const hub = tableKey("public", "t0");
+    const relations = tables
+      .slice(1)
+      .map((table) => relation(tableKey(table.schema, table.name), hub));
+
+    const before = buildDiagramLayout(tables, relations);
+    const { layout, routes, overflow } = layoutDiagram(tables, relations);
+
+    expect(overflow).toBe(false);
+    expect(layout.width).toBe(before.width);
+    assertRoutes(layout, relations, routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
+    // Every relation entering the hub from one side arrives through the same last lane.
+    for (const enterFrom of ["left", "right"] as const) {
+      const lastLanes = new Set(
+        routes
+          .filter(
+            (route) =>
+              route && route.enterFrom === enterFrom && route.points.length > 2
+          )
+          .map((route) => route!.points[route!.points.length - 2]!.x)
+      );
+      expect(lastLanes.size).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("keeps source and target hubs apart when they mix", () => {
+    // A source hub and a target hub, with relations between them: some share a start
+    // point with relations of another bundle.
+    const tables = makeTables(40, 23);
+    const keys = tables.map((table) => tableKey(table.schema, table.name));
+    const relations = [
+      ...keys.slice(2, 20).map((key) => relation(keys[0]!, key)),
+      ...keys.slice(10, 40).map((key) => relation(key, keys[1]!)),
+      relation(keys[0]!, keys[1]!),
+    ];
+
+    const { layout, routes, overflow } = layoutDiagram(tables, relations);
+
+    expect(overflow).toBe(false);
+    assertRoutes(layout, relations, routes);
+    assertDistinguishable(routes, expectedBundles(layout, relations, routes));
+  });
+
   it("is deterministic", () => {
     const { tables, relations } = makeSchema(40, 80, 11);
     expect(layoutDiagram(tables, relations)).toEqual(
@@ -429,19 +578,26 @@ describe("layoutDiagram", () => {
 
 describe("routeDiagramRelations without widening", () => {
   it("reports overflow when a fixed layout lacks lanes", () => {
-    const tables = makeTables(12, 12);
-    const layout = buildDiagramLayout(tables, []);
-    const column = layout.items.filter((item) => item.column === 0);
-    const relations = Array.from({ length: 30 }, () =>
-      relation(column[0]!.key, column[1]!.key)
+    const tables = makeTables(12, 12).map((table) => ({
+      ...table,
+      columns: Array.from({ length: 30 }, (_, c) => ({
+        name: `c${c}`,
+        type: "uuid",
+      })),
+    }));
+    const fixed = buildDiagramLayout(tables, []);
+    const column = fixed.items.filter((item) => item.column === 0);
+    // Distinct rows on both ends: no two relations can share a lane.
+    const relations = Array.from({ length: 30 }, (_, i) =>
+      relation(column[0]!.key, column[1]!.key, `c${i}`, `c${29 - i}`)
     );
 
-    const routed = routeDiagramRelations(layout, relations);
+    const routed = routeDiagramRelations(fixed, relations);
 
     expect(routed.overflow).toBe(true);
-    expect(routed.demand.gutterLanes).toBe(30);
+    expect(routed.demand.gutterLanes).toBeGreaterThanOrEqual(15);
     // Still never through a card while lanes are shared.
-    assertRoutes(layout, relations, routed.routes);
+    assertRoutes(fixed, relations, routed.routes);
   });
 
   it("would flag the previous straight route across a middle column", () => {
