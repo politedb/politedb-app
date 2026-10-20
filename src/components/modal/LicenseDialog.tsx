@@ -12,13 +12,17 @@ import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { showMessage } from "src/lib/system-dialog";
 import { cn } from "src/utils/cn";
-import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import { formatDateTime } from "src/utils/convert";
 import {
   TrialStatusNote,
   trialNote,
 } from "src/components/license/TrialStatusNote";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  RENEWAL_TONE_CLASS,
+  renewalPresentation,
+} from "src/lib/license/renewal";
 import {
   LICENSE_SUPPORT_EMAIL,
   openLicenseRecoveryMail,
@@ -60,7 +64,7 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
 
   const isActive = (state?.status ?? "").toLowerCase() === "active";
   const trial = trialNote(state ?? null, trialSyncStatus);
-  const daysUntilExpires = formatDaysUntil(state?.expires_at);
+  const renewal = renewalPresentation(state ?? null);
 
   const handleActivate = async () => {
     const next = licenseKey.trim();
@@ -186,20 +190,19 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                 </div>
                 <div class="space-x-1">
                   <p>
-                    Expires at:{" "}
-                    <span
-                      class={cn(
-                        "font-medium",
-                        daysUntilExpires > 0 ? "text-green-600" : "text-red-600"
-                      )}
-                    >
-                      ({daysUntilExpires > 0 ? "in" : "expired from"}{" "}
-                      {daysUntilExpires} days)
-                    </span>
+                    {renewal.label}:{" "}
+                    {renewal.detail ? (
+                      <span
+                        class={cn(
+                          "font-medium",
+                          RENEWAL_TONE_CLASS[renewal.tone]
+                        )}
+                      >
+                        ({renewal.detail})
+                      </span>
+                    ) : null}
                   </p>
-                  <p class="font-medium text-neutral-900">
-                    {formatDateTime(state?.expires_at, true) || "Unknown"}
-                  </p>
+                  <p class="font-medium text-neutral-900">{renewal.value}</p>
                 </div>
                 <div class="space-x-1">
                   <p>Last checked at:</p>

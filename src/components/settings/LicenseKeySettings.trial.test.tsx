@@ -74,3 +74,50 @@ describe("LicenseKeySettings trial line", () => {
     expect(screen.queryByText(/Free trial/)).toBeNull();
   });
 });
+
+describe("LicenseKeySettings renewal row", () => {
+  it("shows the fallback for a subscription key with no renewal info", () => {
+    show({ paid_license: true, expires_at: null });
+    expect(screen.getByText("Renewal:")).toBeInTheDocument();
+    expect(
+      screen.getByText("Renews with your subscription")
+    ).toBeInTheDocument();
+  });
+
+  it("shows the renewal date from the license server", () => {
+    show({
+      paid_license: true,
+      expires_at: null,
+      subscription_status: "active",
+      renews_at: new Date(Date.now() + 30 * DAY).toISOString(),
+    });
+    expect(screen.getByText("Renews on:")).toBeInTheDocument();
+    expect(screen.getByText(/\(in (29|30) days\)/)).toBeInTheDocument();
+  });
+
+  it("shows a cancelled subscription's end", () => {
+    show({
+      paid_license: true,
+      subscription_status: "canceled",
+      ends_at: new Date(Date.now() + 5 * DAY).toISOString(),
+    });
+    expect(screen.getByText("Ends on:")).toBeInTheDocument();
+  });
+
+  it("shows the days left for a license with an expiry date", () => {
+    show({
+      paid_license: true,
+      expires_at: new Date(Date.now() + 10 * DAY).toISOString(),
+    });
+    expect(screen.getByText("Expires at:")).toBeInTheDocument();
+    expect(screen.getByText(/\(in (9|10) days\)/)).toBeInTheDocument();
+  });
+
+  it("flags an expired license", () => {
+    show({
+      paid_license: true,
+      expires_at: new Date(Date.now() - 2 * DAY).toISOString(),
+    });
+    expect(screen.getByText(/expired [12] days? ago/)).toBeInTheDocument();
+  });
+});

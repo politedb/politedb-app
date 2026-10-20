@@ -100,6 +100,16 @@ pub struct LicenseState {
     /// Order of this snapshot within the process; the frontend publishes only newer ones.
     #[serde(default, skip_deserializing)]
     pub snapshot_seq: u64,
+    /// Subscription renewal info for display only (active, trialing, past_due, canceled,
+    /// pausing, paused, incomplete, ended). Never affects entitlement.
+    #[serde(default)]
+    pub subscription_status: Option<String>,
+    /// Next renewal or first payment (RFC 3339), display only.
+    #[serde(default)]
+    pub renews_at: Option<String>,
+    /// When the subscription ends or ended, or pauses (RFC 3339), display only.
+    #[serde(default)]
+    pub ends_at: Option<String>,
 }
 
 /// A trial window as the license server recorded it (epoch ms), and when it was fetched.
@@ -206,6 +216,12 @@ struct LicenseApiResponse {
     plan: Option<String>,
     message: Option<String>,
     error: Option<String>,
+    #[serde(default, alias = "subscriptionStatus")]
+    subscription_status: Option<String>,
+    #[serde(default, alias = "renewsAt")]
+    renews_at: Option<String>,
+    #[serde(default, alias = "endsAt")]
+    ends_at: Option<String>,
 }
 
 fn parse_license_api_response(text: &str) -> Option<LicenseApiResponse> {
@@ -256,6 +272,9 @@ impl LicenseState {
             trial: None,
             revision: 0,
             snapshot_seq: 0,
+            subscription_status: None,
+            renews_at: None,
+            ends_at: None,
         }
     }
 
@@ -847,6 +866,11 @@ fn normalize_api_state(
         trial: None,
         revision: 0,
         snapshot_seq: 0,
+        // Display-only renewal info comes from this response alone: absent or null clears
+        // it (e.g. the validate-404 body), so a stale date never outlives its license.
+        subscription_status: pick_string(&[payload.subscription_status]),
+        renews_at: pick_string(&[payload.renews_at]),
+        ends_at: pick_string(&[payload.ends_at]),
     };
     normalize_state_timestamps(&mut state);
     state
@@ -1286,6 +1310,9 @@ mod tests {
             plan: None,
             message: None,
             error: None,
+            subscription_status: None,
+            renews_at: None,
+            ends_at: None,
         }
     }
 
@@ -1761,6 +1788,149 @@ mod tests {
     }
 
     #[test]
+    fn renewal_fields_parse_in_camel_and_snake_case() {
+        for body in [
+            r#"{"status":"active","subscriptionStatus":"active","renewsAt":"2027-10-19T08:30:00.000Z","endsAt":null}"#,
+            r#"{"status":"active","subscription_status":"active","renews_at":"2027-10-19T08:30:00.000Z","ends_at":null}"#,
+        ] {
+            let parsed = parse_license_api_response(body).expect(body);
+            assert_eq!(
+                parsed.subscription_status.as_deref(),
+                Some("active"),
+                "{body}"
+            );
+            assert_eq!(
+                parsed.renews_at.as_deref(),
+                Some("2027-10-19T08:30:00.000Z"),
+                "{body}"
+            );
+            assert_eq!(parsed.ends_at, None, "{body}");
+        }
+    }
+
+    #[test]
+    fn renewal_end_dates_parse_in_camel_and_snake_case() {
+        for body in [
+            r#"{"status":"active","subscriptionStatus":"canceled","endsAt":"2027-01-01T00:00:00.000Z"}"#,
+            r#"{"status":"active","subscription_status":"canceled","ends_at":"2027-01-01T00:00:00.000Z"}"#,
+        ] {
+            let parsed = parse_license_api_response(body).expect(body);
+            assert_eq!(
+                parsed.subscription_status.as_deref(),
+                Some("canceled"),
+                "{body}"
+            );
+            assert_eq!(
+                parsed.ends_at.as_deref(),
+                Some("2027-01-01T00:00:00.000Z"),
+                "{body}"
+            );
+            assert_eq!(parsed.renews_at, None, "{body}");
+        }
+    }
+
+    #[test]
+    fn renewal_fields_come_from_the_response_only() {
+        let device = test_device();
+        let previous = LicenseState {
+            status: "active".to_string(),
+            subscription_status: Some("active".to_string()),
+            renews_at: Some(iso(NOW + DAY)),
+            ends_at: Some(iso(NOW + 2 * DAY)),
+            ..no_trial()
+        };
+        // An older backend (fields absent), explicit nulls and blanks all clear them.
+        for body in [
+            r#"{"status":"active"}"#,
+            r#"{"status":"active","subscriptionStatus":null,"renewsAt":null,"endsAt":null}"#,
+            r#"{"status":"active","subscriptionStatus":" ","renewsAt":"","endsAt":"  "}"#,
+            r#"{"status":"inactive","plan":"free"}"#,
+        ] {
+            let payload = parse_license_api_response(body).unwrap();
+            let next = normalize_api_state(payload, &device, Some(&previous), None);
+            assert_eq!(next.subscription_status, None, "{body}");
+            assert_eq!(next.renews_at, None, "{body}");
+            assert_eq!(next.ends_at, None, "{body}");
+        }
+        let mut payload = empty_payload();
+        payload.subscription_status = Some(" canceled ".to_string());
+        payload.ends_at = Some(iso(NOW + DAY));
+        let next = normalize_api_state(payload, &device, Some(&previous), None);
+        assert_eq!(next.subscription_status.as_deref(), Some("canceled"));
+        assert_eq!(next.ends_at, Some(iso(NOW + DAY)));
+        assert_eq!(next.renews_at, None);
+    }
+
+    #[test]
+    fn renewal_fields_never_change_entitlement() {
+        let base = LicenseState {
+            status: "active".to_string(),
+            plan: Some("pro".to_string()),
+            ..no_trial()
+        };
+        let expected = finalize_state(base.clone(), Distribution::Direct, NOW);
+        assert!(expected.paid_license && expected.pro_access);
+        for status in [
+            "active",
+            "trialing",
+            "past_due",
+            "canceled",
+            "pausing",
+            "paused",
+            "incomplete",
+            "ended",
+            "unknown",
+        ] {
+            let with_renewal = LicenseState {
+                subscription_status: Some(status.to_string()),
+                renews_at: Some(iso(NOW - DAY)),
+                ends_at: Some(iso(NOW - 2 * DAY)),
+                ..base.clone()
+            };
+            let state = finalize_state(with_renewal, Distribution::Direct, NOW);
+            assert_eq!(state.paid_license, expected.paid_license, "{status}");
+            assert_eq!(state.pro_access, expected.pro_access, "{status}");
+            assert_eq!(
+                state.pro_access_until, expected.pro_access_until,
+                "{status}"
+            );
+            assert_eq!(state.status, "active", "{status}");
+        }
+        // A locked license stays locked whatever the renewal says.
+        let free = LicenseState {
+            status: "inactive".to_string(),
+            subscription_status: Some("active".to_string()),
+            renews_at: Some(iso(NOW + DAY)),
+            ..no_trial()
+        };
+        assert!(!finalize_state(free, Distribution::Direct, NOW).pro_access);
+    }
+
+    #[test]
+    fn a_state_file_without_renewal_fields_still_loads() {
+        let path = temp_path();
+        let device = test_device();
+        let mut value = serde_json::to_value(LicenseState {
+            status: "active".to_string(),
+            plan: Some("pro".to_string()),
+            ..no_trial()
+        })
+        .unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("subscription_status");
+        object.remove("renews_at");
+        object.remove("ends_at");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, value.to_string()).unwrap();
+
+        let state = load_at(&path, &device, Distribution::Direct, now_ms()).unwrap();
+        assert_eq!(state.status, "active");
+        assert!(state.pro_access);
+        assert_eq!(state.subscription_status, None);
+        assert_eq!(state.renews_at, None);
+    }
+
+    #[test]
     fn invalid_paid_expiry_keeps_a_valid_trial_across_reload() {
         let path = temp_path();
         let device = test_device();
@@ -2130,6 +2300,95 @@ mod tests {
         assert!(validate.1.get("licenseKey").is_none());
         assert!(validate.1.get("activationToken").is_none());
         assert_eq!(refreshed.license_key, None);
+    }
+
+    #[tokio::test]
+    async fn renewal_fields_follow_each_response_and_survive_failures() {
+        // 0: renewal present, 1: validate-404 body, 2: server error, 3: other key without fields.
+        let mode = Arc::new(Mutex::new(0u8));
+        let current = mode.clone();
+        let handler: Handler = Arc::new(move |path, _| {
+            let with_renewal = || {
+                let mut body = activation("token-K");
+                body["subscriptionStatus"] = "active".into();
+                body["renewsAt"] = "2027-10-19T08:30:00.000Z".into();
+                body["endsAt"] = serde_json::Value::Null;
+                body
+            };
+            if path.ends_with("/deactivate") {
+                return json(
+                    0,
+                    serde_json::json!({ "status": "inactive", "plan": "free" }),
+                );
+            }
+            match *current.lock().unwrap() {
+                0 => json(0, with_renewal()),
+                1 => json(
+                    0,
+                    serde_json::json!({ "status": "inactive", "plan": "free" }),
+                ),
+                2 => Reply::Json {
+                    delay_ms: 0,
+                    status: 500,
+                    body: "{}".to_string(),
+                    headers: vec![],
+                },
+                _ => json(0, activation("token-L")),
+            }
+        });
+        let (base, _) = server(handler).await;
+        let path = temp_path();
+        let device = test_device();
+        let lock = tokio::sync::Mutex::new(());
+        let target = target(&lock, &path, &device);
+        let reload = || load_at(&path, &device, Distribution::Direct, now_ms()).unwrap();
+
+        // Response → commit → reload keeps the fields.
+        let active = activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        assert_eq!(active.subscription_status.as_deref(), Some("active"));
+        assert_eq!(
+            reload().renews_at.as_deref(),
+            Some("2027-10-19T08:30:00.000Z")
+        );
+
+        // A server error keeps the previous snapshot, renewal included.
+        *mode.lock().unwrap() = 2;
+        assert!(refresh_at(&target, &base, "p".into()).await.is_err());
+        assert_eq!(reload().subscription_status.as_deref(), Some("active"));
+
+        // The validate-404 body (no renewal fields) clears them.
+        *mode.lock().unwrap() = 1;
+        let inactive = refresh_at(&target, &base, "p".into()).await.unwrap();
+        assert_eq!(inactive.subscription_status, None);
+        assert_eq!(reload().renews_at, None);
+
+        // Switching to a key whose response has no renewal info leaves none behind.
+        *mode.lock().unwrap() = 0;
+        activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        *mode.lock().unwrap() = 3;
+        let other = activate_at(&target, &base, "p".into(), "L".into())
+            .await
+            .unwrap();
+        assert_eq!(other.subscription_status, None);
+        assert_eq!(other.renews_at, None);
+
+        // Deactivate and clear both drop them.
+        *mode.lock().unwrap() = 0;
+        activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        let cleared = deactivate_at(&target, &base, "p".into()).await.unwrap();
+        assert_eq!(cleared.subscription_status, None);
+        activate_at(&target, &base, "p".into(), "K".into())
+            .await
+            .unwrap();
+        let cleared = clear_at(&path, &device, Distribution::Direct).unwrap();
+        assert_eq!(cleared.subscription_status, None);
+        assert_eq!(reload().ends_at, None);
     }
 
     fn trial_reply(start: i64, end: i64) -> serde_json::Value {
