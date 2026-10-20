@@ -70,7 +70,7 @@ describe("ProUpgradeDialogHost", () => {
     );
     render(<ProUpgradeDialogHost />);
     act(() => useProUpgradeStore.getState().open("ai-agent"));
-    act(() => useProUpgradeStore.getState().open("backup-restore"));
+    act(() => useProUpgradeStore.getState().open("query-analyzer"));
     await waitFor(() => expect(mocks.choose).toHaveBeenCalledTimes(1));
     answer("cancel");
   });

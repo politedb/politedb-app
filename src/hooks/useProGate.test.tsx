@@ -16,7 +16,7 @@ function Probe(props: { onRun: () => void }) {
     <button
       type="button"
       onClick={() => {
-        if (requirePro("backup-restore")) props.onRun();
+        if (requirePro("query-analyzer")) props.onRun();
       }}
     >
       {hasPro ? "pro" : "free"}
@@ -44,7 +44,7 @@ describe("useProGate", () => {
     render(<Probe onRun={() => runs++} />);
     fireEvent.click(screen.getByRole("button"));
     expect(runs).toBe(0);
-    expect(useProUpgradeStore.getState().feature).toBe("backup-restore");
+    expect(useProUpgradeStore.getState().feature).toBe("query-analyzer");
   });
 
   it("follows license changes such as activating a key", () => {

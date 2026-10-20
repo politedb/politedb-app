@@ -6,7 +6,6 @@ import {
 
 /** Features that need a Pro license or a running trial. */
 export type ProFeature =
-  | "backup-restore"
   | "query-analyzer"
   | "health-inspector"
   | "er-diagram-export"
@@ -14,7 +13,6 @@ export type ProFeature =
   | "ai-agent";
 
 export const PRO_FEATURE_LABELS: Record<ProFeature, string> = {
-  "backup-restore": "Database backup and restore",
   "query-analyzer": "Visual query analyzer",
   "health-inspector": "Database health inspector",
   "er-diagram-export": "ER diagram export to SVG",
