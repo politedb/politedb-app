@@ -61,7 +61,7 @@ import { LicenseKeySettings } from "./LicenseKeySettings";
 const lostKey = () => screen.getByRole("button", { name: "Lost license key?" });
 const keyInput = () =>
   screen.getByPlaceholderText(
-    "PLD-XXXX-XXXX-XXXX-XXXX-XXXX"
+    "PLD-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
   ) as HTMLInputElement;
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 

@@ -24,6 +24,7 @@ import { applyThemePreference } from "src/lib/theme";
 import { applyUiFontPreference } from "src/lib/uiFont";
 import { applyUiDensityPreference } from "src/lib/density";
 import { cn } from "src/utils/cn";
+import { SettingsIcon } from "../icons";
 
 export type { SettingsDialogSection } from "src/components/settings/types";
 
@@ -131,10 +132,13 @@ export function SettingsDialog(props: Props) {
       open={open}
       onClose={onClose}
       size="xl"
-      className="flex h-[min(580px,86vh)] max-w-4xl flex-col overflow-hidden"
+      className="flex h-[min(620px,86vh)] max-w-5xl flex-col overflow-hidden"
     >
       <DialogHeader className="border-b border-slate-200">
-        <DialogTitle className="text-lg font-semibold">Settings</DialogTitle>
+        <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
+          <SettingsIcon className="size-4.5" />
+          General settings
+        </DialogTitle>
       </DialogHeader>
       <DialogContent className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-0 p-0">
         <aside class="min-h-0 overflow-hidden border-r border-slate-200 bg-slate-50">

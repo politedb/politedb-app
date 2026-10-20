@@ -98,14 +98,14 @@ export function LicenseKeySettings(props: { active: boolean }) {
             <FieldRow
               class="border-b-0"
               label="Activate license key"
-              description="Paste license key from purchase email."
+              description="Paste your license key here."
             >
               <Input
-                className="border border-slate-300"
+                className="w-88 max-w-full border border-slate-300"
                 type="text"
                 value={licenseKey}
                 onValueChange={setLicenseKey}
-                placeholder="PLD-XXXX-XXXX-XXXX-XXXX-XXXX"
+                placeholder="PLD-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
               />
             </FieldRow>
             {trial ? (

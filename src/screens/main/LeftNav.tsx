@@ -242,7 +242,6 @@ export function LeftNav(props: {
                 icon: <KeyboardIcon className="size-5" />,
                 label: "Keyboard shortcuts",
                 onSelect: () => openSettingsSection("keyboard"),
-                rightSlot: <span className="text-slate-400">⌘ K</span>,
                 className: "text-slate-900",
               },
               {
