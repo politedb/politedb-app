@@ -78,6 +78,44 @@ describe("DiagramCanvas", () => {
     expect(container.querySelector(".diagram-rel-idle")).not.toBeNull();
   });
 
+  it("draws relations below the cards, without an SVG mask", () => {
+    const columns = [
+      { name: "id", type: "integer", isPrimaryKey: true },
+      { name: "a_id", type: "integer" },
+    ];
+    const { container } = renderDiagram(
+      [
+        { schema: "public", name: "a", columns },
+        { schema: "public", name: "b", columns },
+      ],
+      [
+        {
+          fromTable: "public.a",
+          toTable: "public.b",
+          fromColumn: "id",
+          toColumn: "a_id",
+          label: "a",
+          cardinality: "one-to-many",
+        },
+      ]
+    );
+
+    const idle = container.querySelector(".diagram-rel-idle");
+    expect(idle).not.toBeNull();
+    // Cards hide line ends at their edges: the visible relations' SVG is stacked
+    // below them and comes first.
+    const visibleSvg = idle!.closest("svg")!;
+    expect(visibleSvg.classList.contains("z-0")).toBe(true);
+    const card = container.querySelector("[data-diagram-table]")!;
+    expect(
+      visibleSvg.compareDocumentPosition(card) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(card.classList.contains("z-1")).toBe(true);
+    expect(container.querySelector("mask")).toBeNull();
+    expect(container.querySelector("[mask]")).toBeNull();
+  });
+
   it("windows tall table columns to the visible range", () => {
     const columns = Array.from({ length: 80 }, (_, index) => ({
       name: `col_${index}`,

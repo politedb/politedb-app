@@ -570,160 +570,18 @@ export function DiagramCanvas(props: {
                   });
                 }}
               >
-                {visibleCards.map(({ item, columnStart, columnEnd }) => (
-                  <DiagramTableCard
-                    key={item.key}
-                    item={item}
-                    highlighted={highlightedTableKeys.has(item.key)}
-                    columnStart={columnStart}
-                    columnEnd={columnEnd}
-                  />
-                ))}
+                {/* Visible relations sit below the cards, which hide line ends and animated
+                    particles at their edges without an SVG mask. A full-viewport mask over the
+                    animated relations is a suspected cause of cut-off lines and stutter in
+                    WebKit; the router already keeps every line out of the cards. */}
                 <svg
-                  class="pointer-events-none absolute z-100 overflow-hidden"
+                  class="pointer-events-none absolute z-0 overflow-hidden"
                   style={{ left: `${svgBox.x}px`, top: `${svgBox.y}px` }}
                   width={svgBox.width}
                   height={svgBox.height}
                   viewBox={`${svgBox.x} ${svgBox.y} ${svgBox.width} ${svgBox.height}`}
                 >
-                  <defs>
-                    <mask id="diagram-rel-mask" maskUnits="userSpaceOnUse">
-                      <rect
-                        x={svgBox.x}
-                        y={svgBox.y}
-                        width={svgBox.width}
-                        height={svgBox.height}
-                        fill="white"
-                      />
-                      {visibleCards.map(({ item }) => (
-                        <rect
-                          key={`mask-${item.key}`}
-                          x={item.x - 1}
-                          y={item.y - 1}
-                          width={item.width + 2}
-                          height={item.height + 2}
-                          rx={12}
-                          ry={12}
-                          fill="black"
-                        />
-                      ))}
-                    </mask>
-                  </defs>
-                  {showDetails
-                    ? visibleRelations.map(
-                        ({ relation, index, geometry: g }) => {
-                          const tip = relationHoverTitle(relation);
-                          const gk = `${relation.fromTable}-${relation.toTable}-${index}`;
-                          if (relation.cardinality === "one-to-one") {
-                            const o = oneToOneCircleCenters(g);
-                            return (
-                              <g key={gk}>
-                                <path
-                                  d={g.path}
-                                  fill="none"
-                                  stroke={HIT_STROKE}
-                                  stroke-width={REL_HIT_STROKE_WIDTH}
-                                  stroke-linecap="round"
-                                  stroke-linejoin="round"
-                                  class="cursor-pointer"
-                                  style={{ pointerEvents: "stroke" }}
-                                  onMouseEnter={() =>
-                                    onRelationHoverEnter(index)
-                                  }
-                                  onMouseLeave={onRelationHoverLeave}
-                                >
-                                  <title>{tip}</title>
-                                </path>
-                                <circle
-                                  cx={o.startCx}
-                                  cy={o.startCy}
-                                  r={O_HIT_R}
-                                  fill={HIT_FILL}
-                                  class="cursor-pointer"
-                                  style={{ pointerEvents: "fill" }}
-                                  onMouseEnter={() =>
-                                    onRelationHoverEnter(index)
-                                  }
-                                  onMouseLeave={onRelationHoverLeave}
-                                >
-                                  <title>{tip}</title>
-                                </circle>
-                                <circle
-                                  cx={o.endCx}
-                                  cy={o.endCy}
-                                  r={O_HIT_R}
-                                  fill={HIT_FILL}
-                                  class="cursor-pointer"
-                                  style={{ pointerEvents: "fill" }}
-                                  onMouseEnter={() =>
-                                    onRelationHoverEnter(index)
-                                  }
-                                  onMouseLeave={onRelationHoverLeave}
-                                >
-                                  <title>{tip}</title>
-                                </circle>
-                              </g>
-                            );
-                          }
-                          const tick = oneToManyParentTickGeometry(g);
-                          const crow = crowFootLines(
-                            g.endX,
-                            g.endY,
-                            g.enterFrom
-                          );
-                          return (
-                            <g key={gk}>
-                              <path
-                                d={g.path}
-                                fill="none"
-                                stroke={HIT_STROKE}
-                                stroke-width={REL_HIT_STROKE_WIDTH}
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                class="cursor-pointer"
-                                style={{ pointerEvents: "stroke" }}
-                                onMouseEnter={() => onRelationHoverEnter(index)}
-                                onMouseLeave={onRelationHoverLeave}
-                              >
-                                <title>{tip}</title>
-                              </path>
-                              <line
-                                x1={tick.x}
-                                y1={tick.y1}
-                                x2={tick.x}
-                                y2={tick.y2}
-                                stroke={HIT_STROKE}
-                                stroke-width={12}
-                                stroke-linecap="round"
-                                class="cursor-pointer"
-                                style={{ pointerEvents: "stroke" }}
-                                onMouseEnter={() => onRelationHoverEnter(index)}
-                                onMouseLeave={onRelationHoverLeave}
-                              />
-                              {crow.map(([x1, y1, x2, y2], i) => (
-                                <line
-                                  key={`${gk}-crow-hit-${i}`}
-                                  x1={x1}
-                                  y1={y1}
-                                  x2={x2}
-                                  y2={y2}
-                                  stroke={HIT_STROKE}
-                                  stroke-width={CROW_HIT_STROKE_WIDTH}
-                                  stroke-linecap="round"
-                                  class="cursor-pointer"
-                                  style={{ pointerEvents: "stroke" }}
-                                  onMouseEnter={() =>
-                                    onRelationHoverEnter(index)
-                                  }
-                                  onMouseLeave={onRelationHoverLeave}
-                                />
-                              ))}
-                            </g>
-                          );
-                        }
-                      )
-                    : null}
-                  <g mask="url(#diagram-rel-mask)">
+                  <g>
                     {idleRelationPath ? (
                       <path
                         d={idleRelationPath}
@@ -887,6 +745,137 @@ export function DiagramCanvas(props: {
                       );
                     })}
                   </g>
+                </svg>
+                {visibleCards.map(({ item, columnStart, columnEnd }) => (
+                  <DiagramTableCard
+                    key={item.key}
+                    item={item}
+                    highlighted={highlightedTableKeys.has(item.key)}
+                    columnStart={columnStart}
+                    columnEnd={columnEnd}
+                  />
+                ))}
+                <svg
+                  class="pointer-events-none absolute z-100 overflow-hidden"
+                  style={{ left: `${svgBox.x}px`, top: `${svgBox.y}px` }}
+                  width={svgBox.width}
+                  height={svgBox.height}
+                  viewBox={`${svgBox.x} ${svgBox.y} ${svgBox.width} ${svgBox.height}`}
+                >
+                  {showDetails
+                    ? visibleRelations.map(
+                        ({ relation, index, geometry: g }) => {
+                          const tip = relationHoverTitle(relation);
+                          const gk = `${relation.fromTable}-${relation.toTable}-${index}`;
+                          if (relation.cardinality === "one-to-one") {
+                            const o = oneToOneCircleCenters(g);
+                            return (
+                              <g key={gk}>
+                                <path
+                                  d={g.path}
+                                  fill="none"
+                                  stroke={HIT_STROKE}
+                                  stroke-width={REL_HIT_STROKE_WIDTH}
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  class="cursor-pointer"
+                                  style={{ pointerEvents: "stroke" }}
+                                  onMouseEnter={() =>
+                                    onRelationHoverEnter(index)
+                                  }
+                                  onMouseLeave={onRelationHoverLeave}
+                                >
+                                  <title>{tip}</title>
+                                </path>
+                                <circle
+                                  cx={o.startCx}
+                                  cy={o.startCy}
+                                  r={O_HIT_R}
+                                  fill={HIT_FILL}
+                                  class="cursor-pointer"
+                                  style={{ pointerEvents: "fill" }}
+                                  onMouseEnter={() =>
+                                    onRelationHoverEnter(index)
+                                  }
+                                  onMouseLeave={onRelationHoverLeave}
+                                >
+                                  <title>{tip}</title>
+                                </circle>
+                                <circle
+                                  cx={o.endCx}
+                                  cy={o.endCy}
+                                  r={O_HIT_R}
+                                  fill={HIT_FILL}
+                                  class="cursor-pointer"
+                                  style={{ pointerEvents: "fill" }}
+                                  onMouseEnter={() =>
+                                    onRelationHoverEnter(index)
+                                  }
+                                  onMouseLeave={onRelationHoverLeave}
+                                >
+                                  <title>{tip}</title>
+                                </circle>
+                              </g>
+                            );
+                          }
+                          const tick = oneToManyParentTickGeometry(g);
+                          const crow = crowFootLines(
+                            g.endX,
+                            g.endY,
+                            g.enterFrom
+                          );
+                          return (
+                            <g key={gk}>
+                              <path
+                                d={g.path}
+                                fill="none"
+                                stroke={HIT_STROKE}
+                                stroke-width={REL_HIT_STROKE_WIDTH}
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="cursor-pointer"
+                                style={{ pointerEvents: "stroke" }}
+                                onMouseEnter={() => onRelationHoverEnter(index)}
+                                onMouseLeave={onRelationHoverLeave}
+                              >
+                                <title>{tip}</title>
+                              </path>
+                              <line
+                                x1={tick.x}
+                                y1={tick.y1}
+                                x2={tick.x}
+                                y2={tick.y2}
+                                stroke={HIT_STROKE}
+                                stroke-width={12}
+                                stroke-linecap="round"
+                                class="cursor-pointer"
+                                style={{ pointerEvents: "stroke" }}
+                                onMouseEnter={() => onRelationHoverEnter(index)}
+                                onMouseLeave={onRelationHoverLeave}
+                              />
+                              {crow.map(([x1, y1, x2, y2], i) => (
+                                <line
+                                  key={`${gk}-crow-hit-${i}`}
+                                  x1={x1}
+                                  y1={y1}
+                                  x2={x2}
+                                  y2={y2}
+                                  stroke={HIT_STROKE}
+                                  stroke-width={CROW_HIT_STROKE_WIDTH}
+                                  stroke-linecap="round"
+                                  class="cursor-pointer"
+                                  style={{ pointerEvents: "stroke" }}
+                                  onMouseEnter={() =>
+                                    onRelationHoverEnter(index)
+                                  }
+                                  onMouseLeave={onRelationHoverLeave}
+                                />
+                              ))}
+                            </g>
+                          );
+                        }
+                      )
+                    : null}
                 </svg>
               </div>
             </div>
