@@ -4,7 +4,7 @@ import { Input } from "src/components/common/Input";
 import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
-import { formatDateTime, formatDaysUntil } from "src/utils/convert";
+import { formatDateTime } from "src/utils/convert";
 import {
   TrialStatusNote,
   trialNote,
@@ -13,6 +13,10 @@ import { FieldRow } from "src/components/settings/FieldRow";
 import { SettingCard } from "src/components/settings/SettingCard";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import { LICENSE_PORTAL_URL } from "src/lib/license/proAccess";
+import {
+  RENEWAL_TONE_CLASS,
+  renewalPresentation,
+} from "src/lib/license/renewal";
 import {
   LICENSE_SUPPORT_EMAIL,
   openLicenseRecoveryMail,
@@ -65,7 +69,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
 
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
   const trial = trialNote(licenseState ?? null, trialSyncStatus);
-  const daysUntilExpires = formatDaysUntil(licenseState?.expires_at);
+  const renewal = renewalPresentation(licenseState ?? null);
 
   return (
     <>
@@ -147,19 +151,14 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 {licenseState?.device_name || "Unknown"}
               </div>
             </FieldRow>
-            <FieldRow label="Expires at:">
+            <FieldRow label={`${renewal.label}:`}>
               <div class="space-x-1 text-neutral-700">
-                <span class="font-medium">
-                  {formatDateTime(licenseState?.expires_at, true) || "Unknown"}
-                </span>
-                <span
-                  class={
-                    daysUntilExpires > 0 ? "text-green-600" : "text-red-600"
-                  }
-                >
-                  ({daysUntilExpires > 0 ? "in" : "expired from"}{" "}
-                  {daysUntilExpires} days)
-                </span>
+                <span class="font-medium">{renewal.value}</span>
+                {renewal.detail ? (
+                  <span class={RENEWAL_TONE_CLASS[renewal.tone]}>
+                    ({renewal.detail})
+                  </span>
+                ) : null}
               </div>
             </FieldRow>
             <FieldRow label="Last checked at:">

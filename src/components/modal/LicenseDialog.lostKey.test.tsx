@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   features: {} as Record<string, boolean>,
   store: null as unknown,
   status: "inactive",
+  extra: {} as Partial<LicenseState>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -41,6 +42,7 @@ vi.mock("src/stores/license", () => ({
         status: mocks.status,
         customer_email: "buyer@example.com",
         device_name: "Test Mac",
+        ...mocks.extra,
       } as LicenseState,
       loaded: true,
       busy: false,
@@ -74,6 +76,7 @@ beforeEach(() => {
   mocks.navigate.mockReset();
   mocks.store = null;
   mocks.status = "inactive";
+  mocks.extra = {};
 });
 
 afterEach(() => cleanup());
@@ -148,5 +151,39 @@ describe("LicenseDialog lost key", () => {
     view.rerender(<LicenseDialog open={false} onClose={() => {}} />);
     view.rerender(<LicenseDialog open onClose={() => {}} />);
     expect(screen.getByText("License Key")).toBeInTheDocument();
+  });
+});
+
+describe("LicenseDialog renewal row", () => {
+  it.each([
+    ["Direct", DIRECT],
+    ["App Store", APP_STORE],
+  ])("shows the shared renewal row and fallback on %s", (_name, features) => {
+    mocks.status = "active";
+    mocks.extra = {
+      subscription_status: "canceled",
+      ends_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+    setup(features);
+    expect(screen.getByText(/Ends on:/)).toBeInTheDocument();
+    expect(screen.getByText(/\(in (29|30) days\)/)).toBeInTheDocument();
+    cleanup();
+
+    // A known status without a usable date shows status words, not the fallback.
+    mocks.store = null;
+    mocks.extra = { subscription_status: "paused" };
+    setup(features);
+    expect(screen.getByText(/Status:/)).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.queryByText("Renews with your subscription")).toBeNull();
+    cleanup();
+
+    mocks.store = null;
+    mocks.extra = {};
+    setup(features);
+    expect(screen.getByText(/Renewal:/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Renews with your subscription")
+    ).toBeInTheDocument();
   });
 });

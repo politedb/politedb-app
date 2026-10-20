@@ -1,3 +1,4 @@
+import type { SubscriptionDisplayStatus } from "src/lib/license/renewal";
 import { invoke } from "@tauri-apps/api/core";
 import { CMD } from "./commands";
 
@@ -53,6 +54,12 @@ export type LicenseState = {
   revision?: number;
   /** Order of this snapshot in the app session; only newer snapshots are shown. */
   snapshot_seq?: number;
+  /** Subscription state from the license server; display only, never affects access. */
+  subscription_status?: SubscriptionDisplayStatus | null;
+  /** Next renewal or first payment (ISO), display only. */
+  renews_at?: string | null;
+  /** When the subscription ends, ended or pauses (ISO), display only. */
+  ends_at?: string | null;
 };
 
 /** A trial window from the license server (epoch ms) and when it was fetched. */

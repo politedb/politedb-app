@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   features: {} as Record<string, boolean>,
   store: null as unknown,
   status: "inactive",
+  extra: {} as Partial<LicenseState>,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -40,6 +41,7 @@ vi.mock("src/stores/license", () => ({
       state: {
         status: mocks.status,
         customer_email: "buyer@example.com",
+        ...mocks.extra,
       } as LicenseState,
       loaded: true,
       busy: false,
@@ -73,6 +75,7 @@ beforeEach(() => {
   mocks.navigate.mockReset();
   mocks.store = null;
   mocks.status = "inactive";
+  mocks.extra = {};
 });
 
 afterEach(() => cleanup());
@@ -140,4 +143,43 @@ describe("the recovery mail link", () => {
     );
     expect(LICENSE_RECOVERY_MAILTO).not.toContain("buyer@example.com");
   });
+});
+
+describe("LicenseKeySettings renewal row in both flavors", () => {
+  const inThirtyDays = () =>
+    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  it.each([
+    ["Direct", DIRECT],
+    ["App Store", APP_STORE],
+  ])(
+    "shows renewal, status words and the fallback on %s",
+    (_name, features) => {
+      mocks.status = "active";
+      mocks.extra = {
+        subscription_status: "active",
+        renews_at: inThirtyDays(),
+      };
+      setup(features);
+      expect(screen.getByText("Renews on:")).toBeInTheDocument();
+      cleanup();
+
+      mocks.store = null;
+      mocks.extra = { subscription_status: "past_due" };
+      setup(features);
+      expect(screen.getByText("Payment:")).toBeInTheDocument();
+      expect(
+        screen.getByText("Past due. Update your payment method")
+      ).toBeInTheDocument();
+      cleanup();
+
+      mocks.store = null;
+      mocks.extra = {};
+      setup(features);
+      expect(screen.getByText("Renewal:")).toBeInTheDocument();
+      expect(
+        screen.getByText("Renews with your subscription")
+      ).toBeInTheDocument();
+    }
+  );
 });
