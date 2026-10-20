@@ -404,7 +404,7 @@ function SessionsTable(props: {
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <SectionBanner section={section} loading={props.loading} />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -488,7 +488,7 @@ function StatementsTable(props: {
         </div>
       ) : null}
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -576,7 +576,7 @@ function TablesTable(props: {
         caveat={`${DEAD_ROW_CAVEAT} ${PARTITION_SIZE_NOTE}`}
       />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -617,7 +617,7 @@ function IndexesTable(props: {
       {
         key: "indexBytes",
         label: "Size",
-        className: "text-sm p-2",
+        className: "text-sm p-2 min-w-24",
         render: (_v, row) =>
           row.indexBytes == null
             ? "—"
@@ -641,7 +641,7 @@ function IndexesTable(props: {
         caveat={INDEX_SCAN_CAVEAT}
       />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
