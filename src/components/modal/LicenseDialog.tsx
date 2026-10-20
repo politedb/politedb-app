@@ -236,12 +236,13 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                   variant="shadow"
                   onClick={() => void refresh()}
                   disabled={busy}
+                  loading={busy}
                 >
-                  {busy ? "Refreshing..." : "Refresh"}
+                  Refresh
                 </Button>
                 <Button
                   variant="outline"
-                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  className="border-rose-200 text-rose-700 hover:bg-rose-50"
                   onClick={() => void deactivate()}
                   disabled={busy}
                 >

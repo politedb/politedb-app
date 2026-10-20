@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Popover } from "src/components/common/Popover";
 import { ProBadge } from "src/components/license/ProBadge";
-import { ChevronDownIcon } from "src/components/icons";
 import { useProGate } from "src/hooks/useProGate";
 import {
   setAssistantMode,
@@ -150,13 +149,12 @@ export function AssistantModePicker() {
         aria-expanded={open}
         aria-controls={open ? MENU_ID : undefined}
         class={cn(
-          "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100",
+          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100",
           open && "bg-neutral-100"
         )}
         onClick={() => setOpen((value) => !value)}
       >
         {activeLabel}
-        <ChevronDownIcon className="size-3.5" aria-hidden="true" />
       </button>
     </Popover>
   );

@@ -173,8 +173,9 @@ export function LicenseKeySettings(props: { active: boolean }) {
               variant="shadow"
               onClick={() => void refreshLicense()}
               disabled={licenseBusy}
+              loading={licenseBusy}
             >
-              {licenseBusy ? "Refreshing..." : "Refresh"}
+              Refresh
             </Button>
             <Button
               variant="outline"
