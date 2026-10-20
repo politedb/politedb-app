@@ -6,6 +6,7 @@ import {
   PlusIcon,
   SearchIcon,
   SquareFunctionIcon,
+  TrashIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
@@ -528,8 +529,9 @@ export function LeftNavObjectsPane({ profileId }: Props) {
         onClose={() => (dropping ? null : setDropTarget(null))}
         size="sm"
       >
-        <DialogHeader>
-          <DialogTitle>
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <TrashIcon className="size-4 text-neutral-600" />
             Drop {dropTarget ? objectKindSingular(dropTarget.kind) : "object"}
           </DialogTitle>
         </DialogHeader>

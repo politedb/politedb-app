@@ -23,7 +23,7 @@ import {
 import { KeychainCard } from "./KeychainCard";
 import type { KeychainSortMode, ViewMode } from "src/types";
 import { cn } from "src/utils/cn";
-import { CopyIcon, LockIcon } from "src/components/icons";
+import { CopyIcon, KeyIcon, LockIcon } from "src/components/icons";
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -322,20 +322,23 @@ export function KeychainSection(props: {
         size="md"
         closeOnOutsideClick
       >
-        <DialogHeader>
-          <DialogTitle>Secret Editor</DialogTitle>
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <KeyIcon className="size-4 text-neutral-600" />
+            Secret Editor
+          </DialogTitle>
           <DialogDescription>
             Configure the key and value for your secret.
           </DialogDescription>
         </DialogHeader>
-        <DialogContent className="gap-3 pt-1">
+        <DialogContent className="gap-2">
           <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
             <Input
               label="Key"
               value={key}
               onValueChange={setKey}
               placeholder="Secret key"
-              className="rounded-md border border-slate-300 bg-white"
+              className="h-9 rounded-md border border-slate-300 bg-white"
               right={
                 <CopyIcon
                   onClick={() => void navigator.clipboard.writeText(key)}
@@ -349,7 +352,7 @@ export function KeychainSection(props: {
               value={value}
               onValueChange={setValue}
               placeholder="Secret value"
-              className="rounded-md border border-slate-300 bg-white"
+              className="h-9 rounded-md border border-slate-300 bg-white"
               type="password"
             />
           </div>
@@ -358,7 +361,7 @@ export function KeychainSection(props: {
             label="Last loaded value"
             value={new Array(48).fill("*").join("")}
             readOnly
-            className="rounded-md border border-slate-300 bg-slate-50 align-middle"
+            className="h-9 rounded-md border border-slate-300 bg-slate-50 align-middle"
             style={{ paddingTop: "8px", paddingBottom: "6px" }}
             placeholder="No value loaded"
             right={
@@ -384,7 +387,7 @@ export function KeychainSection(props: {
             </div>
           )}
         </DialogContent>
-        <DialogFooter className="justify-between pt-1">
+        <DialogFooter className="justify-between">
           <div class="flex items-center gap-2">
             <Button
               variant="shadow"

@@ -8,7 +8,13 @@ import {
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
-import { RefreshCwIcon, VaultIcon, XIcon } from "src/components/icons";
+import {
+  RefreshCwIcon,
+  SparklesIcon,
+  UnlockIcon,
+  VaultIcon,
+  XIcon,
+} from "src/components/icons";
 import {
   AI_PROVIDER_LABELS,
   SUGGESTED_MODELS,
@@ -498,7 +504,10 @@ export function AiAssistantSettingsDialog(props: Props) {
       className="max-w-4xl overflow-hidden"
     >
       <DialogHeader className="border-b border-neutral-200">
-        <DialogTitle>AI Provider Settings</DialogTitle>
+        <DialogTitle className="flex items-center gap-2 font-semibold">
+          <SparklesIcon className="size-4" />
+          AI Provider Settings
+        </DialogTitle>
       </DialogHeader>
       <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] gap-0 overflow-hidden p-0">
         <aside class="flex min-h-0 flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
@@ -524,7 +533,12 @@ export function AiAssistantSettingsDialog(props: Props) {
                     )}
                     onClick={() => chooseProvider(kind, configured[0])}
                   >
-                    <VaultIcon className="size-4 shrink-0" />
+                    {ready ? (
+                      <UnlockIcon className="size-4 shrink-0" />
+                    ) : (
+                      <VaultIcon className="size-4 shrink-0" />
+                    )}
+
                     <span class="min-w-0 flex-1 truncate">
                       {AI_PROVIDER_LABELS[kind]}
                     </span>

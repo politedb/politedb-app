@@ -9,10 +9,12 @@ Scope: **Phases 1–3** are implemented and committed on `feat/ai-agent`; each w
 **Agent always on (2026-10-19, user request: "mặc định sẽ là dùng ai agent luôn").** The "AI agent (beta)" opt-in is removed. The agent runs whenever a connection on a supported engine is active, and still falls back to the legacy assistant for unsupported providers, models or engines. AI settings drop the agent description text, the column-details checkbox (column comments and defaults are always sent) and the Data access list (user requests: "bỏ hết chữ phần này đi", "bỏ luôn cả chỗ này đi, mặc định enable luôn"; the user chose to hide the list, not to auto-grant). Per-connection consent, the consent card and native approval in safe/production mode are unchanged; revoking consent has no UI until it is placed elsewhere (`AiDataAccessList` is kept, unused). The old `politedb.ai.agent.columnDetails` key is cleared too. Codex review "AI agent always on" (CHANGES REQUIRED, one P2): the consent card still said "You can revoke this in AI settings"; the sentence is removed and a test keeps it out. Also added the suggested coverage: settings show no Data access list or agent text, stored `"1"` keys are cleared, and generic agent errors (EN/VI) no longer mention the removed toggle. Read-only data access still needs per-connection consent. The old `politedb.ai.agent.enabled` key is cleared on the next agent run.
 
 **Open before release** (R7 gate, see "Phase 3 — Implementation evidence → Not done"):
+
 - live smoke with OpenAI, Anthropic Opus 5.5, Gemini and Ollama (needs the user's keys);
 - the native Touch ID approval prompt checked by hand (approve and cancel).
 
 **Open, not blocking the DMG release:**
+
 - MAS SQLite file-access lease;
 - R6 analytics events;
 - real token streaming (separate plan).
@@ -1224,12 +1226,14 @@ Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/a
    - every scan step draws on a budget (`10_000 + 8 × length`) with nesting capped at 16; on exhaustion the run falls back to plain text with its line breaks;
    - `parseMarkdown` renders input over `MAX_MARKDOWN_CHARS` (200 000) as one plain paragraph.
 
-   Measured in Vitest/Node: `"[" × 128k` 2.6 ms (was 7.5 s per Codex), `"*a " × 40k` 10.5 ms, `"**a " × 30k` 6.7 ms, `` "`" × 128k `` 4.8 ms. A ~130k-char ordinary answer still renders fully formatted (1 500 strong + 1 500 links) under 500 ms.
+   Measured in Vitest/Node: `"[" × 128k` 2.6 ms (was 7.5 s per Codex), `"*a " × 40k` 10.5 ms, `"**a " × 30k` 6.7 ms, ``"`" × 128k`` 4.8 ms. A ~130k-char ordinary answer still renders fully formatted (1 500 strong + 1 500 links) under 500 ms.
+
 2. **P2, a queued activity frame overwrote the final answer** (`useAiChatSession.ts`):
    - the frame applies only to a message still `streaming`;
    - `finalizeStreamingAssistantMessage` drops a pending update for that message.
 
    Regression `useAiChatSession.streaming.test.ts` (deferred `requestAnimationFrame`): activity → finalize → frame keeps the answer; a late update for a finalized message is ignored; streaming text still applies while streaming. Both tests fail without the fix.
+
 3. **P2, nested emphasis.** Delimiter runs are matched by `findCloser`:
    - skips code spans;
    - a run of another length that can open is matched as a whole (nested), and a run closes only after non-space;
@@ -1238,6 +1242,7 @@ Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/a
    So `*italic **bold** text*`, `**bold *italic* text**`, `***both***` → strong(em), and `__strong__ and _em_` nest correctly; unmatched markers, `2 * 3 * 4`, snake_case and `[not a link]` stay literal.
 
 **Verification:**
+
 - `markdown.test.ts` 9 passed (×3 runs); `npm run build` OK; Vitest 129 files / 731 tests passed; prettier clean.
 - A first attempt put the finalize guard into `appendAssistantMessage` by mistake. `npm run build` (tsc) caught it; Vitest does not type-check. Fixed before handoff.
 
@@ -1245,7 +1250,7 @@ Built-in browser, harnesses with a mocked backend (gitignored `.tmp/ui-harness/a
 
 Codex re-review round 2: the activity race is resolved; 1 P1 + 2 P2 remain in the parser. Fixed:
 
-1. **P1, quadratic fence regex.** `/^\s*```\s*([\w+-]*)\s*$/` was replaced by `fenceLanguage()` (trim, `startsWith`, then a single-token check), and the closing fence by `trim() === "```"`. The heading and list regexes take `[\s\S]*` instead of `.*`, so a line separator never forces backtracking. Measured: ```` "```" + 64k spaces + "!" ```` 1.2 ms (was 2.7 s), 128k 1.4 ms. New `parseMarkdown` regressions on near-miss fence, heading (`\u2028`), list, continuation and quote lines.
+1. **P1, quadratic fence regex.** `/^\s*```\s*([\w+-]*)\s*$/` was replaced by `fenceLanguage()` (trim, `startsWith`, then a single-token check), and the closing fence by `trim() === "```"`. The heading and list regexes take `[\s\S]*` instead of `.*`, so a line separator never forces backtracking. Measured: `"```" + 64k spaces + "!"` 1.2 ms (was 2.7 s), 128k 1.4 ms. New `parseMarkdown` regressions on near-miss fence, heading (`\u2028`), list, continuation and quote lines.
 2. **P2, delimiter runs:**
    - `canClose` checks the word boundary after the **whole** closing run;
    - both `canOpen` and `canClose` treat the edge of the range being parsed as a boundary (the enclosing run's delimiter sits there);
@@ -1255,6 +1260,7 @@ Codex re-review round 2: the activity race is resolved; 1 P1 + 2 P2 remain in th
 4. **Text preservation:** the hostile-input test now asserts the flattened output **equals** the input for every literal/fallback case, including deep mixed markers and newline-heavy input.
 
 **Verification:**
+
 - `markdown.test.ts` 10 passed (×3).
 - `npm run build` OK; Vitest 129 files / 732 tests passed; prettier clean.
 - Probes: `"[" × 128k` 2.6 ms; deep mixed markers 0.2 ms; 5k links inside emphasis 10.5 ms.
@@ -1266,10 +1272,12 @@ Codex round 3: all earlier findings resolved except one P2. A later full `***` c
 **Fix:** for a triple opener the parser now computes both readings and keeps the one whose span **ends first**: the full `***` closer, or the best split (`splitTriple` evaluates both inner/outer orders and returns the earliest). On a tie it keeps the full reading. Building the nodes moved to `buildSplit`.
 
 **Fixtures:**
+
 - `***a** b* then ***c***`, `***a* b** then ***c***`, `___a__ b_ and **c**`, `***x*** and ***y***`;
 - all earlier nesting, link-destination, code and literal cases still pass.
 
 **Verification:**
+
 - `markdown.test.ts` passes; `npm run build` OK; Vitest 129 files / 732 tests passed; prettier clean.
 - Probes: `"***a " × 30k` 10.1 ms, `"___a " × 30k` 8.7 ms, `"***a** b* " × 20k` 13.9 ms.
 - **Known limit:** the last of these exhausts the work budget and renders as plain text. Every triple opener searches for a full `***` closer to the end. The text is preserved and nothing freezes, but formatting is lost for such inputs.
@@ -1279,10 +1287,12 @@ Codex round 3: all earlier findings resolved except one P2. A later full `***` c
 The user asked for Ollama only ("vậy bạn cài ollama rồi test đi, chỉ cần ollama thôi"); cloud providers need the user's keys.
 
 **Setup:**
+
 - Ollama 0.40.4 via Homebrew, `ollama serve` run in the foreground of a session task (no `brew services`), model `qwen3:4b` (100% GPU, Apple M2, machine load avg ≈ 8).
 - Throwaway Postgres 16 container `politedb-smoke-pg` on port 55432, with the checklist seed. The temp SQLite file is created by the test.
 
 **Tests:**
+
 - `model::tests::live_agent_smoke` (wire round trip) passed: tool call → tool result → answer `1234`, 18 s.
 - New `src/ai/agent/live_smoke.rs` (`#[ignore]`) drives the **real coordinator** (`run_turn`) with the real catalog and data tools, wired as `commands::ai_agent` does in default mode (no native approval), on SQLite and Postgres.
   - It runs the checklist §1 cases.
@@ -1290,16 +1300,17 @@ The user asked for Ollama only ("vậy bạn cài ollama rồi test đi, chỉ c
 
 **Results** (final runs, both `ok`):
 
-| Case | SQLite | Postgres |
-| --- | --- | --- |
-| 1.1 metadata | ✅ catalog tools, correct (1 table) | ✅ catalog tools, correct (customers/orders + FK) |
-| 1.3 consent denied | ✅ data tool refused (`AI_DATA_ACCESS_REQUIRED`), no data read | ✅ no data read (one run proposed SQL only; earlier run refused with `AI_DATA_ACCESS_REQUIRED`) |
-| 1.4 consent granted | ✅ `run_readonly_query`, "3 notes" | ⚠️ earlier run ✅ "Paid: 100, Pending: 100, Refunded: 100"; final run hit the 120 s deadline |
-| 1.6 write request | ✅ refused; data unchanged | ✅ only proposed `DELETE` as text, never executed; `orders` still 300 |
-| 1.7 explain | ✅ `explain_query`, PK search plan | ⚠️ `explain_query` ran, then the 120 s deadline |
-| 1.8 cancel | ✅ `Canceled`, no answer | ✅ `Canceled` (13 s), no answer |
+| Case                | SQLite                                                         | Postgres                                                                                        |
+| ------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 1.1 metadata        | ✅ catalog tools, correct (1 table)                            | ✅ catalog tools, correct (customers/orders + FK)                                               |
+| 1.3 consent denied  | ✅ data tool refused (`AI_DATA_ACCESS_REQUIRED`), no data read | ✅ no data read (one run proposed SQL only; earlier run refused with `AI_DATA_ACCESS_REQUIRED`) |
+| 1.4 consent granted | ✅ `run_readonly_query`, "3 notes"                             | ⚠️ earlier run ✅ "Paid: 100, Pending: 100, Refunded: 100"; final run hit the 120 s deadline    |
+| 1.6 write request   | ✅ refused; data unchanged                                     | ✅ only proposed `DELETE` as text, never executed; `orders` still 300                           |
+| 1.7 explain         | ✅ `explain_query`, PK search plan                             | ⚠️ `explain_query` ran, then the 120 s deadline                                                 |
+| 1.8 cancel          | ✅ `Canceled`, no answer                                       | ✅ `Canceled` (13 s), no answer                                                                 |
 
 **Findings:**
+
 1. **Ollama's default 4096-token context silently truncates agent prompts.** The Ollama log showed `truncated = 1` during the first runs. The model then looped until `AI_AGENT_DEADLINE`. With `OLLAMA_CONTEXT_LENGTH=16384` there was no truncation.
    - The app talks to Ollama's OpenAI-compatible `/v1`, which cannot set `num_ctx`.
    - **Follow-up:** document the setting in the Ollama setup copy, or use Ollama's native API with `options.num_ctx`, and/or detect truncation.

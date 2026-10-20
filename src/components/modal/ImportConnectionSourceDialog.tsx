@@ -11,7 +11,7 @@ import { cn } from "src/utils/cn";
 import { PoliteDbIcon } from "../icons/PoliteDb";
 import { DbeaverIcon } from "../icons/Dbeaver";
 import { TablePlusIcon } from "../icons/TablePlus";
-import { ConsoleIcon } from "src/components/icons";
+import { ConsoleIcon, DatabaseIcon } from "src/components/icons";
 
 export type ImportConnectionSource =
   | "dbeaver"
@@ -67,14 +67,17 @@ export function ImportConnectionSourceDialog(props: {
 
   return (
     <Dialog open={open} onClose={onClose} size="md">
-      <DialogHeader>
-        <DialogTitle>Import connections</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2 font-semibold">
+          <DatabaseIcon className="size-4.5 shrink-0" />
+          Import connections
+        </DialogTitle>
         <DialogDescription>
           Choose where your connections are exported from.
         </DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="grid gap-2 pt-1 sm:grid-cols-1">
+      <DialogContent className="grid gap-2 sm:grid-cols-1">
         {SOURCES.map((source) => (
           <button
             key={source.id}

@@ -1127,7 +1127,6 @@ The end-to-end control flow now fails closed: `remove_grants` handles read failu
 
 Handoff: code re-review is complete with limitations. Keep R7/user-dependent evidence and MAS/analytics scope disposition open; this verdict does not authorize activation, release, commit or merge.
 
-
 ## Review: legacy-webkit-storage Phase 1
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-14.
@@ -1231,7 +1230,6 @@ Commands below used the required `rtk` prefix; Rust commands ran in `src-tauri/`
 - Signed-app ACL prompts, access-group behavior, actual file-to-data-protection transitions and Windows/Linux execution were not verified. Downgrade credential loss after approved D2a retirement remains intentional.
 - Workflow requires Claude's security review after Codex review. The plan records one before this review; Claude should perform the required post-review pass, including these limits, before release handoff.
 
-
 ## Review: AI agent markdown and activity (669c1ff)
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-16. **1 P1, 2 P2; no P0 found.**
@@ -1267,7 +1265,6 @@ All shell verification used `rtk` after reading RTK guidance.
 ### Limits and handoff
 
 No native desktop/manual visual inspection, live provider calls, browser network capture, full frontend suite or Rust suite run. DOM probes establish absence of resource-capable elements for tested payloads, not a native-webview security audit. Pure parser benchmarks establish the algorithmic issue; exact native freeze durations remain unmeasured. No Context7 lookup needed for this code review/business-logic scope. Claude should fix the P1 and the two concrete P2 regressions, add permanent focused tests, record verification and request re-review. Earlier provider/native-auth/MAS release limitations remain unchanged. No commit, push or application edits.
-
 
 ## Re-review: AI agent markdown and activity round 2
 
@@ -1340,7 +1337,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md`, RTK guidance, round 2 
 
 Limits: no full frontend suite, native/manual UI inspection, live provider/DB calls, browser network capture or Rust checks. Timings are Node/V8, not native WebKit. No Context7 lookup needed for this code-review/business-logic scope. Existing provider/native-auth/MAS/analytics release gates remain outside this re-review. Claude should fix the remaining P2 composition case, record verification and request re-review. No commit or push.
 
-
 ## Re-review: AI agent markdown and activity round 4
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-16. **No new P0/P1/P2 findings.**
@@ -1378,7 +1374,6 @@ The plan's documented formatting fallback remains: repeated valid split triples 
 
 No full frontend suite rerun, native/manual UI inspection, live provider/DB calls, network capture or Rust checks. Timings are Node/V8, not WebKit. Existing DOM test and renderer inspection do not constitute a native-webview security audit. No Context7 lookup needed for this code-review/business-logic scope. Earlier provider/native-auth/MAS/analytics gates remain outside this review. Round 3 finding is closed; no further change requested within this re-review scope. No commit or push.
 
-
 ## Review: ollama-native-context Phase 1
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Date: 2026-10-16. No P0/P1 found; four P2 findings below require correction against the approved Phase 1 contracts.
@@ -1412,7 +1407,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK guidance and `.agent/plans/ol
 - `rtk git diff --check`: **passed** before report append; repeated afterwards.
 
 Limitations: no native desktop settings inspection, real-provider generation, independent `/api/ps` allocation check, old-version runtime, or live database smoke. Loopback restrictions blocked local HTTP fixture execution, so implementation evidence's Ollama 0.40.4/qwen3:4b smoke remains implementer-reported and was not independently reproduced. No full app-store test suite or clippy rerun. No Context7 lookup needed for this code-review/business-logic task. Fix findings and complete the missing approved regression gates before re-review; no commit or push performed.
-
 
 ## Re-review: ollama-native-context Phase 1 round 2
 
@@ -1451,7 +1445,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance; revie
 
 Limitations: socket policy prevents independent native HTTP/routing/status/lifecycle fixture execution; no escalation available. No full frontend suite, app-store Rust test suite, clippy, native UI inspection, real Ollama generation, allocation check or database smoke rerun. Implementer-reported successful full suites/live evidence remain attributed to Claude. No Context7 lookup needed for this code-review/business-logic scope. Correct the false-green gate and finish retained lifecycle coverage, then request re-review. No commit or push.
 
-
 ## Re-review: ollama-native-context Phase 1 round 3
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-17. Both round-2 P2 findings are resolved in the reviewed implementation and regression gates. No new actionable P0/P1/P2 found. This verdict supersedes round 2 for the current Phase 1 working tree; socket-dependent execution remains unverified here.
@@ -1478,7 +1471,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md`, RTK guidance, the prio
 - `rtk git diff --check`: **passed** before append; repeated after append.
 
 Limitations: native HTTP round trips and socket-dependent lifecycle/routing/status assertions could not execute under this sandbox. Claude's reported 400-pass default/app-store suites remain implementer-reported evidence, not independently reproduced passes. No full frontend suite, app-store Rust test suite, clippy, desktop UI inspection, real Ollama generation/allocation check or database smoke rerun. No Context7 lookup needed for this code-review/business-logic task. No commit or push.
-
 
 ## Review: AI agent always on (uncommitted, feat/ai-agent)
 
@@ -1511,7 +1503,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Revie
 
 Limitations: no native desktop/browser visual inspection, live provider/database run or Touch ID/password prompt interaction. Frontend tests use mocked IPC and cannot independently prove native enforcement; native paths were inspected, not rerun, because this scoped diff changes no Rust. Existing release smoke gates remain open. No Context7 lookup needed for this code-review scope. Build necessarily includes the current working tree, including the excluded backend-client files, without reviewing those unrelated changes. No commit performed.
 
-
 ## Re-review: AI agent always on round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-19. Prior P2 resolved; no new P0/P1/P2 found.
@@ -1532,7 +1523,6 @@ Scope: read `AGENTS.md` first, then `.agent/WORKFLOW.md` and RTK guidance. Re-re
 - `rtk git diff --check`: **passed** before append; repeated after append.
 
 Limitations: no desktop/browser visual smoke, live provider/database run or native Touch ID/password interaction performed; this re-review targets a consent-copy fix and frontend regression coverage. Tests mock IPC and do not independently prove native enforcement; Rust checks were not rerun because no Rust changed. Existing release smoke gates remain open. Build includes the full current working tree, including the excluded backend-client files; those changes are not approved by this review. No Context7 lookup needed for this code-review scope. Only this new review section was appended; no code, tests or plans edited, no staging or commit.
-
 
 ## Review: pro-gating Phase 1
 
@@ -1570,7 +1560,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 
 Limitations: socket-dependent timeout/HTTP/credential-ordering behavior was inspected but could not be independently executed here. No desktop visual inspection, live provider/database/native-approval smoke or App Store artifact run. No Context7 lookup needed for this business-logic/code-review task. D9's later phases and separate security-review/release gates remain open. Only this new review section appended; no application code, tests or plan edited, no staging or commit.
 
-
 ## Re-review: pro-gating Phase 1 round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Date: 2026-10-19. All four prior findings resolved by inspection; their non-socket regression tests pass. No new P0/P1/P2 issue found in the fixes or their integration.
@@ -1579,12 +1568,12 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 
 ### Disposition of the four findings
 
-| Prior finding | Result | File:line evidence |
-|---|---|---|
-| P1 — expiry normalization | **Resolved** | `src-tauri/src/license.rs:788-790` takes expiry exclusively from the response; missing/null becomes `None`, while blank/whitespace remains a present invalid string. `:276-282` grants unlimited only for `None`; malformed or blank values cannot grant paid access. Trial union remains independent at `:342-356`. Tests at `:1581-1615` cover an unlimited renewal after an expired deadline, blank/whitespace/malformed values and a future date; `:1618-1635` covers invalid paid expiry with a valid trial through commit/reload. Existing malformed save/reload coverage remains at `:1465-1486`. These tests passed in both flavors. |
+| Prior finding                             | Result       | File:line evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — expiry normalization                 | **Resolved** | `src-tauri/src/license.rs:788-790` takes expiry exclusively from the response; missing/null becomes `None`, while blank/whitespace remains a present invalid string. `:276-282` grants unlimited only for `None`; malformed or blank values cannot grant paid access. Trial union remains independent at `:342-356`. Tests at `:1581-1615` cover an unlimited renewal after an expired deadline, blank/whitespace/malformed values and a future date; `:1618-1635` covers invalid paid expiry with a valid trial through commit/reload. Existing malformed save/reload coverage remains at `:1465-1486`. These tests passed in both flavors.                                                         |
 | P1 — remove-before-replace license writes | **Resolved** | `src-tauri/src/license.rs:594-602` now calls `json_replace_private` and returns the incremented state only after success. The existing helper at `src-tauri/src/file_storage.rs:166-204` creates a unique private sibling, writes and syncs it, then replaces the destination without unlinking the old file; error cleanup removes only the temporary sibling. Unix replacement is rename-over-existing (`:130-134`); Windows uses `MoveFileExW` with replacement/write-through (`:136-155`). License regression `src-tauri/src/license.rs:1640-1666` passes in both flavors: failed clear preserves key, revision and original trial start, successful initial write has revision 1 and mode 0600. |
-| P2 — old version reset | **Resolved** | `src-tauri/src/license.rs:570-590` rejects newer versions without resetting and migrates decodable older versions while retaining state, normalizing timestamps and capturing original legacy provenance. `:236-242` sets the current version; `:619-627` persists migration, and `:647-652` applies the same decoder to mutation entry paths while carrying device-owned fields. Tests at `:1679-1709` cover version 0 with an exhausted trial, load/clear/credential-commit before first load, retained key on load and subsequent reload; `:1713-1721` verifies newer-version load/clear errors leave bytes unchanged. Both pass in both flavors. |
-| P2 — App Store gate depends on storage | **Resolved** | `src-tauri/src/license.rs:683-699` passes the loader as a closure and returns before invoking it for ungated distributions. Both native entry points use this gate before provider/profile/database work: `src-tauri/src/commands/ai_agent.rs:88` and `src-tauri/src/commands/ai_agent_data.rs:232`. Regression `src-tauri/src/license.rs:1555-1577` passes in both flavors: App Store's loader panics if invoked, while Direct denies free or unreadable state and permits Pro. Thus malformed/missing/unwritable license storage cannot affect either App Store entitlement check. |
+| P2 — old version reset                    | **Resolved** | `src-tauri/src/license.rs:570-590` rejects newer versions without resetting and migrates decodable older versions while retaining state, normalizing timestamps and capturing original legacy provenance. `:236-242` sets the current version; `:619-627` persists migration, and `:647-652` applies the same decoder to mutation entry paths while carrying device-owned fields. Tests at `:1679-1709` cover version 0 with an exhausted trial, load/clear/credential-commit before first load, retained key on load and subsequent reload; `:1713-1721` verifies newer-version load/clear errors leave bytes unchanged. Both pass in both flavors.                                                 |
+| P2 — App Store gate depends on storage    | **Resolved** | `src-tauri/src/license.rs:683-699` passes the loader as a closure and returns before invoking it for ungated distributions. Both native entry points use this gate before provider/profile/database work: `src-tauri/src/commands/ai_agent.rs:88` and `src-tauri/src/commands/ai_agent_data.rs:232`. Regression `src-tauri/src/license.rs:1555-1577` passes in both flavors: App Store's loader panics if invoked, while Direct denies free or unreadable state and permits Pro. Thus malformed/missing/unwritable license storage cannot affect either App Store entitlement check.                                                                                                                 |
 
 ### Regression assessment and evidence limits
 
@@ -1602,7 +1591,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `git diff --check`: **passed** before and after append.
 
 Limitations: no desktop visual inspection, live provider/database/approval smoke or App Store artifact validation. Socket-dependent HTTP deadlines and credential sequencing require a loopback-capable environment. D9 and separate security-review/release gates remain unchanged. Only this new section appended; no code, tests, plan, staging or commit changed by this review.
-
 
 ## Review: pro-gating Phase 2 (backend trial endpoint)
 
@@ -1659,7 +1647,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - Direct validation/window probes passed using `node --import tsx --input-type=module`; the initial tsx CLI probe was blocked by its IPC socket, then rerun without that socket.
 - Claude reports **86/86 against throwaway Postgres** in the fix section. This is implementer-reported evidence, not independently reproduced here. Postgres storage/migration/concurrency and HTTP response/privacy execution therefore remain independent-verification limitations, rather than unresolved code findings. Existing separate security-review, TRUST_PROXY and deployed smoke-check prerequisites still apply; this verdict is not deployment approval.
 
-
 ## Review: pro-gating Phase 3
 
 **Verdict: CHANGES REQUIRED** (2026-10-19). No P0/P1 found; three P2 correctness/compatibility issues below.
@@ -1693,7 +1680,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `git diff --check`: **passed** before review append. Supplemental scheduler/presentation probes ran from memory without modifying source/tests.
 - No live native UI or deployed endpoint smoke run. Local server binding is restricted, and the Phase 2 endpoint is not deployed per handoff. D9 release gates remain: resolve findings, rerun affected regressions, complete deployed backend smoke checks and the separate license-sensitive security review. This verdict is not release approval.
 
-
 ## Re-review: pro-gating Phase 3 round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). All three prior P2 findings are resolved by inspection; no new P0/P1/P2 introduced by the fixes found. Native HTTP regression execution remains limited by denied loopback binding.
@@ -1722,7 +1708,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - `cargo clippy --locked --all-targets`, default and `--features app-store`: **passed**. Warnings remain in unchanged export/MSRV, MySQL formatting and credential-identity test code; App Store additionally warns to use its dedicated build script for distributable artifacts.
 - `git diff --check`: **passed** before this append.
 - No live native UI or deployed-endpoint smoke run. D9 deployed-backend checks and the separate license-sensitive security review remain release gates; this verdict is not release approval.
-
 
 ## Review: pro-gating UI follow-ups (a122a98..06d1374)
 
@@ -1785,7 +1770,6 @@ Scope: read AGENTS.md, .agent/WORKFLOW.md and referenced RTK guidance first. Rev
 - git diff --check HEAD: **passed** before append.
 - No live desktop/browser, screen-reader or native-dialog smoke run. Real positioning, close-animation focus behavior, light/dark and platform dialog close/Escape remain unverified. These limits do not reopen settled decisions.
 
-
 ## Re-review: pro-gating UI follow-ups round 3
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). Remaining initial-focus P2 resolved; no new P0/P1/P2 found in the scoped changes.
@@ -1809,7 +1793,6 @@ No new P0/P1/P2 found. Shared session mode remains authoritative for picker, pan
 - `npm run build`: **passed**, exit 0. Existing `node:zlib` browser externalization, mixed static/dynamic import and large-chunk warnings remain.
 - `git diff --check HEAD`: **passed** before append.
 - No live desktop/browser or screen-reader run performed. Lifecycle regressions use jsdom and substitute third-party positioning; real portal/layout behavior, visual appearance and platform focus behavior remain unverified. Real-wrapper regressions initialize selected Agent with Pro; selected Manual/Free initial focus follows the same indexed implementation but is not separately exercised in that suite. Native dialog close/Escape on each OS remains manual, as stated in the plan. These are verification limits, not additional findings or reopened product decisions.
-
 
 ## Review: lost-key portal link (dbaefce)
 
@@ -1838,7 +1821,6 @@ Scope: read AGENTS.md and .agent/WORKFLOW.md first, then referenced RTK guidance
 - `git diff --check f886bbc dbaefce`: **passed**.
 - No live desktop/browser, native opener/mail client, Polar sign-in/recovery, or packaged App Store smoke run performed. No Rust tests or App Store build run: backend/configuration unchanged; their behavior was checked by source inspection. Passing jsdom tests do not establish native navigation or the external portal's availability/key-recovery behavior. These limits and the P2 coverage gap prevent an unqualified VERIFIED verdict.
 
-
 ## Re-review: lost-key portal link round 2
 
 **Verdict: VERIFIED WITH LIMITATIONS** (2026-10-19). The original non-blocking P2 is **partially resolved, not closed**. No new P0/P1/P2 or functional regression found in this commit.
@@ -1864,7 +1846,6 @@ Scope: read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK guidance first.
 - From `src-tauri/`, `cargo test --locked distribution --features app-store`: **passed**, 8 distribution tests, 442 filtered out, exit 0 (library target has 0 matching tests). Build warns that invoking Cargo without the Tauri CLI leaves `macos-private-api` enabled; this verifies feature-selected policy tests, not an App Store submission artifact.
 - `git diff --check dbaefce 5d03370`: **passed**.
 - No live desktop/native mail client, Polar recovery, visual UI or packaged App Store smoke run performed. No new runtime behavior is introduced by this commit; passing tests and source inspection support retaining the prior non-blocking verdict, but do not justify declaring the original P2 fully resolved.
-
 
 ## Review: subscription-renewal Phase 1 (backend)
 
@@ -1951,7 +1932,6 @@ No new P0–P3 finding identified. Both remaining requested test gaps are addres
 - PostgreSQL integration tests skipped; no database server, live Polar, SMTP or deployment checks attempted. The plan's **219/219 with PostgreSQL** remains implementer evidence, not independently reproduced. Existing Vite CommonJS/native-config-loader warning remains non-blocking.
 - Remaining verification: run the unchanged full suite with permitted loopback and PostgreSQL. Status reflects these environmental limits; neither prior P2 remains an implementation/test-coverage change request.
 
-
 ## Review: subscription-renewal Phase 2 (app)
 
 Status: CHANGES REQUIRED
@@ -1983,7 +1963,6 @@ Reviewed 2026-10-20 against the Goal table, R1, R6, Tests and Phase 2 implementa
 - Focused `cargo test renewal_fields_`: **4 passed, 1 failed** (450 filtered). Parsing, payload clearing, entitlement independence and old-state loading passed; lifecycle case stops at loopback server creation (`src-tauri/src/license.rs:2055`) with PermissionDenied.
 - App Store build/Cargo-feature runs reported by the implementer were not independently rerun; permitted default checks plus static flavor-policy review are recorded above. No live desktop visual check, external network calls, backend execution, Polar lookup or backend restart performed. Lifecycle HTTP coverage still needs a loopback-enabled environment; UI layout still needs the planned manual check.
 - Only `.agent/REVIEW.md` edited. No application changes, staging or commits.
-
 
 ## Re-review: subscription-renewal Phase 2 (app) round 1
 
@@ -2018,7 +1997,6 @@ No new P0–P2 production correctness, security or privacy finding identified. S
 - No emitting frontend builds, full App Store Rust suite, desktop visual inspection, live Polar/backend calls or network documentation lookup performed. Plan-reported Direct/App Store builds and unrestricted 441/15 Cargo results remain implementer evidence. Persistence/HTTP lifecycle execution still needs a loopback-enabled environment; layout still needs the planned manual inspection.
 - Status reflects the two small remaining P3 test fixes above, separately from environmental verification limits. Only `.agent/REVIEW.md` edited; no staging or commits.
 
-
 ## Re-review: subscription-renewal Phase 2 (app) round 2
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2046,3 +2024,161 @@ No new P0–P3 findings identified. Both outstanding test fixes are complete. Sh
 - `cargo test --offline renewal_` and `cargo test --offline --features app-store renewal_`: each **5 passed, 1 failed**, 450 filtered. Alias parsing, payload clearing, entitlement independence and old-state loading pass. The renewal lifecycle test stops at loopback server creation (`src-tauri/src/license.rs:2076`) under both feature sets, before exercising its HTTP/persistence sequence. App Store emits the existing direct-Cargo warning about `macos-private-api`; this is not an App Store artifact build.
 - No emitting frontend builds, full App Store Rust suite, desktop visual inspection, backend/Polar execution, external network calls or documentation lookup performed. Plan-reported builds remain implementer evidence. HTTP lifecycle verification still requires a loopback-enabled environment; visual layout remains unverified here. These limitations, rather than remaining findings, determine the status.
 - Only `.agent/REVIEW.md` edited; no application changes, staging or commits.
+
+## Review: ER diagram routing (shared layout)
+
+Status: CHANGES REQUIRED
+
+Reviewed 2026-10-20 on `fix/license-key-input`. Read `AGENTS.md`, referenced RTK guidance and `.agent/WORKFLOW.md`. Reviewed the uncommitted diffs for `DiagramCanvas.tsx`, `diagramExport.ts`, `diagramExport.test.ts` and the complete untracked `diagramLayout.ts` / `diagramLayout.test.ts`. Ignored `.claude/launch.json`. Earlier review sections retained. No application edits, commits or network calls.
+
+### Findings
+
+1. **P2 — `src/components/diagram/diagramLayout.ts:430`, `src/components/diagram/diagramLayout.ts:457`: lane allocation can superimpose overlapping relations.** Internal gutters have only five slots, allocated by a global counter modulo five without checking occupied vertical intervals; the right outer gutter has only one slot. A read-only probe using the real layout builder and six same-column relations spanning the same two cards returned vertical lanes `[340, 346, 334, 352, 328, 340]`: the sixth shares the first's complete vertical span. Horizontal allocation can collide even before exhausting capacity: in a synthetic three-column layout with free gap `[128,156]` and six distinct endpoint-row pairs whose desired crossing is 156, actual crossing lanes were `[156,156,151,156,146,156]`. Clamping offsets onto the boundary collapses four runs onto one y. Shared strokes make dense relations ambiguous and prevent independent hover selection along their shared spans. **Fix:** allocate actual available coordinates against occupied intervals, reuse lanes only for disjoint spans, and provide an explicit overflow strategy (for example, widen congested gutters/gaps in the shared layout). For gaps, enumerate in-bounds lanes rather than clamping multiple offsets to the same coordinate. Add adversarial saturation and boundary-desired fixtures that assert overlapping spans remain distinguishable; the current `diagramLayout.test.ts:202-219` assertion only proves that at least two x values exist anywhere.
+
+2. **P2 — `src/components/diagram/diagramLayout.ts:316`, `src/components/diagram/diagramLayout.ts:426`: corner rounding consumes space reserved for cardinality marks.** Stub clearance is measured before rounding. A generated one-table layout with a self-reference from its first row to its second produces points `(312,88) → (328,88) → (328,116) → (312,116)`, but its path starts `M 312 88 L 320 88 Q 328 88 328 96`: only 8 px remain straight. The one-to-one circle is centered 9 px outside the edge, extending to 12.5 px, so the path bends through the marker instead of preserving its horizontal attachment stub. The same issue affects short internal lanes; the minimum allocated edge distance is 16 px. This occurs in both canvas and export, and the outer margin offers no alternative lane. **Fix:** reserve the marker envelope plus stroke clearance after rounding, either by limiting endpoint-corner trim or by allocating longer stubs and increasing shared gutters/outer bounds as needed. Test actual rounded endpoint geometry for both cardinalities, outer-margin loops and the shortest internal lanes; checking raw lengths against 12 px does not establish this invariant.
+
+3. **P3 — `src/components/diagram/diagramLayout.test.ts:85-118`, `src/components/diagram/diagramExport.test.ts:73`: the invariant tests leave important outputs unchecked.** The seeded fixtures test unrounded `points`, not the emitted `path`, marker geometry or layout bounds; they never assert target `endY`. A path containing an unrelated curve, an end attached to the wrong target row, or the marker-clearance defect above can therefore pass. The SVG end-circle regression uses only two different-column tables, where old `fromRight` logic already selects the correct side; it would not catch reverting the new same-column entry-side fix. The checker sanity test covers only one horizontal crossing, while its bounding-box predicate is valid as a segment/card oracle only after orthogonality has been established. **Fix:** add an independent expected-row assertion, explicit same-row self-loop allowance, finite/in-bounds checks, rounded-path/marker-envelope checks, and a same-column one-to-one SVG fixture with exact marker coordinates. Exercise the checker with horizontal/vertical crossings, non-crossings, edge touches and diagonal rejection. Add explicit empty-layout, narrow-free-gap and saturated-lane fixtures; keep the reproducible seeded cases as broader coverage.
+
+### Correctness and regression assessment
+
+- **Original card-crossing causes addressed by inspection and passing point tests.** Canvas and SVG now use the same layout and router. SVG emits relations before cards. Standard generated layouts have 56 px gutters and 48 px card spacing; vertical lanes remain outside cards, intermediate horizontal runs use free gaps, and same-column relations leave/enter the right edges rather than crossing their column. No straight-segment/card-interior violation found in the four seeded cases (12/20, 60/120, 150/300, 150/600 tables/relations). The checker tests every card, including source and target, and is a valid interior-overlap check for these orthogonal segments; its 0.5 px inset intentionally ignores near-edge penetration below that threshold.
+- **Rounded corners avoid cards under the generated geometry.** A corner remains within the convex hull of its trimmed legs. Gutter clearance is at least 16 px and cross-column gap clearance is at least 10 px, against maximum trim 10 px; source/target corners turn away from their own cards. This supports card avoidance, but does not supply the straight marker space in finding 2. No arbitrary custom-layout safety guarantee is inferred: the router assumes aligned fixed-width columns and adequate free space.
+- **Boundary cases inspected.** Empty layouts retain 640×400 bounds and return null for absent endpoints; one-table layouts use a bounded right-margin loop. Missing source or target tables are skipped without shifting original relation indices. Same-row self-references move the target attachment down 12 px, still within a normal 28 px row (including the last row); different-row self-references preserve target row centers. Ordinary one-column loops and all generated paths stay inside outer bounds. Very different column heights retain valid top/bottom free gaps, although choosing the midpoint of a large terminal gap can create long detours. Sub-spacing gaps yield a single clamped horizontal lane; they are safe only when the supplied layout still provides the router's card clearance, and cannot imply distinct lanes for concurrent runs.
+- **Canvas integration preserved by inspection.** Relation indices, table-hover activation, marker hit targets and path-based hover handlers remain wired as before. `segments` now cover every simplified leg and continue feeding the relation spatial index and viewport culling. Rounded corners/marker envelopes extend beyond those thin rectangles, but the unchanged 420 px overscan is much larger than these local offsets; no newly demonstrated visible-viewport omission. Shared-span hover ambiguity is covered by finding 1. Zoom/detail behavior and Pro export gating are unchanged; no entitlement logic changed.
+- **Determinism and scale.** Same ordered input yields stable routing; lane counters are local to each call, shorter spans sort first, and original indices break ties. Layout ordering retains the previous canvas's locale-sensitive name/key comparisons and input-order ties, so cross-locale or input-permutation identity is not promised. Routing sorts relations and scans free gaps per intermediate column, with generated column count capped at 12; it does not perform an all-cards collision search per segment. The 150-table/600-relation fixture passed. No production-size interaction benchmark or memory profile was run; spatial-index cost still grows with long routed legs.
+- **SVG validity/escaping inspected.** Output retains the XML declaration, SVG namespace, finite generated coordinates, valid path commands and numeric relation IDs. Table names, column names and types pass through the existing XML escaper; user strings are not inserted into path attributes or IDs. Relation labels are not emitted into this SVG. No new escaping defect identified. Existing tests check substrings, not XML parsing or rasterized output; no standalone renderer validation was performed.
+
+### Verification and limitations
+
+- `npx tsc --noEmit -p .`: **passed**.
+- `npx vitest run src/components/diagram`: **33/33 passed**, 7 files.
+- `npm run test:run`: **927/927 passed**, 150 files.
+- Read-only, in-memory Node/TypeScript probes executed the actual router to confirm the outer-margin rounded path and crowded gutter/gap coordinates quoted above. Synthetic gap fixtures isolate allocation behavior; they are not claimed to be output of the layout builder. No application or test files were written by these probes.
+- No emitting build, browser/desktop session, real customer schema, SVG renderer, live hover/scroll check or performance benchmark run. Visual and interaction assessments above are static; passing tests do not close the findings.
+- Only this section appended to `.agent/REVIEW.md`; earlier sections preserved. No application changes, staging or commits; no network calls.
+
+## Re-review: ER diagram routing round 1
+
+Status: CHANGES REQUIRED
+
+Reviewed 2026-10-20 on `fix/license-key-input`. Read `AGENTS.md`, referenced RTK guidance, `.agent/WORKFLOW.md`, and the previous shared-layout review. Re-inspected the three tracked application/test diffs and both complete untracked layout files. Ignored `.claude/launch.json`. Scope remains routing correctness and the stated invariants.
+
+### Dispositions of previous findings
+
+- **P2 lane allocation — PARTIALLY RESOLVED.** `diagramLayout.ts:471-495` allocates logical gutter lanes against occupied vertical intervals, reusing a lane only for disjoint spans with 4 px clearance. Capacity exhaustion records demand and overflow instead of silently wrapping. `:509-565` enumerates actual crossing coordinates, avoiding other owners' crossings in the same and adjacent columns. `:725-754` reroutes after widening. Existing crowded-gutter and seeded inner-segment tests pass. However, opposite endpoint stubs can still superimpose even when `overflow` is false; finding 1 below keeps this correctness request open.
+- **P2 rounding consumes marker space — CLOSED.** `diagramLayout.ts:329-350` limits the first/last corner trims by endpoint length minus `MARK_CLEARANCE`; `:578` supplies 14 px. Generated gutters retain at least 14 px edge clearance, including widened one-table margins and last-column left-gutter loops. Thus rounding retains the 12.5 px circle envelope plus stroke space. Emitted-path endpoint assertions run for seeded diagrams, self-references and saturation cases; same-column SVG tests check both left/right circle offsets. This correction does not increase corner radius or reduce the existing 10 px clearance from intermediate cards.
+- **P3 unchecked outputs — MOSTLY RESOLVED, with one relevant blind spot.** `diagramLayout.test.ts:105-184` independently checks target/source rows, the explicit same-row self-loop offset, finite/in-bounds points, orthogonality/card avoidance and emitted rounded endpoint lengths. Empty/missing-endpoint, deterministic, fixed-layout overflow and widened saturation cases are present. `diagramExport.test.ts:93-161` exercises same-column one-to-one markers on both sides. The segment oracle now covers vertical/horizontal crossings and edge/non-crossings; diagonals are separately rejected by `assertRoutes`. However, `assertDistinguishable` omits all end stubs rather than allowing only legitimate common-endpoint fan-out, hiding finding 1. Path interiors are still assessed through orthogonal points and corner-clearance reasoning, rather than an independent full curve/card oracle; no separate defect established there.
+
+### Remaining finding
+
+1. **P2 — `src/components/diagram/diagramLayout.ts:636`, `src/components/diagram/diagramLayout.ts:641`, `src/components/diagram/diagramLayout.test.ts:199`: opposite endpoint stubs can share a rendered stroke between unrelated attachment points while overflow is false.** Gutter allocation checks only vertical spans; same-column loops never register their horizontal endpoint runs with the crossing allocator. A deterministic fixture can use four tables `public.a/b/c/d`, each with five rows `c0..c4`, and eight ordered relations: first `a.c0 → c.c1..c4`, then `b.c0 → d.c1..c4`. All tables have degree four, so layout places `a,c` left and `b,d` right. All eight vertical spans overlap and widening produces a 77 px gutter, left card edge 312, right card edge 389 and center 350.5. Relation index 3 takes x=362.5; index 4 takes x=338.5. Their source stubs both lie at y=88, despite attaching to different cards. After the actual 10 px corner trims, index 3 emits a horizontal line from x=312 to 352.5 and index 4 from x=389 to 348.5: a **4 px shared rendered segment**. Vertical lanes are distinct, demand fits, and `overflow` is false. This is not legitimate fan-out from a shared endpoint; canvas hit paths and SVG strokes coincide there. **Fix:** include endpoint horizontal runs in occupancy decisions, coordinating opposite-side attachments so their runs do not overlap (or route a separate safe detour), while retaining marker clearance and card avoidance. Extend the non-overlap checker to include endpoint runs, exempting only overlap attributable to the same attachment point, and add this fixture against emitted paths. This fixture is derived directly from the implementation; no new probe or test file was executed/written during this review.
+
+### Regression assessment
+
+- **Widening/caps:** `gutterRoomFor` accounts for the center-out odd lane count; its extra pixel makes measured vertical demand fit the allocator's floor-based capacity. `gapRoomFor` supplies the requested count inside an ordinary inter-card gap. Spacing grows monotonically and is capped at 640/480; execution is bounded to the initial route plus four reroutes. This is a bounded attempt, not a convergence proof. `overflow` correctly remains exposed on unresolved allocation, but its documentation at `:722` overstates that this necessarily means widest spacing: the pass limit can terminate sooner. Neighbor blockers are not included in successful per-gap demand counts, so horizontal demand is a heuristic for rerouting, not an exact capacity proof. No additional demonstrated production failure from that heuristic identified. Existing overflow coverage exercises a fixed layout; neither actual capped `layoutDiagram` output nor exhaustion of all four reroutes has a dedicated regression test.
+- **Crossing ownership:** owner is the original relation index. Excluding that owner lets one relation cross adjacent columns on one horizontal run; other owners in neighboring columns remain blockers, covering horizontal crossings that share a gutter. This rule does not account for endpoint runs, as finding 1 demonstrates. Successful crossings can move to another free gap; no assumption that they must stay in the nearest gap is needed.
+- **Canvas/export integration:** both consume `layoutDiagram`; missing endpoints retain null slots and original relation indices. Marker sides, table-hover activation, path hit handlers, zoom/detail behavior and Pro gating remain intact by inspection. Every simplified leg feeds the existing spatial index and viewport culling. Corner/marker offsets are small relative to existing overscan; no new viewport omission identified. Neither consumer uses the overflow flag to change rendering; capped/unresolved cases consequently retain shared lanes as the documented fallback. No entitlement changes identified.
+- **Determinism/performance:** local allocation state, stable relation-index ties and fixed iteration bounds preserve repeatability for identical ordered input; the deterministic test passes. Locale-sensitive name ordering remains inherited behavior. Routing scans occupied lane intervals and neighboring crossings; each gap request also enumerates/sorts coordinates in candidate gaps, including potentially tall terminal gaps. Widening can repeat both layout and routing five times. The 150-table/600-relation fixture passes, but no interaction benchmark or larger-schema latency/memory bound was established. No speculative performance finding raised.
+- **SVG:** relations precede cards, both marker directions use target entry side, and existing XML escaping remains in place. No new escaping/JSON-export regression identified.
+
+### Verification and limitations
+
+- `npx tsc --noEmit -p .`: **passed**.
+- `npx vitest run src/components/diagram`: **45/45 passed**, 7 files.
+- `npm run test:run`: **939/939 passed**, 150 files.
+- Commands executed through the repository's `rtk proxy` wrapper. No network calls, emitting build, browser/desktop inspection, rendered-SVG inspection, custom executable probes or performance benchmark performed. Geometry evidence for finding 1 is static arithmetic from the actual allocator, layout ordering and rounding code; existing tests do not exercise that fixture.
+- Only `.agent/REVIEW.md` edited. Earlier sections retained; no application/test changes, staging or commits. Remaining finding stays within the previous non-superposition invariant.
+
+## Re-review: ER diagram routing round 2
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-20 on `fix/license-key-input`. Read `AGENTS.md`, referenced RTK guidance, `.agent/WORKFLOW.md`, and round 1. Re-reviewed the complete tracked diffs for `DiagramCanvas.tsx`, `diagramExport.ts`, and `diagramExport.test.ts`, plus both untracked `diagramLayout` files. Ignored `.claude/launch.json`. Scope: routing correctness and existing invariants only.
+
+### Previous finding disposition
+
+- **Round-1 finding 1, P2 opposite endpoint-stub overlap — CLOSED.** `diagramLayout.ts:503-641` now allocates a passage against both vertical occupancy and horizontal runs. `:533-539` rejects opposite-side stubs on rows less than 4 px apart unless the low-side lane stays at least 6 px left of the high-side lane. `:566-570` records both endpoint runs and each jog. The same check applies to gutter portions of column crossings through `:825-828`, not only card endpoints. The exact four-table/eight-relation fixture is present at `diagramLayout.test.ts:350-373`; it passes with `overflow === false`, card/bounds/marker assertions, and the strengthened non-superposition oracle. `assertDistinguishable` at `:192-248` includes end runs and exempts only pairs sharing an attachment point, including either attachment of a one-segment route. Removing the distinct-first-x assertion is correct: disjoint vertical spans may reuse a lane.
+
+### New findings
+
+None. No new P0-P3 correctness issue established in the reviewed scope.
+
+### Regression assessment
+
+- **Side conventions and predicates:** low means the gutter's left boundary, high its right. Rightward crossings enter low/exit high; leftward crossings reverse those sides (`diagramLayout.ts:792-828`). Same-column loops use low on the right of a column and high on the left of the last column (`:769-787`). The opposite-stub inequalities are symmetric. Stub-versus-jog and jog-versus-stub checks both compare the actual horizontal intervals; jog-versus-jog checks reject positive-length overlap on nearby rows (`:530-557`). Perpendicular intersections remain permitted. Same-side fan-out remains permitted; in generated layouts its common row and boundary identify the same card attachment, while intermediate crossings use card-free gap rows.
+- **Jog bounds and card clearance:** candidate rows stay strictly inside `(5, height - 5)` and at least 4 px from this passage's entry/exit (`:590-600`). Jog rows need not fall in inter-card gaps: every jog stays horizontally between two lanes inside one gutter. Available lanes retain at least 14 px from both gutter boundaries, so jogs and their vertical legs remain outside cards even when a jog row aligns with a card. Only column-crossing runs require gap allocation, which retains the existing 10 px card margin. Searching 48 candidate rows can conservatively trigger overflow/widening; it does not silently authorize an overlapping passage.
+- **Two-lane occupancy and widening:** both vertical spans are reserved and both horizontal endpoints use their respective lane coordinates (`:560-571`). Demand uses the maximum occupied lane index plus one, accounting for the full center-out capacity required by either lane rather than counting passages. Failed passage allocation still marks overflow and requests additional capacity. The existing capped fallback deliberately shares rendered lanes; its virtual reservations are not a proof of separation, and separation is asserted only for successful non-overflow layouts. Widening remains monotonic, capped, and limited to four reroutes; no convergence guarantee is implied.
+- **Rounded geometry and markers:** internal corners trim by at most half of each adjoining leg and 10 px; endpoint corners additionally preserve 14 px of straight marker space (`:322-357`, `:719`). Jog rounding stays within the gutter, and rounding at a column crossing stays within the existing gap/card clearance. Short jogs reduce corner trims rather than consuming endpoint marker clearance. Seeded, saturation, self-loop and previous-finding fixtures exercise emitted endpoint lengths; same-column export tests cover marker sides. No new marker-clearance defect identified.
+- **Integration and determinism:** canvas and SVG still consume the same `layoutDiagram` output; original relation indices, null missing-endpoint slots, segment-based culling/hit integration, marker sides and Pro gating are preserved by inspection. Allocation state is local, candidate iteration order fixed, and relation-index ties explicit. Identical ordered-input determinism test passes; inherited locale-sensitive table ordering remains unchanged.
+- **Performance:** the jog search is bounded to 48 rows with nested lane-pair searches and occupancy scans; widening can repeat routing five times total. No new unbounded loop identified for generated layouts. Existing 150-table/300- and 600-relation fixtures pass. The supplied approximately 73/186/520 ms measurements were not independently reproduced; they are not treated as verified interaction-latency guarantees or worst-case bounds.
+
+### Verification and limitations
+
+- `npx tsc --noEmit -p .`: **passed**.
+- `npx vitest run src/components/diagram`: **46/46 passed**, 7 files.
+- `npm run test:run`: **940/940 passed**, 150 files.
+- Commands executed through `rtk proxy`; no network calls. No emitting build, custom executable probes, browser/desktop inspection, SVG rasterization, independent performance benchmark or memory profile. Curve/card clearance above is static geometric reasoning supported by point/endpoint tests, not an independent rendered-curve collision oracle. Tests do not exhaust all schemas, cap/pass-limit outcomes or jog candidate combinations.
+- Only this section appended to `.agent/REVIEW.md`; earlier sections preserved. No application/test changes, staging or commits.
+
+
+## Review: ER diagram edge bundling
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-20 on `fix/license-key-input`, HEAD `f3bc981`. Read `AGENTS.md`, referenced RTK guidance, `.agent/WORKFLOW.md`, and previous ER diagram routing reviews. Scope: only the uncommitted changes in `src/components/diagram/diagramLayout.ts` and `diagramLayout.test.ts`, against HEAD. Ignored untracked `diagram-harness.html`, `src/dev/`, and `.claude/launch.json`. No P0–P2 implementation defect established.
+
+### Findings
+
+1. **P3 — `src/components/diagram/diagramLayout.test.ts:205-210`, `:251`: the oracle's whole-route exemption is broader than the actual bundle contract.** A shared source does not imply a shared bundle: with `A → B`, `A → C`, `X → B`, `Y → B`, the first relation chooses target B (three uses versus A's two), while the second chooses source A. Nevertheless, `bundled()` exempts every pair of their segments. Executed the actual oracle in memory with two routes starting at `(0,0)`: `[(0,0),(20,0),(20,100),(60,100)]` and `[(0,0),(30,0),(30,20),(20,20),(20,80),(80,80)]`. It accepts their coincident internal vertical span `x=20, y=20..80`, regardless of bundle assignment. This is a demonstrated false negative in the test helper, **not a reproduced production-router failure**. **Fix:** derive expected bundle identities independently from fixture relations/ports, allow whole-route overlap only within that selected bundle, and retain the existing common-attachment exception for endpoint stubs across bundles. Add a mixed source/target hub fixture and a negative oracle test using the coordinates above. The new source-hub test at `:432-457` also needs a target-hub counterpart: it currently constructs `hub → table`, so it does not directly exercise the strictly-greater target-use branch or final-trunk reuse.
+
+### Assessment of requested risks
+
+- **Different bundles / stubs / jogs:** successful allocation still filters out only the current bundle in vertical occupancy (`diagramLayout.ts:537-543`), checks both endpoint stubs against other-bundle stubs/jogs (`:548-567`), and checks jogs symmetrically (`:569-584`). Remembering a preferred trunk changes candidate order, not those acceptance checks. Every new passage records its complete vertical intervals, endpoint runs and optional jog (`:586-602`); extending a bundle therefore does not erase another bundle's reservations. Perpendicular line intersections remain allowed, as before. Same-side endpoint stubs from different bundles can share their common attachment run; this is intentional endpoint fan-out, not evidence that their internal lanes may merge.
+- **Crossing-row reuse:** the immediate return in `takeGapY` reuses a row that was already reserved for this bundle in this column. Later allocations in either neighboring column inspect this reservation and cannot successfully take its row for another bundle. Reservations never move or disappear during a routing pass. Thus a newly added neighboring reservation cannot invalidate the reused row in a non-overflow result. Gutter passage checks still run when that crossing is reused. Another bundle's overflow fallback can collide; overflow never promised separation.
+- **Oracle and visibility:** equality of a start/end coordinate is a useful test for legitimate shared endpoint stubs, but is not selected-bundle identity (finding 1). In successful routing, the mixed-bundle probes found no internal collinear overlap beyond those common endpoint runs. Shared strokes naturally have one visible stroke and overlapping hit areas; a shared trunk cannot identify an individual relation by geometry alone. Existing individual branches/endpoints and relation hover remain available, but pointer interaction on a shared trunk selects according to existing rendering/hit ordering. This is an interaction limitation of intentional bundling, not a newly established different-bundle routing defect. No browser interaction verified.
+- **Cards, orthogonality, rounding and markers:** reusing a crossing row does not change its column's static free gaps. Reusing a vertical lane does not change its gutter bounds. Passage assembly still joins matching row coordinates with horizontal legs, and a jog remains entirely inside its gutter. Endpoint trimming still preserves `MARK_CLEARANCE`; bundle metadata does not alter rounding or marker positioning. Same-row self-loops still offset their target by 12 px; their bundle port is computed from the logical row before this offset. Accordingly, physical endpoint equality alone is also not a complete independent model of bundle identity. No new card-interior, diagonal, bounds or marker-clearance failure established; existing point/endpoint tests pass.
+- **Demand / widening / overflow:** successful shared passages record lane indices actually used, so trunk reuse does not incorrectly count one lane per relation. New crossings reserve/count one row per bundle, matching actual shared-row use. Overflow still records virtual lane demand while drawing a bounded fallback on the last physical lane; different bundles may overlap there, and virtual reservations are not a collision proof for the returned geometry. This fallback predates bundling and remains signaled by `overflow`. Widening still reroutes from fresh allocation state, with four passes and existing caps. Neighbor blockers and jog-search failures make demand a heuristic, not a convergence guarantee. The rewritten distinct-row overflow test verifies reporting and card avoidance, not distinguishability after exhaustion; its `>=15` demand assertion is weaker than the former exact count. No new demand-accounting failure reproduced.
+- **Determinism:** port counts are collected before allocation; source wins ties; relation span/index ordering, lane/jog iteration and first matching crossing remain deterministic for identical ordered inputs. State is local to each route call. Existing deterministic test passes. Inherited locale-sensitive table sorting/input-order dependence is unchanged.
+- **Test strength:** 47 diagram tests retain geometry, emitted endpoint clearance, crowded-gutter, opposite-stub, seeded and overflow coverage. The new hub test verifies unchanged width and first-lane reuse for a source hub. It does not directly establish target-hub bundling, mixed bundle identity, reuse after neighboring-column allocations, actual cap/pass-limit behavior, or rendered shared-trunk interaction. Finding 1 is non-blocking because production checks and independent probes did not reproduce the illegal merge that this weakened oracle would miss.
+
+### Verification and limitations
+
+- `npx vitest run src/components/diagram`: **47/47 passed**, 7 files.
+- `npx tsc --noEmit -p .`: **passed**.
+- Read-only in-memory TypeScript/Node probes ran the actual router on **120 deterministic synthetic schemas**, each with 32 tables, six rows per table and 85 relations mixing source and target hubs. All returned `overflow === false`. Compared collinear point segments across independently assigned different bundles, allowing only common endpoint runs: **zero unexpected overlaps**, including **1,318 pairs** with a shared source or target but different selected bundles. Probe bundle identity accounts for the logical self-loop row before its physical target offset; an initial physical-endpoint-only classifier incorrectly classified that case and was corrected. These fixtures are extra evidence, not exhaustive proof or committed regression coverage.
+- A separate **112-table / 56-relation incoming target-hub** fixture returned `overflow === false` and retained width **4040**, equal to its initial layout. This isolates target-hub reuse; it is not the supplied real 112-table/147-relation schema.
+- Executed the existing oracle on the synthetic overlapping routes quoted in finding 1; it accepted them, confirming the test blind spot.
+- Commands ran through `rtk proxy`; no network calls. No full-suite run, emitting build, browser/desktop inspection, SVG rasterization, customer-schema execution, performance benchmark or memory profile. Card/curve and marker conclusions combine existing tests with static geometry reasoning; no independent rendered-curve collision checker was run.
+- Only this section appended to `.agent/REVIEW.md`. Application/test files and temporary harness files left untouched; no staging or commits.
+
+
+## Re-review: ER diagram edge bundling round 2
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-20, HEAD `f3bc981`. Read `AGENTS.md`, referenced RTK guidance, `.agent/WORKFLOW.md`, and the previous edge-bundling review. Reviewed `git diff HEAD -- src/components/diagram/diagramLayout.ts src/components/diagram/diagramLayout.test.ts`, including staged and unstaged changes. Ignored `.claude/launch.json`, `diagram-harness.html`, and `src/dev/` as requested.
+
+### Previous finding disposition
+
+- **Previous P3 test-oracle exemption — CLOSED.** `diagramLayout.test.ts:193-225` derives expected bundle identities from fixture relations, logical card rows and attachment sides, counts source and target ports separately, and selects target only when strictly busier (source wins ties). It reads no allocator bundle identifiers, reservations or preferred lanes. `:241-242`, `:281-282` exempt whole-route overlap only for equal non-null expected bundles; the separate common-attachment exemption remains limited to endpoint runs, including both attachments of a single-segment route.
+- `diagramLayout.test.ts:291-321` uses the previous review's exact overlapping coordinates: different bundles sharing a start must throw; one bundle may share the internal vertical span. The target-hub counterpart at `:526-554` checks no overflow, unchanged width, geometry, distinguishability and shared last lane per entry side. The mixed source/target fixture at `:556-574` exercises both selection roles; an independent execution confirmed two pairs sharing a physical start while belonging to different expected bundles.
+
+### New P0-P3 findings
+
+None. No new actionable defect or regression established in the reviewed two-file diff.
+
+### Oracle and regression assessment
+
+- **Logical self-loop rows:** expected target identity uses `expectedRowY`, never the physically shifted `endY`. This agrees with production port selection before `SELF_LOOP_DROP` (`diagramLayout.ts:802-863`). A read-only execution of the actual helper on three self-relations targeting one row confirmed that a same-row loop ending 12 px lower still shares the expected target bundle with loops arriving at the unshifted row.
+- **Side derivation:** source side comes from actual `startX` against the card's right edge rather than copying production column-direction branches. Target side comes from `enterFrom`, which `assertRoutes` separately checks against the target edge. Boolean source-side and string target-side encodings are consistent within their separately namespaced port domains. This is an independent model of bundle selection for the validated attachment geometry, not a separate oracle for every side-metadata mutation. Existing same-column/last-column tests explicitly check routing sides.
+- **Null routes:** the helper returns null identities without dereferencing missing cards and excludes those slots from port counts, matching production's missing-endpoint exclusion. Null identities never authorize overlap. A read-only mixed valid/missing-endpoint probe confirmed this. For valid-endpoint fixtures, `assertRoutes` requires every route before the bundle oracle runs, so an incorrectly missing route cannot silently weaken those checks.
+- **Allocation:** different-bundle vertical spans, stubs, jogs and neighboring crossings remain blockers; preferred trunk reuse changes candidate order, not acceptance. Reused crossing reservations remain present for later bundles. Demand, bounded widening, overflow fallback, rounded geometry and marker clearance retain the previously reviewed behavior. Separation remains asserted for successful non-overflow layouts; overflow can intentionally share lanes.
+- **Mutation evidence:** Claude reported 10 failures after forcing every relation into one production bundle. This is consistent with the revised independent oracle, but that mutation was not rerun here because application/test files were to remain untouched.
+
+### Verification and limitations
+
+- `npx vitest run src/components/diagram`: **51/51 passed**, 7 files.
+- `npx tsc --noEmit -p .`: **passed**.
+- Additional read-only TypeScript/Node execution loaded the actual router and test helpers in memory: logical self-loop grouping, physical +12 offset, null-route handling, and mixed-hub shared-start/different-bundle pairs passed. The probe's initial assertion adapter hit a cross-VM array-prototype mismatch; normalizing both assertion values corrected the adapter, with no repository changes.
+- Commands ran through `rtk proxy`; no network calls. No full-suite run, emitting build, browser/desktop inspection, SVG rasterization or performance benchmark. Existing rendered-curve, interaction and capped-overflow limitations remain; finite fixture coverage is not exhaustive proof.
+- Only this section appended to `.agent/REVIEW.md`; earlier review content preserved. No application/test/harness edits, staging changes or commits.

@@ -94,14 +94,15 @@ function NewSchemaDialog({
   }, [schemaName, createSchema, handleClose]);
 
   return (
-    <Dialog open={open} showCloseButton={false} onClose={handleClose} size="sm">
+    <Dialog open={open} onClose={handleClose} size="md">
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <SchemaIcon className="size-4 text-neutral-600" />
+          Create new schema
+        </DialogTitle>
+        <DialogDescription>Enter a name for your new schema</DialogDescription>
+      </DialogHeader>
       <DialogContent>
-        <DialogHeader className="px-0 py-0">
-          <DialogTitle>Create new schema</DialogTitle>
-          <DialogDescription>
-            Enter a name for your new schema
-          </DialogDescription>
-        </DialogHeader>
         <div className="space-y-2">
           <Input
             label="Schema name"

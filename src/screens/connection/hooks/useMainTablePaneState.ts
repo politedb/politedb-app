@@ -13,8 +13,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
-  const [truncateDialogOpen, setTruncateDialogOpen] = useState(false);
-  const [dropDialogOpen, setDropDialogOpen] = useState(false);
   const [progressNow, setProgressNow] = useState(() => Date.now());
   const [settledPagination, setSettledPagination] = useState(() => ({
     limit,
@@ -36,10 +34,6 @@ export function useMainTablePaneState(args: { limit: number; offset: number }) {
     setExportDialogOpen,
     cloneDialogOpen,
     setCloneDialogOpen,
-    truncateDialogOpen,
-    setTruncateDialogOpen,
-    dropDialogOpen,
-    setDropDialogOpen,
     progressNow,
     setProgressNow,
     settledPagination,

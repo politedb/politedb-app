@@ -1,13 +1,14 @@
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
 import { Button } from "src/components/common/Button";
 import type { ConnectionGroup } from "src/stores/connectionGroups";
-import { SearchIcon, XIcon } from "src/components/icons";
+import { FolderIcon, SearchIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
@@ -69,25 +70,25 @@ export function AssignConnectionGroupDialog(props: {
     <Dialog
       open={open}
       onClose={onClose}
-      size="sm"
+      size="md"
       className="overflow-visible"
     >
-      <DialogHeader>
-        <DialogTitle>Move Connection To Groups</DialogTitle>
-      </DialogHeader>
-      <DialogContent className="gap-2 pt-0">
-        <p class="text-sm text-slate-600">
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <FolderIcon className="size-4 text-neutral-600" />
+          Move Connection To Groups
+        </DialogTitle>
+        <DialogDescription>
           Choose one or more groups for{" "}
-          <span class="font-semibold">{connectionLabel}</span>.
-        </p>
-
+          <span class="font-semibold text-neutral-900">{connectionLabel}</span>.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogContent className="gap-2">
         <div class="relative">
           <div
             class={cn(
               "flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl border bg-white px-3 py-2",
-              focused
-                ? "border-blue-500 ring-2 ring-blue-100"
-                : "border-slate-200"
+              focused ? "border-blue-500/60" : "border-neutral-300"
             )}
           >
             {selectedGroups.map((group) => (
@@ -171,19 +172,20 @@ export function AssignConnectionGroupDialog(props: {
           ) : null}
         </div>
 
-        {values.length ? (
-          <button
-            type="button"
-            class="self-start text-xs font-semibold text-slate-500 hover:text-slate-900"
-            onClick={() => setValues([])}
-          >
-            Clear groups
-          </button>
-        ) : (
+        <div class="flex items-center justify-between">
           <p class="text-xs text-slate-500">
             Leave empty to keep this connection ungrouped.
           </p>
-        )}
+          {values.length ? (
+            <button
+              type="button"
+              class="text-xs font-semibold text-slate-500 hover:text-slate-900"
+              onClick={() => setValues([])}
+            >
+              Clear groups
+            </button>
+          ) : null}
+        </div>
       </DialogContent>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>

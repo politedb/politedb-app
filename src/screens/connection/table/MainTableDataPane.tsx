@@ -33,13 +33,12 @@ import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { TableViewMode } from "src/components/table/TableViewToggle";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
+import { tableIdentity } from "../hooks/useTableDestructiveActions";
 import { useTableFilter } from "src/components/table/tableHooks";
 import { useImportTableData } from "src/hooks/useImportTableData";
 import {
   cloneTableQuery,
   copyTableDataQuery,
-  truncateTableQuery,
-  dropTableQuery,
   type TableSort,
 } from "src/lib/queries/sql";
 import type { TableItem } from "src/types";
@@ -170,10 +169,6 @@ export function MainTableDataPane(props: {
     setExportDialogOpen,
     cloneDialogOpen,
     setCloneDialogOpen,
-    truncateDialogOpen,
-    setTruncateDialogOpen,
-    dropDialogOpen,
-    setDropDialogOpen,
     progressNow,
     setProgressNow,
     settledPagination,
@@ -838,78 +833,6 @@ export function MainTableDataPane(props: {
     [setCloneDialogOpen]
   );
 
-  const onTruncateOpen = useCallback(() => {
-    if (isNewTable || isProfileLocked) return;
-    setTruncateDialogOpen(true);
-  }, [isNewTable, isProfileLocked, setTruncateDialogOpen]);
-  const onTruncateClose = useCallback(
-    () => setTruncateDialogOpen(false),
-    [setTruncateDialogOpen]
-  );
-
-  const onDropOpen = useCallback(() => {
-    if (isProfileLocked) return;
-    setDropDialogOpen(true);
-  }, [isProfileLocked, setDropDialogOpen]);
-  const onDropClose = useCallback(
-    () => setDropDialogOpen(false),
-    [setDropDialogOpen]
-  );
-
-  const handleTruncate = useCallback(
-    async (opts: { restartIdentity: boolean; cascade: boolean }) => {
-      if (isNewTable || isProfileLocked) return;
-      if (!meta.connectionId) throw new Error("Not connected.");
-
-      const { schema, name } = activeTableWindow.table;
-      const sql = truncateTableQuery(schema, name, opts, engine);
-      await rt.runSqlWithHistory({
-        windowId: activeTableWindow.id,
-        connectionId: meta.connectionId,
-        sql,
-      });
-      await reloadTableData(schema, name);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      isNewTable,
-      isProfileLocked,
-      meta.connectionId,
-      activeTableWindow.table.schema,
-      activeTableWindow.table.name,
-      activeTableWindow.id,
-      engine,
-      rt.runSqlWithHistory,
-      reloadTableData,
-    ]
-  );
-
-  const handleDrop = useCallback(async () => {
-    if (isProfileLocked) return;
-    if (!meta.connectionId) throw new Error("Not connected.");
-
-    const { schema, name } = activeTableWindow.table;
-    const sql = dropTableQuery(schema, name, engine);
-    await rt.runSqlWithHistory({
-      windowId: activeTableWindow.id,
-      connectionId: meta.connectionId,
-      sql,
-    });
-    await rt.refreshSchemaAndTables();
-    await actions.closeWindow(activeTableWindow.id, new MouseEvent("click"));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isProfileLocked,
-    meta.connectionId,
-    activeTableWindow.table.schema,
-    activeTableWindow.table.name,
-    activeTableWindow.id,
-    engine,
-    rt.runSqlWithHistory,
-    rt.refreshSchemaAndTables,
-    actions.closeWindow,
-  ]);
-
   const handleClone = useCallback(
     async (newTableName: string, copyData: boolean) => {
       if (isProfileLocked) return;
@@ -988,7 +911,25 @@ export function MainTableDataPane(props: {
     ]
   );
 
-  // When user chose Import/Clone/Truncate/Drop/Structure from table context menu in left nav
+  // Rows changed outside this view (e.g. truncated from the object tree): reload them
+  // when this table is shown.
+  const { staleTableKey, setStaleTableKey } = rt;
+  useEffect(() => {
+    if (!staleTableKey) return;
+    if (staleTableKey !== tableIdentity(activeTableWindow.table)) return;
+    setStaleTableKey(null);
+    void reloadTableData(
+      activeTableWindow.table.schema,
+      activeTableWindow.table.name
+    );
+  }, [
+    staleTableKey,
+    setStaleTableKey,
+    activeTableWindow.table,
+    reloadTableData,
+  ]);
+
+  // When user chose Import/Clone/Structure from table context menu in left nav
   useEffect(() => {
     if (!rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
@@ -1002,8 +943,6 @@ export function MainTableDataPane(props: {
       else if (action === "import") onImportOpen();
       else if (action === "importSqlDump") void onImportSqlDumpOpen();
       else if (action === "clone") onCloneOpen();
-      else if (action === "truncate") onTruncateOpen();
-      else if (action === "drop") onDropOpen();
       rt.setPendingTableAction(null);
     }, 80);
     return () => clearTimeout(timer);
@@ -1015,8 +954,6 @@ export function MainTableDataPane(props: {
     onImportOpen,
     onImportSqlDumpOpen,
     onCloneOpen,
-    onTruncateOpen,
-    onDropOpen,
   ]);
 
   /* ===========================================================================
@@ -1187,10 +1124,6 @@ export function MainTableDataPane(props: {
         onImportClose={onImportClose}
         cloneDialogOpen={cloneDialogOpen}
         onCloneClose={onCloneClose}
-        truncateDialogOpen={truncateDialogOpen}
-        onTruncateClose={onTruncateClose}
-        dropDialogOpen={dropDialogOpen}
-        onDropClose={onDropClose}
         connectionId={meta.connectionId}
         schema={activeTableWindow.table.schema}
         tableName={activeTableWindow.table.name}
@@ -1212,8 +1145,6 @@ export function MainTableDataPane(props: {
         importProgressState={importProgressState}
         handleImport={handleImport}
         handleClone={handleClone}
-        handleTruncate={handleTruncate}
-        handleDrop={handleDrop}
       />
     </div>
   );

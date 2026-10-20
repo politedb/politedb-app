@@ -259,7 +259,7 @@ export function LeftNavSnippetsPane({ profileId, onInsert }: Props) {
         onClose={() => (deleting ? null : setDeleteTarget(null))}
         size="sm"
       >
-        <DialogHeader>
+        <DialogHeader className="border-b border-neutral-200">
           <DialogTitle>Delete snippet</DialogTitle>
         </DialogHeader>
         <DialogContent>
@@ -267,7 +267,7 @@ export function LeftNavSnippetsPane({ profileId, onInsert }: Props) {
             Delete “{deleteTarget?.name}”? This cannot be undone.
           </p>
         </DialogContent>
-        <DialogFooter>
+        <DialogFooter className="justify-end pt-1">
           <Button
             variant="ghost"
             disabled={deleting}

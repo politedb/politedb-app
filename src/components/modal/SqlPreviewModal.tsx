@@ -25,10 +25,12 @@ export function SqlPreviewModal(props: {
 
   return (
     <Dialog open={open} onClose={onClose} size="md">
-      <DialogHeader>
-        <DialogTitle>SQL Preview</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          SQL Preview
+        </DialogTitle>
       </DialogHeader>
-      <DialogContent className="pt-0">
+      <DialogContent className="gap-2">
         <div class="flex items-center justify-between rounded border border-neutral-200 bg-neutral-100">
           <div class="p-2 font-mono text-xs break-all whitespace-pre-wrap">
             {sqlPreview}

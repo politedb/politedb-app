@@ -45,26 +45,21 @@ export type ConnectionRuntime = {
   // database objects (functions/procedures/triggers)
   objectSaveRef: { current: ObjectSaveHandler | null };
 
-  /** When set by context menu, MainTableDataPane runs import/clone/truncate/drop/structure then clears */
-  pendingTableAction:
-    | "import"
-    | "importSqlDump"
-    | "clone"
-    | "truncate"
-    | "drop"
-    | "structure"
-    | null;
-  setPendingTableAction: (
-    action:
-      | "import"
-      | "importSqlDump"
-      | "clone"
-      | "truncate"
-      | "drop"
-      | "structure"
-      | null
-  ) => void;
+  /** When set by context menu, MainTableDataPane runs import/clone/structure then clears */
+  pendingTableAction: PendingTableAction | null;
+  setPendingTableAction: (action: PendingTableAction | null) => void;
+
+  /** Table whose rows changed outside its view (e.g. truncated from the object tree). */
+  staleTableKey: string | null;
+  setStaleTableKey: (key: string | null) => void;
 };
+
+/** Actions the table view runs after the object tree opened it. */
+export type PendingTableAction =
+  | "import"
+  | "importSqlDump"
+  | "clone"
+  | "structure";
 
 const Ctx = createContext<ConnectionRuntime | null>(null);
 

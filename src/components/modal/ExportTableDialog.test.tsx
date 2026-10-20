@@ -243,7 +243,7 @@ describe("ExportTableDialog UX", () => {
     }) as HTMLOptionElement;
     expect(sql.disabled).toBe(true);
 
-    const exportBtn = screen.getByRole("button", { name: /Export CSV/i });
+    const exportBtn = screen.getByRole("button", { name: "Export" });
     expect((exportBtn as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/0 \/ 6 output columns/)).toBeTruthy();
   });
@@ -328,7 +328,7 @@ describe("ExportTableDialog UX", () => {
     };
     renderDialog();
     const exportBtn = screen.getByRole("button", {
-      name: /Export CSV/i,
+      name: "Export",
     }) as HTMLButtonElement;
     expect(exportBtn.disabled).toBe(true);
     expect(screen.getByText(/0 \/ 6 output columns/)).toBeTruthy();

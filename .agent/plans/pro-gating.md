@@ -22,6 +22,7 @@ APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Re
 ## Product scope (from the user)
 
 **Free:**
+
 - all engines; unlimited connections and tabs;
 - SQL editor, history, snippets; grid and structure editing;
 - SSH, SSL, keychain;
@@ -30,6 +31,7 @@ APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Re
 - basic AI chat (BYO key or Ollama).
 
 **Pro:**
+
 1. Backup/restore.
 2. AI agent mode.
 3. Visual query analyzer (EXPLAIN view plus suggestions).
@@ -60,6 +62,7 @@ APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Re
 ### A. Entitlement (D1, D2, D3)
 
 **A1. D1, unknown plan → Free.** Pro needs a positive paid signal. Replace the "active unless plan is free" rule:
+
 - `status == "active"` (after `apply_local_expiry`) **and** either:
   - `plan` equals `"pro"` (case-insensitive, trimmed), or
   - `plan` is absent (older servers) **and** `plan_name`, normalized (trimmed, lowercase, trailing `plan` removed), is `pro` or `ultimate`.
@@ -123,6 +126,7 @@ APPROVED (Revision 5). Decisions D1–D8, D2b, D2c, D2d and D9 are settled. **Re
 ### C. Badges (D8)
 
 Show `ProBadge` on every gated entry point for all tiers, Free, trial and Pro alike:
+
 - the Backup/Restore buttons;
 - the health inspector menu item;
 - the "Export as SVG" button;
@@ -205,6 +209,7 @@ The backend phase is verified with `npm test`, `npm run build`, and the Postgres
 ## Revision 3 (answers the Codex critique of Revision 2)
 
 **New user decision D2b (2026-10-19): a trial needs the server.** A trial starts only after the server answers. There is no provisional local trial.
+
 - A device that has never reached the server is **Free**; the free features work as usual.
 - Once a server window is known, it is kept, and it is honoured offline until it expires.
 - This replaces the "provisional local window" in A2 and removes the first-contact extension.
@@ -213,24 +218,24 @@ The backend phase is verified with `npm test`, `npm run build`, and the Postgres
 
 **Rust `LicenseState`.** Credentials stay as they are. A separate `trial: Option<ServerTrial>` holds:
 
-| field | meaning |
-|---|---|
-| `started_at`, `expires_at` | the server's window, in server epoch ms |
-| `clock_offset_ms` | `server_now − local_now`, measured at the last successful sync |
-| `synced_at` | local ms of the last successful sync |
-| `high_water_ms` | the largest local time ever observed, updated on every finalize |
+| field                      | meaning                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| `started_at`, `expires_at` | the server's window, in server epoch ms                         |
+| `clock_offset_ms`          | `server_now − local_now`, measured at the last successful sync  |
+| `synced_at`                | local ms of the last successful sync                            |
+| `high_water_ms`            | the largest local time ever observed, updated on every finalize |
 
 - **Legacy fields.** `trial_started_at` / `trial_expires_at` stay readable for migration only (R2). They never grant access.
 - **`paid_license(state)`.** True when status is `active` after `apply_local_expiry`, **and** one of:
   - if `plan` is present and non-blank: `plan.trim().eq_ignore_ascii_case("pro")`;
   - otherwise: the normalized `plan_name` is `pro` or `ultimate` (trimmed, lowercase, one trailing `plan` word removed).
-  Unknown, blank or conflicting values give **Free**, so `{plan:"free", plan_name:"Ultimate"}` is Free and `{plan:"pro", plan_name:"Polar License"}` is Pro.
+    Unknown, blank or conflicting values give **Free**, so `{plan:"free", plan_name:"Ultimate"}` is Free and `{plan:"pro", plan_name:"Polar License"}` is Pro.
 - **`plan` handling.** Activate and refresh responses set `plan` from the response **without** carrying a previous value forward. A response that omits it means an older server, and the `plan_name` rule applies.
 - **`trial_active(state, local_now)`.** The trial must exist and, using `effective_now = local_now + clock_offset_ms`:
   - `started_at <= effective_now < expires_at`, and
   - `local_now >= high_water_ms − 24 h` (a clock wound back by more than a day loses only the **trial**);
   - the window must be well formed: start before expiry, at most 31 days long.
-  A clock that is fixed recovers on its own once local time passes the high-water mark again, or at the next sync, which re-measures the offset. Paid access never depends on any of this.
+    A clock that is fixed recovers on its own once local time passes the high-water mark again, or at the next sync, which re-measures the offset. Paid access never depends on any of this.
 - **Finalize.** `pro_access = !gates_pro_features || paid_license || trial_active`. Finalize also sets `pro_access_until: Option<i64>`, in local ms: when the current access ends, from the paid `expires_at` or the trial's `expires_at − clock_offset_ms`. It is `None` when unlimited or not applicable.
   - The same function runs on load, save and every gate check: frontend state, `ai_agent_start` and the grant.
   - Nothing is trusted from input: `pro_access` and `pro_access_until` are always recomputed.
@@ -238,7 +243,7 @@ The backend phase is verified with `npm test`, `npm run build`, and the Postgres
   - case, whitespace and the `plan` suffix boundary (`"Pro plan"` yes, `"Pro plans"` no);
   - conflicting tier and name, unknown tiers;
   - an expired Ultimate license.
-  The Rust test (`include_str!`) and Vitest both use it. The TS `isPaidLicense(state)` mirrors `paid_license`.
+    The Rust test (`include_str!`) and Vitest both use it. The TS `isPaidLicense(state)` mirrors `paid_license`.
 - **AI gateway tier.**
   - `x-user-plan` is `"ultimate"` only when `isPaidLicense` (status, tier and name); trials still send `"free"`, as today.
   - An expired Ultimate license now sends `"free"` instead of `"ultimate"`, which fixes a leak.
@@ -336,6 +341,7 @@ The backend phase is verified with `npm test`, `npm run build`, and the Postgres
 Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is added.
 
 **Free can still:**
+
 - export to CSV, JSON and SQL;
 - export with every column set to Keep, passed through unmasked;
 - select columns without turning masking on;
@@ -345,6 +351,7 @@ Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is add
 - use basic chat.
 
 **Free is blocked from:**
+
 - Backup and Restore;
 - the analyzer view and its reports;
 - SVG export;
@@ -355,6 +362,7 @@ Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is add
 **A masking policy saved during Pro**, then a downgrade: the export fails with a clear upgrade error, and there is no unmasked fallback.
 
 **Lifecycle:**
+
 - the trial expires while the window is open (timer, focus), with several consumers;
 - a paid license expires the same way.
 
@@ -403,6 +411,7 @@ Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is add
 ## Revision 4 (answers the Codex re-review of Revision 3)
 
 **New user decisions (2026-10-19):**
+
 - **D2c: no clock-rollback protection.** The trial is checked against the local clock, exactly like paid `expires_at`. The license file is unsigned and editable (an accepted v1 limit), so protecting the clock adds little.
   - This drops `clock_offset_ms`, `high_water_ms`, the 24 h skew rule and the server `now` field from R1, R2 and R3.
   - Closes **B1**.
@@ -462,7 +471,7 @@ Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is add
   - refresh against deactivate;
   - activate against sync, in both start orders;
   - a stale frontend publication arriving after a newer one.
-  Each asserts the credentials, trial and revision on disk, and the store state.
+    Each asserts the credentials, trial and revision on disk, and the store state.
 
 ### V3. Legacy trial migration (replaces the R2 migration; closes B3)
 
@@ -505,6 +514,7 @@ Revision 2's "regression with Pro mocked in" stays, and a **Free matrix** is add
 ### V5. Trial presentation (closes S6)
 
 `LicenseDialog.tsx` and `LicenseKeySettings.tsx` render from the server `trial` and the derived state, not from `trial_expires_at`:
+
 - "Free trial: N days left (ends DATE)";
 - "Free trial ended on DATE";
 - "Free trial not activated yet. Connect to the internet to start it" (never verified);
@@ -529,6 +539,7 @@ Both files are in the Phase 3 file list. Tests cover a successful migration, an 
 ### V7. Agent badge (closes N2)
 
 The AI panel header shows a persistent "Agent" chip with `ProBadge` for every tier.
+
 - **Pro and trial:** it is informational, with tooltip "Agent mode is on".
 - **Free:** clicking it opens the upgrade dialog.
 
@@ -641,6 +652,7 @@ The fallback hint (B2) and the consent-card Allow badge (R9) stay as specified. 
 Finalize evaluates `!gates_pro_features()` **first**: `{ pro_access: true, pro_access_until: None }`, before the paid/trial union, which runs only for Direct.
 
 Fixtures cover:
+
 - App Store with no grant;
 - App Store with an expired paid license;
 - App Store with trial fields present (stripped, still Pro).
@@ -651,6 +663,7 @@ Fixtures cover:
 - **Free:** "Agent mode is a Pro feature", and clicking opens the upgrade dialog.
 
 **Implementation notes from the Codex re-review of Revision 5:**
+
 - **Atomic capture.** The load's read, capture and minimal write happen in **one** `LICENSE_FILE_LOCK` critical section, using unlocked private helpers. The concurrent load/mutation test pauses at that boundary and asserts that credentials and the server trial survive.
 - **Expiry representation.** A malformed expiry stays distinct from an absent one across save and reload: store `expires_at_valid: bool` (or check that the raw field is present) next to `expires_at_ms`. Test reloading a malformed expiry together with a valid trial.
 
@@ -661,6 +674,7 @@ Phase plan unchanged from Revision 4. W1, W2, W5 and W6 belong to Phase 1. W3 an
 The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e`. The changes below are uncommitted on top of it.
 
 **Rust (`src-tauri/src/license.rs`, `commands/license.rs`, `commands/ai_agent.rs`, `commands/ai_agent_data.rs`):**
+
 - **Entitlement (V1, W5, W6).**
   - `paid_tier` follows the exact V1 rule: `plan` decides when present, otherwise `plan_name` pro/ultimate with an optional ` plan` suffix.
   - `paid_expiry` distinguishes Unlimited, At and Invalid. It is derived from the raw `expires_at` on every read, so a malformed expiry stays ineligible across reload.
@@ -682,6 +696,7 @@ The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e
 - **Agent gate (B2).** `ai_agent_start` and `ai_agent_data_access_grant` call `license::require_pro(&app, "AI_AGENT_PRO_REQUIRED")` before any provider or database work. An unreadable license file counts as locked.
 
 **Frontend:**
+
 - **Core.**
   - `stores/license.ts` publishes only snapshots with a higher `snapshot_seq`, including those carried by errors.
   - It re-reads at `pro_access_until` (timer clamped to 24 h) and on focus, `visibilitychange` and `online`.
@@ -721,6 +736,7 @@ The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e
 **Deviation (recorded):** V1 planned a shared JSON fixture table used by both Rust and TypeScript. The frontend instead trusts the native `paid_license`, `pro_access` and `pro_access_until` and computes no entitlement itself, so there is nothing to keep in parity. The fixture table therefore lives only in Rust (`paid_tier_needs_a_positive_paid_signal` and the entitlement tests). The gateway test covers `gatewayPlan`.
 
 **Tests added or updated:**
+
 - **Rust (`license::tests`, 24):**
   - the `paid_tier` table;
   - activity and expiry, including equality and malformed values;
@@ -750,6 +766,7 @@ The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e
   - the gateway tier.
 
 **Verification:**
+
 - **Rust:**
   - `cargo test --locked`: 419 passed / 15 ignored, the same with `--features app-store`.
   - `cargo clippy --locked --all-targets`: 8 warnings (default) and 9 (app-store), the baseline.
@@ -784,15 +801,18 @@ The branch was rebased onto `origin/main` (`57de05f`); `99a5f22` is now `983f40e
    - The test asserts that the App Store flavor never calls the loader.
 
 **Coverage gaps closed** (Rust, with loopback):
+
 - `clear_then_reactivate_with_the_same_key`;
 - `a_refresh_queued_behind_a_deactivate_sees_no_license` (the validate request carries no credentials);
 - after a timeout, a queued activation runs instead of being blocked.
 
 **Frontend (`stores/license.test.ts`):**
+
 - a timer re-read notifies several subscribers;
 - a focus event triggers a re-read.
 
 **Verification:**
+
 - **Rust:**
   - `cargo test --locked`: 426 passed / 15 ignored, the same with `--features app-store`.
   - `license::tests`: 31.
@@ -856,12 +876,14 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
    - **Tests:** exact lower and upper bounds, an expiry crossing the upper bound, and a server clock out of range (no row written).
 
 **Coverage gaps closed:**
+
 - every caller of a race with **different** legacy starts gets the winner's dates;
 - a second allowed product gets its own trial;
 - a failure after the insert (fresh-manager read) returns a fixed 503, with no `console.error` and no report;
 - the shared device bounds now reject a 129-character `device_id` on `validate` before Polar is called. This tightening is intended and is documented in the README.
 
 **Verification:**
+
 - 6 files / 86 tests pass with `TEST_POSTGRES_URL` set to the throwaway Postgres.
 - `tsc` is clean, and `git diff --check` is clean.
 
@@ -870,6 +892,7 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
 **App, branch `feat/pro-gating`, uncommitted.**
 
 **Rust (`src-tauri/src/license.rs`, `commands/license.rs`, `main.rs`):**
+
 - **Server trial (V1, D2b):**
   - `LicenseState.trial: Option<ServerTrial { started_at, expires_at, synced_at }>` is the only trial that unlocks Pro.
   - `ServerTrial::is_valid` requires `[2026-01-01, 2100-01-01)`, a start before the end and a length of at most 31 days (checked subtraction). An invalid stored window never unlocks.
@@ -887,6 +910,7 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
 - **Shared POST.** `post_license_api` is now generic over the request and returns the body of the first successful response. License actions parse it into `LicenseApiResponse`; the trial action parses `TrialResponse`. The 404, HTML and "Cannot POST" route fallback and the typed errors are unchanged.
 
 **Frontend:**
+
 - **Wrappers.** `licenseTrialSync` wrapper and `CMD.licenseTrialSync`. `ServerTrial` and `LicenseState.trial` types. `DistributionFeatures.serverTrial` is true only for Direct.
 - **Scheduler (`stores/license.ts`, V4, W3).** A module singleton:
   - **Triggers:** load, focus or visibility (at most once per 10 min), online, and its own wake-up timer.
@@ -907,6 +931,7 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
   - nothing for an active license or for the App Store.
 
 **Tests:**
+
 - **Rust (`license::tests`, 37):**
   - `a_trial_kept_on_the_device_never_unlocks_pro` and `server_trial_windows_are_validated` (bounds, 31 days, overflow, invalid stored window);
   - with loopback:
@@ -920,6 +945,7 @@ Codex returned CHANGES REQUIRED with two P2 findings. Both are fixed.
   - `TrialStatusNote.test.ts` (5).
 
 **Verification:**
+
 - **Rust:**
   - `cargo test --locked`: 432 passed / 15 ignored, the same with `--features app-store`.
   - Clippy: 8 (default) and 9 (app-store), the baseline.
@@ -948,14 +974,16 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
      - The new rendered test `LicenseKeySettings.trial.test.tsx`, for the active-free running trial, offline with no trial, and paid-hidden cases.
 
 **Coverage gaps closed:**
+
 - **Trial route fallback:** `the_trial_route_is_found_after_a_missing_prefixed_route` covers a 404 on `/api/v1/licenses/trial` followed by success on `/api/v1/trial`.
 - **Legacy lifecycle:** `a_legacy_trial_survives_every_operation_until_the_server_accepts_it` runs the full V3/W4 matrix on one file:
   - an exhausted legacy file;
   - activate → refresh → deactivate → reload;
   - a 503 sync, a malformed sync, then a delayed successful sync.
-  It checks that every trial request carries the original `legacyStartedAt`, that the field survives each failure, and that the server window uses that start, so the trial stays exhausted. It also checks that the legacy fields are retired.
+    It checks that every trial request carries the original `legacyStartedAt`, that the field survives each failure, and that the server window uses that start, so the trial stays exhausted. It also checks that the legacy fields are retired.
 
 **Verification:**
+
 - **Rust:** `cargo test --locked` gives 435 passed / 15 ignored, the same with `--features app-store`. `license::tests`: 40. Clippy: 8 and 9, the baseline.
 - **Frontend:** Vitest with `VITE_POLITEDB_API_BASE` set: 137 files / 814 tests passed. `tsc`, Prettier and the build pass.
 - `git diff --check` is clean.
@@ -988,6 +1016,7 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
    - **Tests:** roles and states, focus on open, arrow wrap-around, Escape with focus restoration.
 
 **Coverage gaps closed:**
+
 - **`Checkbox.test.tsx`:** an accepted change in both directions; a refused change from both initial states; an uncontrolled checkbox; the indeterminate state with the disabled attribute. jsdom dispatches clicks on disabled inputs, so the disabled-click case is left to browsers.
 - **`system-dialog/index.test.ts` (`chooseDialog`):**
   - the button shape for yes/no/cancel and for ok/cancel;
@@ -999,6 +1028,7 @@ Codex returned CHANGES REQUIRED with three P2 findings. All three are fixed.
 **Verification:** Vitest passes 142 files / 840 tests; `tsc`, the build and Prettier pass.
 
 **Round 2 (Codex: accessibility P2 partially resolved).**
+
 - **Problem:** initial focus ran before the app Popover mounted its content.
 - **Fix:** the selected mode is focused from the menu's mount ref, and also on open, which covers reopening during the close transition.
 - **Tests:** `AssistantModePicker.popover.test.tsx` keeps the real app `Popover` and mocks only `react-tiny-popover`. It covers focus on mount, arrow keys, Escape with focus return, reopening after a full close, and reopening during the close transition. A mutation check confirmed the test catches the bug: dropping the mount ref fails it.
@@ -1055,20 +1085,20 @@ Reviewed Revision 3 as authoritative over Revision 2. Confirmed this worktree is
 
 “Resolved” below means the implementation contract is now specified; application code still needs implementation and regression verification.
 
-| Prior finding | Disposition | Revision 3 contract and current-code evidence |
-|---|---|---|
-| 1. Running-app expiry | **Partially resolved** | R1 adds a shared deadline, timer, focus/resume reload, action-time reads, and lets started work finish; R7 adds trial and paid expiry coverage. This addresses the missing scheduler in `src/stores/license.ts:53-69` and captured access in `src/hooks/useProGate.ts:13-30`. Clock rollback and combining paid/trial deadlines still need B1/S1 below. |
-| 2. Trial provenance across lifecycle | **Partially resolved** | R2 preserves the server substate independently of credentials and removes trial creation from normalization/inactive. That fixes the intended replacement of `src-tauri/src/license.rs:437-458,644-645`. Legacy provenance is not included in the merge contract; see B3. |
-| 3. Concurrent sync/credentials/publication | **Partially resolved** | R3 correctly separates HTTP from locked disk merging and specifies delayed-response tests. Identity checks cover refresh, but not stale deactivate/activate; frontend sequence ordering is underspecified. Existing destructive completion path is `src-tauri/src/license.rs:676-696`; unversioned publications are `src/stores/license.ts:60-65,75-119`. See B2/S2. |
-| 4. Persisted clock policy | **Not resolved** | R1 supplies persisted offset/high-water evidence, but its recovery claim does not follow from its predicate, and cached frontend access does not evaluate rollback. Current common finalizer is `src-tauri/src/license.rs:173-201`. See B1. |
-| 5. Provisional bootstrap/retry/reset claims | **Resolved for Phase 3; release exception unresolved** | D2b removes optimistic local grants; R2 specifies reconnect/focus/periodic retries, retains known windows on all failures, and exposes status. This replaces the startup-only pattern at `src/stores/license.ts:53-69`. Phase 1 still grants new local trials, and retry triggers need one throttle; see B4/S3. |
-| 6. Historical consent cards | **Resolved in plan** | R4 covers click-time gating, pending-generation invalidation, explicit re-click after upgrade, fixed errors, status/revoke preservation and filtered history. Correct integration sites verified at `origin/main:src/components/ai-assistant/AiAssistantPanel.tsx:555-582`, `origin/main:src/components/ai-assistant/hooks/useAiAssistantSubmit.ts:120,340-345,372-376`, and `origin/main:src-tauri/src/commands/ai_agent_data.rs:224-248`. |
-| 7. Paid classification/gateway parity | **Partially resolved** | R1 separates paid access from trials and gateway labels and removes cached `plan` fallback. This addresses `src/lib/politedbBackend/ai.ts:159-178` and authoritative backend tiers at `../politedb-backend/src/services/polar-license-key.ts:130-139,160-169`. Blank-tier behavior, cached display-name fallback and fixture expiry inputs remain ambiguous; see S4. |
-| 8. Backend conflict recovery/privacy | **Resolved in plan, with implementation notes** | R5 replaces failed-flush recovery with conflict-safe insert plus fresh read, registers the entity, bounds/normalizes input, sanitizes DB errors and requires Postgres evidence. Relevant current boundaries: `../politedb-backend/src/db/orm.ts:45-59`, `src/db/entities.ts:117-121`, `src/services/polar-license-key.ts:11-16` (the latter two also in the backend). SQLite feasibility checked below; see S5/N1. |
-| 9. Open inspector after downgrade | **Resolved in plan** | R6 guards the dialog and each collect/refresh and invalidates pending work, covering `src/hooks/useDbHealthInspector.ts:42-75`. Preserve ordinary connection checks and exercise open → expiry → refresh with no new inspector queries. |
-| 10. Free/lifecycle regression matrix | **Resolved in plan** | R6/R7 explicitly retain raw rows for direct/streaming/restored Explain and ordinary/error results, gate both report formats, preserve privacy confirmation, keep PNG/Mermaid and imports Free, and test all-Keep versus masking plus downgrade failure. Integration verified at `src/components/editor/SqlResultsPane.tsx:393-410,467-480`, `src/components/editor/query-analyzer/QueryAnalyzer.tsx:139-165`, `src/lib/export-pipeline/runStreamingExport.ts:92-107`, `src/components/modal/DiagramGeneratorDialog.tsx:98-110`. Keep these tests alongside the new state/clock tests below. |
-| 11. Release/deploy readiness | **Partially resolved** | R8 requires Postgres concurrency/migration evidence, proxy configuration, endpoint smoke tests, backend-first Phase 3 and retained rows; R2 adds the native App Store early return. Current route composition is `../politedb-backend/src/app.ts:77` plus `src/routes/index.ts:10` (backend), rate-limit switch is `../politedb-backend/src/middleware/rate-limit.ts:5-12,31-32`. Phase 1/D2b conflict remains B4. |
-| 12. Copy/badge inventory | **Resolved in plan, minor clarification** | R9 replaces hard-coded highlights, adds agent/SVG copy, removes PNG/Explain badges and defines a non-sensitive dismissal key. Current sites are `src/components/license/ProUpgradeDialogHost.tsx:18-24`, `src/screens/connection/workspace/MenuBar.tsx:307-308`, `src/components/modal/DiagramGeneratorDialog.tsx:256`. Agent badge visibility across tiers needs N2. |
+| Prior finding                               | Disposition                                            | Revision 3 contract and current-code evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Running-app expiry                       | **Partially resolved**                                 | R1 adds a shared deadline, timer, focus/resume reload, action-time reads, and lets started work finish; R7 adds trial and paid expiry coverage. This addresses the missing scheduler in `src/stores/license.ts:53-69` and captured access in `src/hooks/useProGate.ts:13-30`. Clock rollback and combining paid/trial deadlines still need B1/S1 below.                                                                                                                                                                                                                                     |
+| 2. Trial provenance across lifecycle        | **Partially resolved**                                 | R2 preserves the server substate independently of credentials and removes trial creation from normalization/inactive. That fixes the intended replacement of `src-tauri/src/license.rs:437-458,644-645`. Legacy provenance is not included in the merge contract; see B3.                                                                                                                                                                                                                                                                                                                   |
+| 3. Concurrent sync/credentials/publication  | **Partially resolved**                                 | R3 correctly separates HTTP from locked disk merging and specifies delayed-response tests. Identity checks cover refresh, but not stale deactivate/activate; frontend sequence ordering is underspecified. Existing destructive completion path is `src-tauri/src/license.rs:676-696`; unversioned publications are `src/stores/license.ts:60-65,75-119`. See B2/S2.                                                                                                                                                                                                                        |
+| 4. Persisted clock policy                   | **Not resolved**                                       | R1 supplies persisted offset/high-water evidence, but its recovery claim does not follow from its predicate, and cached frontend access does not evaluate rollback. Current common finalizer is `src-tauri/src/license.rs:173-201`. See B1.                                                                                                                                                                                                                                                                                                                                                 |
+| 5. Provisional bootstrap/retry/reset claims | **Resolved for Phase 3; release exception unresolved** | D2b removes optimistic local grants; R2 specifies reconnect/focus/periodic retries, retains known windows on all failures, and exposes status. This replaces the startup-only pattern at `src/stores/license.ts:53-69`. Phase 1 still grants new local trials, and retry triggers need one throttle; see B4/S3.                                                                                                                                                                                                                                                                             |
+| 6. Historical consent cards                 | **Resolved in plan**                                   | R4 covers click-time gating, pending-generation invalidation, explicit re-click after upgrade, fixed errors, status/revoke preservation and filtered history. Correct integration sites verified at `origin/main:src/components/ai-assistant/AiAssistantPanel.tsx:555-582`, `origin/main:src/components/ai-assistant/hooks/useAiAssistantSubmit.ts:120,340-345,372-376`, and `origin/main:src-tauri/src/commands/ai_agent_data.rs:224-248`.                                                                                                                                                 |
+| 7. Paid classification/gateway parity       | **Partially resolved**                                 | R1 separates paid access from trials and gateway labels and removes cached `plan` fallback. This addresses `src/lib/politedbBackend/ai.ts:159-178` and authoritative backend tiers at `../politedb-backend/src/services/polar-license-key.ts:130-139,160-169`. Blank-tier behavior, cached display-name fallback and fixture expiry inputs remain ambiguous; see S4.                                                                                                                                                                                                                        |
+| 8. Backend conflict recovery/privacy        | **Resolved in plan, with implementation notes**        | R5 replaces failed-flush recovery with conflict-safe insert plus fresh read, registers the entity, bounds/normalizes input, sanitizes DB errors and requires Postgres evidence. Relevant current boundaries: `../politedb-backend/src/db/orm.ts:45-59`, `src/db/entities.ts:117-121`, `src/services/polar-license-key.ts:11-16` (the latter two also in the backend). SQLite feasibility checked below; see S5/N1.                                                                                                                                                                          |
+| 9. Open inspector after downgrade           | **Resolved in plan**                                   | R6 guards the dialog and each collect/refresh and invalidates pending work, covering `src/hooks/useDbHealthInspector.ts:42-75`. Preserve ordinary connection checks and exercise open → expiry → refresh with no new inspector queries.                                                                                                                                                                                                                                                                                                                                                     |
+| 10. Free/lifecycle regression matrix        | **Resolved in plan**                                   | R6/R7 explicitly retain raw rows for direct/streaming/restored Explain and ordinary/error results, gate both report formats, preserve privacy confirmation, keep PNG/Mermaid and imports Free, and test all-Keep versus masking plus downgrade failure. Integration verified at `src/components/editor/SqlResultsPane.tsx:393-410,467-480`, `src/components/editor/query-analyzer/QueryAnalyzer.tsx:139-165`, `src/lib/export-pipeline/runStreamingExport.ts:92-107`, `src/components/modal/DiagramGeneratorDialog.tsx:98-110`. Keep these tests alongside the new state/clock tests below. |
+| 11. Release/deploy readiness                | **Partially resolved**                                 | R8 requires Postgres concurrency/migration evidence, proxy configuration, endpoint smoke tests, backend-first Phase 3 and retained rows; R2 adds the native App Store early return. Current route composition is `../politedb-backend/src/app.ts:77` plus `src/routes/index.ts:10` (backend), rate-limit switch is `../politedb-backend/src/middleware/rate-limit.ts:5-12,31-32`. Phase 1/D2b conflict remains B4.                                                                                                                                                                          |
+| 12. Copy/badge inventory                    | **Resolved in plan, minor clarification**              | R9 replaces hard-coded highlights, adds agent/SVG copy, removes PNG/Explain badges and defines a non-sensitive dismissal key. Current sites are `src/components/license/ProUpgradeDialogHost.tsx:18-24`, `src/screens/connection/workspace/MenuBar.tsx:307-308`, `src/components/modal/DiagramGeneratorDialog.tsx:256`. Agent badge visibility across tiers needs N2.                                                                                                                                                                                                                       |
 
 #### Blocking — fix before approval
 
@@ -1112,27 +1142,26 @@ Reviewed Revision 3 as authoritative over Revision 2. Confirmed this worktree is
 
 **Verdict: NOT READY.** Resolve B1–B4 and make the remaining implementation contracts explicit before approval.
 
-
 ### Codex re-review — Revision 4
 
 Reviewed Revision 4 as authoritative where it overrides earlier text. Confirmed `feat/pro-gating` at `99a5f22`, with `origin/main` at `57de05fae9c5d1b0b7cc6adf52094a895d8c8fc1`; inspected the agent on `origin/main` and `../politedb-backend` read-only. References below describe existing code and proposed contracts, not implemented fixes. D1–D8, D2b, D2c, D2d and D9 remain settled; unsigned state and client device identity are accepted v1 limits.
 
 #### Disposition of every Revision 3 finding
 
-| Finding | Disposition | Evidence and remaining work |
-|---|---|---|
-| B1 — clock recovery/parity | **Resolved by D2c** | Plan `:405-408,414-417,441` removes offset/high-water/skew enforcement. Existing native clock boundary is `src-tauri/src/license.rs:173-177,204-229`. No rollback protection requested. Publication correctness is a separate issue below. |
-| B2 — credential/publication ordering | **Partially resolved** | Plan `:445-465` serializes credential operations and assigns write revisions, replacing the stale completion paths at `src-tauri/src/license.rs:644-645,653-673,681-696` and unversioned store publications at `src/stores/license.ts:60-65,75-119`. Serialization is viable, but timeout and read-publication contracts need B1/B2 below. |
-| B3 — legacy provenance | **Resolved in intent; lifecycle clarification needed** | Plan `:469-481` preserves a migration-only original start, migrates old versions/seconds, retains it across credentials/failures and clears it atomically with the server window. This addresses `src-tauri/src/license.rs:238-254,378-387,406-410,457-458,514-515`. S2 below specifies initialization and cleanup around the new read-only path. D2d and the explicitly documented out-of-range outcome remain accepted. |
-| B4 — independent Phase 1 release | **Resolved by D9** | Plan `:410,539-549` makes Phase 1 unreleased and requires Phase 3 plus the live backend. This explicitly replaces `:367`; no separate local-trial release remains. |
-| S1 — paid/trial union | **Resolved for Direct; App Store edge needs clarification** | Plan `:423-432` selects the latest eligible finite deadline or unlimited access. This replaces the single cached boolean at `src-tauri/src/license.rs:183-201` and supplies both expiry-order tests. See S4 for the unconditional distribution grant. |
-| S2 — lock/async integration | **Resolved structurally** | Plan `:449-452` separates short synchronous file reads from async operation serialization, prohibits nested public helpers and `blocking_lock`, and converts command wrappers currently synchronous at `src-tauri/src/commands/license.rs:13-25`. The synchronous grant at `origin/main:src-tauri/src/commands/ai_agent_data.rs:224-248` can use the private synchronous reader; it need not await the operation lock. Existing async credential callers at `src-tauri/src/license.rs:645,653,673,681,696` must switch to private helpers. Timeout/lazy-migration details remain below. |
-| S3 — scheduler/backoff | **Partially resolved** | Plan `:485-503` unifies triggers, single-flight, failure classes, expiry reads and cleanup, addressing the independent background refresh at `src/stores/license.ts:53-69`. Success cadence, timer ownership and structured native errors still need S1 below. |
-| S4 — paid inputs/fixtures | **Mostly resolved** | Plan `:418-440` distinguishes absent/null from present blank tiers and makes both classification fields response-owned, fixing cached name/tier fallback at `src-tauri/src/license.rs:481-484,521`. Actual backend responses carry `plan`, `planName` and nullable RFC3339 `expiresAt` (`../politedb-backend/src/services/polar-license-key.ts:130-140,160-169`). Malformed-expiry normalization still needs S3. |
-| S5 — conflict-safe backend verification | **Resolved in plan** | Plan `:517-527` specifies entity property names, awaited insert, fresh manager, metadata-only updates and mandatory Postgres evidence. Matches camelCase mapping at `../politedb-backend/src/db/entities.ts:74-93`, fresh forks at `../politedb-backend/src/db/orm.ts:58-59`, SQLite test setup at `../politedb-backend/test/helpers.ts:8-12` and fresh/existing-schema migration cases at `../politedb-backend/test/migrations.pg.test.ts:54-84`. Entity registration remains required by R5 (`:315`; backend list currently `src/db/entities.ts:117-121`). No new ORM API probe performed. |
-| S6 — trial presentation | **Resolved in plan** | Plan `:507-513,547` explicitly migrates both consumers from legacy dates, with never-verified, expired and offline-known states. Existing consumers verified at `src/components/modal/LicenseDialog.tsx:52-56,157-168` and `src/components/settings/LicenseKeySettings.tsx:58-65`. Clock-denied copy is correctly dropped under D2c. |
-| N1 — AppError reference | **Resolved** | Plan `:523-525` now points to the actual early return at `../politedb-backend/src/app.ts:89-95`; unknown exceptions reach sinks at `:115-117`. Sanitization and sink-spy requirements remain explicit. |
-| N2 — all-tier agent badge | **Resolved in plan** | Plan `:531-535` gives every tier a persistent header chip, independent of hint/card visibility. Existing conditional Allow integration is `origin/main:src/components/ai-assistant/AiAssistantPanel.tsx:555-582`. Tooltip accuracy needs only N1 below. |
+| Finding                                 | Disposition                                                 | Evidence and remaining work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1 — clock recovery/parity              | **Resolved by D2c**                                         | Plan `:405-408,414-417,441` removes offset/high-water/skew enforcement. Existing native clock boundary is `src-tauri/src/license.rs:173-177,204-229`. No rollback protection requested. Publication correctness is a separate issue below.                                                                                                                                                                                                                                                                                                                                                   |
+| B2 — credential/publication ordering    | **Partially resolved**                                      | Plan `:445-465` serializes credential operations and assigns write revisions, replacing the stale completion paths at `src-tauri/src/license.rs:644-645,653-673,681-696` and unversioned store publications at `src/stores/license.ts:60-65,75-119`. Serialization is viable, but timeout and read-publication contracts need B1/B2 below.                                                                                                                                                                                                                                                   |
+| B3 — legacy provenance                  | **Resolved in intent; lifecycle clarification needed**      | Plan `:469-481` preserves a migration-only original start, migrates old versions/seconds, retains it across credentials/failures and clears it atomically with the server window. This addresses `src-tauri/src/license.rs:238-254,378-387,406-410,457-458,514-515`. S2 below specifies initialization and cleanup around the new read-only path. D2d and the explicitly documented out-of-range outcome remain accepted.                                                                                                                                                                    |
+| B4 — independent Phase 1 release        | **Resolved by D9**                                          | Plan `:410,539-549` makes Phase 1 unreleased and requires Phase 3 plus the live backend. This explicitly replaces `:367`; no separate local-trial release remains.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| S1 — paid/trial union                   | **Resolved for Direct; App Store edge needs clarification** | Plan `:423-432` selects the latest eligible finite deadline or unlimited access. This replaces the single cached boolean at `src-tauri/src/license.rs:183-201` and supplies both expiry-order tests. See S4 for the unconditional distribution grant.                                                                                                                                                                                                                                                                                                                                        |
+| S2 — lock/async integration             | **Resolved structurally**                                   | Plan `:449-452` separates short synchronous file reads from async operation serialization, prohibits nested public helpers and `blocking_lock`, and converts command wrappers currently synchronous at `src-tauri/src/commands/license.rs:13-25`. The synchronous grant at `origin/main:src-tauri/src/commands/ai_agent_data.rs:224-248` can use the private synchronous reader; it need not await the operation lock. Existing async credential callers at `src-tauri/src/license.rs:645,653,673,681,696` must switch to private helpers. Timeout/lazy-migration details remain below.      |
+| S3 — scheduler/backoff                  | **Partially resolved**                                      | Plan `:485-503` unifies triggers, single-flight, failure classes, expiry reads and cleanup, addressing the independent background refresh at `src/stores/license.ts:53-69`. Success cadence, timer ownership and structured native errors still need S1 below.                                                                                                                                                                                                                                                                                                                               |
+| S4 — paid inputs/fixtures               | **Mostly resolved**                                         | Plan `:418-440` distinguishes absent/null from present blank tiers and makes both classification fields response-owned, fixing cached name/tier fallback at `src-tauri/src/license.rs:481-484,521`. Actual backend responses carry `plan`, `planName` and nullable RFC3339 `expiresAt` (`../politedb-backend/src/services/polar-license-key.ts:130-140,160-169`). Malformed-expiry normalization still needs S3.                                                                                                                                                                             |
+| S5 — conflict-safe backend verification | **Resolved in plan**                                        | Plan `:517-527` specifies entity property names, awaited insert, fresh manager, metadata-only updates and mandatory Postgres evidence. Matches camelCase mapping at `../politedb-backend/src/db/entities.ts:74-93`, fresh forks at `../politedb-backend/src/db/orm.ts:58-59`, SQLite test setup at `../politedb-backend/test/helpers.ts:8-12` and fresh/existing-schema migration cases at `../politedb-backend/test/migrations.pg.test.ts:54-84`. Entity registration remains required by R5 (`:315`; backend list currently `src/db/entities.ts:117-121`). No new ORM API probe performed. |
+| S6 — trial presentation                 | **Resolved in plan**                                        | Plan `:507-513,547` explicitly migrates both consumers from legacy dates, with never-verified, expired and offline-known states. Existing consumers verified at `src/components/modal/LicenseDialog.tsx:52-56,157-168` and `src/components/settings/LicenseKeySettings.tsx:58-65`. Clock-denied copy is correctly dropped under D2c.                                                                                                                                                                                                                                                         |
+| N1 — AppError reference                 | **Resolved**                                                | Plan `:523-525` now points to the actual early return at `../politedb-backend/src/app.ts:89-95`; unknown exceptions reach sinks at `:115-117`. Sanitization and sink-spy requirements remain explicit.                                                                                                                                                                                                                                                                                                                                                                                       |
+| N2 — all-tier agent badge               | **Resolved in plan**                                        | Plan `:531-535` gives every tier a persistent header chip, independent of hint/card visibility. Existing conditional Allow integration is `origin/main:src/components/ai-assistant/AiAssistantPanel.tsx:555-582`. Tooltip accuracy needs only N1 below.                                                                                                                                                                                                                                                                                                                                      |
 
 #### Blocking — fix before approval
 
@@ -1162,22 +1191,21 @@ Reviewed Revision 4 as authoritative where it overrides earlier text. Confirmed 
 
 **Verdict: NOT READY.** Resolve B1–B2 and finish the listed implementation contracts before approval.
 
-
 ### Codex re-review — Revision 5
 
 Reviewed on 2026-10-19 against `feat/pro-gating` at `99a5f22`, the local `origin/main` AI-agent sources, and read-only backend sources. Revision 5 takes precedence over Revisions 2–4. D1–D8, D2b, D2c, D2d and D9 remain settled; unsigned state and client-supplied device identity remain accepted v1 limits. This is plan readiness, not implementation verification or release approval.
 
 #### Revision 4 findings
 
-| Finding | Result | File:line evidence |
-|---|---|---|
-| B1 — bounded operation locking | **Resolved in plan** | `.agent/plans/pro-gating.md:555-569` replaces the unbounded request/body path at `src-tauri/src/license.rs:538-554` and four-candidate fallback at `src-tauri/src/license.rs:618-621` with 5 s connect, 15 s whole-attempt, 30 s aggregate HTTP deadlines, a 64 KiB body cap, sanitized typed failures and scope-based operation-lock release. Stalled-body, queued-operation, responsive-gate and fallback-budget tests directly cover the failure. |
-| B2 — time-derived snapshot publication | **Resolved in plan** | `.agent/plans/pro-gating.md:573-587` separates durable write revision from process-wide snapshot sequence, assigns the sequence under the file mutex for reads/writes/errors, and publishes strictly newer snapshots. Thus an expiry read publishes without a disk mutation and a delayed pre-expiry read cannot replace it. Tests include subscriber notification and pending-consent invalidation. This replaces unversioned publications at `src/stores/license.ts:60-65,75-119` while preserving time-derived finalization currently at `src-tauri/src/license.rs:173-201,204-232`. |
-| S1 — scheduler cadence and error transport | **Resolved in plan** | `.agent/plans/pro-gating.md:591-603` sets a six-hour success deadline, ten-minute focus minimum, one deadline wake-up, session-owned scheduler independent of reloads, typed sync outcomes, parsed Retry-After and persistent session-level 400 suppression. Tests cover event-free retries and reloads during backoff. This addresses string-only errors at `src-tauri/src/license.rs:550-565` and `src-tauri/src/commands/license.rs:29-54`; backend limiter configuration is `../politedb-backend/src/middleware/rate-limit.ts:21-32`. |
-| S2 — first-read legacy capture and retirement | **Resolved in plan** | `.agent/plans/pro-gating.md:607-622` makes all entry paths use one decoder, captures before mutation regardless of startup ordering, permits atomic capture on load, and retires all three legacy fields together with the validated server window. Save/clear preserve that window; tests cover mutation before load, concurrency, restart and sync → clear → reload. These replace the divergent current load/clear/activation paths at `src-tauri/src/license.rs:378-387,402-414,625-645`. |
+| Finding                                         | Result               | File:line evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1 — bounded operation locking                  | **Resolved in plan** | `.agent/plans/pro-gating.md:555-569` replaces the unbounded request/body path at `src-tauri/src/license.rs:538-554` and four-candidate fallback at `src-tauri/src/license.rs:618-621` with 5 s connect, 15 s whole-attempt, 30 s aggregate HTTP deadlines, a 64 KiB body cap, sanitized typed failures and scope-based operation-lock release. Stalled-body, queued-operation, responsive-gate and fallback-budget tests directly cover the failure.                                                                                                                                                   |
+| B2 — time-derived snapshot publication          | **Resolved in plan** | `.agent/plans/pro-gating.md:573-587` separates durable write revision from process-wide snapshot sequence, assigns the sequence under the file mutex for reads/writes/errors, and publishes strictly newer snapshots. Thus an expiry read publishes without a disk mutation and a delayed pre-expiry read cannot replace it. Tests include subscriber notification and pending-consent invalidation. This replaces unversioned publications at `src/stores/license.ts:60-65,75-119` while preserving time-derived finalization currently at `src-tauri/src/license.rs:173-201,204-232`.                |
+| S1 — scheduler cadence and error transport      | **Resolved in plan** | `.agent/plans/pro-gating.md:591-603` sets a six-hour success deadline, ten-minute focus minimum, one deadline wake-up, session-owned scheduler independent of reloads, typed sync outcomes, parsed Retry-After and persistent session-level 400 suppression. Tests cover event-free retries and reloads during backoff. This addresses string-only errors at `src-tauri/src/license.rs:550-565` and `src-tauri/src/commands/license.rs:29-54`; backend limiter configuration is `../politedb-backend/src/middleware/rate-limit.ts:21-32`.                                                              |
+| S2 — first-read legacy capture and retirement   | **Resolved in plan** | `.agent/plans/pro-gating.md:607-622` makes all entry paths use one decoder, captures before mutation regardless of startup ordering, permits atomic capture on load, and retires all three legacy fields together with the validated server window. Save/clear preserve that window; tests cover mutation before load, concurrency, restart and sync → clear → reload. These replace the divergent current load/clear/activation paths at `src-tauri/src/license.rs:378-387,402-414,625-645`.                                                                                                          |
 | S3 — expiry normalization and timestamp domains | **Resolved in plan** | `.agent/plans/pro-gating.md:626-637` explicitly distinguishes absent/null unlimited expiry from malformed ineligible expiry, retains valid trial eligibility, defines RFC3339-to-ms normalization and equality-as-expired, bounds trial timestamps, requires checked arithmetic and safe backend integers, and injects one evaluation time. Raw-response and normalized-state fixtures are required. This closes the permissive malformed-date return at `src-tauri/src/license.rs:221-225` and matches backend ISO/null responses at `../politedb-backend/src/services/polar-license-key.ts:139,169`. |
-| S4 — unconditional distribution bypass | **Resolved in plan** | `.agent/plans/pro-gating.md:639-646` evaluates the unlimited distribution grant before the Direct-only union and includes no-grant, expired-paid and stripped-trial App Store fixtures. This preserves the existing early bypass at `src-tauri/src/license.rs:183-185`. |
-| N1 — entitlement-accurate chip copy | **Resolved in plan** | `.agent/plans/pro-gating.md:648-651` uses “Agent mode is included with Pro” and preserves provider/model/engine fallback, avoiding a running/availability claim. Capability checks remain visible at `origin/main:src-tauri/src/commands/ai_agent.rs:75-97`. |
+| S4 — unconditional distribution bypass          | **Resolved in plan** | `.agent/plans/pro-gating.md:639-646` evaluates the unlimited distribution grant before the Direct-only union and includes no-grant, expired-paid and stripped-trial App Store fixtures. This preserves the existing early bypass at `src-tauri/src/license.rs:183-185`.                                                                                                                                                                                                                                                                                                                                |
+| N1 — entitlement-accurate chip copy             | **Resolved in plan** | `.agent/plans/pro-gating.md:648-651` uses “Agent mode is included with Pro” and preserves provider/model/engine fallback, avoiding a running/availability claim. Capability checks remain visible at `origin/main:src-tauri/src/commands/ai_agent.rs:75-97`.                                                                                                                                                                                                                                                                                                                                           |
 
 #### Nonblocking implementation cautions
 

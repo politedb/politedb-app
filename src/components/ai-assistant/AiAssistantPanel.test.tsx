@@ -152,6 +152,9 @@ vi.mock("src/components/icons", () => ({
   ShareIcon: () => <span>share</span>,
   SparklesIcon: () => <span>sparkles</span>,
   XIcon: () => <span>x</span>,
+  ClockIcon: () => <span>clock</span>,
+  EditIcon: () => <span>edit</span>,
+  UnlockIcon: () => <span>unlock</span>,
 }));
 
 let renderSeq = 0;

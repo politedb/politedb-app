@@ -2,6 +2,7 @@ import { useMemo, useState } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -13,6 +14,7 @@ import { Skeleton } from "src/components/common/Skeleton";
 import {
   CopyCheckIcon,
   CopyIcon,
+  DbInspectorIcon,
   RefreshCwIcon,
   StopIcon,
 } from "src/components/icons";
@@ -402,7 +404,7 @@ function SessionsTable(props: {
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <SectionBanner section={section} loading={props.loading} />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -486,7 +488,7 @@ function StatementsTable(props: {
         </div>
       ) : null}
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -574,7 +576,7 @@ function TablesTable(props: {
         caveat={`${DEAD_ROW_CAVEAT} ${PARTITION_SIZE_NOTE}`}
       />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -615,7 +617,7 @@ function IndexesTable(props: {
       {
         key: "indexBytes",
         label: "Size",
-        className: "text-sm p-2",
+        className: "text-sm p-2 min-w-24",
         render: (_v, row) =>
           row.indexBytes == null
             ? "—"
@@ -639,7 +641,7 @@ function IndexesTable(props: {
         caveat={INDEX_SCAN_CAVEAT}
       />
       {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-200">
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
           <Table
             columns={columns}
             data={section.data}
@@ -730,14 +732,17 @@ export function DbHealthInspectorDialog(props: Props) {
       className="flex h-[80vh] flex-col overflow-hidden"
     >
       <DialogHeader className="shrink-0 border-b border-neutral-200 pr-12">
-        <DialogTitle>Database Health Inspector</DialogTitle>
-        <p class="mt-1 text-sm text-neutral-600">
+        <DialogTitle className="flex items-center gap-2">
+          <DbInspectorIcon className="size-4 text-neutral-600" />
+          Database Health Inspector
+        </DialogTitle>
+        <DialogDescription>
           Read-only PostgreSQL snapshot
           {databaseLabel ? ` · ${databaseLabel}` : ""}
           {snapshot?.startedAt
             ? ` · Started ${formatCollectedAt(snapshot.startedAt)}`
             : ""}
-        </p>
+        </DialogDescription>
       </DialogHeader>
 
       {!hasPro ? (

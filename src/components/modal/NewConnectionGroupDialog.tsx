@@ -10,6 +10,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Input } from "../common/Input";
 import { showMessage } from "src/lib/system-dialog";
+import { FolderIcon } from "../icons";
 
 export function NewConnectionGroupDialog(props: {
   open: boolean;
@@ -48,18 +49,21 @@ export function NewConnectionGroupDialog(props: {
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
-      <DialogHeader>
-        <DialogTitle>New Group</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <FolderIcon className="size-4 text-neutral-600" />
+          New Group
+        </DialogTitle>
         <DialogDescription>
           Configure the name for your new group.
         </DialogDescription>
       </DialogHeader>
-      <DialogContent className="gap-2 pt-0">
+      <DialogContent className="gap-2">
         <Input
           label="Group name"
           value={name}
           placeholder="production"
-          className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
           onInput={(e) => setName((e.target as HTMLInputElement).value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -72,7 +76,7 @@ export function NewConnectionGroupDialog(props: {
           Groups help you organize connections on the main screen.
         </p>
       </DialogContent>
-      <DialogFooter className="pt-1">
+      <DialogFooter className="justify-end">
         <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>

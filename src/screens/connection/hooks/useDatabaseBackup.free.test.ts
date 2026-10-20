@@ -48,20 +48,22 @@ beforeEach(() => {
   useProUpgradeStore.setState({ feature: null });
 });
 
-describe("useDatabaseBackup Pro gates", () => {
-  it("asks Free users to upgrade before database backup or restore", async () => {
-    setPro(false);
-    const { result } = renderHook(() => useDatabaseBackup());
+describe("useDatabaseBackup is free", () => {
+  it.each([false, true])(
+    "runs database backup and restore with pro_access=%s, without an upgrade prompt",
+    async (pro) => {
+      setPro(pro);
+      const { result } = renderHook(() => useDatabaseBackup());
 
-    await act(() => result.current.onBackupDatabase("db"));
-    expect(mocks.metadataLoad).not.toHaveBeenCalled();
-    expect(useProUpgradeStore.getState().feature).toBe("backup-restore");
+      await act(() => result.current.onBackupDatabase("db"));
+      expect(mocks.metadataLoad).toHaveBeenCalledTimes(1);
 
-    useProUpgradeStore.setState({ feature: null });
-    await act(() => result.current.onRestoreDatabase());
-    expect(mocks.openDialog).not.toHaveBeenCalled();
-    expect(useProUpgradeStore.getState().feature).toBe("backup-restore");
-  });
+      await act(() => result.current.onRestoreDatabase());
+      expect(mocks.openDialog).toHaveBeenCalledTimes(1);
+
+      expect(useProUpgradeStore.getState().feature).toBeNull();
+    }
+  );
 
   it("keeps table-level SQL dump import free", async () => {
     setPro(false);
@@ -69,25 +71,5 @@ describe("useDatabaseBackup Pro gates", () => {
     await act(() => result.current.onImportSqlDump());
     expect(mocks.openDialog).toHaveBeenCalledTimes(1);
     expect(useProUpgradeStore.getState().feature).toBeNull();
-  });
-
-  it("runs backup and restore with Pro", async () => {
-    setPro(true);
-    const { result } = renderHook(() => useDatabaseBackup());
-    await act(() => result.current.onBackupDatabase("db"));
-    expect(mocks.metadataLoad).toHaveBeenCalledTimes(1);
-    await act(() => result.current.onRestoreDatabase());
-    expect(mocks.openDialog).toHaveBeenCalledTimes(1);
-    expect(useProUpgradeStore.getState().feature).toBeNull();
-  });
-
-  it("checks access when the action runs, not when the hook rendered", async () => {
-    setPro(true);
-    const { result } = renderHook(() => useDatabaseBackup());
-    // The trial ends while the screen stays open.
-    setPro(false);
-    await act(() => result.current.onRestoreDatabase());
-    expect(mocks.openDialog).not.toHaveBeenCalled();
-    expect(useProUpgradeStore.getState().feature).toBe("backup-restore");
   });
 });

@@ -32,21 +32,21 @@ Next: the user's manual UI check, then token scopes (`benefits:read`, `subscript
 
 - Settings → License key and the License dialog show one row:
 
-  | Case | Label | Value |
-  |---|---|---|
-  | Key has a valid `expires_at` (one-time key) | Expires at | `<date>` with `(in N days)`, `(today)` or `(expired N days ago)` (today's behaviour) |
-  | Key `expires_at` unparseable | Expires at | Unknown |
-  | `active` | Renews on | `<date>` (in N days / today) |
-  | `trialing` | First payment | `<date>` (in N days / today) |
-  | `canceled` | Ends on | `<date>` (in N days / today) |
-  | `pausing` | Pauses on | `<date>` |
-  | `paused` | Status | Paused |
-  | `incomplete` | Status | Payment pending |
-  | `past_due` | Payment | Past due. Update your payment method |
-  | `ended` with date | Ended on | `<date>` |
-  | `ended` without date | Status | Ended |
-  | known status, required date missing or unparseable, or a stale app state with a past `renews_at` | Status | Renews automatically / Canceled / … (status words, no date) |
-  | `subscriptionStatus` null (nothing known) | Renewal | Renews with your subscription |
+  | Case                                                                                             | Label         | Value                                                                                |
+  | ------------------------------------------------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------ |
+  | Key has a valid `expires_at` (one-time key)                                                      | Expires at    | `<date>` with `(in N days)`, `(today)` or `(expired N days ago)` (today's behaviour) |
+  | Key `expires_at` unparseable                                                                     | Expires at    | Unknown                                                                              |
+  | `active`                                                                                         | Renews on     | `<date>` (in N days / today)                                                         |
+  | `trialing`                                                                                       | First payment | `<date>` (in N days / today)                                                         |
+  | `canceled`                                                                                       | Ends on       | `<date>` (in N days / today)                                                         |
+  | `pausing`                                                                                        | Pauses on     | `<date>`                                                                             |
+  | `paused`                                                                                         | Status        | Paused                                                                               |
+  | `incomplete`                                                                                     | Status        | Payment pending                                                                      |
+  | `past_due`                                                                                       | Payment       | Past due. Update your payment method                                                 |
+  | `ended` with date                                                                                | Ended on      | `<date>`                                                                             |
+  | `ended` without date                                                                             | Status        | Ended                                                                                |
+  | known status, required date missing or unparseable, or a stale app state with a past `renews_at` | Status        | Renews automatically / Canceled / … (status words, no date)                          |
+  | `subscriptionStatus` null (nothing known)                                                        | Renewal       | Renews with your subscription                                                        |
 
 - No Manage subscription button (user decision 2026-10-20). Customers keep using the existing "Lost license key?" portal link (Direct) and Polar's own emails.
 - The license email shows the same rows, with UTC dates ("October 19, 2027") and no "(in N days)".
@@ -107,17 +107,17 @@ Next: the user's manual UI check, then token scopes (`benefits:read`, `subscript
 
 ### R3. Mapping (pure, first match wins; from archived Z4)
 
-| # | Condition | `subscriptionStatus` | date |
-|---|---|---|---|
-| 1 | `ended_at` set; or status in `canceled`, `unpaid`, `incomplete_expired`; or (`cancel_at_period_end` or `ends_at`) with the end already past | `ended` | `endsAt = ended_at ?? ends_at ?? current_period_end` |
-| 2 | status `paused` | `paused` | — |
-| 3 | `pause_at_period_end` | `pausing` | `endsAt = current_period_end` |
-| 4 | status `incomplete` | `incomplete` | — |
-| 5 | `ends_at` set or `cancel_at_period_end` | `canceled` | `endsAt = ends_at ?? current_period_end` |
-| 6 | status `past_due` | `past_due` | — |
-| 7 | status `trialing` | `trialing` | `renewsAt = trial_end ?? current_period_end`, only if parseable and `> now`, else null |
-| 8 | status `active` | `active` | `renewsAt = current_period_end`, only if parseable and `> now`, else null |
-| 9 | any other or unrecognised status | null | — |
+| #   | Condition                                                                                                                                   | `subscriptionStatus` | date                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| 1   | `ended_at` set; or status in `canceled`, `unpaid`, `incomplete_expired`; or (`cancel_at_period_end` or `ends_at`) with the end already past | `ended`              | `endsAt = ended_at ?? ends_at ?? current_period_end`                                   |
+| 2   | status `paused`                                                                                                                             | `paused`             | —                                                                                      |
+| 3   | `pause_at_period_end`                                                                                                                       | `pausing`            | `endsAt = current_period_end`                                                          |
+| 4   | status `incomplete`                                                                                                                         | `incomplete`         | —                                                                                      |
+| 5   | `ends_at` set or `cancel_at_period_end`                                                                                                     | `canceled`           | `endsAt = ends_at ?? current_period_end`                                               |
+| 6   | status `past_due`                                                                                                                           | `past_due`           | —                                                                                      |
+| 7   | status `trialing`                                                                                                                           | `trialing`           | `renewsAt = trial_end ?? current_period_end`, only if parseable and `> now`, else null |
+| 8   | status `active`                                                                                                                             | `active`             | `renewsAt = current_period_end`, only if parseable and `> now`, else null              |
+| 9   | any other or unrecognised status                                                                                                            | null                 | —                                                                                      |
 
 - Status never depends on date eligibility: a known status is always reported. A date that is missing, unparseable, equal to `now` or (for `renewsAt`) in the past is dropped (null field), and the presentation then shows the status-words row ("Status: Renews automatically" for `active`, "Status: Trial" for `trialing`, "Status: Canceled" for `canceled`, "Status: Pausing" for `pausing`).
 - Tests assert both the DTO and the presentation (app and email) for `active` with a missing, malformed, equal-to-now and past `current_period_end`, and the same for `trialing`.

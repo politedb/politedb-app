@@ -753,7 +753,7 @@ export function MenuBar({
           <div class="mx-1 h-5 w-px bg-neutral-200" />
 
           <IconButton
-            title={dbBackupRunning ? "Backing up..." : "Backup database (Pro)"}
+            title={dbBackupRunning ? "Backing up..." : "Backup database"}
             onClick={() => void onBackupDatabase(connectionInfo?.database)}
             disabled={
               !rt.runtimeConnectionId || dbBackupRunning || dbRestoreRunning
@@ -763,7 +763,7 @@ export function MenuBar({
           </IconButton>
 
           <IconButton
-            title={dbRestoreRunning ? "Restoring..." : "Restore database (Pro)"}
+            title={dbRestoreRunning ? "Restoring..." : "Restore database"}
             onClick={() => void onRestoreDatabase(onRefresh)}
             disabled={
               !!activeTab?.isLocked ||

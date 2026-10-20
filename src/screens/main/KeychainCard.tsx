@@ -63,13 +63,20 @@ export function KeychainCard(props: {
     [disabled, onCopy, onDeleteSecret, onOpen]
   );
 
-  const openMenuAtAnchor = useCallback((e: MouseEvent) => {
+  const openMenuAtAnchor = useCallback((e: Event) => {
     e.preventDefault();
     e.stopPropagation();
     const rect = btnRef.current?.getBoundingClientRect();
     if (rect) {
       setMenu({ x: rect.left - 150, y: rect.bottom + 6 });
     }
+  }, []);
+
+  // Right-click anywhere on the card opens the same menu at the pointer.
+  const openMenuAtPoint = useCallback((e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
   return (
@@ -79,10 +86,14 @@ export function KeychainCard(props: {
         tabIndex={0}
         onClick={onSelect}
         onDblClick={onOpen}
+        onContextMenu={openMenuAtPoint}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onSelect();
+          }
+          if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") {
+            openMenuAtAnchor(e);
           }
         }}
         class={cn(

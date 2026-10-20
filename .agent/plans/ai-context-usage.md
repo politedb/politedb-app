@@ -23,15 +23,15 @@ DRAFT
 
 ### Limits today: bytes, not tokens
 
-| Part | Limit | Where |
-| --- | --- | --- |
-| question | 16 KB | `run.rs` `MAX_QUESTION_BYTES` |
-| history sent | 12 messages, ≤ 2 KB each, ≤ 8 KB total | `agent/mod.rs` |
-| editor SQL | 8 KB | `agent/mod.rs` |
-| composed first message | 40 KB | `MAX_PROMPT_BYTES` |
-| each tool result | 64 KB | `MAX_TOOL_RESULT_BYTES` |
-| steps / tool calls | 8 / 16 | `MAX_STEPS`, `MAX_TOOL_CALLS` |
-| output | 4096 per step, 32 000 per turn | `STEP_MAX_TOKENS`, `OUTPUT_TOKEN_BUDGET` |
+| Part                   | Limit                                  | Where                                    |
+| ---------------------- | -------------------------------------- | ---------------------------------------- |
+| question               | 16 KB                                  | `run.rs` `MAX_QUESTION_BYTES`            |
+| history sent           | 12 messages, ≤ 2 KB each, ≤ 8 KB total | `agent/mod.rs`                           |
+| editor SQL             | 8 KB                                   | `agent/mod.rs`                           |
+| composed first message | 40 KB                                  | `MAX_PROMPT_BYTES`                       |
+| each tool result       | 64 KB                                  | `MAX_TOOL_RESULT_BYTES`                  |
+| steps / tool calls     | 8 / 16                                 | `MAX_STEPS`, `MAX_TOOL_CALLS`            |
+| output                 | 4096 per step, 32 000 per turn         | `STEP_MAX_TOKENS`, `OUTPUT_TOKEN_BUDGET` |
 
 - **No total transcript limit.** Tool results accumulate across steps, so the worst case is ≈ 40 KB + 16 × 64 KB ≈ 1 MB (≈ 250k tokens) on the last step. That can exceed a 128k window and make the provider reject the request.
 - Each question starts a fresh transcript. History is clipped, so context does not grow across a chat. The meter is therefore per turn and grows step by step.
@@ -163,6 +163,7 @@ DRAFT
      - whether `num_ctx` persists across requests.
 
   Record results here.
+
 - **Phase 1 — R1 + R2 + R3 + R6:** usage events, the estimate, window resolution and the meter. No behavior change in runs.
 - **Phase 2 — R4:** the transcript budget.
 - **Phase 3 — R5:** Ollama context (D1).
@@ -204,15 +205,15 @@ Answers the Codex Plan Review (8 blockers, 4 should-fix) below. D1a/D2a/D3a/D4 u
 
 ### P0 Probe evidence (Ollama 0.40.4, `qwen3:4b`, local, synthetic prompts only)
 
-| Probe | Result |
-| --- | --- |
-| `/v1/chat/completions` with `options.num_ctx` / top-level `num_ctx` | ignored; `/api/ps` stays 4096 |
-| `/api/chat` with `options.num_ctx: 16384` | loaded at 16384; a later `/v1` call reloads at 4096 |
-| `/api/chat`, prompt ≈ 6000 tokens, `num_ctx: 4096`, **`truncate: false`** | **HTTP error:** `request (6012 tokens) exceeds the available context size (4096 tokens), try increasing it` |
-| Same, without `truncate` | silently truncated: `done_reason: "length"`, `prompt_eval_count: 2050` (**below** the window, so a "near full" heuristic would miss it) |
-| `/api/chat` with tools, `think: true` | `done: true`, `done_reason: "stop"`, `message.tool_calls: [{id: "call_…", function: {index, name, arguments: {object}}}]`, separate `message.thinking`, empty `content` |
-| Final step: replay the original assistant message (thinking + calls) + `role: "tool"` results (`tool_name`, `tool_call_id`), **no `tools` field** | answered from the results, `tool_calls: null`, `done_reason: "stop"` |
-| `/api/show` | `model_info["qwen3.context_length"] = 262144` (trained max) |
+| Probe                                                                                                                                             | Result                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/chat/completions` with `options.num_ctx` / top-level `num_ctx`                                                                               | ignored; `/api/ps` stays 4096                                                                                                                                           |
+| `/api/chat` with `options.num_ctx: 16384`                                                                                                         | loaded at 16384; a later `/v1` call reloads at 4096                                                                                                                     |
+| `/api/chat`, prompt ≈ 6000 tokens, `num_ctx: 4096`, **`truncate: false`**                                                                         | **HTTP error:** `request (6012 tokens) exceeds the available context size (4096 tokens), try increasing it`                                                             |
+| Same, without `truncate`                                                                                                                          | silently truncated: `done_reason: "length"`, `prompt_eval_count: 2050` (**below** the window, so a "near full" heuristic would miss it)                                 |
+| `/api/chat` with tools, `think: true`                                                                                                             | `done: true`, `done_reason: "stop"`, `message.tool_calls: [{id: "call_…", function: {index, name, arguments: {object}}}]`, separate `message.thinking`, empty `content` |
+| Final step: replay the original assistant message (thinking + calls) + `role: "tool"` results (`tool_name`, `tool_call_id`), **no `tools` field** | answered from the results, `tool_calls: null`, `done_reason: "stop"`                                                                                                    |
+| `/api/show`                                                                                                                                       | `model_info["qwen3.context_length"] = 262144` (trained max)                                                                                                             |
 
 ### Phase order (blocker 6)
 
@@ -225,17 +226,20 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 ### R-A Ollama native `/api/chat` (blockers 4, 5, 6, 8)
 
 **A1 Destination**
+
 - `ollama_native_base(config)`: start from the validated `base_url(config)`. Only a path that is exactly `/v1` or `/v1/` (after an optional proxy prefix `P`) maps to `P` + `/api/chat`. Scheme, host and port must equal the validated base; otherwise native is not derivable. Saved configs are never rewritten.
 - Model listing and the legacy chat keep their current `/v1` paths.
 - Tests: default `http://127.0.0.1:11434/v1`, trailing slash, `https://proxy/x/v1`, base without `/v1`, ambiguous bases (`/v1/extra`, query/fragment), and that the origin never changes.
 
 **A2 Is it Ollama?**
+
 - Before the first native run for a destination: `GET <native base>/api/version`, with no conversation data, a 2 s timeout and the existing transport policy (redirect block, proxy avoidance, body cap, code-only errors).
 - A JSON `{version}` response → native. Anything else (404, auth, timeout, non-JSON, or a `local_openai_compatible` server such as LM Studio) → the run uses today's `/v1` wire, with the context size **unknown** (R-B).
 - Cached per destination and provider generation (A6).
 - Decided **before** the run starts and fixed for the run: no switching endpoints mid-run, and no resending a transcript to another endpoint.
 
 **A3 Request**
+
 - Fields:
   - `model`;
   - `messages` (system, user, assistant, tool);
@@ -248,12 +252,14 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 - `keep_alive` uses the server default.
 
 **A4 Context size setting**
+
 - New `context_size: Option<u32>` on `AiProviderConfig`, plus TS types, provider-store validation, settings UI (Ollama only, "Context size (tokens)"), and serde default `None`. Meaningful only for `Ollama`; ignored elsewhere.
 - Bounds 2 048 ..= 262 144, validated in the provider store and at the IPC boundary (direct IPC values outside the bounds are rejected). Default 16 384.
 - At run start, `num_ctx = min(setting or default, trained max)`. The trained max comes from the cached `/api/show` lookup (A6); on a cache miss the setting is used unclamped, and the background lookup fills the cache for later runs.
 - The value is snapshotted once per run and sent on **every** step. Saving settings affects later runs only.
 
 **A5 Replay and stop contract**
+
 - **IDs:**
   - each call gets an internal id `ollama:{step}:{index}`, used by `protocol::ToolCall.id` and the coordinator's duplicate check;
   - a native `id`, if present, is kept in the raw envelope only;
@@ -285,6 +291,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 - Live gate: `live_smoke.rs` with the **default server context** (no env var). Pass when every case runs with no context error and `/api/ps` shows the snapshotted `num_ctx`.
 
 **A6 Caches (blocker 7, Ollama part)**
+
 - New `OllamaProbeCache` (not `CapabilityCache`):
   - key (provider id, provider generation, destination origin+prefix) → `is_ollama` + version;
   - key (…, model) → trained max.
@@ -295,12 +302,14 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 - **Startup latency:** on a miss, A2 runs before the first run (2 s cap, local server). The trained max lookup runs in the background and never blocks.
 
 **A7 Consent**
+
 - `consent::endpoint_fingerprint` hashes the saved config (kind, base URL, host, sub path), which is unchanged. A grant therefore covers the deterministic same-origin translation `/v1` → `/api/chat` on the same server, and the plan says so.
 - Test: native base derivation cannot change scheme/host/port, so it cannot select another destination under an existing grant.
 
 ### R-B Accounting and meter (blockers 3, 6; should-fix 1–3)
 
 **B1 Usage with presence (blocker 3)**
+
 - `protocol::Usage` becomes `{ input_tokens: Option<u64>, output_tokens: Option<u64> }`, parsed independently.
 - The coordinator's charging is unchanged: missing output is charged at the effective allowance. `Done` stays cumulative.
 - Normalization:
@@ -311,6 +320,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 - Fixtures per wire: complete, input only, output only, malformed, cached counters.
 
 **B2 Limits**
+
 - New `ai::context_limits`, a pure function `limits(kind, model, run snapshot) -> Limits { input: Option<u64>, output: Option<u64>, combined: Option<u64>, source: Table | Probe | Setting | Unknown }`.
   - **Ollama native:** `combined = num_ctx` sent (Setting). Ollama via `/v1`: Unknown.
   - **D3a table:**
@@ -322,6 +332,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 - Constraints checked, each only when known: prompt ≤ input; max_tokens ≤ output; prompt + max_tokens ≤ combined.
 
 **B3 `Context` event (should-fix 1, 2)**
+
 - A fixed DTO:
 
   ```text
@@ -338,6 +349,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 
   - Numbers and booleans only. No labels, model/provider/endpoint ids, names, arguments or text.
   - `source` stays internal.
+
 - **Meter equation:**
   - `sum(parts) = prompt_tokens`. When the count is not exact, `prompt_tokens` is the R-C1 estimate and `prompt_exact = false`;
   - parts are split by serialized bytes of each category, with largest-remainder rounding, zero-safe, saturating, and labelled "illustrative" in the UI;
@@ -351,6 +363,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
   - assert their absence from `Context`, logs, analytics and meter state.
 
 **B4 UI (should-fix 3)**
+
 - `ContextMeter`, rendered by `AiAssistantChatArea.tsx` next to the model controls and fed from `hooks/useAiAssistantSubmit.ts` via a new `onContext` on `runAgentTurn`.
 - Lifecycle:
   - `runAgentTurn` drops every callback after it settles, or after abort or a newer request (`requestSeqRef`);
@@ -380,6 +393,7 @@ Each phase has its own Codex review and recorded gate evidence before the next s
 **C1 Estimates: best effort, stated as such**
 
 The plan no longer promises that a request "never exceeds". It promises the following.
+
 - **Display estimate:**
   - after a response with an exact count, `prompt ≈ exact + (bytes added since) × observed tokens-per-byte of this run`;
   - before any exact count, the bytes of the serialized request divided by 3 (deliberately conservative for code and Unicode);
@@ -387,11 +401,13 @@ The plan no longer promises that a request "never exceeds". It promises the foll
 - **Admission estimate** (used to decide): the display estimate × 1.25, plus 16 tokens per message for framing, saturating.
 
 **C2 Hard local byte cap for every provider**
+
 - The serialized request (system, specs, all turns including raw replay envelopes, results) must stay ≤ `MAX_REQUEST_BYTES = 512 KiB`, whatever the window. With an unknown window this is the only limit.
 - Placeholders and shortening count toward it.
 - A single response envelope is already capped at 2 MiB by transport. If one replayed envelope alone exceeds the cap, the run stops: `AI_AGENT_CONTEXT_FULL`.
 
 **C3 Algorithm before every send (including the final request)**
+
 1. Build the actual candidate request: the same system or finalize instruction, the declarations the wire will send (none on Ollama native finals), and the effective `max_tokens` including adapter floors.
 2. If it fits (C2 and every known B2 limit, using the admission estimate) → send.
 3. Else shorten eligible results **oldest first**, one at a time:
@@ -401,17 +417,20 @@ The plan no longer promises that a request "never exceeds". It promises the foll
    - error and denied results stay as they are (already short).
 
    Recompute after each change.
+
 4. If no eligible result is left and it still does not fit:
    - not yet finalizing → switch to the final request (step 1 with the finalize instruction) and recheck;
    - already final → stop locally with `AI_AGENT_CONTEXT_FULL`.
 
    Never send it. Never a ninth step. Never a request after cancel/deadline. No tool re-execution, no legacy fallback.
+
 5. `gate.check()` runs immediately before every actual send, including the final one.
 6. A provider context error (Ollama message, OpenAI `context_length_exceeded`, Anthropic/Gemini equivalents, mapped by code only) → `AI_AGENT_CONTEXT_FULL`, with no retry.
 
 Shortening reduces what is sent. It never re-reads data or widens consent.
 
 **C4 Tests**
+
 - First-request overflow.
 - Zero eligible results.
 - An irreducible large question or replay envelope.
@@ -432,15 +451,16 @@ Shortening reduces what is sent. It never re-reads data or widens consent.
 ### Phase gates (should-fix 4)
 
 Each phase requires:
+
 - `cargo test --locked` and `cargo test --locked --features app-store`;
 - `cargo clippy --locked --all-targets` with and without `--features app-store`, with no new warnings;
 - `npm run build`, `npm run test:run` and prettier;
 - a Codex review at VERIFIED or better, with evidence recorded here, before the next phase starts.
 
-| Phase | Additional gate |
-| --- | --- |
-| **A** | Native fixtures (A5); endpoint, config and validation tests; the live Ollama smoke at the default server context; Claude `/security-review`. |
-| **B** | Per-wire usage fixtures; privacy sentinels; cache and generation race tests; UI lifecycle tests; the meter checked in the built-in browser harness and in the desktop app. |
+| Phase | Additional gate                                                                                                                                                                          |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A** | Native fixtures (A5); endpoint, config and validation tests; the live Ollama smoke at the default server context; Claude `/security-review`.                                             |
+| **B** | Per-wire usage fixtures; privacy sentinels; cache and generation race tests; UI lifecycle tests; the meter checked in the built-in browser harness and in the desktop app.               |
 | **C** | Admission tests (C4); a live Ollama smoke with a forced small `context_size` (e.g. 4096) showing shortening and then a final answer, or `AI_AGENT_CONTEXT_FULL`, with no provider error. |
 
 Live probes use only synthetic prompts, throwaway databases and the local Ollama. Cloud checks need the user's keys. The predecessor gates (cloud smoke, Touch ID) stay open and are not satisfied by this plan.
@@ -514,25 +534,25 @@ Reviewed by Codex, 2026-10-16, on `feat/ai-agent`. Read `AGENTS.md` and `.agent/
 
 #### Disposition of prior blockers
 
-| Prior item | Disposition | Assessment of Revision 2 |
-| --- | --- | --- |
-| 1 — final request overflow | **Resolved at plan level** | C2/C3 bound the actual serialized candidate, shorten content only, recheck the final request with its declarations/instruction/floors, terminate locally if irreducible, preserve eight steps/cancel/deadline/consent, and prohibit replay/fallback after tools. C4 covers the required adjacent cases. On switching to finalization, implementation must recompute the final allowance from remaining output budget using the existing `drive` rules, not reuse the rejected tool-step allowance. |
-| 2 — unjustified fit guarantee | **Resolved in principle; clarification needed** | C1 explicitly narrows admission to best effort; C2 fixes an all-provider 512 KiB serialized-body cap including raw envelopes. This is an acceptable answer to the prior blocker, **not a conservative token bound**. C1 arithmetic and phase ownership still need S1/S4 below. The old unconditional Goal language must be reconciled. |
-| 3 — limits and usage semantics | **Partially resolved; still blocking** | B1 independent presence, conservative missing-output charging and cumulative Done are correct directions. B2 separates input/output/combined limits, bounds matching and chooses the Anthropic table. Incomplete aggregate presence and Gemini prompt-vs-tool-use semantics remain B5. |
-| 4 — native replay/finalization | **Partially resolved; still blocking** | A5 now specifies ordered raw replay, internal IDs, complete stops, no execution on length/final turns, and omission of tools on finals, with broad fixtures. Malformed/duplicate native identities are still replayed as result identities (B4); supported-server and overflow behavior remain B1. |
-| 5 — destination/compatibility/consent | **Partially resolved; still blocking** | A1 correctly scopes translation to a terminal `/v1` path and preserves proxy prefix/origin; A7 explicitly retains grants for that deterministic translation, consistent with the current fingerprint. But A2 treats every discovery failure as permission to use `/v1` (B1), and “native base” ambiguously means the chat URL versus the server prefix (S2). |
-| 6 — unenforced Ollama window/phasing | **Partially resolved; still blocking** | A-before-B-before-C, positive bounded settings, full config/TS/store scope and immutable per-run settings resolve the original phase-order defect. A4's unclamped cold-cache request and lack of handling for a server-adjusted allocation remain B2. |
-| 7 — cache/generation contract | **Partially resolved; still blocking** | Separate metadata records, locked snapshots, TTLs, negative retry and dedup are specified. The existing capability cache is not wire-specific (B3); new cache ownership, Gemini invalidation, bounded eviction and in-flight lifecycle remain B6. |
-| 8 — false truncation claim | **Partially resolved; still blocking** | Removing the near-full heuristic is correct; P0's low truncated count shows why. However, `truncate:false` plus any `{version}` does not establish the fail-closed contract for supported deployments (B1). B4 UI also treats every context-full outcome as an exact server rejection, although C3 generates that same code locally. |
+| Prior item                            | Disposition                                     | Assessment of Revision 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — final request overflow            | **Resolved at plan level**                      | C2/C3 bound the actual serialized candidate, shorten content only, recheck the final request with its declarations/instruction/floors, terminate locally if irreducible, preserve eight steps/cancel/deadline/consent, and prohibit replay/fallback after tools. C4 covers the required adjacent cases. On switching to finalization, implementation must recompute the final allowance from remaining output budget using the existing `drive` rules, not reuse the rejected tool-step allowance. |
+| 2 — unjustified fit guarantee         | **Resolved in principle; clarification needed** | C1 explicitly narrows admission to best effort; C2 fixes an all-provider 512 KiB serialized-body cap including raw envelopes. This is an acceptable answer to the prior blocker, **not a conservative token bound**. C1 arithmetic and phase ownership still need S1/S4 below. The old unconditional Goal language must be reconciled.                                                                                                                                                             |
+| 3 — limits and usage semantics        | **Partially resolved; still blocking**          | B1 independent presence, conservative missing-output charging and cumulative Done are correct directions. B2 separates input/output/combined limits, bounds matching and chooses the Anthropic table. Incomplete aggregate presence and Gemini prompt-vs-tool-use semantics remain B5.                                                                                                                                                                                                             |
+| 4 — native replay/finalization        | **Partially resolved; still blocking**          | A5 now specifies ordered raw replay, internal IDs, complete stops, no execution on length/final turns, and omission of tools on finals, with broad fixtures. Malformed/duplicate native identities are still replayed as result identities (B4); supported-server and overflow behavior remain B1.                                                                                                                                                                                                 |
+| 5 — destination/compatibility/consent | **Partially resolved; still blocking**          | A1 correctly scopes translation to a terminal `/v1` path and preserves proxy prefix/origin; A7 explicitly retains grants for that deterministic translation, consistent with the current fingerprint. But A2 treats every discovery failure as permission to use `/v1` (B1), and “native base” ambiguously means the chat URL versus the server prefix (S2).                                                                                                                                       |
+| 6 — unenforced Ollama window/phasing  | **Partially resolved; still blocking**          | A-before-B-before-C, positive bounded settings, full config/TS/store scope and immutable per-run settings resolve the original phase-order defect. A4's unclamped cold-cache request and lack of handling for a server-adjusted allocation remain B2.                                                                                                                                                                                                                                              |
+| 7 — cache/generation contract         | **Partially resolved; still blocking**          | Separate metadata records, locked snapshots, TTLs, negative retry and dedup are specified. The existing capability cache is not wire-specific (B3); new cache ownership, Gemini invalidation, bounded eviction and in-flight lifecycle remain B6.                                                                                                                                                                                                                                                  |
+| 8 — false truncation claim            | **Partially resolved; still blocking**          | Removing the near-full heuristic is correct; P0's low truncated count shows why. However, `truncate:false` plus any `{version}` does not establish the fail-closed contract for supported deployments (B1). B4 UI also treats every context-full outcome as an exact server rejection, although C3 generates that same code locally.                                                                                                                                                               |
 
 #### Disposition of prior should-fix items
 
-| Prior item | Disposition | Assessment |
-| --- | --- | --- |
-| 1 — meter equation | **Partially resolved; promote remaining ambiguity to blocker B7** | Fixed categories, same-request reserve, illustrative splits and deterministic rounding are good. Ring numerator/denominator, overage, nullable prompt totals and serialized framing ownership remain undefined. |
-| 2 — numeric DTO/privacy | **Resolved at plan level, subject to B7** | Fixed named numeric fields, internal source, sentinel tests and no conversation data in metadata requests satisfy the privacy scope. Preserve the existing fixed `type: "context"` discriminator and camelCase event serialization; nulls are allowed. Do not reinterpret “numbers only” as changing existing Answer events. |
-| 3 — actual owners/lifecycle | **Resolved at plan level** | B4 names `useAiAssistantSubmit`, `AiAssistantChatArea`, settle/request guards, run/session/provider/model ownership, bounded transient storage, fallback/purge clears and keyboard/unknown-limit accessibility tests. Keep completed/failed/canceled displays tied to the last actual attempt, rather than presenting a previous measured request as the failed candidate (B7). |
-| 4 — executable phase gates | **Mostly resolved; S4 remains** | Explicit locked Rust tests, both flavors of clippy, npm/UI checks, independent reviews, native fixtures/security review and predecessor gates are preserved. `VERIFIED WITH LIMITATIONS` must be explicitly permitted only for recorded limitations that do not invalidate a dependency. Unavailable required gates cannot silently pass. |
+| Prior item                  | Disposition                                                       | Assessment                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — meter equation          | **Partially resolved; promote remaining ambiguity to blocker B7** | Fixed categories, same-request reserve, illustrative splits and deterministic rounding are good. Ring numerator/denominator, overage, nullable prompt totals and serialized framing ownership remain undefined.                                                                                                                                                                 |
+| 2 — numeric DTO/privacy     | **Resolved at plan level, subject to B7**                         | Fixed named numeric fields, internal source, sentinel tests and no conversation data in metadata requests satisfy the privacy scope. Preserve the existing fixed `type: "context"` discriminator and camelCase event serialization; nulls are allowed. Do not reinterpret “numbers only” as changing existing Answer events.                                                    |
+| 3 — actual owners/lifecycle | **Resolved at plan level**                                        | B4 names `useAiAssistantSubmit`, `AiAssistantChatArea`, settle/request guards, run/session/provider/model ownership, bounded transient storage, fallback/purge clears and keyboard/unknown-limit accessibility tests. Keep completed/failed/canceled displays tied to the last actual attempt, rather than presenting a previous measured request as the failed candidate (B7). |
+| 4 — executable phase gates  | **Mostly resolved; S4 remains**                                   | Explicit locked Rust tests, both flavors of clippy, npm/UI checks, independent reviews, native fixtures/security review and predecessor gates are preserved. `VERIFIED WITH LIMITATIONS` must be explicitly permitted only for recorded limitations that do not invalidate a dependency. Unavailable required gates cannot silently pass.                                       |
 
 #### Remaining and new blockers
 

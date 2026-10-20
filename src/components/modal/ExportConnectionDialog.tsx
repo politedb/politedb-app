@@ -10,6 +10,7 @@ import {
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Input } from "src/components/common/Input";
+import { BackupIcon } from "../icons";
 
 export type ExportConnectionOptions = {
   filePassword: string;
@@ -58,16 +59,19 @@ export function ExportConnectionDialog(props: {
 
   return (
     <Dialog open={open} onClose={onClose} size="md" closeOnOutsideClick={!busy}>
-      <DialogHeader>
-        <DialogTitle>Export for another device</DialogTitle>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <BackupIcon className="size-4.5 text-neutral-600" />
+          Export for another device
+        </DialogTitle>
         <DialogDescription>
           Create an encrypted, shareable copy of{" "}
-          <strong>{connectionLabel}</strong>. Choose which credentials to embed
-          inside the encrypted file.
+          <span class="font-semibold text-neutral-900">{connectionLabel}</span>.
+          Choose which credentials to embed inside the encrypted file.
         </DialogDescription>
       </DialogHeader>
 
-      <DialogContent className="space-y-2 pt-1 text-sm text-slate-600">
+      <DialogContent className="space-y-2 text-sm text-slate-600">
         <div>
           <div class="mb-2 font-medium text-slate-800">
             Enter the password used to encrypt the export file
@@ -92,10 +96,11 @@ export function ExportConnectionDialog(props: {
           </div>
         </div>
 
-        <div>
-          <div class="mb-2 font-medium text-slate-800">
+        <div class="space-y-2">
+          <div class="font-medium text-slate-800">
             Include in encrypted file
           </div>
+
           <div class="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
             <Checkbox
               checked={includeDbPassword}
@@ -112,35 +117,30 @@ export function ExportConnectionDialog(props: {
               description="Only applies when this connection uses SSH password auth."
             />
           </div>
-          <p class="mt-2 text-xs text-slate-500">
+
+          <p class="text-xs text-slate-500">
             SSH private key files are never included. The recipient must copy
             the key file manually.
           </p>
+
+          {error ? (
+            <p class="text-xs font-medium text-rose-600">{error}</p>
+          ) : null}
+
+          <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            {includeDbPassword || includeSshPassword
+              ? "Included passwords are protected by the file password, but only share this file with people you trust."
+              : "No connection passwords are stored in the file. The recipient will enter them after import."}
+          </p>
         </div>
-
-        {error ? (
-          <p class="text-xs font-medium text-rose-600">{error}</p>
-        ) : null}
-
-        <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {includeDbPassword || includeSshPassword
-            ? "Included passwords are protected by the file password, but only share this file with people you trust."
-            : "No connection passwords are stored in the file. The recipient will enter them after import."}
-        </p>
       </DialogContent>
 
-      <DialogFooter className="gap-2 pt-1">
-        <Button
-          variant="shadow"
-          className="py-1.5"
-          onClick={onClose}
-          disabled={busy}
-        >
+      <DialogFooter className="gap-2">
+        <Button variant="shadow" onClick={onClose} disabled={busy}>
           Cancel
         </Button>
         <Button
           variant="default"
-          className="py-1.5"
           onClick={handleConfirm}
           loading={busy}
           disabled={!password || !confirmPassword}

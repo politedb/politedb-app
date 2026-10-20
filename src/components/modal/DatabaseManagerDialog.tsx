@@ -148,11 +148,14 @@ export function DatabaseManagerDialog({
   }, [error, setError]);
 
   return (
-    <Dialog open={open} size="sm" onClose={onClose}>
-      <DialogHeader>
-        <DialogTitle>Open database</DialogTitle>
+    <Dialog open={open} size="md" onClose={onClose}>
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          <DatabaseIcon className="size-4.5 text-neutral-600" />
+          Open database
+        </DialogTitle>
       </DialogHeader>
-      <DialogContent className="gap-3 pt-0">
+      <DialogContent className="gap-3">
         <Input
           value={search}
           placeholder="Search for database..."
@@ -167,9 +170,9 @@ export function DatabaseManagerDialog({
           </div>
         )}
 
-        <div class="min-h-80 gap-4">
+        <div class="min-h-98 gap-4">
           <OverlayScrollArea
-            className="h-80 rounded-lg"
+            className="h-98 rounded-lg"
             contentClassName="flex flex-col gap-1.5"
           >
             {visibleDbs.length === 0 ? (
@@ -259,22 +262,25 @@ export function DatabaseManagerDialog({
 
       <Dialog
         open={dropConfirmDb !== null}
-        size="xs"
+        size="sm"
         onClose={() => {
           setDropConfirmDb(null);
           setDropConfirmName("");
         }}
       >
-        <DialogHeader>
-          <DialogTitle>Drop database '{dropConfirmDb ?? ""}'</DialogTitle>
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <DatabaseIcon className="size-4.5 text-neutral-600" />
+            Drop database "{dropConfirmDb ?? ""}"
+          </DialogTitle>
         </DialogHeader>
-        <DialogContent className="py-1">
-          <p className="text-sm text-neutral-800">
-            Permanently drop the database <strong>{dropConfirmDb ?? ""}</strong>
-            ? This cannot be undone.
-          </p>
-          <p className="text-xs text-neutral-600">
-            Enter <strong>{dropConfirmDb ?? ""}</strong> to confirm.
+        <DialogContent className="gap-2">
+          <p className="text-sm text-neutral-600">
+            Enter{" "}
+            <span class="font-semibold text-neutral-900">
+              {dropConfirmDb ?? ""}
+            </span>{" "}
+            to confirm:
           </p>
           <Input
             value={dropConfirmName}
@@ -284,8 +290,15 @@ export function DatabaseManagerDialog({
             placeholder={dropConfirmDb ?? ""}
             className="h-9 rounded-lg border border-neutral-300 text-sm"
           />
+          <p className="text-xs text-neutral-800">
+            Permanently drop the database{" "}
+            <span class="font-semibold text-neutral-900">
+              {dropConfirmDb ?? ""}
+            </span>
+            ? This cannot be undone.
+          </p>
         </DialogContent>
-        <DialogFooter>
+        <DialogFooter className="pt-1">
           <Button
             variant="outline"
             onClick={() => {

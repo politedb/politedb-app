@@ -1,18 +1,13 @@
 import { useState } from "preact/hooks";
 import { DEFAULT_LIMIT, DEFAULT_OFFSET } from "src/hooks/useLoadTableData";
+import type { PendingTableAction } from "../workspace/ConnectionRuntimeContext";
 
 export function useConnectionScreenState() {
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [offset, setOffset] = useState(DEFAULT_OFFSET);
-  const [pendingTableAction, setPendingTableAction] = useState<
-    | "import"
-    | "importSqlDump"
-    | "clone"
-    | "truncate"
-    | "drop"
-    | "structure"
-    | null
-  >(null);
+  const [pendingTableAction, setPendingTableAction] =
+    useState<PendingTableAction | null>(null);
+  const [staleTableKey, setStaleTableKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [searchDialogOpen, setSearchDialogOpen] = useState(false);
@@ -27,6 +22,8 @@ export function useConnectionScreenState() {
     setOffset,
     pendingTableAction,
     setPendingTableAction,
+    staleTableKey,
+    setStaleTableKey,
     error,
     setError,
     showSaveDialog,

@@ -32,32 +32,19 @@ import {
 import type {
   DiagramRelation,
   DiagramState,
-  DiagramTable,
 } from "src/components/diagram/diagramTypes";
 import { Button } from "src/components/common/Button";
 import { Dropdown } from "src/components/common/Dropdown";
 import { ProBadge } from "src/components/license/ProBadge";
 import { useDiagramExport } from "src/components/diagram/useDiagramExport";
+import {
+  HEADER_HEIGHT,
+  layoutDiagram,
+  ROW_HEIGHT,
+  type LayoutItem,
+  type RelationGeometry,
+} from "src/components/diagram/diagramLayout";
 
-type LayoutItem = {
-  key: string;
-  table: DiagramTable;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  column: number;
-};
-
-const CARD_WIDTH = 280;
-const HEADER_HEIGHT = 42;
-const ROW_HEIGHT = 28;
-const DIAGRAM_PAD = 32;
-const EMPTY_DIAGRAM_WIDTH = 640;
-const EMPTY_DIAGRAM_HEIGHT = 400;
-const COLUMN_H_GAP = 56;
-const REL_LANE_STAGGER = 14;
-const ROW_GAP = 48;
 const REL_STROKE_WIDTH = 0.85;
 const REL_STROKE_HOVER = 1.35;
 const HIT_STROKE = "transparent";
@@ -68,7 +55,6 @@ const CROW_INWARD = 5;
 const CROW_BRANCH = 4;
 const ONE_MARK_TICK = 5;
 const ONE_MARK_INSET = 5;
-const REL_CORNER_RADIUS = 10;
 const O_MARK_R = 3.5;
 const O_MARK_INSET = 9;
 const O_HIT_R = 10;
@@ -97,367 +83,6 @@ function browserSupportsCssZoom(): boolean {
 
 const USE_CSS_ZOOM = browserSupportsCssZoom();
 
-function tableKey(schema: string, table: string) {
-  return `${schema}.${table}`;
-}
-
-function estimateCardHeight(columnCount: number) {
-  return HEADER_HEIGHT + Math.max(1, columnCount) * ROW_HEIGHT + 16;
-}
-
-function chooseColumnCount(tableCount: number): number {
-  if (tableCount <= 1) return 1;
-  return Math.min(12, Math.max(2, Math.ceil(tableCount / 6)));
-}
-
-function columnXPositions(numColumns: number): number[] {
-  const xs: number[] = [];
-  for (let i = 0; i < numColumns; i++)
-    xs.push(DIAGRAM_PAD + i * (CARD_WIDTH + COLUMN_H_GAP));
-  return xs;
-}
-
-function normalizeLayoutBounds(items: LayoutItem[]) {
-  if (items.length === 0)
-    return { items, width: EMPTY_DIAGRAM_WIDTH, height: EMPTY_DIAGRAM_HEIGHT };
-  const minX = Math.min(...items.map((i) => i.x));
-  const minY = Math.min(...items.map((i) => i.y));
-  const maxX = Math.max(...items.map((i) => i.x + i.width));
-  const maxY = Math.max(...items.map((i) => i.y + i.height));
-  const shifted = items.map((item) => ({
-    ...item,
-    x: item.x - minX + DIAGRAM_PAD,
-    y: item.y - minY + DIAGRAM_PAD,
-  }));
-  return {
-    items: shifted,
-    width: Math.max(
-      maxX - minX + DIAGRAM_PAD * 2,
-      CARD_WIDTH + DIAGRAM_PAD * 2
-    ),
-    height: Math.max(maxY - minY + DIAGRAM_PAD * 2, 120),
-  };
-}
-
-function tableCenterY(item: LayoutItem): number {
-  return item.y + item.height / 2;
-}
-
-function groupItemsIntoColumns(items: LayoutItem[], numColumns: number) {
-  const cols: LayoutItem[][] = Array.from({ length: numColumns }, () => []);
-  for (const item of items) cols[item.column]!.push(item);
-  for (const col of cols) col.sort((a, b) => a.y - b.y);
-  return cols;
-}
-
-function buildRelationNeighbors(relations: DiagramRelation[]) {
-  const neighbors = new Map<string, string[]>();
-  for (const relation of relations) {
-    const from = neighbors.get(relation.fromTable) ?? [];
-    from.push(relation.toTable);
-    neighbors.set(relation.fromTable, from);
-
-    const to = neighbors.get(relation.toTable) ?? [];
-    to.push(relation.fromTable);
-    neighbors.set(relation.toTable, to);
-  }
-  return neighbors;
-}
-
-function barycenterTowardColumn(
-  item: LayoutItem,
-  relationNeighbors: Map<string, string[]>,
-  itemByKey: Map<string, LayoutItem>,
-  neighborCol: number
-): number | null {
-  const ys: number[] = [];
-  for (const neighborKey of relationNeighbors.get(item.key) ?? []) {
-    const neighbor = itemByKey.get(neighborKey);
-    if (neighbor?.column === neighborCol) ys.push(tableCenterY(neighbor));
-  }
-  if (ys.length === 0) return null;
-  return ys.reduce((a, b) => a + b, 0) / ys.length;
-}
-
-function sortColumnByNeighborBarycenter(
-  colItems: LayoutItem[],
-  relationNeighbors: Map<string, string[]>,
-  itemByKey: Map<string, LayoutItem>,
-  neighborCol: number
-): LayoutItem[] {
-  return colItems.slice().sort((a, b) => {
-    const ba = barycenterTowardColumn(
-      a,
-      relationNeighbors,
-      itemByKey,
-      neighborCol
-    );
-    const bb = barycenterTowardColumn(
-      b,
-      relationNeighbors,
-      itemByKey,
-      neighborCol
-    );
-    if (ba !== null && bb !== null && ba !== bb) return ba - bb;
-    if (ba !== null && bb === null) return -1;
-    if (ba === null && bb !== null) return 1;
-    return a.key.localeCompare(b.key);
-  });
-}
-
-function restackColumns(
-  columns: LayoutItem[][],
-  colXs: number[]
-): LayoutItem[] {
-  const out: LayoutItem[] = [];
-  for (let c = 0; c < columns.length; c++) {
-    let y = DIAGRAM_PAD;
-    for (const item of columns[c]!) {
-      out.push({ ...item, x: colXs[c]!, y, column: c });
-      y += item.height + ROW_GAP;
-    }
-  }
-  return out;
-}
-
-function minimizeCrossingsVertical(
-  items: LayoutItem[],
-  relations: DiagramRelation[],
-  numColumns: number,
-  colXs: number[]
-): LayoutItem[] {
-  if (numColumns <= 1 || relations.length === 0) return items;
-  const relationNeighbors = buildRelationNeighbors(relations);
-  let current = items;
-  for (let pass = 0; pass < 6; pass++) {
-    const byKey = new Map(current.map((i) => [i.key, i]));
-    const cols = groupItemsIntoColumns(current, numColumns);
-    if (pass % 2 === 0) {
-      for (let c = 1; c < numColumns; c++)
-        cols[c] = sortColumnByNeighborBarycenter(
-          cols[c]!,
-          relationNeighbors,
-          byKey,
-          c - 1
-        );
-    } else {
-      for (let c = numColumns - 2; c >= 0; c--)
-        cols[c] = sortColumnByNeighborBarycenter(
-          cols[c]!,
-          relationNeighbors,
-          byKey,
-          c + 1
-        );
-    }
-    current = restackColumns(cols, colXs);
-  }
-  return current;
-}
-
-function buildLayout(tables: DiagramTable[], relations: DiagramRelation[]) {
-  if (tables.length === 0)
-    return {
-      items: [] as LayoutItem[],
-      width: EMPTY_DIAGRAM_WIDTH,
-      height: EMPTY_DIAGRAM_HEIGHT,
-    };
-  const degree = new Map<string, number>();
-  for (const table of tables) degree.set(tableKey(table.schema, table.name), 0);
-  for (const relation of relations) {
-    degree.set(relation.fromTable, (degree.get(relation.fromTable) ?? 0) + 1);
-    degree.set(relation.toTable, (degree.get(relation.toTable) ?? 0) + 1);
-  }
-  const numColumns = chooseColumnCount(tables.length);
-  const colXs = columnXPositions(numColumns);
-  const columns: DiagramTable[][] = Array.from(
-    { length: numColumns },
-    () => []
-  );
-  const sorted = tables.slice().sort((a, b) => {
-    const d =
-      (degree.get(tableKey(b.schema, b.name)) ?? 0) -
-      (degree.get(tableKey(a.schema, a.name)) ?? 0);
-    return d !== 0 ? d : a.name.localeCompare(b.name);
-  });
-  sorted.forEach((table, i) => columns[i % numColumns]!.push(table));
-  const items: LayoutItem[] = [];
-  columns.forEach((columnTables, columnIndex) => {
-    let y = DIAGRAM_PAD;
-    for (const table of columnTables) {
-      const height = estimateCardHeight(table.columns.length);
-      items.push({
-        key: tableKey(table.schema, table.name),
-        table,
-        x: colXs[columnIndex]!,
-        y,
-        width: CARD_WIDTH,
-        height,
-        column: columnIndex,
-      });
-      y += height + ROW_GAP;
-    }
-  });
-  const untangled = minimizeCrossingsVertical(
-    items,
-    relations,
-    numColumns,
-    colXs
-  );
-  return normalizeLayoutBounds(untangled);
-}
-
-function yMidForTableColumn(item: LayoutItem, columnName?: string): number {
-  const fallback = item.y + item.height / 2;
-  const raw = columnName?.trim();
-  if (!raw) return fallback;
-  const idx = item.table.columns.findIndex(
-    (c) => c.name.trim().toLowerCase() === raw.toLowerCase()
-  );
-  if (idx < 0) return fallback;
-  return item.y + HEADER_HEIGHT + idx * ROW_HEIGHT + ROW_HEIGHT / 2;
-}
-
-type RelationGeometry = {
-  path: string;
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  enterFrom: "left" | "right";
-  fromRight: boolean;
-  segments: Array<{ x: number; y: number; width: number; height: number }>;
-};
-
-function roundedOrthogonalPath(
-  points: Array<{ x: number; y: number }>,
-  radius: number
-): string {
-  if (points.length < 2) return "";
-  const path: string[] = [`M ${points[0]!.x} ${points[0]!.y}`];
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const prev = points[i - 1]!,
-      curr = points[i]!,
-      next = points[i + 1]!;
-    const inDx = curr.x - prev.x,
-      inDy = curr.y - prev.y,
-      outDx = next.x - curr.x,
-      outDy = next.y - curr.y;
-    const inLen = Math.hypot(inDx, inDy),
-      outLen = Math.hypot(outDx, outDy);
-    if (!inLen || !outLen) continue;
-    const trim = Math.min(radius, inLen / 2, outLen / 2);
-    const sx = curr.x - (inDx / inLen) * trim,
-      sy = curr.y - (inDy / inLen) * trim;
-    const ex = curr.x + (outDx / outLen) * trim,
-      ey = curr.y + (outDy / outLen) * trim;
-    path.push(`L ${sx} ${sy}`, `Q ${curr.x} ${curr.y} ${ex} ${ey}`);
-  }
-  const last = points[points.length - 1]!;
-  path.push(`L ${last.x} ${last.y}`);
-  return path.join(" ");
-}
-
-function relationGeometry(
-  from: LayoutItem,
-  to: LayoutItem,
-  relation: DiagramRelation,
-  middleYOverride?: number
-): RelationGeometry {
-  const fromRight = from.column <= to.column;
-  const startX = fromRight ? from.x + from.width : from.x;
-  const startY = yMidForTableColumn(from, relation.fromColumn);
-  const endX = fromRight ? to.x : to.x + to.width;
-  const endY = yMidForTableColumn(to, relation.toColumn);
-  const x1 = startX + (fromRight ? 26 : -26);
-  const x2 = endX + (fromRight ? -26 : 26);
-  const baseMiddleY = (startY + endY) / 2;
-  const middleY = middleYOverride !== undefined ? middleYOverride : baseMiddleY;
-  const points = [
-    { x: startX, y: startY },
-    { x: x1, y: startY },
-    { x: x1, y: middleY },
-    { x: x2, y: middleY },
-    { x: x2, y: endY },
-    { x: endX, y: endY },
-  ];
-  const path = roundedOrthogonalPath(points, REL_CORNER_RADIUS);
-  const segments = points.slice(1).map((point, index) => {
-    const previous = points[index]!;
-    return {
-      x: Math.min(previous.x, point.x),
-      y: Math.min(previous.y, point.y),
-      width: Math.max(1, Math.abs(point.x - previous.x)),
-      height: Math.max(1, Math.abs(point.y - previous.y)),
-    };
-  });
-  return {
-    path,
-    startX,
-    startY,
-    endX,
-    endY,
-    enterFrom: fromRight ? "left" : "right",
-    fromRight,
-    segments,
-  };
-}
-
-function computeRelationMiddleYByIndex(
-  items: LayoutItem[],
-  relations: DiagramRelation[]
-): Map<number, number> {
-  const itemByKey = new Map(items.map((i) => [i.key, i]));
-  type Edge = {
-    index: number;
-    colLo: number;
-    colHi: number;
-    baseMid: number;
-  };
-  const list: Edge[] = [];
-
-  relations.forEach((rel, index) => {
-    const from = itemByKey.get(rel.fromTable);
-    const to = itemByKey.get(rel.toTable);
-    if (!from || !to) return;
-    const startY = yMidForTableColumn(from, rel.fromColumn);
-    const endY = yMidForTableColumn(to, rel.toColumn);
-    const baseMid = (startY + endY) / 2;
-    const colLo = Math.min(from.column, to.column);
-    const colHi = Math.max(from.column, to.column);
-    list.push({ index, colLo, colHi, baseMid });
-  });
-
-  const byChannel = new Map<string, Edge[]>();
-  for (const e of list) {
-    const k = `${e.colLo}-${e.colHi}`;
-    if (!byChannel.has(k)) byChannel.set(k, []);
-    byChannel.get(k)!.push(e);
-  }
-
-  const out = new Map<number, number>();
-  for (const [, group] of byChannel) {
-    group.sort((a, b) =>
-      a.baseMid !== b.baseMid ? a.baseMid - b.baseMid : a.index - b.index
-    );
-    const n = group.length;
-    for (let i = 0; i < n; i++) {
-      const e = group[i]!;
-      const rel = relations[e.index]!;
-      const from = itemByKey.get(rel.fromTable)!;
-      const to = itemByKey.get(rel.toTable)!;
-      const startY = yMidForTableColumn(from, rel.fromColumn);
-      const endY = yMidForTableColumn(to, rel.toColumn);
-      const delta = (i - (n - 1) / 2) * REL_LANE_STAGGER;
-      let y = e.baseMid + delta;
-      const loP = Math.min(startY, endY) - 36;
-      const hiP = Math.max(startY, endY) + 36;
-      y = Math.max(loP, Math.min(hiP, y));
-      out.set(e.index, y);
-    }
-  }
-  return out;
-}
-
 function crowFootLines(x: number, y: number, enterFrom: "left" | "right") {
   const baseX = x + (enterFrom === "left" ? -CROW_INWARD : CROW_INWARD);
   return [
@@ -473,19 +98,14 @@ function oneToManyParentTickGeometry(g: RelationGeometry) {
 }
 
 function oneToOneCircleCenters(g: RelationGeometry) {
-  return g.fromRight
-    ? {
-        startCx: g.startX + O_MARK_INSET,
-        startCy: g.startY,
-        endCx: g.endX - O_MARK_INSET,
-        endCy: g.endY,
-      }
-    : {
-        startCx: g.startX - O_MARK_INSET,
-        startCy: g.startY,
-        endCx: g.endX + O_MARK_INSET,
-        endCy: g.endY,
-      };
+  return {
+    startCx: g.fromRight ? g.startX + O_MARK_INSET : g.startX - O_MARK_INSET,
+    startCy: g.startY,
+    // Outward from the target card, on the side the relation enters.
+    endCx:
+      g.enterFrom === "left" ? g.endX - O_MARK_INSET : g.endX + O_MARK_INSET,
+    endCy: g.endY,
+  };
 }
 
 function diagramTableKeyFromTarget(target: EventTarget | null): string | null {
@@ -638,41 +258,19 @@ export function DiagramCanvas(props: {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const layout = useMemo(
-    () => buildLayout(state.tables, state.relations),
+  const diagram = useMemo(
+    () => layoutDiagram(state.tables, state.relations),
     [state.tables, state.relations]
   );
-
-  const relationMiddleYByIndex = useMemo(
-    () => computeRelationMiddleYByIndex(layout.items, state.relations),
-    [layout.items, state.relations]
-  );
-
-  const itemByKey = useMemo(
-    () => new Map(layout.items.map((item) => [item.key, item])),
-    [layout.items]
-  );
+  const layout = diagram.layout;
 
   const relationRenderItems = useMemo(
     () =>
       state.relations.flatMap((relation, index) => {
-        const from = itemByKey.get(relation.fromTable);
-        const to = itemByKey.get(relation.toTable);
-        if (!from || !to) return [];
-        return [
-          {
-            relation,
-            index,
-            geometry: relationGeometry(
-              from,
-              to,
-              relation,
-              relationMiddleYByIndex.get(index)
-            ),
-          },
-        ];
+        const geometry = diagram.routes[index];
+        return geometry ? [{ relation, index, geometry }] : [];
       }),
-    [itemByKey, relationMiddleYByIndex, state.relations]
+    [diagram, state.relations]
   );
 
   const cardSpatialIndex = useMemo(

@@ -48,15 +48,18 @@ export function TruncateTableDialog({
   }, [onClose, onConfirm, restartIdentity, cascade]);
 
   return (
-    <Dialog open={open} onClose={onClose} size="sm">
-      <DialogHeader>
-        <DialogTitle>Truncate table '{tableName}'</DialogTitle>
+    <Dialog open={open} onClose={onClose} size="md">
+      <DialogHeader className="border-b border-neutral-200">
+        <DialogTitle className="flex items-center gap-2">
+          Truncate table "{tableName}"
+        </DialogTitle>
         <DialogDescription>
-          Permanently delete all rows in <strong>{tableName}</strong>? This
+          Permanently delete all rows in{" "}
+          <span class="font-medium text-neutral-900">{tableName}</span>? This
           cannot be undone.
         </DialogDescription>
       </DialogHeader>
-      <DialogContent className="py-0">
+      <DialogContent className="gap-2">
         <div class="space-y-3">
           <Checkbox
             checked={restartIdentity}
@@ -81,7 +84,7 @@ export function TruncateTableDialog({
         </Button>
         <Button
           variant="outline"
-          class="border border-red-500 bg-red-50 text-red-700 hover:bg-red-100"
+          class="border border-red-500/50 bg-red-50 text-red-700 hover:bg-red-100"
           onClick={() => void handleTruncate()}
           disabled={truncating}
         >

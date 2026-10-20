@@ -27,13 +27,14 @@ IMPLEMENTED
 
 The old data is still on disk on every platform:
 
-| Platform | Engine | Old store (≤1.4) | Why 1.5 lost it | Origin |
-| --- | --- | --- | --- | --- |
-| macOS | WKWebView | `~/Library/WebKit/com.politehq.politedb/WebsiteData/Default/<hash>/<hash>/LocalStorage/localstorage.sqlite3` | WebKit folder is not an app folder; never migrated | `tauri://localhost` |
-| Windows | WebView2 (Chromium) | `%LOCALAPPDATA%\com.politehq.politedb\EBWebView\Default\Local Storage\leveldb` | Tauri forces the WebView2 data dir to `LocalData/<id>` (`tauri-2.10.1/src/manager/webview.rs:504`); the migration only moves `%APPDATA%\<id>` (Roaming) | `http://tauri.localhost` (v2 default, no `useHttpsScheme` in config) |
-| Linux | WebKitGTK | under `~/.local/share/com.politehq.politedb` (same LocalData rule) | Config windows are created **before** the `setup` hook (`tauri-2.10.1/src/app.rs:2373`). The new WebView creates `~/.local/share/PoliteDB` first, so `migrate_dir` only merges missing top-level entries and leaves the old WebKitGTK folders behind | `tauri://localhost` |
+| Platform | Engine              | Old store (≤1.4)                                                                                             | Why 1.5 lost it                                                                                                                                                                                                                                      | Origin                                                               |
+| -------- | ------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| macOS    | WKWebView           | `~/Library/WebKit/com.politehq.politedb/WebsiteData/Default/<hash>/<hash>/LocalStorage/localstorage.sqlite3` | WebKit folder is not an app folder; never migrated                                                                                                                                                                                                   | `tauri://localhost`                                                  |
+| Windows  | WebView2 (Chromium) | `%LOCALAPPDATA%\com.politehq.politedb\EBWebView\Default\Local Storage\leveldb`                               | Tauri forces the WebView2 data dir to `LocalData/<id>` (`tauri-2.10.1/src/manager/webview.rs:504`); the migration only moves `%APPDATA%\<id>` (Roaming)                                                                                              | `http://tauri.localhost` (v2 default, no `useHttpsScheme` in config) |
+| Linux    | WebKitGTK           | under `~/.local/share/com.politehq.politedb` (same LocalData rule)                                           | Config windows are created **before** the `setup` hook (`tauri-2.10.1/src/app.rs:2373`). The new WebView creates `~/.local/share/PoliteDB` first, so `migrate_dir` only merges missing top-level entries and leaves the old WebKitGTK folders behind | `tauri://localhost`                                                  |
 
 Formats:
+
 - WebKit (macOS, recent WebKitGTK): SQLite `ItemTable(key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB NOT NULL)` with UTF-16LE values, in an origin folder whose `origin` file names scheme and host. Confirmed on this Mac.
 - Older WebKitGTK may use `<base>/localstorage/<scheme>_<host>_0.localstorage` (same table). The reader supports both layouts.
 - Chromium LevelDB (snappy-compressed). Entry key `_<origin>\0<enc><name>`; value `<enc><bytes>`, where `enc` `0x00` = UTF-16LE and `0x01` = Latin-1. `META:` / `VERSION` entries are ignored.
@@ -57,6 +58,7 @@ On the first launch of the fixed build, on macOS, Windows and Linux, a user who 
   ```
 
   One impl is selected per target by `cfg`, so callers never branch on the platform.
+
 - Thin command `legacy_web_storage_read` in `commands/`, registered in `main.rs`. It returns `{ entries: [{key, value}], skipped: n }` or a fixed error code `LEGACY_STORAGE_UNREADABLE`. Under the `app-store` feature it returns empty (the sandbox can't read outside its container and MAS has no old data).
 - **Source paths** are fixed and built in Rust (`LEGACY_IDENTIFIER = "com.politehq.politedb"`). No path comes from the frontend.
   - macOS: `<home>/Library/WebKit/com.politehq.politedb/WebsiteData/Default`.
@@ -113,6 +115,7 @@ On the first launch of the fixed build, on macOS, Windows and Linux, a user who 
   Then copy the old store (throwaway data only) as test fixtures under `src-tauri/tests/fixtures/legacy_web_storage/<platform>/`.
   - macOS: this Mac (already confirmed for the format).
   - Windows/Linux: a VM, or a CI job that installs 1.4.0 → 1.5.2 headlessly. **Needs the user** (no Windows/Linux machine in this workspace).
+
 - **Phase 1 — Implement R1–R4.**
 
 ### Phase 0 — Results, macOS (Claude, 2026-10-14)
@@ -133,6 +136,7 @@ On the first launch of the fixed build, on macOS, Windows and Linux, a user who 
   - dev: `http`/`localhost`/`1420`.
 
   The reader accepts a folder only if **both** origins parse exactly as `tauri`, `localhost`, no port, with no trailing bytes. Anything else is ignored.
+
 - **Store:**
   - `ItemTable(key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB NOT NULL ON CONFLICT FAIL)`; 18 rows, all values BLOB and all valid UTF-16LE.
   - Most data was only in the WAL (main file 28 KB, WAL 230 KB), so copying `-wal`/`-shm` with the database is required.
@@ -151,6 +155,7 @@ On the first launch of the fixed build, on macOS, Windows and Linux, a user who 
   - prefix: `politedb.ai.chat.`, `politedb.ai.model.selected.`.
 
   This avoids reviving dead legacy AI endpoint/model keys (Phase 1c removed the legacy local endpoint path), and the import can only touch state the app knows how to read.
+
 - **Follow-up checks for Phase 1:**
   - a restored `politedb.ai.provider.selected` naming a provider that no longer exists must fall back cleanly;
   - restored chat JSON must load through `useAiChatSession` parsing;
@@ -216,6 +221,7 @@ On the first launch of the fixed build, on macOS, Windows and Linux, a user who 
 Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
 
 **Backend:**
+
 - `src-tauri/src/legacy_web_storage/mod.rs`:
   - `LEGACY_IDENTIFIER`, the allowlist (`EXACT_KEYS` + `KEY_PREFIXES`, per the approved amendment), caps;
   - the `LegacyStore` enum (`WebKit { general, flat }` / `Chromium { leveldb }`) and `legacy_store()`, which picks paths per platform via `cfg`;
@@ -231,6 +237,7 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
   - decodes the 0 = UTF-16LE / 1 = Latin-1 prefix.
 
   Compiled for Windows and for tests on every platform.
+
 - `commands/legacy_web_storage.rs`:
   - thin async command; the read runs in `spawn_blocking`;
   - returns empty when `Distribution::supports_legacy_web_storage_import()` is false (App Store);
@@ -240,6 +247,7 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
 - `Cargo.toml`: `rusty-leveldb = "=4.0.1"` (Windows target dependency + dev-dependency). `Cargo.lock` adds only `rusty-leveldb`, `crc32c`, `errno`, `errno-dragonfly`, `fs2`, `integer-encoding`; `snap` was already present.
 
 **Frontend:**
+
 - `src/lib/tauri/legacyWebStorage.ts` (wrapper, `CMD.legacyWebStorageRead`).
 - `src/lib/legacyWebStorage.ts`, `restoreLegacyWebStorage({read, storage, timeoutMs})`:
   - marker check;
@@ -252,6 +260,7 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
 - `src/main.tsx`: first step of `boot()` in the Tauri runtime; `"restored"` → `window.location.reload()`.
 
 **Verification:**
+
 - `cargo test legacy_web_storage` → 15 passed.
   - WebKit: exact origin parsing, including the real Phase 0 bytes and every truncation; WAL-only rows read with source db and WAL byte-identical after; dev origin ignored; two app origins → `Ambiguous`; flat layout; corrupt db → error; symlinked origin folder / flat file ignored.
   - Chromium: snappy tables + log entries, both encodings, the dev origin and `META:` ignored, lookalike origins rejected, unknown value encoding counted, `LOCK` present and the source directory byte-identical after; corrupt manifest → error; no `CURRENT` → `Open` (nothing created).
@@ -264,6 +273,7 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
   - **R4's purge-path check.** `politedb.ai.chatOwners` exists only on the unmerged `feat/ai-agent` branch; on `main` restored chats are ordinary legacy chats.
 
 **Manual run on this Mac** (user approved "chạy thử đi", 2026-10-14):
+
 - **Build:** `npx tauri build --bundles app` (updater artifacts off), signed with Developer ID `B3X2G545LX`, `CFBundleIdentifier=PoliteDB`, not notarized. `main` differs from v1.5.2 only in CI files.
 - **Backup first:** `~/politedb-webkit-backup-20261014/` holds copies of `~/Library/WebKit/politedb` and `~/Library/WebKit/com.politehq.politedb`, plus SHA-1s of the legacy files and key + value-hash listings of the `tauri://localhost` store before and after. No values were printed.
 - **First launch:** the store went from 10 to 17 keys. Added:
@@ -273,6 +283,7 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
   - the marker
 
   Every pre-existing key kept its value hash (`global-ai-assistant`, `provider.selected`, `install_date`, `pinned-connections`, `app-settings`, `welcome:seen`, `session_id`). Only `last_active_date` changed, as the app does on any launch. Dead keys (`ai.endpoint`, `ai.model`, `ai.model.seen`) were not restored.
+
 - **Legacy store:** all 19 file SHA-1s are identical after the run.
 - **Second launch:** the key/hash listing is identical to the first (no second import).
 - **No UI screenshot:** a window capture fell back to a full-screen capture of unrelated apps. It was deleted unviewed for content and not repeated.
@@ -290,16 +301,19 @@ Branch `fix/legacy-webkit-storage` (from `main` @ `b74100b`), uncommitted.
    - a marker write failure also counts as an attempt.
 
    Regressions: first entry fails while the later one is written, then recovery on the next launch; give-up after 3 incomplete imports; marker-unwritable case does not loop.
+
 3. **P2, parent symlinks bypassed the source check:**
    - `LegacyStore` variants now carry `root` (the `com.politehq.politedb` folder), and `real_dir_chain(root, path)` requires `root` and every folder down to `general`/`flat`/`leveldb` to be a real directory;
    - `find_database` takes the already-checked folders and also requires `inner/LocalStorage` to be a real directory.
 
    Regressions (unix): symlinked `inner/LocalStorage`, symlinked flat folder, symlinked `general`, symlinked store root (WebKit); symlinked leveldb folder (Chromium).
+
 4. **P2, the smoke test printed key names.** It now prints only counts.
 
 Also: the minor R3 deviation (web build did not set the marker) is resolved. The web build runs the same routine with an empty read, which sets the marker.
 
 **Verification:**
+
 - `cargo test` → 218 passed / 2 ignored (`legacy_web_storage`: 17 passed).
 - `cargo clippy --all-targets` → 8 warnings, same as baseline.
 - Vitest `legacyWebStorage.test.ts` → 10 passed (5 repeated runs).

@@ -122,6 +122,7 @@ Probe: a throwaway Swift tool in the session scratchpad (not in the repo). It mi
 - **Out of scope:** the unexpanded DMG entitlement noted above. It is not changed by this plan.
 
 Verdict: **R8 gate passed for the file keychain (all current users). Data-protection keychain deferred to the MAS release gate.** Phase 1 may proceed once the plan is APPROVED.
+
 - **Phase 1 — Implement R1–R7** on `fix/keychain-service-rename`.
 
 ## Verification
