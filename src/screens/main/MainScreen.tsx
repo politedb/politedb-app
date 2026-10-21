@@ -214,6 +214,12 @@ export function MainScreen() {
     selectProfile(undefined);
   }
 
+  // Sessions of connections deleted since cannot be opened again.
+  const knownProfileIds = useMemo(
+    () => new Set(profiles.map((p) => p.id)),
+    [profiles]
+  );
+
   function openProfileInTab(profileId: string) {
     const found = profiles.find((p) => p.id === profileId);
     if (!found) return;
@@ -485,6 +491,8 @@ export function MainScreen() {
             {activeNav === "logs" ? (
               <ConnectionLogsSection
                 searchQuery={searchQuery}
+                knownProfileIds={knownProfileIds}
+                onOpenConnection={openProfileInTab}
                 onShowConnection={(profileId) => {
                   setActiveNav("connections");
                   selectProfile(profileId);

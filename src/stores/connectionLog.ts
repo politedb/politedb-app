@@ -11,7 +11,8 @@ import {
 import type { ConnectionOpenLogEntry } from "src/types";
 import type { DatabaseEngine } from "src/types";
 
-const MAX_ENTRIES = 300;
+/** The log keeps only the newest sessions. */
+export const MAX_ENTRIES = 300;
 
 export type ConnectionLogTabRef = Pick<
   ProfileTab,
@@ -162,7 +163,14 @@ export const useConnectionLogStore = create<ConnectionLogState>((set, get) => ({
   },
 
   clearLog: () => {
-    set({ entries: [], activeByTabId: {} });
+    // Sessions still open stay, so closing their tabs can still end them.
+    set((s) => {
+      const openIds = new Set(Object.values(s.activeByTabId));
+      return {
+        entries: s.entries.filter((entry) => openIds.has(entry.id)),
+        activeByTabId: s.activeByTabId,
+      };
+    });
     schedulePersistentSave();
   },
 

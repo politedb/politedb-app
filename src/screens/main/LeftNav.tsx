@@ -58,8 +58,8 @@ const QUICK_TIPS: Record<NavId, string[]> = {
     "Right-click a key for actions.",
   ],
   logs: [
-    "Click a connection to find it.",
-    "Search by name, host, user or error.",
+    "Right-click a session for actions.",
+    "Double-click a session to open connection.",
   ],
 };
 
@@ -142,7 +142,7 @@ export function LeftNav(props: {
                       {item.id === "connections"
                         ? "Saved profiles"
                         : item.id === "logs"
-                          ? "Open sessions"
+                          ? "Recent sessions"
                           : "Secrets & keychain"}
                     </div>
                   </div>
