@@ -34,7 +34,7 @@ export function ColorPicker(props: {
               "hover:scale-[1.05] active:scale-100",
               selected
                 ? "border-blue-400 ring-2 ring-blue-200"
-                : "border-slate-200 hover:bg-slate-50"
+                : "border-slate-200 hover:opacity-90"
             )}
             style={{ background: c || "transparent" }}
           />
@@ -47,9 +47,9 @@ export function ColorPicker(props: {
         class={cn(
           "group relative h-9 w-9 rounded-xl border",
           "transition-all duration-150",
-          "hover:scale-[1.05] hover:ring-2 hover:ring-blue-200",
+          "hover:scale-[1.05] hover:ring-1 hover:ring-blue-200",
           isCustom
-            ? "border-blue-400 ring-2 ring-blue-200"
+            ? "border-blue-400 ring-1 ring-blue-200"
             : "border-slate-200 bg-white"
         )}
       >

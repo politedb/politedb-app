@@ -58,7 +58,7 @@ export function FilePathPicker(props: {
           }
         }}
         class={cn(
-          "flex h-10 w-full min-w-0 items-center gap-2 rounded-lg border bg-white px-3 text-sm outline-none",
+          "flex h-10 w-full min-w-0 items-center gap-2 rounded-xl border bg-white px-3 text-sm outline-none",
           borderCls,
           "focus:ring-2",
           disabled ? "cursor-not-allowed" : "hover:bg-slate-50"

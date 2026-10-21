@@ -14,6 +14,7 @@ export * from "./Folder";
 export * from "./Plug";
 export * from "./Bell";
 export * from "./Table";
+export * from "./Tag";
 export * from "./ChevronUp";
 export * from "./ChevronDown";
 export * from "./ChevronRight";

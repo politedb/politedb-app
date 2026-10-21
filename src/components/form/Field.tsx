@@ -1,3 +1,5 @@
+import { cn } from "src/utils/cn";
+
 export function Field(props: {
   label: string;
   children: any;
@@ -17,26 +19,22 @@ export function Field(props: {
 
   return (
     <div
-      class={[
+      class={cn(
         "grid grid-cols-[100px_1fr] gap-3",
         alignTop ? "items-start" : "items-center",
-        className || "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
+        className || ""
+      )}
     >
       <div
-        class={[
+        class={cn(
           "text-sm font-medium text-slate-700",
           alignTop ? "pt-2" : "",
-          labelClassName || "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+          labelClassName || ""
+        )}
       >
         {label}
       </div>
-      <div class={contentClassName || ""}>{children}</div>
+      <div class={cn(contentClassName || "")}>{children}</div>
     </div>
   );
 }

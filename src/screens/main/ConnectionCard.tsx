@@ -433,16 +433,11 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
 
             {tags?.length ? (
               <div class="min-w-0 shrink-0">
-                <TagChips
-                  className="min-w-0 uppercase"
-                  tags={tags}
-                  max={2}
-                  size="sm"
-                />
+                <TagChips className="min-w-0" tags={tags} max={2} size="sm" />
               </div>
             ) : (
               <TagChips
-                className="min-w-0 uppercase"
+                className="min-w-0"
                 tags={currentGroups.map((group) => group.name)}
                 max={1}
                 size="sm"

@@ -124,7 +124,7 @@ export function Input(
             "w-full rounded-md px-3 text-sm",
             "border border-neutral-300",
             "focus:bg-white focus:outline-2 focus:outline-blue-500/60 dark:focus:bg-neutral-900!",
-            props.left && "pl-8.5",
+            props.left && "pl-9",
             (showSelect || props.right) && "pr-8",
             className
           )}

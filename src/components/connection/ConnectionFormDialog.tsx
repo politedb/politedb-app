@@ -288,7 +288,7 @@ export function ConnectionFormDialog({
             onDirty={onDirty}
             isCreateNewConnection={!profileId}
           />
-          <div class="space-y-3">
+          <div class="flex flex-1 flex-col gap-3">
             <IdentitySection control={control} onDirty={onDirty} />
             <SSHSection control={control} onDirty={onDirty} />
           </div>

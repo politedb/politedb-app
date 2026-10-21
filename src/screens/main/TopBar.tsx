@@ -100,7 +100,7 @@ function CreateConnectionButtonGroup(props: {
           <div>
             <Button
               variant="default"
-              className="h-9 rounded-lg rounded-l-none border-l border-l-neutral-300! px-3"
+              className="h-9 rounded-lg rounded-l-none border-l border-l-neutral-300 px-3 hover:border-l-neutral-300"
               onClick={() => setOpen((v) => !v)}
               title={title}
             >

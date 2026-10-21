@@ -18,13 +18,15 @@ export function IdentitySection(props: SectionProps) {
 
   return (
     <section class="rounded-2xl border border-slate-200 bg-white p-5">
-      <div class="mb-4 text-sm font-semibold text-slate-900">Identity</div>
+      <div class="mb-4 text-sm font-semibold text-slate-900">
+        Identity <span class="text-slate-500">(optional)</span>
+      </div>
 
       <div class="space-y-4">
         <Field label="Tags" alignTop>
           <TagInput
             value={tags.field.value || []}
-            placeholder="local, dev, prod…"
+            placeholder="local, dev, production…"
             suggestions={TAG_SUGGESTIONS}
             onChange={(next) => {
               tags.field.onChange(next);
@@ -34,7 +36,7 @@ export function IdentitySection(props: SectionProps) {
         </Field>
 
         <Field label="Indicator color" alignTop>
-          <div class="space-y-1">
+          <div class="space-y-2">
             <ColorPicker
               value={indicatorColor.field.value}
               onChange={(c) => {
