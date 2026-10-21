@@ -125,13 +125,6 @@ export function KeyboardSettings(props: { active: boolean }) {
               key={item.id}
               label={item.label}
               description={item.description}
-              extra={
-                isRecording ? (
-                  <div class="mt-1 text-xs text-blue-700 dark:text-blue-300">
-                    Press keys with Cmd/Ctrl, Alt or Shift. Esc stops recording.
-                  </div>
-                ) : null
-              }
             >
               <div class="flex shrink-0 items-center gap-2">
                 {/* Only a changed shortcut can be reset; the slot keeps
@@ -180,7 +173,11 @@ export function KeyboardSettings(props: { active: boolean }) {
           );
         })}
       </SettingCard>
-      <div class="flex flex-1 items-center justify-end gap-2">
+      <div class="flex flex-1 items-start justify-between gap-2">
+        <div class="text-xs text-blue-700 dark:text-blue-300">
+          {recordingId &&
+            " Press keys with Cmd/Ctrl, Alt or Shift. Esc stops recording."}
+        </div>
         <div class="flex items-center gap-2">
           <Button
             variant="outline"
