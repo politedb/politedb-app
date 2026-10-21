@@ -11,9 +11,14 @@ function setup() {
   };
   render(
     <KeychainCard
-      keyName="credential/postgres"
-      title="credential/postgres"
-      subtitle="Athena"
+      keyName="politedb/profile/p1/credential/database"
+      display={{
+        title: "Athena",
+        badge: "PostgreSQL",
+        detail: "db.internal:5432 • shop",
+        icon: { kind: "database", engine: "postgres" },
+        unused: false,
+      }}
       selected={false}
       {...handlers}
     />
@@ -25,10 +30,27 @@ const menu = () => screen.queryByRole("menu");
 
 afterEach(() => cleanup());
 
+describe("KeychainCard content", () => {
+  it("names the raw key for keyboard and screen-reader users", () => {
+    setup();
+    const card = screen.getByText("Athena").closest('[role="button"]')!;
+
+    expect(card.getAttribute("title")).toBe(
+      "politedb/profile/p1/credential/database"
+    );
+    expect(card.textContent).toContain(
+      "Key name: politedb/profile/p1/credential/database"
+    );
+    // The engine logo is decorative next to its badge.
+    expect(card.querySelector("img")?.getAttribute("alt")).toBe("");
+  });
+});
+
 describe("KeychainCard menu", () => {
   it.each([
-    ["the title", () => screen.getByText("credential/postgres")],
-    ["the subtitle", () => screen.getByText("Athena")],
+    ["the title", () => screen.getByText("Athena")],
+    ["the badge", () => screen.getByText("PostgreSQL")],
+    ["the detail", () => screen.getByText("db.internal:5432 • shop")],
     [
       "the card itself",
       () => screen.getByText("Athena").closest('[role="button"]')!,

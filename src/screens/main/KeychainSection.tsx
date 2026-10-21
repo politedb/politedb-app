@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { aiProviderList } from "src/lib/tauri/ai";
 import { profileList } from "src/lib/tauri/profile";
 import type { ConnectionProfile } from "src/lib/tauri/types";
-import { keychainDisplay } from "src/lib/keychain/display";
+import { keychainDisplay, sortKeychainKeys } from "src/lib/keychain/display";
 import type { AiProviderConfig } from "src/types";
 import { Button } from "src/components/common/Button";
 import {
@@ -255,13 +255,11 @@ export function KeychainSection(props: {
       ? keys
       : keys.filter((k) => {
           const d = displays.get(k);
-          return [k, d?.title ?? "", d?.subtitle ?? ""].some((text) =>
-            text.toLowerCase().includes(q)
+          return [k, d?.title ?? "", d?.badge ?? "", d?.detail ?? ""].some(
+            (text) => text.toLowerCase().includes(q)
           );
         });
-    return [...matched].sort((a, b) =>
-      sortMode === "label-desc" ? b.localeCompare(a) : a.localeCompare(b)
-    );
+    return sortKeychainKeys(matched, displays, sortMode);
   }, [keys, displays, searchQuery, sortMode]);
 
   return (
@@ -274,9 +272,10 @@ export function KeychainSection(props: {
         )}
 
         <div class="mb-3 flex items-center justify-between gap-8">
-          <h2 class="text-sm font-semibold tracking-wide text-slate-800">
-            Keychain ({filteredKeys.length})
-          </h2>
+          <h3 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
+            <KeyIcon className="size-4 text-slate-500" />
+            Credentials ({filteredKeys.length})
+          </h3>
 
           <div class="flex items-center gap-1">
             <LockIcon className="size-4 text-green-600" />
@@ -302,8 +301,7 @@ export function KeychainSection(props: {
               <KeychainCard
                 key={k}
                 keyName={k}
-                title={displays.get(k)?.title ?? k}
-                subtitle={displays.get(k)?.subtitle ?? ""}
+                display={displays.get(k) ?? keychainDisplay(k)}
                 selected={selectedKey === k}
                 disabled={!canSubmit}
                 onSelect={() => setSelectedKey(k)}
