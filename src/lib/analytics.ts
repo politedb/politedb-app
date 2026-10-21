@@ -98,10 +98,63 @@ function maskSensitiveText(value: string) {
     );
 }
 
-function sanitizeErrorMessage(value: string) {
-  const normalized = maskSensitiveText(value);
-  const firstLine = normalized.split("\n")[0] ?? normalized;
-  return firstLine.slice(0, 160);
+/** Error categories analytics may report; checked in order, first match wins. */
+const ERROR_KINDS: ReadonlyArray<[string, RegExp]> = [
+  ["cancelled", /\b(cancel(l)?ed|aborted|abort)\b/i],
+  ["timeout", /time(d)?[ -]?out|deadline exceeded/i],
+  [
+    "auth_failed",
+    /authenticat|password|access denied|login failed|invalid credentials|unauthori[sz]ed|\b401\b/i,
+  ],
+  [
+    "permission_denied",
+    /permission denied|not authori[sz]ed|insufficient privilege|forbidden|\b403\b/i,
+  ],
+  ["tls", /\b(ssl|tls)\b|certificate|handshake/i],
+  [
+    "host_not_found",
+    /could not translate host|unknown host|name or service not known|nodename nor servname|no such host|getaddrinfo|dns/i,
+  ],
+  [
+    "connection_refused",
+    /connection refused|econnrefused|could not connect|can't connect|unable to connect/i,
+  ],
+  [
+    "network",
+    /connection (reset|closed|lost|aborted)|broken pipe|network|unreachable|econnreset|socket/i,
+  ],
+  ["too_many_connections", /too many (connections|clients)/i],
+  [
+    "database_not_found",
+    /database .*(does not exist|not found)|unknown database/i,
+  ],
+  [
+    "object_not_found",
+    /does not exist|not found|no such (table|column)|unknown (table|column)|invalid object name/i,
+  ],
+  ["syntax_error", /syntax|parse error|unexpected token/i],
+  [
+    "constraint_violation",
+    /constraint|duplicate key|unique|foreign key|violat/i,
+  ],
+  ["read_only", /read[- ]only/i],
+  ["keychain", /keychain|credential store/i],
+  ["ssh", /\bssh\b|tunnel/i],
+  ["out_of_resources", /out of memory|disk full|no space left|resource/i],
+  ["unsupported", /not supported|unsupported|not implemented/i],
+];
+
+/**
+ * A fixed category for an error message ("timeout", "auth_failed", …), so the
+ * message itself is never sent; "other" when nothing matches.
+ */
+export function classifyErrorMessage(message: string): string {
+  const text = String(message ?? "");
+  if (!text.trim()) return "other";
+  for (const [kind, pattern] of ERROR_KINDS) {
+    if (pattern.test(text)) return kind;
+  }
+  return "other";
 }
 
 function sanitizeProp(
@@ -125,8 +178,16 @@ function sanitizeProp(
     return "[masked]";
   }
 
-  if (k === "error" && typeof value === "string") {
-    return sanitizeErrorMessage(value);
+  // Statement kinds come from detectSqlKind's allowlist; anything else is
+  // reported as OTHER rather than masked into a useless placeholder.
+  if (k === "sql_kind" && typeof value === "string") {
+    return SQL_KINDS.has(value) || value === "UNKNOWN" ? value : "OTHER";
+  }
+
+  // Errors leave the device only as a fixed category, never their text: a
+  // driver message can carry hosts, users, table names or row values.
+  if (k.includes("error") && typeof value === "string") {
+    return classifyErrorMessage(value);
   }
 
   if (typeof value === "string") {
@@ -136,7 +197,8 @@ function sanitizeProp(
   return value;
 }
 
-function sanitizeProps(props?: AnalyticsProps) {
+/** Exported for tests: what every event property becomes before sending. */
+export function sanitizeProps(props?: AnalyticsProps) {
   if (!props) return {};
   return Object.fromEntries(
     Object.entries(props).map(([key, value]) => [key, sanitizeProp(key, value)])
@@ -407,11 +469,84 @@ export function trackAppLifecycle(props?: AnalyticsProps) {
   }
 }
 
-export function detectSqlKind(sql: string) {
-  const token = String(sql ?? "")
-    .trimStart()
-    .split(/\s+/, 1)[0]
-    ?.toUpperCase();
+/** Statement kinds analytics may report; anything else is "OTHER". */
+const SQL_KINDS = new Set([
+  "SELECT",
+  "WITH",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "MERGE",
+  "UPSERT",
+  "REPLACE",
+  "VALUES",
+  "TABLE",
+  "CREATE",
+  "ALTER",
+  "DROP",
+  "TRUNCATE",
+  "RENAME",
+  "COMMENT",
+  "GRANT",
+  "REVOKE",
+  "EXPLAIN",
+  "DESCRIBE",
+  "DESC",
+  "SHOW",
+  "USE",
+  "SET",
+  "RESET",
+  "BEGIN",
+  "START",
+  "COMMIT",
+  "END",
+  "ROLLBACK",
+  "SAVEPOINT",
+  "RELEASE",
+  "CALL",
+  "EXEC",
+  "EXECUTE",
+  "DO",
+  "DECLARE",
+  "PREPARE",
+  "DEALLOCATE",
+  "PRAGMA",
+  "ANALYZE",
+  "VACUUM",
+  "REINDEX",
+  "REFRESH",
+  "OPTIMIZE",
+  "COPY",
+  "UNLOAD",
+  "LOCK",
+  "ATTACH",
+  "DETACH",
+  "LISTEN",
+  "NOTIFY",
+  "KILL",
+]);
 
-  return token || "UNKNOWN";
+/**
+ * The kind of statement, for analytics only. Leading comments are skipped and
+ * only known keywords are reported, so nothing the user typed (a comment, a
+ * table name) can leave the device this way.
+ */
+export function detectSqlKind(sql: string) {
+  let text = String(sql ?? "");
+  for (;;) {
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith("--")) {
+      const end = trimmed.indexOf("\n");
+      text = end < 0 ? "" : trimmed.slice(end + 1);
+    } else if (trimmed.startsWith("/*")) {
+      const end = trimmed.indexOf("*/");
+      text = end < 0 ? "" : trimmed.slice(end + 2);
+    } else {
+      text = trimmed;
+      break;
+    }
+  }
+  const token = /^[A-Za-z]+/.exec(text)?.[0]?.toUpperCase();
+  if (!token) return "UNKNOWN";
+  return SQL_KINDS.has(token) ? token : "OTHER";
 }
