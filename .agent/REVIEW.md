@@ -2255,7 +2255,6 @@ None. No new actionable defect established in this diff.
 - Existing SVG viewport/outer wrapper clips, asynchronous scroll overscan lag, and filtered-animation cost remain the previous review's diagnostic limitations; no new regression established here.
 - Only this section appended to `.agent/REVIEW.md`; earlier content preserved. No other file intentionally modified, no staging or commits.
 
-
 ## Review: connection form UI, tag dropdown, empty credential defaults
 
 Status: CHANGES REQUIRED
@@ -2287,7 +2286,6 @@ No P0 or additional P3 finding established.
 - Additional in-memory Preact/JSDOM probes against actual staged source reproduced the Input ref exception, duplicate-prefix wrong tag, and composing ArrowDown/Enter behavior. No test/application source files were created or modified for probes. Vite module loading emitted a sandbox `EPERM` warning when attempting its HMR listener on port 24678; module loading and the probes still completed successfully. These are DOM event probes, not native IME validation.
 - No native app/browser visual run, screenshot, screen-reader session, live database connection, Rust test run, or emitting production build. Requested no-emit check and component tests passed, but they do not establish native IME ordering, clipping, touch selection, pixel-level dark mode, or server-specific empty-database behavior. Existing tests do not catch the findings above.
 - Only this section appended to `.agent/REVIEW.md`; no application edits, staging, commits, or changes to the index.
-
 
 ## Re-review: connection form UI, tag dropdown, empty credential defaults round 2
 
@@ -2324,7 +2322,6 @@ No new P0, P1, or P3 finding established.
 - No native app/browser visual run, real IME, screen reader, touch test, live database, Rust checks, or emitting production build. Used requested no-emit check; component tests do not prove clipping, native event ordering, platform-specific 229 behavior, or server-specific empty-database compatibility.
 - Only this section appended to `.agent/REVIEW.md`; no staging, commits, or application edits.
 
-
 ## Re-review: connection form UI, tag dropdown, empty credential defaults round 3
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2355,7 +2352,6 @@ None. No new actionable defect or regression established in the reviewed scope.
 - `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
 - No emitting production build, native app/browser visual run, real OS/WebKit IME session, screen-reader or touch session, live database connection, or Rust checks. Requested component tests and no-emit check do not prove dropdown clipping, pixel-level themes, native composition ordering or server-specific empty-database compatibility. No additional runtime probes or source-reversion mutation runs performed this round.
 - Only this round 3 section appended to `.agent/REVIEW.md`; no application/test edits, staging, commits, or changes to the index.
-
 
 ## Review: keychain card redesign
 
@@ -2389,7 +2385,6 @@ No P0/P1 finding established. P2 sort mismatch needs disposition; P3 items are n
 - No emitting production build, native/browser visual session, live keychain/database, screen reader, touch session or Rust checks. Requested test/type-check commands passed; these do not establish pixel-level dark-mode rendering or native accessibility behavior. Workflow calls for Claude's second security-review pass for keychain scope; not performed here.
 - Only this section appended to `.agent/REVIEW.md`; no other file modified, no staging, commits or git identity changes.
 
-
 ## Re-review: keychain card redesign round 2
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2422,7 +2417,6 @@ None. No new actionable defect established in reviewed scope.
 - Additional read-only, in-memory helper sorting/performance and Tailwind compilation probes completed. First direct CSS compiler attempt omitted its required dependency callback and failed; retry with callback succeeded. No application/test/probe files created.
 - No emitting production build, native/browser visual session, screen reader, real keychain/database, touch session or Rust checks. Tests/type-check and generated CSS do not prove native tooltip-on-focus behavior, announcement verbosity, pixel-level contrast or large-list WebKit responsiveness. Workflow's separate Claude security-review pass for keychain scope was not performed here.
 - Only this section appended to `.agent/REVIEW.md`; no other file edited, no staging or commits.
-
 
 ## Review: credentials grouping, sort label, nav tips, draggable assistant
 
@@ -2459,7 +2453,6 @@ No P0 established. P1 blocks verification; P2 findings also need fixes.
 - New launcher tests cover defaults, synthetic successful drag + explicit click, small-motion click, saved restoration and Alt+arrows. Helper tests cover bounds, undersized viewport, persistence, invalid storage and denied storage. They do not cover cancellation/no-click suppression, capture failure/outside release, resize integration, multi-touch or destructive batch failure/load races. Findings above use source tracing, not live keychain deletion or newly written tests.
 - No production build, native/browser visual session, screen reader, actual touch/pointer capture session, live keychain operation or Rust checks performed. Tests/type-check do not prove native dialog, dark-mode pixels, focus announcements or OS pointer behavior. Keychain workflow requires a separate Claude security-review pass; not performed here.
 - Only this section appended to `.agent/REVIEW.md`; no other file edited, no staging or commits.
-
 
 ## Re-review: credentials grouping, sort label, nav tips, draggable assistant round 2
 
@@ -2501,7 +2494,6 @@ No new P0/P1 established. Previous four findings are closed as scoped above; rem
 - No production build, native desktop/browser visual session, real WebKit/touch event run, screen reader, live keychain deletion, or Rust checks performed. Native dialog timing, platform click ordering, and actual store reconciliation remain unverified. Workflow's separate Claude security-review pass remains required for keychain scope; not performed here.
 - Only this round-2 section appended to `.agent/REVIEW.md`; application files and git staging unchanged.
 
-
 ## Re-review: credentials grouping, sort label, nav tips, draggable assistant round 3
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2534,3 +2526,71 @@ None established in this re-review. No remaining round-2 blocker identified.
 - New component tests cover owner failure, provider-event recovery, rejected-delete reconciliation plus dismiss, and no double-click read during deferred cleanup. They do not directly exercise every handler rejection/release path, editor button interaction under lock, pending initial import/owner ordering, failed relist fallback, or editor clearing; those paths were source-traced here. No additional test/application files created.
 - No emitting production build, native desktop/browser visual session, screen reader, live keychain deletion, Rust checks, or real WebKit/touch pointer run. Native confirmation timing, platform pointerup/click ordering, pixel layout and real multi-store reconciliation remain unverified. Production build omitted to keep this review non-emitting and confined to the requested checks. Workflow's separate Claude security-review pass for keychain scope was not performed here.
 - Only this round-3 section appended to `.agent/REVIEW.md`; no other file edited, no staging or commits.
+
+## Review: History page redesign
+
+Status: CHANGES REQUIRED
+
+Reviewed 2026-10-21 on `feat/connection-form-polish`. Read `AGENTS.md`, referenced RTK instructions, and `.agent/WORKFLOW.md`. Reviewed all six tracked changed files plus untracked `src/utils/connectionLog.test.ts` and `src/stores/connectionLog.test.ts`. Ignored `.claude/launch.json`. No application/test edits or staging changes.
+
+### P0-P3 findings
+
+- **P2 — `src/screens/main/ConnectionLogsSection.tsx:338-341`: row Enter handling intercepts descendant buttons.** Tab to a saved session's “Open menu” button and press Enter: its keydown bubbles to the row, which prevents the native button activation and opens a new connection tab instead. Restrict the row's Enter shortcut to `e.target === e.currentTarget`; preserve descendant button behavior. Add a regression asserting Enter on the kebab opens its menu without calling `onOpenConnection`, while Enter on the row still opens once.
+- **P2 — `src/screens/main/ConnectionLogsSection.tsx:337` (also `:414-416`): double-clicking Retry opens three tabs.** Each of the two Retry clicks calls `onOpen`; the subsequent bubbling `dblclick` reaches the row and calls it again. `MainScreen.tsx:220-234` always creates a fresh UUID/tab, so this produces three independent connection attempts. Stopping `click` propagation does not stop `dblclick`. Ignore interactive descendants in the row double-click handler, and suppress repeated Retry activation within the same double-click gesture. Test the complete click/click/dblclick sequence, including kebab double-click, rather than dispatching only `dblClick` on the row.
+- **P2 — `src/screens/main/ConnectionLogsSection.tsx:245` (also `:335`): new day-heading and keyboard-focus backgrounds remain light in dark mode.** `bg-slate-50/60` and `focus-visible:bg-blue-50/60` have no mappings in `src/styles.css`; the existing mappings cover other opacity variants, not these selectors. Dark mode remaps `text-slate-500` to light gray, leaving day headings low contrast on a pale surface; a focused session row similarly retains light background with remapped light text. Add explicit dark backgrounds for these new states or extend the existing theme mappings. Verify day headings and focused rows visually in dark mode.
+- **P3 — `src/screens/main/ConnectionLogsSection.tsx:179-190`: ARIA radios lack radio keyboard behavior.** All three buttons remain Tab stops and Left/Right/Up/Down never move selection. A screen-reader user encountering “Filter by status” as a radiogroup cannot use expected radio navigation. Use native radio inputs or implement roving tabindex and arrow-key selection/focus; alternatively expose independent filter buttons with `aria-pressed`. Add keyboard coverage.
+
+No P0/P1 finding established.
+
+### Correctness and regression assessment
+
+- **Pagination/grouping:** collapse runs over the entire filtered list before `useInfiniteScroll` slices rows (`ConnectionLogsSection.tsx:106-121`). A folded run cannot split across pages. Grouping visible rows is safe: each subsequent render regroups the whole visible prefix, extending the existing day rather than duplicating its heading. Page size counts folded rows, while header/filter counts count sessions; this is consistent with their labels. Reset-on-row-count-change can return pagination to page one when new sessions arrive, matching the prior length-based reset approach.
+- **Fold identity:** exact stored error, profile ID, outcome and local day are compared; active sessions are explicitly excluded. Distinct stored errors and open sessions do not fold. Folding is adjacency in the filtered list, not a maximum interval between sessions; two short sessions hours apart can fold if no intervening visible session exists. This matches the stated same-day/short-duration rule, but should be confirmed if “back-to-back” is intended to constrain elapsed gaps. Host/user/device snapshots are not part of fold identity, so only the newest snapshot survives when a saved profile changes; no new cross-device persistence path was identified here.
+- **Timezone/DST:** local midnight plus calendar `setDate(-1)` avoids the fixed-24-hour Yesterday bug over DST. Group keys and labels use the same local-day calculation. Existing tests use local calendar constructors, but do not exercise DST transition dates or timezone changes. With no active session, `now` stops refreshing, so a page left open across midnight retains yesterday's relative headings until entries change or remount; this is a minor remaining date-refresh limitation.
+- **Clear/persistence:** `clearLog` retains entries referenced by `activeByTabId`, preserves that map, and schedules the existing persistent save. `endSession` can still close retained entries and remove mappings. Persistent restore loads profiles first, hydrates entries/map together, then closes prior-run active sessions at `snap.savedAt` (`persistentStore.ts:271-290`); clear does not introduce a competing representation. Existing 300-entry clamping can evict active entries while retaining their mappings, but predates this patch. No new clear/hydrate corruption established.
+- **Loaded/deleted profiles:** empty `knownProfileIds` temporarily disables Retry/open/show. Once profiles load, the memoized set and row props update; there is no cached disabled state. Persistent restore itself waits for profile loading before hydrating history. Deleted profiles remain non-openable. A profile-load failure leaves open actions unavailable, safely, without recovery feedback in this page.
+- **Privacy:** changed presentation paths render stored hosts/errors and use native title tooltips. Clipboard write occurs only from the user-selected Copy error message action. No added console logging or analytics emission found. Existing stored error truncation to 500 characters is unchanged; “full text” tooltip means full stored error, not necessarily full original exception.
+- **Menus/performance:** every visible row mounts a closed ContextMenu component and allocates items, but closed menus return null and install no global listeners; bounded at 300 stored sessions. No performance blocker established without profiling. Open menus are rendered as `div` siblings of `tr` inside `tbody`, which is invalid table structure; actual browser/accessibility-tree behavior remains unverified. The shared ContextMenu does not focus its first item or implement arrow navigation; Shift+F10 creates the menu but keeps focus on the row, requiring Tab navigation through intervening controls. A focused menu/portal integration would improve this path.
+- **Other requested behavior:** column order and optional Device column match scope; address truncation retains 40% head/60% tail, with database in a nonshrinking span; onInput updates the connection select; failed error tooltip, status counts, exported limit, native confirmation, sidebar copy and tips are present. Long database/error layout still requires real viewport verification.
+
+### Verification and limitations
+
+- `npx vitest run src/utils src/stores src/screens` via `rtk proxy`: **34 files, 192 tests passed**.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- `git diff --check` before review append: **passed**.
+- Component tests now exercise real rendering, Retry/copy, filters, deleted-profile guard, collapse and confirmation. Utility tests cover basic local day boundaries, formatting and fold exclusion. Store test proves retained active entry can close after clear.
+- Missing focused coverage: 30-row pagination boundary/observer loading; fake-timer advancement of the 30-second refresh (the “keeps counting” test checks only initial text); full pointer event sequences and descendant key handling; Shift+F10/menu focus; radio arrows; rejected confirmation; profile loading transition; persistence save assertion and hydrate/close-orphan round-trip. Store test mocks scheduleSave with a disposable spy and never asserts persistence.
+- Findings are source-traced, not reproduced in a running desktop/browser. No native Tauri confirmation/clipboard execution, screen-reader session, visual viewport/dark-mode inspection, runtime timezone-change test, or performance profile performed. No production build run: review used the requested non-emitting type check and tests, avoiding generated output. No Rust change, so no Rust checks run.
+- Only this section appended to `.agent/REVIEW.md`; no staging or commits.
+
+## Re-review: History page redesign round 2
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-21 on `feat/connection-form-polish`. Read `AGENTS.md`, referenced RTK instructions, `.agent/WORKFLOW.md`, and the preceding History review. Re-reviewed the six tracked application/test diffs plus untracked `src/utils/connectionLog.test.ts` and `src/stores/connectionLog.test.ts`. Ignored `.claude/launch.json` and the existing `.agent/REVIEW.md` diff. Only this report appended; no application/test changes or staging.
+
+### Previous finding disposition
+
+- **P2 — descendant Enter: CLOSED.** `src/screens/main/ConnectionLogsSection.tsx:343` requires `e.target === e.currentTarget` before preventing Enter and opening. Retry/kebab Enter now reaches native button activation; Enter on the row still opens. Regression checks descendant keydown does not open, and row Enter does.
+- **P2 — Retry double-click: CLOSED.** `src/screens/main/ConnectionLogsSection.tsx:338-340,418-422,451-453` excludes interactive descendants (including nested icon elements via `closest`) from row double-click opening and suppresses Retry clicks with detail > 1. The complete click(detail 1)/click(detail 2)/dblclick regression opens once; kebab dblclick does not open a connection. Native keyboard-generated clicks have detail 0 and remain accepted, including repeated independent keyboard activations. Button forwards the click handler without replacing this behavior.
+- **P2 — dark day/focus backgrounds: CLOSED.** `src/screens/main/ConnectionLogsSection.tsx:245-250,334` adds explicit dark backgrounds. Production CSS contains `.dark\:bg-white\/5:where(.dark,.dark *)` and `.dark\:focus-visible\:bg-blue-950\/40:where(.dark,.dark *):focus-visible` with dark color values, so the custom variant compiles correctly. The day text variant also compiles; existing unlayered `html.dark .text-slate-500 { color: #a3a3a3 !important }` wins over `dark:text-slate-400`, retaining readable gray rather than the exact requested slate shade. On hovered focused rows, the existing important dark hover mapping can win, but remains dark. Neither interaction restores a pale background.
+- **P3 — radio keyboard contract: CLOSED.** `src/screens/main/ConnectionLogsSection.tsx:179-197` uses a named group of native buttons with `aria-pressed`. Independent Tab stops and native Enter/Space activation fit this contract; radio arrow navigation is no longer promised. Regression verifies selected and deselected pressed states.
+
+### New P0-P3 findings
+
+None established. No new blocking regression found in the reviewed tree.
+
+### Regression assessment
+
+- Shift+F10 and ContextMenu key handling remains outside the row-only Enter guard (`src/screens/main/ConnectionLogsSection.tsx:347-350`), so events bubbling from Retry/kebab still open the row menu and prevent the browser default without opening a connection. Existing shared ContextMenu focus/arrow-navigation limitations remain; the fix does not worsen them.
+- Other History surfaces use existing dark mappings: page/card/table header and hover backgrounds, filter/select surfaces, folded-count chips, status backgrounds and text, error text, row/device text, outline buttons, and shared context menu. No additional unmapped pale History background established by source/cascade inspection. Explicit dark foreground shades may be superseded by existing important theme mappings, but those mappings still supply readable dark-theme colors.
+- Rechecked sorting/filtering, folding before pagination, deleted-profile guards and MainScreen open callback, and clearLog retaining the authoritative active map and referenced entries. Utility/store tests remain consistent with these contracts. No new state or persistence path introduced by the fixes.
+
+### Verification and limitations
+
+- `npx vitest run src/utils src/stores src/screens` via `rtk proxy`: **34 files, 194 tests passed**.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- `npx vite build --outDir /private/tmp/politedb-history-review-round2 --emptyOutDir` via `rtk proxy`: **passed**; inspected emitted CSS for all three added dark utilities and custom selectors. Output outside the repository. Build warnings: browser externalization of `node:zlib`, ineffective dynamic imports, and large chunks; no build error.
+- `git diff --check`: **passed** before report append. Working-tree file inventory unchanged apart from this append; no staging or commits.
+- New tests exercise event guards and pointer click counts, but `fireEvent.keyDown` does not synthesize native browser button clicks. Kebab Enter test proves no accidental connection open; it does not prove native menu activation. Existing Retry click test uses default detail 0, confirming that handler accepts the keyboard-click detail, but does not simulate actual Enter/Space activation. Shift+F10 on descendants is source-traced, not dynamically exercised.
+- No running desktop/browser visual inspection, screen-reader test, native Tauri confirmation/clipboard check, or real-browser keyboard activation performed. CSS compilation/cascade inspection is not visual contrast verification. Previous nonblocking limitations (menu markup/focus, midnight heading refresh, pagination/timer/persistence coverage) remain unchanged; this status does not claim those paths are exhaustively verified. No Rust changes; no Rust checks run.
