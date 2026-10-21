@@ -161,13 +161,13 @@ describe("LicenseKeySettings renewal row in both flavors", () => {
         renews_at: inThirtyDays(),
       };
       setup(features);
-      expect(screen.getByText("Renews on:")).toBeInTheDocument();
+      expect(screen.getByText("Renews on")).toBeInTheDocument();
       cleanup();
 
       mocks.store = null;
       mocks.extra = { subscription_status: "past_due" };
       setup(features);
-      expect(screen.getByText("Payment:")).toBeInTheDocument();
+      expect(screen.getByText("Payment")).toBeInTheDocument();
       expect(
         screen.getByText("Past due. Update your payment method")
       ).toBeInTheDocument();
@@ -176,7 +176,7 @@ describe("LicenseKeySettings renewal row in both flavors", () => {
       mocks.store = null;
       mocks.extra = {};
       setup(features);
-      expect(screen.getByText("Renewal:")).toBeInTheDocument();
+      expect(screen.getByText("Renewal")).toBeInTheDocument();
       expect(
         screen.getByText("Renews with your subscription")
       ).toBeInTheDocument();

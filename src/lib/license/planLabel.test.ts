@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountPlanLabel } from "./planLabel";
+import { accountPlanLabel, knownPlanLabel } from "./planLabel";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -36,5 +36,34 @@ describe("accountPlanLabel", () => {
 
   it("never shows a trial on flavors without trials", () => {
     expect(accountPlanLabel({ trial: trial(5) }, NOW, false)).toBe("Free plan");
+  });
+
+  it("uses the tier when the plan has no display name", () => {
+    expect(
+      accountPlanLabel(
+        { plan_name: null, plan: "pro", paid_license: true, trial: null },
+        0,
+        true
+      )
+    ).toBe("Pro plan");
+  });
+});
+
+describe("knownPlanLabel", () => {
+  it("is null when the license names no plan", () => {
+    expect(
+      knownPlanLabel(
+        { plan_name: null, plan: null, paid_license: true, trial: null },
+        0,
+        true
+      )
+    ).toBeNull();
+    expect(
+      knownPlanLabel(
+        { plan_name: "Pro", plan: null, paid_license: true, trial: null },
+        0,
+        true
+      )
+    ).toBe("Pro plan");
   });
 });

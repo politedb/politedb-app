@@ -63,6 +63,25 @@ const DEFAULT_SHORTCUTS = SHORTCUT_DEFINITIONS.reduce((acc, item) => {
   return acc;
 }, {} as ShortcutBindings);
 
+/**
+ * App-wide shortcuts handled outside this store (src/layout). They cannot be
+ * assigned to an action, or one key press would run two things.
+ */
+const RESERVED_SHORTCUTS: Record<string, string> = { "Mod+,": "Settings" };
+
+/** What a reserved binding opens ("Settings"), or undefined when free. */
+export function reservedShortcutOwner(binding: string): string | undefined {
+  return RESERVED_SHORTCUTS[normalizeShortcutBinding(binding)];
+}
+
+/** Whether a binding is the shortcut's built-in one (nothing to reset). */
+export function isDefaultShortcut(id: ShortcutActionId, binding: string) {
+  return (
+    normalizeShortcutBinding(binding) ===
+    normalizeShortcutBinding(DEFAULT_SHORTCUTS[id])
+  );
+}
+
 type ShortcutStoreState = {
   shortcuts: ShortcutBindings;
   setShortcut: (id: ShortcutActionId, binding: string) => void;
@@ -156,7 +175,12 @@ function loadShortcuts(): ShortcutBindings {
     const next = { ...DEFAULT_SHORTCUTS };
     for (const item of SHORTCUT_DEFINITIONS) {
       const value = parsed[item.id];
-      if (typeof value === "string" && value.trim()) {
+      // A stored binding that clashes with a reserved one keeps the default.
+      if (
+        typeof value === "string" &&
+        value.trim() &&
+        !reservedShortcutOwner(value)
+      ) {
         next[item.id] = normalizeShortcutBinding(value);
       }
     }
@@ -184,16 +208,19 @@ export function formatShortcutLabel(
   const modifiers = parts.slice(0, -1);
 
   if (isMac) {
-    const prefix = modifiers
-      .map((part) => {
-        if (part === "Mod") return "⌘";
-        if (part === "Ctrl") return "^";
-        if (part === "Alt") return "⌥";
-        if (part === "Shift") return "⇧";
-        return part;
-      })
+    // macOS writes modifiers in the order ⌃⌥⇧⌘, directly before the key: ⇧⌘S.
+    const MAC_ORDER = ["Ctrl", "Alt", "Shift", "Mod"];
+    const MAC_SYMBOL: Record<string, string> = {
+      Ctrl: "⌃",
+      Alt: "⌥",
+      Shift: "⇧",
+      Mod: "⌘",
+    };
+    const prefix = [...modifiers]
+      .sort((a, b) => MAC_ORDER.indexOf(a) - MAC_ORDER.indexOf(b))
+      .map((part) => MAC_SYMBOL[part] ?? part)
       .join("");
-    return `${prefix} + ${key}`;
+    return `${prefix}${key}`;
   }
 
   return [...modifiers.map((part) => (part === "Mod" ? "Ctrl" : part)), key]
@@ -246,6 +273,7 @@ export const useKeyboardShortcutsStore = create<ShortcutStoreState>((set) => ({
   shortcuts: loadShortcuts(),
   setShortcut: (id, binding) =>
     set((state) => {
+      if (reservedShortcutOwner(binding)) return state;
       const next = {
         ...state.shortcuts,
         [id]: normalizeShortcutBinding(binding),
