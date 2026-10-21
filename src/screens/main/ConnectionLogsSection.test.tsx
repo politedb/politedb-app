@@ -90,9 +90,7 @@ describe("ConnectionLogsSection", () => {
     expect(headers.slice(0, 3)).toEqual(["Connection", "Status", "Time"]);
     expect(screen.getByText("Today")).toBeTruthy();
     expect(within(row("Today DB")).getByText(/· 10 min/)).toBeTruthy();
-    expect(
-      screen.getByText("keeps the last 300", { exact: false })
-    ).toBeTruthy();
+    expect(screen.getByText(/Last 300 sessions \(2\)/)).toBeTruthy();
   });
 
   it("marks open sessions and keeps counting their time", () => {
