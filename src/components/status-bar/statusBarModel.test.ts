@@ -17,10 +17,7 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("idle");
     expect(model.left).toEqual(["No active connection"]);
-    expect(model.right).toEqual([
-      "Tips: Right-click a connection for actions",
-      "PoliteDB v1.6.0",
-    ]);
+    expect(model.right).toEqual(["PoliteDB v1.6.0"]);
   });
 
   it("shows engine and query mode for a live connection", () => {
@@ -36,10 +33,7 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("connected");
     expect(model.left).toEqual(["Connected: SQLite", "Query mode: Production"]);
-    expect(model.right).toEqual([
-      "Tips: Right-click a table for actions",
-      "PoliteDB v1.6.0",
-    ]);
+    expect(model.right).toEqual(["PoliteDB v1.6.0"]);
   });
 
   it("marks a connection tab without a runtime as connecting", () => {
@@ -54,10 +48,7 @@ describe("app status bar model", () => {
 
     expect(model.dot).toBe("connecting");
     expect(model.left).toEqual(["Connecting: Postgres"]);
-    expect(model.right).toEqual([
-      "Tips: Right-click a table for actions",
-      "PoliteDB v1.6.0-dev",
-    ]);
+    expect(model.right).toEqual(["PoliteDB v1.6.0-dev"]);
   });
 });
 

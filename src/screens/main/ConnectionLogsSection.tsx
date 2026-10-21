@@ -41,10 +41,10 @@ export function ConnectionLogsSection({
     <div class="h-full w-full bg-slate-50">
       <div class="mx-auto w-full max-w-400 px-6 py-5">
         <div class="mb-3 flex justify-between">
-          <h3 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
+          <h2 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
             <ClockIcon className="size-4 text-slate-500" />
             Connection history ({totalCount})
-          </h3>
+          </h2>
         </div>
 
         <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
