@@ -2355,3 +2355,70 @@ None. No new actionable defect or regression established in the reviewed scope.
 - `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
 - No emitting production build, native app/browser visual run, real OS/WebKit IME session, screen-reader or touch session, live database connection, or Rust checks. Requested component tests and no-emit check do not prove dropdown clipping, pixel-level themes, native composition ordering or server-specific empty-database compatibility. No additional runtime probes or source-reversion mutation runs performed this round.
 - Only this round 3 section appended to `.agent/REVIEW.md`; no application/test edits, staging, commits, or changes to the index.
+
+
+## Review: keychain card redesign
+
+Status: CHANGES REQUIRED
+
+Reviewed 2026-10-21 on `feat/connection-form-polish`, against HEAD `707911d0d552a2243ea89df2317cff16e16e3f19`. Read `AGENTS.md`, referenced RTK guidance, and `.agent/WORKFLOW.md`. Scope: complete tracked working-tree diff and untracked `src/lib/connection/profileSummary.ts`. Ignored `.claude/launch.json`. No application edits or staging.
+
+### P0-P3 findings
+
+- **P2 — `src/screens/main/KeychainSection.tsx:262-264`: A-z/Z-a sorts hidden identifiers instead of displayed names.** With connection Alpha assigned UUID `ffff…` and Zulu assigned UUID `0000…`, A-z renders Zulu before Alpha. Provider IDs also need not match provider labels. The comparator is unchanged, but replacing the visible key-derived headings with owner names makes the existing sort control (`topBar.config.tsx:89-100`) visibly misleading. Compare display titles, with raw key as deterministic tie-breaker; alternatively explicitly label the control as sorting key IDs. Preserve raw keys for selection/actions.
+- **P3 — `src/screens/main/KeychainCard.tsx:120`: raw identity is available only through a pointer tooltip on a non-focusable div.** Two orphaned database keys now have identical visible title/badge and no detail; a keyboard or screen-reader user cannot distinguish their raw identities from the card text before acting. Focusing the outer button does not reliably expose the descendant's native title tooltip. Provide the full key through an accessible description on the focusable card and a keyboard-accessible way to inspect it. Existing Copy name remains a workaround. Badge as ordinary text is appropriate; no special role needed.
+- **P3 — `src/screens/main/KeychainCard.tsx:162`: violet AI icon lacks a dark-mode color.** `text-violet-600` remains the light-theme violet on the icon surface mapped to `#181818` by `styles.css:226-230`; unlike the slate text/badge colors, no violet override exists. This gives roughly 2.8:1 contrast, below the usual 3:1 graphical contrast target. Use an existing theme-aware icon color or a lighter dark-theme violet. Badge remains a redundant text identifier, so this is a visual polish issue rather than loss of the key type.
+
+No P0/P1 finding established. P2 sort mismatch needs disposition; P3 items are nonblocking recommendations.
+
+### Behavior, privacy, and edge cases
+
+- **Extraction:** compared the extracted helper text against HEAD. `firstNonEmpty`, `formatConnectionTarget`, `EngineInput`, `getEngineInput`, and the complete `buildSubtitle` body are unchanged; only the exported function name/comment/import boundary changes. `ConnectionCard` still consumes the same `{ engine, subtitle, hasSsh }`. No change to target formatting, engine fallback, SSH indicator, or database filename handling established.
+- **Privacy:** display reads profile/provider metadata, not secret values. No new secret fetch, log, analytics event, persistence, or network send is introduced. Hosts, database names, account identifiers and SSH usernames/targets are sensitive metadata but intentionally shown locally; AGENTS prohibits logging/sending them, not this requested screen display. ConnectionCard already exposes the shared connection summary. Passwords, API tokens, SSH private keys/passphrases and Google service-account JSON/path are not selected for detail. Existing explicitly opened secret editor behavior is outside this redesign.
+- **Files/engines:** SQLite and DuckDB database paths pass through `formatConnectionDatabaseDisplay`, which strips both Unix and Windows directory components. Google Sheets uses `spreadsheet_id`, suppresses host, and does not select a credentials file path; the formatter only basenames SQLite/DuckDB, not arbitrary Sheets strings. Turso URL/account/host fields are displayed verbatim as in ConnectionCard; this is metadata rendering, not a sanitizer for credentials manually embedded in such fields. Unknown engine strings fall back to their raw engine badge and DbIcon's generic database fallback; no matching input gives empty detail. Missing `input` is guarded. Valid empty/whitespace labels use provider-kind or unnamed-connection fallbacks; malformed null labels/models remain outside typed contracts.
+- **Unused detection:** profile UUID comparison is case-insensitive in both directions. AI lookup first honors exact `apiKeyRef`, then exact case-sensitive provider ID, matching backend `key_ref(id)`/save behavior in `ai/provider_store.rs:44,67`. Thus a null ref can still match a live provider ID; a differing provider ref can also match by ID. This fallback predates the diff and backend canonicalizes saved refs from IDs. Connection unused means no matching owner profile, not proof that a surviving profile currently needs that secret: a stale SSH key whose profile no longer has SSH is still marked used. Owner-existence semantics are unchanged, not newly introduced validation of actual secret consumption. Failed or pending owner-list loads can temporarily label keys unused; existing loading behavior remains.
+- **Identity/search:** raw key remains map/list key, selected identity and action argument. Search includes raw key, title, badge and detail, case-insensitively. New host/model/type searches follow directly from those fields; no secret-value search introduced. Generic keys retain last path-segment title behavior; redundant single-segment detail is intentionally suppressed.
+- **Accessibility/theme:** Enter/Space selection and Shift+F10/ContextMenu handlers remain unchanged; the existing keyboard-menu test passes. Title/badge/detail become button text; DbIcon also contributes an engine alt, potentially repeating the badge. Slate badge background/border/text and icon ring have global dark overrides; violet is the exception above. Actual focus behavior, clipping, screen-reader announcements and rendered theme contrast were not exercised in a native session.
+
+### Verification and limitations
+
+- `npx vitest run src/lib src/screens` via `rtk proxy`: **83 files, 489 tests passed**. Updated display tests cover label/model fallbacks, orphaned owner IDs, uppercase key UUID, SSH target and duplicate connection names; card tests cover context menus on title/badge/detail and Shift+F10.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- `git diff --check`: **passed** before this append.
+- No new test files or runtime probes created. Existing tests do not independently cover extracted summary across every engine, missing input, custom refs, filename privacy, search/sort ordering, or native tooltip accessibility; those conclusions use source inspection.
+- No emitting production build, native/browser visual session, live keychain/database, screen reader, touch session or Rust checks. Requested test/type-check commands passed; these do not establish pixel-level dark-mode rendering or native accessibility behavior. Workflow calls for Claude's second security-review pass for keychain scope; not performed here.
+- Only this section appended to `.agent/REVIEW.md`; no other file modified, no staging, commits or git identity changes.
+
+
+## Re-review: keychain card redesign round 2
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-21 on `feat/connection-form-polish`, against HEAD `707911d0d552a2243ea89df2317cff16e16e3f19`. Read `AGENTS.md`, referenced RTK instructions, `.agent/WORKFLOW.md`, and previous keychain review. Scope: complete application working-tree diff plus untracked `src/lib/connection/profileSummary.ts`. Ignored untracked `.claude/launch.json` and existing `.agent/REVIEW.md` diff. No application changes or staging.
+
+### Previous finding disposition
+
+- **P2 displayed-name sorting — CLOSED.** `src/lib/keychain/display.ts:140-163` compares title, badge, then detail using case-insensitive numeric collation, then raw key. `src/screens/main/KeychainSection.tsx:252-263` applies it after filtering and preserves raw keys as action/selection identities. Tests exercise names whose IDs sort in the opposite order, both directions, badge and detail ordering.
+- **P3 raw identity accessibility — CLOSED for programmatic identity exposure; native interaction remains unverified.** `src/screens/main/KeychainCard.tsx:93-95,135-136` places title on the focusable card and raw key in screen-reader text within its content. Identically named orphan cards therefore have distinct text-derived accessible names. `:162` supplies an empty decorative image alt, removing repeated engine announcements. Moving title alone would not establish a keyboard tooltip; closure rests on the raw identity being included in accessible content, with existing keyboard Copy name available for inspection.
+- **P3 dark AI icon — CLOSED at source/generated-CSS level.** `src/screens/main/KeychainCard.tsx:167` adds `dark:text-violet-400`; `src/styles.css:3` defines the class-driven custom dark variant. Compiling actual stylesheet in memory with installed Tailwind emitted the violet rule under `&:where(.dark, .dark *)`. Native rendered contrast remains unmeasured.
+
+### New P0-P3 findings
+
+None. No new actionable defect established in reviewed scope.
+
+### Regression and edge-case checks
+
+- **Accessible name:** sr-only content participates in the button's name; this is not an `aria-describedby` description. It appends `Key name: <full key>` after visible title/badge/detail, so UUID-based names become longer. For a generic single-segment key, visible title already equals raw key, so that string is repeated once. The existing descendant menu button also contributes its label to content-derived naming. These are verbosity tradeoffs, not evidence of missing identity, changed actions, or an unusable name. Exact full-name role queries would need updating; current title/badge/detail text queries and `Open menu` role query remain valid and pass. No native screen-reader session or computed-accessible-name assertion was run; new test checks title/textContent/empty alt, not actual announcements. Extremely long arbitrary custom keys have no new truncation in accessible text; usability at that extreme remains unverified.
+- **Comparator reversal/ties:** descending swaps operands for the entire comparator, including raw-key fallback; reversing tie order is consistent and preserves comparator symmetry. Additional in-memory execution of actual transpiled helper confirmed exact ascending/descending reversal for 1,000 and 10,000 unique keys; equal display fields resolve raw keys `a,b,c` versus `c,b,a`. Input array remains unchanged. Current committed-source tests cover badge/detail ties but do not actually reach equal-display raw-key fallback, descending ties, or numeric ordering; the raw-key fallback/reversal probe supplements that gap. Locale order depends on runtime locale, as with the previous comparator.
+- **Performance:** comparator does two map lookups and allocates two three-field arrays per comparison; no profile/provider scan or `keychainDisplay` call occurs inside sorting. Expected sort cost is O(n log n) comparisons with O(1) map access. A one-shot Node probe with synthetic mixed numeric titles measured approximately 30 ms for 1,000 keys and 294 ms for 10,000 keys ascending. Repeated localeCompare options/array allocation could warrant a reusable Intl.Collator/precomputed tuples if large-list latency becomes a requirement; no supported workload or native UI latency regression established. These are synthetic timings, not a WebKit benchmark. Memoization avoids re-sorting on unrelated state changes; search changes still trigger sorting. Existing display-map owner scans occur when keys/owners change, outside comparator.
+- **CSS support:** actual stylesheet compilation also emitted sr-only's absolute positioning, 1px dimensions, clipping, overflow hiding and nowrap. It hides the raw key visually without display:none/visibility:hidden. Both new utilities are supported by installed setup; no theme configuration change needed.
+- **Menus/remaining scope:** all right-click targets, Copy name, menu button and Shift+F10 tests pass. Event handlers and raw identity arguments remain unchanged. Rechecked extracted summary against removed ConnectionCard helpers and reviewed section heading/navigation/icon changes; no further regression established. No new secret fetch, storage, logging or telemetry introduced by fixes.
+
+### Verification and limitations
+
+- `npx vitest run src/lib src/screens` via `rtk proxy`: **83 files, 492 tests passed**.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- `git diff --check`: **passed** before append.
+- Additional read-only, in-memory helper sorting/performance and Tailwind compilation probes completed. First direct CSS compiler attempt omitted its required dependency callback and failed; retry with callback succeeded. No application/test/probe files created.
+- No emitting production build, native/browser visual session, screen reader, real keychain/database, touch session or Rust checks. Tests/type-check and generated CSS do not prove native tooltip-on-focus behavior, announcement verbosity, pixel-level contrast or large-list WebKit responsiveness. Workflow's separate Claude security-review pass for keychain scope was not performed here.
+- Only this section appended to `.agent/REVIEW.md`; no other file edited, no staging or commits.
