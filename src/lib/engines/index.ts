@@ -4,8 +4,6 @@ export {
   isNonSqlPatchEngine,
   allowsEmptyColumnList,
   supportsNewSchema,
-  defaultCredentialUser,
-  defaultCredentialDatabase,
   formatTableBreadcrumbTarget,
   preferredSchemaFromList,
 } from "./registry";
