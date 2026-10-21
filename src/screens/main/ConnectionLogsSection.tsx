@@ -14,6 +14,7 @@ import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
 import { confirmDialog } from "src/lib/system-dialog";
 import { MAX_ENTRIES, useConnectionLogStore } from "src/stores/connectionLog";
+import { useMainViewStore } from "src/stores/mainView";
 import {
   collapseRepeatedSessions,
   connectionLogDisplayStatus,
@@ -61,9 +62,12 @@ export function ConnectionLogsSection({
 }: Props) {
   const entries = useConnectionLogStore((s) => s.entries);
   const clearLog = useConnectionLogStore((s) => s.clearLog);
-  const [statusFilter, setStatusFilter] =
-    useState<ConnectionLogStatusFilter>("all");
-  const [profileFilter, setProfileFilter] = useState("all");
+  // Kept with the rest of the home screen view, so coming back from a
+  // connection keeps the filters.
+  const statusFilter = useMainViewStore((s) => s.historyStatusFilter);
+  const setStatusFilter = useMainViewStore((s) => s.setHistoryStatusFilter);
+  const profileFilter = useMainViewStore((s) => s.historyProfileFilter);
+  const setProfileFilter = useMainViewStore((s) => s.setHistoryProfileFilter);
 
   const sorted = useMemo(
     () => [...entries].sort((a, b) => b.openedAt - a.openedAt),
@@ -89,12 +93,23 @@ export function ConnectionLogsSection({
     return [...seen].sort((a, b) => a[1].localeCompare(b[1]));
   }, [sorted]);
 
+  // The chosen connection can drop out of the log (300-session limit, Clear
+  // history) while away; fall back to all instead of an unexplained empty list.
+  const profileFilterKnown =
+    profileFilter === "all" || connections.some(([id]) => id === profileFilter);
+  useEffect(() => {
+    if (!profileFilterKnown) setProfileFilter("all");
+  }, [profileFilterKnown, setProfileFilter]);
+  const activeProfileFilter = profileFilterKnown ? profileFilter : "all";
+
   const searched = useMemo(
     () =>
       filterConnectionLogEntries(sorted, searchQuery).filter(
-        (entry) => profileFilter === "all" || entry.profileId === profileFilter
+        (entry) =>
+          activeProfileFilter === "all" ||
+          entry.profileId === activeProfileFilter
       ),
-    [sorted, searchQuery, profileFilter]
+    [sorted, searchQuery, activeProfileFilter]
   );
   const statusCounts = useMemo(
     () => ({
@@ -113,7 +128,7 @@ export function ConnectionLogsSection({
 
   const { visibleItems, sentinelRef, hasMore } = useInfiniteScroll(rows, {
     pageSize: LOG_PAGE_SIZE,
-    resetKey: `${searchQuery}:${statusFilter}:${profileFilter}:${rows.length}`,
+    resetKey: `${searchQuery}:${statusFilter}:${activeProfileFilter}:${rows.length}`,
   });
   const days = useMemo(
     () => groupRowsByDay(visibleItems, now),
@@ -139,7 +154,9 @@ export function ConnectionLogsSection({
   }
 
   const isFiltered =
-    !!searchQuery.trim() || statusFilter !== "all" || profileFilter !== "all";
+    !!searchQuery.trim() ||
+    statusFilter !== "all" ||
+    activeProfileFilter !== "all";
   const columnCount = showDevice ? 5 : 4;
 
   return (
@@ -180,7 +197,7 @@ export function ConnectionLogsSection({
               <select
                 aria-label="Filter by connection"
                 class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                value={profileFilter}
+                value={activeProfileFilter}
                 onInput={(e) => setProfileFilter(e.currentTarget.value)}
               >
                 <option value="all">All connections</option>

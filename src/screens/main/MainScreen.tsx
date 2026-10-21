@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMainViewStore } from "src/stores/mainView";
+import { useScrollMemory } from "src/hooks/useScrollMemory";
 import { readTextFile } from "src/lib/system-fs";
 import { v4 as uuid } from "uuid";
 
@@ -41,13 +43,7 @@ import {
   formatExternalImportSuccessMessage,
   isTablePlusEncryptedPath,
 } from "src/lib/profiles/profileImport";
-import type {
-  ConnectionSortMode,
-  DatabaseEngine,
-  KeychainSortMode,
-  NavId,
-  ViewMode,
-} from "src/types";
+import type { DatabaseEngine, NavId } from "src/types";
 import {
   duplicateProfile,
   profileDecryptExport,
@@ -95,14 +91,35 @@ export function MainScreen() {
   const pinnedIds = usePinnedConnectionsStore((s) => s.pinnedIds);
   const loadLicense = useLicenseStore((s) => s.load);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeNav, setActiveNav] = useState<NavId>("connections");
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [connectionSortMode, setConnectionSortMode] =
-    useState<ConnectionSortMode>("created-desc");
-  const [keychainSortMode, setKeychainSortMode] =
-    useState<KeychainSortMode>("label-asc");
-  const [selectedGroupId, setSelectedGroupId] = useState<string>();
+  // Kept in a store: this screen unmounts while a connection tab is open, and
+  // coming back must not reset search, sort, layout or the chosen group.
+  const searchQuery = useMainViewStore((s) => s.searchQuery);
+  const setSearchQuery = useMainViewStore((s) => s.setSearchQuery);
+  const activeNav = useMainViewStore((s) => s.activeNav);
+  const setActiveNav = useMainViewStore((s) => s.setActiveNav);
+  const viewMode = useMainViewStore((s) => s.viewMode);
+  const setViewMode = useMainViewStore((s) => s.setViewMode);
+  const connectionSortMode = useMainViewStore((s) => s.connectionSortMode);
+  const setConnectionSortMode = useMainViewStore(
+    (s) => s.setConnectionSortMode
+  );
+  const keychainSortMode = useMainViewStore((s) => s.keychainSortMode);
+  const setKeychainSortMode = useMainViewStore((s) => s.setKeychainSortMode);
+  const selectedGroupId = useMainViewStore((s) => s.selectedGroupId);
+  const setSelectedGroupId = useMainViewStore((s) => s.setSelectedGroupId);
+  const mainColumnRef = useRef<HTMLDivElement>(null);
+
+  // Each page keeps its scroll position, also across a visit to a connection.
+  useScrollMemory({
+    key: activeNav,
+    getScroller: () =>
+      mainColumnRef.current?.querySelector<HTMLElement>("[data-scroll-root]"),
+    read: (nav) =>
+      useMainViewStore.getState().scrollTopByNav[nav as NavId] ?? 0,
+    write: (nav, top) =>
+      useMainViewStore.getState().setScrollTop(nav as NavId, top),
+    isCurrent: (nav) => useMainViewStore.getState().activeNav === nav,
+  });
   const [keychainNewSignal, setKeychainNewSignal] = useState(0);
   const [keychainEditorOpen, setKeychainEditorOpen] = useState(false);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
@@ -184,7 +201,7 @@ export function MainScreen() {
       ({ group }) => group.id === selectedGroupId
     );
     if (!stillExists) setSelectedGroupId(undefined);
-  }, [groupedProfiles, selectedGroupId]);
+  }, [groupedProfiles, selectedGroupId, setSelectedGroupId]);
 
   function assignSelectedGroupToProfile(profileId: string) {
     if (showNewConnection && selectedGroupId) {
@@ -464,7 +481,10 @@ export function MainScreen() {
         <LeftNav active={activeNav} onChange={setActiveNav} />
 
         {/* Main column */}
-        <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div
+          ref={mainColumnRef}
+          class="flex min-w-0 flex-1 flex-col overflow-hidden"
+        >
           {/* TopBar: pinned */}
           <div class="shrink-0 border-b border-slate-200 bg-white">
             <TopBar

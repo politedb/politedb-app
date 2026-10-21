@@ -13,6 +13,33 @@ vi.mock("src/stores/connectionLog", () => ({
   useConnectionLogStore: (select: (s: unknown) => unknown) => select(log.state),
 }));
 vi.mock("src/lib/system-dialog", () => ({ confirmDialog: log.confirmDialog }));
+// The History filters live in the home screen view store; a vanilla store
+// wired with Preact's useSyncExternalStore stands in for zustand's React hook.
+const view = vi.hoisted(() => ({
+  reset: () => {},
+  setProfile: (_id: string) => {},
+}));
+vi.mock("src/stores/mainView", async () => {
+  const { createStore } = await import("zustand/vanilla");
+  const { useSyncExternalStore } = await import("preact/compat");
+  const initial = { historyStatusFilter: "all", historyProfileFilter: "all" };
+  const store = createStore<Record<string, unknown>>(() => ({ ...initial }));
+  const actions = {
+    setHistoryStatusFilter: (v: string) =>
+      store.setState({ historyStatusFilter: v }),
+    setHistoryProfileFilter: (v: string) =>
+      store.setState({ historyProfileFilter: v }),
+  };
+  view.reset = () => store.setState({ ...initial });
+  view.setProfile = (id: string) =>
+    store.setState({ historyProfileFilter: id });
+  return {
+    useMainViewStore: (select: (s: unknown) => unknown) =>
+      useSyncExternalStore(store.subscribe, () =>
+        select({ ...store.getState(), ...actions })
+      ),
+  };
+});
 
 import { ConnectionLogsSection } from "./ConnectionLogsSection";
 
@@ -67,6 +94,7 @@ const table = () => within(screen.getByRole("table"));
 const row = (text: string) => table().getByText(text).closest("tr")!;
 
 beforeEach(() => {
+  view.reset();
   vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
   log.state.clearLog.mockReset();
   log.confirmDialog.mockReset().mockResolvedValue(true);
@@ -246,5 +274,19 @@ describe("ConnectionLogsSection", () => {
       expect.stringContaining("still open stay"),
       expect.objectContaining({ title: "Clear history" })
     );
+  });
+});
+
+describe("ConnectionLogsSection retained filters", () => {
+  it("falls back to all connections when the chosen one left the log", () => {
+    // Chosen before leaving; its sessions are gone by now.
+    view.setProfile("gone");
+    setup([session({ profileLabel: "Still here" })]);
+
+    expect(table().getByText("Still here")).toBeTruthy();
+    const select = screen.getByRole("combobox", {
+      name: "Filter by connection",
+    }) as HTMLSelectElement;
+    expect(select.value).toBe("all");
   });
 });
