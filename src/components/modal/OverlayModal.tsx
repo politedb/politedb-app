@@ -15,6 +15,8 @@ export function OverlayModal(props: {
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         class="flex h-full w-full items-center justify-center overflow-hidden p-4"
         onClick={(e) => e.stopPropagation()}
         onContextMenu={(e) => {

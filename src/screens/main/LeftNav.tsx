@@ -22,10 +22,15 @@ import {
   SettingsDialog,
   type SettingsDialogSection,
 } from "src/components/modal/SettingsDialog";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import {
+  OPEN_SETTINGS_EVENT,
+  takeOpenSettingsRequest,
+} from "src/lib/settings/openSettings";
+import { isMacPlatform } from "src/stores/keyboardShortcuts";
 
 const SPONSOR_URL = "https://github.com/sponsors/tonyphamvn";
 const REQUEST_FEATURE_URL =
@@ -46,6 +51,9 @@ const NAV_ITEMS: NavItem[] = [
   },
   { id: "logs", label: "History", icon: <ClockIcon className="size-5" /> },
 ];
+
+/** Opens Settings from anywhere (see src/layout). */
+const SETTINGS_SHORTCUT = isMacPlatform() ? "⌘," : "Ctrl+,";
 
 /** Tips for the page that is open. */
 const QUICK_TIPS: Record<NavId, string[]> = {
@@ -80,7 +88,21 @@ export function LeftNav(props: {
     await openExternalUrl(SPONSOR_URL);
   }
 
+  // ⌘, from anywhere: open now, or as soon as this screen mounts.
+  useEffect(() => {
+    const open = () => {
+      if (!takeOpenSettingsRequest()) return;
+      // The account menu may be open; it would sit on top of the dialog.
+      setOpenSettings(false);
+      setSettingsDialogOpen(true);
+    };
+    open();
+    window.addEventListener(OPEN_SETTINGS_EVENT, open);
+    return () => window.removeEventListener(OPEN_SETTINGS_EVENT, open);
+  }, []);
+
   function openSettingsSection(section: SettingsDialogSection) {
+    setOpenSettings(false);
     setSettingsInitialSection(section);
     setSettingsDialogOpen(true);
   }
@@ -186,13 +208,16 @@ export function LeftNav(props: {
                     "hover:border-slate-100 hover:bg-slate-100",
                     "dark:text-slate-300 dark:hover:border-slate-800 dark:hover:bg-slate-900"
                   )}
-                  title="Settings"
+                  title={`Settings (${SETTINGS_SHORTCUT})`}
                   onClick={() => setOpenSettings((v) => !v)}
                 >
                   <div className="flex items-center gap-3">
                     <SettingsIcon className="size-4.5" />
                     Settings
                   </div>
+                  <kbd class="font-sans text-xs text-slate-400">
+                    {SETTINGS_SHORTCUT}
+                  </kbd>
                 </Button>
 
                 {updateAvailable ? (
@@ -236,6 +261,9 @@ export function LeftNav(props: {
                 separatorBefore: true,
                 icon: <SettingsIcon className="size-5" />,
                 label: "Preferences...",
+                rightSlot: (
+                  <kbd class="font-sans text-xs">{SETTINGS_SHORTCUT}</kbd>
+                ),
                 onSelect: () => openSettingsSection("appearance"),
                 className: "text-slate-900",
               },
