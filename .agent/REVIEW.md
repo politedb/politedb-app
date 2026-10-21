@@ -2120,7 +2120,6 @@ None. No new P0-P3 correctness issue established in the reviewed scope.
 - Commands executed through `rtk proxy`; no network calls. No emitting build, custom executable probes, browser/desktop inspection, SVG rasterization, independent performance benchmark or memory profile. Curve/card clearance above is static geometric reasoning supported by point/endpoint tests, not an independent rendered-curve collision oracle. Tests do not exhaust all schemas, cap/pass-limit outcomes or jog candidate combinations.
 - Only this section appended to `.agent/REVIEW.md`; earlier sections preserved. No application/test changes, staging or commits.
 
-
 ## Review: ER diagram edge bundling
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2150,7 +2149,6 @@ Reviewed 2026-10-20 on `fix/license-key-input`, HEAD `f3bc981`. Read `AGENTS.md`
 - Executed the existing oracle on the synthetic overlapping routes quoted in finding 1; it accepted them, confirming the test blind spot.
 - Commands ran through `rtk proxy`; no network calls. No full-suite run, emitting build, browser/desktop inspection, SVG rasterization, customer-schema execution, performance benchmark or memory profile. Card/curve and marker conclusions combine existing tests with static geometry reasoning; no independent rendered-curve collision checker was run.
 - Only this section appended to `.agent/REVIEW.md`. Application/test files and temporary harness files left untouched; no staging or commits.
-
 
 ## Re-review: ER diagram edge bundling round 2
 
@@ -2182,7 +2180,6 @@ None. No new actionable defect or regression established in the reviewed two-fil
 - Additional read-only TypeScript/Node execution loaded the actual router and test helpers in memory: logical self-loop grouping, physical +12 offset, null-route handling, and mixed-hub shared-start/different-bundle pairs passed. The probe's initial assertion adapter hit a cross-VM array-prototype mismatch; normalizing both assertion values corrected the adapter, with no repository changes.
 - Commands ran through `rtk proxy`; no network calls. No full-suite run, emitting build, browser/desktop inspection, SVG rasterization or performance benchmark. Existing rendered-curve, interaction and capped-overflow limitations remain; finite fixture coverage is not exhaustive proof.
 - Only this section appended to `.agent/REVIEW.md`; earlier review content preserved. No application/test/harness edits, staging changes or commits.
-
 
 ## Review: ER diagram WebKit clipping
 
@@ -2225,7 +2222,6 @@ Other unchanged suspects, not established new defects:
 - No native WKWebView run, browser screenshot, before/after reproduction, SVG raster collision test or performance trace performed. Therefore clipping/stutter resolution and visual acceptability of endpoint bleed remain unverified. Recommended final validation: reproduce original large schema in the actual macOS Tauri build, scroll through the previous cutoff at multiple zoom/DPR settings, hover a high-degree table, compare filters/animation disabled, and inspect endpoints in light/dark themes.
 - Only this review section intentionally appended; no application/test edits, staging or commits. Earlier review sections preserved.
 
-
 ## Re-review: ER diagram WebKit clipping round 2
 
 Status: VERIFIED WITH LIMITATIONS
@@ -2258,3 +2254,104 @@ None. No new actionable defect established in this diff.
 - Structural test verifies idle-layer class/DOM placement and mask absence; it does not exercise actual stacking pixels, both browser zoom branches, active endpoint animations, hit testing through overlapping cards, shadows, or dark-theme rasterization. No native WKWebView/browser visual run, screenshot, SVG raster collision test, large-schema before/after reproduction, or performance trace performed. Thus original WebKit clipping/stutter resolution and shadow/ring appearance remain unverified. Validate the original schema in macOS Tauri at fractional/min/max zoom and both themes, including high-degree table hover.
 - Existing SVG viewport/outer wrapper clips, asynchronous scroll overscan lag, and filtered-animation cost remain the previous review's diagnostic limitations; no new regression established here.
 - Only this section appended to `.agent/REVIEW.md`; earlier content preserved. No other file intentionally modified, no staging or commits.
+
+
+## Review: connection form UI, tag dropdown, empty credential defaults
+
+Status: CHANGES REQUIRED
+
+Reviewed staged diff (`git diff --cached`) against HEAD/main `707911d0d552a2243ea89df2317cff16e16e3f19` on 2026-10-21. Read `AGENTS.md`, referenced RTK instructions, and `.agent/WORKFLOW.md`. Included user UI polish and Claude changes; ignored untracked `.claude/launch.json` and formatting-only staged review/feature-map changes. Application files had no unstaged differences during review.
+
+### P0-P3 findings
+
+- **P1 — `src/components/modal/ConnectionModal.tsx:294`: search ref now targets a component instance and crashes the picker effect.** Opening New Connection renders `<Input ref={searchRef}>`; `src/components/form/Input.tsx:4` is a plain Preact function component without ref forwarding. Its ref is an `Input` component instance, not the native input. `searchRef.current?.focus()` at `ConnectionModal.tsx:162` throws `TypeError: ref.current?.focus is not a function`, aborting the same effect before initial engine selection is established. Reproduced using the actual Input component with its left adornment in Preact/JSDOM. Forward the ref to the native input (or expose an explicit input-ref prop), and cover opening/searching the picker with a regression test.
+- **P2 — `src/components/common/TagInput.tsx:74`: combobox consumes IME candidate-navigation keys.** During composition, ArrowUp/ArrowDown now call `preventDefault()` and change the active tag option instead of leaving candidate navigation to the IME. Enter also executes tag selection without checking composition state; reproducing an in-progress `ni` composition with `isComposing: true` prevents ArrowDown and commits `["ni"]` on Enter. The old component already lacked an Enter composition guard, but interception of candidate arrows and suggestion selection are newly introduced. Ignore combobox actions while composing; cover composition start/update/end and composing Arrow/Enter events, including the native WebKit confirmation sequence where practical.
+- **P2 — `src/components/common/TagInput.tsx:55`: duplicate typed text can select a different tag on Enter.** With existing tag `d`, type `d` again: `canCreate` is false because the tag already exists, while matches are `dev` and `production`; `onInput` highlights index 0 and Enter at line 86 adds `dev`. Reproduced callback result: `["d", "dev"]`. Previously Enter normalized the typed text and duplicate addition was a no-op. Keep typed Enter behavior unless the user explicitly navigates/selects another option; also prioritize an exact suggestion over longer substring matches when suppressing Create Tag. Add duplicate-prefix and exact-match-order regression cases.
+
+No P0 or additional P3 finding established.
+
+### Behavioral compatibility assessment
+
+- **Removed defaults/helpers:** repository search found no remaining `defaultCredentialUser` / `defaultCredentialDatabase` references. Only form initialization consumed them; import/export and backend profile serialization do not call them. Existing nonempty saved values still win. Saved empty users now remain empty rather than being silently replaced with `root`; mandatory-user engines then disable Test/Save/Connect through `hasRequiredConnectionFields`, consistently with backend profile validation. This follows the requested empty-default behavior, rather than establishing a separate regression.
+- **Build/test/connect:** `buildConnectionInput` preserves entered users and trims database strings; shared footer gates required fields. PostgreSQL/MySQL/MariaDB/SQL Server/Oracle/ClickHouse require users; Snowflake additionally requires database and warehouse. PostgreSQL maps empty database to `postgres`; SQL Server maps it to `master`; MySQL/MariaDB pass the empty string as `db_name(Some(...))`; ClickHouse HTTP omits an empty database, while native configuration receives it as an empty default database. Oracle constructs `//host:port/` when database is empty, so success depends on server default-service configuration; there is no application service fallback. Oracle's database-optional UI and that connector behavior predate this patch. Empty database is now the initial state intentionally; no live-server compatibility claim is made here.
+- **Redis:** existing builder maps empty database to index 0 and does not emit the form user at all. Redis ACL-user omission and failure to initialize database from saved `redis.db` are pre-existing paths, not introduced by removal of `root`; they remain outside these findings. Mongo/Cassandra optional credentials retain their existing null conversion. SSH's independent `root` fallback is unchanged.
+- **Profiles:** native import/export preserves profile inputs independently of frontend form defaults; normal save/connect validation remains in place. Editing a profile no longer manufactures root user/database for empty stored fields. No DTO/schema change or secret-reference migration is introduced. Imported profiles are not rewritten by these removed helpers.
+- **Escape/focus/click:** TagInput stops native propagation on Escape while a visible list exists. The shared Dialog listener is document bubble phase, so it is blocked; no connection-form capture-phase Escape closer was found. New-connection form uses OverlayModal, which has no Escape listener; the engine-picker element handler belongs to a separate render branch. A closed/empty list permits Escape to propagate as before. Prevented option mousedown retains input focus through the subsequent click; blur closes the list. Existing tests cover these bubble/click cases, not real IME or touch ordering.
+- **ARIA/shared UI/theme:** combobox has an accessible name, expanded state, listbox relationship and active-option IDs while displayed; list options stay out of the tab sequence. Field retains its prop interface, and form Input now merges both class/className. No additional shared styling/prop regression established. Global dark-theme CSS remaps the new list's white/slate backgrounds, text and borders; missing local `dark:` classes alone is not a defect. Existing Field labels remain visual divs, not newly broken label associations. The Enter tip is still present in staged TagInput lines 200-202, contrary to the handoff description.
+- **Layout limitation:** list is absolute with z-50 inside OverlayScrollArea's overflow viewport, itself inside an overflow-hidden dialog. Z-index cannot escape that clip; short windows, many selected tags, and scrolled form positions need browser/native validation. No measured clipping defect is claimed without layout evidence. Keyboard activation also has no explicit scroll-into-view for long custom suggestion lists (the connection form currently supplies only four).
+
+### Verification and limitations
+
+- `npx vitest run src/components` via `rtk proxy`: **52 files, 377 tests passed**.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- Additional in-memory Preact/JSDOM probes against actual staged source reproduced the Input ref exception, duplicate-prefix wrong tag, and composing ArrowDown/Enter behavior. No test/application source files were created or modified for probes. Vite module loading emitted a sandbox `EPERM` warning when attempting its HMR listener on port 24678; module loading and the probes still completed successfully. These are DOM event probes, not native IME validation.
+- No native app/browser visual run, screenshot, screen-reader session, live database connection, Rust test run, or emitting production build. Requested no-emit check and component tests passed, but they do not establish native IME ordering, clipping, touch selection, pixel-level dark mode, or server-specific empty-database behavior. Existing tests do not catch the findings above.
+- Only this section appended to `.agent/REVIEW.md`; no application edits, staging, commits, or changes to the index.
+
+
+## Re-review: connection form UI, tag dropdown, empty credential defaults round 2
+
+Status: CHANGES REQUIRED
+
+Reviewed all application changes against HEAD `707911d0d552a2243ea89df2317cff16e16e3f19` using `git diff HEAD` (staged and unstaged), plus untracked `src/components/modal/ConnectionModal.test.tsx`, on 2026-10-21. Read `AGENTS.md`, referenced RTK instructions, `.agent/WORKFLOW.md`, and previous review. Excluded untracked `.claude/launch.json` and review/FEATURE_MAP formatting changes. No application files or staging modified.
+
+### Previous finding disposition
+
+- **P1 search ref — CLOSED.** `src/components/form/Input.tsx:45,65` attaches explicit `inputRef` to the native input in both render branches; `ConnectionModal.tsx:294` uses it. New picker regression test passes with actual shared Input, checks focus and console errors. Additional in-memory DOM probes confirm native HTMLInputElement refs with and without adornments. Did not independently run Claude's source-reversion mutation.
+- **P2 IME — CLOSED for reported event cases.** `TagInput.tsx:85` returns before preventing defaults, navigating, selecting, closing, or deleting during `isComposing` or keyCode 229. Regression test covers composing ArrowDown, Enter, Escape and non-composing Enter/229, then ordinary Enter. Tests synthesize flags; native composition start/update/end and OS/WebKit event ordering remain unverified.
+- **P2 duplicate-prefix selection — CLOSED.** Untouched navigation state remains -1; typed duplicate Enter calls duplicate-safe add instead of selecting a longer suggestion. Exact suggestions sort first; typing resets navigation. Regression tests cover duplicate `d` with `dev`/`production`, exact `dev` before `devops`, and Enter behavior.
+
+### New P0-P3 findings
+
+- **P2 — `src/components/common/TagInput.tsx:68-70`: numeric active index silently selects a different tag when options change.** Reproduced with actual component in a controlled Preact/JSDOM harness: initial tags `["local"]`, suggestions `["local", "dev", "staging", "production"]`; focus empty input and ArrowDown highlights `dev` at index 0. Backspace removes the last selected chip (`local`) without resetting active; `local` returns at option index 0, so highlight changes to `local` and Enter re-adds the chip just removed (callbacks: `[]`, then `["local"]`). External suggestion reorder has the same issue: after navigating to `dev`, reordering suggestions can make Enter select `production` at the retained index. Preserve active option identity across option changes, or clear explicit navigation whenever its option mapping changes; add regression coverage for chip removal and suggestion updates while open.
+
+No new P0, P1, or P3 finding established.
+
+### Compatibility and edge-case checks
+
+- **Other Input refs:** `SnippetPickerDialog.tsx:184` still passes plain `ref` to form/Input and calls `.focus()` at lines 65/133; `DatabaseSearchDialog.tsx:207` does likewise with common/Input and calls `.focus()` at line 147. Both exact caller patterns exist at HEAD; neither is introduced by this diff, and adding explicit inputRef does not repair those pre-existing callers. No other JSX Input ref caller found in `src/`. Recorded as existing debt, not a new patch finding.
+- **keyCode 229:** early return does not swallow/prevent browser keys; it skips custom tag handling. An event reporting 229 outside active composition also skips tag shortcuts, intentionally covering IME confirmation after compositionend. No evidence established of ordinary physical Enter/arrows being incorrectly classified on supported desktop platforms; no blanket cross-platform guarantee from synthetic tests.
+- **Pointer and arrows:** DOM probes confirm mouseenter selects `dev` and Enter adds it. From typed `d`'s default Create Tag highlight, ArrowUp wraps to `production`, then ArrowDown wraps back to Create Tag. Empty input starts Down at first/Up at last; Escape and blur clear active, and new input resets it.
+- **ARIA:** inspected and probed active-descendant resolves to rendered option with matching aria-selected; absent when list closed or no highlighted option. Out-of-range indices fall back to typed match/no highlight without dangling active-descendant. The new finding is semantic selection drift within bounds, not an invalid ARIA target.
+- **Changing options:** after shrinking options below active index, fallback safely highlights typed Create Tag (or none); Enter uses typed text. Reorder/insertion/removal that leaves index in bounds retains wrong option identity as above. Current connection caller has static suggestions, but selected-chip removal changes the same options list in the existing workflow.
+- **Remaining diff:** reviewed shared form class merging, Field, spacing/icon/theme changes, tag display casing, credential-default/helper removal and their callers. No further regression established. Prior backend/default compatibility caveats remain; no new native/database behavior changes in this round.
+
+### Verification and limitations
+
+- `npx vitest run src/components` via `rtk proxy`: **53 files, 381 tests passed**, including untracked ConnectionModal regression test.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- Additional in-memory Preact/JSDOM probes exercised both native-ref branches, hover+Enter, arrow wrap from typed highlight, ARIA targets, suggestion reorder/shrink, and controlled selected-chip removal. No test/application source files created or modified. Vite module loading emitted sandbox `EPERM` for HMR listener port 24678; probes completed successfully.
+- No native app/browser visual run, real IME, screen reader, touch test, live database, Rust checks, or emitting production build. Used requested no-emit check; component tests do not prove clipping, native event ordering, platform-specific 229 behavior, or server-specific empty-database compatibility.
+- Only this section appended to `.agent/REVIEW.md`; no staging, commits, or application edits.
+
+
+## Re-review: connection form UI, tag dropdown, empty credential defaults round 3
+
+Status: VERIFIED WITH LIMITATIONS
+
+Reviewed 2026-10-21 against HEAD `707911d0d552a2243ea89df2317cff16e16e3f19`. Read `AGENTS.md`, referenced RTK guidance, `.agent/WORKFLOW.md`, and round 2 review. Scope: all application changes in `git diff HEAD` (staged and unstaged), plus untracked `src/components/modal/ConnectionModal.test.tsx`. Excluded `.claude/launch.json` and review/FEATURE_MAP formatting as requested.
+
+### Previous finding disposition
+
+- **P2 numeric active-index selection drift — CLOSED.** `src/components/common/TagInput.tsx:10,32,72-79` stores option identity and derives its current index each render. Backspace can insert `local` before the selected `dev` without changing the selected identity; Enter resolves the current option by that identity (`:109`). New tests at `src/components/common/TagInput.test.tsx:139-173` pass: the exact controlled chip-removal scenario adds `dev`, not `local`; external suggestion reorder preserves both highlighted `dev` and Enter's callback.
+- **Earlier P1 search ref — remains CLOSED.** `src/components/form/Input.tsx:45,65` binds `inputRef` to the native input in both branches; `src/components/modal/ConnectionModal.tsx:294` supplies it. Untracked picker regression test passed with the actual shared Input and checks initial focus/no console errors.
+- **Earlier P2 IME — remains CLOSED for reported synthetic event cases.** `TagInput.tsx:91` still returns before all custom key handling for `isComposing` or keyCode 229. Existing regression at `TagInput.test.tsx:115-137` passes.
+- **Earlier P2 duplicate-prefix / exact-first — remains CLOSED.** Without a surviving explicitly selected option, Enter uses typed text (`TagInput.tsx:109-110`), and duplicate-safe addition remains at `:35-39`. Exact suggestions sort ahead of longer matches before truncation (`:57-58`). Duplicate `d` with longer matches and exact `dev` after `devops` tests both pass (`TagInput.test.tsx:85-113`).
+
+### New P0-P3 findings
+
+None. No new actionable defect or regression established in the reviewed scope.
+
+### Identity and compatibility checks
+
+- **Collision scheme:** `optionKey` at `TagInput.tsx:10` is injective over `(create, tag)`: different kinds have distinct fixed prefixes (`create:` versus `tag:`); within one kind, equal keys require equal complete tag strings. Colons or prefix-like text inside a tag cannot bridge those prefixes. Suggestions are normalized and deduplicated (`:50-53`), and at most one Create option exists (`:64`); the same rendered list therefore has unique option keys. A create-to-suggestion transition for the same tag intentionally changes identity and safely falls back to the typed match.
+- **Disappearing option:** static trace of `:72-79,109-110` confirms a missing key produces `activeIndex === -1`, disables explicit navigation, and highlights the typed match or nothing. Enter then uses typed input; empty input adds nothing. A surviving key retains its tag through insertion, removal and reorder. Missing-option fallback is assessed statically; no new dedicated runtime probe was run in this review.
+- **Navigation/reset/ARIA:** arrows compute from current highlight and save the resulting key (`:96-104`); mouseenter uses the same key (`:200`). Choose, blur, handled Escape and input clear navigation (`:85,119,169,175`). List keys use the same identity (`:190`). ARIA IDs remain positional but are regenerated with the derived current highlight (`:161-164,191-193`), so reorder does not leave the active-descendant pointing at the old index.
+- **Remaining diff:** inspected shared Input/Field changes, connection form spacing and labels, tag styling/icon/casing, empty credential defaults and removed helper exports/callers. No additional regression established. Credential serialization, database-driver behavior and native UI caveats from earlier reviews remain outside what these component checks prove.
+
+### Verification and limitations
+
+- `npx vitest run src/components` via `rtk proxy`: **53 files, 383 tests passed**, including both new identity regressions, prior IME/duplicate/exact-first cases and untracked ConnectionModal regression.
+- `npx tsc --noEmit -p .` via `rtk proxy`: **passed**.
+- No emitting production build, native app/browser visual run, real OS/WebKit IME session, screen-reader or touch session, live database connection, or Rust checks. Requested component tests and no-emit check do not prove dropdown clipping, pixel-level themes, native composition ordering or server-specific empty-database compatibility. No additional runtime probes or source-reversion mutation runs performed this round.
+- Only this round 3 section appended to `.agent/REVIEW.md`; no application/test edits, staging, commits, or changes to the index.
