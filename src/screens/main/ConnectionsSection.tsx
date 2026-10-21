@@ -1,7 +1,7 @@
 import { useMemo } from "preact/hooks";
 import type { ConnectionProfile } from "src/lib/tauri";
 import { Button } from "src/components/common/Button";
-import { PinFilledIcon } from "src/components/icons";
+import { DatabaseIcon, PinFilledIcon } from "src/components/icons";
 import type { ViewMode } from "src/types";
 import { ConnectionCard } from "./ConnectionCard";
 import type { ConnectionGroup } from "src/stores/connectionGroups";
@@ -185,9 +185,10 @@ export function ConnectionsSection(props: {
       {profiles.length === 0 ? (
         <div class="space-y-3">
           <div class="flex items-center justify-between">
-            <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+            <h2 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
+              <DatabaseIcon className="size-4 text-slate-500" />
               All Connections ({profiles.length})
-            </h3>
+            </h2>
           </div>
           <EmptyState
             hasSearch={hasSearch}
@@ -201,19 +202,18 @@ export function ConnectionsSection(props: {
         <div class="space-y-5">
           {favoriteProfiles.length > 0 ? (
             <section class="space-y-3">
-              <div class="flex items-center gap-2">
+              <h2 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
                 <PinFilledIcon className="size-4.5 text-amber-500" />
-                <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
-                  Favorites ({favoriteProfiles.length})
-                </h2>
-              </div>
+                Favorites ({favoriteProfiles.length})
+              </h2>
               <ConnectionCards profiles={favoriteProfiles} {...cardProps} />
             </section>
           ) : null}
 
           {otherProfiles.length > 0 ? (
             <section class="space-y-3">
-              <h2 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+              <h2 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
+                <DatabaseIcon className="size-4 text-slate-500" />
                 All connections ({otherProfiles.length})
               </h2>
               <ConnectionCards profiles={otherProfiles} {...cardProps} />

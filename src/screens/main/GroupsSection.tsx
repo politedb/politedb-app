@@ -1,6 +1,6 @@
 import type { ConnectionGroup } from "src/stores/connectionGroups";
 import { Button } from "src/components/common/Button";
-import { XIcon } from "src/components/icons/X";
+import { XIcon, FolderIcon } from "src/components/icons";
 
 export function GroupsSection(props: {
   groups: Array<{ group: ConnectionGroup; count: number }>;
@@ -25,7 +25,8 @@ export function GroupsSection(props: {
   return (
     <div class="mb-5">
       <div class="mb-3 flex items-center">
-        <h3 class="text-xs font-semibold tracking-wide text-slate-800 uppercase">
+        <h3 class="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-800">
+          <FolderIcon className="size-4 text-slate-500" />
           Groups ({groups.length})
         </h3>
       </div>

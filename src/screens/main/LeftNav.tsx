@@ -37,10 +37,14 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "connections",
     label: "Connections",
-    icon: <DatabaseIcon className="size-4" />,
+    icon: <DatabaseIcon className="size-5" />,
   },
-  { id: "keychain", label: "Keychain", icon: <KeyIcon className="size-4" /> },
-  { id: "logs", label: "Logs", icon: <ClockIcon className="size-4" /> },
+  {
+    id: "keychain",
+    label: "Credentials",
+    icon: <KeyIcon className="size-5" />,
+  },
+  { id: "logs", label: "History", icon: <ClockIcon className="size-5" /> },
 ];
 
 export function LeftNav(props: {
@@ -73,7 +77,7 @@ export function LeftNav(props: {
         style={{ width: "var(--sidebar-width)" }}
       >
         <div data-density-sidebar-header class="p-3">
-          <div class="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400">
+          <div class="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400">
             EXPLORER
           </div>
         </div>
@@ -102,7 +106,7 @@ export function LeftNav(props: {
                   <span
                     data-density-icon
                     class={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-lg",
+                      "flex size-8.5 items-center justify-center rounded-lg",
                       "bg-slate-100",
                       isActive
                         ? "text-slate-700"
