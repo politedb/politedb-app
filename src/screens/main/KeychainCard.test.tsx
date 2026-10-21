@@ -70,6 +70,31 @@ describe("KeychainCard menu", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("does not open on double-click while disabled", () => {
+    const onOpen = vi.fn();
+    render(
+      <KeychainCard
+        keyName="politedb/profile/p2/credential/database"
+        display={{
+          title: "Busy",
+          badge: "PostgreSQL",
+          detail: "",
+          icon: { kind: "key" },
+          unused: false,
+        }}
+        selected={false}
+        disabled
+        onSelect={vi.fn()}
+        onOpen={onOpen}
+        onCopy={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    fireEvent.dblClick(screen.getByText("Busy").closest('[role="button"]')!);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it("still opens from the menu button", () => {
     setup();
 

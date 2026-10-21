@@ -27,7 +27,11 @@ export type KeychainDisplay = {
   unused: boolean;
 };
 
-/** Sources that give keychain entries readable names. */
+/**
+ * Sources that give keychain entries readable names. A missing list means it is
+ * not known (still loading or failed to load): its keys are then never called
+ * unused, so nothing in use can be offered for cleanup.
+ */
 export type KeychainNameSources = {
   aiProviders?: readonly AiProviderConfig[];
   profiles?: readonly ConnectionProfile[];
@@ -67,7 +71,16 @@ export function keychainDisplay(
 ): KeychainDisplay {
   const ai = AI_KEY_RE.exec(keyName);
   if (ai) {
-    const providers = sources.aiProviders ?? [];
+    const providers = sources.aiProviders;
+    if (!providers) {
+      return {
+        title: "AI key",
+        badge: "AI key",
+        detail: "",
+        icon: { kind: "ai" },
+        unused: false,
+      };
+    }
     const provider =
       providers.find((p) => p.apiKeyRef === keyName) ??
       providers.find((p) => p.id === ai[1]);
@@ -95,10 +108,19 @@ export function keychainDisplay(
   const profileKey = PROFILE_KEY_RE.exec(keyName);
   if (profileKey) {
     const [, profileId, purpose] = profileKey;
-    const profile = (sources.profiles ?? []).find(
+    const ssh = purpose === "ssh";
+    if (!sources.profiles) {
+      return {
+        title: "Connection key",
+        badge: ssh ? "SSH" : "Database",
+        detail: "",
+        icon: ssh ? { kind: "ssh" } : { kind: "key" },
+        unused: false,
+      };
+    }
+    const profile = sources.profiles.find(
       (p) => p.id.toLowerCase() === profileId.toLowerCase()
     );
-    const ssh = purpose === "ssh";
     if (!profile) {
       return {
         title: "Unused connection key",
@@ -161,4 +183,49 @@ export function sortKeychainKeys(
   return [...keys].sort((a, b) =>
     mode === "label-desc" ? compare(b, a) : compare(a, b)
   );
+}
+
+export type KeychainGroupId = "ai" | "database" | "ssh" | "other" | "unused";
+
+export type KeychainGroup = {
+  id: KeychainGroupId;
+  label: string;
+  keys: string[];
+};
+
+const GROUP_ORDER: ReadonlyArray<{ id: KeychainGroupId; label: string }> = [
+  { id: "ai", label: "AI providers" },
+  { id: "database", label: "Database connections" },
+  { id: "ssh", label: "SSH" },
+  { id: "other", label: "Other keys" },
+  // Last: keys to clean up.
+  { id: "unused", label: "Unused" },
+];
+
+export function keychainGroupOf(display: KeychainDisplay): KeychainGroupId {
+  if (display.unused) return "unused";
+  if (display.icon.kind === "ai") return "ai";
+  if (display.icon.kind === "ssh") return "ssh";
+  if (display.icon.kind === "database") return "database";
+  return "other";
+}
+
+/**
+ * Splits already sorted keys into the screen's groups, keeping their order
+ * within each group. Empty groups are left out.
+ */
+export function groupKeychainKeys(
+  sortedKeys: readonly string[],
+  displays: ReadonlyMap<string, KeychainDisplay>
+): KeychainGroup[] {
+  const byGroup = new Map<KeychainGroupId, string[]>();
+  for (const key of sortedKeys) {
+    const display = displays.get(key) ?? keychainDisplay(key);
+    const id = keychainGroupOf(display);
+    byGroup.set(id, [...(byGroup.get(id) ?? []), key]);
+  }
+  return GROUP_ORDER.flatMap(({ id, label }) => {
+    const keys = byGroup.get(id);
+    return keys?.length ? [{ id, label, keys }] : [];
+  });
 }

@@ -29,7 +29,7 @@ export function KeychainCard(props: {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const { title, badge, detail, icon } = props.display;
+  const { title, badge, detail, icon, unused } = props.display;
 
   const onDeleteSecret = useCallback(async () => {
     const ok = await Promise.resolve(
@@ -94,7 +94,8 @@ export function KeychainCard(props: {
         tabIndex={0}
         title={keyName}
         onClick={onSelect}
-        onDblClick={onOpen}
+        // While another keychain operation runs, a card must not start a read.
+        onDblClick={disabled ? undefined : onOpen}
         onContextMenu={openMenuAtPoint}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -114,7 +115,14 @@ export function KeychainCard(props: {
         )}
       >
         <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-50 ring-1 ring-slate-200">
+          <div
+            class={cn(
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1",
+              unused
+                ? "bg-amber-50 ring-amber-200"
+                : "bg-slate-50 ring-slate-200"
+            )}
+          >
             <KeychainCardIcon icon={icon} />
           </div>
 

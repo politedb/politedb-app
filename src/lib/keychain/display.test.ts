@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ConnectionProfile } from "src/lib/tauri/types";
 import type { AiProviderConfig } from "src/types";
-import { keychainDisplay, sortKeychainKeys } from "./display";
+import {
+  groupKeychainKeys,
+  keychainDisplay,
+  sortKeychainKeys,
+} from "./display";
 
 const anthropic: AiProviderConfig = {
   id: "anthropic-1",
@@ -50,7 +54,9 @@ describe("keychainDisplay", () => {
   });
 
   it("marks AI keys whose provider was removed as unused", () => {
-    expect(keychainDisplay("politedb:ai:gone:api_key")).toMatchObject({
+    expect(
+      keychainDisplay("politedb:ai:gone:api_key", { aiProviders: [] })
+    ).toMatchObject({
       title: "Unused AI key",
       badge: "AI key",
       unused: true,
@@ -94,11 +100,29 @@ describe("keychainDisplay", () => {
   });
 
   it("marks connection secrets without a connection as unused", () => {
-    expect(keychainDisplay(dbKey("missing"))).toMatchObject({
+    expect(keychainDisplay(dbKey("missing"), { profiles: [] })).toMatchObject({
       title: "Unused connection key",
       badge: "Database",
       unused: true,
     });
+  });
+
+  it("never calls a key unused while its owners are not known", () => {
+    // Lists still loading or failed to load: nothing may be offered for cleanup.
+    for (const key of [
+      "politedb:ai:gone:api_key",
+      dbKey("missing"),
+      `politedb/profile/${PROFILE_ID}/credential/ssh`,
+    ]) {
+      expect(keychainDisplay(key).unused).toBe(false);
+    }
+    expect(keychainDisplay(dbKey("x"), { aiProviders: [] })).toMatchObject({
+      title: "Connection key",
+      unused: false,
+    });
+    expect(
+      keychainDisplay("politedb:ai:x:api_key", { profiles: [] })
+    ).toMatchObject({ title: "AI key", unused: false });
   });
 
   it("keeps the previous names for other keys", () => {
@@ -116,7 +140,7 @@ describe("sortKeychainKeys", () => {
   // Raw ids run opposite to the names: "zulu" is stored under the smallest id.
   const zulu = { ...profile(PROFILE_ID, "z.internal"), label: "Zulu" };
   const alpha = { ...profile(OTHER_ID, "a.internal"), label: "alpha" };
-  const sources = { profiles: [zulu, alpha] } as const;
+  const sources = { profiles: [zulu, alpha], aiProviders: [] };
   const keys = [dbKey(PROFILE_ID), dbKey(OTHER_ID), "politedb:ai:gone:api_key"];
   const displays = new Map(keys.map((k) => [k, keychainDisplay(k, sources)]));
   const titles = (sorted: string[]) =>
@@ -152,6 +176,44 @@ describe("sortKeychainKeys", () => {
       dbKey(OTHER_ID), // PostgreSQL, a.internal
       dbKey(PROFILE_ID), // PostgreSQL, b.internal
       `politedb/profile/${PROFILE_ID}/credential/ssh`, // SSH
+    ]);
+  });
+});
+
+describe("groupKeychainKeys", () => {
+  it("groups keys by kind, unused last, keeping their order", () => {
+    const sources = {
+      profiles: [profile(PROFILE_ID, "db.internal")],
+      aiProviders: [anthropic],
+    };
+    const keys = [
+      "politedb:ai:gone:api_key",
+      dbKey(PROFILE_ID),
+      "my-custom-key",
+      `politedb/profile/${PROFILE_ID}/credential/ssh`,
+      anthropic.apiKeyRef!,
+      dbKey("missing"),
+    ];
+    const displays = new Map(keys.map((k) => [k, keychainDisplay(k, sources)]));
+
+    expect(
+      groupKeychainKeys(keys, displays).map((g) => [g.id, g.keys])
+    ).toEqual([
+      ["ai", [anthropic.apiKeyRef]],
+      ["database", [dbKey(PROFILE_ID)]],
+      ["ssh", [`politedb/profile/${PROFILE_ID}/credential/ssh`]],
+      ["other", ["my-custom-key"]],
+      ["unused", ["politedb:ai:gone:api_key", dbKey("missing")]],
+    ]);
+  });
+
+  it("leaves out empty groups", () => {
+    const keys = [dbKey("missing")];
+    const displays = new Map(
+      keys.map((k) => [k, keychainDisplay(k, { profiles: [] })])
+    );
+    expect(groupKeychainKeys(keys, displays).map((g) => g.label)).toEqual([
+      "Unused",
     ]);
   });
 });
