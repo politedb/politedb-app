@@ -25,6 +25,7 @@ import {
   getTopBarCreateLabel,
   getTopBarCreateTitle,
   getTopBarSearchPlaceholder,
+  SORT_LABELS,
 } from "./topBar.config";
 import { cn } from "src/utils/cn";
 
@@ -135,11 +136,13 @@ function CreateKeychainButton(props: {
 
 function SortMenu(props: {
   title: string;
+  /** The current order, shown on the button. */
+  label: string;
   items:
     | ReturnType<typeof buildConnectionSortItems>
     | ReturnType<typeof buildKeychainSortItems>;
 }) {
-  const { title, items } = props;
+  const { title, label, items } = props;
   const [open, setOpen] = useState(false);
 
   return (
@@ -155,10 +158,12 @@ function SortMenu(props: {
           <Button
             variant="outline"
             onClick={() => setOpen((v) => !v)}
-            class="h-9 rounded-lg border border-slate-300 px-2 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            class="h-9 gap-1.5 rounded-lg border border-slate-300 px-2.5 text-sm font-medium whitespace-nowrap dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             title={title}
+            aria-label={`${title}: ${label}`}
           >
             <SortIcon className="size-4" />
+            <span>{label}</span>
           </Button>
         </div>
       }
@@ -168,15 +173,16 @@ function SortMenu(props: {
 
 function UtilityActions(props: {
   sortTitle: string;
+  sortLabel: string;
   sortItems:
     | ReturnType<typeof buildConnectionSortItems>
     | ReturnType<typeof buildKeychainSortItems>;
 }) {
-  const { sortTitle, sortItems } = props;
+  const { sortTitle, sortLabel, sortItems } = props;
 
   return (
     <div class="flex items-center gap-1">
-      <SortMenu title={sortTitle} items={sortItems} />
+      <SortMenu title={sortTitle} label={sortLabel} items={sortItems} />
     </div>
   );
 }
@@ -302,8 +308,9 @@ export function TopBar(props: TopBarProps) {
       {isUtilityMode ? (
         <>
           <UtilityActions
-            sortTitle={
-              isConnections ? "Sort connections" : "Sort keychain keys"
+            sortTitle={isConnections ? "Sort connections" : "Sort credentials"}
+            sortLabel={
+              SORT_LABELS[isConnections ? connectionSortMode : keychainSortMode]
             }
             sortItems={sortItems}
           />

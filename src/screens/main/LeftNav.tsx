@@ -47,6 +47,22 @@ const NAV_ITEMS: NavItem[] = [
   { id: "logs", label: "History", icon: <ClockIcon className="size-5" /> },
 ];
 
+/** Tips for the page that is open. */
+const QUICK_TIPS: Record<NavId, string[]> = {
+  connections: [
+    "Double-click a connection to open it.",
+    "Pin connections to keep it at the top.",
+  ],
+  keychain: [
+    "Double-click a key to edit it.",
+    "Right-click a key for actions.",
+  ],
+  logs: [
+    "Click a connection to find it.",
+    "Search by name, host, user or error.",
+  ],
+};
+
 export function LeftNav(props: {
   active: NavId;
   onChange: (id: NavId) => void;
@@ -130,13 +146,6 @@ export function LeftNav(props: {
                           : "Secrets & keychain"}
                     </div>
                   </div>
-
-                  {/* Active marker (subtle) */}
-                  {isActive ? (
-                    <span class="h-2 w-2 rounded-full bg-blue-500" />
-                  ) : (
-                    <span class="h-2 w-2 rounded-full bg-transparent" />
-                  )}
                 </button>
               );
             })}
@@ -157,8 +166,9 @@ export function LeftNav(props: {
               <span>Quick tips:</span>
             </div>
             <ul class="list-disc pl-5">
-              <li>Double-click a connection to open it.</li>
-              <li>Pin connections to keep it at the top.</li>
+              {QUICK_TIPS[active].map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
             </ul>
           </div>
           <Dropdown
