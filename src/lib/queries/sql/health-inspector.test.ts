@@ -5,7 +5,10 @@ import {
   HEALTH_INSPECTOR_QUERY_TEXT_CAP,
   healthInspectorCapabilitiesSql,
   HEALTH_INSPECTOR_SIZE_CANDIDATES,
+  healthInspectorDropIndexSql,
   healthInspectorIndexesSql,
+  healthInspectorServerSql,
+  healthInspectorVacuumSql,
   healthInspectorOverviewSql,
   healthInspectorSessionsSql,
   healthInspectorStatementsInfoSql,
@@ -52,6 +55,44 @@ describe("healthInspector SQL builders", () => {
     expect(HEALTH_INSPECTOR_SIZE_CANDIDATES).toBeGreaterThan(
       HEALTH_INSPECTOR_FETCH_LIMIT
     );
+  });
+
+  it("reads server health from catalogs only", () => {
+    const sql = healthInspectorServerSql();
+    expect(sql).toContain("pg_catalog.pg_database");
+    expect(sql).toContain("datfrozenxid");
+    expect(sql).toContain("'max_connections'");
+    expect(sql).toContain("'superuser_reserved_connections'");
+    expect(sql).toContain("pg_catalog.pg_stat_replication");
+    // Client slots only (workers do not use max_connections), and whether the
+    // role can see other roles' sessions at all.
+    expect(sql).toContain("a.backend_type='client backend'");
+    // USAGE, not MEMBER: a NOINHERIT member still sees other sessions masked.
+    expect(sql).toContain("pg_has_role('pg_read_all_stats', 'USAGE')");
+    expect(sql).not.toContain("'MEMBER'");
+    expect(sql).toContain("current_setting('reserved_connections', true)");
+    expect(sql).not.toContain("numbackends");
+    expect(sql).toContain("pg_last_xact_replay_timestamp");
+    expect(sql).not.toMatch(/pg_(total_)?relation_size|pg_stat_user_tables/);
+  });
+
+  it("marks unique indexes so they are never offered for DROP", () => {
+    const sql = healthInspectorIndexesSql();
+    expect(sql).toContain("indisunique OR x.indisprimary");
+    expect(sql).toContain("is_unique");
+    expect(sql).toContain("x.indisexclusion");
+    expect(sql).toContain("AS enforces_constraint");
+  });
+
+  it("quotes identifiers in copy-only maintenance statements", () => {
+    expect(healthInspectorVacuumSql("public", "events")).toBe(
+      'VACUUM (ANALYZE) "public"."events";'
+    );
+    expect(healthInspectorDropIndexSql('we"ird', "Idx")).toBe(
+      'DROP INDEX CONCURRENTLY IF EXISTS "we""ird"."Idx";'
+    );
+    expect(healthInspectorVacuumSql(null, "events")).toBeNull();
+    expect(healthInspectorDropIndexSql("public", "")).toBeNull();
   });
 
   it("overview aggregates sessions and database size without table scans", () => {

@@ -315,6 +315,7 @@ describe("collectHealthInspectorSnapshot", () => {
       runSql: runSql as any,
       onProgress: (partial) => {
         const sections = [
+          partial.server,
           partial.sessions,
           partial.statements,
           partial.tables,
@@ -331,9 +332,9 @@ describe("collectHealthInspectorSnapshot", () => {
     expect(maxInFlight).toBe(2);
     // First update clears the previous results; then the overview alone;
     // later updates finish one section each.
-    expect(progress[0]).toEqual({ overview: "loading", pending: 4 });
-    expect(progress[1]).toEqual({ overview: "ready", pending: 4 });
-    expect(progress.map((p) => p.pending)).toEqual([4, 4, 3, 2, 1, 0]);
+    expect(progress[0]).toEqual({ overview: "loading", pending: 5 });
+    expect(progress[1]).toEqual({ overview: "ready", pending: 5 });
+    expect(progress.map((p) => p.pending)).toEqual([5, 5, 4, 3, 2, 1, 0]);
     expect(snap.finishedAt).not.toBeNull();
     for (const opts of optsSeen) {
       expect(opts).toMatchObject({ readOnly: true, lockTimeoutMs: 1_000 });
@@ -397,5 +398,33 @@ describe("collectHealthInspectorSnapshot", () => {
 
     expect(snap.tables.sizeRankingEstimated).toBe(true);
     expect(snap.indexes.sizeRankingEstimated).toBe(false);
+  });
+
+  it("keeps the overview when only the server metrics query fails", async () => {
+    const runSql = vi.fn(async (_conn: string, sql: string) => {
+      if (sql.includes("pg_database_size")) {
+        return result(["database_name", "session_count"], [["db", 1]]);
+      }
+      if (sql.includes("datfrozenxid")) {
+        throw new Error(
+          "permission denied for function pg_last_xact_replay_timestamp"
+        );
+      }
+      return result([]);
+    });
+
+    const snap = await collectHealthInspectorSnapshot({
+      runtimeConnectionId: "c1",
+      profileId: "p1",
+      engine: "postgres",
+      runSql: runSql as any,
+    });
+
+    expect(snap.overview.status).toBe("ready");
+    expect(snap.server.status).toBe("unavailable");
+    expect(snap.server.data).toBeNull();
+    expect(runSql.mock.calls.length).toBeLessThanOrEqual(
+      HEALTH_INSPECTOR_MAX_STATEMENTS
+    );
   });
 });

@@ -10,7 +10,16 @@ export type HealthInspectorContext = {
   runtimeConnectionId?: string;
   profileId?: string | null;
   engine?: DatabaseEngine;
+  /**
+   * Re-collect this long after each finished snapshot (null = off). These
+   * background refreshes keep the current snapshot on screen and swap it only
+   * when the new one is complete; they pause while the window is hidden and
+   * after a cancelled snapshot.
+   */
+  autoRefreshMs?: number | null;
 };
+
+type RefreshOptions = { background?: boolean };
 
 /**
  * Owns one authoritative in-memory snapshot per runtime context.
@@ -24,6 +33,10 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     null
   );
   const [loading, setLoading] = useState(false);
+  /** A background (auto) refresh is running behind the current snapshot. */
+  const [refreshing, setRefreshing] = useState(false);
+  /** Bumped to re-arm the auto-refresh timer after a skipped (hidden) tick. */
+  const [autoTick, setAutoTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [proAccess, setProAccess] = useState(() =>
     hasProAccess(useLicenseStore.getState().state)
@@ -43,71 +56,93 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     generationRef.current += 1;
     setSnapshot(null);
     setLoading(false);
+    setRefreshing(false);
     setError(null);
   }, [cancel]);
 
-  const refresh = useCallback(async () => {
-    if (!ctx.open) return;
-    if (!hasProAccessNow()) {
-      clear();
-      return;
-    }
-    if (!ctx.runtimeConnectionId || !ctx.profileId || !ctx.engine) {
-      setError("No active runtime connection.");
-      setSnapshot(null);
+  const refresh = useCallback(
+    async (options?: RefreshOptions) => {
+      const background = options?.background === true;
+      if (!ctx.open) return;
+      if (!hasProAccessNow()) {
+        clear();
+        return;
+      }
+      if (!ctx.runtimeConnectionId || !ctx.profileId || !ctx.engine) {
+        setError("No active runtime connection.");
+        setSnapshot(null);
+        setLoading(false);
+        return;
+      }
+      if (ctx.engine !== "postgres") {
+        setError(
+          "Database Health Inspector currently supports PostgreSQL only."
+        );
+        setSnapshot(null);
+        setLoading(false);
+        return;
+      }
+
+      // Invalidate in-flight work (no overlapping refreshes)
+      cancel();
+      const generation = ++generationRef.current;
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      if (background) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+        setRefreshing(false);
+        setError(null);
+      }
+
+      const result = await collectHealthInspectorSnapshot({
+        runtimeConnectionId: ctx.runtimeConnectionId,
+        profileId: ctx.profileId,
+        engine: ctx.engine,
+        signal: ac.signal,
+        // Manual refresh shows each section as soon as it is in; a background
+        // refresh keeps the current snapshot until the new one is complete.
+        onProgress: background
+          ? undefined
+          : (partial) => {
+              if (generation === generationRef.current) setSnapshot(partial);
+            },
+      });
+
+      if (generation !== generationRef.current) {
+        return;
+      }
+
+      if (abortRef.current === ac) {
+        abortRef.current = null;
+      }
+
+      if (background) {
+        setRefreshing(false);
+        // A cancelled background refresh holds partial sections; keep the
+        // complete snapshot already on screen.
+        if (result.cancelled) return;
+      }
+      setSnapshot(result);
       setLoading(false);
-      return;
-    }
-    if (ctx.engine !== "postgres") {
-      setError("Database Health Inspector currently supports PostgreSQL only.");
-      setSnapshot(null);
-      setLoading(false);
-      return;
-    }
-
-    // Invalidate in-flight work (no overlapping refreshes)
-    cancel();
-    const generation = ++generationRef.current;
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    setLoading(true);
-    setError(null);
-
-    const result = await collectHealthInspectorSnapshot({
-      runtimeConnectionId: ctx.runtimeConnectionId,
-      profileId: ctx.profileId,
-      engine: ctx.engine,
-      signal: ac.signal,
-      // Show each section as soon as it is in; a newer refresh wins.
-      onProgress: (partial) => {
-        if (generation === generationRef.current) setSnapshot(partial);
-      },
-    });
-
-    if (generation !== generationRef.current) {
-      return;
-    }
-
-    if (abortRef.current === ac) {
-      abortRef.current = null;
-    }
-
-    setSnapshot(result);
-    setLoading(false);
-    if (result.cancelled) {
-      setError(null);
-    } else if (result.overallError && !hasAnySectionData(result)) {
-      setError(result.overallError);
-    }
-  }, [
-    cancel,
-    clear,
-    ctx.engine,
-    ctx.open,
-    ctx.profileId,
-    ctx.runtimeConnectionId,
-  ]);
+      // Every accepted result sets the error, so a later success clears it.
+      setError(
+        !result.cancelled && result.overallError && !hasAnySectionData(result)
+          ? result.overallError
+          : null
+      );
+    },
+    [
+      cancel,
+      clear,
+      ctx.engine,
+      ctx.open,
+      ctx.profileId,
+      ctx.runtimeConnectionId,
+    ]
+  );
 
   // Follow license changes; losing Pro access drops any pending collection.
   useEffect(() => {
@@ -136,9 +171,43 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     };
   }, [ctx.open, contextKey, proAccess]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-refresh: one timer after each finished snapshot, never overlapping.
+  const autoRefreshMs = ctx.autoRefreshMs ?? null;
+  useEffect(() => {
+    if (
+      !autoRefreshMs ||
+      !ctx.open ||
+      !proAccess ||
+      loading ||
+      refreshing ||
+      !snapshot?.finishedAt ||
+      snapshot.cancelled
+    ) {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      if (typeof document !== "undefined" && document.hidden) {
+        setAutoTick((n) => n + 1);
+        return;
+      }
+      void refresh({ background: true });
+    }, autoRefreshMs);
+    return () => window.clearTimeout(id);
+  }, [
+    autoRefreshMs,
+    autoTick,
+    ctx.open,
+    proAccess,
+    loading,
+    refreshing,
+    snapshot,
+    refresh,
+  ]);
+
   return {
     snapshot,
     loading,
+    refreshing,
     error,
     refresh,
     cancel,

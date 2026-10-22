@@ -4,10 +4,21 @@ import { cn } from "src/utils/cn";
 import {
   formatExactCount,
   formatHealthInspectorTimestamp,
+  formatCompactCount,
   formatInspectorBytes,
 } from "src/lib/health-inspector/format";
 import {
   BLOCKING_LIMITATION_NOTE,
+  CACHE_HIT_NOTE,
+  CONNECTIONS_NOTE,
+  CONNECTIONS_RESTRICTED_DETAIL,
+  REPLICATION_NOTE,
+  XID_AGE_NOTE,
+  buildServerAttentionItems,
+  formatPercent,
+  serverCheckState,
+  serverMetricSignals,
+  type ServerCheckState,
   DEADLOCKS_CAVEAT,
   LONGEST_TRANSACTION_NOTE,
   SESSIONS_SCOPE_NOTE,
@@ -26,6 +37,7 @@ import type {
   HealthInspectorSnapshot,
   HealthOverview,
   HealthSection,
+  HealthServerMetrics,
 } from "src/lib/health-inspector/types";
 import { InfoHint } from "./InfoHint";
 
@@ -88,6 +100,8 @@ const DOT_TONE_CLASS: Record<HealthMetricTone, string | null> = {
 type OverviewCard = {
   label: string;
   value: string;
+  /** Value still being collected: show a placeholder instead. */
+  pending?: boolean;
   detail?: string | null;
   hint?: string;
   tone?: HealthMetricTone;
@@ -113,9 +127,15 @@ function MetricCard(props: OverviewCard) {
         {props.label}
         {props.hint ? <InfoHint text={props.hint} /> : null}
       </div>
-      <div class={cn("mt-0.5 text-base font-semibold", VALUE_TONE_CLASS[tone])}>
-        {props.value}
-      </div>
+      {props.pending ? (
+        <Skeleton className="mt-1.5 h-4 w-16" />
+      ) : (
+        <div
+          class={cn("mt-0.5 text-base font-semibold", VALUE_TONE_CLASS[tone])}
+        >
+          {props.value}
+        </div>
+      )}
       {props.detail ? (
         <div class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
           {props.detail}
@@ -127,35 +147,55 @@ function MetricCard(props: OverviewCard) {
 
 function AttentionSummary(props: {
   items: HealthAttentionItem[];
+  /** "All clear" needs complete server checks too. */
+  serverState: ServerCheckState;
   onOpenSessions: () => void;
 }) {
   const { issues, history } = splitAttentionItems(props.items);
-  const critical = issues.some((i) => i.kind === "blocked");
+  const state =
+    issues.length > 0
+      ? issues.some((i) => i.critical)
+        ? "critical"
+        : "warning"
+      : props.serverState === "pending"
+        ? "pending"
+        : props.serverState === "incomplete"
+          ? "incomplete"
+          : "clear";
   return (
     <section
       aria-label="Attention"
+      data-state={state}
       class={cn(
         "rounded-lg border px-3 py-2",
-        issues.length === 0
+        state === "clear"
           ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/50"
-          : critical
+          : state === "critical"
             ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60"
-            : "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60"
+            : state === "warning"
+              ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60"
+              : "border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900/40"
       )}
     >
       <div
         class={cn(
           "text-sm font-semibold",
-          issues.length === 0
+          state === "clear"
             ? "text-emerald-800 dark:text-emerald-200"
-            : critical
+            : state === "critical"
               ? "text-red-800 dark:text-red-200"
-              : "text-amber-900 dark:text-amber-100"
+              : state === "warning"
+                ? "text-amber-900 dark:text-amber-100"
+                : "text-neutral-600 dark:text-neutral-300"
         )}
       >
-        {issues.length === 0
+        {state === "clear"
           ? "✓ All clear in this snapshot"
-          : `⚠ ${issues.length} issue${issues.length === 1 ? "" : "s"}`}
+          : state === "pending"
+            ? "Checking server health…"
+            : state === "incomplete"
+              ? "No issues found, but server checks are incomplete"
+              : `⚠ ${issues.length} issue${issues.length === 1 ? "" : "s"}`}
       </div>
       {issues.length > 0 ? (
         <ul class="mt-1 space-y-0.5 text-sm">
@@ -225,7 +265,95 @@ function OverviewSkeleton() {
   );
 }
 
-function overviewCards(data: HealthOverview): OverviewCard[] {
+type ServerCardKey = "connections" | "xid" | "replication" | "cache";
+
+/** Server-wide cards; placeholders while the server query is still running. */
+function serverCards(
+  section: HealthSection<HealthServerMetrics | null> | undefined,
+  loading: boolean
+): Record<ServerCardKey, OverviewCard> {
+  const server = section?.status === "ready" ? section.data : null;
+  const pending = !section || (loading && section.status === "loading");
+  const unavailable = !pending && !server;
+  const unavailableDetail = unavailable
+    ? (section?.unavailableReason ?? section?.error ?? "Unavailable")
+    : null;
+  const signals = server ? serverMetricSignals(server) : null;
+
+  const replicationValue = !server
+    ? "—"
+    : server.isStandby
+      ? "Standby"
+      : (server.replicaCount ?? 0) === 0
+        ? "None"
+        : `${server.replicaCount} replica${server.replicaCount === 1 ? "" : "s"}`;
+  const replicationDetail = !server
+    ? unavailableDetail
+    : server.isStandby
+      ? `Replay lag ${formatAgeSeconds(server.standbyReplayLagSeconds)}`
+      : (server.replicaCount ?? 0) === 0
+        ? null
+        : server.maxReplicaLagSeconds == null
+          ? "Lag not visible to this role"
+          : `Max lag ${formatAgeSeconds(server.maxReplicaLagSeconds)}`;
+
+  return {
+    connections: {
+      label: "Connections",
+      pending,
+      value:
+        server?.clientConnections == null || server.maxConnections == null
+          ? "—"
+          : `${server.clientConnections} / ${server.maxConnections}`,
+      detail: server
+        ? !server.canReadAllStats
+          ? CONNECTIONS_RESTRICTED_DETAIL
+          : signals?.connectionRatio == null
+            ? null
+            : `${formatPercent(signals.connectionRatio)} of usable slots`
+        : unavailableDetail,
+      hint: CONNECTIONS_NOTE,
+      tone: signals?.connections ?? "neutral",
+    },
+    xid: {
+      label: "Transaction ID age",
+      pending,
+      value: formatCompactCount(server?.maxXidAge),
+      detail: server
+        ? signals?.xidAgeRatio == null
+          ? null
+          : `${formatPercent(signals.xidAgeRatio, 1)} of wraparound limit`
+        : unavailableDetail,
+      hint: XID_AGE_NOTE,
+      tone: signals?.xid ?? "neutral",
+    },
+    replication: {
+      label: "Replication",
+      pending,
+      value: replicationValue,
+      detail: replicationDetail,
+      hint: REPLICATION_NOTE,
+      tone: signals?.replication ?? "neutral",
+    },
+    cache: {
+      label: "Cache hit ratio",
+      pending,
+      value: formatPercent(signals?.cacheHitRatio ?? null, 1),
+      detail: server
+        ? signals?.cacheHitRatio == null
+          ? "Not enough reads yet"
+          : null
+        : unavailableDetail,
+      hint: CACHE_HIT_NOTE,
+      tone: signals?.cache ?? "neutral",
+    },
+  };
+}
+
+function overviewCards(
+  data: HealthOverview,
+  server: Record<ServerCardKey, OverviewCard>
+): OverviewCard[] {
   const tones = overviewMetricTones(data);
   const idleInXact = data.idleInTransactionCount;
   const blockers = data.topBlockers
@@ -268,10 +396,14 @@ function overviewCards(data: HealthOverview): OverviewCard[] {
       hint: LONGEST_TRANSACTION_NOTE,
       tone: tones.longestTransaction,
     },
+    server.connections,
+    server.xid,
+    server.replication,
     {
       label: "Database size",
       value: formatInspectorBytes(data.databaseBytes),
     },
+    server.cache,
     {
       label: "Temp files",
       value: data.tempFiles === 0 ? "None" : formatExactCount(data.tempFiles),
@@ -305,12 +437,21 @@ export function DbHealthInspectorOverview(props: {
   }
 
   const data = section.data;
-  const attention = buildAttentionItems(data ?? null);
+  const serverSection = props.snap?.server;
+  const serverState = serverCheckState(serverSection, props.loading);
+  const attention = [
+    ...buildAttentionItems(data ?? null),
+    ...buildServerAttentionItems(
+      serverSection?.status === "ready" ? serverSection.data : null
+    ),
+  ];
   const statsResetLabel = data?.statsReset
     ? formatHealthInspectorTimestamp(data.statsReset)
     : null;
 
-  const cards: OverviewCard[] = data ? overviewCards(data) : [];
+  const cards: OverviewCard[] = data
+    ? overviewCards(data, serverCards(serverSection, props.loading))
+    : [];
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <SectionBanner section={section} loading={props.loading} />
@@ -318,6 +459,7 @@ export function DbHealthInspectorOverview(props: {
         <>
           <AttentionSummary
             items={attention}
+            serverState={serverState}
             onOpenSessions={props.onOpenSessions}
           />
 

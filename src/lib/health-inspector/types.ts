@@ -129,10 +129,46 @@ export type HealthIndexRow = {
   idxTupRead: number | null;
   idxTupFetch: number | null;
   indexBytes: number | null;
+  /** Unique or primary key index. */
+  isUnique: boolean;
+  /**
+   * Backs a unique, primary key or exclusion constraint, so it is needed even
+   * with zero scans. True when unknown, so nothing is suggested for dropping.
+   */
+  enforcesConstraint: boolean;
 };
 
 export type HealthSection<T> = HealthSectionMeta & {
   data: T;
+};
+
+/** Server-wide health signals (catalog reads only). */
+export type HealthServerMetrics = {
+  /** Oldest unfrozen transaction ID age across all databases. */
+  maxXidAge: number | null;
+  autovacuumFreezeMaxAge: number | null;
+  maxConnections: number | null;
+  /**
+   * Slots not open to ordinary roles: `superuser_reserved_connections` plus
+   * `reserved_connections` (PostgreSQL 16+).
+   */
+  reservedConnections: number | null;
+  /**
+   * Client backends across all databases; null when this role cannot see
+   * other roles' sessions (needs pg_read_all_stats), so it is never a subset.
+   */
+  clientConnections: number | null;
+  /** Whether this role can see every session (pg_read_all_stats or superuser). */
+  canReadAllStats: boolean;
+  /** Current database buffer hits / reads since stats reset. */
+  blocksHit: number | null;
+  blocksRead: number | null;
+  isStandby: boolean;
+  /** Standby only: time since the last replayed transaction. */
+  standbyReplayLagSeconds: number | null;
+  /** Primary only: connected replicas and their worst replay lag. */
+  replicaCount: number | null;
+  maxReplicaLagSeconds: number | null;
 };
 
 export type HealthInspectorSnapshot = {
@@ -144,6 +180,7 @@ export type HealthInspectorSnapshot = {
   overallError: string | null;
   cancelled: boolean;
   overview: HealthSection<HealthOverview | null>;
+  server: HealthSection<HealthServerMetrics | null>;
   sessions: HealthSection<HealthSessionRow[]>;
   statements: HealthSection<HealthStatementRow[]> & {
     info: HealthStatementsInfo | null;
@@ -173,6 +210,9 @@ export type HealthAttentionKind =
   | "blocked"
   | "idle_in_transaction"
   | "long_transaction"
+  | "xid_wraparound"
+  | "connections_near_limit"
+  | "replication_lag"
   | "deadlocks_history"
   | "incomplete";
 
@@ -180,6 +220,8 @@ export type HealthAttentionItem = {
   kind: HealthAttentionKind;
   /** Actionable current conditions vs informational history vs incomplete data. */
   tone: "actionable" | "informational" | "incomplete";
+  /** Turns the summary strip red (blocking, near-outage limits). */
+  critical?: boolean;
   title: string;
   evidence: string;
   /** Offer a Sessions tab switch without re-querying. */

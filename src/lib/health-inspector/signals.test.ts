@@ -49,6 +49,8 @@ describe("healthInspector signals", () => {
         idxTupRead: null,
         idxTupFetch: null,
         indexBytes: null,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("unknown");
     expect(
@@ -60,6 +62,8 @@ describe("healthInspector signals", () => {
         idxTupRead: 0,
         idxTupFetch: 0,
         indexBytes: 1,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("zero");
     expect(
@@ -71,6 +75,8 @@ describe("healthInspector signals", () => {
         idxTupRead: 1,
         idxTupFetch: 1,
         indexBytes: 1,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("used");
   });

@@ -3,6 +3,7 @@ import {
   healthInspectorCapabilitiesSql,
   healthInspectorIndexesSql,
   healthInspectorOverviewSql,
+  healthInspectorServerSql,
   healthInspectorSessionsSql,
   healthInspectorStatementsInfoSql,
   healthInspectorStatementsSql,
@@ -13,6 +14,7 @@ import {
   decodeCapabilities,
   decodeIndexes,
   decodeOverview,
+  decodeServerMetrics,
   decodeSessions,
   decodeStatements,
   decodeStatementsInfo,
@@ -26,6 +28,7 @@ import type {
   HealthInspectorSnapshot,
   HealthOverview,
   HealthSection,
+  HealthServerMetrics,
   HealthSessionRow,
   HealthStatementRow,
   HealthStatementsInfo,
@@ -86,6 +89,7 @@ function loadingSnapshot(
     overallError: null,
     cancelled: false,
     overview: emptySection<HealthOverview | null>(null),
+    server: emptySection<HealthServerMetrics | null>(null),
     sessions: emptySection<HealthSessionRow[]>([]),
     statements: {
       ...emptySection<HealthStatementRow[]>([]),
@@ -195,6 +199,41 @@ export async function collectHealthInspectorSnapshot(
       if (isAbortError(err)) throw err;
       const msg = sanitizeHealthError(err);
       snap.overview = {
+        status: isPermissionOrMissingRelationError(msg)
+          ? "unavailable"
+          : "error",
+        collectedAt: now(),
+        error: msg,
+        truncated: false,
+        unavailableReason: isPermissionOrMissingRelationError(msg) ? msg : null,
+        data: null,
+      };
+    }
+  };
+
+  const runServer = async () => {
+    try {
+      bump();
+      const result = await runSectionQuery(
+        runSql,
+        args.runtimeConnectionId,
+        healthInspectorServerSql(),
+        args.signal,
+        deadlineAt,
+        now
+      );
+      snap.server = {
+        status: "ready",
+        collectedAt: now(),
+        error: null,
+        truncated: false,
+        unavailableReason: null,
+        data: decodeServerMetrics(result),
+      };
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      const msg = sanitizeHealthError(err);
+      snap.server = {
         status: isPermissionOrMissingRelationError(msg)
           ? "unavailable"
           : "error",
@@ -443,7 +482,13 @@ export async function collectHealthInspectorSnapshot(
     emit();
 
     // The other sections share a small pool and show as each one finishes.
-    const queue = [runSessions, runStatements, runTables, runIndexes];
+    const queue = [
+      runServer,
+      runSessions,
+      runStatements,
+      runTables,
+      runIndexes,
+    ];
     const worker = async () => {
       for (let task = queue.shift(); task && !settled; task = queue.shift()) {
         await task();
@@ -472,4 +517,4 @@ export async function collectHealthInspectorSnapshot(
 }
 
 /** Max statements used by a full snapshot path (for tests / docs). */
-export const HEALTH_INSPECTOR_MAX_STATEMENTS = 7;
+export const HEALTH_INSPECTOR_MAX_STATEMENTS = 8;

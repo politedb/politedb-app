@@ -8,6 +8,8 @@ import type { LicenseState } from "src/lib/tauri/license";
 const hookState = {
   snapshot: null as any,
   loading: false,
+  refreshing: false,
+  lastArgs: null as any,
   error: null as string | null,
   refresh: vi.fn(),
   cancel: vi.fn(),
@@ -16,7 +18,10 @@ const hookState = {
 };
 
 vi.mock("@root/src/hooks/useDbHealthInspector", () => ({
-  useDbHealthInspector: () => hookState,
+  useDbHealthInspector: (args: any) => {
+    hookState.lastArgs = args;
+    return hookState;
+  },
 }));
 
 function setProAccess(pro_access: boolean) {
@@ -61,6 +66,27 @@ beforeEach(() => {
         tempFiles: 0,
         tempBytes: 0,
         deadlocks: 0,
+      },
+    },
+    server: {
+      status: "ready",
+      collectedAt: Date.now(),
+      error: null,
+      truncated: false,
+      unavailableReason: null,
+      data: {
+        maxXidAge: 1_000_000,
+        autovacuumFreezeMaxAge: 200_000_000,
+        maxConnections: 100,
+        reservedConnections: 3,
+        clientConnections: 4,
+        canReadAllStats: true,
+        blocksHit: 99_000,
+        blocksRead: 1_000,
+        isStandby: false,
+        standbyReplayLagSeconds: null,
+        replicaCount: 0,
+        maxReplicaLagSeconds: null,
       },
     },
     sessions: {
@@ -117,6 +143,7 @@ beforeEach(() => {
     },
   };
   hookState.loading = false;
+  hookState.refreshing = false;
   hookState.error = null;
   hookState.supported = true;
   hookState.refresh.mockReset();
@@ -192,7 +219,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
     const cell = screen.getByText("<script>alert(1)</script>");
     expect(cell.querySelector("script")).toBeNull();
   });
@@ -215,7 +242,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy query" }));
     expect(writeText).toHaveBeenCalledWith(fullQuery);
@@ -238,7 +265,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.getByText("Enable Top statements")).toBeTruthy();
@@ -274,7 +301,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.getByText("Load pg_stat_statements")).toBeTruthy();
@@ -307,7 +334,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.queryByText(/PoliteDB is read-only/i)).toBeNull();
@@ -338,7 +365,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
 
     const dialog = screen.getByRole("dialog");
     expect(dialog.className).toMatch(/overflow-hidden/);
@@ -409,7 +436,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Tables" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Tables/ }));
 
     // Autovacuum newer than manual vacuum for orders.
     const autoVacuumLocal = new Date("2024-06-01T00:00:00.000Z");
@@ -439,7 +466,7 @@ describe("DbHealthInspectorDialog", () => {
     ).toBeTruthy();
     expect(screen.queryByText("Loading…")).toBeNull();
 
-    const sessionsTab = screen.getByRole("button", { name: "Sessions" });
+    const sessionsTab = screen.getByRole("button", { name: /^Sessions/ });
     expect(sessionsTab).not.toBeDisabled();
     fireEvent.click(sessionsTab);
     expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
@@ -552,7 +579,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
     expect(screen.getByText("No sessions")).toBeTruthy();
 
     hookState.loading = true;
@@ -581,8 +608,12 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
     expect(screen.queryByText("No sessions")).toBeNull();
     // Tabs stay switchable while sections are still loading.
-    expect(screen.getByRole("button", { name: "Overview" })).not.toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sessions" })).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /^Overview/ })
+    ).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /^Sessions/ })
+    ).not.toBeDisabled();
     expect(
       screen.getByTitle("Cancel in-flight inspector queries")
     ).not.toBeDisabled();
@@ -630,7 +661,8 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.getByText("3 sessions")).toBeTruthy();
     expect(screen.getByText("2 idle · 1 active")).toBeTruthy();
     expect(screen.getByText("None running")).toBeTruthy();
-    expect(screen.getAllByText("None").length).toBe(2);
+    // Temp files, deadlocks and replication.
+    expect(screen.getAllByText("None").length).toBe(3);
     expect(screen.queryByText(/0\.0 B/)).toBeNull();
     // The Inspector-connection caveat lives in one hint, not on every card.
     expect(screen.queryByText(/Excludes this Inspector connection/)).toBeNull();
@@ -755,7 +787,202 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Tables" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Tables/ }));
     expect(screen.getByText(/recently grown one may be missing/)).toBeTruthy();
+  });
+
+  function renderDialog() {
+    return render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+  }
+
+  function tableRow(name: string, live: number, dead: number) {
+    return {
+      schema: "public",
+      tableName: name,
+      liveTuples: live,
+      deadTuples: dead,
+      lastVacuum: null,
+      lastAutovacuum: null,
+      lastAnalyze: null,
+      lastAutoAnalyze: null,
+      tableBytes: 1,
+      indexesBytes: 0,
+      totalBytes: live,
+      isPartitionedParent: false,
+      isPartitionChild: false,
+    };
+  }
+
+  it("searches, flags and sorts tables, offering VACUUM only where needed", () => {
+    hookState.snapshot.tables = {
+      ...hookState.snapshot.tables,
+      status: "ready",
+      sizeRankingEstimated: false,
+      data: [
+        tableRow("orders", 10_000, 100),
+        tableRow("events", 4_000, 6_000),
+        tableRow("audit_log", 50_000, 0),
+      ],
+    };
+    renderDialog();
+    const tablesTab = screen.getByRole("button", { name: /^Tables/ });
+    expect(tablesTab.textContent).toContain("3");
+    expect(tablesTab.textContent).toContain("1 to vacuum");
+    fireEvent.click(tablesTab);
+
+    expect(screen.getAllByRole("button", { name: "Copy VACUUM" })).toHaveLength(
+      1
+    );
+
+    fireEvent.input(screen.getByRole("searchbox", { name: "Search tables" }), {
+      target: { value: "ORD" },
+    });
+    expect(screen.getByText("public.orders")).toBeTruthy();
+    expect(screen.queryByText("public.events")).toBeNull();
+    expect(screen.getByText("1 of 3")).toBeTruthy();
+
+    fireEvent.input(screen.getByRole("searchbox", { name: "Search tables" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Needs vacuum (1)" }));
+    expect(screen.getByText("public.events")).toBeTruthy();
+    expect(screen.queryByText("public.orders")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Needs vacuum (1)" }));
+
+    // Sort by dead rows: descending first.
+    // Table sorts on mouse-up of the header button.
+    fireEvent.mouseUp(screen.getByText("Dead (est.)"), { button: 0 });
+    const names = screen.getAllByText(/^public\./).map((el) => el.textContent);
+    expect(names).toEqual([
+      "public.events",
+      "public.orders",
+      "public.audit_log",
+    ]);
+  });
+
+  it("offers DROP INDEX only for unused, non-unique indexes", () => {
+    const index = (name: string, scans: number | null, unique: boolean) => ({
+      schema: "public",
+      tableName: "events",
+      indexName: name,
+      idxScan: scans,
+      idxTupRead: 0,
+      idxTupFetch: 0,
+      indexBytes: 8192,
+      isUnique: unique,
+      enforcesConstraint: unique,
+    });
+    hookState.snapshot.indexes = {
+      ...hookState.snapshot.indexes,
+      status: "ready",
+      sizeRankingEstimated: false,
+      data: [
+        index("events_kind_idx", 0, false),
+        index("events_pkey", 0, true),
+        index("events_at_idx", 12, false),
+      ],
+    };
+    renderDialog();
+    const indexesTab = screen.getByRole("button", { name: /^Indexes/ });
+    expect(indexesTab.textContent).toContain("1 unused");
+    fireEvent.click(indexesTab);
+    const copy = screen.getAllByRole("button", { name: "Copy DROP" });
+    expect(copy).toHaveLength(1);
+    expect(copy[0]!.getAttribute("title")).toBe(
+      'DROP INDEX CONCURRENTLY IF EXISTS "public"."events_kind_idx";'
+    );
+  });
+
+  it("clears the search on Escape without closing the dialog", () => {
+    const onClose = vi.fn();
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={onClose}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+    const search = screen.getByRole("searchbox", {
+      name: "Search PID, user, app, query",
+    });
+    fireEvent.input(search, { target: { value: "nothing-matches" } });
+    expect(screen.getByText("No matching rows")).toBeTruthy();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows server health cards and waits for them before All clear", () => {
+    const { rerender } = renderDialog();
+    expect(screen.getByText("4 / 100")).toBeTruthy();
+    expect(screen.getByText("99.0%")).toBeTruthy();
+    expect(screen.getByText("1M")).toBeTruthy();
+    expect(screen.getByText("✓ All clear in this snapshot")).toBeTruthy();
+
+    hookState.loading = true;
+    hookState.snapshot.server = {
+      ...hookState.snapshot.server,
+      status: "loading",
+      data: null,
+    };
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("Checking server health…")).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("passes the auto-refresh choice to the hook, off by default", () => {
+    renderDialog();
+    expect(hookState.lastArgs.autoRefreshMs).toBeNull();
+    const select = screen.getByRole("combobox", { name: /Auto-refresh/ });
+    fireEvent.input(select, { target: { value: "10000" } });
+    expect(hookState.lastArgs.autoRefreshMs).toBe(10_000);
+    fireEvent.input(select, { target: { value: "off" } });
+    expect(hookState.lastArgs.autoRefreshMs).toBeNull();
+  });
+
+  it("does not claim All clear when server checks failed", () => {
+    hookState.snapshot.server = {
+      ...hookState.snapshot.server,
+      status: "error",
+      error: "canceling statement due to statement timeout",
+      data: null,
+    };
+    renderDialog();
+    expect(
+      screen.getByText("No issues found, but server checks are incomplete")
+    ).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("does not grade connections the role cannot fully see", () => {
+    hookState.snapshot.server.data = {
+      ...hookState.snapshot.server.data,
+      canReadAllStats: false,
+      clientConnections: null,
+    };
+    renderDialog();
+    expect(screen.getByText("Needs pg_read_all_stats")).toBeTruthy();
+    expect(
+      screen.getByText("No issues found, but server checks are incomplete")
+    ).toBeTruthy();
   });
 });

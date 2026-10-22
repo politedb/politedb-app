@@ -19,6 +19,7 @@ import {
   StopIcon,
 } from "src/components/icons";
 import { useDbHealthInspector } from "@root/src/hooks/useDbHealthInspector";
+import { HEALTH_INSPECTOR_AUTO_REFRESH_OPTIONS } from "src/lib/health-inspector/autoRefresh";
 import { useProGate } from "src/hooks/useProGate";
 import { ProBadge } from "src/components/license/ProBadge";
 import type { DatabaseEngine } from "src/types";
@@ -34,9 +35,18 @@ import {
   INDEX_SCAN_CAVEAT,
   PARTITION_SIZE_NOTE,
   SIZE_RANKING_NOTE,
+  deadRowRatio,
   formatAgeSeconds,
   formatOptionalNumber,
+  formatPercent,
+  isUnusedIndex,
+  matchesHealthFilter,
+  needsVacuum,
 } from "src/lib/health-inspector/signals";
+import {
+  healthInspectorDropIndexSql,
+  healthInspectorVacuumSql,
+} from "src/lib/queries/sql/health-inspector";
 import type {
   HealthIndexRow,
   HealthInspectorSnapshot,
@@ -46,8 +56,23 @@ import type {
   HealthTableRow,
 } from "src/lib/health-inspector/types";
 import { DbHealthInspectorOverview } from "./DbHealthInspectorOverview";
+import {
+  CopySqlButton,
+  EMPTY_SECTION_FILTER,
+  SectionToolbar,
+  type SectionFilterState,
+} from "./SectionToolbar";
+import { cn } from "src/utils/cn";
 
 type SectionKey = "overview" | "sessions" | "statements" | "tables" | "indexes";
+type ListKey = Exclude<SectionKey, "overview">;
+
+const INITIAL_FILTERS: Record<ListKey, SectionFilterState> = {
+  sessions: EMPTY_SECTION_FILTER,
+  statements: EMPTY_SECTION_FILTER,
+  tables: EMPTY_SECTION_FILTER,
+  indexes: EMPTY_SECTION_FILTER,
+};
 
 type Props = {
   open: boolean;
@@ -342,11 +367,121 @@ function TableSectionSkeleton(props: { columns?: number; rows?: number }) {
   );
 }
 
-function SessionsTable(props: {
+type SectionTableProps = {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
+  filter: SectionFilterState;
+  onFilterChange: (next: SectionFilterState) => void;
+};
+
+/**
+ * Shared list layout: per-section skeleton, status banner, search/flag toolbar
+ * and a sortable table over the filtered rows. Hooks run before any early
+ * return so a section switching to loading never changes hook order.
+ */
+function ListSection<T>(props: {
+  section: HealthSection<T[]> | undefined;
+  loading: boolean;
+  skeletonColumns: number;
+  banner?: {
+    caveat?: string;
+    rankingNote?: string | null;
+    showPgStatStatementsGuide?: boolean;
+  };
+  extra?: preact.ComponentChildren;
+  filter: SectionFilterState;
+  onFilterChange: (next: SectionFilterState) => void;
+  placeholder: string;
+  searchFields: (row: T) => Array<string | number | null | undefined>;
+  flag?: { label: string; isFlagged: (row: T) => boolean };
+  columns: TableColumn<T>[];
+  keyExtractor: (row: T, index: number) => string | number;
+  emptyMessage: string;
+  rowClassName?: (row: T) => string;
 }) {
-  const section = props.snap?.sessions;
+  const { section, filter, flag, searchFields } = props;
+  const rows = section?.data ?? EMPTY_ROWS;
+  const flaggedCount = useMemo(
+    () => (flag ? rows.filter(flag.isFlagged).length : 0),
+    [rows, flag]
+  );
+  const visible = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          (!filter.flaggedOnly || !flag || flag.isFlagged(row)) &&
+          matchesHealthFilter(searchFields(row), filter.query)
+      ),
+    [rows, filter, flag, searchFields]
+  );
+
+  if (!section || (props.loading && section.status === "loading")) {
+    return props.loading ? (
+      <TableSectionSkeleton columns={props.skeletonColumns} />
+    ) : null;
+  }
+  const hasRows = section.status === "ready" || section.status === "empty";
+  const filtered = visible.length !== rows.length;
+  return (
+    <div class="flex min-h-0 flex-1 flex-col gap-2">
+      <SectionBanner
+        section={section}
+        loading={props.loading}
+        caveat={props.banner?.caveat}
+        rankingNote={props.banner?.rankingNote}
+        showPgStatStatementsGuide={props.banner?.showPgStatStatementsGuide}
+      />
+      {props.extra}
+      {hasRows && rows.length > 0 ? (
+        <SectionToolbar
+          filter={filter}
+          onFilterChange={props.onFilterChange}
+          placeholder={props.placeholder}
+          shown={visible.length}
+          total={rows.length}
+          flag={flag ? { label: flag.label, count: flaggedCount } : undefined}
+        />
+      ) : null}
+      {hasRows ? (
+        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
+          <Table
+            columns={props.columns}
+            data={visible}
+            keyExtractor={props.keyExtractor}
+            emptyMessage={filtered ? "No matching rows" : props.emptyMessage}
+            rowClassName={props.rowClassName}
+            enableSort
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const EMPTY_ROWS: never[] = [];
+
+function sessionNeedsAttention(row: HealthSessionRow): boolean {
+  return (
+    row.isBlocked ||
+    (row.state != null && row.state.startsWith("idle in transaction"))
+  );
+}
+
+const SESSION_FLAG = {
+  label: "Blocked / idle in txn",
+  isFlagged: sessionNeedsAttention,
+};
+
+const sessionSearchFields = (row: HealthSessionRow) => [
+  row.pid,
+  row.usename,
+  row.applicationName,
+  row.clientAddr,
+  row.state,
+  row.queryHidden ? null : row.queryText,
+];
+
+function SessionsTable(props: SectionTableProps) {
   const columns = useMemo<TableColumn<HealthSessionRow>[]>(
     () => [
       {
@@ -357,6 +492,23 @@ function SessionsTable(props: {
         className: "text-sm p-2",
       },
       {
+        key: "usename",
+        label: "User · App",
+        sortable: true,
+        sortKey: "usename",
+        className: "text-sm p-2 max-w-40",
+        render: (_v, row) => (
+          <div class="min-w-0">
+            <div class="truncate">{row.usename ?? "—"}</div>
+            {row.applicationName ? (
+              <div class="truncate text-xs text-neutral-500">
+                {row.applicationName}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
         key: "state",
         label: "State",
         sortable: true,
@@ -364,20 +516,18 @@ function SessionsTable(props: {
         className: "text-sm p-2",
       },
       {
-        key: "isExecuting",
-        label: "Exec",
-        className: "text-sm p-2",
-        render: (_v, row) => (row.isExecuting ? "yes" : "idle"),
-      },
-      {
         key: "queryAgeSeconds",
         label: "Query age",
+        sortable: true,
+        sortKey: "queryAgeSeconds",
         className: "text-sm p-2",
         render: (_v, row) => formatAgeSeconds(row.queryAgeSeconds),
       },
       {
         key: "xactAgeSeconds",
         label: "Txn age",
+        sortable: true,
+        sortKey: "xactAgeSeconds",
         className: "text-sm p-2",
         render: (_v, row) => formatAgeSeconds(row.xactAgeSeconds),
       },
@@ -406,33 +556,32 @@ function SessionsTable(props: {
     ],
     []
   );
-  // Hooks above run on every render; only this section's own loading shows a
-  // skeleton, so finished sections appear while others are still collected.
-  if (!section || (props.loading && section.status === "loading")) {
-    return props.loading ? <TableSectionSkeleton columns={8} /> : null;
-  }
   return (
-    <div class="flex min-h-0 flex-1 flex-col gap-2">
-      <SectionBanner section={section} loading={props.loading} />
-      {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
-          <Table
-            columns={columns}
-            data={section.data}
-            keyExtractor={(row, i) => row.pid ?? i}
-            emptyMessage="No sessions"
-            enableSort
-          />
-        </div>
-      ) : null}
-    </div>
+    <ListSection
+      section={props.snap?.sessions}
+      loading={props.loading}
+      skeletonColumns={8}
+      filter={props.filter}
+      onFilterChange={props.onFilterChange}
+      placeholder="Search PID, user, app, query"
+      searchFields={sessionSearchFields}
+      flag={SESSION_FLAG}
+      columns={columns}
+      keyExtractor={(row, i) => row.pid ?? i}
+      emptyMessage="No sessions"
+      rowClassName={(row) => (row.isBlocked ? FLAGGED_ROW_CLASS : "")}
+    />
   );
 }
 
-function StatementsTable(props: {
-  snap: HealthInspectorSnapshot | null;
-  loading: boolean;
-}) {
+const FLAGGED_ROW_CLASS = "bg-amber-50/60 dark:bg-amber-950/30";
+
+const statementSearchFields = (row: HealthStatementRow) => [
+  row.queryId,
+  row.queryHidden ? null : row.queryText,
+];
+
+function StatementsTable(props: SectionTableProps) {
   const section = props.snap?.statements;
   const columns = useMemo<TableColumn<HealthStatementRow>[]>(
     () => [
@@ -463,6 +612,8 @@ function StatementsTable(props: {
       {
         key: "rows",
         label: "Rows",
+        sortable: true,
+        sortKey: "rows",
         className: "text-sm p-2",
         render: (_v, row) => formatOptionalNumber(row.rows),
       },
@@ -477,147 +628,205 @@ function StatementsTable(props: {
     ],
     []
   );
-  // Hooks above run on every render; only this section's own loading shows a
-  // skeleton, so finished sections appear while others are still collected.
-  if (!section || (props.loading && section.status === "loading")) {
-    return props.loading ? <TableSectionSkeleton columns={5} /> : null;
-  }
-  const info = section.info;
+  const info = section?.info;
   return (
-    <div class="flex min-h-0 flex-1 flex-col gap-2">
-      <SectionBanner
-        section={section}
-        loading={props.loading}
-        caveat="Cumulative since last statistics reset — not a live slow-query feed."
-        showPgStatStatementsGuide
-      />
-      {info ? (
-        <div class="text-xs text-neutral-500">
-          {info.statsReset
-            ? `Statements stats reset: ${formatHealthInspectorTimestamp(info.statsReset)}`
-            : ""}
-          {info.dealloc != null ? ` · Dealloc: ${info.dealloc}` : ""}
-        </div>
-      ) : null}
-      {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
-          <Table
-            columns={columns}
-            data={section.data}
-            keyExtractor={(row, i) => row.queryId ?? i}
-            emptyMessage="No statement statistics"
-            enableSort
-          />
-        </div>
-      ) : null}
-    </div>
+    <ListSection
+      section={section}
+      loading={props.loading}
+      skeletonColumns={5}
+      banner={{
+        caveat:
+          "Cumulative since last statistics reset — not a live slow-query feed.",
+        showPgStatStatementsGuide: true,
+      }}
+      extra={
+        info ? (
+          <div class="text-xs text-neutral-500">
+            {info.statsReset
+              ? `Statements stats reset: ${formatHealthInspectorTimestamp(info.statsReset)}`
+              : ""}
+            {info.dealloc != null ? ` · Dealloc: ${info.dealloc}` : ""}
+          </div>
+        ) : null
+      }
+      filter={props.filter}
+      onFilterChange={props.onFilterChange}
+      placeholder="Search query text"
+      searchFields={statementSearchFields}
+      columns={columns}
+      keyExtractor={(row, i) => row.queryId ?? i}
+      emptyMessage="No statement statistics"
+    />
   );
 }
 
-function TablesTable(props: {
-  snap: HealthInspectorSnapshot | null;
-  loading: boolean;
-}) {
+/** Table row plus the derived values its columns sort on. */
+type TableViewRow = HealthTableRow & {
+  displayName: string;
+  deadRatio: number | null;
+  lastVacuumAt: string | number | null;
+  lastAnalyzeAt: string | number | null;
+};
+
+function toTableViewRow(row: HealthTableRow): TableViewRow {
+  return {
+    ...row,
+    displayName: `${row.schema ?? "?"}.${row.tableName ?? "?"}${
+      row.isPartitionedParent
+        ? " (partitioned)"
+        : row.isPartitionChild
+          ? " (partition)"
+          : ""
+    }`,
+    deadRatio: deadRowRatio(row),
+    lastVacuumAt: latestHealthTimestamp(row.lastVacuum, row.lastAutovacuum),
+    lastAnalyzeAt: latestHealthTimestamp(row.lastAnalyze, row.lastAutoAnalyze),
+  };
+}
+
+const TABLE_FLAG = { label: "Needs vacuum", isFlagged: needsVacuum };
+
+const tableSearchFields = (row: TableViewRow) => [row.displayName];
+
+function TablesTable(props: SectionTableProps) {
   const section = props.snap?.tables;
-  const columns = useMemo<TableColumn<HealthTableRow>[]>(
+  // One view row per table, so sorting sees the derived columns.
+  const viewSection = useMemo(
+    () =>
+      section
+        ? { ...section, data: section.data.map(toTableViewRow) }
+        : undefined,
+    [section]
+  );
+  const columns = useMemo<TableColumn<TableViewRow>[]>(
     () => [
       {
-        key: "name",
+        key: "displayName",
         label: "Table",
+        sortable: true,
+        sortKey: "displayName",
         className: "text-sm p-2",
-        render: (_v, row) =>
-          `${row.schema ?? "?"}.${row.tableName ?? "?"}${
-            row.isPartitionedParent
-              ? " (partitioned)"
-              : row.isPartitionChild
-                ? " (partition)"
-                : ""
-          }`,
       },
       {
         key: "liveTuples",
         label: "Live (est.)",
+        sortable: true,
+        sortKey: "liveTuples",
         className: "text-sm p-2",
         render: (_v, row) => formatOptionalNumber(row.liveTuples),
       },
       {
         key: "deadTuples",
         label: "Dead (est.)",
+        sortable: true,
+        sortKey: "deadTuples",
         className: "text-sm p-2",
         render: (_v, row) => formatOptionalNumber(row.deadTuples),
       },
       {
+        key: "deadRatio",
+        label: "Dead %",
+        sortable: true,
+        sortKey: "deadRatio",
+        className: "text-sm p-2",
+        render: (_v, row) => formatPercent(row.deadRatio),
+      },
+      {
         key: "totalBytes",
         label: "Total size",
+        sortable: true,
+        sortKey: "totalBytes",
         className: "text-sm p-2",
         render: (_v, row) => formatInspectorBytes(row.totalBytes),
       },
       {
-        key: "lastVacuum",
+        key: "lastVacuumAt",
         label: "Last vacuum",
+        sortable: true,
+        sortKey: "lastVacuumAt",
         className: "text-sm p-2",
-        render: (_v, row) =>
-          formatHealthInspectorTimestamp(
-            latestHealthTimestamp(row.lastVacuum, row.lastAutovacuum)
-          ),
+        render: (_v, row) => formatHealthInspectorTimestamp(row.lastVacuumAt),
       },
       {
-        key: "lastAnalyze",
+        key: "lastAnalyzeAt",
         label: "Last analyze",
+        sortable: true,
+        sortKey: "lastAnalyzeAt",
         className: "text-sm p-2",
-        render: (_v, row) =>
-          formatHealthInspectorTimestamp(
-            latestHealthTimestamp(row.lastAnalyze, row.lastAutoAnalyze)
-          ),
+        render: (_v, row) => formatHealthInspectorTimestamp(row.lastAnalyzeAt),
+      },
+      {
+        key: "actions",
+        label: "",
+        className: "text-sm p-1 text-right",
+        render: (_v, row) => {
+          const sql = needsVacuum(row)
+            ? healthInspectorVacuumSql(row.schema, row.tableName)
+            : null;
+          return sql ? <CopySqlButton sql={sql} label="Copy VACUUM" /> : null;
+        },
       },
     ],
     []
   );
-  // Hooks above run on every render; only this section's own loading shows a
-  // skeleton, so finished sections appear while others are still collected.
-  if (!section || (props.loading && section.status === "loading")) {
-    return props.loading ? <TableSectionSkeleton columns={6} /> : null;
-  }
   return (
-    <div class="flex min-h-0 flex-1 flex-col gap-2">
-      <SectionBanner
-        section={section}
-        loading={props.loading}
-        caveat={`${DEAD_ROW_CAVEAT} ${PARTITION_SIZE_NOTE}`}
-        rankingNote={section.sizeRankingEstimated ? SIZE_RANKING_NOTE : null}
-      />
-      {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
-          <Table
-            columns={columns}
-            data={section.data}
-            keyExtractor={(row, i) => `${row.schema}.${row.tableName}.${i}`}
-            emptyMessage="No tables"
-            enableSort={false}
-          />
-        </div>
-      ) : null}
-    </div>
+    <ListSection
+      section={viewSection}
+      loading={props.loading}
+      skeletonColumns={7}
+      banner={{
+        caveat: `${DEAD_ROW_CAVEAT} ${PARTITION_SIZE_NOTE}`,
+        rankingNote: section?.sizeRankingEstimated ? SIZE_RANKING_NOTE : null,
+      }}
+      filter={props.filter}
+      onFilterChange={props.onFilterChange}
+      placeholder="Search tables"
+      searchFields={tableSearchFields}
+      flag={TABLE_FLAG}
+      columns={columns}
+      keyExtractor={(row, i) => `${row.schema}.${row.tableName}.${i}`}
+      emptyMessage="No tables"
+      rowClassName={(row) => (needsVacuum(row) ? FLAGGED_ROW_CLASS : "")}
+    />
   );
 }
 
-function IndexesTable(props: {
-  snap: HealthInspectorSnapshot | null;
-  loading: boolean;
-}) {
+type IndexViewRow = HealthIndexRow & { displayName: string };
+
+function toIndexViewRow(row: HealthIndexRow): IndexViewRow {
+  return {
+    ...row,
+    displayName: `${row.schema ?? "?"}.${row.indexName ?? "?"} on ${row.tableName ?? "?"}${row.isUnique ? " (unique)" : ""}`,
+  };
+}
+
+const INDEX_FLAG = { label: "Unused", isFlagged: isUnusedIndex };
+
+const indexSearchFields = (row: IndexViewRow) => [row.displayName];
+
+function IndexesTable(props: SectionTableProps) {
   const section = props.snap?.indexes;
-  const columns = useMemo<TableColumn<HealthIndexRow>[]>(
+  const viewSection = useMemo(
+    () =>
+      section
+        ? { ...section, data: section.data.map(toIndexViewRow) }
+        : undefined,
+    [section]
+  );
+  const columns = useMemo<TableColumn<IndexViewRow>[]>(
     () => [
       {
-        key: "name",
+        key: "displayName",
         label: "Index",
+        sortable: true,
+        sortKey: "displayName",
         className: "text-sm p-2",
-        render: (_v, row) =>
-          `${row.schema ?? "?"}.${row.indexName ?? "?"} on ${row.tableName ?? "?"}`,
       },
       {
         key: "idxScan",
         label: "Scans",
+        sortable: true,
+        sortKey: "idxScan",
         className: "text-sm p-2",
         render: (_v, row) =>
           row.idxScan == null ? "—" : formatOptionalNumber(row.idxScan),
@@ -625,43 +834,82 @@ function IndexesTable(props: {
       {
         key: "indexBytes",
         label: "Size",
+        sortable: true,
+        sortKey: "indexBytes",
         className: "text-sm p-2 min-w-24",
         render: (_v, row) => formatInspectorBytes(row.indexBytes),
       },
       {
         key: "idxTupRead",
         label: "Tup read",
+        sortable: true,
+        sortKey: "idxTupRead",
         className: "text-sm p-2",
         render: (_v, row) => formatOptionalNumber(row.idxTupRead),
+      },
+      {
+        key: "actions",
+        label: "",
+        className: "text-sm p-1 text-right",
+        render: (_v, row) => {
+          const sql = isUnusedIndex(row)
+            ? healthInspectorDropIndexSql(row.schema, row.indexName)
+            : null;
+          return sql ? <CopySqlButton sql={sql} label="Copy DROP" /> : null;
+        },
       },
     ],
     []
   );
-  // Hooks above run on every render; only this section's own loading shows a
-  // skeleton, so finished sections appear while others are still collected.
-  if (!section || (props.loading && section.status === "loading")) {
-    return props.loading ? <TableSectionSkeleton columns={4} /> : null;
+  return (
+    <ListSection
+      section={viewSection}
+      loading={props.loading}
+      skeletonColumns={5}
+      banner={{
+        caveat: INDEX_SCAN_CAVEAT,
+        rankingNote: section?.sizeRankingEstimated ? SIZE_RANKING_NOTE : null,
+      }}
+      filter={props.filter}
+      onFilterChange={props.onFilterChange}
+      placeholder="Search indexes or tables"
+      searchFields={indexSearchFields}
+      flag={INDEX_FLAG}
+      columns={columns}
+      keyExtractor={(row, i) => `${row.schema}.${row.indexName}.${i}`}
+      emptyMessage="No indexes"
+    />
+  );
+}
+
+/** Count after a tab label, plus a warning pill when something needs a look. */
+function TabBadge(props: {
+  section: HealthSection<unknown[]> | undefined;
+  alert?: { count: number; text: string; tone: "critical" | "warning" };
+}) {
+  const { section, alert } = props;
+  if (!section || (section.status !== "ready" && section.status !== "empty")) {
+    return null;
   }
   return (
-    <div class="flex min-h-0 flex-1 flex-col gap-2">
-      <SectionBanner
-        section={section}
-        loading={props.loading}
-        caveat={INDEX_SCAN_CAVEAT}
-        rankingNote={section.sizeRankingEstimated ? SIZE_RANKING_NOTE : null}
-      />
-      {section.status === "ready" || section.status === "empty" ? (
-        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
-          <Table
-            columns={columns}
-            data={section.data}
-            keyExtractor={(row, i) => `${row.schema}.${row.indexName}.${i}`}
-            emptyMessage="No indexes"
-            enableSort={false}
-          />
-        </div>
+    <>
+      <span class="ml-1.5 rounded-full bg-neutral-200 px-1.5 text-xs font-medium text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200">
+        {section.data.length}
+        {section.truncated ? "+" : ""}
+      </span>
+      {alert && alert.count > 0 ? (
+        <span
+          class={cn(
+            "ml-1 rounded-full px-1.5 text-xs font-medium",
+            alert.tone === "critical"
+              ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"
+              : "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+          )}
+        >
+          {alert.count} {alert.text}
+        </span>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -686,13 +934,15 @@ function useNow(enabled: boolean): number {
 function describeSnapshot(
   snapshot: HealthInspectorSnapshot | null,
   loading: boolean,
-  now: number
+  now: number,
+  refreshing = false
 ): string | null {
   if (loading) return "Collecting…";
   if (!snapshot?.finishedAt) return null;
   const age = formatSnapshotTime(snapshot.finishedAt, now);
   if (snapshot.cancelled) return `${age} · cancelled`;
-  return `${age} · collected in ${formatCollectionDuration(snapshot.finishedAt - snapshot.startedAt)}`;
+  const base = `${age} · collected in ${formatCollectionDuration(snapshot.finishedAt - snapshot.startedAt)}`;
+  return refreshing ? `${base} · refreshing…` : base;
 }
 
 export function DbHealthInspectorDialog(props: Props) {
@@ -705,18 +955,37 @@ export function DbHealthInspectorDialog(props: Props) {
     databaseLabel,
   } = props;
   const [tab, setTab] = useState<SectionKey>("overview");
+  const [filters, setFilters] =
+    useState<Record<ListKey, SectionFilterState>>(INITIAL_FILTERS);
+  // Off by default and per dialog session: every refresh runs several catalog
+  // queries against the user's database.
+  const [autoRefreshMs, setAutoRefreshMs] = useState<number | null>(null);
   const { hasPro, requirePro } = useProGate();
   // The hook re-checks Pro access itself, so collection never starts while locked.
-  const { snapshot, loading, error, refresh, cancel, supported } =
+  const { snapshot, loading, refreshing, error, refresh, cancel, supported } =
     useDbHealthInspector({
       open,
       runtimeConnectionId,
       profileId,
       engine,
+      autoRefreshMs,
     });
 
+  // Filters and auto-refresh belong to one database: reset on context change.
+  useEffect(() => {
+    setFilters(INITIAL_FILTERS);
+    setAutoRefreshMs(null);
+  }, [runtimeConnectionId, profileId, engine]);
+
   const now = useNow(open && Boolean(snapshot?.finishedAt));
-  const snapshotStatus = describeSnapshot(snapshot, loading, now);
+  const snapshotStatus = describeSnapshot(snapshot, loading, now, refreshing);
+  const listProps = (key: ListKey) => ({
+    snap: snapshot,
+    loading,
+    filter: filters[key],
+    onFilterChange: (next: SectionFilterState) =>
+      setFilters((current) => ({ ...current, [key]: next })),
+  });
 
   const handleClose = () => {
     cancel();
@@ -746,22 +1015,54 @@ export function DbHealthInspectorDialog(props: Props) {
     {
       value: "sessions" as const,
       label: "Sessions",
-      children: <SessionsTable snap={snapshot} loading={loading} />,
+      badge: (
+        <TabBadge
+          section={snapshot?.sessions}
+          alert={{
+            count:
+              snapshot?.sessions.data.filter((r) => r.isBlocked).length ?? 0,
+            text: "blocked",
+            tone: "critical",
+          }}
+        />
+      ),
+      children: <SessionsTable {...listProps("sessions")} />,
     },
     {
       value: "statements" as const,
       label: "Top statements",
-      children: <StatementsTable snap={snapshot} loading={loading} />,
+      badge: <TabBadge section={snapshot?.statements} />,
+      children: <StatementsTable {...listProps("statements")} />,
     },
     {
       value: "tables" as const,
       label: "Tables",
-      children: <TablesTable snap={snapshot} loading={loading} />,
+      badge: (
+        <TabBadge
+          section={snapshot?.tables}
+          alert={{
+            count: snapshot?.tables.data.filter(needsVacuum).length ?? 0,
+            text: "to vacuum",
+            tone: "warning",
+          }}
+        />
+      ),
+      children: <TablesTable {...listProps("tables")} />,
     },
     {
       value: "indexes" as const,
       label: "Indexes",
-      children: <IndexesTable snap={snapshot} loading={loading} />,
+      badge: (
+        <TabBadge
+          section={snapshot?.indexes}
+          alert={{
+            count: snapshot?.indexes.data.filter(isUnusedIndex).length ?? 0,
+            text: "unused",
+            tone: "warning",
+          }}
+        />
+      ),
+      children: <IndexesTable {...listProps("indexes")} />,
     },
   ];
 
@@ -839,6 +1140,25 @@ export function DbHealthInspectorDialog(props: Props) {
           </DialogContent>
 
           <DialogFooter className="shrink-0 border-t border-neutral-200">
+            <label class="mr-auto flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300">
+              Auto-refresh
+              <select
+                value={autoRefreshMs == null ? "off" : String(autoRefreshMs)}
+                disabled={!supported || !runtimeConnectionId}
+                onInput={(e) => {
+                  const value = e.currentTarget.value;
+                  setAutoRefreshMs(value === "off" ? null : Number(value));
+                }}
+                class="h-8 rounded-md border border-neutral-300 bg-white px-2 text-sm text-neutral-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+              >
+                <option value="off">Off</option>
+                {HEALTH_INSPECTOR_AUTO_REFRESH_OPTIONS.map((ms) => (
+                  <option key={ms} value={String(ms)}>
+                    Every {ms / 1000} s
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button type="button" variant="outline" onClick={handleClose}>
               Close
             </Button>
@@ -863,7 +1183,9 @@ export function DbHealthInspectorDialog(props: Props) {
                 title="Refresh snapshot"
               >
                 <span class="inline-flex items-center gap-1.5">
-                  <RefreshCwIcon className="size-4" />
+                  <RefreshCwIcon
+                    className={cn("size-4", refreshing && "animate-spin")}
+                  />
                   Refresh
                 </span>
               </Button>

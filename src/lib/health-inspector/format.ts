@@ -83,3 +83,21 @@ export function formatCollectionDuration(ms: number): string {
   const seconds = Math.round((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
 }
+
+/** "950", "12.3K", "152M", "1.2B" for large counters such as XID age. */
+export function formatCompactCount(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  const units: Array<[number, string]> = [
+    [1e9, "B"],
+    [1e6, "M"],
+    [1e3, "K"],
+  ];
+  for (const [size, suffix] of units) {
+    if (abs >= size) {
+      const scaled = value / size;
+      return `${scaled >= 100 ? Math.round(scaled) : Number(scaled.toFixed(1))}${suffix}`;
+    }
+  }
+  return String(Math.round(value));
+}

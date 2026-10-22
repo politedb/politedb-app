@@ -273,4 +273,146 @@ describe("useDbHealthInspector Pro gating", () => {
     await waitFor(() => expect(result.current.snapshot).not.toBeNull());
     expect(collectMock).toHaveBeenCalledTimes(1);
   });
+
+  describe("useDbHealthInspector auto-refresh", () => {
+    it("refreshes in the background and swaps only a complete snapshot", async () => {
+      vi.useFakeTimers();
+      try {
+        let call = 0;
+        let resolveSecond: (value: unknown) => void = () => {};
+        collectMock.mockImplementation((args: any) => {
+          call += 1;
+          if (call === 1) return Promise.resolve(snap({ finishedAt: 10 }));
+          expect(args.onProgress).toBeUndefined();
+          return new Promise((resolve) => {
+            resolveSecond = resolve;
+          });
+        });
+        const { result } = renderHook(() =>
+          useDbHealthInspector({ ...pgCtx, autoRefreshMs: 5_000 })
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(result.current.snapshot?.finishedAt).toBe(10);
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(2);
+        // The previous snapshot stays while the background refresh runs.
+        expect(result.current.loading).toBe(false);
+        expect(result.current.refreshing).toBe(true);
+        expect(result.current.snapshot?.finishedAt).toBe(10);
+
+        await act(async () => {
+          resolveSecond(snap({ finishedAt: 20 }));
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(result.current.refreshing).toBe(false);
+        expect(result.current.snapshot?.finishedAt).toBe(20);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("clears an earlier error once a background refresh succeeds", async () => {
+      vi.useFakeTimers();
+      try {
+        const failed = snap({
+          finishedAt: 10,
+          overallError: "Collection failed",
+          overview: { ...snap().overview, status: "error", data: null },
+          sessions: { ...snap().sessions, status: "error" },
+        });
+        collectMock
+          .mockResolvedValueOnce(failed)
+          .mockResolvedValueOnce(snap({ finishedAt: 20 }));
+        const { result } = renderHook(() =>
+          useDbHealthInspector({ ...pgCtx, autoRefreshMs: 5_000 })
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(result.current.error).toBe("Collection failed");
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+        expect(result.current.snapshot?.finishedAt).toBe(20);
+        expect(result.current.error).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the shown snapshot when a background refresh is cancelled", async () => {
+      vi.useFakeTimers();
+      try {
+        collectMock
+          .mockResolvedValueOnce(snap({ finishedAt: 10 }))
+          .mockResolvedValueOnce(snap({ finishedAt: 20, cancelled: true }));
+        const { result } = renderHook(() =>
+          useDbHealthInspector({ ...pgCtx, autoRefreshMs: 5_000 })
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(2);
+        expect(result.current.snapshot?.finishedAt).toBe(10);
+        expect(result.current.refreshing).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("pauses after a cancelled snapshot until the next manual refresh", async () => {
+      vi.useFakeTimers();
+      try {
+        collectMock.mockResolvedValue(snap({ cancelled: true }));
+        renderHook(() =>
+          useDbHealthInspector({ ...pgCtx, autoRefreshMs: 5_000 })
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(30_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not refresh while off or while the window is hidden", async () => {
+      vi.useFakeTimers();
+      const hidden = vi.spyOn(document, "hidden", "get");
+      try {
+        const { rerender } = renderHook(
+          (props: any) => useDbHealthInspector(props),
+          { initialProps: { ...pgCtx, autoRefreshMs: null as number | null } }
+        );
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(60_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(1);
+
+        hidden.mockReturnValue(true);
+        rerender({ ...pgCtx, autoRefreshMs: 5_000 });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(15_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(1);
+
+        hidden.mockReturnValue(false);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+        expect(collectMock).toHaveBeenCalledTimes(2);
+      } finally {
+        hidden.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+  });
 });

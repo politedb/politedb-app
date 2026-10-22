@@ -217,6 +217,62 @@ export function healthInspectorOverviewSql(): string {
 }
 
 /**
+ * Server-wide health from catalogs only (no table scans, no locks):
+ * transaction ID age (wraparound), backends vs max_connections, the
+ * current database's buffer cache hit counters, and replication lag.
+ * Replication columns are null for roles without pg_read_all_stats.
+ * The client count is only complete with pg_read_all_stats (superusers have
+ * it): without it pg_stat_activity hides other roles' backend_type, and
+ * pg_stat_database.numbackends also counts autovacuum/parallel workers, which
+ * do not use max_connections slots. `can_read_all_stats` tells them apart; it
+ * checks USAGE (privileges actually in effect), since a NOINHERIT member still
+ * sees other roles' sessions masked.
+ */
+export function healthInspectorServerSql(): string {
+  const queryStr = `
+    SELECT
+      (
+        SELECT MAX(pg_catalog.age(d.datfrozenxid))::bigint
+        FROM pg_catalog.pg_database d
+      ) AS max_xid_age,
+      pg_catalog.current_setting('autovacuum_freeze_max_age')::bigint
+        AS autovacuum_freeze_max_age,
+      pg_catalog.current_setting('max_connections')::bigint AS max_connections,
+      pg_catalog.current_setting('superuser_reserved_connections')::bigint
+        AS reserved_connections,
+      COALESCE(
+        pg_catalog.current_setting('reserved_connections', true), '0'
+      )::bigint AS role_reserved_connections,
+      pg_catalog.pg_has_role('pg_read_all_stats', 'USAGE') AS can_read_all_stats,
+      (
+        SELECT COUNT(*)::bigint
+        FROM pg_catalog.pg_stat_activity a
+        WHERE a.backend_type = 'client backend'
+      ) AS client_connections,
+      (
+        SELECT d.blks_hit::bigint
+        FROM pg_catalog.pg_stat_database d
+        WHERE d.datname = current_database()
+      ) AS blks_hit,
+      (
+        SELECT d.blks_read::bigint
+        FROM pg_catalog.pg_stat_database d
+        WHERE d.datname = current_database()
+      ) AS blks_read,
+      pg_catalog.pg_is_in_recovery() AS is_standby,
+      CASE WHEN pg_catalog.pg_is_in_recovery() THEN
+        EXTRACT(EPOCH FROM (now() - pg_catalog.pg_last_xact_replay_timestamp()))::float8
+      END AS standby_replay_lag_seconds,
+      (SELECT COUNT(*)::bigint FROM pg_catalog.pg_stat_replication) AS replica_count,
+      (
+        SELECT MAX(EXTRACT(EPOCH FROM r.replay_lag))::float8
+        FROM pg_catalog.pg_stat_replication r
+      ) AS max_replica_lag_seconds
+  `;
+  return regexEscape(queryStr);
+}
+
+/**
  * Sessions in the current database (stable: active first, then query age).
  * Query text is capped; blocker PIDs via pg_blocking_pids.
  */
@@ -413,9 +469,13 @@ export function healthInspectorIndexesSql(): string {
         i.indexrelname,
         i.idx_scan,
         i.idx_tup_read,
-        i.idx_tup_fetch
+        i.idx_tup_fetch,
+        (x.indisunique OR x.indisprimary) AS is_unique,
+        (x.indisunique OR x.indisprimary OR x.indisexclusion)
+          AS enforces_constraint
       FROM pg_catalog.pg_stat_user_indexes i
       JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
+      JOIN pg_catalog.pg_index x ON x.indexrelid = i.indexrelid
       ORDER BY GREATEST(ic.relpages, 0) DESC,
         i.schemaname ASC,
         i.relname ASC,
@@ -436,6 +496,8 @@ export function healthInspectorIndexesSql(): string {
       s.idx_tup_read,
       s.idx_tup_fetch,
       s.index_bytes,
+      s.is_unique,
+      s.enforces_constraint,
       (SELECT count(*) FROM pg_catalog.pg_stat_user_indexes)::bigint AS relation_count
     FROM sized s
     ORDER BY s.index_bytes DESC NULLS LAST,
@@ -445,6 +507,27 @@ export function healthInspectorIndexesSql(): string {
     LIMIT ${limit}
   `;
   return regexEscape(queryStr);
+}
+
+/**
+ * Maintenance statements the user can copy and run themselves. The Inspector
+ * never runs them. Null when the identifiers are unknown.
+ */
+export function healthInspectorVacuumSql(
+  schema: string | null,
+  table: string | null
+): string | null {
+  if (!schema || !table) return null;
+  return `VACUUM (ANALYZE) ${quoteIdent(schema)}.${quoteIdent(table)};`;
+}
+
+/** CONCURRENTLY avoids blocking writes; it cannot run inside a transaction. */
+export function healthInspectorDropIndexSql(
+  schema: string | null,
+  index: string | null
+): string | null {
+  if (!schema || !index) return null;
+  return `DROP INDEX CONCURRENTLY IF EXISTS ${quoteIdent(schema)}.${quoteIdent(index)};`;
 }
 
 function quoteIdent(ident: string): string {
