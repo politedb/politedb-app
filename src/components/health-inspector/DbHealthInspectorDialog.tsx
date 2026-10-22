@@ -1285,7 +1285,7 @@ export function DbHealthInspectorDialog(props: Props) {
                 onValueChange={handleTabChange}
                 tabs={tabs}
                 listClassName="rounded-t-md"
-                contentClassName="mt-2 flex min-h-0 flex-col"
+                contentClassName="mt-2 flex min-h-0 flex-col p-1"
               />
             </div>
           </DialogContent>
