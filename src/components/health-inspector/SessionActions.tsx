@@ -132,7 +132,7 @@ export function SessionActions(props: {
   if (eligibility.ownedByThisApp) {
     return (
       <span
-        class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+        class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs whitespace-nowrap text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
         title="Sessions opened by this app are never cancelled or terminated from here"
       >
         This app
@@ -218,7 +218,7 @@ export function SessionActions(props: {
               onKeyDown={onMenuKeyDown}
               onFocusIn={() => (focusWithinRef.current = true)}
               onFocusOut={() => (focusWithinRef.current = false)}
-              class="fixed z-[1100] rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+              class="fixed z-1100 rounded-md border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
               style={{
                 left: position.left,
                 top: position.top,

@@ -463,7 +463,7 @@ function ListSection<T>(props: {
         <div
           ref={props.tableContainerRef}
           tabIndex={-1}
-          class="min-h-0 overflow-hidden rounded-lg border border-neutral-200 outline-none"
+          class={TABLE_FRAME_CLASS}
         >
           <Table
             columns={props.columns}
@@ -478,6 +478,17 @@ function ListSection<T>(props: {
     </div>
   );
 }
+
+/**
+ * The rounded frame draws the outer edge; the shared Table also draws its own
+ * outer borders (table edge, first/last cell sides), which would double it.
+ */
+const TABLE_FRAME_CLASS = cn(
+  "min-h-0 overflow-hidden rounded-lg border border-neutral-200 outline-none",
+  "[&_table]:border-0",
+  "[&_th:first-child]:border-l-0 [&_td:first-child]:border-l-0",
+  "[&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0"
+);
 
 const EMPTY_ROWS: never[] = [];
 
@@ -589,8 +600,8 @@ function SessionsTable(
       },
       {
         key: "actions",
-        label: "",
-        className: "text-sm p-1 text-right",
+        label: "Actions",
+        className: "min-w-24 whitespace-nowrap text-sm p-1",
         render: (_v, row) => {
           const eligibility = sessionActionEligibility(
             row,
@@ -845,8 +856,8 @@ function TablesTable(props: SectionTableProps) {
       },
       {
         key: "actions",
-        label: "",
-        className: "text-sm p-1 text-right",
+        label: "Actions",
+        className: "min-w-24 whitespace-nowrap text-sm p-1",
         render: (_v, row) => {
           const sql = needsVacuum(row)
             ? healthInspectorVacuumSql(row.schema, row.tableName)
@@ -937,8 +948,8 @@ function IndexesTable(props: SectionTableProps) {
       },
       {
         key: "actions",
-        label: "",
-        className: "text-sm p-1 text-right",
+        label: "Actions",
+        className: "min-w-24 whitespace-nowrap text-sm p-1",
         render: (_v, row) => {
           const sql = isUnusedIndex(row)
             ? healthInspectorDropIndexSql(row.schema, row.indexName)
