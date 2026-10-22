@@ -217,6 +217,70 @@ export function healthInspectorOverviewSql(): string {
 }
 
 /**
+ * Server-wide health from catalogs only (no table scans, no locks):
+ * transaction ID age (wraparound), backends vs max_connections, the
+ * current database's buffer cache hit counters, and replication lag.
+ * Replication columns are null for roles without pg_read_all_stats.
+ * The client count is only complete with pg_read_all_stats (superusers have
+ * it): without it pg_stat_activity hides other roles' backend_type, and
+ * pg_stat_database.numbackends also counts autovacuum/parallel workers, which
+ * do not use max_connections slots. `can_read_all_stats` tells them apart; it
+ * checks USAGE (privileges actually in effect), since a NOINHERIT member still
+ * sees other roles' sessions masked.
+ */
+export function healthInspectorServerSql(): string {
+  const queryStr = `
+    SELECT
+      (
+        SELECT MAX(pg_catalog.age(d.datfrozenxid))::bigint
+        FROM pg_catalog.pg_database d
+      ) AS max_xid_age,
+      pg_catalog.current_setting('autovacuum_freeze_max_age')::bigint
+        AS autovacuum_freeze_max_age,
+      pg_catalog.current_setting('max_connections')::bigint AS max_connections,
+      pg_catalog.current_setting('superuser_reserved_connections')::bigint
+        AS reserved_connections,
+      COALESCE(
+        pg_catalog.current_setting('reserved_connections', true), '0'
+      )::bigint AS role_reserved_connections,
+      pg_catalog.pg_has_role('pg_read_all_stats', 'USAGE') AS can_read_all_stats,
+      (
+        SELECT COUNT(*)::bigint
+        FROM pg_catalog.pg_stat_activity a
+        WHERE a.backend_type = 'client backend'
+      ) AS client_connections,
+      (
+        SELECT d.blks_hit::bigint
+        FROM pg_catalog.pg_stat_database d
+        WHERE d.datname = current_database()
+      ) AS blks_hit,
+      (
+        SELECT d.blks_read::bigint
+        FROM pg_catalog.pg_stat_database d
+        WHERE d.datname = current_database()
+      ) AS blks_read,
+      pg_catalog.pg_is_in_recovery() AS is_standby,
+      CASE WHEN pg_catalog.pg_is_in_recovery() THEN
+        EXTRACT(EPOCH FROM (now() - pg_catalog.pg_last_xact_replay_timestamp()))::float8
+      END AS standby_replay_lag_seconds,
+      (SELECT COUNT(*)::bigint FROM pg_catalog.pg_stat_replication) AS replica_count,
+      (
+        SELECT MAX(EXTRACT(EPOCH FROM r.replay_lag))::float8
+        FROM pg_catalog.pg_stat_replication r
+      ) AS max_replica_lag_seconds
+  `;
+  return regexEscape(queryStr);
+}
+
+/**
+ * Session identity token: backend start in UTC with microseconds, formatted by
+ * the server so it never goes through a JS Date. Must match the expression in
+ * src-tauri/src/engines/postgres/session_signal.rs. Null when the role cannot
+ * see the session's start time.
+ */
+export const HEALTH_INSPECTOR_BACKEND_TOKEN_SQL = `pg_catalog.to_char(a.backend_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/**
  * Sessions in the current database (stable: active first, then query age).
  * Query text is capped; blocker PIDs via pg_blocking_pids.
  */
@@ -233,6 +297,7 @@ export function healthInspectorSessionsSql(): string {
       a.wait_event_type,
       a.wait_event,
       a.backend_type,
+      ${HEALTH_INSPECTOR_BACKEND_TOKEN_SQL} AS backend_token,
       EXTRACT(EPOCH FROM (now() - a.xact_start))::float8 AS xact_age_seconds,
       EXTRACT(EPOCH FROM (now() - a.query_start))::float8 AS query_age_seconds,
       EXTRACT(EPOCH FROM (now() - a.state_change))::float8 AS state_age_seconds,
@@ -309,33 +374,86 @@ export function healthInspectorStatementsInfoSql(schema: string): string {
 }
 
 /**
+ * Candidate rows ranked by the catalog page estimate before real sizes are
+ * computed. Larger than the fetch limit so a stale `relpages` (it only
+ * updates on VACUUM/ANALYZE) rarely pushes a big relation out of the list.
+ */
+export const HEALTH_INSPECTOR_SIZE_CANDIDATES = 500;
+
+/**
  * Table live/dead estimates, maintenance timestamps, and sizes.
  * Includes partition leaves with is_partition_child so physical storage and
  * maintenance are visible. Each row reports only its own relation size
  * (no parent+child aggregation), so sizes are never double-counted.
+ *
+ * Sizes stat files and lock each relation, so they are computed only for the
+ * candidates ranked by `pg_class.relpages` (heap + TOAST + their indexes),
+ * never for every table in the database. `relation_count` tells the UI when
+ * that ranking was a sample.
  */
 export function healthInspectorTablesSql(): string {
   const limit = HEALTH_INSPECTOR_FETCH_LIMIT;
+  const candidates = HEALTH_INSPECTOR_SIZE_CANDIDATES;
   const queryStr = `
+    WITH candidates AS (
+      SELECT
+        t.relid,
+        t.schemaname,
+        t.relname,
+        t.n_live_tup,
+        t.n_dead_tup,
+        t.last_vacuum,
+        t.last_autovacuum,
+        t.last_analyze,
+        t.last_autoanalyze,
+        c.relkind,
+        c.relispartition
+      FROM pg_catalog.pg_stat_user_tables t
+      JOIN pg_catalog.pg_class c ON c.oid = t.relid
+      LEFT JOIN pg_catalog.pg_class toast ON toast.oid = c.reltoastrelid
+      LEFT JOIN LATERAL (
+        SELECT SUM(ic.relpages)::bigint AS pages
+        FROM pg_catalog.pg_index x
+        JOIN pg_catalog.pg_class ic ON ic.oid = x.indexrelid
+        WHERE x.indrelid = t.relid
+          OR (c.reltoastrelid <> 0 AND x.indrelid = c.reltoastrelid)
+      ) idx ON true
+      ORDER BY (
+          GREATEST(c.relpages, 0)::bigint
+          + GREATEST(COALESCE(toast.relpages, 0), 0)::bigint
+          + COALESCE(idx.pages, 0)
+        ) DESC,
+        t.schemaname ASC,
+        t.relname ASC
+      LIMIT ${candidates}
+    ),
+    sized AS (
+      SELECT
+        cand.*,
+        pg_catalog.pg_table_size(cand.relid)::bigint AS table_bytes,
+        pg_catalog.pg_indexes_size(cand.relid)::bigint AS indexes_bytes,
+        pg_catalog.pg_total_relation_size(cand.relid)::bigint AS total_bytes
+      FROM candidates cand
+    )
     SELECT
-      t.schemaname,
-      t.relname AS table_name,
-      t.n_live_tup,
-      t.n_dead_tup,
-      t.last_vacuum,
-      t.last_autovacuum,
-      t.last_analyze,
-      t.last_autoanalyze,
-      pg_catalog.pg_table_size(t.relid)::bigint AS table_bytes,
-      pg_catalog.pg_indexes_size(t.relid)::bigint AS indexes_bytes,
-      pg_catalog.pg_total_relation_size(t.relid)::bigint AS total_bytes,
-      (c.relkind = 'p') AS is_partitioned_parent,
-      COALESCE(c.relispartition, false) AS is_partition_child
-    FROM pg_catalog.pg_stat_user_tables t
-    JOIN pg_catalog.pg_class c ON c.oid = t.relid
-    ORDER BY pg_catalog.pg_total_relation_size(t.relid) DESC NULLS LAST,
-      t.schemaname ASC,
-      t.relname ASC
+      s.schemaname,
+      s.relname AS table_name,
+      s.n_live_tup,
+      s.n_dead_tup,
+      s.last_vacuum,
+      s.last_autovacuum,
+      s.last_analyze,
+      s.last_autoanalyze,
+      s.table_bytes,
+      s.indexes_bytes,
+      s.total_bytes,
+      (s.relkind = 'p') AS is_partitioned_parent,
+      COALESCE(s.relispartition, false) AS is_partition_child,
+      (SELECT count(*) FROM pg_catalog.pg_stat_user_tables)::bigint AS relation_count
+    FROM sized s
+    ORDER BY s.total_bytes DESC NULLS LAST,
+      s.schemaname ASC,
+      s.relname ASC
     LIMIT ${limit}
   `;
   return regexEscape(queryStr);
@@ -344,26 +462,81 @@ export function healthInspectorTablesSql(): string {
 /**
  * Index sizes and scan counters.
  * Zero scans is a signal only — never treat as safe-to-drop.
+ *
+ * Like tables, real sizes are computed only for candidates ranked by
+ * `pg_class.relpages`.
  */
 export function healthInspectorIndexesSql(): string {
   const limit = HEALTH_INSPECTOR_FETCH_LIMIT;
+  const candidates = HEALTH_INSPECTOR_SIZE_CANDIDATES;
   const queryStr = `
+    WITH candidates AS (
+      SELECT
+        i.indexrelid,
+        i.schemaname,
+        i.relname,
+        i.indexrelname,
+        i.idx_scan,
+        i.idx_tup_read,
+        i.idx_tup_fetch,
+        (x.indisunique OR x.indisprimary) AS is_unique,
+        (x.indisunique OR x.indisprimary OR x.indisexclusion)
+          AS enforces_constraint
+      FROM pg_catalog.pg_stat_user_indexes i
+      JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
+      JOIN pg_catalog.pg_index x ON x.indexrelid = i.indexrelid
+      ORDER BY GREATEST(ic.relpages, 0) DESC,
+        i.schemaname ASC,
+        i.relname ASC,
+        i.indexrelname ASC
+      LIMIT ${candidates}
+    ),
+    sized AS (
+      SELECT
+        cand.*,
+        pg_catalog.pg_relation_size(cand.indexrelid)::bigint AS index_bytes
+      FROM candidates cand
+    )
     SELECT
-      i.schemaname,
-      i.relname AS table_name,
-      i.indexrelname AS index_name,
-      i.idx_scan,
-      i.idx_tup_read,
-      i.idx_tup_fetch,
-      pg_catalog.pg_relation_size(i.indexrelid)::bigint AS index_bytes
-    FROM pg_catalog.pg_stat_user_indexes i
-    ORDER BY pg_catalog.pg_relation_size(i.indexrelid) DESC NULLS LAST,
-      i.schemaname ASC,
-      i.relname ASC,
-      i.indexrelname ASC
+      s.schemaname,
+      s.relname AS table_name,
+      s.indexrelname AS index_name,
+      s.idx_scan,
+      s.idx_tup_read,
+      s.idx_tup_fetch,
+      s.index_bytes,
+      s.is_unique,
+      s.enforces_constraint,
+      (SELECT count(*) FROM pg_catalog.pg_stat_user_indexes)::bigint AS relation_count
+    FROM sized s
+    ORDER BY s.index_bytes DESC NULLS LAST,
+      s.schemaname ASC,
+      s.relname ASC,
+      s.indexrelname ASC
     LIMIT ${limit}
   `;
   return regexEscape(queryStr);
+}
+
+/**
+ * Maintenance statements the user can copy and run themselves. The Inspector
+ * never runs them. Null when the identifiers are unknown.
+ */
+export function healthInspectorVacuumSql(
+  schema: string | null,
+  table: string | null
+): string | null {
+  if (!schema || !table) return null;
+  return `VACUUM (ANALYZE) ${quoteIdent(schema)}.${quoteIdent(table)};`;
+}
+
+/** CONCURRENTLY avoids blocking writes; it cannot run inside a transaction. */
+export function healthInspectorDropIndexSql(
+  schema: string | null,
+  index: string | null
+): string | null {
+  if (!schema || !index) return null;
+  return `DROP INDEX CONCURRENTLY IF EXISTS ${quoteIdent(schema)}.${quoteIdent(index)};`;
 }
 
 function quoteIdent(ident: string): string {

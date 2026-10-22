@@ -33,9 +33,8 @@ describe("AppStatusBar", () => {
 
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
     expect(screen.getByText("No active connection")).toBeInTheDocument();
-    expect(
-      screen.getByText("Tips: Right-click a connection for actions")
-    ).toBeInTheDocument();
+    // Tips live in the sidebar now, not in the status bar.
+    expect(screen.queryByText(/^Tips:/)).toBeNull();
   });
 
   it("renders connected engine and query mode", () => {
@@ -55,8 +54,7 @@ describe("AppStatusBar", () => {
 
     expect(screen.getByText("Connected: SQLite")).toBeInTheDocument();
     expect(screen.getByText("Query mode: Default")).toBeInTheDocument();
-    expect(
-      screen.getByText("Tips: Right-click a table for actions")
-    ).toBeInTheDocument();
+    // Tips live in the sidebar now, not in the status bar.
+    expect(screen.queryByText(/^Tips:/)).toBeNull();
   });
 });

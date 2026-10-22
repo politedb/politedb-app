@@ -6,6 +6,7 @@ pub mod cassandra;
 pub mod connection;
 pub mod export;
 pub mod google_sheets;
+pub mod health_inspector;
 pub mod legacy_web_storage;
 pub mod license;
 pub mod mongo;

@@ -5,6 +5,8 @@ import { cn } from "src/utils/cn";
 export interface TabItem<T extends string = string> {
   value: T;
   label: string;
+  /** Optional count or status shown after the label (part of its name). */
+  badge?: ComponentChildren;
   children: ComponentChildren;
 }
 
@@ -63,6 +65,7 @@ export function Tabs<T extends string = string>({
               )}
             >
               {tab.label}
+              {tab.badge}
             </Button>
           );
         })}

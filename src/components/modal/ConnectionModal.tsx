@@ -4,7 +4,7 @@ import { ConnectionFormDialog } from "../connection/ConnectionFormDialog.tsx";
 import { OverlayModal } from "./OverlayModal.tsx";
 import { Button } from "../common/Button.tsx";
 import { DbIcon } from "../icons/DbIcon.tsx";
-import { SearchIcon } from "../icons/index.tsx";
+import { DatabaseIcon, SearchIcon } from "../icons/index.tsx";
 import { OverlayScrollArea } from "../common/OverlayScrollArea.tsx";
 
 import type { DatabaseEngine, DatabaseType } from "src/types.ts";
@@ -12,6 +12,7 @@ import type { ConnectionProfile } from "src/lib/tauri";
 import { SUPPORTED_DATABASES } from "src/constant.ts";
 import { cn } from "src/utils/cn.ts";
 import { isEngineSupported } from "src/lib/distribution";
+import { Input } from "src/components/form";
 
 function normalizeQuery(q: string) {
   return q.trim().toLowerCase();
@@ -277,7 +278,8 @@ export function ConnectionModal(props: {
         {/* Header */}
         <div class="flex items-center justify-between border-b border-slate-200 p-4">
           <div>
-            <div class="text-lg font-semibold text-slate-900">
+            <div class="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <DatabaseIcon className="size-5 text-slate-500" />
               New Connection
             </div>
             <div class="mt-0.5 text-xs text-slate-500">
@@ -288,23 +290,16 @@ export function ConnectionModal(props: {
 
         {/* Search */}
         <div class="shrink-0 border-b border-slate-200 bg-slate-50 p-4">
-          <div class="relative">
-            <input
-              ref={searchRef}
-              type="text"
-              value={query}
-              placeholder="Search engines…"
-              onInput={(e) => setQuery(e.currentTarget.value)}
-              class={cn(
-                "h-10 w-full rounded-xl border border-slate-300 bg-white pr-3 pl-10 text-sm font-medium",
-                "text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200/60"
-              )}
-            />
-            <SearchIcon className="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 text-slate-400" />
-          </div>
+          <Input
+            inputRef={searchRef}
+            value={query}
+            placeholder="Search engines…"
+            onInput={(e) => setQuery(e.currentTarget.value)}
+            left={<SearchIcon className="size-4.5 text-slate-400" />}
+          />
 
           {!anyAvailable ? (
-            <div class="mt-2 text-xs text-rose-600">
+            <div class="mt-2 text-xs text-rose-500">
               No available engines in this list.
             </div>
           ) : (

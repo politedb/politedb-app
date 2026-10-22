@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { confirmDeactivateLicense } from "src/lib/license/confirmDeactivate";
 import {
   Dialog,
   DialogContent,
@@ -243,7 +244,9 @@ export function LicenseDialog(props: { open: boolean; onClose: () => void }) {
                 <Button
                   variant="outline"
                   className="border-rose-200 text-rose-700 hover:bg-rose-50"
-                  onClick={() => void deactivate()}
+                  onClick={async () => {
+                    if (await confirmDeactivateLicense()) await deactivate();
+                  }}
                   disabled={busy}
                 >
                   Deactivate

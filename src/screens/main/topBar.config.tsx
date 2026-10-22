@@ -39,6 +39,17 @@ export function buildNewConnectionMenuItems(actions: {
   ];
 }
 
+/** Names of the sort orders, shown in the menu and on the sort button. */
+export const SORT_LABELS: Record<
+  ConnectionSortMode | KeychainSortMode,
+  string
+> = {
+  "label-asc": "Name A–Z",
+  "label-desc": "Name Z–A",
+  "created-desc": "Newest first",
+  "created-asc": "Oldest first",
+};
+
 export function buildConnectionSortItems(args: {
   mode: ConnectionSortMode;
   onChange?: (mode: ConnectionSortMode) => void;
@@ -48,21 +59,21 @@ export function buildConnectionSortItems(args: {
   return [
     {
       key: "label-asc",
-      label: "A-z",
+      label: SORT_LABELS["label-asc"],
       icon: alphaSortBadge("Az"),
       rightSlot: selectedMark(mode === "label-asc"),
       onSelect: () => onChange?.("label-asc"),
     },
     {
       key: "label-desc",
-      label: "Z-a",
+      label: SORT_LABELS["label-desc"],
       icon: alphaSortBadge("Za"),
       rightSlot: selectedMark(mode === "label-desc"),
       onSelect: () => onChange?.("label-desc"),
     },
     {
       key: "created-desc",
-      label: "Newest to oldest",
+      label: SORT_LABELS["created-desc"],
       separatorBefore: true,
       icon: <DateDescIcon className="size-5" />,
       rightSlot: selectedMark(mode === "created-desc"),
@@ -70,7 +81,7 @@ export function buildConnectionSortItems(args: {
     },
     {
       key: "created-asc",
-      label: "Oldest to newest",
+      label: SORT_LABELS["created-asc"],
       icon: <DateAscIcon className="size-5" />,
       rightSlot: selectedMark(mode === "created-asc"),
       onSelect: () => onChange?.("created-asc"),
@@ -87,14 +98,14 @@ export function buildKeychainSortItems(args: {
   return [
     {
       key: "label-asc",
-      label: "A-z",
+      label: SORT_LABELS["label-asc"],
       icon: alphaSortBadge("Az"),
       rightSlot: selectedMark(mode === "label-asc"),
       onSelect: () => onChange?.("label-asc"),
     },
     {
       key: "label-desc",
-      label: "Z-a",
+      label: SORT_LABELS["label-desc"],
       icon: alphaSortBadge("Za"),
       rightSlot: selectedMark(mode === "label-desc"),
       onSelect: () => onChange?.("label-desc"),
@@ -109,7 +120,7 @@ export function getTopBarSearchPlaceholder(mode: NavId) {
   if (mode === "logs") {
     return "Search connection history...";
   }
-  return "Search keychain keys...";
+  return "Search credentials...";
 }
 
 export function getTopBarCreateLabel(mode: NavId) {
@@ -121,5 +132,5 @@ export function getTopBarCreateLabel(mode: NavId) {
 export function getTopBarCreateTitle(mode: NavId) {
   if (mode === "connections") return "Create";
   if (mode === "logs") return "";
-  return "New keychain key";
+  return "New credential";
 }

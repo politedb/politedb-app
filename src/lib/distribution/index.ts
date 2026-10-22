@@ -16,6 +16,11 @@ export type DistributionFeatures = {
   gatesProFeatures: boolean;
   /** Free trial recorded by the license server (none on the App Store). */
   serverTrial: boolean;
+  /**
+   * Links to politedb.com pages such as the privacy policy. The App Store build
+   * may only open support URLs (`allows_external_url` in distribution.rs).
+   */
+  websiteLinks: boolean;
   /** Engines hidden from the new-connection picker in this flavor. */
   unsupportedEngines: readonly DatabaseEngine[];
 };
@@ -34,6 +39,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
       externalPurchase: false,
       gatesProFeatures: false,
       serverTrial: false,
+      websiteLinks: false,
       unsupportedEngines: ["oracle"],
     };
   }
@@ -42,6 +48,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
     externalPurchase: true,
     gatesProFeatures: true,
     serverTrial: true,
+    websiteLinks: true,
     unsupportedEngines: [],
   };
 }

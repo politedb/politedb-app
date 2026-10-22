@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  LONG_TRANSACTION_WARN_SECONDS,
   buildAttentionItems,
+  formatLongestTransaction,
+  overviewMetricTones,
+  splitAttentionItems,
   deadRowRatio,
   formatAgeSeconds,
   indexScanSignal,
@@ -45,6 +49,8 @@ describe("healthInspector signals", () => {
         idxTupRead: null,
         idxTupFetch: null,
         indexBytes: null,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("unknown");
     expect(
@@ -56,6 +62,8 @@ describe("healthInspector signals", () => {
         idxTupRead: 0,
         idxTupFetch: 0,
         indexBytes: 1,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("zero");
     expect(
@@ -67,6 +75,8 @@ describe("healthInspector signals", () => {
         idxTupRead: 1,
         idxTupFetch: 1,
         indexBytes: 1,
+        isUnique: false,
+        enforcesConstraint: false,
       })
     ).toBe("used");
   });
@@ -198,5 +208,88 @@ describe("healthInspector signals", () => {
     );
     expect(items.some((i) => i.kind === "incomplete")).toBe(true);
     expect(items.every((i) => i.kind !== "blocked" || true)).toBe(true);
+  });
+
+  it("colors cards by thresholds and keeps unknown values neutral", () => {
+    expect(overviewMetricTones(baseOverview())).toEqual({
+      blocked: "ok",
+      idleInTransaction: "ok",
+      longestTransaction: "ok",
+    });
+    expect(
+      overviewMetricTones(
+        baseOverview({
+          blockedSessionCount: 1,
+          idleInTransactionCount: 2,
+          longestXactAgeSeconds: LONG_TRANSACTION_WARN_SECONDS + 1,
+        })
+      )
+    ).toEqual({
+      blocked: "critical",
+      idleInTransaction: "warning",
+      longestTransaction: "warning",
+    });
+    expect(
+      overviewMetricTones(
+        baseOverview({
+          restrictedVisibility: true,
+          blockedSessionCount: null,
+          idleInTransactionCount: null,
+          longestXactAgeSeconds: null,
+        })
+      )
+    ).toEqual({
+      blocked: "neutral",
+      idleInTransaction: "neutral",
+      longestTransaction: "neutral",
+    });
+  });
+
+  it("says None running only when no transaction is visible", () => {
+    expect(
+      formatLongestTransaction(baseOverview({ longestXactAgeSeconds: null }))
+    ).toBe("None running");
+    expect(
+      formatLongestTransaction(
+        baseOverview({
+          longestXactAgeSeconds: null,
+          restrictedVisibility: true,
+        })
+      )
+    ).toBe("—");
+    expect(
+      formatLongestTransaction(baseOverview({ longestXactAgeSeconds: 90 }))
+    ).toBe("1m 30s");
+  });
+
+  it("flags long transactions unless the idle one already explains it", () => {
+    const long = buildAttentionItems(
+      baseOverview({ longestXactAgeSeconds: 600 })
+    );
+    expect(long.find((i) => i.kind === "long_transaction")?.title).toBe(
+      "Transaction open for 10m"
+    );
+    expect(
+      buildAttentionItems(baseOverview({ longestXactAgeSeconds: 300 })).some(
+        (i) => i.kind === "long_transaction"
+      )
+    ).toBe(false);
+    const idle = buildAttentionItems(
+      baseOverview({
+        longestXactAgeSeconds: 600,
+        idleInTransactionCount: 1,
+        idleInTransactionOldestXactAgeSeconds: 600,
+      })
+    );
+    expect(idle.map((i) => i.kind)).toEqual(["idle_in_transaction"]);
+  });
+
+  it("separates current issues from history", () => {
+    const items = buildAttentionItems(
+      baseOverview({ blockedSessionCount: 1, deadlocks: 2 })
+    );
+    const { issues, history } = splitAttentionItems(items);
+    expect(issues.map((i) => i.kind)).toEqual(["blocked"]);
+    expect(history.map((i) => i.kind)).toEqual(["deadlocks_history"]);
   });
 });

@@ -8,6 +8,7 @@ import type { SectionProps } from "./connectionForm.utils";
 import { Select } from "../common/Select";
 import { toNumber } from "src/utils/convert";
 import { getConnectionFormEngineConfig } from "./engineFormConfig";
+import { cn } from "src/utils/cn";
 
 type InputEvt = TargetedEvent<HTMLInputElement>;
 
@@ -105,7 +106,12 @@ export function SSHSection(props: SectionProps) {
   if (!engineConfig.showSsh) return null;
 
   return (
-    <section class="rounded-2xl border border-slate-200 bg-white p-5">
+    <section
+      class={cn(
+        "rounded-2xl border border-slate-200 bg-white p-5",
+        enabled ? "h-full" : ""
+      )}
+    >
       <div class="flex items-center justify-between">
         <div>
           <div class="text-sm font-semibold text-slate-900">Over SSH</div>
@@ -194,7 +200,7 @@ export function SSHSection(props: SectionProps) {
                     dirty();
                   }}
                 >
-                  <option value="privateKey">Private Key</option>
+                  <option value="privateKey">SSH Key</option>
                   <option value="password">Password</option>
                 </Select>
 

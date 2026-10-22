@@ -1,23 +1,45 @@
 import { Skeleton } from "src/components/common/Skeleton";
 import { Button } from "src/components/common/Button";
-import { formatBytesSize } from "src/utils/convert";
+import { cn } from "src/utils/cn";
 import {
   formatExactCount,
   formatHealthInspectorTimestamp,
+  formatCompactCount,
+  formatInspectorBytes,
 } from "src/lib/health-inspector/format";
 import {
   BLOCKING_LIMITATION_NOTE,
+  CACHE_HIT_NOTE,
+  CONNECTIONS_NOTE,
+  CONNECTIONS_RESTRICTED_DETAIL,
+  REPLICATION_NOTE,
+  XID_AGE_NOTE,
+  buildServerAttentionItems,
+  formatPercent,
+  serverCheckState,
+  serverMetricSignals,
+  type ServerCheckState,
   DEADLOCKS_CAVEAT,
+  LONGEST_TRANSACTION_NOTE,
+  SESSIONS_SCOPE_NOTE,
+  STATS_RESET_NOTE,
   TEMP_FILES_CAVEAT,
   buildAttentionItems,
   formatAgeSeconds,
+  formatLongestTransaction,
   formatOptionalNumber,
-  overviewVisibilityNote,
+  overviewMetricTones,
+  splitAttentionItems,
+  type HealthMetricTone,
 } from "src/lib/health-inspector/signals";
 import type {
+  HealthAttentionItem,
   HealthInspectorSnapshot,
+  HealthOverview,
   HealthSection,
+  HealthServerMetrics,
 } from "src/lib/health-inspector/types";
+import { InfoHint } from "./InfoHint";
 
 function formatCollectedAt(ts: number | null): string {
   return formatHealthInspectorTimestamp(ts);
@@ -52,19 +74,68 @@ function SectionBanner(props: {
   return null;
 }
 
-function MetricCard(props: {
+const CARD_TONE_CLASS: Record<HealthMetricTone, string> = {
+  critical: "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60",
+  warning:
+    "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60",
+  ok: "border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900/40",
+  neutral:
+    "border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900/40",
+};
+
+const VALUE_TONE_CLASS: Record<HealthMetricTone, string> = {
+  critical: "text-red-700 dark:text-red-200",
+  warning: "text-amber-800 dark:text-amber-200",
+  ok: "text-neutral-900 dark:text-neutral-50",
+  neutral: "text-neutral-900 dark:text-neutral-50",
+};
+
+const DOT_TONE_CLASS: Record<HealthMetricTone, string | null> = {
+  critical: "bg-red-500",
+  warning: "bg-amber-500",
+  ok: "bg-emerald-500",
+  neutral: null,
+};
+
+type OverviewCard = {
   label: string;
   value: string;
+  /** Value still being collected: show a placeholder instead. */
+  pending?: boolean;
   detail?: string | null;
-}) {
+  hint?: string;
+  tone?: HealthMetricTone;
+  wide?: boolean;
+};
+
+function MetricCard(props: OverviewCard) {
+  const tone = props.tone ?? "neutral";
+  const dot = DOT_TONE_CLASS[tone];
   return (
-    <div class="h-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900/40">
-      <div class="text-sm font-medium text-neutral-500 dark:text-neutral-400">
+    <div
+      class={cn(
+        "h-full rounded-lg border px-3 py-2",
+        CARD_TONE_CLASS[tone],
+        props.wide && "col-span-2"
+      )}
+      data-tone={tone}
+    >
+      <div class="flex items-center gap-1.5 text-sm font-medium text-neutral-500 dark:text-neutral-400">
+        {dot ? (
+          <span class={cn("size-1.5 rounded-full", dot)} aria-hidden="true" />
+        ) : null}
         {props.label}
+        {props.hint ? <InfoHint text={props.hint} /> : null}
       </div>
-      <div class="mt-0.5 text-base font-semibold text-neutral-900 dark:text-neutral-50">
-        {props.value}
-      </div>
+      {props.pending ? (
+        <Skeleton className="mt-1.5 h-4 w-16" />
+      ) : (
+        <div
+          class={cn("mt-0.5 text-base font-semibold", VALUE_TONE_CLASS[tone])}
+        >
+          {props.value}
+        </div>
+      )}
       {props.detail ? (
         <div class="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
           {props.detail}
@@ -74,7 +145,100 @@ function MetricCard(props: {
   );
 }
 
-const OVERVIEW_SKELETON_CARD_COUNT = 9;
+function AttentionSummary(props: {
+  items: HealthAttentionItem[];
+  /** "All clear" needs complete server checks too. */
+  serverState: ServerCheckState;
+  onOpenSessions: () => void;
+}) {
+  const { issues, history } = splitAttentionItems(props.items);
+  const state =
+    issues.length > 0
+      ? issues.some((i) => i.critical)
+        ? "critical"
+        : "warning"
+      : props.serverState === "pending"
+        ? "pending"
+        : props.serverState === "incomplete"
+          ? "incomplete"
+          : "clear";
+  return (
+    <section
+      aria-label="Attention"
+      data-state={state}
+      class={cn(
+        "rounded-lg border px-3 py-2",
+        state === "clear"
+          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/50"
+          : state === "critical"
+            ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/60"
+            : state === "warning"
+              ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/60"
+              : "border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900/40"
+      )}
+    >
+      <div
+        class={cn(
+          "text-sm font-semibold",
+          state === "clear"
+            ? "text-emerald-800 dark:text-emerald-200"
+            : state === "critical"
+              ? "text-red-800 dark:text-red-200"
+              : state === "warning"
+                ? "text-amber-900 dark:text-amber-100"
+                : "text-neutral-600 dark:text-neutral-300"
+        )}
+      >
+        {state === "clear"
+          ? "✓ All clear in this snapshot"
+          : state === "pending"
+            ? "Checking server health…"
+            : state === "incomplete"
+              ? "No issues found, but server checks are incomplete"
+              : `⚠ ${issues.length} issue${issues.length === 1 ? "" : "s"}`}
+      </div>
+      {issues.length > 0 ? (
+        <ul class="mt-1 space-y-0.5 text-sm">
+          {issues.map((item) => (
+            <li
+              key={`${item.kind}-${item.title}`}
+              class="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+            >
+              <span class="text-neutral-800 dark:text-neutral-100">
+                {item.title}
+              </span>
+              <InfoHint text={item.evidence} />
+              {item.openSessions ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-6 px-1.5 text-xs font-medium text-neutral-800 underline-offset-2 hover:underline dark:text-neutral-100"
+                  onClick={props.onOpenSessions}
+                >
+                  Open Sessions
+                </Button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {history.map((item) => (
+        <div
+          key={`${item.kind}-${item.title}`}
+          class="mt-1 flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-300"
+        >
+          <span class="rounded bg-white/70 px-1.5 py-0.5 dark:bg-neutral-800">
+            history
+          </span>
+          {item.title}
+          <InfoHint text={item.evidence} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+const OVERVIEW_SKELETON_CARD_COUNT = 8;
 
 function OverviewSkeleton() {
   return (
@@ -83,8 +247,8 @@ function OverviewSkeleton() {
       role="status"
       aria-label="Loading overview"
     >
-      <Skeleton className="h-3 w-64 max-w-full" />
-      <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <Skeleton className="h-12 w-full rounded-lg" />
+      <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {Array.from({ length: OVERVIEW_SKELETON_CARD_COUNT }, (_, i) => (
           <div
             key={i}
@@ -96,13 +260,165 @@ function OverviewSkeleton() {
           </div>
         ))}
       </div>
-      <div class="mt-1 space-y-2">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-3 w-full max-w-md" />
-        <Skeleton className="h-3 w-48 max-w-sm" />
-      </div>
+      <Skeleton className="h-3 w-48 max-w-full" />
     </div>
   );
+}
+
+type ServerCardKey = "connections" | "xid" | "replication" | "cache";
+
+/** Server-wide cards; placeholders while the server query is still running. */
+function serverCards(
+  section: HealthSection<HealthServerMetrics | null> | undefined,
+  loading: boolean
+): Record<ServerCardKey, OverviewCard> {
+  const server = section?.status === "ready" ? section.data : null;
+  const pending = !section || (loading && section.status === "loading");
+  const unavailable = !pending && !server;
+  const unavailableDetail = unavailable
+    ? (section?.unavailableReason ?? section?.error ?? "Unavailable")
+    : null;
+  const signals = server ? serverMetricSignals(server) : null;
+
+  const replicationValue = !server
+    ? "—"
+    : server.isStandby
+      ? "Standby"
+      : (server.replicaCount ?? 0) === 0
+        ? "None"
+        : `${server.replicaCount} replica${server.replicaCount === 1 ? "" : "s"}`;
+  const replicationDetail = !server
+    ? unavailableDetail
+    : server.isStandby
+      ? `Replay lag ${formatAgeSeconds(server.standbyReplayLagSeconds)}`
+      : (server.replicaCount ?? 0) === 0
+        ? null
+        : server.maxReplicaLagSeconds == null
+          ? "Lag not visible to this role"
+          : `Max lag ${formatAgeSeconds(server.maxReplicaLagSeconds)}`;
+
+  return {
+    connections: {
+      label: "Connections",
+      pending,
+      value:
+        server?.clientConnections == null || server.maxConnections == null
+          ? "—"
+          : `${server.clientConnections} / ${server.maxConnections}`,
+      detail: server
+        ? !server.canReadAllStats
+          ? CONNECTIONS_RESTRICTED_DETAIL
+          : signals?.connectionRatio == null
+            ? null
+            : `${formatPercent(signals.connectionRatio)} of usable slots`
+        : unavailableDetail,
+      hint: CONNECTIONS_NOTE,
+      tone: signals?.connections ?? "neutral",
+    },
+    xid: {
+      label: "Transaction ID age",
+      pending,
+      value: formatCompactCount(server?.maxXidAge),
+      detail: server
+        ? signals?.xidAgeRatio == null
+          ? null
+          : `${formatPercent(signals.xidAgeRatio, 1)} of wraparound limit`
+        : unavailableDetail,
+      hint: XID_AGE_NOTE,
+      tone: signals?.xid ?? "neutral",
+    },
+    replication: {
+      label: "Replication",
+      pending,
+      value: replicationValue,
+      detail: replicationDetail,
+      hint: REPLICATION_NOTE,
+      tone: signals?.replication ?? "neutral",
+    },
+    cache: {
+      label: "Cache hit ratio",
+      pending,
+      value: formatPercent(signals?.cacheHitRatio ?? null, 1),
+      detail: server
+        ? signals?.cacheHitRatio == null
+          ? "Not enough reads yet"
+          : null
+        : unavailableDetail,
+      hint: CACHE_HIT_NOTE,
+      tone: signals?.cache ?? "neutral",
+    },
+  };
+}
+
+function overviewCards(
+  data: HealthOverview,
+  server: Record<ServerCardKey, OverviewCard>
+): OverviewCard[] {
+  const tones = overviewMetricTones(data);
+  const idleInXact = data.idleInTransactionCount;
+  const blockers = data.topBlockers
+    .map((b) => (b.isPreparedTransaction ? "prepared xact (0)" : String(b.pid)))
+    .join(", ");
+  return [
+    {
+      label: "Sessions",
+      value:
+        data.sessionCount == null
+          ? "—"
+          : `${formatOptionalNumber(data.sessionCount)} session${data.sessionCount === 1 ? "" : "s"}`,
+      detail: `${formatOptionalNumber(data.idleSessionCount)} idle · ${formatOptionalNumber(data.activeSessionCount)} active`,
+      hint: SESSIONS_SCOPE_NOTE,
+      wide: true,
+    },
+    {
+      label: "Blocked",
+      value: formatOptionalNumber(data.blockedSessionCount),
+      detail: blockers ? `Top blockers: ${blockers}` : null,
+      hint: BLOCKING_LIMITATION_NOTE,
+      tone: tones.blocked,
+    },
+    {
+      label: "Idle in transaction",
+      value: formatOptionalNumber(idleInXact),
+      detail:
+        idleInXact == null
+          ? data.restrictedVisibility
+            ? "Unknown (restricted visibility)"
+            : null
+          : idleInXact > 0
+            ? `Oldest txn ${formatAgeSeconds(data.idleInTransactionOldestXactAgeSeconds)} · longest idle ${formatAgeSeconds(data.idleInTransactionLongestIdleSeconds)}`
+            : null,
+      tone: tones.idleInTransaction,
+    },
+    {
+      label: "Longest txn",
+      value: formatLongestTransaction(data),
+      hint: LONGEST_TRANSACTION_NOTE,
+      tone: tones.longestTransaction,
+    },
+    server.connections,
+    server.xid,
+    server.replication,
+    {
+      label: "Database size",
+      value: formatInspectorBytes(data.databaseBytes),
+    },
+    server.cache,
+    {
+      label: "Temp files",
+      value: data.tempFiles === 0 ? "None" : formatExactCount(data.tempFiles),
+      detail:
+        data.tempBytes == null || data.tempBytes === 0
+          ? null
+          : `${formatInspectorBytes(data.tempBytes)} total`,
+      hint: TEMP_FILES_CAVEAT,
+    },
+    {
+      label: "Deadlocks",
+      value: data.deadlocks === 0 ? "None" : formatExactCount(data.deadlocks),
+      hint: DEADLOCKS_CAVEAT,
+    },
+  ];
 }
 
 export function DbHealthInspectorOverview(props: {
@@ -111,7 +427,9 @@ export function DbHealthInspectorOverview(props: {
   onOpenSessions: () => void;
 }) {
   const section = props.snap?.overview;
-  if (props.loading) {
+  // The overview is collected first; once in, it shows while the other
+  // sections are still being collected.
+  if (props.loading && (!section || section.status === "loading")) {
     return <OverviewSkeleton />;
   }
   if (!section) {
@@ -119,180 +437,43 @@ export function DbHealthInspectorOverview(props: {
   }
 
   const data = section.data;
-  const note = overviewVisibilityNote(data);
-  const attention = buildAttentionItems(data ?? null);
+  const serverSection = props.snap?.server;
+  const serverState = serverCheckState(serverSection, props.loading);
+  const attention = [
+    ...buildAttentionItems(data ?? null),
+    ...buildServerAttentionItems(
+      serverSection?.status === "ready" ? serverSection.data : null
+    ),
+  ];
   const statsResetLabel = data?.statsReset
     ? formatHealthInspectorTimestamp(data.statsReset)
     : null;
 
-  const cards = data
-    ? [
-        {
-          label: "Sessions",
-          value: formatOptionalNumber(data.sessionCount),
-          detail: "Current database (all backends with this datname)",
-        },
-        {
-          label: "Active",
-          value: formatOptionalNumber(data.activeSessionCount),
-          detail: "Excludes this Inspector connection",
-        },
-        {
-          label: "Idle",
-          value: formatOptionalNumber(data.idleSessionCount),
-          detail: "Excludes this Inspector connection",
-        },
-        {
-          label: "Idle in transaction",
-          value: formatOptionalNumber(data.idleInTransactionCount),
-          detail:
-            data.idleInTransactionCount == null
-              ? data.restrictedVisibility
-                ? "Unknown (restricted visibility)"
-                : null
-              : `Oldest txn ${formatAgeSeconds(data.idleInTransactionOldestXactAgeSeconds)} · longest idle ${formatAgeSeconds(data.idleInTransactionLongestIdleSeconds)}`,
-        },
-        {
-          label: "Blocked",
-          value: formatOptionalNumber(data.blockedSessionCount),
-          detail:
-            data.topBlockers.length > 0
-              ? `Top blockers: ${data.topBlockers
-                  .map((b) =>
-                    b.isPreparedTransaction
-                      ? "prepared xact (0)"
-                      : String(b.pid)
-                  )
-                  .join(", ")}`
-              : data.lockWaitDurationAvailable
-                ? null
-                : "Lock-wait duration unavailable",
-        },
-        {
-          label: "Longest txn",
-          value: formatAgeSeconds(data.longestXactAgeSeconds),
-          detail: "Excludes this Inspector connection",
-        },
-        {
-          label: "Database size",
-          value:
-            data.databaseBytes == null
-              ? "—"
-              : formatBytesSize(data.databaseBytes, { fractionDigits: 1 }),
-        },
-        {
-          label: "Temp files",
-          value: formatExactCount(data.tempFiles),
-          detail:
-            data.tempBytes == null
-              ? TEMP_FILES_CAVEAT
-              : `${formatBytesSize(data.tempBytes, { fractionDigits: 1 })} cumulative · ${TEMP_FILES_CAVEAT}`,
-        },
-        {
-          label: "Deadlocks",
-          value: formatExactCount(data.deadlocks),
-          detail: DEADLOCKS_CAVEAT,
-        },
-      ]
+  const cards: OverviewCard[] = data
+    ? overviewCards(data, serverCards(serverSection, props.loading))
     : [];
-
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
       <SectionBanner section={section} loading={props.loading} />
-      <div class="text-xs text-neutral-500 dark:text-neutral-400">
-        {statsResetLabel
-          ? `Stats reset: ${statsResetLabel} (observation window for cumulative counters; Refresh does not reset statistics)`
-          : "Stats reset time unavailable — observation window for cumulative counters is unknown"}
-      </div>
       {section.status === "ready" && data ? (
         <>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <AttentionSummary
+            items={attention}
+            serverState={serverState}
+            onOpenSessions={props.onOpenSessions}
+          />
+
+          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {cards.map((c) => (
-              <MetricCard
-                key={c.label}
-                label={c.label}
-                value={c.value}
-                detail={c.detail}
-              />
+              <MetricCard key={c.label} {...c} />
             ))}
           </div>
 
-          {data.topBlockers.length > 0 ||
-          (data.blockedSessionCount != null && data.blockedSessionCount > 0) ? (
-            <div class="text-xs text-neutral-500 dark:text-neutral-400">
-              {BLOCKING_LIMITATION_NOTE}
-              {data.hasUnresolvedBlockers
-                ? " Some listed blocker PIDs are unresolved."
-                : ""}
-              <Button
-                type="button"
-                variant="ghost"
-                className="ml-2 h-7 px-2 text-xs"
-                onClick={props.onOpenSessions}
-              >
-                Open Sessions
-              </Button>
-            </div>
-          ) : null}
-
-          {note ? (
-            <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50">
-              {note}
-            </div>
-          ) : null}
-
-          <div class="mt-1">
-            <div class="text-sm font-medium text-neutral-700 dark:text-neutral-200">
-              Attention
-            </div>
-            {attention.length === 0 ? (
-              <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                {data.restrictedVisibility
-                  ? "Visibility is incomplete — not reporting healthy."
-                  : "No actionable current conditions in this snapshot."}
-              </p>
-            ) : (
-              <ul class="mt-1 space-y-2 text-sm">
-                {attention.map((item) => (
-                  <li
-                    key={`${item.kind}-${item.title}`}
-                    class="flex flex-col gap-1 border-b border-neutral-100 py-2 last:border-b-0 dark:border-neutral-800"
-                  >
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span
-                        class={
-                          item.tone === "actionable"
-                            ? "font-medium text-amber-800 dark:text-amber-200"
-                            : item.tone === "incomplete"
-                              ? "font-medium text-amber-800 dark:text-amber-200"
-                              : "font-medium text-neutral-700 dark:text-neutral-200"
-                        }
-                      >
-                        {item.title}
-                      </span>
-                      {item.tone === "informational" ? (
-                        <span class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                          history
-                        </span>
-                      ) : null}
-                      {item.openSessions ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-7 px-2 text-xs"
-                          onClick={props.onOpenSessions}
-                        >
-                          Open Sessions
-                        </Button>
-                      ) : null}
-                    </div>
-                    <p class="text-xs text-neutral-500 dark:text-neutral-400">
-                      {item.evidence}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div class="flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500">
+            {statsResetLabel
+              ? `Counters since ${statsResetLabel}`
+              : "Counter start unknown (stats reset time unavailable)"}
+            <InfoHint text={STATS_RESET_NOTE} />
           </div>
         </>
       ) : null}

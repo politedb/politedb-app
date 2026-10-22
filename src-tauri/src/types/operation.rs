@@ -15,6 +15,11 @@ pub struct SqlQueryInput {
     pub max_rows: Option<u32>,
     pub batch_size: Option<u32>,
     pub statement_timeout_ms: Option<u64>,
+    /// How long to wait for a lock before failing (PostgreSQL only). Lets
+    /// read-only diagnostics skip a relation another session holds exclusively
+    /// instead of waiting for the statement timeout.
+    #[serde(default)]
+    pub lock_timeout_ms: Option<u64>,
     pub read_only: Option<bool>,
     pub validate_only: Option<bool>,
     #[serde(default)]

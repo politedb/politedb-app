@@ -5,6 +5,11 @@ import {
   type TelemetryConsent,
 } from "src/lib/analytics";
 import { SettingCard } from "src/components/settings/SettingCard";
+import { CheckMarkIcon, XIcon } from "src/components/icons";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
+import { openExternalUrl } from "src/lib/tauri";
+
+export const PRIVACY_POLICY_URL = "https://politedb.com/privacy";
 
 export function AnalyticsSettings(props: { active: boolean }) {
   const [telemetryConsent, setTelemetryConsentState] =
@@ -25,21 +30,6 @@ export function AnalyticsSettings(props: { active: boolean }) {
 
   return (
     <>
-      <SettingCard class="p-3 text-sm text-slate-700">
-        <div class="font-medium text-slate-900">What we do not send</div>
-        <div>
-          No raw SQL text, no query content, no file paths, and no sensitive
-          database names.
-        </div>
-      </SettingCard>
-
-      <SettingCard class="p-3 text-sm text-slate-700">
-        <div class="font-medium text-slate-900">Always tracked</div>
-        <div>
-          App opens, installs, daily active usage, and app update events.
-        </div>
-      </SettingCard>
-
       <SettingCard class="rounded-xl p-3">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
@@ -79,6 +69,43 @@ export function AnalyticsSettings(props: { active: boolean }) {
           </button>
         </div>
       </SettingCard>
+
+      {/* Plain text, not cards: there is nothing to change here. */}
+      <div class="space-y-3 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+        <div class="flex gap-2">
+          <CheckMarkIcon className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+          <div>
+            <div class="font-medium text-slate-800">Always sent</div>
+            <div>
+              App opens, installs, daily active usage and update events, with a
+              random install ID — never your email or license key. These cannot
+              be turned off.
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <XIcon className="mt-0.5 size-4 shrink-0 text-rose-600" />
+          <div>
+            <div class="font-medium text-slate-800">Not included in events</div>
+            <div>
+              Your SQL queries or their results, error messages, host and
+              database names, passwords, your email or license key. When
+              something fails, only a short category such as "timeout" or
+              "auth_failed" is sent.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {DISTRIBUTION_FEATURES.websiteLinks ? (
+        <button
+          type="button"
+          class="text-sm text-blue-600 underline decoration-blue-300 underline-offset-2 hover:text-blue-700"
+          onClick={() => void openExternalUrl(PRIVACY_POLICY_URL)}
+        >
+          Privacy policy ↗
+        </button>
+      ) : null}
     </>
   );
 }

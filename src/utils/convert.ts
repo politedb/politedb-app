@@ -263,8 +263,10 @@ export function formatDateTime(
   const date =
     typeof value === "number" ? new Date(value) : new Date(String(value));
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "short",
-    timeStyle: includeTime ? "medium" : undefined,
+  // Same wording as the rest of the English UI ("May 26, 2027, 09:57"),
+  // rather than a locale's numeric date that reads differently per region.
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: includeTime ? "short" : undefined,
   }).format(date);
 }

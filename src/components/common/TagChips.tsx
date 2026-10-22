@@ -1,7 +1,7 @@
 import { cn } from "src/utils/cn";
 import { normalizeTags } from "src/utils/convert";
 
-function tagTone(tag: string) {
+export function tagTone(tag: string) {
   const normalized = tag.trim().toLowerCase();
 
   if (["local"].includes(normalized)) {

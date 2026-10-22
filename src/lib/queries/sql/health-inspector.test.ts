@@ -4,7 +4,11 @@ import {
   HEALTH_INSPECTOR_LIST_LIMIT,
   HEALTH_INSPECTOR_QUERY_TEXT_CAP,
   healthInspectorCapabilitiesSql,
+  HEALTH_INSPECTOR_SIZE_CANDIDATES,
+  healthInspectorDropIndexSql,
   healthInspectorIndexesSql,
+  healthInspectorServerSql,
+  healthInspectorVacuumSql,
   healthInspectorOverviewSql,
   healthInspectorSessionsSql,
   healthInspectorStatementsInfoSql,
@@ -32,6 +36,63 @@ describe("healthInspector SQL builders", () => {
     const indexes = healthInspectorIndexesSql();
     expect(indexes).toContain("pg_catalog.pg_stat_user_indexes");
     expect(indexes).toContain("idx_scan");
+  });
+
+  it("computes relation sizes only for relpages-ranked candidates", () => {
+    for (const sql of [
+      healthInspectorTablesSql(),
+      healthInspectorIndexesSql(),
+    ]) {
+      const candidates = sql.slice(0, sql.indexOf("sized AS"));
+      expect(candidates).toContain("relpages");
+      expect(candidates).toContain(`LIMIT ${HEALTH_INSPECTOR_SIZE_CANDIDATES}`);
+      expect(candidates).not.toMatch(/pg_(total_)?relation_size|pg_table_size/);
+      expect(sql).toContain(`LIMIT ${HEALTH_INSPECTOR_FETCH_LIMIT}`);
+    }
+    expect(healthInspectorTablesSql()).toContain("x.indrelid=c.reltoastrelid");
+    expect(healthInspectorTablesSql()).toContain("AS relation_count");
+    expect(healthInspectorIndexesSql()).toContain("AS relation_count");
+    expect(HEALTH_INSPECTOR_SIZE_CANDIDATES).toBeGreaterThan(
+      HEALTH_INSPECTOR_FETCH_LIMIT
+    );
+  });
+
+  it("reads server health from catalogs only", () => {
+    const sql = healthInspectorServerSql();
+    expect(sql).toContain("pg_catalog.pg_database");
+    expect(sql).toContain("datfrozenxid");
+    expect(sql).toContain("'max_connections'");
+    expect(sql).toContain("'superuser_reserved_connections'");
+    expect(sql).toContain("pg_catalog.pg_stat_replication");
+    // Client slots only (workers do not use max_connections), and whether the
+    // role can see other roles' sessions at all.
+    expect(sql).toContain("a.backend_type='client backend'");
+    // USAGE, not MEMBER: a NOINHERIT member still sees other sessions masked.
+    expect(sql).toContain("pg_has_role('pg_read_all_stats', 'USAGE')");
+    expect(sql).not.toContain("'MEMBER'");
+    expect(sql).toContain("current_setting('reserved_connections', true)");
+    expect(sql).not.toContain("numbackends");
+    expect(sql).toContain("pg_last_xact_replay_timestamp");
+    expect(sql).not.toMatch(/pg_(total_)?relation_size|pg_stat_user_tables/);
+  });
+
+  it("marks unique indexes so they are never offered for DROP", () => {
+    const sql = healthInspectorIndexesSql();
+    expect(sql).toContain("indisunique OR x.indisprimary");
+    expect(sql).toContain("is_unique");
+    expect(sql).toContain("x.indisexclusion");
+    expect(sql).toContain("AS enforces_constraint");
+  });
+
+  it("quotes identifiers in copy-only maintenance statements", () => {
+    expect(healthInspectorVacuumSql("public", "events")).toBe(
+      'VACUUM (ANALYZE) "public"."events";'
+    );
+    expect(healthInspectorDropIndexSql('we"ird', "Idx")).toBe(
+      'DROP INDEX CONCURRENTLY IF EXISTS "we""ird"."Idx";'
+    );
+    expect(healthInspectorVacuumSql(null, "events")).toBeNull();
+    expect(healthInspectorDropIndexSql("public", "")).toBeNull();
   });
 
   it("overview aggregates sessions and database size without table scans", () => {
@@ -93,6 +154,6 @@ it("includes partition leaves with labels rather than omitting them", () => {
   expect(tables).toContain("is_partition_child");
   expect(tables).not.toContain("WHERE NOT COALESCE(c.relispartition");
   expect(tables).toContain(
-    "COALESCE(c.relispartition, false) AS is_partition_child"
+    "COALESCE(s.relispartition, false) AS is_partition_child"
   );
 });

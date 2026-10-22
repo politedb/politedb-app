@@ -133,6 +133,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::app_quit,
+            commands::health_inspector::signal::health_inspector_signal_backend,
+            engines::postgres::app_name::postgres_instance_app_name,
             commands::legacy_web_storage::legacy_web_storage_read,
             commands::ai::ai_provider_list,
             commands::ai::ai_provider_save,

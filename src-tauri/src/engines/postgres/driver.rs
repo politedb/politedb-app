@@ -150,9 +150,7 @@ pub async fn connect_pg(
         .map_err(|e| anyhow!("{e}"))?;
 
     // Build config WITHOUT logging password
-    let mut cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
-    let app_name = "PoliteDB".to_string();
-    cfg.application_name(&app_name);
+    let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
 
     let mgr = Manager::from_config(cfg, NoTls, deadpool_postgres::ManagerConfig::default());
 

@@ -19,6 +19,8 @@ export const CMD = {
   aiAgentDataAccessGrant: "ai_agent_data_access_grant",
   aiAgentDataAccessList: "ai_agent_data_access_list",
   aiAgentDataAccessRevoke: "ai_agent_data_access_revoke",
+  healthInspectorSignalBackend: "health_inspector_signal_backend",
+  postgresInstanceAppName: "postgres_instance_app_name",
   licenseDeviceInfo: "license_device_info",
   licenseStateLoad: "license_state_load",
   licenseStateSave: "license_state_save",

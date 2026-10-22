@@ -14,10 +14,6 @@ import {
   resolveClickhouseProtocol,
 } from "./buildInput";
 import { dedupeKeepOrder } from "../dedupe";
-import {
-  defaultCredentialDatabase,
-  defaultCredentialUser,
-} from "src/lib/engines";
 import { getConnectionFormEngineConfig } from "../engineFormConfig";
 
 function getEngineFromProfile(p?: ConnectionProfile): DatabaseEngine {
@@ -91,7 +87,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       snowflake: sf?.user,
       clickhouse: ch?.user,
       google_sheets: "",
-    }) || defaultCredentialUser(engine);
+    }) || "";
 
   const database =
     pickByEngine(engine, {
@@ -108,7 +104,7 @@ function makeDbDefaults(engine: DatabaseEngine, input?: ConnectionCreateInput) {
       snowflake: sf?.database,
       clickhouse: ch?.database,
       google_sheets: sheets?.spreadsheet_id,
-    }) || defaultCredentialDatabase(engine);
+    }) || "";
 
   const snowflakeWarehouse = sf?.warehouse ?? "";
   const snowflakeRole = sf?.role ?? "";

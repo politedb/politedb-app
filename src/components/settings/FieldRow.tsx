@@ -4,6 +4,8 @@ import { cn } from "src/utils/cn";
 export function FieldRow(props: {
   label: string;
   description?: string;
+  /** Extra content under the description, such as a preview. */
+  extra?: ComponentChildren;
   class?: string;
   children: ComponentChildren;
 }) {
@@ -21,6 +23,7 @@ export function FieldRow(props: {
             {props.description}
           </div>
         ) : null}
+        {props.extra}
       </div>
       <div>{props.children}</div>
     </div>

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatCollectionDuration,
   formatExactCount,
   formatHealthInspectorTimestamp,
+  formatInspectorBytes,
+  formatRelativeAge,
+  formatSnapshotTime,
   latestHealthTimestamp,
 } from "./format";
 
@@ -48,5 +52,30 @@ describe("formatExactCount", () => {
     expect(formatExactCount(null)).toBe("—");
     expect(formatExactCount(42)).toBe("42");
     expect(formatExactCount(Number.MAX_SAFE_INTEGER + 2)).toMatch(/^≈/);
+  });
+});
+
+describe("inspector display formats", () => {
+  it("shows zero bytes as 0 B and unknown as a dash", () => {
+    expect(formatInspectorBytes(0)).toBe("0 B");
+    expect(formatInspectorBytes(null)).toBe("—");
+    expect(formatInspectorBytes(2048)).toBe("2.0 KB");
+  });
+
+  it("formats snapshot age relative to now with the local clock", () => {
+    const now = new Date(2026, 9, 21, 22, 37, 10).getTime();
+    expect(formatRelativeAge(now - 10_000, now)).toBe("just now");
+    expect(formatRelativeAge(now - 2 * 60_000, now)).toBe("2 min ago");
+    expect(formatRelativeAge(now - 3 * 3_600_000, now)).toBe("3 h ago");
+    expect(formatRelativeAge(now - 2 * 86_400_000, now)).toBe("2 d ago");
+    const taken = new Date(2026, 9, 21, 22, 35, 0).getTime();
+    expect(formatSnapshotTime(taken, now)).toBe("2 min ago (22:35)");
+  });
+
+  it("formats collection duration", () => {
+    expect(formatCollectionDuration(1_234)).toBe("1.2 s");
+    expect(formatCollectionDuration(80)).toBe("0.1 s");
+    expect(formatCollectionDuration(65_000)).toBe("1m 5s");
+    expect(formatCollectionDuration(-1)).toBe("—");
   });
 });

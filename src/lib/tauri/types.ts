@@ -386,6 +386,9 @@ export type SqlQueryPayload = {
 
   // Optional overrides (backend may ignore if unsupported)
   statement_timeout_ms?: number | null;
+  /** PostgreSQL only: fail instead of waiting longer for a lock. */
+  lock_timeout_ms?: number | null;
+  read_only?: boolean;
   client_mode?: "direct" | "stream";
 };
 

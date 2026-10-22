@@ -21,6 +21,7 @@ describe("featuresFor", () => {
     expect(features.selfUpdate).toBe(true);
     expect(features.externalPurchase).toBe(true);
     expect(features.gatesProFeatures).toBe(true);
+    expect(features.websiteLinks).toBe(true);
     expect(isEngineSupported("oracle", features)).toBe(true);
   });
 
@@ -29,6 +30,7 @@ describe("featuresFor", () => {
     expect(features.selfUpdate).toBe(false);
     expect(features.externalPurchase).toBe(false);
     expect(features.gatesProFeatures).toBe(false);
+    expect(features.websiteLinks).toBe(false);
     expect(isEngineSupported("oracle", features)).toBe(false);
     expect(isEngineSupported("postgres", features)).toBe(true);
   });

@@ -417,7 +417,7 @@ export function ConnectionBasicsSection(
                 />
                 <Input
                   value={snowflakeRole.field.value}
-                  placeholder="ACCOUNTADMIN (optional)"
+                  placeholder="ACCOUNT ADMIN (optional)"
                   onInput={(e: InputEvt) => {
                     snowflakeRole.field.onChange(e.currentTarget.value);
                     dirty();
@@ -557,7 +557,7 @@ export function ConnectionBasicsSection(
 
               {/* Storage radio */}
               <div
-                class={`flex flex-wrap items-center gap-4 rounded-xl border px-3 py-2 ${
+                class={`flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 ${
                   storeKeychain
                     ? "border-slate-200 bg-white"
                     : "border-slate-200 bg-white"

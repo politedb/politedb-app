@@ -1,10 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
+import { confirmDeactivateLicense } from "src/lib/license/confirmDeactivate";
 import { Button } from "src/components/common/Button";
 import { Input } from "src/components/common/Input";
 import { openExternalUrl } from "src/lib/tauri";
 import { useLicenseStore } from "src/stores/license";
 import { cn } from "src/utils/cn";
 import { formatDateTime } from "src/utils/convert";
+import { knownPlanLabel } from "src/lib/license/planLabel";
+import { maskLicenseKey } from "src/lib/license/keyDisplay";
 import {
   TrialStatusNote,
   trialNote,
@@ -70,6 +73,8 @@ export function LicenseKeySettings(props: { active: boolean }) {
   const isActive = (licenseState?.status ?? "").toLowerCase() === "active";
   const trial = trialNote(licenseState ?? null, trialSyncStatus);
   const renewal = renewalPresentation(licenseState ?? null);
+  const planLabel = knownPlanLabel(licenseState ?? null);
+  const maskedKey = maskLicenseKey(licenseState?.license_key);
 
   return (
     <>
@@ -78,12 +83,18 @@ export function LicenseKeySettings(props: { active: boolean }) {
           "rounded-xl border px-3 py-2 text-sm",
           lostKeyHelp
             ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "border-blue-200 bg-blue-50 text-blue-700"
+            : isActive
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-blue-200 bg-blue-50 text-blue-700"
         )}
       >
         {lostKeyHelp
           ? "Use the email you used when purchasing to contact support."
-          : "Activate a license key for this device and manage its status."}
+          : isActive
+            ? planLabel
+              ? `${planLabel} is active on this device.`
+              : "Your license is active on this device."
+            : "Activate a license key for this device and manage its status."}
       </div>
 
       {licenseError ? (
@@ -141,17 +152,31 @@ export function LicenseKeySettings(props: { active: boolean }) {
             <TrialStatusNote note={trial} className="rounded-xl" />
           ) : null}
           <SettingCard class="text-sm [&>div>div]:last:pb-4">
-            <FieldRow label="Managed by email:">
+            <FieldRow label="Plan">
+              <div class="font-medium text-neutral-800">
+                {planLabel ?? "Unknown"}
+              </div>
+            </FieldRow>
+            {maskedKey ? (
+              <FieldRow label="License key">
+                <div class="flex items-center gap-2 text-neutral-700">
+                  <span class="font-mono" title="Shortened for display">
+                    {maskedKey}
+                  </span>
+                </div>
+              </FieldRow>
+            ) : null}
+            <FieldRow label="Managed by email">
               <div class="text-neutral-700">
                 {licenseState?.customer_email || "Unknown"}
               </div>
             </FieldRow>
-            <FieldRow label="Device name:">
+            <FieldRow label="Device name">
               <div class="text-neutral-700">
                 {licenseState?.device_name || "Unknown"}
               </div>
             </FieldRow>
-            <FieldRow label={`${renewal.label}:`}>
+            <FieldRow label={renewal.label}>
               <div class="space-x-1 text-neutral-700">
                 <span class="font-medium">{renewal.value}</span>
                 {renewal.detail ? (
@@ -161,7 +186,7 @@ export function LicenseKeySettings(props: { active: boolean }) {
                 ) : null}
               </div>
             </FieldRow>
-            <FieldRow label="Last checked at:">
+            <FieldRow label="Last checked">
               <div class="text-neutral-700">
                 {formatDateTime(licenseState?.last_validated_at, true) ||
                   "Unknown"}
@@ -180,7 +205,9 @@ export function LicenseKeySettings(props: { active: boolean }) {
             <Button
               variant="outline"
               className="border-rose-200 text-rose-700 hover:bg-rose-50"
-              onClick={() => void deactivateLicense()}
+              onClick={async () => {
+                if (await confirmDeactivateLicense()) await deactivateLicense();
+              }}
               disabled={licenseBusy}
             >
               Deactivate

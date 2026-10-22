@@ -78,7 +78,7 @@ describe("LicenseKeySettings trial line", () => {
 describe("LicenseKeySettings renewal row", () => {
   it("shows the fallback for a subscription key with no renewal info", () => {
     show({ paid_license: true, expires_at: null });
-    expect(screen.getByText("Renewal:")).toBeInTheDocument();
+    expect(screen.getByText("Renewal")).toBeInTheDocument();
     expect(
       screen.getByText("Renews with your subscription")
     ).toBeInTheDocument();
@@ -91,7 +91,7 @@ describe("LicenseKeySettings renewal row", () => {
       subscription_status: "active",
       renews_at: new Date(Date.now() + 30 * DAY).toISOString(),
     });
-    expect(screen.getByText("Renews on:")).toBeInTheDocument();
+    expect(screen.getByText("Renews on")).toBeInTheDocument();
     expect(screen.getByText(/\(in (29|30) days\)/)).toBeInTheDocument();
   });
 
@@ -101,7 +101,7 @@ describe("LicenseKeySettings renewal row", () => {
       subscription_status: "canceled",
       ends_at: new Date(Date.now() + 5 * DAY).toISOString(),
     });
-    expect(screen.getByText("Ends on:")).toBeInTheDocument();
+    expect(screen.getByText("Ends on")).toBeInTheDocument();
   });
 
   it("shows the days left for a license with an expiry date", () => {
@@ -109,7 +109,7 @@ describe("LicenseKeySettings renewal row", () => {
       paid_license: true,
       expires_at: new Date(Date.now() + 10 * DAY).toISOString(),
     });
-    expect(screen.getByText("Expires at:")).toBeInTheDocument();
+    expect(screen.getByText("Expires at")).toBeInTheDocument();
     expect(screen.getByText(/\(in (9|10) days\)/)).toBeInTheDocument();
   });
 

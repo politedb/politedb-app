@@ -14,6 +14,7 @@ import {
   formatShortcutLabel,
   keyboardEventToShortcut,
   normalizeShortcutBinding,
+  reservedShortcutOwner,
 } from "src/stores/keyboardShortcuts";
 import { cn } from "src/utils/cn";
 import { XIcon } from "../icons";
@@ -75,6 +76,12 @@ export function SnippetEditorDialog({
       const binding = keyboardEventToShortcut(event);
       if (!binding) {
         setHotkeyHint("Use at least one modifier (Cmd/Ctrl, Alt, or Shift).");
+        return;
+      }
+
+      const reserved = reservedShortcutOwner(binding);
+      if (reserved) {
+        setHotkeyHint(`This shortcut opens ${reserved}; choose another.`);
         return;
       }
 

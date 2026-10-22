@@ -12,6 +12,12 @@ import { ProUpgradeDialogHost } from "src/components/license/ProUpgradeDialogHos
 import { Spinner } from "src/components/common/Spinner";
 import { Toast } from "@root/src/components/common/Toast";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
+import {
+  isModalDialogOpen,
+  isOpenSettingsShortcut,
+  requestOpenSettings,
+} from "src/lib/settings/openSettings";
+import { isMacPlatform } from "src/stores/keyboardShortcuts";
 
 const loadConnectionScreen = () =>
   import("src/screens/connection/ConnectionScreen").then((module) => ({
@@ -48,6 +54,23 @@ export function MainLayout() {
   useEffect(() => {
     void loadLicense();
   }, [loadLicense]);
+
+  // ⌘, (Ctrl+, elsewhere) opens Settings from any screen; Settings lives on the
+  // main screen, so switch there first.
+  useEffect(() => {
+    const isMac = isMacPlatform();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isOpenSettingsShortcut(event, isMac)) return;
+      event.preventDefault();
+      // Another dialog is open (New Group, a form…): leave it alone rather than
+      // stacking Settings on top or under it.
+      if (isModalDialogOpen()) return;
+      setActiveProfileScreen("main");
+      requestOpenSettings();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setActiveProfileScreen]);
 
   return (
     <div class="app-header flex h-screen flex-col overflow-hidden rounded-t-xl bg-neutral-50 select-none">

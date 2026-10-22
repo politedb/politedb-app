@@ -9,6 +9,7 @@ import type {
   HealthInspectorCapabilities,
   HealthIndexRow,
   HealthOverview,
+  HealthServerMetrics,
   HealthSessionRow,
   HealthStatementRow,
   HealthStatementsInfo,
@@ -61,6 +62,16 @@ export function decodeUnknownString(value: unknown): string | null {
     return prim.map((x) => decodeUnknownString(x) ?? "").join(",");
   }
   return null;
+}
+
+function isExplicitFalse(value: unknown): boolean {
+  const prim = cellPrimitive(value);
+  if (prim === false || prim === 0) return true;
+  if (typeof prim === "string") {
+    const t = prim.trim().toLowerCase();
+    return t === "f" || t === "false" || t === "0";
+  }
+  return false;
 }
 
 export function decodeUnknownBool(value: unknown): boolean {
@@ -306,6 +317,41 @@ export function decodeOverview(result: QueryResult): HealthOverview {
   };
 }
 
+export function decodeServerMetrics(result: QueryResult): HealthServerMetrics {
+  const row = result.rows[0] ?? [];
+  const cols = result.columns;
+  const num = (name: string) => decodeUnknownNumber(cellAt(row, cols, name));
+  const canReadAllStats = decodeUnknownBool(
+    cellAt(row, cols, "can_read_all_stats")
+  );
+  const superuserReserved = num("reserved_connections");
+  const roleReserved = num("role_reserved_connections") ?? 0;
+  return {
+    maxXidAge: num("max_xid_age"),
+    autovacuumFreezeMaxAge: num("autovacuum_freeze_max_age"),
+    maxConnections: num("max_connections"),
+    reservedConnections:
+      superuserReserved == null ? null : superuserReserved + roleReserved,
+    // Without full visibility the count is only this role's sessions.
+    clientConnections: canReadAllStats ? num("client_connections") : null,
+    canReadAllStats,
+    blocksHit: num("blks_hit"),
+    blocksRead: num("blks_read"),
+    isStandby: decodeUnknownBool(cellAt(row, cols, "is_standby")),
+    standbyReplayLagSeconds: num("standby_replay_lag_seconds"),
+    replicaCount: num("replica_count"),
+    maxReplicaLagSeconds: num("max_replica_lag_seconds"),
+  };
+}
+
+const BACKEND_TOKEN_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+/** Only the server's exact token shape; anything else means "not actionable". */
+export function decodeBackendToken(value: unknown): string | null {
+  const text = decodeUnknownString(value);
+  return text != null && BACKEND_TOKEN_SHAPE.test(text) ? text : null;
+}
+
 export function decodeSessions(result: QueryResult): {
   rows: HealthSessionRow[];
   truncated: boolean;
@@ -323,6 +369,7 @@ export function decodeSessions(result: QueryResult): {
       waitEventType: decodeUnknownString(cellAt(row, cols, "wait_event_type")),
       waitEvent: decodeUnknownString(cellAt(row, cols, "wait_event")),
       backendType: decodeUnknownString(cellAt(row, cols, "backend_type")),
+      backendToken: decodeBackendToken(cellAt(row, cols, "backend_token")),
       xactAgeSeconds: decodeUnknownNumber(
         cellAt(row, cols, "xact_age_seconds")
       ),
@@ -383,9 +430,17 @@ export function decodeStatementsInfo(
   };
 }
 
+/** Total relations in the database, repeated on every sized row. */
+function decodeRelationCount(result: QueryResult): number | null {
+  const first = result.rows[0];
+  if (!first) return null;
+  return decodeUnknownNumber(cellAt(first, result.columns, "relation_count"));
+}
+
 export function decodeTables(result: QueryResult): {
   rows: HealthTableRow[];
   truncated: boolean;
+  relationCount: number | null;
 } {
   const mapped = result.rows.map((row) => {
     const cols = result.columns;
@@ -411,12 +466,16 @@ export function decodeTables(result: QueryResult): {
       ),
     } satisfies HealthTableRow;
   });
-  return applyListCap(mapped);
+  return {
+    ...applyListCap(mapped),
+    relationCount: decodeRelationCount(result),
+  };
 }
 
 export function decodeIndexes(result: QueryResult): {
   rows: HealthIndexRow[];
   truncated: boolean;
+  relationCount: number | null;
 } {
   const mapped = result.rows.map((row) => {
     const cols = result.columns;
@@ -428,9 +487,17 @@ export function decodeIndexes(result: QueryResult): {
       idxTupRead: decodeUnknownNumber(cellAt(row, cols, "idx_tup_read")),
       idxTupFetch: decodeUnknownNumber(cellAt(row, cols, "idx_tup_fetch")),
       indexBytes: decodeUnknownNumber(cellAt(row, cols, "index_bytes")),
+      isUnique: decodeUnknownBool(cellAt(row, cols, "is_unique")),
+      // Fail closed: only an explicit false makes an index a DROP candidate.
+      enforcesConstraint: !isExplicitFalse(
+        cellAt(row, cols, "enforces_constraint")
+      ),
     } satisfies HealthIndexRow;
   });
-  return applyListCap(mapped);
+  return {
+    ...applyListCap(mapped),
+    relationCount: decodeRelationCount(result),
+  };
 }
 
 /** Sanitize errors for UI — never echo SQL or long raw driver payloads. */

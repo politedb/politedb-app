@@ -5,16 +5,6 @@ export type DefaultSchemaContext = {
   redisDb?: number;
 };
 
-const ENGINES_WITHOUT_DEFAULT_CREDENTIALS = new Set<DatabaseEngine>([
-  "mongo",
-  "cassandra",
-  "sqlite",
-  "duckdb",
-  "d1",
-  "turso",
-  "google_sheets",
-]);
-
 const NON_SQL_PATCH_ENGINES = new Set<DatabaseEngine>([
   "mongo",
   "cassandra",
@@ -66,14 +56,6 @@ export function allowsEmptyColumnList(
 
 export function supportsNewSchema(engine: DatabaseEngine | undefined): boolean {
   return engine === "postgres";
-}
-
-export function defaultCredentialUser(engine: DatabaseEngine): string {
-  return ENGINES_WITHOUT_DEFAULT_CREDENTIALS.has(engine) ? "" : "root";
-}
-
-export function defaultCredentialDatabase(engine: DatabaseEngine): string {
-  return ENGINES_WITHOUT_DEFAULT_CREDENTIALS.has(engine) ? "" : "root";
 }
 
 export function formatTableBreadcrumbTarget(

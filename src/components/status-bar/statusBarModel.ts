@@ -38,12 +38,7 @@ export function buildAppStatusBarModel(input: {
   telemetryConsent: TelemetryConsent;
 }): AppStatusBarModel {
   const engineLabel = normalizeEngineName(input.engine ?? "postgres");
-  const right = [
-    input.isConnectionTab
-      ? "Tips: Right-click a table for actions"
-      : "Tips: Right-click a connection for actions",
-    formatAppVersionLabel(input.appVersion, input.isDev),
-  ];
+  const right = [formatAppVersionLabel(input.appVersion, input.isDev)];
 
   if (!input.isConnectionTab) {
     return {

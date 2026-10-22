@@ -3,6 +3,7 @@ import {
   keyboardEventToShortcut,
   matchesShortcut,
   useKeyboardShortcutsStore,
+  reservedShortcutOwner,
 } from "src/stores/keyboardShortcuts";
 
 type ShortcutActions = {
@@ -76,7 +77,13 @@ export function useConnectionShortcuts(params: {
       }
 
       const pressed = keyboardEventToShortcut(e);
-      if (pressed && actionsRef.current.insertSnippetByHotkey?.(pressed)) {
+      // Reserved app-wide chords (⌘, for Settings) never run a snippet, even
+      // one saved with that hotkey before it was reserved.
+      if (
+        pressed &&
+        !reservedShortcutOwner(pressed) &&
+        actionsRef.current.insertSnippetByHotkey?.(pressed)
+      ) {
         e.preventDefault();
         e.stopPropagation();
         return;

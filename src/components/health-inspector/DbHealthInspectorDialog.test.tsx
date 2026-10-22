@@ -8,6 +8,12 @@ import type { LicenseState } from "src/lib/tauri/license";
 const hookState = {
   snapshot: null as any,
   loading: false,
+  refreshing: false,
+  lastArgs: null as any,
+  sessionAction: null as any,
+  sessionActionResult: null as any,
+  runSessionAction: vi.fn(),
+  isSessionActionBlocked: vi.fn(() => false),
   error: null as string | null,
   refresh: vi.fn(),
   cancel: vi.fn(),
@@ -15,8 +21,24 @@ const hookState = {
   supported: true,
 };
 
+const INSTANCE_APP_NAME = "PoliteDB/abcd1234";
+
+vi.mock("src/lib/tauri/health-inspector-actions", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getPostgresInstanceAppName: () => Promise.resolve(INSTANCE_APP_NAME),
+}));
+
+const confirmMock = vi.fn(async () => true);
+vi.mock("src/lib/system-dialog", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  confirmDialog: (...args: unknown[]) => confirmMock(...(args as [])),
+}));
+
 vi.mock("@root/src/hooks/useDbHealthInspector", () => ({
-  useDbHealthInspector: () => hookState,
+  useDbHealthInspector: (args: any) => {
+    hookState.lastArgs = args;
+    return hookState;
+  },
 }));
 
 function setProAccess(pro_access: boolean) {
@@ -61,6 +83,27 @@ beforeEach(() => {
         tempFiles: 0,
         tempBytes: 0,
         deadlocks: 0,
+      },
+    },
+    server: {
+      status: "ready",
+      collectedAt: Date.now(),
+      error: null,
+      truncated: false,
+      unavailableReason: null,
+      data: {
+        maxXidAge: 1_000_000,
+        autovacuumFreezeMaxAge: 200_000_000,
+        maxConnections: 100,
+        reservedConnections: 3,
+        clientConnections: 4,
+        canReadAllStats: true,
+        blocksHit: 99_000,
+        blocksRead: 1_000,
+        isStandby: false,
+        standbyReplayLagSeconds: null,
+        replicaCount: 0,
+        maxReplicaLagSeconds: null,
       },
     },
     sessions: {
@@ -117,6 +160,12 @@ beforeEach(() => {
     },
   };
   hookState.loading = false;
+  hookState.refreshing = false;
+  hookState.sessionAction = null;
+  hookState.sessionActionResult = null;
+  hookState.runSessionAction = vi.fn();
+  hookState.isSessionActionBlocked = vi.fn(() => false);
+  confirmMock.mockClear();
   hookState.error = null;
   hookState.supported = true;
   hookState.refresh.mockReset();
@@ -192,7 +241,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
     const cell = screen.getByText("<script>alert(1)</script>");
     expect(cell.querySelector("script")).toBeNull();
   });
@@ -215,7 +264,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy query" }));
     expect(writeText).toHaveBeenCalledWith(fullQuery);
@@ -238,7 +287,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.getByText("Enable Top statements")).toBeTruthy();
@@ -274,7 +323,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.getByText("Load pg_stat_statements")).toBeTruthy();
@@ -307,7 +356,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Top statements" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Top statements/ }));
 
     expect(screen.getByText(/Unavailable/i)).toBeTruthy();
     expect(screen.queryByText(/PoliteDB is read-only/i)).toBeNull();
@@ -338,7 +387,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
 
     const dialog = screen.getByRole("dialog");
     expect(dialog.className).toMatch(/overflow-hidden/);
@@ -409,7 +458,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Tables" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Tables/ }));
 
     // Autovacuum newer than manual vacuum for orders.
     const autoVacuumLocal = new Date("2024-06-01T00:00:00.000Z");
@@ -421,7 +470,7 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.getByText(/events_2024 \(partition\)/)).toBeTruthy();
   });
 
-  it("shows overview skeleton and locks other tabs while loading", () => {
+  it("shows overview skeleton and lets tabs switch to their own skeleton while loading", () => {
     hookState.snapshot = null;
     hookState.loading = true;
     render(
@@ -439,15 +488,13 @@ describe("DbHealthInspectorDialog", () => {
     ).toBeTruthy();
     expect(screen.queryByText("Loading…")).toBeNull();
 
-    const sessionsTab = screen.getByRole("button", { name: "Sessions" });
-    expect(sessionsTab).toBeDisabled();
+    const sessionsTab = screen.getByRole("button", { name: /^Sessions/ });
+    expect(sessionsTab).not.toBeDisabled();
     fireEvent.click(sessionsTab);
-    // Still on overview skeleton — table skeleton / Sessions header absent
-    expect(screen.queryByRole("status", { name: "Loading table" })).toBeNull();
-    expect(screen.queryByText("PID")).toBeNull();
+    expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
     expect(
-      screen.getByRole("status", { name: "Loading overview" })
-    ).toBeTruthy();
+      screen.queryByRole("status", { name: "Loading overview" })
+    ).toBeNull();
   });
 
   it("keeps Cancel available while loading and shows table skeleton on active tab", () => {
@@ -554,7 +601,7 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
     expect(screen.getByText("No sessions")).toBeTruthy();
 
     hookState.loading = true;
@@ -567,10 +614,28 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
+    // A section that already finished stays visible while the rest load.
+    expect(screen.getByText("No sessions")).toBeTruthy();
+
+    hookState.snapshot.sessions.status = "loading";
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
     expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
     expect(screen.queryByText("No sessions")).toBeNull();
-    expect(screen.getByRole("button", { name: "Overview" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sessions" })).not.toBeDisabled();
+    // Tabs stay switchable while sections are still loading.
+    expect(
+      screen.getByRole("button", { name: /^Overview/ })
+    ).not.toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /^Sessions/ })
+    ).not.toBeDisabled();
     expect(
       screen.getByTitle("Cancel in-flight inspector queries")
     ).not.toBeDisabled();
@@ -601,5 +666,460 @@ describe("DbHealthInspectorDialog", () => {
     fireEvent.click(buttons[0]!);
     expect(hookState.refresh).not.toHaveBeenCalled();
     expect(screen.getByText("PID")).toBeTruthy();
+  });
+
+  it("summarizes a clean overview with merged sessions and plain empty values", () => {
+    hookState.snapshot.overview.data.longestXactAgeSeconds = null;
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("✓ All clear in this snapshot")).toBeTruthy();
+    expect(screen.getByText("3 sessions")).toBeTruthy();
+    expect(screen.getByText("2 idle · 1 active")).toBeTruthy();
+    expect(screen.getByText("None running")).toBeTruthy();
+    // Temp files, deadlocks and replication.
+    expect(screen.getAllByText("None").length).toBe(3);
+    expect(screen.queryByText(/0\.0 B/)).toBeNull();
+    // The Inspector-connection caveat lives in one hint, not on every card.
+    expect(screen.queryByText(/Excludes this Inspector connection/)).toBeNull();
+    const hints = screen.getAllByRole("img", { name: "More info" });
+    expect(
+      hints.some((hint) =>
+        /exclude this Inspector connection/.test(
+          document.getElementById(hint.getAttribute("aria-describedby")!)
+            ?.textContent ?? ""
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("counts issues in the summary strip and colors their cards", () => {
+    const data = hookState.snapshot.overview.data;
+    data.blockedSessionCount = 2;
+    data.idleInTransactionCount = 1;
+    data.idleInTransactionOldestXactAgeSeconds = 30;
+    data.idleInTransactionLongestIdleSeconds = 20;
+    const { container } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("⚠ 2 issues")).toBeTruthy();
+    expect(container.querySelectorAll('[data-tone="critical"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-tone="warning"]').length).toBe(1);
+  });
+
+  it("shows the snapshot age and duration, and swaps Refresh for Cancel while loading", () => {
+    const finishedAt = Date.now() - 2 * 60_000;
+    hookState.snapshot.startedAt = finishedAt - 1_200;
+    hookState.snapshot.finishedAt = finishedAt;
+    const { rerender } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(
+      screen.getByText(/2 min ago \(\d\d:\d\d\) · collected in 1\.2 s/)
+    ).toBeTruthy();
+    expect(screen.getByTitle("Refresh snapshot")).toBeTruthy();
+    expect(
+      screen.queryByTitle("Cancel in-flight inspector queries")
+    ).toBeNull();
+
+    hookState.loading = true;
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText(/Collecting…/)).toBeTruthy();
+    expect(screen.queryByTitle("Refresh snapshot")).toBeNull();
+    expect(
+      screen.getByTitle("Cancel in-flight inspector queries")
+    ).toBeTruthy();
+  });
+
+  it("never shows All clear when the overview failed", () => {
+    hookState.snapshot.overview = {
+      ...hookState.snapshot.overview,
+      status: "error",
+      error: "canceling statement due to statement timeout",
+      data: null,
+    };
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText(/statement timeout/)).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("flags an estimated size ranking on large databases", () => {
+    hookState.snapshot.tables = {
+      ...hookState.snapshot.tables,
+      status: "ready",
+      sizeRankingEstimated: true,
+      data: [
+        {
+          schema: "public",
+          tableName: "events",
+          liveTuples: 1,
+          deadTuples: 0,
+          lastVacuum: null,
+          lastAutovacuum: null,
+          lastAnalyze: null,
+          lastAutoAnalyze: null,
+          tableBytes: 1,
+          indexesBytes: 0,
+          totalBytes: 1,
+          isPartitionedParent: false,
+          isPartitionChild: false,
+        },
+      ],
+    };
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Tables/ }));
+    expect(screen.getByText(/recently grown one may be missing/)).toBeTruthy();
+  });
+
+  function renderDialog() {
+    return render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+  }
+
+  function tableRow(name: string, live: number, dead: number) {
+    return {
+      schema: "public",
+      tableName: name,
+      liveTuples: live,
+      deadTuples: dead,
+      lastVacuum: null,
+      lastAutovacuum: null,
+      lastAnalyze: null,
+      lastAutoAnalyze: null,
+      tableBytes: 1,
+      indexesBytes: 0,
+      totalBytes: live,
+      isPartitionedParent: false,
+      isPartitionChild: false,
+    };
+  }
+
+  it("searches, flags and sorts tables, offering VACUUM only where needed", () => {
+    hookState.snapshot.tables = {
+      ...hookState.snapshot.tables,
+      status: "ready",
+      sizeRankingEstimated: false,
+      data: [
+        tableRow("orders", 10_000, 100),
+        tableRow("events", 4_000, 6_000),
+        tableRow("audit_log", 50_000, 0),
+      ],
+    };
+    renderDialog();
+    const tablesTab = screen.getByRole("button", { name: /^Tables/ });
+    expect(tablesTab.textContent).toContain("3");
+    expect(tablesTab.textContent).toContain("1 to vacuum");
+    fireEvent.click(tablesTab);
+
+    expect(screen.getAllByRole("button", { name: "Copy VACUUM" })).toHaveLength(
+      1
+    );
+
+    fireEvent.input(screen.getByRole("searchbox", { name: "Search tables" }), {
+      target: { value: "ORD" },
+    });
+    expect(screen.getByText("public.orders")).toBeTruthy();
+    expect(screen.queryByText("public.events")).toBeNull();
+    expect(screen.getByText("1 of 3")).toBeTruthy();
+
+    fireEvent.input(screen.getByRole("searchbox", { name: "Search tables" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Needs vacuum (1)" }));
+    expect(screen.getByText("public.events")).toBeTruthy();
+    expect(screen.queryByText("public.orders")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Needs vacuum (1)" }));
+
+    // Sort by dead rows: descending first.
+    // Table sorts on mouse-up of the header button.
+    fireEvent.mouseUp(screen.getByText("Dead (est.)"), { button: 0 });
+    const names = screen.getAllByText(/^public\./).map((el) => el.textContent);
+    expect(names).toEqual([
+      "public.events",
+      "public.orders",
+      "public.audit_log",
+    ]);
+  });
+
+  it("offers DROP INDEX only for unused, non-unique indexes", () => {
+    const index = (name: string, scans: number | null, unique: boolean) => ({
+      schema: "public",
+      tableName: "events",
+      indexName: name,
+      idxScan: scans,
+      idxTupRead: 0,
+      idxTupFetch: 0,
+      indexBytes: 8192,
+      isUnique: unique,
+      enforcesConstraint: unique,
+    });
+    hookState.snapshot.indexes = {
+      ...hookState.snapshot.indexes,
+      status: "ready",
+      sizeRankingEstimated: false,
+      data: [
+        index("events_kind_idx", 0, false),
+        index("events_pkey", 0, true),
+        index("events_at_idx", 12, false),
+      ],
+    };
+    renderDialog();
+    const indexesTab = screen.getByRole("button", { name: /^Indexes/ });
+    expect(indexesTab.textContent).toContain("1 unused");
+    fireEvent.click(indexesTab);
+    const copy = screen.getAllByRole("button", { name: "Copy DROP" });
+    expect(copy).toHaveLength(1);
+    expect(copy[0]!.getAttribute("title")).toBe(
+      'DROP INDEX CONCURRENTLY IF EXISTS "public"."events_kind_idx";'
+    );
+  });
+
+  it("clears the search on Escape without closing the dialog", () => {
+    const onClose = vi.fn();
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={onClose}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+    const search = screen.getByRole("searchbox", {
+      name: "Search PID, user, app, query",
+    });
+    fireEvent.input(search, { target: { value: "nothing-matches" } });
+    expect(screen.getByText("No matching rows")).toBeTruthy();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows server health cards and waits for them before All clear", () => {
+    const { rerender } = renderDialog();
+    expect(screen.getByText("4 / 100")).toBeTruthy();
+    expect(screen.getByText("99.0%")).toBeTruthy();
+    expect(screen.getByText("1M")).toBeTruthy();
+    expect(screen.getByText("✓ All clear in this snapshot")).toBeTruthy();
+
+    hookState.loading = true;
+    hookState.snapshot.server = {
+      ...hookState.snapshot.server,
+      status: "loading",
+      data: null,
+    };
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("Checking server health…")).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("passes the auto-refresh choice to the hook, off by default", () => {
+    renderDialog();
+    expect(hookState.lastArgs.autoRefreshMs).toBeNull();
+    const select = screen.getByRole("combobox", { name: /Auto-refresh/ });
+    fireEvent.input(select, { target: { value: "10000" } });
+    expect(hookState.lastArgs.autoRefreshMs).toBe(10_000);
+    fireEvent.input(select, { target: { value: "off" } });
+    expect(hookState.lastArgs.autoRefreshMs).toBeNull();
+  });
+
+  it("does not claim All clear when server checks failed", () => {
+    hookState.snapshot.server = {
+      ...hookState.snapshot.server,
+      status: "error",
+      error: "canceling statement due to statement timeout",
+      data: null,
+    };
+    renderDialog();
+    expect(
+      screen.getByText("No issues found, but server checks are incomplete")
+    ).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("does not grade connections the role cannot fully see", () => {
+    hookState.snapshot.server.data = {
+      ...hookState.snapshot.server.data,
+      canReadAllStats: false,
+      clientConnections: null,
+    };
+    renderDialog();
+    expect(screen.getByText("Needs pg_read_all_stats")).toBeTruthy();
+    expect(
+      screen.getByText("No issues found, but server checks are incomplete")
+    ).toBeTruthy();
+  });
+
+  describe("session actions", () => {
+    function withSessions(rows: any[]) {
+      hookState.snapshot.sessions = {
+        ...hookState.snapshot.sessions,
+        status: "ready",
+        data: rows,
+      };
+    }
+    const session = (overrides: any = {}) => ({
+      pid: 4242,
+      usename: "app_user",
+      applicationName: "orders-api",
+      clientAddr: null,
+      state: "active",
+      waitEventType: null,
+      waitEvent: null,
+      backendType: "client backend",
+      backendToken: "2026-10-22T03:04:05.123456Z",
+      xactAgeSeconds: 5,
+      queryAgeSeconds: 5,
+      stateAgeSeconds: 5,
+      isExecuting: true,
+      queryText: "SELECT pg_sleep(30)",
+      queryHidden: false,
+      isBlocked: false,
+      blockerPids: [],
+      ...overrides,
+    });
+
+    async function openSessions() {
+      renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+      // Instance name resolves asynchronously.
+      await screen.findByText("This app");
+    }
+
+    it("labels this app's own sessions and confirms before acting", async () => {
+      withSessions([
+        session(),
+        session({ pid: 7, applicationName: INSTANCE_APP_NAME }),
+      ]);
+      await openSessions();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Actions for PID 4242" })
+      );
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Terminate session" })
+      );
+      expect(hookState.runSessionAction).toHaveBeenCalledTimes(1);
+      const [request, confirm] = hookState.runSessionAction.mock.calls[0]!;
+      expect(request).toEqual({
+        pid: 4242,
+        backendToken: "2026-10-22T03:04:05.123456Z",
+        kind: "terminate",
+      });
+      await confirm();
+      const [body, options] = confirmMock.mock.calls[0] as any;
+      expect(body).toContain("Terminate session 4242?");
+      expect(body).toContain("Query: SELECT pg_sleep(30)");
+      expect(options).toMatchObject({
+        kind: "warning",
+        okLabel: "Terminate session",
+        cancelLabel: "Keep session",
+      });
+      expect(
+        screen.queryByRole("button", { name: "Actions for PID 7" })
+      ).toBeNull();
+    });
+
+    it("announces the outcome and blocks refresh while sending", async () => {
+      withSessions([
+        session(),
+        session({ pid: 9, applicationName: INSTANCE_APP_NAME }),
+      ]);
+      hookState.sessionAction = {
+        ...session(),
+        kind: "cancel",
+        phase: "sending",
+      };
+      const { rerender } = renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+      await screen.findByText("This app");
+      expect(screen.getByRole("status", { name: "" }).textContent).toContain(
+        "Cancelling the query in session 4242"
+      );
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+      expect(
+        screen
+          .getByRole("button", { name: "Actions for PID 4242" })
+          .getAttribute("aria-disabled")
+      ).toBe("true");
+
+      hookState.sessionAction = null;
+      hookState.sessionActionResult = {
+        pid: 4242,
+        backendToken: "x",
+        kind: "cancel",
+        outcome: "denied",
+      };
+      rerender(
+        <DbHealthInspectorDialog
+          open
+          onClose={() => {}}
+          engine="postgres"
+          runtimeConnectionId="c1"
+          profileId="p1"
+        />
+      );
+      expect(
+        screen.getByText(/Not permitted to signal session 4242/)
+      ).toBeTruthy();
+      expect(screen.getByTitle("Refresh snapshot")).not.toBeDisabled();
+    });
   });
 });

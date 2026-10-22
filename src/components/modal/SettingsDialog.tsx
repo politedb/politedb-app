@@ -47,7 +47,7 @@ const SECTIONS: Array<{
   {
     id: "analytics",
     label: "Privacy & Analytics",
-    caption: "Telemetry controls",
+    caption: "What PoliteDB shares with us",
   },
   { id: "keyboard", label: "Keyboard shortcuts", caption: "Command hotkeys" },
   { id: "license", label: "License key", caption: "Activation and plan info" },
@@ -132,12 +132,14 @@ export function SettingsDialog(props: Props) {
       open={open}
       onClose={onClose}
       size="xl"
-      className="flex h-[min(620px,86vh)] max-w-5xl flex-col overflow-hidden"
+      // Fixed height so switching sections never makes the dialog jump; sized
+      // for the longest section (Keyboard shortcuts).
+      className="flex h-[min(560px,86vh)] max-w-5xl flex-col overflow-hidden"
     >
       <DialogHeader className="border-b border-slate-200">
         <DialogTitle className="flex items-center gap-2 font-semibold">
           <SettingsIcon className="size-4.5" />
-          General settings
+          Settings
         </DialogTitle>
       </DialogHeader>
       <DialogContent className="grid min-h-0 flex-1 grid-cols-[220px_1fr] gap-0 p-0">
@@ -155,9 +157,10 @@ export function SettingsDialog(props: Props) {
                   class={cn(
                     "w-full rounded-lg px-3 py-2 text-left transition-colors",
                     selected
-                      ? "bg-blue-600 text-white shadow-sm"
+                      ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200"
                       : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
                   )}
+                  aria-current={selected ? "page" : undefined}
                   onClick={() => setActiveSection(section.id)}
                 >
                   <div class="text-sm font-semibold">{section.label}</div>

@@ -1,14 +1,22 @@
 import { useCallback, useMemo, useRef, useState } from "preact/hooks";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import { CopyIcon, EditIcon, KeyIcon, TrashIcon } from "src/components/icons";
+import {
+  CopyIcon,
+  EditIcon,
+  KeyIcon,
+  SparklesIcon,
+  SshIcon,
+  TrashIcon,
+} from "src/components/icons";
+import { DbIcon } from "src/components/icons/DbIcon";
+import type { KeychainDisplay, KeychainIcon } from "src/lib/keychain/display";
 import { cn } from "src/utils/cn";
 import { KebabButton } from "../../components/common/KebabButton";
 
 export function KeychainCard(props: {
   keyName: string;
-  /** Display text from `keychainDisplay` (the raw key name stays the identity). */
-  title: string;
-  subtitle: string;
+  /** From `keychainDisplay`; the raw key name stays the identity. */
+  display: KeychainDisplay;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -21,7 +29,7 @@ export function KeychainCard(props: {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  const { title: label, subtitle: tag } = props;
+  const { title, badge, detail, icon, unused } = props.display;
 
   const onDeleteSecret = useCallback(async () => {
     const ok = await Promise.resolve(
@@ -84,8 +92,10 @@ export function KeychainCard(props: {
       <div
         role="button"
         tabIndex={0}
+        title={keyName}
         onClick={onSelect}
-        onDblClick={onOpen}
+        // While another keychain operation runs, a card must not start a read.
+        onDblClick={disabled ? undefined : onOpen}
         onContextMenu={openMenuAtPoint}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -105,20 +115,33 @@ export function KeychainCard(props: {
         )}
       >
         <div class="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-          <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 ring-1 ring-blue-200">
-            <KeyIcon className="size-6 text-slate-700" />
+          <div
+            class={cn(
+              "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1",
+              unused
+                ? "bg-amber-50 ring-amber-200"
+                : "bg-slate-50 ring-slate-200"
+            )}
+          >
+            <KeychainCardIcon icon={icon} />
           </div>
 
           <div class="min-w-0 flex-1">
-            <div class="flex flex-col justify-start gap-1">
-              <div
-                class="truncate text-sm font-semibold text-slate-800"
-                title={keyName}
-              >
-                {label}
-              </div>
-              <span class="text-xs text-neutral-600">{tag}</span>
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="truncate text-sm font-semibold text-slate-800">
+                {title}
+              </span>
+              {badge ? (
+                <span class="shrink-0 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] leading-none font-medium text-slate-600">
+                  {badge}
+                </span>
+              ) : null}
             </div>
+            {detail ? (
+              <div class="mt-1 truncate text-xs text-slate-500">{detail}</div>
+            ) : null}
+            {/* The raw key tells apart cards that read the same (two unused keys). */}
+            <span class="sr-only">Key name: {keyName}</span>
           </div>
         </div>
 
@@ -137,4 +160,21 @@ export function KeychainCard(props: {
       />
     </>
   );
+}
+
+function KeychainCardIcon(props: { icon: KeychainIcon }) {
+  const { icon } = props;
+  switch (icon.kind) {
+    case "database":
+      // Decorative: the badge already names the engine.
+      return <DbIcon engine={icon.engine} size="sm" alt="" />;
+    case "ssh":
+      return <SshIcon className="size-6 text-slate-700" />;
+    case "ai":
+      return (
+        <SparklesIcon className="size-6 text-violet-600 dark:text-violet-400" />
+      );
+    default:
+      return <KeyIcon className="size-6 text-slate-700" />;
+  }
 }
