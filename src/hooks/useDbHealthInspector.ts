@@ -79,6 +79,10 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
       profileId: ctx.profileId,
       engine: ctx.engine,
       signal: ac.signal,
+      // Show each section as soon as it is in; a newer refresh wins.
+      onProgress: (partial) => {
+        if (generation === generationRef.current) setSnapshot(partial);
+      },
     });
 
     if (generation !== generationRef.current) {

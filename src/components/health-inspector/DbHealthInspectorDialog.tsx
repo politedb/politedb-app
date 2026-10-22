@@ -1,4 +1,4 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -22,16 +22,18 @@ import { useDbHealthInspector } from "@root/src/hooks/useDbHealthInspector";
 import { useProGate } from "src/hooks/useProGate";
 import { ProBadge } from "src/components/license/ProBadge";
 import type { DatabaseEngine } from "src/types";
-import { formatBytesSize } from "src/utils/convert";
-import { cn } from "src/utils/cn";
 import {
+  formatCollectionDuration,
   formatHealthInspectorTimestamp,
+  formatInspectorBytes,
+  formatSnapshotTime,
   latestHealthTimestamp,
 } from "src/lib/health-inspector/format";
 import {
   DEAD_ROW_CAVEAT,
   INDEX_SCAN_CAVEAT,
   PARTITION_SIZE_NOTE,
+  SIZE_RANKING_NOTE,
   formatAgeSeconds,
   formatOptionalNumber,
 } from "src/lib/health-inspector/signals";
@@ -198,9 +200,12 @@ function SectionBanner(props: {
   section: HealthSection<unknown>;
   loading: boolean;
   caveat?: string;
+  /** Shown prominently: the size order is an estimate on this database. */
+  rankingNote?: string | null;
   showPgStatStatementsGuide?: boolean;
 }) {
-  const { section, loading, caveat, showPgStatStatementsGuide } = props;
+  const { section, loading, caveat, rankingNote, showPgStatStatementsGuide } =
+    props;
   if (loading && section.status === "loading") {
     return null;
   }
@@ -245,8 +250,13 @@ function SectionBanner(props: {
       </div>
     );
   }
-  return section.truncated || caveat ? (
+  return section.truncated || caveat || rankingNote ? (
     <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+      {rankingNote ? (
+        <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+          {rankingNote}
+        </span>
+      ) : null}
       {section.truncated ? (
         <span class="rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-700">
           Showing first 100 rows
@@ -336,9 +346,6 @@ function SessionsTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
-  if (props.loading) {
-    return <TableSectionSkeleton columns={8} />;
-  }
   const section = props.snap?.sessions;
   const columns = useMemo<TableColumn<HealthSessionRow>[]>(
     () => [
@@ -399,7 +406,11 @@ function SessionsTable(props: {
     ],
     []
   );
-  if (!section) return null;
+  // Hooks above run on every render; only this section's own loading shows a
+  // skeleton, so finished sections appear while others are still collected.
+  if (!section || (props.loading && section.status === "loading")) {
+    return props.loading ? <TableSectionSkeleton columns={8} /> : null;
+  }
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <SectionBanner section={section} loading={props.loading} />
@@ -422,9 +433,6 @@ function StatementsTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
-  if (props.loading) {
-    return <TableSectionSkeleton columns={5} />;
-  }
   const section = props.snap?.statements;
   const columns = useMemo<TableColumn<HealthStatementRow>[]>(
     () => [
@@ -469,7 +477,11 @@ function StatementsTable(props: {
     ],
     []
   );
-  if (!section) return null;
+  // Hooks above run on every render; only this section's own loading shows a
+  // skeleton, so finished sections appear while others are still collected.
+  if (!section || (props.loading && section.status === "loading")) {
+    return props.loading ? <TableSectionSkeleton columns={5} /> : null;
+  }
   const info = section.info;
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
@@ -506,9 +518,6 @@ function TablesTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
-  if (props.loading) {
-    return <TableSectionSkeleton columns={6} />;
-  }
   const section = props.snap?.tables;
   const columns = useMemo<TableColumn<HealthTableRow>[]>(
     () => [
@@ -541,10 +550,7 @@ function TablesTable(props: {
         key: "totalBytes",
         label: "Total size",
         className: "text-sm p-2",
-        render: (_v, row) =>
-          row.totalBytes == null
-            ? "—"
-            : formatBytesSize(row.totalBytes, { fractionDigits: 1 }),
+        render: (_v, row) => formatInspectorBytes(row.totalBytes),
       },
       {
         key: "lastVacuum",
@@ -567,13 +573,18 @@ function TablesTable(props: {
     ],
     []
   );
-  if (!section) return null;
+  // Hooks above run on every render; only this section's own loading shows a
+  // skeleton, so finished sections appear while others are still collected.
+  if (!section || (props.loading && section.status === "loading")) {
+    return props.loading ? <TableSectionSkeleton columns={6} /> : null;
+  }
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <SectionBanner
         section={section}
         loading={props.loading}
         caveat={`${DEAD_ROW_CAVEAT} ${PARTITION_SIZE_NOTE}`}
+        rankingNote={section.sizeRankingEstimated ? SIZE_RANKING_NOTE : null}
       />
       {section.status === "ready" || section.status === "empty" ? (
         <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
@@ -594,9 +605,6 @@ function IndexesTable(props: {
   snap: HealthInspectorSnapshot | null;
   loading: boolean;
 }) {
-  if (props.loading) {
-    return <TableSectionSkeleton columns={4} />;
-  }
   const section = props.snap?.indexes;
   const columns = useMemo<TableColumn<HealthIndexRow>[]>(
     () => [
@@ -618,10 +626,7 @@ function IndexesTable(props: {
         key: "indexBytes",
         label: "Size",
         className: "text-sm p-2 min-w-24",
-        render: (_v, row) =>
-          row.indexBytes == null
-            ? "—"
-            : formatBytesSize(row.indexBytes, { fractionDigits: 1 }),
+        render: (_v, row) => formatInspectorBytes(row.indexBytes),
       },
       {
         key: "idxTupRead",
@@ -632,13 +637,18 @@ function IndexesTable(props: {
     ],
     []
   );
-  if (!section) return null;
+  // Hooks above run on every render; only this section's own loading shows a
+  // skeleton, so finished sections appear while others are still collected.
+  if (!section || (props.loading && section.status === "loading")) {
+    return props.loading ? <TableSectionSkeleton columns={4} /> : null;
+  }
   return (
     <div class="flex min-h-0 flex-1 flex-col gap-2">
       <SectionBanner
         section={section}
         loading={props.loading}
         caveat={INDEX_SCAN_CAVEAT}
+        rankingNote={section.sizeRankingEstimated ? SIZE_RANKING_NOTE : null}
       />
       {section.status === "ready" || section.status === "empty" ? (
         <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
@@ -653,6 +663,36 @@ function IndexesTable(props: {
       ) : null}
     </div>
   );
+}
+
+const SNAPSHOT_AGE_TICK_MS = 30_000;
+
+/** Current time, re-read every 30 s while enabled so "2 min ago" stays fresh. */
+function useNow(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    if (!enabled) return;
+    const id = window.setInterval(
+      () => setNow(Date.now()),
+      SNAPSHOT_AGE_TICK_MS
+    );
+    return () => window.clearInterval(id);
+  }, [enabled]);
+  return now;
+}
+
+/** "Collecting…", or "2 min ago (22:35) · collected in 1.2 s". */
+function describeSnapshot(
+  snapshot: HealthInspectorSnapshot | null,
+  loading: boolean,
+  now: number
+): string | null {
+  if (loading) return "Collecting…";
+  if (!snapshot?.finishedAt) return null;
+  const age = formatSnapshotTime(snapshot.finishedAt, now);
+  if (snapshot.cancelled) return `${age} · cancelled`;
+  return `${age} · collected in ${formatCollectionDuration(snapshot.finishedAt - snapshot.startedAt)}`;
 }
 
 export function DbHealthInspectorDialog(props: Props) {
@@ -675,18 +715,19 @@ export function DbHealthInspectorDialog(props: Props) {
       engine,
     });
 
+  const now = useNow(open && Boolean(snapshot?.finishedAt));
+  const snapshotStatus = describeSnapshot(snapshot, loading, now);
+
   const handleClose = () => {
     cancel();
     onClose();
   };
 
   const openSessionsTab = () => {
-    if (loading) return;
     setTab("sessions");
   };
 
   const handleTabChange = (next: SectionKey) => {
-    if (loading) return;
     setTab(next);
   };
 
@@ -739,9 +780,7 @@ export function DbHealthInspectorDialog(props: Props) {
         <DialogDescription>
           Read-only PostgreSQL snapshot
           {databaseLabel ? ` · ${databaseLabel}` : ""}
-          {snapshot?.startedAt
-            ? ` · Started ${formatCollectedAt(snapshot.startedAt)}`
-            : ""}
+          {hasPro && snapshotStatus ? ` · ${snapshotStatus}` : ""}
         </DialogDescription>
       </DialogHeader>
 
@@ -793,7 +832,6 @@ export function DbHealthInspectorDialog(props: Props) {
                 value={tab}
                 onValueChange={handleTabChange}
                 tabs={tabs}
-                disabled={loading}
                 listClassName="rounded-t-md"
                 contentClassName="mt-2 flex min-h-0 flex-col"
               />
@@ -801,35 +839,35 @@ export function DbHealthInspectorDialog(props: Props) {
           </DialogContent>
 
           <DialogFooter className="shrink-0 border-t border-neutral-200">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void refresh()}
-              disabled={loading || !supported || !runtimeConnectionId}
-              title="Refresh snapshot"
-            >
-              <span class="inline-flex items-center gap-1.5">
-                <RefreshCwIcon
-                  className={cn("size-4", loading && "animate-spin")}
-                />
-                Refresh
-              </span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => cancel()}
-              disabled={!loading}
-              title="Cancel in-flight inspector queries"
-            >
-              <span class="inline-flex items-center gap-1.5">
-                <StopIcon className="size-4" />
-                Cancel
-              </span>
-            </Button>
-            <Button type="button" variant="default" onClick={handleClose}>
+            <Button type="button" variant="outline" onClick={handleClose}>
               Close
             </Button>
+            {loading ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => cancel()}
+                title="Cancel in-flight inspector queries"
+              >
+                <span class="inline-flex items-center gap-1.5">
+                  <StopIcon className="size-4" />
+                  Cancel
+                </span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => void refresh()}
+                disabled={!supported || !runtimeConnectionId}
+                title="Refresh snapshot"
+              >
+                <span class="inline-flex items-center gap-1.5">
+                  <RefreshCwIcon className="size-4" />
+                  Refresh
+                </span>
+              </Button>
+            )}
           </DialogFooter>
         </>
       )}

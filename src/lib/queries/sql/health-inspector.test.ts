@@ -4,6 +4,7 @@ import {
   HEALTH_INSPECTOR_LIST_LIMIT,
   HEALTH_INSPECTOR_QUERY_TEXT_CAP,
   healthInspectorCapabilitiesSql,
+  HEALTH_INSPECTOR_SIZE_CANDIDATES,
   healthInspectorIndexesSql,
   healthInspectorOverviewSql,
   healthInspectorSessionsSql,
@@ -32,6 +33,25 @@ describe("healthInspector SQL builders", () => {
     const indexes = healthInspectorIndexesSql();
     expect(indexes).toContain("pg_catalog.pg_stat_user_indexes");
     expect(indexes).toContain("idx_scan");
+  });
+
+  it("computes relation sizes only for relpages-ranked candidates", () => {
+    for (const sql of [
+      healthInspectorTablesSql(),
+      healthInspectorIndexesSql(),
+    ]) {
+      const candidates = sql.slice(0, sql.indexOf("sized AS"));
+      expect(candidates).toContain("relpages");
+      expect(candidates).toContain(`LIMIT ${HEALTH_INSPECTOR_SIZE_CANDIDATES}`);
+      expect(candidates).not.toMatch(/pg_(total_)?relation_size|pg_table_size/);
+      expect(sql).toContain(`LIMIT ${HEALTH_INSPECTOR_FETCH_LIMIT}`);
+    }
+    expect(healthInspectorTablesSql()).toContain("x.indrelid=c.reltoastrelid");
+    expect(healthInspectorTablesSql()).toContain("AS relation_count");
+    expect(healthInspectorIndexesSql()).toContain("AS relation_count");
+    expect(HEALTH_INSPECTOR_SIZE_CANDIDATES).toBeGreaterThan(
+      HEALTH_INSPECTOR_FETCH_LIMIT
+    );
   });
 
   it("overview aggregates sessions and database size without table scans", () => {
@@ -93,6 +113,6 @@ it("includes partition leaves with labels rather than omitting them", () => {
   expect(tables).toContain("is_partition_child");
   expect(tables).not.toContain("WHERE NOT COALESCE(c.relispartition");
   expect(tables).toContain(
-    "COALESCE(c.relispartition, false) AS is_partition_child"
+    "COALESCE(s.relispartition, false) AS is_partition_child"
   );
 });

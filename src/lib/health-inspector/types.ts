@@ -148,8 +148,16 @@ export type HealthInspectorSnapshot = {
   statements: HealthSection<HealthStatementRow[]> & {
     info: HealthStatementsInfo | null;
   };
-  tables: HealthSection<HealthTableRow[]>;
-  indexes: HealthSection<HealthIndexRow[]>;
+  tables: HealthSection<HealthTableRow[]> & SizeRankedSection;
+  indexes: HealthSection<HealthIndexRow[]> & SizeRankedSection;
+};
+
+export type SizeRankedSection = {
+  /**
+   * True when the database has more relations than were sized, so the size
+   * order comes from catalog estimates and may miss a recently grown one.
+   */
+  sizeRankingEstimated: boolean;
 };
 
 export type HealthInspectorCapabilities = {
@@ -164,6 +172,7 @@ export type HealthInspectorCapabilities = {
 export type HealthAttentionKind =
   | "blocked"
   | "idle_in_transaction"
+  | "long_transaction"
   | "deadlocks_history"
   | "incomplete";
 

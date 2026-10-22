@@ -421,7 +421,7 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.getByText(/events_2024 \(partition\)/)).toBeTruthy();
   });
 
-  it("shows overview skeleton and locks other tabs while loading", () => {
+  it("shows overview skeleton and lets tabs switch to their own skeleton while loading", () => {
     hookState.snapshot = null;
     hookState.loading = true;
     render(
@@ -440,14 +440,12 @@ describe("DbHealthInspectorDialog", () => {
     expect(screen.queryByText("Loading…")).toBeNull();
 
     const sessionsTab = screen.getByRole("button", { name: "Sessions" });
-    expect(sessionsTab).toBeDisabled();
+    expect(sessionsTab).not.toBeDisabled();
     fireEvent.click(sessionsTab);
-    // Still on overview skeleton — table skeleton / Sessions header absent
-    expect(screen.queryByRole("status", { name: "Loading table" })).toBeNull();
-    expect(screen.queryByText("PID")).toBeNull();
+    expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
     expect(
-      screen.getByRole("status", { name: "Loading overview" })
-    ).toBeTruthy();
+      screen.queryByRole("status", { name: "Loading overview" })
+    ).toBeNull();
   });
 
   it("keeps Cancel available while loading and shows table skeleton on active tab", () => {
@@ -567,9 +565,23 @@ describe("DbHealthInspectorDialog", () => {
         profileId="p1"
       />
     );
+    // A section that already finished stays visible while the rest load.
+    expect(screen.getByText("No sessions")).toBeTruthy();
+
+    hookState.snapshot.sessions.status = "loading";
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
     expect(screen.getByRole("status", { name: "Loading table" })).toBeTruthy();
     expect(screen.queryByText("No sessions")).toBeNull();
-    expect(screen.getByRole("button", { name: "Overview" })).toBeDisabled();
+    // Tabs stay switchable while sections are still loading.
+    expect(screen.getByRole("button", { name: "Overview" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Sessions" })).not.toBeDisabled();
     expect(
       screen.getByTitle("Cancel in-flight inspector queries")
@@ -601,5 +613,149 @@ describe("DbHealthInspectorDialog", () => {
     fireEvent.click(buttons[0]!);
     expect(hookState.refresh).not.toHaveBeenCalled();
     expect(screen.getByText("PID")).toBeTruthy();
+  });
+
+  it("summarizes a clean overview with merged sessions and plain empty values", () => {
+    hookState.snapshot.overview.data.longestXactAgeSeconds = null;
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("✓ All clear in this snapshot")).toBeTruthy();
+    expect(screen.getByText("3 sessions")).toBeTruthy();
+    expect(screen.getByText("2 idle · 1 active")).toBeTruthy();
+    expect(screen.getByText("None running")).toBeTruthy();
+    expect(screen.getAllByText("None").length).toBe(2);
+    expect(screen.queryByText(/0\.0 B/)).toBeNull();
+    // The Inspector-connection caveat lives in one hint, not on every card.
+    expect(screen.queryByText(/Excludes this Inspector connection/)).toBeNull();
+    const hints = screen.getAllByRole("img", { name: "More info" });
+    expect(
+      hints.some((hint) =>
+        /exclude this Inspector connection/.test(
+          document.getElementById(hint.getAttribute("aria-describedby")!)
+            ?.textContent ?? ""
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("counts issues in the summary strip and colors their cards", () => {
+    const data = hookState.snapshot.overview.data;
+    data.blockedSessionCount = 2;
+    data.idleInTransactionCount = 1;
+    data.idleInTransactionOldestXactAgeSeconds = 30;
+    data.idleInTransactionLongestIdleSeconds = 20;
+    const { container } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText("⚠ 2 issues")).toBeTruthy();
+    expect(container.querySelectorAll('[data-tone="critical"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-tone="warning"]').length).toBe(1);
+  });
+
+  it("shows the snapshot age and duration, and swaps Refresh for Cancel while loading", () => {
+    const finishedAt = Date.now() - 2 * 60_000;
+    hookState.snapshot.startedAt = finishedAt - 1_200;
+    hookState.snapshot.finishedAt = finishedAt;
+    const { rerender } = render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(
+      screen.getByText(/2 min ago \(\d\d:\d\d\) · collected in 1\.2 s/)
+    ).toBeTruthy();
+    expect(screen.getByTitle("Refresh snapshot")).toBeTruthy();
+    expect(
+      screen.queryByTitle("Cancel in-flight inspector queries")
+    ).toBeNull();
+
+    hookState.loading = true;
+    rerender(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText(/Collecting…/)).toBeTruthy();
+    expect(screen.queryByTitle("Refresh snapshot")).toBeNull();
+    expect(
+      screen.getByTitle("Cancel in-flight inspector queries")
+    ).toBeTruthy();
+  });
+
+  it("never shows All clear when the overview failed", () => {
+    hookState.snapshot.overview = {
+      ...hookState.snapshot.overview,
+      status: "error",
+      error: "canceling statement due to statement timeout",
+      data: null,
+    };
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    expect(screen.getByText(/statement timeout/)).toBeTruthy();
+    expect(screen.queryByText(/All clear/)).toBeNull();
+  });
+
+  it("flags an estimated size ranking on large databases", () => {
+    hookState.snapshot.tables = {
+      ...hookState.snapshot.tables,
+      status: "ready",
+      sizeRankingEstimated: true,
+      data: [
+        {
+          schema: "public",
+          tableName: "events",
+          liveTuples: 1,
+          deadTuples: 0,
+          lastVacuum: null,
+          lastAutovacuum: null,
+          lastAnalyze: null,
+          lastAutoAnalyze: null,
+          tableBytes: 1,
+          indexesBytes: 0,
+          totalBytes: 1,
+          isPartitionedParent: false,
+          isPartitionChild: false,
+        },
+      ],
+    };
+    render(
+      <DbHealthInspectorDialog
+        open
+        onClose={() => {}}
+        engine="postgres"
+        runtimeConnectionId="c1"
+        profileId="p1"
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Tables" }));
+    expect(screen.getByText(/recently grown one may be missing/)).toBeTruthy();
   });
 });

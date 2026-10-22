@@ -1,4 +1,5 @@
 import {
+  HEALTH_INSPECTOR_SIZE_CANDIDATES,
   healthInspectorCapabilitiesSql,
   healthInspectorIndexesSql,
   healthInspectorOverviewSql,
@@ -33,6 +34,13 @@ import type {
 
 export const HEALTH_INSPECTOR_QUERY_TIMEOUT_MS = 10_000;
 export const HEALTH_INSPECTOR_OVERALL_DEADLINE_MS = 30_000;
+/** Waiting longer for a lock means another session holds it; skip instead. */
+export const HEALTH_INSPECTOR_LOCK_TIMEOUT_MS = 1_000;
+/**
+ * Sections after the overview run this many at a time: faster than one by one,
+ * while leaving most of the connection pool to the user's own queries.
+ */
+export const HEALTH_INSPECTOR_CONCURRENCY = 2;
 
 type RunInternal = typeof runSqlQuery;
 
@@ -41,6 +49,8 @@ export type CollectHealthSnapshotArgs = {
   profileId: string;
   engine: string;
   signal?: AbortSignal;
+  /** Called with the snapshot so far each time a section finishes. */
+  onProgress?: (snapshot: HealthInspectorSnapshot) => void;
   /** Injectable for tests */
   runSql?: RunInternal;
   now?: () => number;
@@ -55,6 +65,12 @@ function emptySection<T>(data: T): HealthSection<T> {
     unavailableReason: null,
     data,
   };
+}
+
+function isSizeRankingEstimated(relationCount: number | null): boolean {
+  return (
+    relationCount != null && relationCount > HEALTH_INSPECTOR_SIZE_CANDIDATES
+  );
 }
 
 function loadingSnapshot(
@@ -75,8 +91,14 @@ function loadingSnapshot(
       ...emptySection<HealthStatementRow[]>([]),
       info: null,
     },
-    tables: emptySection<HealthTableRow[]>([]),
-    indexes: emptySection<HealthIndexRow[]>([]),
+    tables: {
+      ...emptySection<HealthTableRow[]>([]),
+      sizeRankingEstimated: false,
+    },
+    indexes: {
+      ...emptySection<HealthIndexRow[]>([]),
+      sizeRankingEstimated: false,
+    },
   };
 }
 
@@ -108,6 +130,10 @@ async function runSectionQuery(
   const timeoutMs = Math.min(HEALTH_INSPECTOR_QUERY_TIMEOUT_MS, left);
   return runSql(connectionId, sql, {
     timeoutMs,
+    // Enforced by the server too, so a query never outlives its budget there.
+    statementTimeoutMs: timeoutMs,
+    lockTimeoutMs: HEALTH_INSPECTOR_LOCK_TIMEOUT_MS,
+    readOnly: true,
     maxRows: 200,
     batchSize: 100,
     signal,
@@ -117,8 +143,10 @@ async function runSectionQuery(
 
 /**
  * Collect one on-demand health snapshot.
- * Sequential queries only; ≤10 statements including capability checks.
- * Partial section failures degrade that section only.
+ * The overview runs first; the other sections then run at most
+ * HEALTH_INSPECTOR_CONCURRENCY at a time, each reported through `onProgress` as it
+ * finishes. ≤10 statements including capability checks. Partial section
+ * failures degrade that section only.
  */
 export async function collectHealthInspectorSnapshot(
   args: CollectHealthSnapshotArgs
@@ -137,8 +165,14 @@ export async function collectHealthInspectorSnapshot(
     }
   };
 
-  try {
-    // 1) Overview
+  // Once the result is returned (done, cancelled or failed), a section still
+  // finishing on the other worker must not report or start anything more.
+  let settled = false;
+  const emit = () => {
+    if (!settled) args.onProgress?.({ ...snap });
+  };
+
+  const runOverview = async () => {
     try {
       bump();
       const result = await runSectionQuery(
@@ -171,8 +205,9 @@ export async function collectHealthInspectorSnapshot(
         data: null,
       };
     }
+  };
 
-    // 2) Sessions
+  const runSessions = async () => {
     try {
       bump();
       const result = await runSectionQuery(
@@ -206,7 +241,10 @@ export async function collectHealthInspectorSnapshot(
         data: [],
       };
     }
+  };
 
+  // Capabilities, then the optional info view and the statements themselves.
+  const runStatements = async () => {
     // 3) Capabilities for statements
     let statementsCap: HealthInspectorStatementsCapability | null = null;
     try {
@@ -318,8 +356,9 @@ export async function collectHealthInspectorSnapshot(
         };
       }
     }
+  };
 
-    // 6) Tables
+  const runTables = async () => {
     try {
       bump();
       const result = await runSectionQuery(
@@ -338,6 +377,7 @@ export async function collectHealthInspectorSnapshot(
         truncated: decoded.truncated,
         unavailableReason: null,
         data: decoded.rows,
+        sizeRankingEstimated: isSizeRankingEstimated(decoded.relationCount),
       };
     } catch (err) {
       if (isAbortError(err)) throw err;
@@ -351,10 +391,12 @@ export async function collectHealthInspectorSnapshot(
         truncated: false,
         unavailableReason: isPermissionOrMissingRelationError(msg) ? msg : null,
         data: [],
+        sizeRankingEstimated: false,
       };
     }
+  };
 
-    // 7) Indexes
+  const runIndexes = async () => {
     try {
       bump();
       const result = await runSectionQuery(
@@ -373,6 +415,7 @@ export async function collectHealthInspectorSnapshot(
         truncated: decoded.truncated,
         unavailableReason: null,
         data: decoded.rows,
+        sizeRankingEstimated: isSizeRankingEstimated(decoded.relationCount),
       };
     } catch (err) {
       if (isAbortError(err)) throw err;
@@ -386,21 +429,45 @@ export async function collectHealthInspectorSnapshot(
         truncated: false,
         unavailableReason: isPermissionOrMissingRelationError(msg) ? msg : null,
         data: [],
+        sizeRankingEstimated: false,
       };
     }
+  };
 
+  try {
+    // Report the all-loading snapshot first, so a Refresh replaces the previous
+    // results right away instead of showing them as current.
+    emit();
+    // The overview is what opens first: it runs alone, then shows.
+    await runOverview();
+    emit();
+
+    // The other sections share a small pool and show as each one finishes.
+    const queue = [runSessions, runStatements, runTables, runIndexes];
+    const worker = async () => {
+      for (let task = queue.shift(); task && !settled; task = queue.shift()) {
+        await task();
+        emit();
+      }
+    };
+    await Promise.all(
+      Array.from({ length: HEALTH_INSPECTOR_CONCURRENCY }, worker)
+    );
+
+    settled = true;
     snap.finishedAt = now();
-    return snap;
+    return { ...snap };
   } catch (err) {
+    settled = true;
     if (isAbortError(err)) {
       snap.cancelled = true;
       snap.finishedAt = now();
       snap.overallError = "Cancelled";
-      return snap;
+      return { ...snap };
     }
     snap.finishedAt = now();
     snap.overallError = sanitizeHealthError(err);
-    return snap;
+    return { ...snap };
   }
 }
 

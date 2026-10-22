@@ -309,33 +309,86 @@ export function healthInspectorStatementsInfoSql(schema: string): string {
 }
 
 /**
+ * Candidate rows ranked by the catalog page estimate before real sizes are
+ * computed. Larger than the fetch limit so a stale `relpages` (it only
+ * updates on VACUUM/ANALYZE) rarely pushes a big relation out of the list.
+ */
+export const HEALTH_INSPECTOR_SIZE_CANDIDATES = 500;
+
+/**
  * Table live/dead estimates, maintenance timestamps, and sizes.
  * Includes partition leaves with is_partition_child so physical storage and
  * maintenance are visible. Each row reports only its own relation size
  * (no parent+child aggregation), so sizes are never double-counted.
+ *
+ * Sizes stat files and lock each relation, so they are computed only for the
+ * candidates ranked by `pg_class.relpages` (heap + TOAST + their indexes),
+ * never for every table in the database. `relation_count` tells the UI when
+ * that ranking was a sample.
  */
 export function healthInspectorTablesSql(): string {
   const limit = HEALTH_INSPECTOR_FETCH_LIMIT;
+  const candidates = HEALTH_INSPECTOR_SIZE_CANDIDATES;
   const queryStr = `
+    WITH candidates AS (
+      SELECT
+        t.relid,
+        t.schemaname,
+        t.relname,
+        t.n_live_tup,
+        t.n_dead_tup,
+        t.last_vacuum,
+        t.last_autovacuum,
+        t.last_analyze,
+        t.last_autoanalyze,
+        c.relkind,
+        c.relispartition
+      FROM pg_catalog.pg_stat_user_tables t
+      JOIN pg_catalog.pg_class c ON c.oid = t.relid
+      LEFT JOIN pg_catalog.pg_class toast ON toast.oid = c.reltoastrelid
+      LEFT JOIN LATERAL (
+        SELECT SUM(ic.relpages)::bigint AS pages
+        FROM pg_catalog.pg_index x
+        JOIN pg_catalog.pg_class ic ON ic.oid = x.indexrelid
+        WHERE x.indrelid = t.relid
+          OR (c.reltoastrelid <> 0 AND x.indrelid = c.reltoastrelid)
+      ) idx ON true
+      ORDER BY (
+          GREATEST(c.relpages, 0)::bigint
+          + GREATEST(COALESCE(toast.relpages, 0), 0)::bigint
+          + COALESCE(idx.pages, 0)
+        ) DESC,
+        t.schemaname ASC,
+        t.relname ASC
+      LIMIT ${candidates}
+    ),
+    sized AS (
+      SELECT
+        cand.*,
+        pg_catalog.pg_table_size(cand.relid)::bigint AS table_bytes,
+        pg_catalog.pg_indexes_size(cand.relid)::bigint AS indexes_bytes,
+        pg_catalog.pg_total_relation_size(cand.relid)::bigint AS total_bytes
+      FROM candidates cand
+    )
     SELECT
-      t.schemaname,
-      t.relname AS table_name,
-      t.n_live_tup,
-      t.n_dead_tup,
-      t.last_vacuum,
-      t.last_autovacuum,
-      t.last_analyze,
-      t.last_autoanalyze,
-      pg_catalog.pg_table_size(t.relid)::bigint AS table_bytes,
-      pg_catalog.pg_indexes_size(t.relid)::bigint AS indexes_bytes,
-      pg_catalog.pg_total_relation_size(t.relid)::bigint AS total_bytes,
-      (c.relkind = 'p') AS is_partitioned_parent,
-      COALESCE(c.relispartition, false) AS is_partition_child
-    FROM pg_catalog.pg_stat_user_tables t
-    JOIN pg_catalog.pg_class c ON c.oid = t.relid
-    ORDER BY pg_catalog.pg_total_relation_size(t.relid) DESC NULLS LAST,
-      t.schemaname ASC,
-      t.relname ASC
+      s.schemaname,
+      s.relname AS table_name,
+      s.n_live_tup,
+      s.n_dead_tup,
+      s.last_vacuum,
+      s.last_autovacuum,
+      s.last_analyze,
+      s.last_autoanalyze,
+      s.table_bytes,
+      s.indexes_bytes,
+      s.total_bytes,
+      (s.relkind = 'p') AS is_partitioned_parent,
+      COALESCE(s.relispartition, false) AS is_partition_child,
+      (SELECT count(*) FROM pg_catalog.pg_stat_user_tables)::bigint AS relation_count
+    FROM sized s
+    ORDER BY s.total_bytes DESC NULLS LAST,
+      s.schemaname ASC,
+      s.relname ASC
     LIMIT ${limit}
   `;
   return regexEscape(queryStr);
@@ -344,23 +397,51 @@ export function healthInspectorTablesSql(): string {
 /**
  * Index sizes and scan counters.
  * Zero scans is a signal only — never treat as safe-to-drop.
+ *
+ * Like tables, real sizes are computed only for candidates ranked by
+ * `pg_class.relpages`.
  */
 export function healthInspectorIndexesSql(): string {
   const limit = HEALTH_INSPECTOR_FETCH_LIMIT;
+  const candidates = HEALTH_INSPECTOR_SIZE_CANDIDATES;
   const queryStr = `
+    WITH candidates AS (
+      SELECT
+        i.indexrelid,
+        i.schemaname,
+        i.relname,
+        i.indexrelname,
+        i.idx_scan,
+        i.idx_tup_read,
+        i.idx_tup_fetch
+      FROM pg_catalog.pg_stat_user_indexes i
+      JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid
+      ORDER BY GREATEST(ic.relpages, 0) DESC,
+        i.schemaname ASC,
+        i.relname ASC,
+        i.indexrelname ASC
+      LIMIT ${candidates}
+    ),
+    sized AS (
+      SELECT
+        cand.*,
+        pg_catalog.pg_relation_size(cand.indexrelid)::bigint AS index_bytes
+      FROM candidates cand
+    )
     SELECT
-      i.schemaname,
-      i.relname AS table_name,
-      i.indexrelname AS index_name,
-      i.idx_scan,
-      i.idx_tup_read,
-      i.idx_tup_fetch,
-      pg_catalog.pg_relation_size(i.indexrelid)::bigint AS index_bytes
-    FROM pg_catalog.pg_stat_user_indexes i
-    ORDER BY pg_catalog.pg_relation_size(i.indexrelid) DESC NULLS LAST,
-      i.schemaname ASC,
-      i.relname ASC,
-      i.indexrelname ASC
+      s.schemaname,
+      s.relname AS table_name,
+      s.indexrelname AS index_name,
+      s.idx_scan,
+      s.idx_tup_read,
+      s.idx_tup_fetch,
+      s.index_bytes,
+      (SELECT count(*) FROM pg_catalog.pg_stat_user_indexes)::bigint AS relation_count
+    FROM sized s
+    ORDER BY s.index_bytes DESC NULLS LAST,
+      s.schemaname ASC,
+      s.relname ASC,
+      s.indexrelname ASC
     LIMIT ${limit}
   `;
   return regexEscape(queryStr);

@@ -24,6 +24,14 @@ export type RunSqlOptions = {
    * Default false preserves existing caller behavior.
    */
   internal?: boolean;
+  /**
+   * Server-side limits, applied inside the statement's transaction. Engines
+   * that do not support one ignore it. Without them the server defaults apply
+   * (the client-side `timeoutMs` still cancels the operation).
+   */
+  statementTimeoutMs?: number;
+  lockTimeoutMs?: number;
+  readOnly?: boolean;
 };
 
 const SQL_BUSY_RETRY_MAX = 8;
@@ -301,6 +309,9 @@ export async function runSqlQuery(
             sql,
             batch_size: opts?.batchSize ?? 100,
             max_rows: opts?.maxRows,
+            statement_timeout_ms: opts?.statementTimeoutMs,
+            lock_timeout_ms: opts?.lockTimeoutMs,
+            read_only: opts?.readOnly,
             client_mode: "direct",
           },
         },

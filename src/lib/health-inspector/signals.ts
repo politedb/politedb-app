@@ -59,6 +59,65 @@ export function overviewVisibilityNote(
   return parts.length ? parts.join(" ") : null;
 }
 
+/** Open transactions older than this are flagged (5 minutes). */
+export const LONG_TRANSACTION_WARN_SECONDS = 5 * 60;
+
+function isLongTransaction(seconds: number | null): boolean {
+  return seconds != null && seconds > LONG_TRANSACTION_WARN_SECONDS;
+}
+
+export type HealthMetricTone = "critical" | "warning" | "ok" | "neutral";
+
+/**
+ * Status colors for the overview cards. Unknown values stay neutral — never
+ * green — so restricted visibility is not shown as healthy.
+ */
+export function overviewMetricTones(overview: HealthOverview): {
+  blocked: HealthMetricTone;
+  idleInTransaction: HealthMetricTone;
+  longestTransaction: HealthMetricTone;
+} {
+  const blocked = overview.blockedSessionCount;
+  const idle = overview.idleInTransactionCount;
+  const longest = overview.longestXactAgeSeconds;
+  const unknownActivity = overview.restrictedVisibility;
+  return {
+    blocked: blocked == null ? "neutral" : blocked > 0 ? "critical" : "ok",
+    idleInTransaction:
+      idle == null
+        ? "neutral"
+        : idle > 0
+          ? "warning"
+          : unknownActivity
+            ? "neutral"
+            : "ok",
+    longestTransaction: isLongTransaction(longest)
+      ? "warning"
+      : unknownActivity
+        ? "neutral"
+        : "ok",
+  };
+}
+
+/** Longest open transaction; null means none is running unless visibility is restricted. */
+export function formatLongestTransaction(overview: HealthOverview): string {
+  if (overview.longestXactAgeSeconds == null) {
+    return overview.restrictedVisibility ? "—" : "None running";
+  }
+  return formatAgeSeconds(overview.longestXactAgeSeconds);
+}
+
+/** Current issues (actionable or incomplete data) vs. history-only notes. */
+export function splitAttentionItems(items: HealthAttentionItem[]): {
+  issues: HealthAttentionItem[];
+  history: HealthAttentionItem[];
+} {
+  return {
+    issues: items.filter((i) => i.tone !== "informational"),
+    history: items.filter((i) => i.tone === "informational"),
+  };
+}
+
 /**
  * Build the compact Attention list from overview metrics.
  * Historical deadlocks are informational (since reset), never a current incident.
@@ -77,6 +136,7 @@ export function buildAttentionItems(
       tone: "incomplete",
       title: "Incomplete activity visibility",
       evidence:
+        overviewVisibilityNote(overview) ??
         "Some session state and timing are hidden for other roles; workload indicators may be partial or unknown.",
       openSessions: true,
     });
@@ -123,6 +183,28 @@ export function buildAttentionItems(
     });
   }
 
+  const longest = overview.longestXactAgeSeconds;
+  const idleOldest = overview.idleInTransactionOldestXactAgeSeconds;
+  // Skip when the longest transaction is the idle one already listed above.
+  const explainedByIdle =
+    idleInXact != null &&
+    idleInXact > 0 &&
+    idleOldest != null &&
+    longest != null
+      ? idleOldest >= longest
+      : false;
+  if (isLongTransaction(longest) && !explainedByIdle) {
+    items.push({
+      kind: "long_transaction",
+      tone: "actionable",
+      title: `Transaction open for ${formatAgeSeconds(longest)}`,
+      evidence:
+        "Longest open transaction in this database (excluding this Inspector connection). " +
+        "Long transactions hold back VACUUM and may keep locks.",
+      openSessions: true,
+    });
+  }
+
   const deadlocks = overview.deadlocks;
   if (deadlocks != null && deadlocks > 0) {
     const since = overview.statsReset
@@ -138,7 +220,8 @@ export function buildAttentionItems(
     });
   }
 
-  // No "healthy" / "no issues" banner when empty — silence means nothing actionable.
+  // Empty means nothing actionable in this snapshot; restricted visibility is
+  // always an item, so an empty list is never shown over incomplete data.
   return items;
 }
 
@@ -151,11 +234,23 @@ export const DEAD_ROW_CAVEAT =
 export const PARTITION_SIZE_NOTE =
   "Partition parents and leaves are listed separately; each row shows only its own relation size (no parent+child double-counting).";
 
+export const SIZE_RANKING_NOTE =
+  "Many relations: sizes are measured for the largest by catalog estimate (refreshed by VACUUM/ANALYZE), so a recently grown one may be missing.";
+
 export const TEMP_FILES_CAVEAT =
   "Temporary files and bytes are cumulative since the last statistics reset — not current disk occupancy or spill rate.";
 
 export const DEADLOCKS_CAVEAT =
   "Deadlocks are cumulative historical events since the last statistics reset — not ongoing blocking.";
+
+export const SESSIONS_SCOPE_NOTE =
+  "All backends connected to this database. Active and idle counts exclude this Inspector connection.";
+
+export const LONGEST_TRANSACTION_NOTE =
+  "Age of the oldest open transaction, excluding this Inspector connection.";
+
+export const STATS_RESET_NOTE =
+  "Cumulative counters (temp files, deadlocks, scans) count from the last statistics reset. Refresh does not reset statistics.";
 
 export const BLOCKING_LIMITATION_NOTE =
   "Blocker PIDs outside this database or hidden by privileges remain unresolved; prepared-transaction blockers appear as PID 0. Exact lock-wait duration is unavailable.";

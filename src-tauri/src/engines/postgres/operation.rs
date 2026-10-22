@@ -22,6 +22,20 @@ fn is_cancelled(err: &tokio_postgres::Error) -> bool {
     err.to_string().to_lowercase().contains("cancel")
 }
 
+/// A cancel ends the operation quietly (`op:done`) only when this app asked
+/// for it. SQLSTATE 57014 also covers `statement_timeout` and cancels sent by
+/// other sessions; those must surface as errors, never as a complete result.
+fn ends_as_user_cancel(query_cancelled: bool, cancel_requested: bool) -> bool {
+    query_cancelled && cancel_requested
+}
+
+fn cancelled_by_user(ctx: &OperationCtx, err: &tokio_postgres::Error) -> bool {
+    ends_as_user_cancel(
+        is_cancelled(err),
+        ctx.cancel_requested.contains_key(&ctx.op_id),
+    )
+}
+
 fn is_explainable(sql: &str) -> bool {
     // Best-effort heuristic: EXPLAIN supports SELECT and most DML in Postgres.
     // DDL not reliably explainable.
@@ -104,8 +118,10 @@ pub async fn run_pg_sql_query(
     // Ensure running_ops cleaned once token exists
     let _running_guard = RunningGuard::new(op_id, Arc::clone(&ctx.running_ops));
 
-    // If user requested cancel before token existed, cancel immediately (non-blocking)
-    if ctx.cancel_requested.remove(&op_id).is_some() {
+    // If user requested cancel before token existed, cancel immediately (non-blocking).
+    // The request stays recorded (ActiveGuard clears it) so the resulting
+    // 57014 is reported as a user cancel.
+    if ctx.cancel_requested.contains_key(&op_id) {
         CancelHandle::Postgres {
             token: cancel_token.clone(),
             backend_pid,
@@ -117,7 +133,7 @@ pub async fn run_pg_sql_query(
     // Run them on the raw client path and finish without row streaming.
     if is_non_transactional_database_ddl(&sql_input.sql) {
         if let Err(e) = client.batch_execute(&sql_input.sql).await {
-            if is_cancelled(&e) {
+            if cancelled_by_user(&ctx, &e) {
                 emit_done(
                     &ctx.app,
                     op_id,
@@ -163,12 +179,10 @@ pub async fn run_pg_sql_query(
         }
     };
 
-    // Optional read-only (best-effort)
+    // Optional read-only: applies to this transaction (must run before any
+    // query in it). `default_transaction_read_only` would only affect later ones.
     if sql_input.read_only.unwrap_or(false) {
-        if let Err(e) = tx
-            .batch_execute("SET LOCAL default_transaction_read_only = on")
-            .await
-        {
+        if let Err(e) = tx.batch_execute("SET TRANSACTION READ ONLY").await {
             emit_error(
                 &ctx.app,
                 op_id,
@@ -201,6 +215,23 @@ pub async fn run_pg_sql_query(
         return;
     }
 
+    // Optional scoped lock_timeout (diagnostics must not queue behind DDL)
+    if let Some(lock_timeout_ms) = sql_input.lock_timeout_ms {
+        let lock_timeout_ms = lock_timeout_ms.clamp(10, 60_000);
+        if let Err(e) = tx
+            .batch_execute(&format!("SET LOCAL lock_timeout = {}", lock_timeout_ms))
+            .await
+        {
+            emit_error(
+                &ctx.app,
+                op_id,
+                format_pg_error(&e, &sql_input.sql),
+                started_at.elapsed().as_millis(),
+            );
+            return;
+        }
+    }
+
     // PREPARE catches syntax errors early
     let stmt = match tx.prepare(&sql_input.sql).await {
         Ok(s) => s,
@@ -227,7 +258,7 @@ pub async fn run_pg_sql_query(
             let explain_sql = format!("EXPLAIN {}", sql_input.sql);
 
             if let Err(e) = tx.batch_execute(&explain_sql).await {
-                if is_cancelled(&e) {
+                if cancelled_by_user(&ctx, &e) {
                     emit_done(
                         &ctx.app,
                         op_id,
@@ -309,7 +340,7 @@ pub async fn run_pg_sql_query(
     let stream = match tx.query_raw(&stmt, std::iter::empty::<&str>()).await {
         Ok(s) => s,
         Err(e) => {
-            if is_cancelled(&e) {
+            if cancelled_by_user(&ctx, &e) {
                 emit_done(
                     &ctx.app,
                     op_id,
@@ -343,7 +374,7 @@ pub async fn run_pg_sql_query(
         let row = match row_result {
             Ok(r) => r,
             Err(e) => {
-                if is_cancelled(&e) {
+                if cancelled_by_user(&ctx, &e) {
                     emit_done(
                         &ctx.app,
                         op_id,
@@ -521,7 +552,16 @@ fn annotate_sql_error_position(core: &str, sql: &str, pos_u32: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::annotate_sql_error_position;
+    use super::{annotate_sql_error_position, ends_as_user_cancel};
+
+    #[test]
+    fn only_app_requested_cancels_end_quietly() {
+        assert!(ends_as_user_cancel(true, true));
+        // statement_timeout / another session's pg_cancel_backend
+        assert!(!ends_as_user_cancel(true, false));
+        assert!(!ends_as_user_cancel(false, true));
+        assert!(!ends_as_user_cancel(false, false));
+    }
 
     #[test]
     fn annotate_sql_error_position_points_at_offset() {

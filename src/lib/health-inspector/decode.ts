@@ -383,9 +383,17 @@ export function decodeStatementsInfo(
   };
 }
 
+/** Total relations in the database, repeated on every sized row. */
+function decodeRelationCount(result: QueryResult): number | null {
+  const first = result.rows[0];
+  if (!first) return null;
+  return decodeUnknownNumber(cellAt(first, result.columns, "relation_count"));
+}
+
 export function decodeTables(result: QueryResult): {
   rows: HealthTableRow[];
   truncated: boolean;
+  relationCount: number | null;
 } {
   const mapped = result.rows.map((row) => {
     const cols = result.columns;
@@ -411,12 +419,16 @@ export function decodeTables(result: QueryResult): {
       ),
     } satisfies HealthTableRow;
   });
-  return applyListCap(mapped);
+  return {
+    ...applyListCap(mapped),
+    relationCount: decodeRelationCount(result),
+  };
 }
 
 export function decodeIndexes(result: QueryResult): {
   rows: HealthIndexRow[];
   truncated: boolean;
+  relationCount: number | null;
 } {
   const mapped = result.rows.map((row) => {
     const cols = result.columns;
@@ -430,7 +442,10 @@ export function decodeIndexes(result: QueryResult): {
       indexBytes: decodeUnknownNumber(cellAt(row, cols, "index_bytes")),
     } satisfies HealthIndexRow;
   });
-  return applyListCap(mapped);
+  return {
+    ...applyListCap(mapped),
+    relationCount: decodeRelationCount(result),
+  };
 }
 
 /** Sanitize errors for UI — never echo SQL or long raw driver payloads. */
