@@ -344,6 +344,14 @@ export function decodeServerMetrics(result: QueryResult): HealthServerMetrics {
   };
 }
 
+const BACKEND_TOKEN_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
+/** Only the server's exact token shape; anything else means "not actionable". */
+export function decodeBackendToken(value: unknown): string | null {
+  const text = decodeUnknownString(value);
+  return text != null && BACKEND_TOKEN_SHAPE.test(text) ? text : null;
+}
+
 export function decodeSessions(result: QueryResult): {
   rows: HealthSessionRow[];
   truncated: boolean;
@@ -361,6 +369,7 @@ export function decodeSessions(result: QueryResult): {
       waitEventType: decodeUnknownString(cellAt(row, cols, "wait_event_type")),
       waitEvent: decodeUnknownString(cellAt(row, cols, "wait_event")),
       backendType: decodeUnknownString(cellAt(row, cols, "backend_type")),
+      backendToken: decodeBackendToken(cellAt(row, cols, "backend_token")),
       xactAgeSeconds: decodeUnknownNumber(
         cellAt(row, cols, "xact_age_seconds")
       ),

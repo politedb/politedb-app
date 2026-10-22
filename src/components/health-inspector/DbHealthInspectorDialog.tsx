@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -56,6 +56,21 @@ import type {
   HealthTableRow,
 } from "src/lib/health-inspector/types";
 import { DbHealthInspectorOverview } from "./DbHealthInspectorOverview";
+import { SessionActions } from "./SessionActions";
+import {
+  sessionActionConfirmation,
+  sessionActionEligibility,
+  sessionActionOutcomeMessage,
+} from "src/lib/health-inspector/sessionActions";
+import {
+  getPostgresInstanceAppName,
+  type SessionActionKind,
+} from "src/lib/tauri/health-inspector-actions";
+import { confirmDialog } from "src/lib/system-dialog";
+import type {
+  SessionActionResult,
+  SessionActionState,
+} from "@root/src/hooks/useDbHealthInspector";
 import {
   CopySqlButton,
   EMPTY_SECTION_FILTER,
@@ -398,6 +413,8 @@ function ListSection<T>(props: {
   keyExtractor: (row: T, index: number) => string | number;
   emptyMessage: string;
   rowClassName?: (row: T) => string;
+  /** Focus fallback when a focused row disappears. */
+  tableContainerRef?: { current: HTMLDivElement | null };
 }) {
   const { section, filter, flag, searchFields } = props;
   const rows = section?.data ?? EMPTY_ROWS;
@@ -443,7 +460,11 @@ function ListSection<T>(props: {
         />
       ) : null}
       {hasRows ? (
-        <div class="min-h-0 overflow-hidden rounded-lg border border-neutral-200">
+        <div
+          ref={props.tableContainerRef}
+          tabIndex={-1}
+          class="min-h-0 overflow-hidden rounded-lg border border-neutral-200 outline-none"
+        >
           <Table
             columns={props.columns}
             data={visible}
@@ -481,7 +502,20 @@ const sessionSearchFields = (row: HealthSessionRow) => [
   row.queryHidden ? null : row.queryText,
 ];
 
-function SessionsTable(props: SectionTableProps) {
+type SessionsActionProps = {
+  /** This app's PostgreSQL application_name; null hides every action. */
+  instanceAppName: string | null;
+  pending: SessionActionState | null;
+  result: SessionActionResult | null;
+  isBlocked: (pid: number, backendToken: string) => boolean;
+  onAction: (row: HealthSessionRow, kind: SessionActionKind) => void;
+};
+
+function SessionsTable(
+  props: SectionTableProps & { actions: SessionsActionProps }
+) {
+  const { actions } = props;
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const columns = useMemo<TableColumn<HealthSessionRow>[]>(
     () => [
       {
@@ -553,14 +587,68 @@ function SessionsTable(props: SectionTableProps) {
           <QueryCell queryText={row.queryText} queryHidden={row.queryHidden} />
         ),
       },
+      {
+        key: "actions",
+        label: "",
+        className: "text-sm p-1 text-right",
+        render: (_v, row) => {
+          const eligibility = sessionActionEligibility(
+            row,
+            actions.instanceAppName
+          );
+          const blocked =
+            row.pid != null &&
+            row.backendToken != null &&
+            actions.isBlocked(row.pid, row.backendToken);
+          return (
+            <SessionActions
+              pid={row.pid ?? 0}
+              eligibility={eligibility}
+              disabled={actions.pending !== null || blocked}
+              disabledReason={
+                blocked
+                  ? "Waiting for a fresh snapshot after an unknown outcome"
+                  : "Waiting for the session action"
+              }
+              onAction={(kind) => actions.onAction(row, kind)}
+              onFocusLost={() => tableContainerRef.current?.focus()}
+            />
+          );
+        },
+      },
     ],
-    []
+    [actions]
   );
+  // While sending, show progress; once an outcome exists (also during the
+  // reconciliation refresh), keep showing it.
+  const status =
+    actions.pending?.phase === "sending"
+      ? `${actions.pending.kind === "cancel" ? "Cancelling the query in" : "Terminating"} session ${actions.pending.pid}…`
+      : actions.result
+        ? sessionActionOutcomeMessage(
+            actions.result.kind,
+            actions.result.pid,
+            actions.result.outcome
+          )
+        : null;
   return (
     <ListSection
+      tableContainerRef={tableContainerRef}
+      extra={
+        <div
+          role="status"
+          aria-live="polite"
+          class={cn(
+            "text-sm",
+            status ? "text-neutral-700 dark:text-neutral-200" : "sr-only"
+          )}
+        >
+          {status}
+        </div>
+      }
       section={props.snap?.sessions}
       loading={props.loading}
-      skeletonColumns={8}
+      skeletonColumns={9}
       filter={props.filter}
       onFilterChange={props.onFilterChange}
       placeholder="Search PID, user, app, query"
@@ -962,14 +1050,25 @@ export function DbHealthInspectorDialog(props: Props) {
   const [autoRefreshMs, setAutoRefreshMs] = useState<number | null>(null);
   const { hasPro, requirePro } = useProGate();
   // The hook re-checks Pro access itself, so collection never starts while locked.
-  const { snapshot, loading, refreshing, error, refresh, cancel, supported } =
-    useDbHealthInspector({
-      open,
-      runtimeConnectionId,
-      profileId,
-      engine,
-      autoRefreshMs,
-    });
+  const {
+    snapshot,
+    loading,
+    refreshing,
+    error,
+    refresh,
+    cancel,
+    supported,
+    sessionAction,
+    sessionActionResult,
+    runSessionAction,
+    isSessionActionBlocked,
+  } = useDbHealthInspector({
+    open,
+    runtimeConnectionId,
+    profileId,
+    engine,
+    autoRefreshMs,
+  });
 
   // Filters and auto-refresh belong to one database: reset on context change.
   useEffect(() => {
@@ -979,6 +1078,56 @@ export function DbHealthInspectorDialog(props: Props) {
 
   const now = useNow(open && Boolean(snapshot?.finishedAt));
   const snapshotStatus = describeSnapshot(snapshot, loading, now, refreshing);
+  // This app's PostgreSQL application_name, to recognise its own sessions.
+  const [instanceAppName, setInstanceAppName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !supported) return;
+    let active = true;
+    void getPostgresInstanceAppName().then((name) => {
+      if (active) setInstanceAppName(name);
+    });
+    return () => {
+      active = false;
+    };
+  }, [open, supported]);
+
+  const sessionActions = useMemo<SessionsActionProps>(
+    () => ({
+      instanceAppName,
+      pending: sessionAction,
+      result: sessionActionResult,
+      isBlocked: isSessionActionBlocked,
+      onAction: (row, kind) => {
+        if (row.pid == null || !row.backendToken) return;
+        const confirmation = sessionActionConfirmation(
+          kind,
+          row,
+          databaseLabel
+        );
+        void runSessionAction(
+          { pid: row.pid, backendToken: row.backendToken, kind },
+          () =>
+            confirmDialog(confirmation.body, {
+              title: confirmation.title,
+              kind: "warning",
+              okLabel: confirmation.okLabel,
+              cancelLabel: confirmation.cancelLabel,
+            })
+        );
+      },
+    }),
+    [
+      instanceAppName,
+      sessionAction,
+      sessionActionResult,
+      isSessionActionBlocked,
+      runSessionAction,
+      databaseLabel,
+    ]
+  );
+  const actionBusy =
+    sessionAction !== null && sessionAction.phase !== "refreshing";
+
   const listProps = (key: ListKey) => ({
     snap: snapshot,
     loading,
@@ -1026,7 +1175,9 @@ export function DbHealthInspectorDialog(props: Props) {
           }}
         />
       ),
-      children: <SessionsTable {...listProps("sessions")} />,
+      children: (
+        <SessionsTable {...listProps("sessions")} actions={sessionActions} />
+      ),
     },
     {
       value: "statements" as const,
@@ -1167,6 +1318,7 @@ export function DbHealthInspectorDialog(props: Props) {
                 type="button"
                 variant="outline"
                 onClick={() => cancel()}
+                disabled={actionBusy}
                 title="Cancel in-flight inspector queries"
               >
                 <span class="inline-flex items-center gap-1.5">
@@ -1179,8 +1331,12 @@ export function DbHealthInspectorDialog(props: Props) {
                 type="button"
                 variant="default"
                 onClick={() => void refresh()}
-                disabled={!supported || !runtimeConnectionId}
-                title="Refresh snapshot"
+                disabled={!supported || !runtimeConnectionId || actionBusy}
+                title={
+                  actionBusy
+                    ? "Waiting for the session action"
+                    : "Refresh snapshot"
+                }
               >
                 <span class="inline-flex items-center gap-1.5">
                   <RefreshCwIcon

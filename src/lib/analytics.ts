@@ -550,3 +550,44 @@ export function detectSqlKind(sql: string) {
   if (!token) return "UNKNOWN";
   return SQL_KINDS.has(token) ? token : "OTHER";
 }
+
+const SESSION_ACTION_EVENT_KINDS = ["cancel", "terminate"] as const;
+const SESSION_ACTION_EVENT_OUTCOMES = [
+  "invalid",
+  "unavailable",
+  "busy",
+  "setup_failed",
+  "signalled",
+  "failed",
+  "not_matched",
+  "denied",
+  "unknown",
+] as const;
+
+/**
+ * Exactly `{ kind, outcome }` for a Health Inspector session action, or null
+ * when either value is outside its closed set. Never spreads caller objects.
+ */
+export function sessionActionEventProps(
+  kind: unknown,
+  outcome: unknown
+): { kind: string; outcome: string } | null {
+  if (
+    typeof kind !== "string" ||
+    typeof outcome !== "string" ||
+    !(SESSION_ACTION_EVENT_KINDS as readonly string[]).includes(kind) ||
+    !(SESSION_ACTION_EVENT_OUTCOMES as readonly string[]).includes(outcome)
+  ) {
+    return null;
+  }
+  return { kind, outcome };
+}
+
+/** Opt-in only (trackEvent); one call per confirmed attempt. */
+export function trackHealthInspectorSessionAction(
+  kind: unknown,
+  outcome: unknown
+) {
+  const props = sessionActionEventProps(kind, outcome);
+  if (props) trackEvent("health_inspector_session_action", props);
+}

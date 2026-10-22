@@ -80,6 +80,11 @@ export type HealthSessionRow = {
   waitEventType: string | null;
   waitEvent: string | null;
   backendType: string | null;
+  /**
+   * Server-formatted backend start (UTC, microseconds) identifying this exact
+   * session for Cancel/Terminate. Opaque; null when not visible.
+   */
+  backendToken: string | null;
   xactAgeSeconds: number | null;
   queryAgeSeconds: number | null;
   stateAgeSeconds: number | null;

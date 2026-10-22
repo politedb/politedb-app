@@ -10,12 +10,29 @@ const hookState = {
   loading: false,
   refreshing: false,
   lastArgs: null as any,
+  sessionAction: null as any,
+  sessionActionResult: null as any,
+  runSessionAction: vi.fn(),
+  isSessionActionBlocked: vi.fn(() => false),
   error: null as string | null,
   refresh: vi.fn(),
   cancel: vi.fn(),
   clear: vi.fn(),
   supported: true,
 };
+
+const INSTANCE_APP_NAME = "PoliteDB/abcd1234";
+
+vi.mock("src/lib/tauri/health-inspector-actions", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getPostgresInstanceAppName: () => Promise.resolve(INSTANCE_APP_NAME),
+}));
+
+const confirmMock = vi.fn(async () => true);
+vi.mock("src/lib/system-dialog", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  confirmDialog: (...args: unknown[]) => confirmMock(...(args as [])),
+}));
 
 vi.mock("@root/src/hooks/useDbHealthInspector", () => ({
   useDbHealthInspector: (args: any) => {
@@ -144,6 +161,11 @@ beforeEach(() => {
   };
   hookState.loading = false;
   hookState.refreshing = false;
+  hookState.sessionAction = null;
+  hookState.sessionActionResult = null;
+  hookState.runSessionAction = vi.fn();
+  hookState.isSessionActionBlocked = vi.fn(() => false);
+  confirmMock.mockClear();
   hookState.error = null;
   hookState.supported = true;
   hookState.refresh.mockReset();
@@ -984,5 +1006,120 @@ describe("DbHealthInspectorDialog", () => {
     expect(
       screen.getByText("No issues found, but server checks are incomplete")
     ).toBeTruthy();
+  });
+
+  describe("session actions", () => {
+    function withSessions(rows: any[]) {
+      hookState.snapshot.sessions = {
+        ...hookState.snapshot.sessions,
+        status: "ready",
+        data: rows,
+      };
+    }
+    const session = (overrides: any = {}) => ({
+      pid: 4242,
+      usename: "app_user",
+      applicationName: "orders-api",
+      clientAddr: null,
+      state: "active",
+      waitEventType: null,
+      waitEvent: null,
+      backendType: "client backend",
+      backendToken: "2026-10-22T03:04:05.123456Z",
+      xactAgeSeconds: 5,
+      queryAgeSeconds: 5,
+      stateAgeSeconds: 5,
+      isExecuting: true,
+      queryText: "SELECT pg_sleep(30)",
+      queryHidden: false,
+      isBlocked: false,
+      blockerPids: [],
+      ...overrides,
+    });
+
+    async function openSessions() {
+      renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+      // Instance name resolves asynchronously.
+      await screen.findByText("This app");
+    }
+
+    it("labels this app's own sessions and confirms before acting", async () => {
+      withSessions([
+        session(),
+        session({ pid: 7, applicationName: INSTANCE_APP_NAME }),
+      ]);
+      await openSessions();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Actions for PID 4242" })
+      );
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Terminate session" })
+      );
+      expect(hookState.runSessionAction).toHaveBeenCalledTimes(1);
+      const [request, confirm] = hookState.runSessionAction.mock.calls[0]!;
+      expect(request).toEqual({
+        pid: 4242,
+        backendToken: "2026-10-22T03:04:05.123456Z",
+        kind: "terminate",
+      });
+      await confirm();
+      const [body, options] = confirmMock.mock.calls[0] as any;
+      expect(body).toContain("Terminate session 4242?");
+      expect(body).toContain("Query: SELECT pg_sleep(30)");
+      expect(options).toMatchObject({
+        kind: "warning",
+        okLabel: "Terminate session",
+        cancelLabel: "Keep session",
+      });
+      expect(
+        screen.queryByRole("button", { name: "Actions for PID 7" })
+      ).toBeNull();
+    });
+
+    it("announces the outcome and blocks refresh while sending", async () => {
+      withSessions([
+        session(),
+        session({ pid: 9, applicationName: INSTANCE_APP_NAME }),
+      ]);
+      hookState.sessionAction = {
+        ...session(),
+        kind: "cancel",
+        phase: "sending",
+      };
+      const { rerender } = renderDialog();
+      fireEvent.click(screen.getByRole("button", { name: /^Sessions/ }));
+      await screen.findByText("This app");
+      expect(screen.getByRole("status", { name: "" }).textContent).toContain(
+        "Cancelling the query in session 4242"
+      );
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+      expect(
+        screen
+          .getByRole("button", { name: "Actions for PID 4242" })
+          .getAttribute("aria-disabled")
+      ).toBe("true");
+
+      hookState.sessionAction = null;
+      hookState.sessionActionResult = {
+        pid: 4242,
+        backendToken: "x",
+        kind: "cancel",
+        outcome: "denied",
+      };
+      rerender(
+        <DbHealthInspectorDialog
+          open
+          onClose={() => {}}
+          engine="postgres"
+          runtimeConnectionId="c1"
+          profileId="p1"
+        />
+      );
+      expect(
+        screen.getByText(/Not permitted to signal session 4242/)
+      ).toBeTruthy();
+      expect(screen.getByTitle("Refresh snapshot")).not.toBeDisabled();
+    });
   });
 });

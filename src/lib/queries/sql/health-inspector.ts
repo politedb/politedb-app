@@ -273,6 +273,14 @@ export function healthInspectorServerSql(): string {
 }
 
 /**
+ * Session identity token: backend start in UTC with microseconds, formatted by
+ * the server so it never goes through a JS Date. Must match the expression in
+ * src-tauri/src/engines/postgres/session_signal.rs. Null when the role cannot
+ * see the session's start time.
+ */
+export const HEALTH_INSPECTOR_BACKEND_TOKEN_SQL = `pg_catalog.to_char(a.backend_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/**
  * Sessions in the current database (stable: active first, then query age).
  * Query text is capped; blocker PIDs via pg_blocking_pids.
  */
@@ -289,6 +297,7 @@ export function healthInspectorSessionsSql(): string {
       a.wait_event_type,
       a.wait_event,
       a.backend_type,
+      ${HEALTH_INSPECTOR_BACKEND_TOKEN_SQL} AS backend_token,
       EXTRACT(EPOCH FROM (now() - a.xact_start))::float8 AS xact_age_seconds,
       EXTRACT(EPOCH FROM (now() - a.query_start))::float8 AS query_age_seconds,
       EXTRACT(EPOCH FROM (now() - a.state_change))::float8 AS state_age_seconds,

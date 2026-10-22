@@ -4,6 +4,12 @@ import type { HealthInspectorSnapshot } from "src/lib/health-inspector/types";
 import type { DatabaseEngine } from "src/types";
 import { hasProAccess } from "src/lib/license/proAccess";
 import { hasProAccessNow, useLicenseStore } from "src/stores/license";
+import {
+  signalHealthInspectorBackend,
+  type SessionActionKind,
+  type SessionActionOutcome,
+} from "src/lib/tauri/health-inspector-actions";
+import { trackHealthInspectorSessionAction } from "src/lib/analytics";
 
 export type HealthInspectorContext = {
   open: boolean;
@@ -19,7 +25,27 @@ export type HealthInspectorContext = {
   autoRefreshMs?: number | null;
 };
 
-type RefreshOptions = { background?: boolean };
+type RefreshOptions = {
+  background?: boolean;
+  /** The reconciliation refresh owned by a session action. */
+  fromAction?: boolean;
+};
+
+export type SessionActionRequest = {
+  pid: number;
+  backendToken: string;
+  kind: SessionActionKind;
+};
+
+export type SessionActionState = SessionActionRequest & {
+  phase: "confirming" | "sending" | "refreshing";
+};
+
+export type SessionActionResult = SessionActionRequest & {
+  outcome: SessionActionOutcome;
+};
+
+const sessionKey = (pid: number, token: string) => `${pid}:${token}`;
 
 /**
  * Owns one authoritative in-memory snapshot per runtime context.
@@ -44,6 +70,23 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
 
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
+
+  // Session actions (plan .agent/plans/health-inspector-session-actions.md).
+  // The epoch changes on clear (close, context change, Pro lost); attempts and
+  // the lock are separate from collection generations.
+  const [sessionAction, setSessionAction] = useState<SessionActionState | null>(
+    null
+  );
+  const [sessionActionResult, setSessionActionResult] =
+    useState<SessionActionResult | null>(null);
+  const epochRef = useRef(0);
+  const attemptRef = useRef(0);
+  const actionLockRef = useRef<number | null>(null);
+  /** Rows whose last outcome was unknown -> generation when blocked. */
+  const blockedRef = useRef(new Map<string, number>());
+  const [, setBlockedVersion] = useState(0);
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
   const contextKey = `${ctx.profileId ?? ""}::${ctx.runtimeConnectionId ?? ""}::${ctx.engine ?? ""}`;
 
   const cancel = useCallback(() => {
@@ -54,16 +97,23 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
   const clear = useCallback(() => {
     cancel();
     generationRef.current += 1;
+    epochRef.current += 1;
+    actionLockRef.current = null;
+    blockedRef.current = new Map();
     setSnapshot(null);
     setLoading(false);
     setRefreshing(false);
     setError(null);
+    setSessionAction(null);
+    setSessionActionResult(null);
   }, [cancel]);
 
   const refresh = useCallback(
     async (options?: RefreshOptions) => {
       const background = options?.background === true;
       if (!ctx.open) return;
+      // A session action owns collection until its own reconciliation ends.
+      if (actionLockRef.current !== null && !options?.fromAction) return;
       if (!hasProAccessNow()) {
         clear();
         return;
@@ -97,19 +147,31 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
         setError(null);
       }
 
-      const result = await collectHealthInspectorSnapshot({
-        runtimeConnectionId: ctx.runtimeConnectionId,
-        profileId: ctx.profileId,
-        engine: ctx.engine,
-        signal: ac.signal,
-        // Manual refresh shows each section as soon as it is in; a background
-        // refresh keeps the current snapshot until the new one is complete.
-        onProgress: background
-          ? undefined
-          : (partial) => {
-              if (generation === generationRef.current) setSnapshot(partial);
-            },
-      });
+      let result: HealthInspectorSnapshot;
+      try {
+        result = await collectHealthInspectorSnapshot({
+          runtimeConnectionId: ctx.runtimeConnectionId,
+          profileId: ctx.profileId,
+          engine: ctx.engine,
+          signal: ac.signal,
+          // Manual refresh shows each section as soon as it is in; a background
+          // refresh keeps the current snapshot until the new one is complete.
+          onProgress: background
+            ? undefined
+            : (partial) => {
+                if (generation === generationRef.current) setSnapshot(partial);
+              },
+        });
+      } catch (err) {
+        // The collector reports failures in the snapshot; a rejection is
+        // unexpected. Leave a usable state (manual Refresh) for this generation.
+        if (generation === generationRef.current) {
+          if (abortRef.current === ac) abortRef.current = null;
+          setLoading(false);
+          setRefreshing(false);
+        }
+        throw err;
+      }
 
       if (generation !== generationRef.current) {
         return;
@@ -127,6 +189,17 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
       }
       setSnapshot(result);
       setLoading(false);
+      // A ready Sessions section newer than an unknown outcome unblocks its row.
+      if (result.sessions.status === "ready" && blockedRef.current.size > 0) {
+        let changed = false;
+        for (const [key, blockedAt] of blockedRef.current) {
+          if (blockedAt < generation) {
+            blockedRef.current.delete(key);
+            changed = true;
+          }
+        }
+        if (changed) setBlockedVersion((n) => n + 1);
+      }
       // Every accepted result sets the error, so a later success clears it.
       setError(
         !result.cancelled && result.overallError && !hasAnySectionData(result)
@@ -142,6 +215,111 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
       ctx.profileId,
       ctx.runtimeConnectionId,
     ]
+  );
+
+  /**
+   * Cancel the current query of, or terminate, one session. One attempt at a
+   * time; `confirm` shows the confirmation. Re-checks everything after it,
+   * invalidates collection before sending, reports the outcome once, then
+   * refreshes. Never retries.
+   */
+  const runSessionAction = useCallback(
+    async (request: SessionActionRequest, confirm: () => Promise<boolean>) => {
+      const start = ctxRef.current;
+      if (
+        actionLockRef.current !== null ||
+        !start.open ||
+        start.engine !== "postgres" ||
+        !start.runtimeConnectionId ||
+        blockedRef.current.has(sessionKey(request.pid, request.backendToken))
+      ) {
+        return;
+      }
+      const runtimeConnectionId = start.runtimeConnectionId;
+      const epoch = epochRef.current;
+      const attempt = ++attemptRef.current;
+      actionLockRef.current = attempt;
+      const current = () =>
+        epochRef.current === epoch && actionLockRef.current === attempt;
+      const release = () => {
+        if (!current()) return;
+        actionLockRef.current = null;
+        setSessionAction(null);
+      };
+
+      setSessionAction({ ...request, phase: "confirming" });
+      let confirmed = false;
+      try {
+        confirmed = await confirm();
+      } catch {
+        confirmed = false;
+      }
+      const now = ctxRef.current;
+      if (
+        !confirmed ||
+        !current() ||
+        !now.open ||
+        now.engine !== "postgres" ||
+        now.runtimeConnectionId !== runtimeConnectionId ||
+        !hasProAccessNow()
+      ) {
+        release();
+        return;
+      }
+
+      setSessionAction({ ...request, phase: "sending" });
+      // Collection started before the action must not land afterwards.
+      cancel();
+      generationRef.current += 1;
+      setLoading(false);
+      setRefreshing(false);
+
+      const outcome = await signalHealthInspectorBackend({
+        runtimeConnectionId,
+        ...request,
+      });
+      // The event belongs to the attempt, even if the dialog closed meanwhile.
+      trackHealthInspectorSessionAction(request.kind, outcome);
+      if (!current()) return;
+
+      setSessionActionResult({ ...request, outcome });
+      if (outcome === "unknown") {
+        blockedRef.current.set(
+          sessionKey(request.pid, request.backendToken),
+          generationRef.current
+        );
+        setBlockedVersion((n) => n + 1);
+      }
+      setSessionAction({ ...request, phase: "refreshing" });
+      try {
+        await refresh({ fromAction: true });
+      } catch {
+        // The outcome stays; manual Refresh remains available.
+      } finally {
+        release();
+      }
+    },
+    [cancel, refresh]
+  );
+
+  const isSessionActionBlocked = useCallback(
+    (pid: number, backendToken: string) =>
+      blockedRef.current.has(sessionKey(pid, backendToken)),
+    []
+  );
+
+  // Unmount ends the Inspector's lifetime: a confirmation resolving later must
+  // never dispatch, and a completion must not write state or reconcile. An
+  // already issued signal is not cancelled; its analytics still fires once.
+  useEffect(
+    () => () => {
+      epochRef.current += 1;
+      actionLockRef.current = null;
+      generationRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+    },
+    []
   );
 
   // Follow license changes; losing Pro access drops any pending collection.
@@ -176,6 +354,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
   useEffect(() => {
     if (
       !autoRefreshMs ||
+      sessionAction !== null ||
       !ctx.open ||
       !proAccess ||
       loading ||
@@ -202,6 +381,7 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     refreshing,
     snapshot,
     refresh,
+    sessionAction,
   ]);
 
   return {
@@ -212,6 +392,10 @@ export function useDbHealthInspector(ctx: HealthInspectorContext) {
     refresh,
     cancel,
     clear,
+    sessionAction,
+    sessionActionResult,
+    runSessionAction,
+    isSessionActionBlocked,
     supported: ctx.engine === "postgres",
     locked: !proAccess,
   };
