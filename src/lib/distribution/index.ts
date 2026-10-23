@@ -21,6 +21,11 @@ export type DistributionFeatures = {
    * may only open support URLs (`allows_external_url` in distribution.rs).
    */
   websiteLinks: boolean;
+  /**
+   * Links to AI providers' API-key pages. Same restriction: the App Store build
+   * cannot open them, so it shows a hint instead.
+   */
+  providerKeyLinks: boolean;
   /** Engines hidden from the new-connection picker in this flavor. */
   unsupportedEngines: readonly DatabaseEngine[];
 };
@@ -40,6 +45,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
       gatesProFeatures: false,
       serverTrial: false,
       websiteLinks: false,
+      providerKeyLinks: false,
       unsupportedEngines: ["oracle"],
     };
   }
@@ -49,6 +55,7 @@ export function featuresFor(distribution: Distribution): DistributionFeatures {
     gatesProFeatures: true,
     serverTrial: true,
     websiteLinks: true,
+    providerKeyLinks: true,
     unsupportedEngines: [],
   };
 }

@@ -145,7 +145,10 @@ export function AiModelCombobox(props: {
         placeholder="Search or type a model ID"
         value={query}
         disabled={props.disabled}
-        class="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        class={cn(
+          "h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none",
+          "focus:border-blue-400 focus:ring-1 focus:ring-blue-100 dark:focus:ring-blue-400"
+        )}
         onInput={(event) => {
           setQuery(event.currentTarget.value);
           setOpen(true);
@@ -163,7 +166,7 @@ export function AiModelCombobox(props: {
               // Portaled outside the assistant: mark it so the floating assistant's
               // outside-click handler treats clicks here as inside (it would close).
               data-ai-assistant-popover="true"
-              class="fixed z-[1100] overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
+              class="fixed z-1100 overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
               style={{
                 left: position.left,
                 width: position.width,

@@ -102,6 +102,26 @@ export function describeProviderError(
   if (raw.startsWith("AI_CHAT_REFUSED")) {
     return fail("The model declined the test request. Try another model.");
   }
+  if (raw.startsWith("AI_PROVIDER_API_KEY_REQUIRED")) {
+    return {
+      tone: "error",
+      message:
+        "This provider needs an API key. Enter one to save it, or delete the provider to remove its key.",
+    };
+  }
+  if (raw.startsWith("AI_PROVIDER_API_KEY_MISSING")) {
+    return { tone: "error", message: "Enter an API key first." };
+  }
+  if (raw.startsWith("AI_PROVIDER_KEYCHAIN_FAILED")) {
+    return fail(
+      "Could not read the saved key from the OS keychain. Allow access, or enter the key again."
+    );
+  }
+  if (raw.startsWith("AI_PROVIDER_MODELS_INVALID")) {
+    return fail(
+      "The provider's model list was not in the expected format. Type a model ID instead."
+    );
+  }
   if (raw.startsWith("AI_PROVIDER_MODEL_REQUIRED")) {
     return { tone: "error", message: "Choose a model first." };
   }

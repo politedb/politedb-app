@@ -3,20 +3,25 @@ import { Button } from "src/components/common/Button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
 import { Input } from "src/components/common/Input";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
+  ChevronRightIcon,
   RefreshCwIcon,
   SparklesIcon,
-  UnlockIcon,
-  VaultIcon,
   XIcon,
 } from "src/components/icons";
+import { openExternalUrl } from "src/lib/tauri/license";
+import { DISTRIBUTION_FEATURES } from "src/lib/distribution";
 import {
   AI_PROVIDER_LABELS,
+  AI_PROVIDER_KEY_PAGES,
+  DEFAULT_HOSTS,
+  DEFAULT_SUB_PATHS,
   SUGGESTED_MODELS,
   aiProviderDelete,
   aiProviderKeyCapability,
@@ -106,6 +111,11 @@ export function AiAssistantSettingsDialog(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState(() => makeDefaultAiProvider("openai"));
   const [apiKey, setApiKey] = useState("");
+  /** Typing a new key over a saved one. */
+  const [replacingKey, setReplacingKey] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  /** Host and sub path shown (always for local servers). */
+  const [showAdvanced, setShowAdvanced] = useState(false);
   // Ids the server reported on the last discovery, offered again as suggestions.
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [status, setStatusLine] = useState<StatusLine | null>(null);
@@ -188,8 +198,11 @@ export function AiAssistantSettingsDialog(props: Props) {
     if (discardResolveRef.current) answerDiscard(false);
   };
 
-  /** The open "discard changes?" question: the provider name, and how to answer it. */
-  const [discardPrompt, setDiscardPrompt] = useState<string | null>(null);
+  /** The open question in the dialog (discard edits, delete), and how to answer it. */
+  const [discardPrompt, setDiscardPrompt] = useState<{
+    message: string;
+    confirmLabel: string;
+  } | null>(null);
   const discardResolveRef = useRef<((discard: boolean) => void) | null>(null);
   /** Where focus was when the question opened; Keep editing returns there. */
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -259,6 +272,8 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const clearSecrets = () => {
     setApiKey("");
+    setReplacingKey(false);
+    setShowKey(false);
   };
 
   const chooseProvider = (
@@ -275,6 +290,11 @@ export function AiAssistantSettingsDialog(props: Props) {
     setSelectedId(provider?.id ?? null);
     setDraft(next);
     setSavedSnapshot(editableSnapshot(next, kind));
+    // Open Advanced when the address differs from the provider's default.
+    setShowAdvanced(
+      (next.host ?? "") !== DEFAULT_HOSTS[kind] ||
+        (next.subPath ?? "") !== DEFAULT_SUB_PATHS[kind]
+    );
     setContextInput(next.contextSize ? String(next.contextSize) : "");
     setContextError(null);
     clearSecrets();
@@ -344,6 +364,18 @@ export function AiAssistantSettingsDialog(props: Props) {
     });
   };
 
+  /**
+   * The key used for requests changed (cancel a replacement, remove, undo):
+   * models found or errors seen with the previous key no longer apply.
+   */
+  const changeKeyAuth = (apply: () => void) => {
+    invalidateDiscovery();
+    setDiscoveredModels([]);
+    setServerHint(null);
+    markEdited();
+    apply();
+  };
+
   /** URL or auth edits make an in-flight discovery stale. */
   const updateConnection = (patch: Partial<AiProviderConfig>) => {
     invalidateDiscovery();
@@ -410,9 +442,8 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const keyChange = (): AiProviderKeyChange => {
     if (keyCapability === "none") return { action: "keep" };
-    return apiKey.trim()
-      ? { action: "set", value: apiKey.trim() }
-      : { action: "keep" };
+    if (apiKey.trim()) return { action: "set", value: apiKey.trim() };
+    return { action: "keep" };
   };
 
   /**
@@ -569,7 +600,11 @@ export function AiAssistantSettingsDialog(props: Props) {
 
   const deleteProvider = async () => {
     if (!selectedProvider) return;
-    if (!window.confirm(`Delete ${selectedProvider.label}?`)) return;
+    const confirmed = await askInDialog(
+      `Delete ${selectedProvider.label}? Its API key is removed from the keychain too.`,
+      "Delete"
+    );
+    if (!confirmed) return;
     invalidateDiscovery();
     setBusy(true);
     try {
@@ -590,13 +625,11 @@ export function AiAssistantSettingsDialog(props: Props) {
   };
 
   const deleteLegacyModel = async () => {
-    if (
-      !window.confirm(
-        "Delete the AI model downloaded by earlier PoliteDB versions? This frees disk space and cannot be undone."
-      )
-    ) {
-      return;
-    }
+    const confirmed = await askInDialog(
+      "Delete the AI model downloaded by earlier PoliteDB versions? This frees disk space and cannot be undone.",
+      "Delete"
+    );
+    if (!confirmed) return;
     try {
       const remaining = await aiLegacyModelDelete();
       setStatusLine(
@@ -621,23 +654,31 @@ export function AiAssistantSettingsDialog(props: Props) {
     editableSnapshot(draft, selectedKind) !== savedSnapshot;
 
   /**
-   * Asks, in the dialog, before throwing away unsaved edits; resolves true when
-   * it is fine to leave. Keep editing has focus, so Return keeps the edits. One
-   * question at a time: another close or switch while it is open (Escape
-   * included) answers Keep editing.
+   * Asks a yes/no question in the dialog (no native alert: its default button
+   * would be the destructive one). The safe answer has focus, so Return and
+   * Escape keep things as they are. One question at a time: another close or
+   * switch while it is open answers no.
    */
-  const confirmDiscard = (): Promise<boolean> => {
-    if (!dirty) return Promise.resolve(true);
+  const askInDialog = (message: string, confirmLabel: string) => {
     if (discardResolveRef.current) {
       answerDiscard(false);
       return Promise.resolve(false);
     }
-    const name = draft.label.trim() || AI_PROVIDER_LABELS[selectedKind];
-    return new Promise((resolve) => {
+    return new Promise<boolean>((resolve) => {
       discardResolveRef.current = resolve;
       discardReturnFocusRef.current = document.activeElement as HTMLElement;
-      setDiscardPrompt(name);
+      setDiscardPrompt({ message, confirmLabel });
     });
+  };
+
+  /** Resolves true when it is fine to leave the current form. */
+  const confirmDiscard = (): Promise<boolean> => {
+    if (!dirty) return Promise.resolve(true);
+    const name = draft.label.trim() || AI_PROVIDER_LABELS[selectedKind];
+    return askInDialog(
+      `Your changes to ${name} are not saved. Discard them?`,
+      "Discard"
+    );
   };
 
   const switchProvider = async (
@@ -676,6 +717,46 @@ export function AiAssistantSettingsDialog(props: Props) {
   const legacyModelBytes =
     legacyModel?.files.reduce((sum, file) => sum + file.sizeBytes, 0) ?? 0;
 
+  const keyPage = DISTRIBUTION_FEATURES.providerKeyLinks
+    ? AI_PROVIDER_KEY_PAGES[selectedKind]
+    : undefined;
+  const keyInputShown = !draft.apiKeyRef || replacingKey;
+  const requestUrl = buildBaseUrl(draft.host, draft.subPath);
+
+  const hostFields = (
+    <div class="space-y-2">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <Input
+          label="Host"
+          value={draft.host ?? ""}
+          placeholder={
+            isLocal ? "http://127.0.0.1:11434" : DEFAULT_HOSTS[selectedKind]
+          }
+          onValueChange={(value) => updateConnection({ host: value })}
+          onBlur={reloadModelsAfterUrlEdit}
+          className="h-10 border border-neutral-300 px-3 text-sm"
+        />
+        <Input
+          label="Sub Path"
+          value={draft.subPath ?? ""}
+          placeholder={DEFAULT_SUB_PATHS[selectedKind] || undefined}
+          onValueChange={(value) => updateConnection({ subPath: value })}
+          onBlur={reloadModelsAfterUrlEdit}
+          className="h-10 border border-neutral-300 px-3 text-sm"
+        />
+      </div>
+      <div class="text-xs break-all text-neutral-500">
+        Requests go to {requestUrl || "—"}
+      </div>
+      {isLocal ? (
+        <div class="text-xs text-neutral-500">
+          Plain http works for localhost and LAN IP addresses (for example
+          192.168.1.20). Other hosts need https.
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <Dialog
       open={props.open}
@@ -688,6 +769,10 @@ export function AiAssistantSettingsDialog(props: Props) {
           <SparklesIcon className="size-4" />
           AI Provider Settings
         </DialogTitle>
+        <DialogDescription className="text-xs text-neutral-500">
+          API keys stay in the OS keychain. Chat history is stored on this
+          device without encryption.
+        </DialogDescription>
       </DialogHeader>
       <DialogContent className="grid h-[min(40rem,calc(90vh-5rem))] min-w-0 grid-cols-[220px_minmax(0,1fr)] gap-0 overflow-hidden p-0">
         <aside class="flex min-h-0 flex-col overflow-hidden border-r border-neutral-200 bg-neutral-50">
@@ -700,11 +785,21 @@ export function AiAssistantSettingsDialog(props: Props) {
                 (provider) => provider.kind === kind
               );
               const active = selectedKind === kind;
-              const ready = configured.some((provider) => provider.enabled);
+              const on = configured.some((provider) => provider.enabled);
+              const isDefault = configured.some(
+                (provider) => provider.isDefault && provider.enabled
+              );
+              const state = !configured.length
+                ? "Not set up"
+                : on
+                  ? "On"
+                  : "Off";
               return (
                 <div key={kind}>
                   <button
                     type="button"
+                    disabled={busy}
+                    title={`${AI_PROVIDER_LABELS[kind]}: ${state}${isDefault ? ", default" : ""}`}
                     class={cn(
                       "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium",
                       active
@@ -712,23 +807,37 @@ export function AiAssistantSettingsDialog(props: Props) {
                         : "text-neutral-700 hover:bg-neutral-200"
                     )}
                     onClick={() => void switchProvider(kind, configured[0])}
-                    disabled={busy}
                   >
-                    {ready ? (
-                      <UnlockIcon className="size-4 shrink-0" />
-                    ) : (
-                      <VaultIcon className="size-4 shrink-0" />
-                    )}
-
                     <span class="min-w-0 flex-1 truncate">
                       {AI_PROVIDER_LABELS[kind]}
                     </span>
-                    {ready ? (
-                      <span class="size-2 rounded-full bg-emerald-400" />
+                    {isDefault ? (
+                      <span
+                        class={cn(
+                          "shrink-0 rounded px-1.5 text-[10px] font-semibold tracking-wide uppercase",
+                          active
+                            ? "bg-white/20 text-white"
+                            : "bg-blue-50 text-blue-700"
+                        )}
+                      >
+                        Default
+                      </span>
                     ) : null}
+                    {configured.length ? (
+                      <span
+                        aria-hidden="true"
+                        class={cn(
+                          "size-2 shrink-0 rounded-full",
+                          on
+                            ? "bg-emerald-400"
+                            : "border border-neutral-400 bg-transparent"
+                        )}
+                      />
+                    ) : null}
+                    <span class="sr-only">{state}</span>
                   </button>
-                  {active && configured.length > 0 ? (
-                    <div class="mt-1 ml-6 space-y-1">
+                  {active && configured.length > 1 ? (
+                    <div class="mt-1 ml-3 space-y-1">
                       {configured.map((provider) => (
                         <button
                           key={provider.id}
@@ -745,29 +854,26 @@ export function AiAssistantSettingsDialog(props: Props) {
                           {provider.enabled ? "" : " (off)"}
                         </button>
                       ))}
-                      <button
-                        type="button"
-                        class={cn(
-                          "block w-full truncate rounded px-2 py-1 text-left text-xs",
-                          selectedId === null
-                            ? "bg-neutral-200 font-semibold"
-                            : "text-neutral-500 hover:bg-neutral-100"
-                        )}
-                        onClick={() => void switchProvider(kind)}
-                      >
-                        + Add another
-                      </button>
                     </div>
+                  ) : null}
+                  {active && configured.length > 0 ? (
+                    <button
+                      type="button"
+                      class={cn(
+                        "mt-1 ml-3 block rounded px-2 py-1 text-left text-xs",
+                        selectedId === null
+                          ? "font-semibold text-neutral-800"
+                          : "text-neutral-500 hover:text-neutral-800"
+                      )}
+                      onClick={() => void switchProvider(kind)}
+                    >
+                      + Add another
+                    </button>
                   ) : null}
                 </div>
               );
             })}
           </OverlayScrollArea>
-          <div class="max-h-[45%] shrink-0 space-y-2 overflow-y-auto border-t border-neutral-200 p-3 text-xs text-neutral-600">
-            <p class="text-neutral-500">
-              Chat history is stored on this device without encryption.
-            </p>
-          </div>
         </aside>
 
         <main class="flex min-h-0 min-w-0 flex-col overflow-hidden">
@@ -777,7 +883,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                 must be what gets saved, and the unsaved-changes check relies on it. */}
             <fieldset
               disabled={busy}
-              class="m-0 min-w-0 space-y-4 border-0 p-0"
+              class="m-0 min-w-0 space-y-5 border-0 p-0"
             >
               {showLegacyNotice ? (
                 <div class="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -797,81 +903,140 @@ export function AiAssistantSettingsDialog(props: Props) {
                   </button>
                 </div>
               ) : null}
+
+              <div class="divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+                <ToggleRow
+                  label="Enabled"
+                  description="Offer this provider in the AI assistant."
+                  checked={draft.enabled}
+                  onChange={(enabled) => updateDraft({ enabled })}
+                />
+                <ToggleRow
+                  label="Default provider"
+                  description="Used when a chat has no provider chosen."
+                  checked={Boolean(draft.isDefault)}
+                  onChange={(isDefault) => updateDraft({ isDefault })}
+                />
+              </div>
+
               <Input
                 label="Name"
                 value={draft.label}
+                placeholder={AI_PROVIDER_LABELS[selectedKind]}
                 onValueChange={(value) => updateDraft({ label: value })}
                 className="h-10 border border-neutral-300 px-3 text-sm"
               />
-              <label class="flex items-center gap-2 text-sm text-neutral-700">
-                <input
-                  type="checkbox"
-                  checked={draft.enabled}
-                  onChange={(event) =>
-                    updateDraft({ enabled: event.currentTarget.checked })
-                  }
-                />
-                Enabled
-              </label>
+
               {keyCapability !== "none" ? (
-                <Input
-                  label="API Key"
-                  type="password"
-                  value={apiKey}
-                  placeholder={
-                    draft.apiKeyRef ? "Stored in OS keychain" : "Secret key"
-                  }
-                  onValueChange={(value) => {
-                    invalidateDiscovery();
-                    markEdited();
-                    setApiKey(value);
-                  }}
-                  className="h-10 border border-neutral-300 px-3 text-sm"
-                />
+                <section class="space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <label
+                      for="ai-provider-api-key"
+                      class="text-sm font-medium text-neutral-900"
+                    >
+                      API key
+                    </label>
+                    {keyPage ? (
+                      <button
+                        type="button"
+                        class="text-xs text-blue-600 hover:underline"
+                        onClick={() => void openExternalUrl(keyPage)}
+                      >
+                        Get a key ↗
+                      </button>
+                    ) : AI_PROVIDER_KEY_PAGES[selectedKind] ? (
+                      // This build cannot open external pages.
+                      <span class="text-xs text-neutral-500">
+                        Create a key in your {AI_PROVIDER_LABELS[selectedKind]}{" "}
+                        account
+                      </span>
+                    ) : null}
+                  </div>
+                  {keyInputShown ? (
+                    <div class="flex gap-2">
+                      <div class="min-w-0 flex-1">
+                        <Input
+                          id="ai-provider-api-key"
+                          type={showKey ? "text" : "password"}
+                          value={apiKey}
+                          placeholder={
+                            draft.apiKeyRef ? "New key" : "Paste your API key"
+                          }
+                          onValueChange={(value) =>
+                            changeKeyAuth(() => setApiKey(value))
+                          }
+                          className="h-10 border border-neutral-300 px-3 text-sm"
+                          right={
+                            <Button
+                              variant="ghost"
+                              className="h-6 text-xs"
+                              aria-pressed={showKey}
+                              onClick={() => setShowKey((shown) => !shown)}
+                            >
+                              {showKey ? "Hide" : "Show"}
+                            </Button>
+                          }
+                        />
+                      </div>
+                      {draft.apiKeyRef ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-10"
+                          onClick={() =>
+                            changeKeyAuth(() => {
+                              setApiKey("");
+                              setShowKey(false);
+                              setReplacingKey(false);
+                            })
+                          }
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    // Cloud providers always need a key (the backend refuses
+                    // to save one without): it can be replaced, and removed
+                    // only by deleting the provider.
+                    <div class="flex h-10 items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 text-sm">
+                      <span class="min-w-0 flex-1 truncate text-neutral-700">
+                        Saved in the OS keychain
+                      </span>
+                      <button
+                        type="button"
+                        class="text-xs font-medium text-blue-600 hover:underline"
+                        onClick={() => {
+                          markEdited();
+                          setReplacingKey(true);
+                        }}
+                      >
+                        Replace
+                      </button>
+                    </div>
+                  )}
+                </section>
               ) : null}
-              <div class="grid gap-3 sm:grid-cols-2">
-                <Input
-                  label="Host"
-                  value={draft.host ?? ""}
-                  placeholder={isLocal ? "http://127.0.0.1:11434" : undefined}
-                  onValueChange={(value) => updateConnection({ host: value })}
-                  onBlur={reloadModelsAfterUrlEdit}
-                  className="h-10 border border-neutral-300 px-3 text-sm"
-                />
-                <Input
-                  label="Sub Path"
-                  value={draft.subPath ?? ""}
-                  onValueChange={(value) =>
-                    updateConnection({ subPath: value })
-                  }
-                  onBlur={reloadModelsAfterUrlEdit}
-                  className="h-10 border border-neutral-300 px-3 text-sm"
-                />
-              </div>
-              {isLocal ? (
-                <div class="text-xs text-neutral-500">
-                  Plain http works for localhost and LAN IP addresses (for
-                  example 192.168.1.20). Other hosts need https.
-                </div>
-              ) : null}
+
+              {isLocal ? hostFields : null}
+
               <section class="space-y-2">
                 <div class="flex items-center justify-between">
-                  <label class="block text-sm font-medium text-neutral-900">
+                  <span class="block text-sm font-medium text-neutral-900">
                     Models
-                  </label>
-                  {isLocal ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="px-1.5"
-                      title="Reload models from the server"
-                      aria-label="Reload models"
-                      loading={loadingModels}
-                      onClick={() => void loadModels()}
-                    >
-                      <RefreshCwIcon className="size-3.5" />
-                    </Button>
-                  ) : null}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="gap-1 px-1.5 text-xs"
+                    title="List the models this server or key can use"
+                    aria-label="Reload models"
+                    loading={loadingModels}
+                    onClick={() => void loadModels()}
+                  >
+                    <RefreshCwIcon className="size-3.5" />
+                    {isLocal ? null : "Load from provider"}
+                  </Button>
                 </div>
                 <AiModelCombobox
                   suggestions={modelSuggestions}
@@ -880,21 +1045,26 @@ export function AiAssistantSettingsDialog(props: Props) {
                   focusRequest={pickerFocusRequest}
                   disabled={busy}
                 />
-                <div class="overflow-hidden rounded-lg border border-neutral-200">
+                <div
+                  role="radiogroup"
+                  aria-label="Default model"
+                  class="overflow-hidden rounded-lg border border-neutral-200"
+                >
                   {(draft.models ?? []).length ? (
                     (draft.models ?? []).map((model) => (
                       <div
                         key={model}
                         class="flex min-w-0 items-center gap-2 border-b border-neutral-100 px-3 py-2 last:border-b-0"
                       >
-                        <button
-                          type="button"
-                          class="min-w-0 flex-1 truncate text-left text-sm"
-                          title="Use as default model"
-                          onClick={() => setDefaultModel(model)}
-                        >
-                          {model}
-                        </button>
+                        <label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="radio"
+                            name="ai-default-model"
+                            checked={draft.defaultModel === model}
+                            onChange={() => setDefaultModel(model)}
+                          />
+                          <span class="min-w-0 truncate">{model}</span>
+                        </label>
                         {draft.defaultModel === model ? (
                           <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
                             default
@@ -914,7 +1084,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                   ) : (
                     <div class="px-3 py-3 text-sm text-neutral-400">
                       {!isLocal
-                        ? "No models selected."
+                        ? "No models yet. Load them from the provider, or type a model ID above."
                         : loadingModels
                           ? "Looking for models on the server..."
                           : discoveredModels.length
@@ -924,7 +1094,14 @@ export function AiAssistantSettingsDialog(props: Props) {
                     </div>
                   )}
                 </div>
+                {(draft.models ?? []).length > 1 ? (
+                  <div class="text-xs text-neutral-500">
+                    The selected model is the default; the others can be chosen
+                    in the chat.
+                  </div>
+                ) : null}
               </section>
+
               {selectedKind === "ollama" ? (
                 <section class="space-y-1.5">
                   <Input
@@ -946,16 +1123,34 @@ export function AiAssistantSettingsDialog(props: Props) {
                   />
                 </section>
               ) : null}
-              <label class="flex items-center gap-2 text-sm text-neutral-700">
-                <input
-                  type="checkbox"
-                  checked={Boolean(draft.isDefault)}
-                  onChange={(event) =>
-                    updateDraft({ isDefault: event.currentTarget.checked })
-                  }
-                />
-                Default provider
-              </label>
+
+              {!isLocal ? (
+                <section class="space-y-2">
+                  <button
+                    type="button"
+                    aria-expanded={showAdvanced}
+                    class="flex items-center gap-1 text-sm font-medium text-neutral-700 hover:text-neutral-900"
+                    onClick={() => setShowAdvanced((open) => !open)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      class={cn(
+                        "inline-block transition-transform",
+                        showAdvanced && "rotate-90"
+                      )}
+                    >
+                      <ChevronRightIcon className="size-3" />
+                    </span>
+                    Advanced
+                    {showAdvanced ? null : (
+                      <span class="ml-1 truncate text-xs font-normal text-neutral-500">
+                        {requestUrl}
+                      </span>
+                    )}
+                  </button>
+                  {showAdvanced ? hostFields : null}
+                </section>
+              ) : null}
 
               {legacyModel?.files.length ? (
                 <section class="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
@@ -995,11 +1190,11 @@ export function AiAssistantSettingsDialog(props: Props) {
             <div
               ref={discardBarRef}
               role="alertdialog"
-              aria-label="Discard changes?"
+              aria-label={discardPrompt.message}
               class="flex shrink-0 items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-5 py-3"
             >
               <span class="min-w-0 text-sm text-amber-900">
-                Your changes to {discardPrompt} are not saved. Discard them?
+                {discardPrompt.message}
               </span>
               <div class="flex shrink-0 gap-2">
                 <Button
@@ -1007,25 +1202,32 @@ export function AiAssistantSettingsDialog(props: Props) {
                   variant="outline"
                   onClick={() => answerDiscard(false)}
                 >
-                  Keep editing
+                  {discardPrompt.confirmLabel === "Discard"
+                    ? "Keep editing"
+                    : "Cancel"}
                 </Button>
                 <Button
                   variant="destructive"
                   onClick={() => answerDiscard(true)}
                 >
-                  Discard
+                  {discardPrompt.confirmLabel}
                 </Button>
               </div>
             </div>
           ) : (
             <div class="flex shrink-0 items-center justify-between gap-2 border-t border-neutral-200 bg-white px-5 py-3">
-              <Button
-                variant="destructive"
-                onClick={() => void deleteProvider()}
-                disabled={!selectedProvider || busy || testing}
-              >
-                Delete
-              </Button>
+              {selectedProvider ? (
+                <Button
+                  variant="ghost"
+                  className="text-red-600 hover:border-rose-50 hover:bg-red-50"
+                  onClick={() => void deleteProvider()}
+                  disabled={busy || testing}
+                >
+                  Delete provider
+                </Button>
+              ) : (
+                <span />
+              )}
               <div class="flex gap-2">
                 {testing ? (
                   <Button variant="outline" onClick={stopTest}>
@@ -1053,6 +1255,43 @@ export function AiAssistantSettingsDialog(props: Props) {
         </main>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A labelled on/off switch row. */
+function ToggleRow(props: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+      <div class="min-w-0">
+        <div class="text-sm font-medium text-neutral-900">{props.label}</div>
+        <div class="text-xs text-neutral-500">{props.description}</div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={props.checked}
+        aria-label={props.label}
+        onClick={() => props.onChange(!props.checked)}
+        class={cn(
+          "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:outline-none disabled:opacity-50",
+          props.checked
+            ? "border-blue-600 bg-blue-600"
+            : "border-neutral-300 bg-neutral-200"
+        )}
+      >
+        <span
+          class={cn(
+            "inline-block size-4 rounded-full bg-white shadow-sm transition-transform",
+            props.checked ? "translate-x-6" : "translate-x-1"
+          )}
+        />
+      </button>
+    </div>
   );
 }
 

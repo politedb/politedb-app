@@ -30,6 +30,22 @@ vi.mock("src/lib/tauri/ai", () => ({
   aiLegacyModelDelete: vi.fn(),
 }));
 
+const openUrl = vi.hoisted(() => vi.fn());
+const distro = vi.hoisted(() => ({ providerKeyLinks: true }));
+vi.mock("src/lib/distribution", async (importActual) => {
+  const actual = await importActual<typeof import("src/lib/distribution")>();
+  return {
+    ...actual,
+    DISTRIBUTION_FEATURES: new Proxy(actual.DISTRIBUTION_FEATURES, {
+      get: (target, key) =>
+        key === "providerKeyLinks"
+          ? distro.providerKeyLinks
+          : target[key as keyof typeof target],
+    }),
+  };
+});
+vi.mock("src/lib/tauri/license", () => ({ openExternalUrl: openUrl }));
+
 vi.mock("src/components/common/Button", () => ({
   Button: ({ children, loading, ...props }: any) => (
     <button {...props} disabled={props.disabled || loading}>
@@ -242,12 +258,18 @@ describe("AiAssistantSettingsDialog", () => {
     pending.resolve([]);
   });
   it("does not change the chat selection when deleting the selected provider", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     mocks.list.mockResolvedValueOnce([LOCAL]).mockResolvedValue([]);
     const selected = vi.fn();
     window.addEventListener("politedb-ai-provider-selected", selected);
     await openDialog();
 
+    fireEvent.click(screen.getByRole("button", { name: "Delete provider" }));
+    // Asked in the dialog; Cancel has focus.
+    const bar = await screen.findByRole("alertdialog");
+    expect(bar).toHaveTextContent("Delete My Ollama?");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Cancel" })
+    );
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
 
@@ -470,7 +492,7 @@ describe("AiAssistantSettingsDialog", () => {
       ]);
       await openDialog();
       await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(1));
-      fireEvent.click(screen.getByRole("button", { name: "llama" }));
+      fireEvent.click(screen.getByRole("radio", { name: "llama" }));
       await waitFor(() => expect(mocks.status).toHaveBeenCalledTimes(2));
       expect(mocks.status.mock.calls[1][0].defaultModel).toBe("llama");
     });
@@ -645,7 +667,8 @@ describe("unsaved changes, results and Test", () => {
     await screen.findByDisplayValue("My Ollama");
     fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
     await screen.findByDisplayValue("Work OpenAI");
-    fireEvent.input(screen.getByPlaceholderText("Stored in OS keychain"), {
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    fireEvent.input(screen.getByLabelText("API key"), {
       target: { value: "sk-test" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
@@ -828,5 +851,132 @@ describe("unsaved changes, results and Test", () => {
     const [, , requestId] = mocks.testDraft.mock.calls[0]!;
     expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
     expect(screen.getByRole("button", { name: "Test" })).toBeInTheDocument();
+  });
+});
+
+describe("layout: sidebar, key, models and advanced", () => {
+  const CLOUD = {
+    id: "gemini-1",
+    kind: "gemini",
+    label: "Google AI",
+    host: "https://generativelanguage.googleapis.com",
+    subPath: "/v1beta",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    defaultModel: "gemini-flash-latest",
+    models: ["gemini-flash-latest"],
+    apiKeyRef: "politedb:ai:gemini-1:api_key",
+    enabled: true,
+    isDefault: true,
+  };
+
+  async function openCloud(provider: object = CLOUD) {
+    mocks.list.mockResolvedValue([LOCAL, provider]);
+    localStorage.setItem("politedb.ai.provider.selected", "gemini-1");
+    render(<AiAssistantSettingsDialog open onClose={() => {}} />);
+    await screen.findByDisplayValue("Google AI");
+  }
+
+  it("shows On/Off and Default in the sidebar, without lock icons", async () => {
+    await openCloud();
+    const google = screen.getByRole("button", { name: /^Google AI/ });
+    expect(google).toHaveTextContent("Default");
+    expect(google).toHaveTextContent("On");
+    expect(screen.getByRole("button", { name: /^OpenAI/ })).toHaveTextContent(
+      "Not set up"
+    );
+    // One configured provider: no sub-list, just "Add another".
+    expect(
+      screen.queryByRole("button", { name: "Google AI (off)" })
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "+ Add another" })).toBeTruthy();
+  });
+
+  it("offers Replace for a saved key, never Remove (cloud keys are required)", async () => {
+    await openCloud();
+    expect(screen.getByText("Saved in the OS keychain")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+  });
+
+  it("replaces a key with a hidden input that can be shown", async () => {
+    await openCloud();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    const input = screen.getByLabelText("API key") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(input.type).toBe("text");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Saved in the OS keychain")).toBeTruthy();
+  });
+
+  it("links to the provider's key page", async () => {
+    await openCloud();
+    fireEvent.click(screen.getByRole("button", { name: "Get a key ↗" }));
+    expect(openUrl).toHaveBeenCalledWith("https://aistudio.google.com/apikey");
+  });
+
+  it("shows a hint instead of a link where external pages cannot open", async () => {
+    distro.providerKeyLinks = false;
+    try {
+      await openCloud();
+      expect(screen.queryByRole("button", { name: "Get a key ↗" })).toBeNull();
+      expect(
+        screen.getByText(/Create a key in your Google AI account/)
+      ).toBeTruthy();
+    } finally {
+      distro.providerKeyLinks = true;
+    }
+  });
+
+  it("models found with a key that was then dropped are not offered", async () => {
+    await openCloud();
+    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+    fireEvent.input(screen.getByLabelText("API key"), {
+      target: { value: "sk-other" },
+    });
+    const pending = deferred<string[]>();
+    mocks.listModels.mockReturnValueOnce(pending.promise);
+    mocks.cancelListModels.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Reload models" }));
+    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
+    const requestId =
+      mocks.listModels.mock.calls[mocks.listModels.mock.calls.length - 1]![2];
+    // Cancel the replacement: requests go back to the saved key.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+    pending.resolve(["replacement-only-model"]);
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.focus(screen.getByRole("combobox"));
+    expect(screen.queryByText("replacement-only-model")).toBeNull();
+  });
+
+  it("keeps the default address under Advanced, with a preview", async () => {
+    await openCloud();
+    expect(screen.queryByLabelText("Host")).toBeNull();
+    const advanced = screen.getByRole("button", { name: /Advanced/ });
+    expect(advanced).toHaveTextContent(
+      "https://generativelanguage.googleapis.com/v1beta"
+    );
+    fireEvent.click(advanced);
+    expect(screen.getByLabelText("Host")).toBeTruthy();
+  });
+
+  it("opens Advanced for a custom address", async () => {
+    await openCloud({ ...CLOUD, host: "https://gateway.example.com" });
+    expect(screen.getByLabelText("Host")).toBeTruthy();
+    expect(screen.getByText(/Requests go to https:\/\/gateway/)).toBeTruthy();
+  });
+
+  it("loads cloud models on request and uses switches for the toggles", async () => {
+    mocks.listModels.mockResolvedValue(["gemini-3.8-flash"]);
+    await openCloud();
+    fireEvent.click(screen.getByRole("button", { name: "Reload models" }));
+    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
+    expect(mocks.listModels.mock.calls[0]![1]).toEqual({ action: "keep" });
+
+    const enabled = screen.getByRole("switch", { name: "Enabled" });
+    expect(enabled).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(enabled);
+    expect(enabled).toHaveAttribute("aria-checked", "false");
   });
 });

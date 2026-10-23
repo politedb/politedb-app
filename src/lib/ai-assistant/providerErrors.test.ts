@@ -57,6 +57,18 @@ describe("describeProviderError", () => {
     });
   });
 
+  it("explains key and model-list problems", () => {
+    expect(describeProviderError("AI_PROVIDER_API_KEY_MISSING")).toEqual({
+      tone: "error",
+      message: "Enter an API key first.",
+    });
+    expect(message("AI_PROVIDER_API_KEY_REQUIRED")).toContain(
+      "needs an API key"
+    );
+    expect(message("AI_PROVIDER_KEYCHAIN_FAILED")).toContain("keychain");
+    expect(message("AI_PROVIDER_MODELS_INVALID")).toContain("model list");
+  });
+
   it("keeps unknown errors as they are", () => {
     expect(describeProviderError("AI_PROVIDER_LABEL_REQUIRED")).toEqual({
       tone: "error",

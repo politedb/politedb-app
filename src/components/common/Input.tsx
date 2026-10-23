@@ -1,5 +1,5 @@
 import { HTMLAttributes, TargetedEvent, TargetedFocusEvent } from "preact";
-import { useState, useRef, useEffect, useCallback } from "preact/hooks";
+import { useState, useRef, useEffect, useCallback, useId } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { MenuPopover, MenuItem } from "./MenuPopover";
 import { ChevronSortIcon } from "src/components/icons";
@@ -38,6 +38,9 @@ export function Input(
   } = props;
 
   const [isOpen, setIsOpen] = useState(false);
+  // Ties the visible label to the input for screen readers and label clicks.
+  const autoId = useId();
+  const inputId = rest.id ?? autoId;
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -102,7 +105,11 @@ export function Input(
 
   return (
     <div ref={containerRef} class="relative">
-      {label && <label class="mb-1 block text-sm font-medium">{label}</label>}
+      {label && (
+        <label for={inputId} class="mb-1 block text-sm font-medium">
+          {label}
+        </label>
+      )}
       <div class="relative">
         {props.left && (
           <div class="absolute top-1/2 left-3 z-10 -translate-y-1/2">
@@ -112,6 +119,7 @@ export function Input(
         <input
           ref={inputRef}
           {...rest}
+          id={inputId}
           autoCapitalize={props.autoCapitalize ?? "off"}
           autoCorrect={props.autoCorrect ?? "off"}
           spellcheck={props.spellcheck ?? false}

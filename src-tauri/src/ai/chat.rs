@@ -378,15 +378,84 @@ pub async fn complete(
     }
 }
 
-/// Model ids from `GET <base>/models` (OpenAI-compatible `{"data":[{"id":..}]}`).
+/// Most pages a discovery follows (Gemini page tokens, Anthropic `after_id`).
+const MAX_DISCOVERY_PAGES: usize = 10;
+
+/// Model ids the provider offers this key: Gemini's and Anthropic's own model
+/// lists, otherwise `GET <base>/models` (OpenAI-compatible `{"data":[{"id":..}]}`).
 pub async fn list_models(
     config: &AiProviderConfig,
     api_key: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let url = provider::endpoint(config, "models")?;
+    match config.kind {
+        AiProviderKind::Gemini => {
+            let key = api_key.unwrap_or_default();
+            let mut ids = Vec::new();
+            let mut token: Option<String> = None;
+            for _ in 0..MAX_DISCOVERY_PAGES {
+                let mut query = vec![("pageSize", "1000".to_string())];
+                if let Some(token) = &token {
+                    query.push(("pageToken", token.clone()));
+                }
+                let body = get_models(config, &query, &[("x-goog-api-key", key)], None).await?;
+                let (page, next) = parse_gemini_models(&body)?;
+                merge_model_ids(&mut ids, page);
+                match next {
+                    Some(next) if ids.len() < MAX_DISCOVERED_MODELS => token = Some(next),
+                    _ => break,
+                }
+            }
+            Ok(ids)
+        }
+        AiProviderKind::Anthropic => {
+            let key = api_key.unwrap_or_default();
+            let headers = [("x-api-key", key), ("anthropic-version", "2023-06-01")];
+            let mut ids = Vec::new();
+            let mut after: Option<String> = None;
+            for _ in 0..MAX_DISCOVERY_PAGES {
+                let mut query = vec![("limit", "1000".to_string())];
+                if let Some(after) = &after {
+                    query.push(("after_id", after.clone()));
+                }
+                let body = get_models(config, &query, &headers, None).await?;
+                let (page, next) = parse_anthropic_models(&body)?;
+                merge_model_ids(&mut ids, page);
+                match next {
+                    Some(next) if ids.len() < MAX_DISCOVERED_MODELS => after = Some(next),
+                    _ => break,
+                }
+            }
+            Ok(ids)
+        }
+        _ => {
+            let body = get_models(config, &[], &[], api_key).await?;
+            parse_model_ids(&body)
+        }
+    }
+}
+
+/// `GET <base>/models` with a query, auth headers and/or bearer token; returns the
+/// size-capped body of a successful answer.
+async fn get_models(
+    config: &AiProviderConfig,
+    query: &[(&str, String)],
+    headers: &[(&str, &str)],
+    bearer: Option<&str>,
+) -> Result<String, String> {
+    let mut url = provider::endpoint(config, "models")?;
+    // Added after validation, which refuses URLs that carry a query.
+    if !query.is_empty() {
+        let mut pairs = url.query_pairs_mut();
+        for (name, value) in query {
+            pairs.append_pair(name, value);
+        }
+    }
     let client = transport::client_for(&url, transport::DISCOVERY_TIMEOUT)?;
     let mut builder = client.get(url);
-    if let Some(token) = api_key {
+    for (name, value) in headers {
+        builder = builder.header(*name, *value);
+    }
+    if let Some(token) = bearer {
         builder = builder.bearer_auth(token);
     }
     let response = builder
@@ -399,7 +468,85 @@ pub async fn list_models(
     if !status.is_success() {
         return Err(provider_http_error(status, &body));
     }
-    parse_model_ids(&body)
+    Ok(body)
+}
+
+/// Appends new, valid ids up to [`MAX_DISCOVERED_MODELS`].
+fn merge_model_ids(ids: &mut Vec<String>, page: Vec<String>) {
+    for id in page {
+        if ids.len() == MAX_DISCOVERED_MODELS {
+            break;
+        }
+        let id = id.trim();
+        if id.is_empty() || id.len() > MAX_MODEL_ID_LEN || ids.iter().any(|seen| seen == id) {
+            continue;
+        }
+        ids.push(id.to_string());
+    }
+}
+
+/// Gemini `GET models`: `{"models":[{"name":"models/<id>","supportedGenerationMethods":[..]}],
+/// "nextPageToken":..}`. Keeps models that can answer chat (`generateContent`);
+/// returns ids without the `models/` prefix and the next page token.
+fn parse_gemini_models(body: &str) -> Result<(Vec<String>, Option<String>), String> {
+    let value = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "AI_PROVIDER_MODELS_INVALID".to_string())?;
+    let Some(items) = value.get("models").and_then(|v| v.as_array()) else {
+        // A key with no models answers `{}`.
+        return if value.is_object() {
+            Ok((Vec::new(), None))
+        } else {
+            Err("AI_PROVIDER_MODELS_INVALID".into())
+        };
+    };
+    let ids = items
+        .iter()
+        .filter(|item| {
+            // No method list: assume it can chat rather than hide it.
+            match item
+                .get("supportedGenerationMethods")
+                .and_then(|m| m.as_array())
+            {
+                Some(methods) => methods
+                    .iter()
+                    .any(|m| m.as_str() == Some("generateContent")),
+                None => true,
+            }
+        })
+        .filter_map(|item| item.get("name").and_then(|n| n.as_str()))
+        .map(|name| name.strip_prefix("models/").unwrap_or(name).to_string())
+        .collect();
+    let next = value
+        .get("nextPageToken")
+        .and_then(|t| t.as_str())
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
+    Ok((ids, next))
+}
+
+/// Anthropic `GET models`: `{"data":[{"id":..}],"has_more":bool,"last_id":..}`.
+fn parse_anthropic_models(body: &str) -> Result<(Vec<String>, Option<String>), String> {
+    let value = serde_json::from_str::<serde_json::Value>(body)
+        .map_err(|_| "AI_PROVIDER_MODELS_INVALID".to_string())?;
+    let items = value
+        .get("data")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "AI_PROVIDER_MODELS_INVALID".to_string())?;
+    let ids = items
+        .iter()
+        .filter_map(|item| item.get("id").and_then(|id| id.as_str()))
+        .map(str::to_string)
+        .collect();
+    let next = if value.get("has_more").and_then(|v| v.as_bool()) == Some(true) {
+        value
+            .get("last_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+    } else {
+        None
+    };
+    Ok((ids, next))
 }
 
 fn parse_model_ids(body: &str) -> Result<Vec<String>, String> {
@@ -680,6 +827,69 @@ mod tests {
             parse_model_ids(r#"{"models":[]}"#).unwrap_err(),
             "AI_PROVIDER_MODELS_INVALID"
         );
+    }
+
+    #[test]
+    fn parses_gemini_models_for_chat_only() {
+        let (ids, next) = parse_gemini_models(
+            r#"{"models":[
+                {"name":"models/gemini-3.8-flash","supportedGenerationMethods":["generateContent","countTokens"]},
+                {"name":"models/text-embedding-005","supportedGenerationMethods":["embedContent"]},
+                {"name":"models/gemini-flash-latest"}
+            ],"nextPageToken":"p2"}"#,
+        )
+        .unwrap();
+        assert_eq!(ids, vec!["gemini-3.8-flash", "gemini-flash-latest"]);
+        assert_eq!(next.as_deref(), Some("p2"));
+        assert_eq!(parse_gemini_models("{}").unwrap(), (vec![], None));
+        assert_eq!(
+            parse_gemini_models(r#"{"models":[],"nextPageToken":""}"#).unwrap(),
+            (vec![], None)
+        );
+        assert_eq!(
+            parse_gemini_models("[]").unwrap_err(),
+            "AI_PROVIDER_MODELS_INVALID"
+        );
+    }
+
+    #[test]
+    fn parses_anthropic_models_with_paging() {
+        let (ids, next) = parse_anthropic_models(
+            r#"{"data":[{"type":"model","id":"claude-sonnet-5-5"},{"type":"model","id":"claude-haiku-5-5"}],"has_more":true,"first_id":"claude-sonnet-5-5","last_id":"claude-haiku-5-5"}"#,
+        )
+        .unwrap();
+        assert_eq!(ids, vec!["claude-sonnet-5-5", "claude-haiku-5-5"]);
+        assert_eq!(next.as_deref(), Some("claude-haiku-5-5"));
+        let (_, last) =
+            parse_anthropic_models(r#"{"data":[],"has_more":false,"last_id":null}"#).unwrap();
+        assert_eq!(last, None);
+        assert_eq!(
+            parse_anthropic_models(r#"{"models":[]}"#).unwrap_err(),
+            "AI_PROVIDER_MODELS_INVALID"
+        );
+    }
+
+    #[test]
+    fn merges_pages_without_duplicates_or_bad_ids() {
+        let mut ids = vec!["a".to_string()];
+        merge_model_ids(
+            &mut ids,
+            vec![
+                "a".into(),
+                " b ".into(),
+                "".into(),
+                "x".repeat(MAX_MODEL_ID_LEN + 1),
+            ],
+        );
+        assert_eq!(ids, vec!["a", "b"]);
+        let mut many = Vec::new();
+        merge_model_ids(
+            &mut many,
+            (0..MAX_DISCOVERED_MODELS + 5)
+                .map(|i| format!("m{i}"))
+                .collect(),
+        );
+        assert_eq!(many.len(), MAX_DISCOVERED_MODELS);
     }
 
     #[test]

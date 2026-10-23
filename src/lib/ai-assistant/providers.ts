@@ -90,6 +90,18 @@ export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
   ollama: ["llama3.2", "qwen2.5-coder:7b", "mistral", "gemma3"],
 };
 
+/** Where to create an API key, per cloud provider. */
+export const AI_PROVIDER_KEY_PAGES: Partial<Record<AiProviderKind, string>> = {
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  gemini: "https://aistudio.google.com/apikey",
+  grok: "https://console.x.ai",
+  groq: "https://console.groq.com/keys",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  openrouter: "https://openrouter.ai/keys",
+  github_copilot: "https://github.com/settings/personal-access-tokens",
+};
+
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
   openai: "https://api.openai.com",
   anthropic: "https://api.anthropic.com",
