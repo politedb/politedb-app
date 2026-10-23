@@ -3984,3 +3984,49 @@ Re-reviewed all application/test changes: Gemini/Anthropic paging/parsing and bo
 - External `remediation.test.tsx` / `remediation.config.mjs`: **60 passed** (50 copied current dialog tests plus 10 independent probes: eight stale success/error/newer-loading cases, completed suggestions/Replace/typing, and keyless local discovery). Real Dialog/Input/combobox; Button and backend/opener I/O mocked as in repository suite. Initial local probe used `fireEvent.focus`, which did not invoke Preact's focus path in this environment; corrected only the external harness to open suggestions with input. Final run passes. Log: `/private/tmp/ai-batch23-rereview-remediation.log`.
 - `npm run dev`: **blocked**, `listen EPERM ::1:1420`. Log: `/private/tmp/ai-batch23-rereview-dev.log`. No native/browser visual inspection, real Tab/Return/screen-reader session, App Store launch, live provider/keychain request or actual opener invocation. Multi-page HTTP integration remains limited by listener restrictions; existing discovery-unmount and focus-target limitations from preceding reviews remain outside these fixes.
 - `git diff --check`: **passed** before append. Ignored launch configuration untouched.
+
+
+## Review: ordered-list marker clipping — commit 0cd510e — 2026-10-23
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Reviewed `git show 0cd510e` (HEAD `0cd510e9c40668b78183ffefe2f83326e486169b`), parser/renderer, tests, both production consumers, and font/CSS context. Application source/tests unchanged; only this report appended. Untracked `.claude/launch.json` left untouched.
+
+### Findings
+
+- **P2 — Bound the ordered-list start before numeric conversion/rendering.** `src/lib/ai-assistant/markdown.ts:446` converts unrestricted `\d+` into a Number; `src/components/ai-assistant/MarkdownText.tsx:65-71` calculates width from that Number, then passes it to the signed-long DOM `ol.start` property. Independent Preact/jsdom probe: `999999999999999999999. item` parses as `1e+21`, renders `start="-559939584"`, and receives `calc(5ch + 1rem)` despite its ten-character negative marker. A 309-digit all-nine prefix parses as `Infinity`, renders `start="0"`, and receives `calc(8ch + 1rem)`. Thus accepted input can silently change numbering and again under-allocate marker space. Earlier implementation had no start assignment, so these conversion/wrapping failures are introduced here. Define a supported decimal range (including room for subsequent items); reject/fall back to literal text outside it before lossy conversion, or use a representation/rendering strategy supporting larger numbers. Calculate width from the actual displayed sequence. Add regressions for oversized/overflowing prefixes and supported-range boundaries. Exact native WebView layout remains unverified; numeric DOM mismatch reproduced independently.
+
+### Correctness and adjacent behavior
+
+- Ordinary nonnegative starts: `start + items.length - 1` is the widest rendered counter within a supported exact range. Zero survives `?? 1`; `007.` correctly normalizes to numeric 7 with ordinary decimal markers. Subsequent source numbers remain intentionally ignored by native sequential numbering, as before. Blank-separated lists now preserve each block's own first number, consistent with the requested change.
+- Two-digit list case passes; independent probes also cover zero, leading zeros, `9)` syntax and 99→100 width growth. Mixed ordered/unordered blocks retain separate tags; bullet padding/class remains unchanged. Indented continuation lines retain inline breaks. Native outside markers retain hanging alignment for visually wrapped text; actual wrapping geometry was not tested in jsdom.
+- `tabular-nums` is inherited by list items/markers. For the configured Inter UI font, tabular figures make decimal digit advances uniform; `ch` measures the zero advance in the same font. The additional `1rem` reserves punctuation/gap. This is sound for ordinary Inter decimal markers; a proportional font lacking tabular figures would not guarantee every digit is as narrow as zero. No current font override establishing that regression was found. The utility also applies tabular figures to list body numbers, an intentional-looking small typography change. Font fallback/native marker rasterization was not visually verified.
+- Production `MarkdownText` usage is limited to `AiAssistantMessageParts.tsx:227` (structured text parts) and `:521` (legacy assistant message text), including floating/sidebar variants. Both share this renderer; no other production parser consumers or persistence contracts found. Paragraphs, inline formatting, quotes, code and user-message paths are unchanged. No new HTML execution or remote-link behavior introduced.
+
+### Verification
+
+- `npm run test:run -- src/lib/ai-assistant/markdown.test.ts src/components/ai-assistant/MarkdownText.test.tsx`: **2 files / 12 tests passed**.
+- `npm run test:run -- src/components/ai-assistant/AiAssistantMessageCard.test.tsx`: **1 file / 11 tests passed**.
+- External `/private/tmp/politedb-0cd510e-review/edge.test.tsx`: **6 tests passed**, including four start/width cases, mixed lists/continuation and an assertion reproducing oversized-number mismatch (passing reproduction is not remediation). Captured DOM values: `/private/tmp/politedb-0cd510e-review/results.jsonl`. Initial harness resolution needed JSX/Preact aliases corrected; initial huge-number expectation assumed attribute parsing, then was corrected after observing property assignment.
+- `npm run build`: **passed**; browser externalization, mixed static/dynamic imports and chunk-size warnings.
+- `npm run dev`: **blocked**, `listen EPERM: operation not permitted ::1:1420`. No browser/native visual verification of marker clipping, font fallback or wrapped-line geometry. No Rust changes; Rust tests not required for this scope.
+- Committed regression tests assert DOM/style strings only; they do not prove marker visibility. Add oversized-number coverage with the remediation; retain a real-browser visual check for 10/11 and 99/100 when available.
+
+
+## Re-review: oversized ordered-list start — commit 0cd510e fix — 2026-10-23
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Scope: uncommitted `git diff -- src` fixing the preceding P2, plus parser/renderer and adjacent regression paths. No source/test edits, staging or commits. Existing report content and untracked `.claude/launch.json` preserved.
+
+### Findings and fix disposition
+
+- **P2 oversized ordered-list start — RESOLVED.** `src/lib/ai-assistant/markdown.ts:358` anchors the complete marker and accepts only 1–9 ASCII digits before either delimiter. Ten-digit and larger prefixes cannot match a trailing nine-digit suffix; they reach paragraph text before `Number` conversion. Nine-digit values remain exact, finite and within the DOM signed-long range. This applies to both list entry and subsequent-item matching because both use `LIST_ITEM`.
+- **Sequence bound — verified from an existing hard limit.** `MAX_MARKDOWN_CHARS = 200_000` and the early oversized-input fallback (`markdown.ts:37,374`) bound the number of list items to at most 200,000 (a conservative bound of one source character per item). Therefore even `999999999 + items.length - 1 <= 1000199998`, below 2147483647. This safety does not depend on an assumption about realistic list lengths. Oversized input itself bypasses list parsing.
+- **Width and adjacent behavior — preserved.** Maximum accepted start with two items retains DOM `ol.start = 999999999` and allocates `calc(10ch + 1rem)` for the final counter 1000000000. Independent probes also pass for zero, leading zeros, `)` markers, 99→100, mixed bullets/ordered blocks and indented continuation text. An unindented oversized prefix between valid lists becomes a paragraph and splits the blocks; an indented oversized prefix remains literal continuation text in its current item, consistent with existing continuation handling. No new actionable regression established. Paragraph/inline rendering and HTML/link safety paths are unchanged.
+
+### Independent verification and limitations
+
+- `rtk npm run test:run -- src/lib/ai-assistant/markdown.test.ts src/components/ai-assistant/MarkdownText.test.tsx src/components/ai-assistant/AiAssistantMessageCard.test.tsx`: **3 files / 24 tests passed**, including added nine-digit boundary, ten-digit fallback and ten-character width assertions.
+- `rtk npm exec -- vitest run --config /private/tmp/politedb-0cd510e-review/vitest.config.mjs /private/tmp/politedb-0cd510e-review/remediation.test.tsx`: **1 file / 10 tests passed**. External harness preserves the original reproduction file; verifies 10-, 21- and 309-digit literal fallback with both delimiters, exact boundary DOM start/width, block splitting/continuation, and preceding ordinary-list probes.
+- `rtk npm run build`: **passed**; browser externalization, mixed static/dynamic import and chunk-size warnings remain.
+- `rtk git diff --check`: **passed** before report append.
+- No native WebView/browser visual session performed in this re-review. DOM numeric conversion and style allocation are verified; actual clipping, font fallback and wrapped-line geometry retain the preceding review's visual limitation. No Rust changes; Rust checks outside scope.
+
+Working-tree observation: during this review HEAD advanced to `61b4bb5` (`fix(ai): keep ordered-list numbers to nine digits`), and the reviewed source diff became committed. Codex issued no commit command. Final working tree has only the report modified plus the existing untracked launch configuration.

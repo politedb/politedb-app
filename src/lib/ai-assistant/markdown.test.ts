@@ -298,4 +298,16 @@ describe("parseInline", () => {
     expect(nodes.filter((n) => n.kind === "strong")).toHaveLength(1_500);
     expect(nodes.filter((n) => n.kind === "link")).toHaveLength(1_500);
   });
+
+  it("keeps ordered-list numbers to nine digits", () => {
+    expect(parseMarkdown("999999999. last")[0]).toMatchObject({
+      kind: "list",
+      ordered: true,
+      start: 999999999,
+    });
+    expect(parseMarkdown("1234567890. too long")[0]).toEqual({
+      kind: "paragraph",
+      children: [{ kind: "text", text: "1234567890. too long" }],
+    });
+  });
 });

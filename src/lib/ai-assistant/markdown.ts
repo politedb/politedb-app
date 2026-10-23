@@ -353,7 +353,9 @@ export function parseInline(source: string): Inline[] {
 }
 
 // `[\s\S]*` (not `.*`) so a line separator inside the text never forces backtracking.
-const LIST_ITEM = /^\s*(?:([-*+])|(\d+)[.)])\s+([\s\S]*)$/;
+// Ordered markers take 1-9 digits (as in CommonMark), so a list's first number
+// stays exact and fits the <ol start> attribute; longer numbers stay text.
+const LIST_ITEM = /^\s*(?:([-*+])|(\d{1,9})[.)])\s+([\s\S]*)$/;
 
 /**
  * The language of an opening code fence line (possibly empty), or null. A plain

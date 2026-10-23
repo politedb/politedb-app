@@ -31,5 +31,10 @@ describe("MarkdownText", () => {
     const startAt = later.container.querySelector("ol") as HTMLOListElement;
     expect(startAt.getAttribute("start")).toBe("3");
     expect(startAt.style.paddingLeft).toBe("calc(1ch + 1rem)");
+
+    const widest = render(<MarkdownText text={"999999999. a\n2. b"} />);
+    const big = widest.container.querySelector("ol") as HTMLOListElement;
+    expect(big.getAttribute("start")).toBe("999999999");
+    expect(big.style.paddingLeft).toBe("calc(10ch + 1rem)");
   });
 });
