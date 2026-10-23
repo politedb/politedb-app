@@ -94,11 +94,13 @@ export async function aiOllamaStatus(
 }
 
 /** Sends a short test completion for an unsaved draft; persists nothing. */
+/** Cancel with `aiProviderCancelListModels(requestId)`; ends after 30 s otherwise. */
 export async function aiProviderTestDraft(
   config: AiProviderConfig,
-  auth: AiProviderKeyChange
+  auth: AiProviderKeyChange,
+  requestId: string
 ) {
-  await invoke(CMD.aiProviderTestDraft, { config, auth });
+  await invoke(CMD.aiProviderTestDraft, { config, auth, requestId });
 }
 
 export type AiLegacyModelFile = { name: string; sizeBytes: number };

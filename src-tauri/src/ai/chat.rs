@@ -30,6 +30,10 @@ pub struct AiChatCompleteRequest {
 }
 
 /// Short completion used by draft tests and validation.
+/// Output budget of the settings Test request.
+pub const PROBE_MAX_TOKENS: u32 = 1024;
+const _: () = assert!(PROBE_MAX_TOKENS >= 1024, "thinking models need room");
+
 pub fn probe_request(config: &AiProviderConfig) -> AiChatCompleteRequest {
     AiChatCompleteRequest {
         provider_id: config.id.clone(),
@@ -39,7 +43,10 @@ pub fn probe_request(config: &AiProviderConfig) -> AiChatCompleteRequest {
             content: "Reply with OK.".into(),
         }],
         temperature: Some(0.0),
-        max_tokens: Some(128),
+        // Room for models that think before answering (Gemini 3, reasoning
+        // models): a tight budget can be spent on thinking alone and come back
+        // empty, which would fail a working provider.
+        max_tokens: Some(PROBE_MAX_TOKENS),
     }
 }
 
@@ -47,11 +54,11 @@ pub fn provider_http_error(status: reqwest::StatusCode, body: &str) -> String {
     let code = serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|value| {
-            value
-                .pointer("/error/code")
-                .or_else(|| value.pointer("/error/type"))
-                .or_else(|| value.pointer("/error/status"))
-                .and_then(|item| item.as_str())
+            // The first of these that is text: Gemini's `code` is the HTTP status
+            // as a number, its text code is in `status` (e.g. NOT_FOUND).
+            ["/error/code", "/error/type", "/error/status"]
+                .into_iter()
+                .find_map(|pointer| value.pointer(pointer).and_then(|item| item.as_str()))
                 .map(|item| {
                     item.chars()
                         .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
@@ -647,6 +654,19 @@ mod tests {
             "AI_CHAT_FAILED: 400 Bad Request invalid_request_error"
         );
         assert!(!error.contains("customers"));
+    }
+
+    #[test]
+    fn gemini_errors_keep_the_status_but_not_the_message() {
+        let body = r#"{"error":{"code":404,"message":"models/gemini-x is not found for API version v1beta. prompt: SELECT * FROM customers","status":"NOT_FOUND"}}"#;
+        let error = provider_http_error(reqwest::StatusCode::NOT_FOUND, body);
+        assert_eq!(error, "AI_CHAT_FAILED: 404 Not Found NOT_FOUND");
+        assert!(!error.contains("customers"));
+        // A numeric code alone gives no text code.
+        assert_eq!(
+            provider_http_error(reqwest::StatusCode::NOT_FOUND, r#"{"error":{"code":404}}"#),
+            "AI_CHAT_FAILED: 404 Not Found"
+        );
     }
 
     #[test]

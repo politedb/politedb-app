@@ -165,6 +165,27 @@ describe("AiAssistantSettingsDialog", () => {
     expect(mocks.save).toHaveBeenCalledTimes(1);
   });
 
+  it("a failed rollback also shows the context size that is on disk", async () => {
+    mocks.save.mockRejectedValue("AI_PROVIDER_SAVE_ROLLBACK_FAILED");
+    await openDialog();
+    mocks.list.mockResolvedValue([{ ...LOCAL, contextSize: 8192 }]);
+    fireEvent.input(screen.getByPlaceholderText("16384"), {
+      target: { value: "32768" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByPlaceholderText("16384") as HTMLInputElement).value
+      ).toBe("8192")
+    );
+    // The form now matches the disk: switching does not ask.
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue("My Ollama")).toBeNull()
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
   it("looks up local models on open and shows guidance when the server is down", async () => {
     mocks.list.mockResolvedValue([{ ...LOCAL, models: [], defaultModel: "" }]);
     mocks.listModels.mockRejectedValue("AI_CHAT_REQUEST_FAILED: connect");
@@ -245,8 +266,8 @@ describe("AiAssistantSettingsDialog", () => {
         label: "Google AI",
         host: "https://generativelanguage.googleapis.com",
         subPath: "/v1beta",
-        defaultModel: "gemini-2.5-flash",
-        models: ["gemini-2.5-flash"],
+        defaultModel: "gemini-flash-latest",
+        models: ["gemini-flash-latest"],
         apiKeyRef: "politedb:ai:gemini-1:api_key",
         enabled: true,
       },
@@ -257,17 +278,17 @@ describe("AiAssistantSettingsDialog", () => {
 
     const combo = screen.getByRole("combobox");
     fireEvent.focus(combo);
-    fireEvent.input(combo, { target: { value: "pro" } });
+    fireEvent.input(combo, { target: { value: "flash" } });
     const option = await screen.findByRole("option", {
-      name: "gemini-2.5-pro",
+      name: "gemini-3.8-flash",
     });
     // Already-selected models are not suggested again.
     expect(
-      screen.queryByRole("option", { name: "gemini-2.5-flash" })
+      screen.queryByRole("option", { name: "gemini-flash-latest" })
     ).not.toBeInTheDocument();
     fireEvent.mouseDown(option);
 
-    expect(screen.getByText("gemini-2.5-pro")).toBeInTheDocument();
+    expect(screen.getByText("gemini-3.8-flash")).toBeInTheDocument();
     expect((combo as HTMLInputElement).value).toBe("");
   });
 
@@ -552,5 +573,260 @@ describe("AiAssistantSettingsDialog", () => {
       expect(screen.queryByPlaceholderText("16384")).toBeNull();
       expect(mocks.status).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("unsaved changes, results and Test", () => {
+  const CLOUD = {
+    id: "openai-1",
+    kind: "openai",
+    label: "Work OpenAI",
+    host: "https://api.openai.com",
+    subPath: "/v1",
+    baseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-4.1-mini",
+    models: ["gpt-4.1-mini"],
+    apiKeyRef: "politedb:ai:openai-1:api_key",
+    enabled: true,
+  };
+
+  beforeEach(() => {
+    mocks.list.mockResolvedValue([LOCAL, CLOUD]);
+  });
+
+  const rename = (value: string) =>
+    fireEvent.input(screen.getByDisplayValue("My Ollama"), {
+      target: { value },
+    });
+
+  it("asks in the dialog before switching provider, with Keep editing focused", async () => {
+    await openDialog();
+    rename("Renamed");
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    const bar = await screen.findByRole("alertdialog");
+    expect(bar).toHaveTextContent("Your changes to Renamed are not saved");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Keep editing" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByDisplayValue("Renamed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await screen.findByDisplayValue("Work OpenAI");
+  });
+
+  it("switches without asking when nothing changed", async () => {
+    await openDialog();
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await screen.findByDisplayValue("Work OpenAI");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("does not count a blank name that saves as the same name", async () => {
+    mocks.list.mockResolvedValue([{ ...LOCAL, label: "Ollama" }]);
+    render(<AiAssistantSettingsDialog open onClose={() => {}} />);
+    fireEvent.input(await screen.findByDisplayValue("Ollama"), {
+      target: { value: "  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await waitFor(() =>
+      expect(
+        (screen.getAllByRole("textbox")[0] as HTMLInputElement).value
+      ).toBe("OpenAI")
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("asks before closing with a typed API key; one question at a time", async () => {
+    const onClose = vi.fn();
+    render(<AiAssistantSettingsDialog open onClose={onClose} />);
+    await screen.findByDisplayValue("My Ollama");
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await screen.findByDisplayValue("Work OpenAI");
+    fireEvent.input(screen.getByPlaceholderText("Stored in OS keychain"), {
+      target: { value: "sk-test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    await screen.findByRole("alertdialog");
+    // Escape (or another close) while asking means Keep editing.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("an edit answers an open question with Keep editing", async () => {
+    await openDialog();
+    rename("Renamed");
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await screen.findByRole("alertdialog");
+    fireEvent.input(screen.getByDisplayValue("Renamed"), {
+      target: { value: "Renamed again" },
+    });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByDisplayValue("Renamed again")).toBeInTheDocument();
+  });
+
+  it("Keep editing returns focus to where it was", async () => {
+    await openDialog();
+    rename("Renamed");
+    const openai = screen.getByRole("button", { name: /OpenAI/ });
+    openai.focus();
+    fireEvent.click(openai);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Keep editing" })
+    );
+    await waitFor(() => expect(document.activeElement).toBe(openai));
+  });
+
+  it("nothing can be edited while a save is running", async () => {
+    const pending = deferred<any>();
+    mocks.save.mockReturnValue(pending.promise);
+    await openDialog();
+    rename("Renamed");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalled());
+    expect(screen.getByDisplayValue("Renamed")).toBeDisabled();
+    expect(screen.getByPlaceholderText("16384")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove qwen" })).toBeDisabled();
+    mocks.list.mockResolvedValue([{ ...LOCAL, label: "Renamed" }, CLOUD]);
+    pending.resolve({ ...LOCAL, label: "Renamed" });
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Renamed")).toBeEnabled()
+    );
+  });
+
+  it("a model list arriving during Save opens nothing and adds nothing", async () => {
+    await openDialog();
+    await settleAutoDiscovery();
+    const reload = deferred<string[]>();
+    mocks.listModels.mockReturnValue(reload.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Reload models" }));
+    await waitFor(() => expect(mocks.listModels).toHaveBeenCalled());
+    const discoveryId = mocks.listModels.mock.calls[0]![2];
+
+    const save = deferred<any>();
+    mocks.save.mockReturnValue(save.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalled());
+    // Saving drops the pending discovery.
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(discoveryId);
+
+    reload.resolve(["new-model"]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.getByRole("combobox")).toBeDisabled();
+    expect(screen.queryByText("new-model")).toBeNull();
+  });
+
+  it("unmounting cancels a running test", async () => {
+    mocks.testDraft.mockReturnValue(new Promise(() => {}));
+    const view = render(<AiAssistantSettingsDialog open onClose={() => {}} />);
+    await screen.findByDisplayValue("My Ollama");
+    await settleAutoDiscovery();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Cancel test" });
+    const [, , requestId] = mocks.testDraft.mock.calls[0]!;
+    view.unmount();
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+  });
+
+  it("cannot leave while a save is running", async () => {
+    const pending = deferred<any>();
+    mocks.save.mockReturnValue(pending.promise);
+    const onClose = vi.fn();
+    render(<AiAssistantSettingsDialog open onClose={onClose} />);
+    await screen.findByDisplayValue("My Ollama");
+    rename("Renamed");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Close dialog" }));
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI/ }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue("Renamed")).toBeInTheDocument();
+  });
+
+  it("says a passing test of unsaved edits still needs Save", async () => {
+    mocks.testDraft.mockResolvedValue(undefined);
+    await openDialog();
+    fireEvent.input(screen.getByDisplayValue("My Ollama"), {
+      target: { value: "Renamed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Test passed. Save to keep these settings."
+    );
+    const [, , requestId] = mocks.testDraft.mock.calls[0]!;
+    expect(requestId).toMatch(/^settings-.*:test:/);
+  });
+
+  it("explains a failed test and keeps the code; an edit clears it", async () => {
+    mocks.testDraft.mockRejectedValue(
+      "AI_CHAT_FAILED: 401 Unauthorized invalid_api_key"
+    );
+    await openDialog();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("rejected the API key");
+    expect(alert).toHaveTextContent(
+      "AI_CHAT_FAILED: 401 Unauthorized invalid_api_key"
+    );
+    fireEvent.input(screen.getByDisplayValue("My Ollama"), {
+      target: { value: "Renamed" },
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("cancels a running test in the backend and ignores its late answer", async () => {
+    const pending = deferred<void>();
+    mocks.testDraft.mockReturnValue(pending.promise);
+    await openDialog();
+    await settleAutoDiscovery();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    const stop = await screen.findByRole("button", { name: "Cancel test" });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.click(stop);
+    const [, , requestId] = mocks.testDraft.mock.calls[0]!;
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+    expect(screen.getByRole("status")).toHaveTextContent("Test cancelled.");
+    pending.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByRole("status")).toHaveTextContent("Test cancelled.");
+    expect(screen.getByRole("button", { name: "Test" })).toBeEnabled();
+  });
+
+  it("an invalid context size also cancels a running test", async () => {
+    mocks.testDraft.mockReturnValue(new Promise(() => {}));
+    await openDialog();
+    await settleAutoDiscovery();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Cancel test" });
+    fireEvent.input(screen.getByPlaceholderText("16384"), {
+      target: { value: "12" },
+    });
+    const [, , requestId] = mocks.testDraft.mock.calls[0]!;
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+    expect(screen.getByRole("button", { name: "Test" })).toBeInTheDocument();
+  });
+
+  it("an edit during a test cancels it", async () => {
+    mocks.testDraft.mockReturnValue(new Promise(() => {}));
+    await openDialog();
+    await settleAutoDiscovery();
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Cancel test" });
+    fireEvent.input(screen.getByDisplayValue("My Ollama"), {
+      target: { value: "Renamed" },
+    });
+    const [, , requestId] = mocks.testDraft.mock.calls[0]!;
+    expect(mocks.cancelListModels).toHaveBeenCalledWith(requestId);
+    expect(screen.getByRole("button", { name: "Test" })).toBeInTheDocument();
   });
 });
