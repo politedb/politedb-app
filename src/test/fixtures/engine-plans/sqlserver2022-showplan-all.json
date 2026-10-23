@@ -1,0 +1,119 @@
+{
+  "columns": [
+    "StmtText",
+    "StmtId",
+    "NodeId",
+    "Parent",
+    "PhysicalOp",
+    "LogicalOp",
+    "Argument",
+    "DefinedValues",
+    "EstimateRows",
+    "EstimateIO",
+    "EstimateCPU",
+    "AvgRowSize",
+    "TotalSubtreeCost",
+    "OutputList",
+    "Warnings",
+    "Type",
+    "Parallel",
+    "EstimateExecutions"
+  ],
+  "rows": [
+    [
+      {
+        "t": "Str",
+        "v": "SELECT name FROM sys.objects WHERE object_id > 10 ORDER BY name"
+      },
+      { "t": "I64", "v": 1 },
+      { "t": "I64", "v": 1 },
+      { "t": "I64", "v": 0 },
+      { "t": "Null" },
+      { "t": "Null" },
+      { "t": "Str", "v": "1" },
+      { "t": "Null" },
+      { "t": "F64", "v": 113.34884643554688 },
+      { "t": "Null" },
+      { "t": "Null" },
+      { "t": "Null" },
+      { "t": "F64", "v": 0.01689467579126358 },
+      { "t": "Null" },
+      { "t": "Null" },
+      { "t": "Str", "v": "SELECT" },
+      { "t": "Bool", "v": false },
+      { "t": "Null" }
+    ],
+    [
+      { "t": "Str", "v": "  |--Sort(ORDER BY:([o].[name] ASC))" },
+      { "t": "I64", "v": 1 },
+      { "t": "I64", "v": 2 },
+      { "t": "I64", "v": 1 },
+      { "t": "Str", "v": "Sort" },
+      { "t": "Str", "v": "Sort" },
+      { "t": "Str", "v": "ORDER BY:([o].[name] ASC)" },
+      { "t": "Null" },
+      { "t": "F64", "v": 113.34884643554688 },
+      { "t": "F64", "v": 0.011261261068284512 },
+      { "t": "F64", "v": 0.0013068979606032372 },
+      { "t": "I64", "v": 139 },
+      { "t": "F64", "v": 0.01689467579126358 },
+      { "t": "Str", "v": "[o].[name]" },
+      { "t": "Null" },
+      { "t": "Str", "v": "PLAN_ROW" },
+      { "t": "Bool", "v": false },
+      { "t": "F64", "v": 1.0 }
+    ],
+    [
+      {
+        "t": "Str",
+        "v": "       |--Filter(WHERE:(has_access('CO',[master].[sys].[sysschobjs].[id] as [o].[id])=(1)))"
+      },
+      { "t": "I64", "v": 1 },
+      { "t": "I64", "v": 3 },
+      { "t": "I64", "v": 2 },
+      { "t": "Str", "v": "Filter" },
+      { "t": "Str", "v": "Filter" },
+      {
+        "t": "Str",
+        "v": "WHERE:(has_access('CO',[master].[sys].[sysschobjs].[id] as [o].[id])=(1))"
+      },
+      { "t": "Null" },
+      { "t": "F64", "v": 113.34884643554688 },
+      { "t": "F64", "v": 0.0 },
+      { "t": "F64", "v": 0.00017909117741510272 },
+      { "t": "I64", "v": 139 },
+      { "t": "F64", "v": 0.004326515831053257 },
+      { "t": "Str", "v": "[o].[name]" },
+      { "t": "Null" },
+      { "t": "Str", "v": "PLAN_ROW" },
+      { "t": "Bool", "v": false },
+      { "t": "F64", "v": 1.0 }
+    ],
+    [
+      {
+        "t": "Str",
+        "v": "            |--Clustered Index Seek(OBJECT:([master].[sys].[sysschobjs].[clst] AS [o]), SEEK:([o].[id] > (10)),  WHERE:([master].[sys].[sysschobjs].[nsclass] as [o].[nsclass]=(0) AND [master].[sys].[sysschobjs].[pclass] as [o].[pclass]=(1)) ORDERED FORWARD)"
+      },
+      { "t": "I64", "v": 1 },
+      { "t": "I64", "v": 4 },
+      { "t": "I64", "v": 3 },
+      { "t": "Str", "v": "Clustered Index Seek" },
+      { "t": "Str", "v": "Clustered Index Seek" },
+      {
+        "t": "Str",
+        "v": "OBJECT:([master].[sys].[sysschobjs].[clst] AS [o]), SEEK:([o].[id] > (10)),  WHERE:([master].[sys].[sysschobjs].[nsclass] as [o].[nsclass]=(0) AND [master].[sys].[sysschobjs].[pclass] as [o].[pclass]=(1)) ORDERED FORWARD"
+      },
+      { "t": "Str", "v": "[o].[id], [o].[name]" },
+      { "t": "F64", "v": 113.34884643554688 },
+      { "t": "F64", "v": 0.003865740727633238 },
+      { "t": "F64", "v": 0.00028168372227810323 },
+      { "t": "I64", "v": 145 },
+      { "t": "F64", "v": 0.00414742436259985 },
+      { "t": "Str", "v": "[o].[id], [o].[name]" },
+      { "t": "Null" },
+      { "t": "Str", "v": "PLAN_ROW" },
+      { "t": "Bool", "v": false },
+      { "t": "F64", "v": 1.0 }
+    ]
+  ]
+}

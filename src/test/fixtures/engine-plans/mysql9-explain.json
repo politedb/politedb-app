@@ -1,0 +1,69 @@
+{
+  "query": "/* select#1 */ select `zz`.`c`.`name` AS `name`,count(0) AS `count(*)` from `zz`.`o` join `zz`.`c` where ((`zz`.`c`.`id` = `zz`.`o`.`cid`) and (`zz`.`o`.`status` = 'x')) group by `zz`.`c`.`name` order by count(0) desc",
+  "query_plan": {
+    "inputs": [
+      {
+        "inputs": [
+          {
+            "inputs": [
+              {
+                "inputs": [
+                  {
+                    "inputs": [
+                      {
+                        "operation": "Table scan on o",
+                        "table_name": "o",
+                        "access_type": "table",
+                        "schema_name": "zz",
+                        "used_columns": ["id", "cid", "status"],
+                        "estimated_rows": 4.0,
+                        "estimated_total_cost": 0.65
+                      }
+                    ],
+                    "condition": "((o.`status` = 'x') and (o.cid is not null))",
+                    "operation": "Filter: ((o.`status` = 'x') and (o.cid is not null))",
+                    "access_type": "filter",
+                    "estimated_rows": 1.0,
+                    "filter_columns": ["zz.o.`status`", "zz.o.cid"],
+                    "estimated_total_cost": 0.65
+                  },
+                  {
+                    "covering": false,
+                    "operation": "Single-row index lookup on c using PRIMARY (id = o.cid)",
+                    "index_name": "PRIMARY",
+                    "table_name": "c",
+                    "access_type": "index",
+                    "key_columns": ["id"],
+                    "schema_name": "zz",
+                    "used_columns": ["id", "name"],
+                    "estimated_rows": 1.0,
+                    "lookup_condition": "id = o.cid",
+                    "index_access_type": "index_lookup",
+                    "lookup_references": ["zz.o.cid"],
+                    "estimated_total_cost": 0.35
+                  }
+                ],
+                "join_type": "inner join",
+                "operation": "Nested loop inner join",
+                "access_type": "join",
+                "estimated_rows": 1.0,
+                "join_algorithm": "nested_loop",
+                "estimated_total_cost": 1.0
+              }
+            ],
+            "operation": "Aggregate using temporary table",
+            "access_type": "temp_table_aggregate"
+          }
+        ],
+        "operation": "Table scan on <temporary>",
+        "table_name": "<temporary>",
+        "access_type": "table"
+      }
+    ],
+    "operation": "Sort: count(*) DESC",
+    "access_type": "sort",
+    "sort_fields": ["count(*) DESC"]
+  },
+  "query_type": "select",
+  "json_schema_version": "2.0"
+}

@@ -1,0 +1,40 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost": 0.01590376,
+    "filesort": {
+      "sort_key": "count(0) desc",
+      "temporary_table": {
+        "nested_loop": [
+          {
+            "table": {
+              "table_name": "o",
+              "access_type": "ALL",
+              "possible_keys": ["cid"],
+              "loops": 1,
+              "rows": 4,
+              "cost": 0.0115068,
+              "filtered": 100,
+              "attached_condition": "o.`status` = 'x' and o.cid is not null"
+            }
+          },
+          {
+            "table": {
+              "table_name": "c",
+              "access_type": "eq_ref",
+              "possible_keys": ["PRIMARY"],
+              "key": "PRIMARY",
+              "key_length": "4",
+              "used_key_parts": ["id"],
+              "ref": ["zz.o.cid"],
+              "loops": 4,
+              "rows": 1,
+              "cost": 0.00439696,
+              "filtered": 100
+            }
+          }
+        ]
+      }
+    }
+  }
+}

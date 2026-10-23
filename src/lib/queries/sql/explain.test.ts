@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExplainSql,
   hasPositionalParameters,
+  isPlanStatement,
   leadingSqlKeyword,
 } from "./explain";
 
@@ -158,5 +159,35 @@ describe("buildExplainSql", () => {
     for (const sql of ["select 'open", "select /* open", "select $a$ open"]) {
       expect(buildExplainSql("postgres", sql).error, sql).toMatch(/not closed/);
     }
+  });
+});
+
+describe("engine plan statements", () => {
+  it("asks DuckDB for a JSON plan", () => {
+    expect(buildExplainSql("duckdb", "select 1;")).toEqual({
+      statements: ["EXPLAIN (FORMAT JSON) select 1"],
+      source: "select 1",
+    });
+  });
+
+  it("recognizes plan statements typed by the user", () => {
+    expect(isPlanStatement("mysql", "/* x */ explain analyze select 1")).toBe(
+      true
+    );
+    expect(isPlanStatement("mariadb", "ANALYZE FORMAT=JSON select 1")).toBe(
+      true
+    );
+    // Only MariaDB's ANALYZE returns a plan; ANALYZE TABLE never does.
+    expect(isPlanStatement("mariadb", "ANALYZE TABLE t")).toBe(false);
+    expect(isPlanStatement("mysql", "ANALYZE FORMAT=JSON select 1")).toBe(
+      false
+    );
+    expect(isPlanStatement("postgres", "select 1")).toBe(false);
+  });
+
+  it("refuses to wrap a MariaDB ANALYZE in another EXPLAIN", () => {
+    expect(
+      buildExplainSql("mariadb", "ANALYZE FORMAT=JSON select 1").error
+    ).toMatch(/already an EXPLAIN/);
   });
 });

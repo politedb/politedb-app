@@ -419,3 +419,25 @@ describe("Run with ANALYZE", () => {
     expect(screen.queryByText("Run with ANALYZE")).toBeNull();
   });
 });
+
+describe("plan statements on other engines", () => {
+  it("opens MariaDB's ANALYZE FORMAT=JSON as a measured plan", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const json = readFileSync(
+      resolve(
+        __dirname,
+        "../../test/fixtures/engine-plans/mariadb11-analyze.json"
+      ),
+      "utf8"
+    );
+    const typed = run();
+    typed.kind = "query";
+    typed.slots[0].sql = "ANALYZE FORMAT=JSON select 1";
+    typed.slots[0].result!.columns = [{ name: "ANALYZE", db_type: "text" }];
+    typed.slots[0].result!.rows = [[{ t: "Str", v: json }]];
+    render(<SqlResultsPane {...base} engine="mariadb" runs={[typed]} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(screen.getByText("Measured plan")).toBeInTheDocument();
+  });
+});

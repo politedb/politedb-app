@@ -16,7 +16,7 @@ import type { DatabaseEngine } from "src/types";
 import { MAX_PLAN_NODES } from "src/lib/query-analyzer/plan";
 import { planFromResult } from "src/lib/query-analyzer/fromResult";
 import type { QueryPlan } from "src/lib/query-analyzer/plan";
-import { leadingSqlKeyword } from "src/lib/queries/sql/explain";
+import { isPlanStatement } from "src/lib/queries/sql/explain";
 import {
   QueryAnalyzer,
   type BaselineOption,
@@ -463,7 +463,7 @@ export function SqlResultsPane(props: {
   const explainKind: "run" | "typed" | null =
     activeRun?.kind === "explain"
       ? "run"
-      : slot && leadingSqlKeyword(slot.sql) === "EXPLAIN"
+      : slot && props.engine && isPlanStatement(props.engine, slot.sql)
         ? "typed"
         : null;
   const plan = useMemo(() => {
@@ -517,7 +517,7 @@ export function SqlResultsPane(props: {
         const kind =
           run.kind === "explain"
             ? "run"
-            : leadingSqlKeyword(candidate.sql) === "EXPLAIN"
+            : isPlanStatement(engine, candidate.sql)
               ? "typed"
               : null;
         if (!kind || candidate.status !== "done") continue;

@@ -1,0 +1,49 @@
+[
+  {
+    "name": "PROJECTION",
+    "children": [
+      {
+        "name": "PERFECT_HASH_GROUP_BY",
+        "children": [
+          {
+            "name": "PROJECTION",
+            "children": [
+              {
+                "name": "PROJECTION",
+                "children": [
+                  {
+                    "name": "SEQ_SCAN",
+                    "children": [],
+                    "extra_info": {
+                      "Table": "memory.main.t",
+                      "Type": "Sequential Scan",
+                      "Projections": "a",
+                      "Filters": "a>10",
+                      "Estimated Cardinality": "200"
+                    }
+                  }
+                ],
+                "extra_info": {
+                  "Projections": "__internal_compress_integral_usmallint(#0, 10)",
+                  "Estimated Cardinality": "200"
+                }
+              }
+            ],
+            "extra_info": {
+              "Projections": "a",
+              "Estimated Cardinality": "200"
+            }
+          }
+        ],
+        "extra_info": {
+          "Groups": "#0",
+          "Aggregates": "count_star()"
+        }
+      }
+    ],
+    "extra_info": {
+      "Projections": ["__internal_decompress_integral_integer(#0, 10)", "#1"],
+      "Estimated Cardinality": "181"
+    }
+  }
+]
