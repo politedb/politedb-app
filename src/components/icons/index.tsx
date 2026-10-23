@@ -20,6 +20,8 @@ export * from "./ChevronDown";
 export * from "./ChevronRight";
 export * from "./Trash";
 export * from "./ChevronLeft";
+export * from "./ChevronsLeft";
+export * from "./ChevronsRight";
 export * from "./Eye";
 export * from "./Unlock";
 export * from "./Lock";

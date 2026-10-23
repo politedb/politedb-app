@@ -1,3 +1,4 @@
+import { patchFieldEntries, recordedRow } from "./rowPositionPatches";
 import {
   mongoDeleteDocuments,
   mongoInsertDocuments,
@@ -54,8 +55,7 @@ export async function applyMongoPatchEntry(
     const raw = (patch ?? {}) as Record<string, unknown>;
     const doc: Record<string, unknown> = {};
 
-    for (const [k, v] of Object.entries(raw)) {
-      if (k === "__rowKey") continue;
+    for (const [k, v] of patchFieldEntries(raw)) {
       if (k === "_id" && (v === null || String(v ?? "").trim() === "")) {
         continue;
       }
@@ -67,7 +67,13 @@ export async function applyMongoPatchEntry(
 
   const updates = Object.entries(updateData)
     .map(([rowKey, patch]) => {
-      const resolved = resolveRowIndex(rowKey, ctx.offset, key, store);
+      const resolved = resolveRowIndex(
+        rowKey,
+        ctx.offset,
+        key,
+        store,
+        recordedRow(entry, rowKey)
+      );
       if (!resolved) return null;
 
       const raw = (patch ?? {}) as Record<string, unknown>;
@@ -81,8 +87,8 @@ export async function applyMongoPatchEntry(
       }
 
       const set: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(raw)) {
-        if (k === "__rowKey" || k === "_id") continue;
+      for (const [k, v] of patchFieldEntries(raw)) {
+        if (k === "_id") continue;
         set[k] = v;
       }
 
@@ -96,7 +102,13 @@ export async function applyMongoPatchEntry(
 
   const deleteIds = Object.keys(deleteData)
     .map((rowKey) => {
-      const resolved = resolveRowIndex(rowKey, ctx.offset, key, store);
+      const resolved = resolveRowIndex(
+        rowKey,
+        ctx.offset,
+        key,
+        store,
+        recordedRow(entry, rowKey)
+      );
       if (!resolved) return null;
 
       const idValue = mongoCellToValue(resolved.sourceRow[idColIdx]);

@@ -70,7 +70,7 @@ describe("schema canvas editing", () => {
     render(
       <SchemaCanvasTable rows={rows} columns={columns} onChange={onChange} />
     );
-    fireEvent.mouseUp(screen.getByText("name"), { button: 0 });
+    // One click sorts ascending.
     fireEvent.mouseUp(screen.getByText("name"), { button: 0 });
     const input = edit();
     expect(input).toHaveValue("alpha");

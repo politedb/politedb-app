@@ -8,6 +8,11 @@ import type {
 } from "src/types";
 import { cellToString } from "src/utils/convert";
 import {
+  isPatchMetaKey,
+  patchFieldEntries,
+  type RecordedRows,
+} from "./rowPositionPatches";
+import {
   isPrimaryKeyColumn,
   resolvePrimaryKeyColumns,
 } from "src/utils/primaryKey";
@@ -44,6 +49,8 @@ export type PatchMap = {
     tableData: TableDataState;
     tableWindow: TableWindow;
     patches: PatchData;
+    /** Rows that unsaved row edits and deletions target (see rowPositionPatches). */
+    originalRows?: RecordedRows;
   };
 };
 
@@ -322,7 +329,7 @@ export function generateInsertSqlFromPatches(
     const values: string[] = [];
 
     for (const [colName, value] of Object.entries(patchData)) {
-      if (colName === "__rowKey") continue; // Skip internal row key
+      if (isPatchMetaKey(colName)) continue; // Skip internal fields
       const col = columns?.find((c) => c.name === colName);
       colNames.push(qIdent(colName, engine));
       values.push(formatPatchValue(value, col?.db_type, engine));
@@ -986,6 +993,7 @@ function tableDataForPatchSql(args: {
   tableName: string;
   columns: TableDataState["columns"];
   patches: PatchData;
+  originalRows?: RecordedRows;
 }): TableDataType | null {
   const {
     activeScreen,
@@ -996,9 +1004,17 @@ function tableDataForPatchSql(args: {
     tableName,
     columns,
     patches,
+    originalRows,
   } = args;
-  const resolveRow = getOriginalRowAt ?? getRowAt;
-  if (!columns || !resolveRow || !activeScreen) return null;
+  const lookup = getOriginalRowAt ?? getRowAt;
+  const resolveRow =
+    lookup && activeScreen
+      ? lookup
+      : (_key: string, _index: number): unknown[] | undefined => undefined;
+  const hasRecordedRows = Object.keys(originalRows ?? {}).length > 0;
+  if (!columns || (!hasRecordedRows && (!lookup || !activeScreen))) {
+    return null;
+  }
 
   const rowIndices = new Set<number>();
   const updatePatches = patches["update"]?.["data"];
@@ -1025,7 +1041,10 @@ function tableDataForPatchSql(args: {
   const maxIndex = Math.max(...Array.from(rowIndices), -1);
 
   for (let i = 0; i <= maxIndex; i++) {
+    // The row each change was made against, when one was recorded; the row now
+    // at that position on the current page only for older patches.
     const row =
+      originalRows?.[String(i)] ??
       resolveRow(tableKey, i + offset) ??
       (offset === 0 ? undefined : resolveRow(tableKey, i));
     rows.push(row ? (row as unknown[]) : []);
@@ -1068,6 +1087,7 @@ export function generateSqlPlanFromPatches(
       tableName,
       columns,
       patches,
+      originalRows: patchData.originalRows,
     });
 
     plan.preData.push(
@@ -1158,7 +1178,7 @@ export function formatMongoScalar(v: unknown): string {
 }
 
 export function formatMongoObject(v: Record<string, unknown>): string {
-  const entries = Object.entries(v).filter(([k]) => k !== "__rowKey");
+  const entries = Object.entries(v).filter(([k]) => !isPatchMetaKey(k));
   if (entries.length === 0) return "{}";
   const parts = entries.map(([k, val]) => `${k}: ${formatMongoScalar(val)}`);
   return `{ ${parts.join(", ")} }`;
@@ -1175,7 +1195,9 @@ export function buildMongoOperations(
   const out: string[] = [];
   const { activeScreen, getRowAt, offset = 0 } = options || {};
 
-  for (const { tableWindow, tableData, patches } of Object.values(patchMap)) {
+  for (const { tableWindow, tableData, patches, originalRows } of Object.values(
+    patchMap
+  )) {
     const db = tableWindow.table.schema;
     const coll = tableWindow.table.name;
     const ref = `db.${coll}`;
@@ -1203,13 +1225,15 @@ export function buildMongoOperations(
     if (updates.length > 0) {
       for (const [rowKey, patch] of updates) {
         const setData: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(patch)) {
-          if (k === "__rowKey") continue;
+        for (const [k, v] of patchFieldEntries(patch)) {
           setData[k] = v;
         }
 
         let idExpr = "/* _id unresolved */";
-        if (idColIdx >= 0 && getRowAt && tableKey) {
+        const recorded = originalRows?.[rowKey]?.[idColIdx];
+        if (idColIdx >= 0 && cellToString(recorded)?.trim()) {
+          idExpr = JSON.stringify(cellToString(recorded));
+        } else if (idColIdx >= 0 && getRowAt && tableKey) {
           const localIdx = Number(rowKey);
           const candidates = [localIdx, localIdx + offset];
           for (const idx of candidates) {
@@ -1234,6 +1258,11 @@ export function buildMongoOperations(
       const ids: string[] = [];
       if (idColIdx >= 0 && getRowAt && tableKey) {
         for (const rowKey of deletes) {
+          const recorded = cellToString(originalRows?.[rowKey]?.[idColIdx]);
+          if (recorded?.trim()) {
+            ids.push(JSON.stringify(recorded));
+            continue;
+          }
           const localIdx = Number(rowKey);
           const candidates = [localIdx, localIdx + offset];
           let found: string | null = null;

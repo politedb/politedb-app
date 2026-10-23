@@ -3,6 +3,8 @@ import { Button } from "src/components/common/Button";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  ChevronsLeftIcon,
+  ChevronsRightIcon,
   PlusIcon,
 } from "src/components/icons";
 import { TableViewMode, TableViewToggle } from "./TableViewToggle";
@@ -34,6 +36,9 @@ interface Props {
   onAddRow: () => void;
   canAddRow?: boolean;
   onFilters: () => void;
+  /** Applied filter conditions, shown on the Filters button. */
+  appliedFilterCount?: number;
+  onExport?: () => void;
   readOnly?: boolean;
   className?: string;
 
@@ -63,6 +68,8 @@ export function TableFooter({
   onAddRow,
   canAddRow = true,
   onFilters,
+  appliedFilterCount = 0,
+  onExport,
   readOnly = false,
   showViewToggle = true,
   showActions = true,
@@ -86,13 +93,31 @@ export function TableFooter({
     };
   }, [totalRows, limit, offset]);
 
+  // An estimated total can be lower than the real one: while the current page
+  // is full, there may be another page after the estimate's last one.
+  const pageFull =
+    typeof loadedMax === "number" && loadedMax + 1 >= offset + limit;
+  const hasNextPage =
+    offset + limit < pagination.totalRows || (rowCountIsEstimated && pageFull);
+  const lastPageOffset =
+    pagination.totalRows > 0
+      ? Math.floor((pagination.totalRows - 1) / limit) * limit
+      : 0;
+
   const handlePageChange = useCallback(
     (newOffset: number) => {
-      if (newOffset >= 0 && newOffset < pagination.totalRows) {
-        onPageChange(limit, newOffset);
+      if (newOffset < 0 || newOffset === offset) return;
+      // Only moving forward is bounded; any earlier page is reachable.
+      if (
+        newOffset > offset &&
+        newOffset >= pagination.totalRows &&
+        !hasNextPage
+      ) {
+        return;
       }
+      onPageChange(limit, newOffset);
     },
-    [limit, pagination.totalRows, onPageChange]
+    [limit, offset, pagination.totalRows, hasNextPage, onPageChange]
   );
 
   const handlePageSizeChange = (nextLimit: number) => {
@@ -104,19 +129,27 @@ export function TableFooter({
     if (viewMode !== "data") return "";
     const formatNumber = (value: number) => numberFormatter.format(value);
 
+    const totalPrefix = rowCountIsEstimated ? "~" : "";
+    // Rows already loaded past a low (even zero) estimate count too.
+    const shownTotal =
+      rowCountIsEstimated && typeof loadedMax === "number"
+        ? Math.max(totalRows, loadedMax + 1)
+        : totalRows;
+
     // No matched rows (e.g. filter result is empty)
-    if (totalRows <= 0) {
+    if (shownTotal <= 0) {
       return "0 rows";
     }
 
-    const totalPrefix = rowCountIsEstimated ? "~" : "";
     const totalPart =
-      totalRows > 0 ? ` of ${totalPrefix}${formatNumber(totalRows)} rows` : "";
+      shownTotal > 0
+        ? ` of ${totalPrefix}${formatNumber(shownTotal)} rows`
+        : "";
 
     // Known total: always show the logical page window (e.g. 601-900 of 1,381).
-    if (totalRows > 0) {
+    if (shownTotal > 0) {
       const start = offset + 1;
-      const end = Math.min(offset + limit, totalRows);
+      const end = Math.min(offset + limit, shownTotal);
       if (end < start) {
         return rowCountIsEstimated
           ? `0 of ~${formatNumber(totalRows)} rows`
@@ -204,7 +237,12 @@ export function TableFooter({
       </div>
 
       {/* CENTER */}
-      {viewMode === "data" && (
+      {viewMode === "data" && !(rowCountIsEstimated || countBusy) && (
+        <div class="px-3 py-1 text-sm text-neutral-600 tabular-nums">
+          {loadedLabel}
+        </div>
+      )}
+      {viewMode === "data" && (rowCountIsEstimated || countBusy) && (
         <div class="flex items-center text-xs text-neutral-600 tabular-nums">
           <Popover
             open={isPopoverOpen}
@@ -221,9 +259,9 @@ export function TableFooter({
 
                 {(rowCountIsEstimated || countBusy) && (
                   <>
-                    <p class="mt-2 text-sm text-orange-500">
-                      This is the estimated value, click "Count" to retrieve the
-                      exact value. It may affect your server performance
+                    <p class="mt-2 text-sm text-orange-600">
+                      The total is an estimate. Counting exactly reads the whole
+                      table and can be slow on a large one.
                     </p>
                     <div class="mt-2 w-fit">
                       <Checkbox
@@ -240,7 +278,7 @@ export function TableFooter({
                     <div class="mt-4 flex justify-center">
                       <Button
                         variant="shadow"
-                        disabled={countBusy}
+                        disabled={countBusy || !onCountExact}
                         onClick={async () => {
                           await handleCountConfirm();
                           setIsPopoverOpen(false);
@@ -259,6 +297,7 @@ export function TableFooter({
               onClick={() => setIsPopoverOpen((open) => !open)}
               aria-expanded={isPopoverOpen}
               aria-haspopup="dialog"
+              title="Estimated total: count exactly"
               class="rounded-full px-3 py-1 text-sm transition-colors hover:bg-slate-100"
             >
               {loadedLabel}
@@ -270,6 +309,11 @@ export function TableFooter({
       {/* RIGHT */}
       {viewMode === "data" && showFiltersAndPaging && (
         <div class="flex items-center gap-2">
+          {onExport ? (
+            <Button variant="shadow" class="py-0.75 text-sm" onClick={onExport}>
+              Export
+            </Button>
+          ) : null}
           <Button
             variant={filterBarVisible ? "default" : "shadow"}
             class={cn(
@@ -277,25 +321,62 @@ export function TableFooter({
               filterBarVisible && "border border-blue-500"
             )}
             onClick={onFilters}
+            aria-pressed={filterBarVisible}
+            // The count says the rows are filtered even with the bar hidden.
+            aria-label={
+              appliedFilterCount > 0
+                ? `Filters, ${appliedFilterCount} applied`
+                : "Filters"
+            }
           >
             Filters
+            {appliedFilterCount > 0 ? (
+              <span class="ml-1 rounded-full bg-blue-600 px-1.5 text-xs leading-4 text-white tabular-nums">
+                {appliedFilterCount}
+              </span>
+            ) : null}
           </Button>
           <div class="flex items-center gap-0.5">
             <Button
               variant="shadow"
-              onClick={() => handlePageChange(offset - limit)}
+              onClick={() => handlePageChange(0)}
+              disabled={offset === 0}
+              className="h-6.75 px-2 py-1"
+              title="First page"
+              aria-label="First page"
+            >
+              <ChevronsLeftIcon className="size-4" />
+            </Button>
+            <Button
+              variant="shadow"
+              onClick={() => handlePageChange(Math.max(0, offset - limit))}
               disabled={offset === 0}
               className="h-6.75 px-3 py-1"
+              title="Previous page"
+              aria-label="Previous page"
             >
               <ChevronLeftIcon className="size-4" />
             </Button>
             <Button
               variant="shadow"
               onClick={() => handlePageChange(offset + limit)}
-              disabled={offset + limit >= pagination.totalRows}
+              disabled={!hasNextPage}
               className="h-6.75 px-3 py-1"
+              title="Next page"
+              aria-label="Next page"
             >
               <ChevronRightIcon className="size-4" />
+            </Button>
+            <Button
+              variant="shadow"
+              onClick={() => handlePageChange(lastPageOffset)}
+              // An estimate has no reliable last page.
+              disabled={rowCountIsEstimated || offset >= lastPageOffset}
+              className="h-6.75 px-2 py-1"
+              title="Last page"
+              aria-label="Last page"
+            >
+              <ChevronsRightIcon className="size-4" />
             </Button>
             <Select
               value={limit}
@@ -303,6 +384,8 @@ export function TableFooter({
                 handlePageSizeChange(Number(e.target.value))
               }
               class="h-6.75"
+              aria-label="Rows per page"
+              title="Rows per page"
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option value={size}>{size}</option>

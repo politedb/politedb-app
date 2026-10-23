@@ -67,6 +67,7 @@ export function TableFilterBar({
   onFilterCombineChange,
   onApply,
   onClear,
+  setFilterVisible,
   onExport,
   onShowSql,
   queryError = false,
@@ -90,8 +91,15 @@ export function TableFilterBar({
   }, [columns[0]?.name]);
 
   const addRow = useCallback(() => {
-    onFiltersChange([...filters, { ...defaultFilter, id: filters.length }]);
-  }, [filters, defaultFilter, onFiltersChange]);
+    // Ids tell applied conditions apart: never reuse one still applied, even
+    // after its draft row was removed.
+    const nextId =
+      [...filters, ...appliedFilters].reduce(
+        (max, f) => Math.max(max, f.id),
+        -1
+      ) + 1;
+    onFiltersChange([...filters, { ...defaultFilter, id: nextId }]);
+  }, [filters, appliedFilters, defaultFilter, onFiltersChange]);
 
   const removeRow = useCallback(
     (index: number) => {
@@ -187,7 +195,21 @@ export function TableFilterBar({
   }, [defaultFilter, filters.length, onFiltersChange]);
 
   return (
-    <div class="flex flex-col gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-3">
+    <div
+      class="flex flex-col gap-2 border-t border-neutral-200 bg-neutral-50 px-4 py-3"
+      role="group"
+      aria-label="Filters"
+      onKeyDown={(e) => {
+        // Escape hides the bar (applied filters stay); an open menu closes first.
+        if (e.key !== "Escape" || e.isComposing) return;
+        e.preventDefault();
+        if (applyAllOpen) {
+          setApplyAllOpen(false);
+          return;
+        }
+        setFilterVisible(false, tableKey);
+      }}
+    >
       {/* Filter row(s) */}
       <div class="flex flex-col gap-2">
         {filters.map((row, index) => {
@@ -196,6 +218,8 @@ export function TableFilterBar({
           return (
             <div key={index} class="flex items-center gap-2">
               <Checkbox
+                aria-label="Use this condition"
+                title="Use this condition"
                 checked={row.enabled}
                 onChange={(e) =>
                   updateRow(index, {
@@ -204,6 +228,7 @@ export function TableFilterBar({
                 }
               />
               <Select
+                aria-label="Column"
                 value={row.column}
                 onChange={(e) =>
                   updateRow(index, {
@@ -219,6 +244,7 @@ export function TableFilterBar({
                 ))}
               </Select>
               <Select
+                aria-label="Operator"
                 value={row.operator}
                 onChange={(e) =>
                   updateRow(index, {
@@ -244,6 +270,8 @@ export function TableFilterBar({
               <div class="flex-1">
                 <Input
                   type="text"
+                  aria-label={isAppliedFilter ? "Value (applied)" : "Value"}
+                  title={isAppliedFilter ? "Applied" : undefined}
                   placeholder={
                     isNullFilterOperator(row.operator)
                       ? ""
@@ -251,7 +279,7 @@ export function TableFilterBar({
                         ? "min, max"
                         : isListFilterOperator(row.operator)
                           ? "value1, value2, ..."
-                          : "EMPTY"
+                          : "Value"
                   }
                   value={isNullFilterOperator(row.operator) ? "" : row.value}
                   disabled={isNullFilterOperator(row.operator)}
@@ -261,6 +289,8 @@ export function TableFilterBar({
                     })
                   }
                   onKeyDown={(e) => {
+                    // The Enter that ends an IME composition only commits text.
+                    if (e.isComposing || e.keyCode === 229) return;
                     if (e.key !== "Enter") return;
                     e.preventDefault();
                     handleApplyRow(row);
@@ -343,20 +373,26 @@ export function TableFilterBar({
               Clear
             </Button>
             <div class="relative">
-              <Button variant="shadow" className="gap-0 p-0 text-xs">
-                <div
-                  class="py-0.75 pr-2 pl-3"
-                  onClick={() => handleApplyAll("AND")}
+              <div class="flex">
+                <Button
+                  variant="shadow"
+                  className="rounded-r-none px-3 py-0.75 text-xs"
+                  onClick={() => handleApplyAll(filterCombine)}
+                  title={`Apply all conditions, joined with ${filterCombine}`}
                 >
-                  Apply All
-                </div>
-                <div
-                  class="border-l border-neutral-200 px-1"
+                  Apply All ({filterCombine})
+                </Button>
+                <Button
+                  variant="shadow"
+                  className="rounded-l-none border-l border-neutral-200 px-1 py-0.75 text-xs"
                   onClick={() => setApplyAllOpen(!applyAllOpen)}
+                  aria-label="Choose how to join conditions"
+                  aria-haspopup="menu"
+                  aria-expanded={applyAllOpen}
                 >
                   <ChevronDownIcon className="size-3.5" />
-                </div>
-              </Button>
+                </Button>
+              </div>
               {applyAllOpen && (
                 <div class="z-50">
                   <div
@@ -364,21 +400,24 @@ export function TableFilterBar({
                     onClick={() => setApplyAllOpen(false)}
                     aria-hidden
                   />
-                  <div class="absolute top-full right-0 z-20 mt-1 w-36 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg">
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-100"
-                      onClick={() => handleApplyAll("AND")}
-                    >
-                      AND
-                    </button>
-                    <button
-                      type="button"
-                      class="block w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-100"
-                      onClick={() => handleApplyAll("OR")}
-                    >
-                      OR
-                    </button>
+                  <div
+                    role="menu"
+                    class="absolute top-full right-0 z-20 mt-1 w-52 rounded-lg border border-neutral-200 bg-white py-1 shadow-lg"
+                  >
+                    {(["AND", "OR"] as const).map((combine) => (
+                      <button
+                        key={combine}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={filterCombine === combine}
+                        class="block w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-100"
+                        onClick={() => handleApplyAll(combine)}
+                      >
+                        {combine === "AND"
+                          ? "AND: rows matching all conditions"
+                          : "OR: rows matching any condition"}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}

@@ -1,3 +1,4 @@
+import type { RecordedRows } from "./rowPositionPatches";
 import type {
   DataAction,
   DataKey,
@@ -13,6 +14,8 @@ export type PatchMapEntry = {
   tableData?: TableDataState;
   tableWindow: TableWindow;
   patches: WindowPatchBuckets;
+  /** Rows that unsaved row edits and deletions target (see rowPositionPatches). */
+  originalRows?: RecordedRows;
 };
 
 export type PatchApplyContext = {
@@ -55,16 +58,23 @@ export function patchValueToString(
   return String(value);
 }
 
+/**
+ * The row a row patch targets: the row recorded when it was made, else (older
+ * patches) the row now loaded at its page position.
+ */
 function resolveRowIndex(
   rowKey: string,
   offset: number,
   key: string,
   store: ReturnType<
     typeof import("src/stores/connection").useConnectionStore.getState
-  >
+  >,
+  recorded?: unknown[]
 ) {
   const rowIndex = Number(rowKey);
   if (!Number.isFinite(rowIndex) || rowIndex < 0) return null;
+
+  if (recorded) return { resolvedIndex: rowIndex, sourceRow: recorded };
 
   const cache = store.tableRowCacheByKey[key];
   const candidateIndices = [rowIndex, rowIndex + offset];

@@ -411,6 +411,8 @@ export function TableData({
           publishSelectedRowDetail(cell.rowIdx);
         }}
         onAddRow={readOnly ? undefined : onAddRow}
+        // Rows are added explicitly (+ Row); a stray double-click must not.
+        addRowOnBlankDoubleClick={false}
         onDuplicateRow={readOnly ? undefined : handleDuplicateRow}
         onPasteRows={readOnly ? undefined : handlePasteRows}
         onRefresh={onRefresh}

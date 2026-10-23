@@ -1,3 +1,5 @@
+import { patchFieldEntries, recordedRow } from "./rowPositionPatches";
+import { resolveRowIndex } from "./types";
 import {
   cassandraPrimaryKeyColumns,
   cassandraUpdateRows,
@@ -55,7 +57,6 @@ export async function applyCassandraPatchEntry(
     tableWindow.table.name
   );
   const cols = store.tableDataMap[key]?.columns ?? [];
-  const cache = store.tableRowCacheByKey[key];
   const colIndex = new Map(
     cols.map((col, idx) => [col?.name ?? "", idx] as const)
   );
@@ -70,15 +71,14 @@ export async function applyCassandraPatchEntry(
     if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
 
     const raw = (patch ?? {}) as Record<string, unknown>;
-    const candidateIndices = [rowIndex, rowIndex + ctx.offset];
-    const resolvedIndex =
-      candidateIndices.find(
-        (idx) =>
-          Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
-      ) ?? rowIndex;
+    const sourceRow = resolveRowIndex(
+      rowKey,
+      ctx.offset,
+      key,
+      store,
+      recordedRow(entry, rowKey)
+    )?.sourceRow;
 
-    const sourceRow =
-      cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
     if (!sourceRow || !Array.isArray(sourceRow)) continue;
 
     const pk: Record<string, string> = {};
@@ -99,8 +99,8 @@ export async function applyCassandraPatchEntry(
     }
 
     const set: Record<string, string> = {};
-    for (const [colName, value] of Object.entries(raw)) {
-      if (colName === "__rowKey" || pkCols.includes(colName)) continue;
+    for (const [colName, value] of patchFieldEntries(raw)) {
+      if (pkCols.includes(colName)) continue;
       const next = patchValueToString(value);
       if (!next.trim()) continue;
       set[colName] = next;

@@ -296,12 +296,18 @@ export function useMainTableDataLoading(args: {
   const loadedRowCount =
     loadedMax >= streamOffset ? loadedMax - streamOffset + 1 : 0;
   const rowsMatchRequestedOffset = streamOffset === offset;
+  // Only an exact count bounds a page: an estimate can be lower than the real
+  // total, and the rows past it are still loaded and shown.
+  const exactRowCount =
+    typeof meta.rowCount === "number" && !meta.rowCountIsEstimated
+      ? meta.rowCount
+      : null;
   const basePageTotal = useMemo(() => {
-    if (typeof meta.rowCount === "number") {
-      return Math.min(limit, Math.max(0, meta.rowCount - offset));
+    if (exactRowCount !== null) {
+      return Math.min(limit, Math.max(0, exactRowCount - offset));
     }
     return limit;
-  }, [meta.rowCount, limit, offset]);
+  }, [exactRowCount, limit, offset]);
 
   const columnsLoaded =
     Array.isArray(meta.columns) &&
@@ -319,7 +325,7 @@ export function useMainTableDataLoading(args: {
     (rowsKnownEmpty ||
       (!rowsRunning &&
         (hasAppliedFilters ||
-          typeof meta.rowCount !== "number" ||
+          exactRowCount === null ||
           loadedRowCount >= basePageTotal)));
   const showingStalePage =
     !currentPageLoaded &&
@@ -372,9 +378,12 @@ export function useMainTableDataLoading(args: {
     errorText,
     hasAppliedFilters,
     basePageTotal,
+    exactRowCount,
     loadedMax,
     loadedRowCount,
     showingStalePage,
+    /** The requested page is fully loaded and no row stream is replacing it. */
+    rowsSettled: currentPageLoaded,
     renderLimit,
     renderOffset,
     shouldShowLoading,
