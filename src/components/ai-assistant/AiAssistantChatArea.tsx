@@ -13,12 +13,13 @@ import {
   ChatPlusIcon,
   ChevronDownIcon,
   ClockIcon,
+  CopyIcon,
   EditIcon,
   MinusIcon,
   MoreVerticalIcon,
-  ShareIcon,
   SparklesIcon,
   VaultIcon,
+  XIcon,
 } from "src/components/icons";
 import {
   Dialog,
@@ -33,6 +34,7 @@ import type { QuerySafetyMode } from "src/lib/queries/querySafety";
 import { confirmDialog } from "src/lib/system-dialog";
 import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
 import { cn } from "src/utils/cn";
+import { sessionDayLabel } from "src/utils/connectionLog";
 import { Button } from "../common/Button";
 import { CheckMarkIcon } from "../icons/CheckMark";
 
@@ -126,17 +128,19 @@ function AiModelPicker(props: {
             }}
           >
             <SparklesIcon className="size-4 text-neutral-700" />
-            <span class="min-w-0 flex-1">Auto</span>
+            <span class="min-w-0 flex-1">
+              <span class="block">Auto</span>
+              <span class="block text-xs font-normal text-neutral-500">
+                The default provider and its default model
+              </span>
+            </span>
             {autoSelected ? (
               <CheckMarkIcon className="size-4 text-neutral-900" />
             ) : null}
           </button>
 
           <div class="px-3 pt-3 pb-1 text-xs font-semibold text-neutral-500">
-            Select a model{" "}
-            <span class="rounded-md bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 uppercase">
-              New
-            </span>
+            Select a model
           </div>
 
           <OverlayScrollArea className="max-h-80">
@@ -289,7 +293,9 @@ export function AiAssistantChatArea(props: {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState("");
-  const [shareCopied, setShareCopied] = useState(false);
+  const [copyChatResult, setCopyChatResult] = useState<
+    "copied" | "failed" | null
+  >(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const historyListRef = useRef<HTMLDivElement>(null);
@@ -314,6 +320,13 @@ export function AiAssistantChatArea(props: {
   useEffect(() => {
     focusPromptRef.current = true;
   }, [activeSessionId]);
+  // The prompt grows with its text up to its max height, then scrolls.
+  useLayoutEffect(() => {
+    const textarea = promptRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [prompt]);
   useEffect(() => {
     if (historyOpen || renameOpen || !focusPromptRef.current) return;
     focusPromptRef.current = false;
@@ -426,7 +439,7 @@ export function AiAssistantChatArea(props: {
         },
       ];
 
-  const handleShare = async () => {
+  const handleCopyChat = async () => {
     const transcript = messages
       .map((message) => {
         const speaker = message.role === "user" ? "You" : "PoliteDB AI";
@@ -436,12 +449,45 @@ export function AiAssistantChatArea(props: {
       .filter(Boolean)
       .join("\n\n");
 
-    await navigator.clipboard.writeText(
-      transcript || "PoliteDB AI chat is empty."
-    );
-    setShareCopied(true);
-    window.setTimeout(() => setShareCopied(false), 1200);
+    try {
+      await navigator.clipboard.writeText(
+        transcript || "PoliteDB AI chat is empty."
+      );
+      setCopyChatResult("copied");
+    } catch {
+      setCopyChatResult("failed");
+    }
+    window.setTimeout(() => setCopyChatResult(null), 1500);
   };
+
+  const enabledProviderCount = providerOptions.filter(
+    (provider) => provider.enabled
+  ).length;
+  const startWith = (text: string) => {
+    onPromptChange(text);
+    promptRef.current?.focus();
+  };
+  const suggestions = runtimeConnectionId
+    ? [
+        "Which tables are the largest?",
+        "Summarize how the tables in this database are related",
+        "Help me write a query",
+      ]
+    : [
+        "Explain the difference between a LEFT JOIN and an INNER JOIN",
+        "Help me write a query",
+      ];
+  // Newest first, under day headings ("Today", "Yesterday", "Mon, Oct 19").
+  const now = Date.now();
+  const sessionGroups: { label: string; sessions: AiChatSession[] }[] = [];
+  for (const session of [...chatSessions].sort(
+    (a, b) => b.updatedAt - a.updatedAt
+  )) {
+    const label = sessionDayLabel(session.updatedAt, now);
+    const group = sessionGroups[sessionGroups.length - 1];
+    if (group?.label === label) group.sessions.push(session);
+    else sessionGroups.push({ label, sessions: [session] });
+  }
 
   const handlePromptInput = (value: string, cursorPosition: number | null) => {
     onPromptChange(value);
@@ -476,28 +522,37 @@ export function AiAssistantChatArea(props: {
               padding={2}
               showArrow={false}
               content={
-                <div class="w-70 rounded-2xl border border-neutral-200 bg-white px-2 py-3 shadow-2xl">
-                  <div class="mb-2 px-2 text-sm font-semibold text-neutral-500">
-                    Today
-                  </div>
-                  {chatSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      class="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-base text-neutral-900 hover:bg-neutral-50"
-                      onClick={() => {
-                        onSwitchSession(session.id);
-                        setTitleOpen(false);
-                      }}
-                    >
-                      <span class="min-w-0 flex-1 truncate">
-                        {session.title || "New Chat"}
-                      </span>
-                      {session.id === activeSessionId ? (
-                        <CheckMarkIcon className="size-4" />
-                      ) : null}
-                    </button>
-                  ))}
+                <div class="w-70 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl">
+                  <OverlayScrollArea
+                    className="max-h-[min(24rem,60vh)]"
+                    contentClassName="px-2 py-3"
+                  >
+                    {sessionGroups.map((group) => (
+                      <div key={group.label} class="not-first:mt-2">
+                        <div class="mb-1 px-2 text-xs font-semibold text-neutral-500">
+                          {group.label}
+                        </div>
+                        {group.sessions.map((session) => (
+                          <button
+                            key={session.id}
+                            type="button"
+                            class="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-base text-neutral-900 hover:bg-neutral-50"
+                            onClick={() => {
+                              onSwitchSession(session.id);
+                              setTitleOpen(false);
+                            }}
+                          >
+                            <span class="min-w-0 flex-1 truncate">
+                              {session.title || "New Chat"}
+                            </span>
+                            {session.id === activeSessionId ? (
+                              <CheckMarkIcon className="size-4" />
+                            ) : null}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </OverlayScrollArea>
                 </div>
               }
             >
@@ -518,21 +573,31 @@ export function AiAssistantChatArea(props: {
             <button
               type="button"
               class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
-              title={shareCopied ? "Copied chat" : "Share chat"}
-              aria-label={shareCopied ? "Copied chat" : "Share chat"}
-              onClick={() => void handleShare()}
+              title="Copy chat"
+              aria-label="Copy chat"
+              onClick={() => void handleCopyChat()}
             >
-              <ShareIcon className="size-5" />
+              <CopyIcon className="size-5" />
             </button>
-            {shareCopied ? (
+            {copyChatResult ? (
               <div
+                role="status"
                 class={cn(
-                  "absolute top-10 right-3 z-20 rounded-lg border border-neutral-200 bg-white px-3 py-1.5",
-                  "flex items-center gap-2 text-xs font-semibold whitespace-nowrap text-neutral-700 shadow-lg"
+                  "absolute top-10 right-3 z-20 rounded-lg border bg-white px-3 py-1.5",
+                  "flex items-center gap-2 text-xs font-semibold whitespace-nowrap shadow-lg",
+                  copyChatResult === "copied"
+                    ? "border-neutral-200 text-neutral-700"
+                    : "border-red-200 text-red-700"
                 )}
               >
-                <CheckMarkIcon class="size-4 rounded-full border border-neutral-300 p-px" />
-                <span>Chat copied to clipboard</span>
+                {copyChatResult === "copied" ? (
+                  <>
+                    <CheckMarkIcon class="size-4 rounded-full border border-neutral-300 p-px" />
+                    <span>Chat copied to clipboard</span>
+                  </>
+                ) : (
+                  <span>Could not copy the chat</span>
+                )}
               </div>
             ) : null}
             <button
@@ -591,10 +656,43 @@ export function AiAssistantChatArea(props: {
           )}
         >
           <div class="w-full max-w-full min-w-0 space-y-1 overflow-hidden">
-            {messages.length === 0 ? (
-              <div class="rounded-xl border border-dashed border-neutral-200 bg-slate-50 p-4 text-[13px] text-neutral-500">
-                Ask about data, get SQL suggestions, or describe the insight you
-                want to see.
+            {messages.length === 0 && enabledProviderCount === 0 ? (
+              <div class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600">
+                <div class="font-semibold text-neutral-900">
+                  Set up an AI provider
+                </div>
+                <p class="mt-1">
+                  Add a provider and its API key, or a local Ollama server, to
+                  start chatting.
+                </p>
+                <Button class="mt-3" onClick={onOpenSettings}>
+                  Open AI settings
+                </Button>
+              </div>
+            ) : messages.length === 0 ? (
+              <div class="space-y-3 text-sm text-neutral-600">
+                <p>
+                  Ask about your data, get SQL suggestions, or describe the
+                  insight you want to see.
+                </p>
+                <div class="flex flex-col items-start gap-2">
+                  {suggestions.map((text) => (
+                    <button
+                      key={text}
+                      type="button"
+                      class="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-left text-sm text-neutral-700 hover:bg-neutral-50"
+                      onClick={() => startWith(text)}
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+                {availableContextOptions.length ? (
+                  <p class="text-xs text-neutral-500">
+                    Type @ to add context, such as the current connection or
+                    SQL.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
@@ -620,44 +718,44 @@ export function AiAssistantChatArea(props: {
         </div>
       </div>
 
-      {showScrollToBottom ? (
-        <button
-          type="button"
-          onClick={onScrollToBottom}
-          title="Scroll to latest message"
-          aria-label="Scroll to latest message"
-          class={cn(
-            "absolute bottom-42 left-1/2 z-10 -translate-x-1/2 rounded-full border border-neutral-200",
-            "flex size-9 items-center justify-center bg-neutral-700 text-white shadow-md",
-            "transition-colors hover:bg-neutral-700",
-            submitting
-              ? "px-3 py-1 text-sm leading-none tracking-widest"
-              : "p-1.5"
-          )}
-        >
-          {submitting ? (
-            <span aria-hidden="true">•••</span>
-          ) : (
-            <ChevronDownIcon className="size-4" aria-hidden="true" />
-          )}
-        </button>
-      ) : null}
+      <div class="relative shrink-0 p-3">
+        {/* Sits just above the composer, however tall it grows. */}
+        {showScrollToBottom ? (
+          <button
+            type="button"
+            onClick={onScrollToBottom}
+            title="Scroll to latest message"
+            aria-label="Scroll to latest message"
+            class={cn(
+              "absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 rounded-full border border-neutral-200",
+              "flex size-9 items-center justify-center bg-neutral-700 text-white shadow-md",
+              "transition-colors hover:bg-neutral-700",
+              submitting
+                ? "px-3 py-1 text-sm leading-none tracking-widest"
+                : "p-1.5"
+            )}
+          >
+            {submitting ? (
+              <span aria-hidden="true">•••</span>
+            ) : (
+              <ChevronDownIcon className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
 
-      <div ref={composerRef} class="shrink-0 p-3">
+        {/* The composer proper: the scroll button above stays out of it, so it
+            keeps focus when an answer ends. */}
         <div
+          ref={composerRef}
           class={cn(
             "rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm"
           )}
         >
-          <div class={cn("mb-2 flex items-center justify-end gap-2")}>
-            <div class="text-xs text-neutral-400">
-              {submitting
-                ? assistantStatus === "loading_model"
-                  ? "Loading model..."
-                  : ""
-                : ""}
+          {submitting && assistantStatus === "loading_model" ? (
+            <div class="mb-1 text-right text-xs text-neutral-400">
+              Loading model...
             </div>
-          </div>
+          ) : null}
 
           {selectedContexts.length ? (
             <div class="mb-2 flex flex-wrap items-center gap-1.5">
@@ -667,10 +765,11 @@ export function AiAssistantChatArea(props: {
                   type="button"
                   class="inline-flex max-w-full items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-200"
                   title={`Remove ${item.label}`}
+                  aria-label={`Remove ${item.label}`}
                   onClick={() => onToggleContext(item.id)}
                 >
                   <span class="truncate">{item.label}</span>
-                  <span class="text-neutral-400">x</span>
+                  <XIcon className="size-3 text-neutral-400" />
                 </button>
               ))}
             </div>
@@ -710,7 +809,7 @@ export function AiAssistantChatArea(props: {
                 }}
                 placeholder="Ask anything..."
                 class={cn(
-                  "w-full resize-none border-none bg-transparent px-1 py-1 text-neutral-900 outline-none placeholder:text-neutral-400",
+                  "max-h-50 w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-1 text-neutral-900 outline-none placeholder:text-neutral-400",
                   floating ? "min-h-20 text-base" : "min-h-14 text-sm"
                 )}
               />
@@ -845,7 +944,7 @@ export function AiAssistantChatArea(props: {
         onClose={() => setHistoryOpen(false)}
         size="md"
         // The header stays put; only the session list scrolls.
-        className="flex max-h-[min(50rem,86vh)] min-h-200 flex-col overflow-hidden"
+        className="flex max-h-[min(50rem,86vh)] flex-col overflow-hidden"
       >
         <DialogHeader className="shrink-0 border-b border-neutral-200">
           <DialogTitle className="flex items-center gap-2 font-semibold">

@@ -287,7 +287,7 @@ function MessageParts(props: {
           return (
             <div
               key={`${message.id}-part-${index}`}
-              class="max-w-full min-w-0 rounded-lg border border-red-200 bg-red-50 p-2 text-sm break-all whitespace-pre-wrap text-red-700"
+              class="max-w-full min-w-0 rounded-lg border border-red-200 bg-red-50 p-2 text-sm wrap-break-word whitespace-pre-wrap text-red-700"
             >
               {part.message}
             </div>
@@ -523,7 +523,7 @@ export function AiAssistantMessageBody(props: {
         />
       ) : !hasParts ? (
         <div
-          class={`max-w-full min-w-0 break-all whitespace-pre-wrap ${
+          class={`max-w-full min-w-0 wrap-break-word whitespace-pre-wrap ${
             floating ? "text-inherit" : "text-sm text-neutral-800"
           }`}
         >
