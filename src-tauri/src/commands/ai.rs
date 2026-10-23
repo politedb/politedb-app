@@ -164,18 +164,48 @@ pub async fn ai_ollama_status(
     Ok(OllamaStatusResponse { request_id, status })
 }
 
+/// How long the settings Test waits for the provider (chat requests allow
+/// minutes; a test that hangs that long would lock the dialog).
+const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Tests an unsaved draft with a short completion. Persists nothing and ignores
-/// `enabled` (plan R3). AI is free: no license check (D16).
+/// `enabled` (plan R3). AI is free: no license check (D16). Ends after
+/// [`TEST_TIMEOUT`], or when [`ai_provider_cancel_list_models`] cancels
+/// `request_id`.
 #[tauri::command]
 pub async fn ai_provider_test_draft(
     app: AppHandle,
     state: tauri::State<'_, AppState>,
     config: AiProviderConfig,
     auth: KeyChangeInput,
+    request_id: String,
 ) -> Result<(), String> {
     let config = provider::validate_for_completion(config)?;
     let key = draft_key(&app, &state, &config, auth)?;
-    let text = chat::complete(&config, &chat::probe_request(&config), key.as_deref()).await?;
+    crate::ai::cancel::run_cancellable(
+        &state.ai_discovery_cancel,
+        &request_id,
+        "AI_PROVIDER_TEST_CANCELED",
+        async {
+            let request = chat::probe_request(&config);
+            probe_within(
+                TEST_TIMEOUT,
+                chat::complete(&config, &request, key.as_deref()),
+            )
+            .await
+        },
+    )
+    .await
+}
+
+/// The test verdict: the reply must be non-empty and arrive within `limit`.
+async fn probe_within(
+    limit: std::time::Duration,
+    reply: impl std::future::Future<Output = Result<String, String>>,
+) -> Result<(), String> {
+    let text = tokio::time::timeout(limit, reply)
+        .await
+        .map_err(|_| "AI_PROVIDER_TEST_TIMEOUT".to_string())??;
     if text.is_empty() {
         return Err("AI_PROVIDER_MODEL_INVALID: empty response".into());
     }
@@ -264,5 +294,42 @@ mod tests {
         assert_eq!(KeyChange::from(set), KeyChange::Set("tok".into()));
         let remove: KeyChangeInput = serde_json::from_str(r#"{"action":"remove"}"#).unwrap();
         assert_eq!(KeyChange::from(remove), KeyChange::Remove);
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_provider_times_out() {
+        let slow = async {
+            tokio::time::sleep(Duration::from_secs(120)).await;
+            Ok("OK".to_string())
+        };
+        assert_eq!(
+            probe_within(TEST_TIMEOUT, slow).await.unwrap_err(),
+            "AI_PROVIDER_TEST_TIMEOUT"
+        );
+    }
+
+    async fn reply(result: Result<&'static str, &'static str>) -> Result<String, String> {
+        result.map(str::to_string).map_err(str::to_string)
+    }
+
+    #[tokio::test]
+    async fn verdicts() {
+        assert!(probe_within(TEST_TIMEOUT, reply(Ok("OK"))).await.is_ok());
+        assert_eq!(
+            probe_within(TEST_TIMEOUT, reply(Ok(""))).await.unwrap_err(),
+            "AI_PROVIDER_MODEL_INVALID: empty response"
+        );
+        assert_eq!(
+            probe_within(TEST_TIMEOUT, reply(Err("AI_CHAT_FAILED: 401 Unauthorized")))
+                .await
+                .unwrap_err(),
+            "AI_CHAT_FAILED: 401 Unauthorized"
+        );
     }
 }

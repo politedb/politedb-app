@@ -50,6 +50,8 @@ export function AiModelCombobox(props: {
   onAdd: (model: string) => void;
   /** Changing this focuses the input and opens the suggestions (e.g. after reloading models). */
   focusRequest?: number;
+  /** No list and no additions (the surrounding form is being saved). */
+  disabled?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -76,13 +78,19 @@ export function AiModelCombobox(props: {
     ...options.matches,
     ...(options.custom ? [options.custom] : []),
   ];
-  const showList = open && rows.length > 0;
+  // The list is portaled outside any disabled <fieldset>, so it must check too.
+  const showList = open && rows.length > 0 && !props.disabled;
 
   useEffect(() => {
-    if (!props.focusRequest) return;
+    if (!props.focusRequest || props.disabled) return;
     inputRef.current?.focus();
     setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.focusRequest]);
+
+  useEffect(() => {
+    if (props.disabled) setOpen(false);
+  }, [props.disabled]);
 
   // Follow the input while the list is open (dialog scroll, window resize).
   useLayoutEffect(() => {
@@ -100,7 +108,7 @@ export function AiModelCombobox(props: {
 
   const add = (model: string) => {
     const value = model.trim();
-    if (!value) return;
+    if (!value || props.disabled) return;
     props.onAdd(value);
     setQuery("");
     setActive(-1);
@@ -136,7 +144,11 @@ export function AiModelCombobox(props: {
         aria-autocomplete="list"
         placeholder="Search or type a model ID"
         value={query}
-        class="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        disabled={props.disabled}
+        class={cn(
+          "h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm outline-none",
+          "focus:border-blue-400 focus:ring-1 focus:ring-blue-100 dark:focus:ring-blue-400"
+        )}
         onInput={(event) => {
           setQuery(event.currentTarget.value);
           setOpen(true);
@@ -154,7 +166,7 @@ export function AiModelCombobox(props: {
               // Portaled outside the assistant: mark it so the floating assistant's
               // outside-click handler treats clicks here as inside (it would close).
               data-ai-assistant-popover="true"
-              class="fixed z-[1100] overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
+              class="fixed z-1100 overflow-auto rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
               style={{
                 left: position.left,
                 width: position.width,

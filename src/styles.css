@@ -447,10 +447,16 @@ html.dark .border-sky-200 {
   border-color: rgb(14 165 233 / 0.4) !important;
 }
 
+/* Tailwind v4 draws dividers on every child but the last (v3 used the
+   following siblings); match both so no light line is left in dark mode. */
 html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
 html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
 html.dark .divide-neutral-100 > :not([hidden]) ~ :not([hidden]),
-html.dark .divide-neutral-200 > :not([hidden]) ~ :not([hidden]) {
+html.dark .divide-neutral-200 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-100 > :not(:last-child),
+html.dark .divide-slate-200 > :not(:last-child),
+html.dark .divide-neutral-100 > :not(:last-child),
+html.dark .divide-neutral-200 > :not(:last-child) {
   border-color: #353535 !important;
 }
 

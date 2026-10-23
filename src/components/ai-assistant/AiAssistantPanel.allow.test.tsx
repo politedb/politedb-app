@@ -80,6 +80,7 @@ vi.mock("src/components/icons", () => ({
   BackupIcon: () => <span>backup</span>,
   ChatPlusIcon: () => <span>new-chat</span>,
   ChevronDownIcon: () => <span>chevron-down</span>,
+  ChevronRightIcon: () => <span>chevron-right</span>,
   DownloadIcon: () => <span>download</span>,
   MinusIcon: () => <span>minus</span>,
   MoreVerticalIcon: () => <span>more</span>,

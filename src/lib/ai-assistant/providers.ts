@@ -34,7 +34,9 @@ export const AI_PROVIDER_LABELS: Record<AiProviderKind, string> = {
 export const DEFAULT_MODELS: Record<AiProviderKind, string> = {
   openai: "gpt-4.1-mini",
   anthropic: "claude-sonnet-5-5",
-  gemini: "gemini-2.5-flash",
+  // An alias Google keeps pointing at its current Flash model: dated models
+  // close to new keys ("gemini-2.5-flash is no longer available to new users").
+  gemini: "gemini-flash-latest",
   openrouter: "openai/gpt-4.1-mini",
   grok: "grok-3-mini",
   deepseek: "deepseek-chat",
@@ -64,7 +66,12 @@ export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
     "claude-haiku-5-5",
     "claude-fable-5-1",
   ],
-  gemini: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+  gemini: [
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+  ],
   openrouter: [
     "openai/gpt-4.1-mini",
     "anthropic/claude-sonnet-4.5",
@@ -81,6 +88,18 @@ export const SUGGESTED_MODELS: Record<AiProviderKind, string[]> = {
   deepseek: ["deepseek-chat", "deepseek-reasoner"],
   github_copilot: ["gpt-4.1", "gpt-4o", "gpt-4o-mini"],
   ollama: ["llama3.2", "qwen2.5-coder:7b", "mistral", "gemma3"],
+};
+
+/** Where to create an API key, per cloud provider. */
+export const AI_PROVIDER_KEY_PAGES: Partial<Record<AiProviderKind, string>> = {
+  openai: "https://platform.openai.com/api-keys",
+  anthropic: "https://console.anthropic.com/settings/keys",
+  gemini: "https://aistudio.google.com/apikey",
+  grok: "https://console.x.ai",
+  groq: "https://console.groq.com/keys",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  openrouter: "https://openrouter.ai/keys",
+  github_copilot: "https://github.com/settings/personal-access-tokens",
 };
 
 export const DEFAULT_HOSTS: Record<AiProviderKind, string> = {
