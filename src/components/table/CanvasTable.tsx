@@ -200,6 +200,8 @@ type Props = {
   onDeleteRow?: (rowIdx: number) => void;
   onDeleteRows?: (rowIndices: number[]) => void;
   onAddRow?: () => void;
+  /** Double-clicking below the last row adds one (off for the data grid). */
+  addRowOnBlankDoubleClick?: boolean;
   onDuplicateRow?: (rowIdx: number) => void;
   onRefresh?: () => void;
   onExportCurrentPage?: () => void;
@@ -536,6 +538,7 @@ export function CanvasTable({
   onDeleteRow,
   onDeleteRows,
   onAddRow,
+  addRowOnBlankDoubleClick = true,
   onDuplicateRow,
   onRefresh,
   onExportCurrentPage,
@@ -1144,15 +1147,16 @@ export function CanvasTable({
     setEditorValue(value);
   }, []);
 
-  const commitAndExit = useCallback(() => {
-    if (!editing) return;
+  /** Saves the edited value and closes the editor; false while it stays open. */
+  const commitAndExit = useCallback((): boolean => {
+    if (!editing) return false;
     if (nativeEditorKind === "blob") {
       cancelExit();
-      return;
+      return true;
     }
     if (!editorWasModifiedRef.current) {
       cancelExit();
-      return;
+      return true;
     }
 
     let nextValue: unknown = editorValue;
@@ -1161,7 +1165,7 @@ export function CanvasTable({
         nextValue = JSON.stringify(JSON.parse(editorValue));
       } catch {
         setEditorError("Invalid JSON");
-        return;
+        return false;
       }
     } else if (nativeEditorKind === "bool") {
       const normalized = editorValue.trim().toLowerCase();
@@ -1173,7 +1177,7 @@ export function CanvasTable({
         nextValue = false;
       } else {
         setEditorError("Use true, false, 1, 0, or NULL");
-        return;
+        return false;
       }
     } else if (nativeEditorKind === "date" || nativeEditorKind === "datetime") {
       nextValue = fromDateInputValue(editorValue, nativeEditorKind);
@@ -1184,6 +1188,7 @@ export function CanvasTable({
     onExitEdit?.();
     setEditorRect(null);
     setEditorError(null);
+    return true;
   }, [
     editing,
     nativeEditorKind,
@@ -1247,13 +1252,14 @@ export function CanvasTable({
       const currentDir =
         sortState && sortState.colName === colName ? sortState.direction : null;
 
+      // Ascending first, then descending, then no sort.
       let next: { colName: string; direction: "asc" | "desc" } | null;
-      if (currentDir === "desc") {
-        next = { colName, direction: "asc" };
-      } else if (currentDir === "asc") {
+      if (currentDir === "asc") {
+        next = { colName, direction: "desc" };
+      } else if (currentDir === "desc") {
         next = null; // clear sort
       } else {
-        next = { colName, direction: "desc" };
+        next = { colName, direction: "asc" };
       }
 
       onChangeSort(next);
@@ -1641,7 +1647,8 @@ export function CanvasTable({
   }, [booleanMenu, columns, onCommitEdit, cellOptions]);
 
   const openCellEditor = useCallback(
-    (rowIdx: number, colIdx: number) => {
+    /** `initialText` (a typed character) replaces the value, like a spreadsheet. */
+    (rowIdx: number, colIdx: number, initialText?: string) => {
       const column = columns[colIdx];
       if (!column) return;
       if (column.readonly || deletedRows?.has(rowIdx) || !onStartEdit) return;
@@ -1656,10 +1663,17 @@ export function CanvasTable({
 
       const row = getRowAt(rowIdx);
       const value = formatTableCellValue(row?.[colIdx] ?? null, column.db_type);
-      editorWasModifiedRef.current = false;
+      const replace =
+        initialText !== undefined &&
+        kind !== "blob" &&
+        kind !== "date" &&
+        kind !== "datetime";
+      editorWasModifiedRef.current = replace;
       setEditorError(null);
 
-      if (kind === "date" || kind === "datetime") {
+      if (replace) {
+        setEditorValue(initialText);
+      } else if (kind === "date" || kind === "datetime") {
         setEditorValue(toDateInputValue(value ?? "", kind));
       } else {
         setEditorValue(value ?? "");
@@ -1676,7 +1690,9 @@ export function CanvasTable({
           editor instanceof HTMLInputElement ||
           editor instanceof HTMLTextAreaElement
         ) {
-          editor.select();
+          // A typed character continues after itself; otherwise select all.
+          if (replace) editor.setSelectionRange(9e9, 9e9);
+          else editor.select();
         }
       });
     },
@@ -1690,6 +1706,44 @@ export function CanvasTable({
       onCellActivate,
     ]
   );
+
+  /**
+   * The next cell across, wrapping to the adjacent row at the row's ends; the
+   * same cell at the grid's first or last cell.
+   */
+  const stepAcross = (rowIdx: number, colIdx: number, delta: 1 | -1) => {
+    const next = colIdx + delta;
+    if (next >= columns.length) {
+      return rowIdx + 1 < totalRows
+        ? { rowIdx: rowIdx + 1, colIdx: 0 }
+        : { rowIdx, colIdx };
+    }
+    if (next < 0) {
+      return rowIdx > 0
+        ? { rowIdx: rowIdx - 1, colIdx: columns.length - 1 }
+        : { rowIdx, colIdx };
+    }
+    return { rowIdx, colIdx: next };
+  };
+
+  /** Selects a cell (clamped to the grid) and scrolls it into view. */
+  const moveSelection = (rowIdx: number, colIdx: number, extend = false) => {
+    if (totalRows <= 0 || columns.length === 0) return;
+    rowIdx = Math.max(0, Math.min(totalRows - 1, rowIdx));
+    colIdx = Math.max(0, Math.min(columns.length - 1, colIdx));
+    onSelect?.(rowIdx, colIdx, false, extend);
+    const host = scrollerRef.current;
+    if (!host) return;
+    const top = rowIdx * ROW_HEIGHT;
+    const left = colLefts[colIdx] ?? 0;
+    const width = colWidths[columns[colIdx]!.name] ?? 140;
+    if (top < host.scrollTop) host.scrollTop = top;
+    else if (top + ROW_HEIGHT > host.scrollTop + bodyH)
+      host.scrollTop = top + ROW_HEIGHT - bodyH;
+    if (left < host.scrollLeft) host.scrollLeft = left;
+    else if (left + width > host.scrollLeft + viewport.w)
+      host.scrollLeft = left + width - viewport.w;
+  };
 
   // --------------------------------------------------------------------------
   // Mouse Handlers (Select / Edit)
@@ -1905,7 +1959,7 @@ export function CanvasTable({
       const rowIdx = Math.floor(y / ROW_HEIGHT);
 
       if (rowIdx >= totalRows) {
-        onAddRow?.();
+        if (addRowOnBlankDoubleClick) onAddRow?.();
         return;
       }
       if (rowIdx < 0) return;
@@ -1926,6 +1980,7 @@ export function CanvasTable({
       colWidths,
       totalRows,
       onAddRow,
+      addRowOnBlankDoubleClick,
       onActivateRow,
       openCellEditor,
       ROW_HEIGHT,
@@ -1964,7 +2019,7 @@ export function CanvasTable({
         const target = e.target as HTMLElement;
         if (
           target.closest(
-            "input, textarea, select, [contenteditable='true'], [role='menu']"
+            "input, textarea, select, [contenteditable='true'], [role='menu'], [role='columnheader']"
           )
         )
           return;
@@ -1996,6 +2051,81 @@ export function CanvasTable({
           (selectedRows && selectedRows.size > 0) || selected;
         if (!hasSelection) return;
 
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onClearSelection?.();
+          return;
+        }
+
+        // Typing a character on a selected cell starts editing it with that
+        // character (spreadsheet style). An IME keystroke just opens the cell.
+        if (
+          selected &&
+          !onActivateRow &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          (e.key.length === 1 || e.isComposing || e.keyCode === 229)
+        ) {
+          const composing = e.isComposing || e.keyCode === 229;
+          if (!composing) e.preventDefault();
+          openCellEditor(
+            selected.rowIdx,
+            selected.colIdx,
+            composing ? undefined : e.key
+          );
+          return;
+        }
+
+        const pageRows = Math.max(1, Math.floor(bodyH / ROW_HEIGHT) - 1);
+        const jump: Record<string, () => { rowIdx: number; colIdx: number }> =
+          selected
+            ? {
+                Home: () => ({
+                  rowIdx: e.metaKey || e.ctrlKey ? 0 : selected.rowIdx,
+                  colIdx: 0,
+                }),
+                End: () => ({
+                  rowIdx:
+                    e.metaKey || e.ctrlKey ? totalRows - 1 : selected.rowIdx,
+                  colIdx: columns.length - 1,
+                }),
+                PageUp: () => ({
+                  rowIdx: selected.rowIdx - pageRows,
+                  colIdx: selected.colIdx,
+                }),
+                PageDown: () => ({
+                  rowIdx: selected.rowIdx + pageRows,
+                  colIdx: selected.colIdx,
+                }),
+              }
+            : {};
+        // Cmd/Ctrl+Arrow: to the first/last row or column.
+        if (selected && (e.metaKey || e.ctrlKey) && e.key.startsWith("Arrow")) {
+          e.preventDefault();
+          const vertical = e.key === "ArrowUp" || e.key === "ArrowDown";
+          moveSelection(
+            vertical
+              ? e.key === "ArrowUp"
+                ? 0
+                : totalRows - 1
+              : selected.rowIdx,
+            vertical
+              ? selected.colIdx
+              : e.key === "ArrowLeft"
+                ? 0
+                : columns.length - 1,
+            e.shiftKey
+          );
+          return;
+        }
+        if (jump[e.key]) {
+          e.preventDefault();
+          const next = jump[e.key]!();
+          moveSelection(next.rowIdx, next.colIdx, e.shiftKey);
+          return;
+        }
+
         if (selected && (e.key === "Enter" || e.key === "F2")) {
           e.preventDefault();
           if (e.key === "Enter" && onActivateRow) {
@@ -2019,31 +2149,13 @@ export function CanvasTable({
           if (e.key === "ArrowLeft") colIdx--;
           if (e.key === "ArrowRight") colIdx++;
           if (e.key === "Tab") {
-            colIdx += e.shiftKey ? -1 : 1;
-            if (colIdx >= columns.length) {
-              colIdx = 0;
-              rowIdx++;
-            }
-            if (colIdx < 0) {
-              colIdx = columns.length - 1;
-              rowIdx--;
-            }
+            ({ rowIdx, colIdx } = stepAcross(
+              rowIdx,
+              colIdx,
+              e.shiftKey ? -1 : 1
+            ));
           }
-          rowIdx = Math.max(0, Math.min(totalRows - 1, rowIdx));
-          colIdx = Math.max(0, Math.min(columns.length - 1, colIdx));
-          onSelect?.(rowIdx, colIdx, false, e.shiftKey && e.key !== "Tab");
-          const host = scrollerRef.current;
-          if (host) {
-            const top = rowIdx * ROW_HEIGHT;
-            const left = colLefts[colIdx] ?? 0;
-            const width = colWidths[columns[colIdx].name] ?? 140;
-            if (top < host.scrollTop) host.scrollTop = top;
-            else if (top + ROW_HEIGHT > host.scrollTop + bodyH)
-              host.scrollTop = top + ROW_HEIGHT - bodyH;
-            if (left < host.scrollLeft) host.scrollLeft = left;
-            else if (left + width > host.scrollLeft + viewport.w)
-              host.scrollLeft = left + width - viewport.w;
-          }
+          moveSelection(rowIdx, colIdx, e.shiftKey && e.key !== "Tab");
           return;
         }
 
@@ -2093,8 +2205,25 @@ export function CanvasTable({
               return (
                 <div
                   key={col.name}
+                  role="columnheader"
+                  aria-sort={
+                    sortDir === "asc"
+                      ? "ascending"
+                      : sortDir === "desc"
+                        ? "descending"
+                        : undefined
+                  }
+                  tabIndex={onChangeSort ? 0 : undefined}
+                  title={onChangeSort ? `Sort by ${col.name}` : undefined}
+                  onKeyDown={(e) => {
+                    if (!onChangeSort) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleHeaderClick(col.name);
+                    }
+                  }}
                   class={cn(
-                    "relative box-border flex items-center justify-between gap-1 border-r border-neutral-200",
+                    "relative box-border flex items-center justify-between gap-1 border-r border-neutral-200 outline-none focus-visible:bg-blue-50",
                     "px-2 text-sm font-semibold whitespace-nowrap text-neutral-700",
                     onChangeSort && "select-none active:bg-neutral-100"
                   )}
@@ -2131,7 +2260,8 @@ export function CanvasTable({
                   {/* --- RESIZE HANDLE --- */}
                   <div
                     data-resize-handle
-                    class="absolute top-0 right-0 z-10 h-full w-0.5 cursor-col-resize touch-none hover:bg-neutral-200 active:bg-neutral-400"
+                    // A wider grab area than the visible line.
+                    class="absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize touch-none bg-clip-content px-0.75 hover:bg-neutral-300 active:bg-neutral-400"
                     onPointerDown={(e) => handleResizeStart(e, col.name, w)}
                   />
                 </div>
@@ -2237,11 +2367,29 @@ export function CanvasTable({
               }
               onKeyDown={(e) => {
                 if (e.isComposing || e.keyCode === 229) return;
-                if (e.key === "Enter" || e.key === "Escape") {
+                if (
+                  e.key === "Enter" ||
+                  e.key === "Escape" ||
+                  e.key === "Tab"
+                ) {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (e.key === "Enter") commitAndExit();
-                  else cancelExit();
+                  const cell = editing;
+                  const closed =
+                    e.key === "Escape" ? (cancelExit(), true) : commitAndExit();
+                  // Like a spreadsheet: Enter goes down, Tab across (only once
+                  // the value was accepted).
+                  if (!closed) return;
+                  if (cell && e.key === "Enter" && !e.shiftKey) {
+                    moveSelection(cell.rowIdx + 1, cell.colIdx);
+                  } else if (cell && e.key === "Tab") {
+                    const next = stepAcross(
+                      cell.rowIdx,
+                      cell.colIdx,
+                      e.shiftKey ? -1 : 1
+                    );
+                    moveSelection(next.rowIdx, next.colIdx);
+                  }
                   queueMicrotask(() => {
                     if (!editorRef.current) rootRef.current?.focus();
                   });
