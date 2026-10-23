@@ -47,6 +47,7 @@ import { MainTableDialogs } from "./MainTableDialogs";
 import { useMainTablePaneState } from "../hooks/useMainTablePaneState";
 import { useMainTableDataLoading } from "../hooks/useMainTableDataLoading";
 import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
+import { pageRowCount } from "../lib/pageRowCount";
 import {
   confirmRowsChangeIn,
   useConfirmRowsChange,
@@ -659,31 +660,14 @@ export function MainTableDataPane(props: {
    * Paging
    * =========================================================================== */
 
-  const pageTotal = useMemo(() => {
-    if (!rowsInfo) return 0;
-
-    if (hasAppliedFilters) {
-      // When filters are applied, rowCount is the source of truth for the
-      // filtered result size. loadedRowCount may still reflect stale rows from
-      // a previous unfiltered window while new chunks are arriving.
-      if (typeof meta.rowCount === "number") {
-        return Math.min(Math.max(meta.rowCount, 0), loadedRowCount);
-      }
-      return loadedRowCount;
-    }
-
-    if (loadedRowCount <= 0) {
-      return basePageTotal;
-    }
-
-    return Math.min(basePageTotal, loadedRowCount);
-  }, [
-    rowsInfo,
+  const pageTotal = pageRowCount({
+    hasRowsWindow: !!rowsInfo,
     hasAppliedFilters,
+    rowCount: meta.rowCount,
     loadedRowCount,
     basePageTotal,
-    meta.rowCount,
-  ]);
+    rowsSettled,
+  });
 
   const visiblePageTotal = showingStalePage ? renderBasePageTotal : pageTotal;
 
