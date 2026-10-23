@@ -25,6 +25,37 @@ fn looks_like_query(sql: &str) -> bool {
         || up.starts_with("SET STATISTICS")
 }
 
+/// The Explain button sends `SET SHOWPLAN_ALL ON; <statement>; SET
+/// SHOWPLAN_ALL OFF;`. SQL Server requires a SET SHOWPLAN statement to be
+/// alone in its batch, so this splits it into the SET batch and the
+/// statement batch, run in that order on the same connection. The trailing
+/// OFF is dropped: the connection is opened for this operation and closed
+/// after it. Anything else returns None and runs unchanged.
+fn split_showplan(sql: &str) -> Option<(String, String)> {
+    let trimmed = sql.trim();
+    let upper = trimmed.to_ascii_uppercase();
+    let mode = ["ALL", "TEXT", "XML"]
+        .into_iter()
+        .find(|mode| upper.starts_with(&format!("SET SHOWPLAN_{mode} ON;")))?;
+    let on = format!("SET SHOWPLAN_{mode} ON");
+    // The prefix matched ASCII, so this index is a char boundary.
+    let rest = trimmed.get(on.len() + 1..)?.trim_end();
+    let rest = rest.strip_suffix(';').unwrap_or(rest).trim_end();
+    let off = format!("SET SHOWPLAN_{mode} OFF");
+    // `get` (not indexing): user SQL can end in multi-byte characters, and a
+    // cut inside one must mean "no match", never a panic.
+    let split = rest.len().checked_sub(off.len())?;
+    if !rest.get(split..)?.eq_ignore_ascii_case(&off) {
+        return None;
+    }
+    let statement = rest.get(..split)?.trim_end();
+    let statement = statement.strip_suffix(';')?.trim();
+    if statement.is_empty() {
+        return None;
+    }
+    Some((on, statement.to_string()))
+}
+
 fn col_to_cell(v: &tiberius::ColumnData<'static>) -> CellValue {
     match v {
         tiberius::ColumnData::U8(Some(x)) => CellValue::I64(*x as i64),
@@ -181,7 +212,30 @@ pub async fn run_sqlserver_sql_query(
         return;
     }
 
-    let mut stream = match client.simple_query(sql.clone()).await {
+    let batch = match split_showplan(&sql) {
+        Some((set_showplan, statement)) => {
+            let set = async {
+                client
+                    .simple_query(set_showplan)
+                    .await?
+                    .into_results()
+                    .await
+            };
+            if let Err(e) = set.await {
+                emit_error(
+                    &ctx.app,
+                    op_id,
+                    format!("SQLSERVER_QUERY_FAILED: {e}"),
+                    started_at.elapsed().as_millis(),
+                );
+                return;
+            }
+            statement
+        }
+        None => sql.clone(),
+    };
+
+    let mut stream = match client.simple_query(batch).await {
         Ok(s) => s,
         Err(e) => {
             emit_error(
@@ -278,4 +332,115 @@ pub async fn run_sqlserver_sql_query(
         started_at.elapsed().as_millis(),
         Some(columns),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn showplan_batches_are_split() {
+        assert_eq!(
+            split_showplan("SET SHOWPLAN_ALL ON;\nselect 1;\nSET SHOWPLAN_ALL OFF;"),
+            Some(("SET SHOWPLAN_ALL ON".into(), "select 1".into()))
+        );
+        // Case, spacing and a missing final semicolon.
+        assert_eq!(
+            split_showplan("  set showplan_all on;\n select a;b \n;\nset showplan_all off  "),
+            Some(("SET SHOWPLAN_ALL ON".into(), "select a;b".into()))
+        );
+        assert_eq!(
+            split_showplan("SET SHOWPLAN_ALL ON;\nselect N'é日';\nSET SHOWPLAN_ALL OFF;"),
+            Some(("SET SHOWPLAN_ALL ON".into(), "select N'é日'".into()))
+        );
+        assert_eq!(
+            split_showplan("SET SHOWPLAN_XML ON;\nselect 1;\nSET SHOWPLAN_XML OFF;")
+                .map(|(on, _)| on),
+            Some("SET SHOWPLAN_XML ON".into())
+        );
+    }
+
+    #[test]
+    fn other_sql_is_left_alone() {
+        for sql in [
+            "select 1",
+            "SET SHOWPLAN_ALL ON",
+            "SET SHOWPLAN_ALL ON;\nSET SHOWPLAN_ALL OFF;",
+            "SET SHOWPLAN_ALL ON;\nselect 1;\nSET SHOWPLAN_XML OFF;",
+            "SET SHOWPLAN_ALL ON;\nselect 1;",
+            "SET STATISTICS PROFILE ON;\nselect 1;\nSET STATISTICS PROFILE OFF;",
+            // Multi-byte characters where the suffix would start.
+            "SET SHOWPLAN_ALL ON; SELECT N'éééééééééé'",
+            "SET SHOWPLAN_ALL ON; SELECT N'日本語日本語日本語日本語'",
+        ] {
+            assert_eq!(split_showplan(sql), None, "{sql}");
+        }
+    }
+
+    /// Against a disposable SQL Server only:
+    /// `SQLSERVER_TEST_PORT=… SQLSERVER_TEST_PASSWORD=… cargo test showplan_live -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn showplan_live() {
+        let port: u16 = std::env::var("SQLSERVER_TEST_PORT")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let password = std::env::var("SQLSERVER_TEST_PASSWORD").unwrap();
+        let mut client = make_client("127.0.0.1", port, "master", "sa", &password, true, None)
+            .await
+            .unwrap();
+        // As one batch, SQL Server refuses it.
+        let sql = "SET SHOWPLAN_ALL ON;\nSELECT name FROM sys.objects WHERE object_id > 10 ORDER BY name;\nSET SHOWPLAN_ALL OFF;";
+        let whole = async { client.simple_query(sql).await?.into_results().await };
+        assert!(whole.await.is_err());
+
+        let mut client = make_client("127.0.0.1", port, "master", "sa", &password, true, None)
+            .await
+            .unwrap();
+        let (on, statement) = split_showplan(sql).unwrap();
+        client
+            .simple_query(on)
+            .await
+            .unwrap()
+            .into_results()
+            .await
+            .unwrap();
+        let mut stream = client.simple_query(statement).await.unwrap();
+        let mut columns = Vec::new();
+        let mut rows = Vec::new();
+        while let Some(item) = stream.try_next().await.unwrap() {
+            match item {
+                tiberius::QueryItem::Metadata(meta) => {
+                    columns = meta
+                        .columns()
+                        .iter()
+                        .map(|c| c.name().to_string())
+                        .collect();
+                }
+                tiberius::QueryItem::Row(row) => {
+                    rows.push(row.cells().map(|(_, v)| col_to_cell(v)).collect::<Vec<_>>());
+                }
+            }
+        }
+        // A plan, not the statement's rows.
+        for name in [
+            "NodeId",
+            "Parent",
+            "PhysicalOp",
+            "StmtText",
+            "TotalSubtreeCost",
+        ] {
+            assert!(columns.iter().any(|c| c == name), "{name} in {columns:?}");
+        }
+        assert!(rows.len() >= 2);
+        if let Ok(path) = std::env::var("SQLSERVER_TEST_DUMP") {
+            std::fs::write(
+                path,
+                serde_json::to_string(&serde_json::json!({ "columns": columns, "rows": rows }))
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+    }
 }

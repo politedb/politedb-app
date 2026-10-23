@@ -11,14 +11,17 @@ import {
   type QueryPlan,
 } from "./plan";
 
+/**
+ * How to get a measured plan the analyzer can read, typed by the user
+ * (checked against MySQL 8.0/8.4/9, MariaDB 11, DuckDB 1.5). SQL Server's
+ * measured plans (STATISTICS XML / PROFILE) are not read, so no hint.
+ */
 const ANALYZE_HINT: Partial<Record<DatabaseEngine, string>> = {
   postgres: "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)",
-  mysql: "EXPLAIN ANALYZE FORMAT=JSON",
+  mysql: "EXPLAIN ANALYZE (MySQL 8.0.18 or later)",
   mariadb: "ANALYZE FORMAT=JSON",
-  duckdb: "EXPLAIN ANALYZE",
-  sqlserver: "SET STATISTICS XML ON — that executes the statement",
-  oracle:
-    "/*+ GATHER_PLAN_STATISTICS */ then DBMS_XPLAN.DISPLAY_CURSOR — that executes the statement",
+  duckdb: "EXPLAIN (ANALYZE, FORMAT JSON)",
+  oracle: "/*+ GATHER_PLAN_STATISTICS */ then DBMS_XPLAN.DISPLAY_CURSOR",
 };
 
 function withHint(
@@ -215,12 +218,39 @@ function parsePostgresLike(value: unknown): QueryPlan | null {
 
 function mysqlCost(block: PlanRecord): number | undefined {
   const info = block.cost_info;
-  if (!isPlanRecord(info)) return asNumber(block.query_cost);
+  // MariaDB puts a plain `cost` on blocks and tables.
+  if (!isPlanRecord(info))
+    return asNumber(block.query_cost) ?? asNumber(block.cost);
   return (
     asNumber(info.query_cost) ??
     asNumber(info.read_cost) ??
     asNumber(info.prefix_cost)
   );
+}
+
+/**
+ * MariaDB `ANALYZE FORMAT=JSON` measurements (`r_*`), in the normalized
+ * per-loop form. Row counts are already per-loop averages (`r_rows` for
+ * tables; filesort prints `r_output_rows` as the rounded average per run);
+ * times are totals across loops, so they are divided by `r_loops`.
+ */
+function mariadbActuals(
+  block: PlanRecord,
+  rowsKey: "r_rows" | "r_output_rows"
+): { actualRows?: number; actualLoops?: number; actualTime?: number } {
+  const loops = asNumber(block.r_loops);
+  if (loops === undefined) return {};
+  const time =
+    asNumber(block.r_total_time_ms) ??
+    (block.r_table_time_ms !== undefined || block.r_other_time_ms !== undefined
+      ? (asNumber(block.r_table_time_ms) ?? 0) +
+        (asNumber(block.r_other_time_ms) ?? 0)
+      : undefined);
+  return {
+    actualLoops: loops,
+    actualRows: asNumber(block[rowsKey]),
+    actualTime: time === undefined ? undefined : loops > 0 ? time / loops : 0,
+  };
 }
 
 function walkMysql(value: unknown, depth: number, nodes: PlanNode[]): boolean {
@@ -235,6 +265,10 @@ function walkMysql(value: unknown, depth: number, nodes: PlanNode[]): boolean {
     "windowing",
     "buffer_result",
     "union_result",
+    // MariaDB
+    "filesort",
+    "temporary_table",
+    "read_sorted_file",
   ] as const;
   for (const wrapper of wrappers) {
     if (isPlanRecord(value[wrapper])) {
@@ -244,6 +278,7 @@ function walkMysql(value: unknown, depth: number, nodes: PlanNode[]): boolean {
         type,
         cost: mysqlCost(child),
         rows: asNumber(child.rows),
+        ...mariadbActuals(child, "r_output_rows"),
       });
       nodes.push({
         id: nodes.length,
@@ -303,6 +338,7 @@ function walkMysql(value: unknown, depth: number, nodes: PlanNode[]): boolean {
       actualRows: asNumber(table.actual_rows),
       actualLoops,
       filter: asText(table.attached_condition),
+      ...mariadbActuals(table, "r_rows"),
     });
     nodes.push({
       id: nodes.length,
@@ -333,7 +369,306 @@ function parseMysqlJson(value: unknown): QueryPlan | null {
   const actual = nodes.some(
     (node) => planNumber(node.data, "Actual Rows") !== undefined
   );
+  if (actual) bridgeStructuralTimes(nodes);
   return finish(document, nodes, actual);
+}
+
+/**
+ * Measured MariaDB plans time tables and sorts but not structural nodes
+ * (temporary table, nested loop). Give such a node its children's total
+ * time (one loop), so the heat view subtracts its subtree from the timed
+ * parent above it instead of charging that parent with its children's work;
+ * the node's own time then reads as zero, since none was measured for it.
+ * Marked `Derived Time`.
+ */
+function bridgeStructuralTimes(nodes: PlanNode[]) {
+  const total = (node: PlanNode) => {
+    const time = planNumber(node.data, "Actual Total Time");
+    return time === undefined
+      ? undefined
+      : time * (planNumber(node.data, "Actual Loops") ?? 1);
+  };
+  // Pre-order list: walk backwards so children are done before parents.
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const node = nodes[i]!;
+    if (planNumber(node.data, "Actual Total Time") !== undefined) continue;
+    // A node with its own loop count was measured itself (just without a
+    // time): leave it as reported rather than inventing one loop.
+    if (planNumber(node.data, "Actual Loops") !== undefined) continue;
+    let sum = 0;
+    let timed = false;
+    for (let j = i + 1; j < nodes.length && nodes[j]!.depth > node.depth; j++) {
+      if (nodes[j]!.depth !== node.depth + 1) continue;
+      const childTime = total(nodes[j]!);
+      if (childTime === undefined) continue;
+      sum += childTime;
+      timed = true;
+    }
+    if (!timed) continue;
+    node.data = {
+      ...node.data,
+      "Actual Total Time": sum,
+      "Actual Loops": 1,
+      "Derived Time": true,
+    };
+  }
+}
+
+/** "Table scan on o", "Index lookup on c using PRIMARY (id = o.cid)". */
+function mysqlOperation(operation: string): {
+  type: string;
+  relation?: string;
+  index?: string;
+} {
+  const target = operation.match(
+    / on (`[^`]+`|[^\s(]+)(?: using (`[^`]+`|[^\s(]+))?/
+  );
+  const relation = target?.[1];
+  // "using X" names an index only after "on <table>" ("Aggregate using
+  // temporary table" is not an index).
+  const index = target?.[2];
+  const type = operation.split(/ on |: |\s*\(/)[0]!.trim() || "Operation";
+  return {
+    type,
+    relation: relation?.replace(/`/g, ""),
+    index: index?.replace(/`/g, ""),
+  };
+}
+
+/**
+ * MySQL `EXPLAIN FORMAT=JSON` with `explain_json_format_version = 2` (the
+ * default from MySQL 9): a tree of `operation` nodes with `inputs`. Actual
+ * rows and times (EXPLAIN ANALYZE) are per loop, like PostgreSQL's.
+ */
+function parseMysqlV2(value: unknown): QueryPlan | null {
+  const document = parseJsonValue(value);
+  if (!isPlanRecord(document)) return null;
+  const root = isPlanRecord(document.query_plan)
+    ? document.query_plan
+    : document;
+  if (typeof root.operation !== "string") return null;
+  const nodes: PlanNode[] = [];
+  const pending: { value: PlanRecord; depth: number }[] = [
+    { value: root, depth: 0 },
+  ];
+  while (pending.length) {
+    const { value: entry, depth } = pending.pop()!;
+    if (nodes.length >= MAX_PLAN_NODES) return null;
+    const operation = asText(entry.operation) ?? "Operation";
+    const parsed = mysqlOperation(operation);
+    const relation = asText(entry.table_name) ?? parsed.relation;
+    const index = asText(entry.index_name) ?? parsed.index;
+    nodes.push({
+      id: nodes.length,
+      depth,
+      type: parsed.type,
+      label: operation,
+      partial: false,
+      data: attachNormalized(
+        { ...entry, inputs: undefined },
+        {
+          type: parsed.type,
+          relation,
+          index,
+          cost: asNumber(entry.estimated_total_cost),
+          rows: asNumber(entry.estimated_rows),
+          actualRows: asNumber(entry.actual_rows),
+          actualLoops: asNumber(entry.actual_loops),
+          actualTime: asNumber(entry.actual_last_row_ms),
+          filter: asText(entry.condition),
+        }
+      ),
+    });
+    const inputs = Array.isArray(entry.inputs) ? entry.inputs : [];
+    for (let i = inputs.length - 1; i >= 0; i--) {
+      if (isPlanRecord(inputs[i]))
+        pending.push({ value: inputs[i] as PlanRecord, depth: depth + 1 });
+    }
+  }
+  const actual = nodes.some(
+    (node) => planNumber(node.data, "Actual Rows") !== undefined
+  );
+  return finish(document, nodes, actual);
+}
+
+const MYSQL_TREE_LINE =
+  /^(\s*)-> (.*?)(?:\s+\(cost=([\d.e+-]+)(?:\.\.[\d.e+-]+)? rows=([\d.e+-]+)\))?(?:\s+\(actual time=[\d.e+-]+\.\.([\d.e+-]+) rows=([\d.e+-]+) loops=(\d+)\))?\s*$/;
+
+/** MySQL `EXPLAIN FORMAT=TREE` / `EXPLAIN ANALYZE` text. */
+function parseMysqlTree(text: string): QueryPlan | null {
+  const lines = text.split("\n").filter((line) => line.trim());
+  if (!lines.length || !lines[0]!.trimStart().startsWith("-> ")) return null;
+  const nodes: PlanNode[] = [];
+  let unit = 0;
+  for (const line of lines) {
+    const match = line.match(MYSQL_TREE_LINE);
+    // Continuation lines (long conditions) belong to the node above.
+    if (!match) {
+      const last = nodes[nodes.length - 1];
+      if (!last) return null;
+      last.label = `${last.label} ${line.trim()}`;
+      continue;
+    }
+    if (nodes.length >= MAX_PLAN_NODES) return null;
+    const indent = match[1]!.length;
+    if (!unit && indent) unit = indent;
+    const depth = unit ? Math.round(indent / unit) : 0;
+    const operation = match[2]!.trim();
+    const parsed = mysqlOperation(operation);
+    nodes.push({
+      id: nodes.length,
+      depth,
+      type: parsed.type,
+      label: operation,
+      partial: false,
+      data: attachNormalized(
+        { operation },
+        {
+          type: parsed.type,
+          relation: parsed.relation,
+          index: parsed.index,
+          cost: asNumber(match[3]),
+          rows: asNumber(match[4]),
+          actualTime: asNumber(match[5]),
+          actualRows: asNumber(match[6]),
+          actualLoops: asNumber(match[7]),
+          filter: operation.startsWith("Filter: ")
+            ? operation.slice("Filter: ".length)
+            : undefined,
+        }
+      ),
+    });
+  }
+  const actual = nodes.some(
+    (node) => planNumber(node.data, "Actual Rows") !== undefined
+  );
+  return finish({ lines }, nodes, actual);
+}
+
+/** DuckDB extra_info value as text (filters can be lists). */
+function duckdbText(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    const parts = value.map((item) => asText(item)).filter(Boolean);
+    return parts.length ? parts.join(" AND ") : undefined;
+  }
+  return asText(value);
+}
+
+/**
+ * DuckDB `EXPLAIN (FORMAT JSON)` (physical_plan: nodes with name, children,
+ * extra_info) and `EXPLAIN (ANALYZE, FORMAT JSON)` (analyzed_plan: the
+ * profiler tree with operator_timing in seconds, own time only). Times are
+ * turned into PostgreSQL-style inclusive milliseconds so the heat view and
+ * findings read them the same way.
+ */
+function parseDuckdb(
+  columns: { name: string }[],
+  rows: unknown[][]
+): QueryPlan | null {
+  const keyIndex = columns.findIndex(
+    (column) => column.name.toLowerCase() === "explain_key"
+  );
+  const valueIndex = columns.findIndex(
+    (column) => column.name.toLowerCase() === "explain_value"
+  );
+  if (keyIndex < 0 || valueIndex < 0) return null;
+  for (const row of rows) {
+    const cells = rowCells(row);
+    const key = asText(cellPrimitive(cells[keyIndex]));
+    const value = parseJsonValue(cellPrimitive(cells[valueIndex]));
+    if (key === "physical_plan" && Array.isArray(value)) {
+      return duckdbTree(value, false, { physical_plan: value });
+    }
+    if (key === "analyzed_plan" && isPlanRecord(value)) {
+      // Skip the profiler's own EXPLAIN_ANALYZE wrapper.
+      let top: unknown[] = Array.isArray(value.children) ? value.children : [];
+      while (
+        top.length === 1 &&
+        isPlanRecord(top[0]) &&
+        /^EXPLAIN_ANALYZE$/i.test(
+          asText(top[0].operator_type) ?? asText(top[0].operator_name) ?? ""
+        )
+      ) {
+        top = Array.isArray(top[0].children) ? top[0].children : [];
+      }
+      // The document is DuckDB's profile as returned (shown, copied and
+      // exported as is); the execution time is attached without being
+      // serialized.
+      const document: PlanRecord = { ...value };
+      const latency = asNumber(value.latency);
+      if (latency !== undefined) {
+        Object.defineProperty(document, "Execution Time", {
+          value: latency * 1000,
+          enumerable: false,
+        });
+      }
+      return duckdbTree(top, true, document);
+    }
+  }
+  return null;
+}
+
+function duckdbTree(
+  roots: unknown[],
+  analyzed: boolean,
+  document: PlanRecord
+): QueryPlan | null {
+  const nodes: PlanNode[] = [];
+  const own: number[] = [];
+  const parents: number[] = [];
+  const pending: { value: unknown; depth: number; parent: number }[] = roots
+    .slice()
+    .reverse()
+    .map((value) => ({ value, depth: 0, parent: -1 }));
+  while (pending.length) {
+    const { value, depth, parent } = pending.pop()!;
+    if (!isPlanRecord(value)) continue;
+    if (nodes.length >= MAX_PLAN_NODES) return null;
+    const name =
+      asText(value.operator_name) ?? asText(value.name) ?? "Operator";
+    const type = name.replace(/_/g, " ");
+    const info = isPlanRecord(value.extra_info) ? value.extra_info : {};
+    const relation = duckdbText(info.Table);
+    const id = nodes.length;
+    nodes.push({
+      id,
+      depth,
+      type,
+      label: relation ? `${type} on ${relation}` : type,
+      partial: false,
+      data: attachNormalized(
+        { ...info },
+        {
+          type,
+          relation,
+          rows: asNumber(info["Estimated Cardinality"]),
+          actualRows: analyzed
+            ? asNumber(value.operator_cardinality)
+            : undefined,
+          actualLoops: analyzed ? 1 : undefined,
+          filter: duckdbText(info.Filters),
+        }
+      ),
+    });
+    own.push(analyzed ? (asNumber(value.operator_timing) ?? 0) * 1000 : 0);
+    parents.push(parent);
+    const children = Array.isArray(value.children) ? value.children : [];
+    for (let i = children.length - 1; i >= 0; i--) {
+      pending.push({ value: children[i], depth: depth + 1, parent: id });
+    }
+  }
+  if (analyzed) {
+    // Own operator time -> inclusive time, children before parents.
+    const inclusive = own.slice();
+    for (let id = nodes.length - 1; id >= 0; id--) {
+      const parent = parents[id]!;
+      if (parent >= 0) inclusive[parent]! += inclusive[id]!;
+    }
+    for (const node of nodes) {
+      node.data["Actual Total Time"] = inclusive[node.id];
+    }
+  }
+  return finish(document, nodes, analyzed);
 }
 
 function parseSqlite(columns: { name: string }[], rows: unknown[][]) {
@@ -367,14 +702,20 @@ function parseSqlServer(columns: { name: string }[], rows: unknown[][]) {
       parentRaw === 0 || parentRaw === "0" || parentRaw == null
         ? undefined
         : asText(parentRaw);
+    // The statement row has no operator, only its Type (SELECT, ...).
     const type =
-      asText(col(rec, ["PhysicalOp", "LogicalOp", "Type"])) || "Query";
+      asText(col(rec, ["PhysicalOp"])) ||
+      asText(col(rec, ["LogicalOp"])) ||
+      asText(col(rec, ["Type"])) ||
+      "Query";
     const stmt = asText(col(rec, ["StmtText", "Argument"]));
+    // Operator rows draw the tree in StmtText ("  |--Sort(...)").
+    const text = stmt?.replace(/^[\s|]*--/, "").trim();
     return {
       id,
       parent,
       type,
-      label: stmt ? `${type} ${stmt}` : type,
+      label: text || type,
       data: attachNormalized(rec, {
         type,
         cost: asNumber(col(rec, ["TotalSubtreeCost"])),
@@ -597,9 +938,17 @@ function parseTabularFallback(
 function parseAnyJsonPlan(value: unknown): QueryPlan | null {
   return (
     parsePostgresLike(value) ??
+    parseMysqlV2(value) ??
     parseMysqlJson(value) ??
     parseSnowflakeJson(value)
   );
+}
+
+/** The text of a one-column, one-row result (EXPLAIN text output). */
+function singleText(rows: unknown[][]): string {
+  if (rows.length !== 1 || rowCells(rows[0]).length !== 1) return "";
+  const raw = cellPrimitive(rows[0][0]);
+  return typeof raw === "string" ? raw : "";
 }
 
 function jsonFromRows(columns: { name: string }[], rows: unknown[][]): unknown {
@@ -695,7 +1044,11 @@ export function planFromResult(
       break;
     case "mysql":
     case "mariadb":
-      plan = parseMysqlJson(json) ?? parseTabularFallback(columns, rows);
+      plan =
+        parseMysqlV2(json) ??
+        parseMysqlJson(json) ??
+        parseMysqlTree(singleText(rows)) ??
+        parseTabularFallback(columns, rows);
       break;
     case "sqlite":
     case "d1":
@@ -716,7 +1069,10 @@ export function planFromResult(
       plan = parseAnyJsonPlan(json) ?? parseTabularFallback(columns, rows);
       break;
     case "duckdb":
-      plan = parseAnyJsonPlan(json) ?? parseTabularFallback(columns, rows);
+      plan =
+        parseDuckdb(columns, rows) ??
+        parseAnyJsonPlan(json) ??
+        parseTabularFallback(columns, rows);
       break;
     default:
       plan = parseTabularFallback(columns, rows);

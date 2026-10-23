@@ -12,6 +12,22 @@ export function leadingSqlKeyword(sql: string): string {
 }
 
 /**
+ * Whether `sql` asks for a plan itself: EXPLAIN on every engine, plus
+ * MariaDB's `ANALYZE FORMAT=JSON …` (its measured plan; plain
+ * `ANALYZE TABLE` is not).
+ */
+export function isPlanStatement(engine: DatabaseEngine, sql: string): boolean {
+  const words = lexPostgres(sql)
+    .tokens.filter((token) => token.kind !== "comment")
+    .slice(0, 2)
+    .map((token) => sql.slice(token.start, token.end).toUpperCase());
+  if (words[0] === "EXPLAIN") return true;
+  return (
+    engine === "mariadb" && words[0] === "ANALYZE" && words[1] === "FORMAT"
+  );
+}
+
+/**
  * PostgreSQL positional parameters ($1, $2, ...) outside strings, quoted
  * identifiers, comments and dollar-quoted bodies.
  */
@@ -57,7 +73,7 @@ export function buildExplainSql(
     };
   }
   const statement = statements[0]!;
-  if (leadingSqlKeyword(statement) === "EXPLAIN") {
+  if (isPlanStatement(engine, statement)) {
     return {
       error:
         "This is already an EXPLAIN statement. Use Run to execute it; a JSON plan result opens in the Query Analyzer.",
@@ -87,7 +103,11 @@ export function buildExplainSql(
         source: statement,
       };
     case "duckdb":
-      return { statements: [`EXPLAIN ${statement}`], source: statement };
+      // The bundled DuckDB (1.5) returns the plan as JSON in explain_value.
+      return {
+        statements: [`EXPLAIN (FORMAT JSON) ${statement}`],
+        source: statement,
+      };
     case "clickhouse":
       return { statements: [`EXPLAIN json=1 ${statement}`], source: statement };
     case "snowflake":
