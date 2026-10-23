@@ -279,6 +279,7 @@ export function MainTableDataPane(props: {
     hasError,
     hasAppliedFilters,
     basePageTotal,
+    exactRowCount,
     loadedMax,
     loadedRowCount,
     showingStalePage,
@@ -502,11 +503,11 @@ export function MainTableDataPane(props: {
   );
 
   const renderBasePageTotal = useMemo(() => {
-    if (typeof meta.rowCount === "number") {
-      return Math.min(renderLimit, Math.max(0, meta.rowCount - renderOffset));
+    if (exactRowCount !== null) {
+      return Math.min(renderLimit, Math.max(0, exactRowCount - renderOffset));
     }
     return renderLimit;
-  }, [meta.rowCount, renderLimit, renderOffset]);
+  }, [exactRowCount, renderLimit, renderOffset]);
 
   const rowFieldEditCtxRef = useRef({
     activeKey,
@@ -1138,7 +1139,20 @@ export function MainTableDataPane(props: {
                 }}
               />
             )}
-            <div class="min-h-0 flex-1">
+            <div class="relative min-h-0 flex-1">
+              {!hasError &&
+              rowsSettled &&
+              visiblePageTotal === 0 &&
+              newRowKeys.length === 0 ? (
+                // Over the empty grid, below its header; clicks pass through.
+                <div class="pointer-events-none absolute inset-x-0 top-16 z-10 px-4 text-center text-sm text-neutral-500">
+                  {hasAppliedFilters
+                    ? "No rows match the filters."
+                    : renderOffset > 0
+                      ? "No rows on this page."
+                      : "This table has no rows."}
+                </div>
+              ) : null}
               <TableData
                 key={activeKey}
                 columns={tableColumns}
@@ -1214,6 +1228,12 @@ export function MainTableDataPane(props: {
         onAddColumn={isStructureReadOnly ? () => {} : onAddColumn}
         onAddIndex={isStructureReadOnly ? () => {} : onAddIndex}
         onFilters={() => setFilterBarVisible((v) => !v, activeKey)}
+        appliedFilterCount={
+          appliedFilters.filter(
+            (filter) => filter.enabled && (filter.column ?? "").trim()
+          ).length
+        }
+        onExport={isNewTable || hasError ? undefined : () => onExportOpen()}
         canAddRow={canAddDataRow}
         readOnly={
           viewMode === "structure" ? isStructureReadOnly : isDataReadOnly
