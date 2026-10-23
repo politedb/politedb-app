@@ -478,7 +478,7 @@ export function ConnectionScreen() {
   /* =============================================================================
    * SQL history runner (depends on engine + metadata + profileId)
    * ============================================================================= */
-  const { runSqlWithHistory } = useSqlHistoryRunner({
+  const { runSqlWithHistory, captureHistoryTarget } = useSqlHistoryRunner({
     engine,
     metadata,
     profileId: activeProfileScreen,
@@ -809,6 +809,7 @@ export function ConnectionScreen() {
       offset: currentOffset,
       loadError,
       runSqlWithHistory,
+      captureHistoryTarget,
       refreshSchemaAndTables,
       newTableSaveRef,
       objectSaveRef,
@@ -831,6 +832,7 @@ export function ConnectionScreen() {
       currentOffset,
       loadError,
       runSqlWithHistory,
+      captureHistoryTarget,
       refreshSchemaAndTables,
       pendingTableAction,
       setPendingTableAction,

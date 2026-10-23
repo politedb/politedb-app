@@ -143,3 +143,9 @@ tauri-plugin-updater = "2"
 [dev-dependencies]
 # The WebView2 localStorage reader is tested on every platform.
 rusty-leveldb = "=4.0.1"
+# Captures driver log records in the Explain Analyze notice test.
+log = "0.4"
+# Bridges `log` records into tracing in the log filter test, as init() does.
+tracing-log = "0.2"
+# Paused clock for the Explain Analyze phase-budget tests.
+tokio = { version = "1", features = ["test-util"] }

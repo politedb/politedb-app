@@ -404,7 +404,7 @@ async fn live_agent_e2e_postgres() {
     let url = std::env::var("AGENT_PG_SMOKE_URL").expect("set AGENT_PG_SMOKE_URL");
     let cfg: tokio_postgres::Config = url.parse().unwrap();
     let manager = deadpool_postgres::Manager::from_config(
-        cfg,
+        cfg.clone(),
         tokio_postgres::NoTls,
         deadpool_postgres::ManagerConfig::default(),
     );
@@ -416,6 +416,7 @@ async fn live_agent_e2e_postgres() {
         id: Uuid::new_v4(),
         label: "Smoke PG".into(),
         pool: pool.clone(),
+        config: cfg,
     });
     let count_url = url.clone();
     let count = move || {

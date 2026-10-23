@@ -3,7 +3,8 @@ import { queryPlanFixture } from "src/test/fixtures/queryPlan";
 import {
   formatPlanNumber,
   parseQueryPlan,
-  planBarShare,
+  planHeat,
+  planParents,
   planMetrics,
   planNumber,
 } from "./plan";
@@ -132,10 +133,12 @@ describe("PostgreSQL query plans", () => {
         ],
       },
     })!;
-    expect(planBarShare(measured.nodes[2], measured)).toEqual({
-      kind: "time",
-      ratio: 0.1,
-    });
+    // Root spends 100 ms; its children 90 + 10 inclusive.
+    const heat = planHeat(measured);
+    expect(heat.kind).toBe("time");
+    expect(heat.nodes[2]!.inclusiveShare).toBe(0.1);
+    expect(heat.nodes[1]!.selfShare).toBe(0.9);
+    expect(heat.hottestId).toBe(1);
     const estimated = parseQueryPlan({
       Plan: {
         "Node Type": "Nested Loop",
@@ -148,10 +151,144 @@ describe("PostgreSQL query plans", () => {
         ],
       },
     })!;
-    expect(planBarShare(estimated.nodes[1], estimated)).toEqual({
-      kind: "cost",
-      ratio: 0.9,
-    });
+    const costHeat = planHeat(estimated);
+    expect(costHeat.kind).toBe("cost");
+    expect(costHeat.nodes[1]!.inclusiveShare).toBe(0.9);
+    expect(costHeat.nodes[0]!.self).toBe(10);
+    expect(costHeat.hottestId).toBe(1);
+  });
+  it("multiplies per-loop time by loops to find the real hot spot", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Nested Loop",
+        "Actual Total Time": 1000,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Seq Scan",
+            "Relation Name": "outer_rows",
+            "Actual Total Time": 50,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "Index Scan",
+            "Relation Name": "inner_rows",
+            // 0.09 ms per loop, but 10,000 loops = 900 ms.
+            "Actual Total Time": 0.09,
+            "Actual Loops": 10000,
+          },
+        ],
+      },
+    })!;
+    const heat = planHeat(plan);
+    expect(heat.nodes[2]!.inclusive).toBeCloseTo(900);
+    expect(heat.hottestId).toBe(2);
+    expect(heat.nodes[0]!.self).toBeCloseTo(50);
+  });
+  it("clamps overlapping parallel worker time", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Gather",
+        "Actual Total Time": 100,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Parallel Seq Scan",
+            "Actual Total Time": 95,
+            "Actual Loops": 3,
+          },
+        ],
+      },
+    })!;
+    const heat = planHeat(plan);
+    expect(heat.nodes[0]!.self).toBe(0);
+    expect(heat.nodes[1]!.inclusiveShare).toBe(1);
+  });
+  it("counts a CTE producer inside the CTE Scan that runs it", () => {
+    // Join 100 ms: InitPlan CTE producer 80 ms (displayed under the join),
+    // CTE Scan 81 ms (includes the producer), other input 5 ms.
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Hash Join",
+        "Actual Total Time": 100,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE recent",
+            "Relation Name": "orders",
+            "Actual Total Time": 80,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "CTE Scan",
+            "CTE Name": "recent",
+            "Actual Total Time": 81,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "Seq Scan",
+            "Relation Name": "customers",
+            "Actual Total Time": 5,
+            "Actual Loops": 1,
+          },
+        ],
+      },
+    })!;
+    const heat = planHeat(plan);
+    expect(heat.nodes[2]!.self).toBeCloseTo(1); // CTE Scan alone
+    expect(heat.nodes[0]!.self).toBeCloseTo(14); // join: 100 - 81 - 5
+    expect(heat.hottestId).toBe(1); // the producer, 80 ms
+  });
+
+  it("does not guess when several nodes read the same CTE", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Append",
+        "Actual Total Time": 100,
+        "Actual Loops": 1,
+        Plans: [
+          {
+            "Node Type": "Seq Scan",
+            "Parent Relationship": "InitPlan",
+            "Subplan Name": "CTE x",
+            "Actual Total Time": 70,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "CTE Scan",
+            "CTE Name": "x",
+            "Actual Total Time": 60,
+            "Actual Loops": 1,
+          },
+          {
+            "Node Type": "CTE Scan",
+            "CTE Name": "x",
+            "Actual Total Time": 30,
+            "Actual Loops": 1,
+          },
+        ],
+      },
+    })!;
+    const heat = planHeat(plan);
+    expect(heat.nodes[2]!.attribution).toBe("shared");
+    expect(heat.nodes[2]!.self).toBeUndefined();
+    expect(heat.nodes[0]!.self).toBeCloseTo(10); // 100 - 60 - 30
+    expect(heat.hottestId).toBe(1);
+  });
+
+  it("derives parents from pre-order depths", () => {
+    const plan = parseQueryPlan({
+      Plan: {
+        "Node Type": "Hash Join",
+        Plans: [
+          { "Node Type": "Seq Scan" },
+          { "Node Type": "Hash", Plans: [{ "Node Type": "Seq Scan" }] },
+        ],
+      },
+    })!;
+    expect(planParents(plan)).toEqual([null, 0, 0, 2]);
   });
   it("does not invent execution metrics for estimated plans", () => {
     const plan = parseQueryPlan([
@@ -168,7 +305,10 @@ describe("PostgreSQL query plans", () => {
     expect(planNumber({ n: 0 }, "n")).toBe(0);
   });
   it("does not sum inclusive buffer counts", () => {
-    expect(planMetrics(parseQueryPlan(queryPlanFixture)!)[4][1]).toBe(18420);
+    const read = planMetrics(parseQueryPlan(queryPlanFixture)!).find(
+      ([label]) => label === "Shared blocks read"
+    );
+    expect(read?.[1]).toBe(18420);
   });
   it("reports selective scans, spills and estimate mismatch", () => {
     const findings = analyzeQueryPlan(parseQueryPlan(queryPlanFixture)!);

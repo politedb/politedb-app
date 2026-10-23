@@ -28,3 +28,26 @@ export function normalizeQuerySafetyMode(value: unknown): QuerySafetyMode {
   }
   return "default";
 }
+
+/** A locked profile tab acts as lock mode, whatever the profile's mode. */
+export function effectiveSafetyMode(
+  mode: QuerySafetyMode,
+  profileLocked: boolean
+): QuerySafetyMode {
+  return mode === "lock" || profileLocked ? "lock" : mode;
+}
+
+/**
+ * Reading data (Run of non-mutating statements, Explain Analyze) asks for
+ * Touch ID in safe and production modes. Shared by both paths so they cannot
+ * drift apart.
+ */
+export function readNeedsTouchId(mode: QuerySafetyMode): boolean {
+  return mode === "safe" || mode === "production";
+}
+
+export function readTouchIdPrompt(mode: QuerySafetyMode): string {
+  return mode === "production"
+    ? "Authenticate with Touch ID before reading production data."
+    : "Authenticate with Touch ID before sending queries.";
+}

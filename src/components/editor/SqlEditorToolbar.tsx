@@ -6,7 +6,13 @@ type Props = {
   onExport?: () => void;
   onFormat?: () => void;
   onMinify?: () => void;
+  /** Estimated plan; the statement is not run. */
   onExplain?: () => void;
+  /**
+   * When offered (Pro, PostgreSQL), Explain calls this instead: it measures
+   * the plan, or estimates statements that can't be measured.
+   */
+  onExplainAnalyze?: () => void;
 
   onRun: () => void;
   onCancel?: () => void;
@@ -20,6 +26,7 @@ export function SqlEditorToolbar(props: Props) {
     onFormat,
     onMinify,
     onExplain,
+    onExplainAnalyze,
     onRun,
     onCancel,
     isExecuting,
@@ -66,14 +73,26 @@ export function SqlEditorToolbar(props: Props) {
           Minify
         </Button>
 
-        <Button
-          variant="ghost"
-          onClick={onExplain}
-          disabled={!onExplain || isExecuting}
-          class={toolBtn}
-        >
-          Explain
-        </Button>
+        {onExplainAnalyze ? (
+          <Button
+            variant="ghost"
+            onClick={onExplainAnalyze}
+            disabled={isExecuting}
+            title="Run the statement read-only and show the measured plan. Statements that can't be measured (for example UPDATE) get the estimated plan."
+            class={toolBtn}
+          >
+            Explain
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={onExplain}
+            disabled={!onExplain || isExecuting}
+            class={toolBtn}
+          >
+            Explain
+          </Button>
+        )}
       </div>
 
       {/* Right: Run */}

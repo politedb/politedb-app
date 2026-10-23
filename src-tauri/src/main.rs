@@ -11,6 +11,7 @@ mod engines;
 mod file_storage;
 mod legacy_web_storage;
 mod license;
+mod log_filter;
 mod operations;
 mod platform;
 mod profiles;
@@ -21,12 +22,12 @@ mod types;
 use crate::distribution::Distribution;
 use crate::security::secrets;
 use crate::state::AppState;
+use tracing_subscriber::prelude::*;
 
 mod ssh_tunnel;
 
 mod window_chrome;
 use std::sync::Arc;
-use tracing_subscriber::EnvFilter;
 
 use engines::driver::EngineDriver;
 use engines::registry::EngineRegistry;
@@ -83,8 +84,8 @@ fn main() {
     // Ensure rustls has a process-level crypto provider before any TLS usage.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(log_filter::from_env()))
         .init();
 
     let drivers: Vec<Arc<dyn EngineDriver>> = vec![

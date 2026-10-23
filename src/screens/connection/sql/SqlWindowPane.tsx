@@ -8,8 +8,16 @@ import { SqlResultsPane } from "src/components/editor/SqlResultsPane";
 import { Spinner } from "src/components/common/Spinner";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
 import { useSqlRunner } from "src/screens/connection/hooks/useSqlRunner";
-import { RunSqlReturn } from "../hooks/useSqlHistoryRunner";
+import type {
+  RunSqlReturn,
+  SqlHistoryTarget,
+} from "../hooks/useSqlHistoryRunner";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
+import {
+  explainModeFor,
+  supportsExplainAnalyze,
+} from "src/lib/sql/analyzeClassify";
+import { useProGate } from "src/hooks/useProGate";
 
 const loadSqlEditorPane = () =>
   import("src/components/editor/SqlEditorPane").then((module) => ({
@@ -43,6 +51,7 @@ export function SqlWindowPane(props: {
     connectionId: string;
     sql: string;
   }) => Promise<RunSqlReturn>;
+  captureHistoryTarget?: () => SqlHistoryTarget | null;
 }) {
   const {
     win,
@@ -54,6 +63,7 @@ export function SqlWindowPane(props: {
     sqlSafetyMode = "default",
     sqlScopeKey,
     onRunSql,
+    captureHistoryTarget,
   } = props;
 
   const meta = useMemo(() => {
@@ -79,6 +89,7 @@ export function SqlWindowPane(props: {
     setActiveResultIndex,
     startRun,
     startExplain,
+    startExplainAnalyze,
     closeRun,
     cancelRun,
   } = useSqlRunner({
@@ -88,7 +99,12 @@ export function SqlWindowPane(props: {
     isProfileLocked,
     sqlSafetyMode,
     onRunSql,
+    captureHistoryTarget,
   });
+  // Pro on PostgreSQL: Explain measures (Explain Analyze); statements it
+  // can't measure get the estimated plan.
+  const { hasPro } = useProGate();
+  const canExplainAnalyze = hasPro && supportsExplainAnalyze(engine);
 
   const activeRun =
     sqlRuns.find((run) => run.id === activeRunId) ??
@@ -123,6 +139,21 @@ export function SqlWindowPane(props: {
               onExplainSql={(payload) =>
                 startExplain({ windowId: scopedWindowId, sql: payload.sql })
               }
+              onExplainAnalyzeSql={
+                canExplainAnalyze
+                  ? (payload) =>
+                      explainModeFor(payload.sql) === "analyze"
+                        ? startExplainAnalyze({
+                            windowId: scopedWindowId,
+                            sql: payload.sql,
+                            sourceUnchanged: payload.sourceUnchanged,
+                          })
+                        : startExplain({
+                            windowId: scopedWindowId,
+                            sql: payload.sql,
+                          })
+                  : undefined
+              }
               onCancelSql={() => {
                 if (activeRun?.id) cancelRun(activeRun.id);
               }}
@@ -148,6 +179,16 @@ export function SqlWindowPane(props: {
             activeIndex={activeResultIndex}
             setActiveIndex={setActiveResultIndex}
             onCloseRun={closeRun}
+            onRunAnalyze={
+              canExplainAnalyze
+                ? (origin) =>
+                    startExplainAnalyze({
+                      windowId: scopedWindowId,
+                      sql: origin.sql,
+                      origin: { connectionId: origin.connectionId },
+                    })
+                : undefined
+            }
           />
         }
       />

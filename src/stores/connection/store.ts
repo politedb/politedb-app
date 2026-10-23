@@ -225,13 +225,15 @@ export const useConnectionStore = create<ConnectionState>()(
       setSizeInfoCache: (key, info) =>
         set((s) => ({ sizeInfoCache: { ...s.sizeInfoCache, [key]: info } })),
 
-      addQueryHistory: (windowId, sql) =>
+      addQueryHistory: (windowId, sql, options) =>
         set((s) => ({
           queryHistory: {
             ...s.queryHistory,
             [windowId]: [
               ...(s.queryHistory[windowId] || []),
-              { sql, timestamp: new Date() },
+              options?.kind
+                ? { sql, timestamp: new Date(), kind: options.kind }
+                : { sql, timestamp: new Date() },
             ],
           },
         })),

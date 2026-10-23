@@ -8,14 +8,16 @@ import { useProUpgradeStore } from "src/stores/proUpgrade";
 import type { LicenseState } from "src/lib/tauri/license";
 
 const state = vi.hoisted(() => ({ streams: {} as Record<string, unknown> }));
+const idleStream = {
+  status: "idle",
+  columns: [],
+  totalRows: 0,
+  getRowAt: () => undefined,
+};
 vi.mock("src/screens/connection/hooks/useSqlStreamResult", () => ({
   useSqlStreamResult: (id: string | null) =>
-    (id && state.streams[id]) || {
-      status: "idle",
-      columns: [],
-      totalRows: 0,
-      getRowAt: () => undefined,
-    },
+    (id && state.streams[id]) || idleStream,
+  getSqlStreamSnapshot: (id: string) => state.streams[id] || idleStream,
 }));
 vi.mock("src/components/table/TableData", () => ({
   TableData: () => <div>Raw result table</div>,
@@ -96,12 +98,14 @@ describe("SQL plan result integration", () => {
     const normal = run();
     normal.kind = "query";
     normal.title = "Query";
+    normal.slots[0].sql = "select plan from saved_plans";
     view.rerender(<SqlResultsPane {...base} runs={[normal]} />);
     expect(screen.queryByText("Query Analyzer")).toBeNull();
     expect(screen.getByText("Raw result table")).toBeInTheDocument();
     const twoCol = run();
     twoCol.kind = "query";
     twoCol.title = "Query";
+    twoCol.slots[0].sql = "select id, parent from t";
     twoCol.slots[0].result!.columns = [
       { name: "id", db_type: "int" },
       { name: "parent", db_type: "int" },
@@ -126,7 +130,7 @@ describe("SQL plan result integration", () => {
     view.rerender(<SqlResultsPane {...base} engine="duckdb" runs={[duckdb]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /SEQ_SCAN t/ })
+      screen.getByRole("option", { name: /SEQ_SCAN t/ })
     ).toBeInTheDocument();
     const sqlite = run();
     sqlite.slots[0].result!.columns = [
@@ -146,7 +150,7 @@ describe("SQL plan result integration", () => {
     view.rerender(<SqlResultsPane {...base} engine="sqlite" runs={[sqlite]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /SCAN users/ })
+      screen.getByRole("option", { name: /SCAN users/ })
     ).toBeInTheDocument();
   });
   it("uses the active stream immediately when switching runs", () => {
@@ -193,6 +197,86 @@ describe("SQL plan result integration", () => {
     expect(
       screen.getByText("Run a query to see results here.")
     ).toBeInTheDocument();
+  });
+});
+
+describe("EXPLAIN typed by the user", () => {
+  it("opens the analyzer when the result is a plan", () => {
+    const typed = run();
+    typed.kind = "query";
+    typed.title = "Query";
+    typed.slots[0].sql =
+      "-- measure\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) select 1";
+    render(<SqlResultsPane {...base} runs={[typed]} />);
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(screen.getByText("Measured plan")).toBeInTheDocument();
+  });
+
+  it("keeps the raw grid when a typed EXPLAIN returns no plan document", () => {
+    const text = run();
+    text.kind = "query";
+    text.slots[0].sql = "EXPLAIN select 1";
+    text.slots[0].result!.rows = [
+      [{ t: "Str", v: "Seq Scan on t  (cost=0.00..1.00 rows=1 width=4)" }],
+    ];
+    render(<SqlResultsPane {...base} runs={[text]} />);
+    expect(screen.queryByText("Query Analyzer")).toBeNull();
+    expect(screen.getByText("Raw result table")).toBeInTheDocument();
+  });
+
+  it("offers earlier streamed explains, never later ones", () => {
+    const streamed = run("s");
+    streamed.kind = "query";
+    streamed.title = "Query 1";
+    streamed.createdAt = 1;
+    streamed.slots[0] = {
+      index: 0,
+      sql: "EXPLAIN (ANALYZE, FORMAT JSON) select 1",
+      status: "done",
+      mode: "stream",
+      opId: "op-1",
+    };
+    state.streams["op-1"] = {
+      status: "done",
+      columns: [{ name: "QUERY PLAN", db_type: "json" }],
+      totalRows: 1,
+      getRowAt: (i: number) =>
+        i === 0
+          ? [{ t: "Json", v: JSON.stringify(queryPlanFixture) }]
+          : undefined,
+    };
+    const current = run("c");
+    current.title = "Explain 2";
+    current.createdAt = 2;
+    const later = run("l");
+    later.title = "Explain 3";
+    later.createdAt = 3;
+    render(
+      <SqlResultsPane
+        {...base}
+        activeRunId="c"
+        runs={[streamed, current, later]}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    expect(screen.getByRole("option", { name: "Query 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Explain 3" })).toBeNull();
+    fireEvent.input(screen.getByRole("combobox"), {
+      target: { value: "s:0" },
+    });
+    expect(
+      screen.getByRole("row", { name: /Execution time/ })
+    ).toBeInTheDocument();
+  });
+
+  it("offers earlier explains in this tab for Compare", () => {
+    const first = run("a");
+    const second = run("b");
+    second.title = "Explain 2";
+    second.createdAt = 2;
+    render(<SqlResultsPane {...base} activeRunId="b" runs={[first, second]} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    expect(screen.getByRole("option", { name: "Explain" })).toBeInTheDocument();
   });
 });
 
@@ -257,8 +341,81 @@ describe("SQL plan results without Pro", () => {
     expect(screen.queryByText(BANNER)).toBeNull();
     const normal = run();
     normal.kind = "query";
+    normal.slots[0].sql = "select plan from saved_plans";
     view.rerender(<SqlResultsPane {...base} runs={[normal]} />);
     expect(screen.getByText("Raw result table")).toBeInTheDocument();
     expect(screen.queryByText(BANNER)).toBeNull();
+    // A statement the user ran as EXPLAIN gets the upgrade banner too.
+    const typed = run();
+    typed.kind = "query";
+    typed.slots[0].sql =
+      "/* measure */ EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) select 1";
+    view.rerender(<SqlResultsPane {...base} runs={[typed]} />);
+    expect(screen.getByText(BANNER)).toBeInTheDocument();
+  });
+});
+
+describe("Run with ANALYZE", () => {
+  const estimated = [{ Plan: { "Node Type": "Seq Scan", "Total Cost": 5 } }];
+  function estimatedRun(): SqlResultRun {
+    const r = run();
+    r.connectionId = "conn-1";
+    // The run keeps the editor text; the slot keeps the statement measured.
+    r.sql = "-- picked\nselect 1; -- tail";
+    r.slots[0].sourceSql = "select 1";
+    r.slots[0].result!.rows = [[{ t: "Json", v: JSON.stringify(estimated) }]];
+    return r;
+  }
+
+  it("asks to measure the slot's own statement and connection", () => {
+    const onRunAnalyze = vi.fn();
+    render(
+      <SqlResultsPane
+        {...base}
+        runs={[estimatedRun()]}
+        onRunAnalyze={onRunAnalyze}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run with ANALYZE" }));
+    expect(onRunAnalyze).toHaveBeenCalledWith({
+      sql: "select 1",
+      connectionId: "conn-1",
+    });
+  });
+
+  it("is not offered for measured plans, typed EXPLAIN or without a handler", () => {
+    const onRunAnalyze = vi.fn();
+    const view = render(
+      <SqlResultsPane {...base} runs={[run()]} onRunAnalyze={onRunAnalyze} />
+    );
+    expect(screen.queryByText("Run with ANALYZE")).toBeNull();
+
+    const typed = estimatedRun();
+    typed.kind = "query";
+    typed.slots[0].sql = "EXPLAIN (FORMAT JSON) select 1";
+    view.rerender(
+      <SqlResultsPane {...base} runs={[typed]} onRunAnalyze={onRunAnalyze} />
+    );
+    expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
+    expect(screen.queryByText("Run with ANALYZE")).toBeNull();
+
+    view.rerender(<SqlResultsPane {...base} runs={[estimatedRun()]} />);
+    expect(screen.queryByText("Run with ANALYZE")).toBeNull();
+
+    // An estimate shown because the statement can't be measured.
+    const update = estimatedRun();
+    update.slots[0].sourceSql = "update t set x = 1";
+    view.rerender(
+      <SqlResultsPane {...base} runs={[update]} onRunAnalyze={onRunAnalyze} />
+    );
+    expect(screen.queryByText("Run with ANALYZE")).toBeNull();
+
+    // Older runs without the slot's statement are not re-measured.
+    const older = estimatedRun();
+    delete older.slots[0].sourceSql;
+    view.rerender(
+      <SqlResultsPane {...base} runs={[older]} onRunAnalyze={onRunAnalyze} />
+    );
+    expect(screen.queryByText("Run with ANALYZE")).toBeNull();
   });
 });

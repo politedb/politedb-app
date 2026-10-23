@@ -42,6 +42,12 @@ type Props = {
     windowId: string;
     sql: string;
   }) => Promise<void> | void;
+  onExplainAnalyzeSql?: (payload: {
+    windowId: string;
+    sql: string;
+    /** False once the editor no longer holds this statement. */
+    sourceUnchanged: () => boolean;
+  }) => Promise<void> | void;
   onCancelSql?: () => void;
   isExecuting?: boolean;
 
@@ -155,6 +161,7 @@ export function SqlEditorPane(props: Props) {
     onCommitContent,
     onRunSql,
     onExplainSql,
+    onExplainAnalyzeSql,
     onCancelSql,
     isExecuting: isExternallyExecuting = false,
     schemas,
@@ -193,11 +200,17 @@ export function SqlEditorPane(props: Props) {
     onCommitContent,
     onRunSql,
     onExplainSql,
+    onExplainAnalyzeSql,
   });
 
   useEffect(() => {
-    callbacksRef.current = { onCommitContent, onRunSql, onExplainSql };
-  }, [onCommitContent, onRunSql, onExplainSql]);
+    callbacksRef.current = {
+      onCommitContent,
+      onRunSql,
+      onExplainSql,
+      onExplainAnalyzeSql,
+    };
+  }, [onCommitContent, onRunSql, onExplainSql, onExplainAnalyzeSql]);
 
   const modelUri = useMemo(
     () => monaco.Uri.parse(`inmemory://sql/${draftId}.sql`),
@@ -462,9 +475,12 @@ export function SqlEditorPane(props: Props) {
     }
   }, [applyRunHighlight, flushDraft, win.id]);
 
-  const onExplain = async () => {
+  const explainWith = async (
+    handler: "onExplainSql" | "onExplainAnalyzeSql"
+  ) => {
     const ed = editorRef.current;
-    if (!ed || !callbacksRef.current.onExplainSql) return;
+    const run = callbacksRef.current[handler];
+    if (!ed || !run) return;
 
     const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
     if (!picked.sql) return;
@@ -473,14 +489,21 @@ export function SqlEditorPane(props: Props) {
     setIsLocalExecuting(true);
     try {
       await flushDraft();
-      await callbacksRef.current.onExplainSql({
-        windowId: win.id,
-        sql: picked.sql,
-      });
+      const sourceUnchanged = () => {
+        const current = editorRef.current;
+        return (
+          !!current &&
+          getSelectedOrCurrentSql(current, lastCursorPositionRef.current)
+            .sql === picked.sql
+        );
+      };
+      await run({ windowId: win.id, sql: picked.sql, sourceUnchanged });
     } finally {
       queueMicrotask(() => setIsLocalExecuting(false));
     }
   };
+  const onExplain = () => explainWith("onExplainSql");
+  const onExplainAnalyze = () => explainWith("onExplainAnalyzeSql");
 
   const onFormatSql = async () => {
     await applyTransform((input) => formatSql(input, { engine }), "format");
@@ -789,6 +812,7 @@ export function SqlEditorPane(props: Props) {
           onFormat={onFormatSql}
           onMinify={onMinifySql}
           onExplain={onExplain}
+          onExplainAnalyze={onExplainAnalyzeSql ? onExplainAnalyze : undefined}
           onRun={onRun}
           onCancel={onCancelSql}
           isExecuting={isExecuting}

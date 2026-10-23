@@ -43,6 +43,8 @@ pub struct AppState {
 
     pub running_ops: Arc<DashMap<Uuid, CancelHandle>>,
     pub cancel_requested: Arc<DashMap<Uuid, ()>>,
+    /// Runtime connections with an EXPLAIN ANALYZE in progress (one each).
+    pub explain_analyze_running: Arc<DashMap<Uuid, ()>>,
     pub active_ops: Arc<DashMap<Uuid, ()>>,
 
     pub flow_by_op: Arc<DashMap<Uuid, FlowCtrl>>,
@@ -79,6 +81,7 @@ impl AppState {
             conn_to_tunnel: Arc::new(DashMap::new()),
             running_ops: Arc::new(DashMap::new()),
             cancel_requested: Arc::new(DashMap::new()),
+            explain_analyze_running: Arc::new(DashMap::new()),
             active_ops: Arc::new(DashMap::new()),
             flow_by_op: Arc::new(DashMap::new()),
             op_tasks: Arc::new(DashMap::new()),

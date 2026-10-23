@@ -229,6 +229,7 @@ export function ActiveWindowContent() {
         metaKey={rt.metaKey}
         metadata={rt.metadata}
         onRunSql={rt.runSqlWithHistory}
+        captureHistoryTarget={rt.captureHistoryTarget}
       />
     );
   }
