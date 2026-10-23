@@ -2197,6 +2197,9 @@ export function CanvasTable({
                 )
               }
               onKeyDown={(e) => {
+                // An Enter or Escape that ends an IME composition (Vietnamese,
+                // Japanese…) belongs to the input method, not the editor.
+                if (e.isComposing || e.keyCode === 229) return;
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                   commitAndExit();
                 }
@@ -2233,6 +2236,7 @@ export function CanvasTable({
                 updateEditorValue((e.currentTarget as HTMLInputElement).value)
               }
               onKeyDown={(e) => {
+                if (e.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter" || e.key === "Escape") {
                   e.preventDefault();
                   e.stopPropagation();

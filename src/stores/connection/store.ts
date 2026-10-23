@@ -1,3 +1,9 @@
+import {
+  isPatchMetaKey,
+  patchFieldEntries,
+  recordedRow,
+  withoutRowPositionPatches,
+} from "src/lib/patches/rowPositionPatches";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { cellEditValuesEqual, cellToString } from "src/utils/convert";
@@ -64,6 +70,69 @@ export const useConnectionStore = create<ConnectionState>()(
 
       const raf = requestAnimationFrame(() => flush());
       rafByKey.set(key, raf);
+    }
+
+    /** The loaded row at a page-local position, from the original-row cache first. */
+    function loadedOriginalRow(
+      s: ConnectionState,
+      tableKey: string,
+      rowKey: string
+    ): { row: unknown[]; fromCache: boolean } | undefined {
+      const localRowIndex = parseInt(rowKey, 10);
+      if (isNaN(localRowIndex) || localRowIndex < 0) return undefined;
+      const rowsState = s.tableRowsByKey[tableKey];
+      const globalRowIndex = (rowsState?.streamOffset ?? 0) + localRowIndex;
+      const cached = cacheGet(s.tableRowCacheByKey[tableKey], globalRowIndex);
+      if (Array.isArray(cached)) return { row: cached, fromCache: true };
+      if (
+        rowsState &&
+        globalRowIndex >= rowsState.base &&
+        globalRowIndex < rowsState.base + rowsState.cap
+      ) {
+        const row = rowsState.rows[globalRowIndex - rowsState.base];
+        if (Array.isArray(row)) return { row, fromCache: false };
+      }
+      return undefined;
+    }
+
+    /** Whether two loaded rows are the same row as loaded (same values). */
+    function sameLoadedRow(a: unknown[], b: unknown[]) {
+      if (a === b) return true;
+      try {
+        return JSON.stringify(a) === JSON.stringify(b);
+      } catch {
+        return false;
+      }
+    }
+
+    /**
+     * Keeps a window's recorded row for `rowKey` while it has a row edit or delete
+     * there, and drops it once neither remains.
+     */
+    function withRecordedRow<T extends Pick<ConnectionState, "dataPatchMap">>(
+      next: T,
+      tabId: string,
+      tableWindowId: string,
+      rowKey: string,
+      row: unknown[] | undefined
+    ): T {
+      const win = next.dataPatchMap[tabId]?.[tableWindowId];
+      if (!win) return next;
+      const pending =
+        !!win.patches?.update?.data?.[rowKey] ||
+        !!win.patches?.delete?.data?.[rowKey];
+      const { [rowKey]: _previous, ...rest } = win.originalRows ?? {};
+      const originalRows = pending && row ? { ...rest, [rowKey]: row } : rest;
+      return {
+        ...next,
+        dataPatchMap: {
+          ...next.dataPatchMap,
+          [tabId]: {
+            ...next.dataPatchMap[tabId],
+            [tableWindowId]: { ...win, originalRows },
+          },
+        },
+      };
     }
 
     function dataPatchMapWithWindowPatches(
@@ -424,6 +493,7 @@ export const useConnectionStore = create<ConnectionState>()(
       setDataPatchMap: (tabId: string, props: DataPatchesState) => {
         const { dataKey, action, tableData, tableWindow, rowKey, data } = props;
         const tableWindowId = tableWindow.id;
+        let accepted = true;
 
         set((s) => {
           const existingRowPatch =
@@ -435,43 +505,51 @@ export const useConnectionStore = create<ConnectionState>()(
             ...(existingRowPatch ?? {}),
             ...data,
           };
+          const tableKey = `${tabId}.${tableWindow.table.schema}.${tableWindow.table.name}`;
+
+          // A row edit or delete records the row it was made against the first
+          // time (outside the patches), so saving targets that row wherever the
+          // grid has moved since.
+          const isRowPatch =
+            dataKey === DATA_KEYS.data &&
+            (action === DATA_ACTIONS.update || action === DATA_ACTIONS.delete);
+          let originalRow: unknown[] | undefined;
+          if (isRowPatch) {
+            const recorded = recordedRow(
+              s.dataPatchMap[tabId]?.[tableWindowId],
+              rowKey
+            );
+            const loaded = loadedOriginalRow(s, tableKey, rowKey);
+            // Another row now sits at this position (it was reloaded while a
+            // change was pending): never attach this action to the earlier
+            // row's change. The grid is read-only while rows are replaced, so
+            // this only guards against paths that bypass it.
+            if (
+              recorded &&
+              loaded?.fromCache &&
+              !sameLoadedRow(recorded, loaded.row)
+            ) {
+              accepted = false;
+              return s;
+            }
+            originalRow = recorded ?? loaded?.row;
+          }
+          const finish = (next: Pick<ConnectionState, "dataPatchMap">) =>
+            isRowPatch
+              ? withRecordedRow(next, tabId, tableWindowId, rowKey, originalRow)
+              : next;
 
           // If changed value equals original, remove that key from the patch
           if (action === DATA_ACTIONS.update) {
-            const tableKey = `${tabId}.${tableWindow.table.schema}.${tableWindow.table.name}`;
             let original: Record<string, any> | undefined;
 
             if (dataKey === DATA_KEYS.data) {
-              const localRowIndex = parseInt(rowKey, 10);
-              if (!isNaN(localRowIndex) && localRowIndex >= 0) {
-                const rowsState = s.tableRowsByKey[tableKey];
-                const globalRowIndex =
-                  (rowsState?.streamOffset ?? 0) + localRowIndex;
-                const cache = s.tableRowCacheByKey[tableKey];
-                let originalRow = cacheGet(cache, globalRowIndex) as
-                  | unknown[]
-                  | undefined;
-                if (
-                  !originalRow &&
-                  rowsState &&
-                  globalRowIndex >= rowsState.base &&
-                  globalRowIndex < rowsState.base + rowsState.cap
-                ) {
-                  originalRow = rowsState.rows[
-                    globalRowIndex - rowsState.base
-                  ] as unknown[] | undefined;
-                }
-                const columns = tableData.columns ?? [];
-                if (
-                  originalRow &&
-                  Array.isArray(originalRow) &&
-                  columns.length
-                ) {
-                  original = {};
-                  for (let i = 0; i < columns.length; i++) {
-                    const col = columns[i];
-                    if (col?.name) original[col.name] = originalRow[i];
-                  }
+              const columns = tableData.columns ?? [];
+              if (originalRow && columns.length) {
+                original = {};
+                for (let i = 0; i < columns.length; i++) {
+                  const col = columns[i];
+                  if (col?.name) original[col.name] = originalRow[i];
                 }
               }
             } else if (dataKey === DATA_KEYS.structure) {
@@ -505,7 +583,7 @@ export const useConnectionStore = create<ConnectionState>()(
             if (original) {
               const cleaned: Record<string, any> = {};
               for (const [key, value] of Object.entries(dataToWrite)) {
-                if (key === "__rowKey") {
+                if (isPatchMetaKey(key)) {
                   cleaned[key] = value;
                   continue;
                 }
@@ -555,7 +633,7 @@ export const useConnectionStore = create<ConnectionState>()(
           // actions (primarily `update`).
           if (
             action !== DATA_ACTIONS.delete &&
-            Object.keys(dataToWrite).length === 0
+            patchFieldEntries(dataToWrite).length === 0
           ) {
             if (!windowData?.patches?.[action]?.[dataKey]?.[rowKey]) return s;
             const nextPatches = { ...patches };
@@ -571,7 +649,7 @@ export const useConnectionStore = create<ConnectionState>()(
               nextPatches[action] = { ...nextAction, [dataKey]: nextDataKey };
             const cleanedPatches =
               Object.keys(nextPatches).length > 0 ? nextPatches : {};
-            return {
+            return finish({
               dataPatchMap: dataPatchMapWithWindowPatches(
                 s,
                 tabId,
@@ -579,10 +657,10 @@ export const useConnectionStore = create<ConnectionState>()(
                 windowData!,
                 cleanedPatches
               ),
-            };
+            });
           }
 
-          return {
+          return finish({
             dataPatchMap: {
               ...s.dataPatchMap,
               [tabId]: {
@@ -590,6 +668,7 @@ export const useConnectionStore = create<ConnectionState>()(
                 [tableWindowId]: {
                   tableData,
                   tableWindow,
+                  originalRows: windowData?.originalRows,
                   patches: {
                     ...patches,
                     [action]: {
@@ -603,8 +682,9 @@ export const useConnectionStore = create<ConnectionState>()(
                 },
               },
             },
-          };
+          });
         });
+        return accepted;
       },
 
       removeDataPatch: (tabId, tableWindowId, action, dataKey, rowKey) =>
@@ -635,7 +715,7 @@ export const useConnectionStore = create<ConnectionState>()(
           const cleanedPatches =
             Object.keys(finalPatches).length > 0 ? finalPatches : {};
 
-          return {
+          const next = {
             dataPatchMap: dataPatchMapWithWindowPatches(
               s,
               tabId,
@@ -644,6 +724,15 @@ export const useConnectionStore = create<ConnectionState>()(
               cleanedPatches
             ),
           };
+          return dataKey === DATA_KEYS.data
+            ? withRecordedRow(
+                next,
+                tabId,
+                tableWindowId,
+                rowKey,
+                recordedRow(windowData, rowKey)
+              )
+            : next;
         }),
 
       clearDataPatchMap: (tabId, tableWindowId) =>
@@ -657,6 +746,57 @@ export const useConnectionStore = create<ConnectionState>()(
 
           const { [tabId]: _, ...rest } = s.dataPatchMap;
           return { dataPatchMap: rest };
+        }),
+
+      discardRowPositionPatches: (tabId, tableWindowId) =>
+        set((s) => {
+          const win = s.dataPatchMap[tabId]?.[tableWindowId];
+          if (!win?.patches) return s;
+          // Edits were also written into the loaded rows: put the recorded
+          // originals back, only where that row still sits (a reload may have
+          // put another row there since).
+          const tableKey = `${tabId}.${win.tableWindow.table.schema}.${win.tableWindow.table.name}`;
+          const rowsState = s.tableRowsByKey[tableKey];
+          let rows = rowsState?.rows;
+          for (const rowKey of Object.keys(win.patches.update?.data ?? {})) {
+            const original = recordedRow(win, rowKey);
+            const loaded = loadedOriginalRow(s, tableKey, rowKey);
+            const localIndex = parseInt(rowKey, 10);
+            if (!rowsState || !rows || !original || isNaN(localIndex)) continue;
+            if (loaded?.fromCache && !sameLoadedRow(original, loaded.row)) {
+              continue;
+            }
+            const windowIndex =
+              rowsState.streamOffset + localIndex - rowsState.base;
+            if (windowIndex < 0 || windowIndex >= rows.length) continue;
+            if (rows === rowsState.rows) rows = [...rows];
+            rows[windowIndex] = original;
+          }
+          const { [tableKey]: _selected, ...selectedRowByKey } =
+            s.selectedRowByKey;
+          return {
+            ...(rowsState && rows && rows !== rowsState.rows
+              ? {
+                  tableRowsByKey: {
+                    ...s.tableRowsByKey,
+                    [tableKey]: { ...rowsState, rows },
+                  },
+                }
+              : {}),
+            // The selected row's details may show a discarded value.
+            selectedRowByKey,
+            dataPatchMap: {
+              ...s.dataPatchMap,
+              [tabId]: {
+                ...s.dataPatchMap[tabId],
+                [tableWindowId]: {
+                  ...win,
+                  originalRows: {},
+                  patches: withoutRowPositionPatches(win.patches),
+                },
+              },
+            },
+          };
         }),
 
       setVirtualKeySafety: (key, issues) =>

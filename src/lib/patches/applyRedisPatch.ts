@@ -1,3 +1,5 @@
+import { recordedRow } from "./rowPositionPatches";
+import { resolveRowIndex } from "./types";
 import { runRedisCommand } from "src/lib/tauri/redis";
 import { tableKey } from "src/lib/table-data";
 import { useConnectionStore } from "src/stores/connection";
@@ -38,21 +40,19 @@ export async function applyRedisPatchEntry(
     tableWindow.table.name
   );
   const cols = store.tableDataMap[key]?.columns ?? [];
-  const cache = store.tableRowCacheByKey[key];
 
   for (const [rowKey, patch] of Object.entries(updateData)) {
     const rowIndex = Number(rowKey);
     if (!Number.isFinite(rowIndex) || rowIndex < 0) continue;
 
     const raw = (patch ?? {}) as Record<string, unknown>;
-    const candidateIndices = [rowIndex, rowIndex + ctx.offset];
-    const resolvedIndex =
-      candidateIndices.find(
-        (idx) =>
-          Boolean(cache?.map.get(idx)) || Boolean(store.getRowAt(key, idx))
-      ) ?? rowIndex;
-    const sourceRow =
-      cache?.map.get(resolvedIndex) ?? store.getRowAt(key, resolvedIndex);
+    const sourceRow = resolveRowIndex(
+      rowKey,
+      ctx.offset,
+      key,
+      store,
+      recordedRow(entry, rowKey)
+    )?.sourceRow;
     if (!sourceRow || !Array.isArray(sourceRow)) continue;
 
     if (cols.length === 1 && cols[0]?.name === "value") {

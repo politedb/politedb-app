@@ -108,6 +108,10 @@ describe("connection edit patches", () => {
       useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
         ?.update?.data?.["0"]
     ).toEqual({ name: next });
+    expect(
+      useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]
+        ?.originalRows?.["0"]
+    ).toEqual([original]);
   });
 
   it("prunes an update when wrapped and edited values are equal", () => {
@@ -159,5 +163,86 @@ describe("row cache reset", () => {
     expect(reset.rows[2]).toEqual(["third"]);
     expect(reset.rows).not.toContainEqual([10, ["first"]]);
     expect(reset.version).toBe(rowState.version + 1);
+  });
+
+  const edit = (action: "update" | "delete", data: Record<string, unknown>) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "data",
+      action,
+      tableData,
+      tableWindow,
+      rowKey: "0",
+      data,
+    });
+  const windowEntry = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId];
+  /** Loads `row` at position 0 in the original-row cache, as a stream does. */
+  const loadCached = (row: unknown[]) =>
+    useConnectionStore.setState({
+      tableRowCacheByKey: {
+        [key]: { map: new Map([[0, row]]), order: [0], orderHead: 0 },
+      } as any,
+    });
+
+  it("records the edited row outside the patch and keeps it for later actions", () => {
+    loadCached(["Ada"]);
+    expect(edit("update", { name: "Grace" })).toBe(true);
+    expect(windowEntry()?.patches.update?.data?.["0"]).toEqual({
+      name: "Grace",
+    });
+    expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
+
+    edit("update", { name: "Hopper" });
+    edit("delete", {});
+    expect(windowEntry()?.patches.delete?.data?.["0"]).toEqual({});
+    expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
+
+    // Reverting the edit keeps the record while the delete remains.
+    edit("update", { name: "Ada" });
+    expect(windowEntry()?.patches.update?.data?.["0"]).toBeUndefined();
+    expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
+  });
+
+  it("refuses an action on a position another row has taken since", () => {
+    loadCached(["Ada"]);
+    edit("update", { name: "Grace" });
+
+    // A reload put another row at position 0 while the edit was pending.
+    loadCached(["Linus"]);
+    // Refused, and reported so the grid does not show a change never saved.
+    expect(edit("delete", {})).toBe(false);
+    expect(edit("update", { name: "Torvalds" })).toBe(false);
+
+    expect(windowEntry()?.patches.delete).toBeUndefined();
+    expect(windowEntry()?.patches.update?.data?.["0"]).toEqual({
+      name: "Grace",
+    });
+    expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
+  });
+
+  it("drops the record when no row change remains", () => {
+    loadCached(["Ada"]);
+    edit("update", { name: "Grace" });
+    edit("update", { name: "Ada" });
+    expect(windowEntry()?.originalRows ?? {}).toEqual({});
+  });
+
+  it("treats a column named like the internal record as an ordinary column", () => {
+    loadCached(["Ada"]);
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "data",
+      action: "update",
+      tableData: {
+        ...tableData,
+        columns: [{ name: "__originalRow", db_type: "text" }],
+      },
+      tableWindow,
+      rowKey: "0",
+      data: { __originalRow: "Grace" },
+    });
+    expect(windowEntry()?.patches.update?.data?.["0"]).toEqual({
+      __originalRow: "Grace",
+    });
+    expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
   });
 });

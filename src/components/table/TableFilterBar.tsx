@@ -261,6 +261,8 @@ export function TableFilterBar({
                     })
                   }
                   onKeyDown={(e) => {
+                    // The Enter that ends an IME composition only commits text.
+                    if (e.isComposing || e.keyCode === 229) return;
                     if (e.key !== "Enter") return;
                     e.preventDefault();
                     handleApplyRow(row);

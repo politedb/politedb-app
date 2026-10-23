@@ -220,7 +220,11 @@ export type ConnectionState = {
   clearTableStructure: (tabId: string, tableWindowId?: string) => void;
   clearTableConstraints: (tabId: string, tableWindowId?: string) => void;
 
-  setDataPatchMap: (tabId: string, props: DataPatchesState) => void;
+  /**
+   * Records a change. Returns false when a row edit or delete was refused
+   * because another row now sits at its position (nothing was recorded).
+   */
+  setDataPatchMap: (tabId: string, props: DataPatchesState) => boolean;
   removeDataPatch: (
     tabId: string,
     tableWindowId: string,
@@ -229,6 +233,8 @@ export type ConnectionState = {
     rowKey: string
   ) => void;
   clearDataPatchMap: (tabId: string, tableWindowId?: string) => void;
+  /** Drops a table window's unsaved row edits and row deletions only. */
+  discardRowPositionPatches: (tabId: string, tableWindowId: string) => void;
   setVirtualKeySafety: (key: string, issues: VirtualKeySafetyIssue[]) => void;
   clearVirtualKeySafety: (key: string) => void;
 

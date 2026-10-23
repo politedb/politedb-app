@@ -1,4 +1,5 @@
 import type { PatchMap } from "./generateSql";
+import { patchFieldEntries, recordedRow } from "./rowPositionPatches";
 import { cellToString } from "../../utils/convert";
 import { resolvePrimaryKeyColumns } from "../../utils/primaryKey";
 import { isBlobColumnType, isJsonColumnType } from "../sql/sqlDialect";
@@ -102,29 +103,28 @@ export function buildPatchDiffs(
         action: "insert",
         rowKey,
         identity: `New row #${rowKey}`,
-        cells: Object.entries(patch)
-          .filter(([column]) => column !== "__rowKey")
-          .map(([column, value]) => ({
-            column,
-            oldValue: "",
-            newValue: displayValue(value),
-          })),
+        cells: patchFieldEntries(patch).map(([column, value]) => ({
+          column,
+          oldValue: "",
+          newValue: displayValue(value),
+        })),
       });
     }
 
     for (const [rowKey, patch] of Object.entries(patches.update?.data ?? {})) {
       const rowIndex = Number(rowKey);
       const originalRow =
-        Number.isFinite(rowIndex) && tableKey
+        recordedRow(entry, rowKey) ??
+        (Number.isFinite(rowIndex) && tableKey
           ? resolveOriginalRow(tableKey, rowIndex)
-          : undefined;
+          : undefined);
 
       diffs.push({
         table,
         action: "update",
         rowKey,
         identity: rowIdentity(columns, originalRow, rowKey, pkColumns),
-        cells: Object.entries(patch).map(([column, value]) => {
+        cells: patchFieldEntries(patch).map(([column, value]) => {
           const columnIndex = columns.findIndex((item) => item.name === column);
           return {
             column,
@@ -136,12 +136,13 @@ export function buildPatchDiffs(
       });
     }
 
-    for (const [rowKey] of Object.entries(patches.delete?.data ?? {})) {
+    for (const rowKey of Object.keys(patches.delete?.data ?? {})) {
       const rowIndex = Number(rowKey);
       const originalRow =
-        Number.isFinite(rowIndex) && tableKey
+        recordedRow(entry, rowKey) ??
+        (Number.isFinite(rowIndex) && tableKey
           ? resolveOriginalRow(tableKey, rowIndex)
-          : undefined;
+          : undefined);
 
       diffs.push({
         table,

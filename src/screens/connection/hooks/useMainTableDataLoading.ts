@@ -375,6 +375,8 @@ export function useMainTableDataLoading(args: {
     loadedMax,
     loadedRowCount,
     showingStalePage,
+    /** The requested page is fully loaded and no row stream is replacing it. */
+    rowsSettled: currentPageLoaded,
     renderLimit,
     renderOffset,
     shouldShowLoading,

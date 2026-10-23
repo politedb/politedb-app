@@ -47,6 +47,10 @@ import { MainTableDialogs } from "./MainTableDialogs";
 import { useMainTablePaneState } from "../hooks/useMainTablePaneState";
 import { useMainTableDataLoading } from "../hooks/useMainTableDataLoading";
 import { useDatabaseBackup } from "../hooks/useDatabaseBackup";
+import {
+  confirmRowsChangeIn,
+  useConfirmRowsChange,
+} from "../hooks/useConfirmRowsChange";
 
 export type { StructPaneTab } from "../hooks/useMainTablePaneState";
 
@@ -191,30 +195,60 @@ export function MainTableDataPane(props: {
     handleClearFilters,
   } = useTableFilter(startedRef, activeKey);
 
+  const confirmRowsChange = useConfirmRowsChange(
+    profileId,
+    activeTableWindow.table.schema,
+    activeTableWindow.table.name
+  );
+
+  const guardedPageChange = useCallback(
+    async (nextLimit: number, nextOffset: number) => {
+      if (!(await confirmRowsChange())) return;
+      pageChange(nextLimit, nextOffset);
+    },
+    [confirmRowsChange, pageChange]
+  );
+
   const applyFilters = useCallback(
-    (
+    async (
       newFilters: Parameters<typeof handleApplyFilters>[0],
       combine: Parameters<typeof handleApplyFilters>[1],
       tableKey: string
     ) => {
+      if (!(await confirmRowsChange())) return;
       if (offset !== 0) {
         pageChange(limit, 0);
         setSettledPagination({ limit, offset: 0 });
       }
       handleApplyFilters(newFilters, combine, tableKey);
     },
-    [offset, handleApplyFilters, pageChange, limit, setSettledPagination]
+    [
+      confirmRowsChange,
+      offset,
+      handleApplyFilters,
+      pageChange,
+      limit,
+      setSettledPagination,
+    ]
   );
 
   const clearFilters = useCallback(
-    (visible: boolean = true) => {
+    async (visible: boolean = true) => {
+      if (!(await confirmRowsChange())) return;
       if (offset !== 0) {
         pageChange(limit, 0);
         setSettledPagination({ limit, offset: 0 });
       }
       handleClearFilters(visible);
     },
-    [offset, handleClearFilters, pageChange, limit, setSettledPagination]
+    [
+      confirmRowsChange,
+      offset,
+      handleClearFilters,
+      pageChange,
+      limit,
+      setSettledPagination,
+    ]
   );
 
   const setSelectedRowDetail = useConnectionStore(
@@ -248,6 +282,7 @@ export function MainTableDataPane(props: {
     loadedMax,
     loadedRowCount,
     showingStalePage,
+    rowsSettled,
     renderLimit,
     renderOffset,
     shouldShowLoading,
@@ -273,14 +308,28 @@ export function MainTableDataPane(props: {
     rerender,
   });
 
+  // Row edits and deletions record the row at their position, so they wait
+  // until the page's rows are settled (not while a reload replaces them).
+  const rowsChangeable = !isDataReadOnly && rowsSettled;
+  const rowsChangeableRef = useRef(rowsChangeable);
+  rowsChangeableRef.current = rowsChangeable;
+
   const handleChangeSort = useCallback(
-    (nextSort: TableSort | null) => {
+    async (nextSort: TableSort | null) => {
+      if (!(await confirmRowsChange())) return;
       setTableSort(activeKey, nextSort);
       if (renderOffset !== 0) {
         pageChange(limit, 0);
       }
     },
-    [activeKey, setTableSort, renderOffset, pageChange, limit]
+    [
+      confirmRowsChange,
+      activeKey,
+      setTableSort,
+      renderOffset,
+      pageChange,
+      limit,
+    ]
   );
 
   const patches = useConnectionStore(
@@ -318,20 +367,31 @@ export function MainTableDataPane(props: {
       data: Record<string, any>
     ) => {
       if (isDataReadOnly) return;
+      if (
+        dataKey === DATA_KEYS.data &&
+        action !== "create" &&
+        !rowsChangeableRef.current
+      ) {
+        return;
+      }
       const rowKey =
         rowIndex === -1 && data.__rowKey
           ? String(data.__rowKey)
           : String(rowIndex);
 
-      // Patches are the source of truth for unsaved edits and new rows.
-      useConnectionStore.getState().setDataPatchMap(profileId, {
-        dataKey,
-        action,
-        tableData: meta,
-        tableWindow: activeTableWindow as any,
-        rowKey,
-        data,
-      });
+      // Patches are the source of truth for unsaved edits and new rows. A
+      // refused row change is not shown either: it would never be saved.
+      const accepted = useConnectionStore
+        .getState()
+        .setDataPatchMap(profileId, {
+          dataKey,
+          action,
+          tableData: meta,
+          tableWindow: activeTableWindow as any,
+          rowKey,
+          data,
+        });
+      if (!accepted) return;
 
       // Page-local row index in patches; global index in row store.
       const pageRowIdx = Number(rowKey);
@@ -550,7 +610,7 @@ export function MainTableDataPane(props: {
   }, [activeKey, columnDefaultsKey]);
 
   useEffect(() => {
-    if (isDataReadOnly || hasError || viewMode !== "data") {
+    if (!rowsChangeable || hasError || viewMode !== "data") {
       registerRowFieldEditHandler(activeKey, undefined);
       return;
     }
@@ -582,7 +642,7 @@ export function MainTableDataPane(props: {
     return () => registerRowFieldEditHandler(activeKey, undefined);
   }, [
     activeKey,
-    isDataReadOnly,
+    rowsChangeable,
     hasError,
     viewMode,
     getRowArrayForDetail,
@@ -593,9 +653,6 @@ export function MainTableDataPane(props: {
   /* ===========================================================================
    * Render guards
    * =========================================================================== */
-
-  if (shouldShowLoading)
-    return <LoadingTableState progress={rowsLoadProgress} />;
 
   /* ===========================================================================
    * Paging
@@ -665,6 +722,15 @@ export function MainTableDataPane(props: {
     }) => {
       const { value, refSchema, refTable, refColumn } = args;
       const refKey = tableKey(profileId, refSchema, refTable);
+      // The destination (this table for a self-referencing key) gets a new
+      // filter: its unsaved row changes would sit on other rows.
+      if (
+        !(await confirmRowsChangeIn(
+          profileId,
+          (win) => win.table.schema === refSchema && win.table.name === refTable
+        ))
+      )
+        return;
       const newFilters = [
         { id: 0, column: refColumn, operator: "=", value, enabled: true },
       ] as const;
@@ -722,19 +788,22 @@ export function MainTableDataPane(props: {
     ]
   );
 
-  const handleContextRefresh = useCallback(() => {
+  const handleContextRefresh = useCallback(async () => {
+    if (!(await confirmRowsChange())) return;
     void reloadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
   }, [
+    confirmRowsChange,
     activeTableWindow.table.schema,
     activeTableWindow.table.name,
     reloadTableData,
   ]);
 
   const handleQuickFilter = useCallback(
-    (colName: string, value: string) => {
+    async (colName: string, value: string) => {
+      if (!(await confirmRowsChange())) return;
       const nextFilters = [
         {
           id: Date.now(),
@@ -749,7 +818,14 @@ export function MainTableDataPane(props: {
       setFilterCombine("AND");
       applyFilters(nextFilters, "AND", activeKey);
     },
-    [activeKey, setFilterBarVisible, setFilters, setFilterCombine, applyFilters]
+    [
+      confirmRowsChange,
+      activeKey,
+      setFilterBarVisible,
+      setFilters,
+      setFilterCombine,
+      applyFilters,
+    ]
   );
 
   const handleCountExact = useCallback(
@@ -796,15 +872,24 @@ export function MainTableDataPane(props: {
     [isNewTable, setExportDialogOpen]
   );
 
+  // Importing reloads the rows: ask about unsaved row changes first.
   const onImportOpen = useCallback(async () => {
     if (isNewTable || isProfileLocked) return;
+    if (!(await confirmRowsChange())) return;
     const loaded = await loadDataImport();
     if (!loaded) return;
     setImportDialogOpen(true);
-  }, [isNewTable, isProfileLocked, loadDataImport, setImportDialogOpen]);
+  }, [
+    isNewTable,
+    isProfileLocked,
+    confirmRowsChange,
+    loadDataImport,
+    setImportDialogOpen,
+  ]);
 
   const onImportSqlDumpOpen = useCallback(async () => {
     if (isNewTable || isProfileLocked) return;
+    if (!(await confirmRowsChange())) return;
     const schema = activeTableWindow.table.schema;
     const name = activeTableWindow.table.name;
     await importSqlDumpFile(async () => {
@@ -813,6 +898,7 @@ export function MainTableDataPane(props: {
   }, [
     isNewTable,
     isProfileLocked,
+    confirmRowsChange,
     importSqlDumpFile,
     activeTableWindow.table.schema,
     activeTableWindow.table.name,
@@ -915,23 +1001,38 @@ export function MainTableDataPane(props: {
   // when this table is shown.
   const { staleTableKey, setStaleTableKey } = rt;
   useEffect(() => {
-    if (!staleTableKey) return;
+    if (shouldShowLoading || !staleTableKey) return;
     if (staleTableKey !== tableIdentity(activeTableWindow.table)) return;
     setStaleTableKey(null);
+    // The rows were removed outside this view (e.g. truncated): row edits and
+    // deletions made on them have nothing left to apply to.
+    const store = useConnectionStore.getState();
+    for (const [windowId, win] of Object.entries(
+      store.dataPatchMap[profileId] ?? {}
+    )) {
+      if (
+        win?.tableWindow?.table.schema === activeTableWindow.table.schema &&
+        win.tableWindow.table.name === activeTableWindow.table.name
+      ) {
+        store.discardRowPositionPatches(profileId, windowId);
+      }
+    }
     void reloadTableData(
       activeTableWindow.table.schema,
       activeTableWindow.table.name
     );
   }, [
+    shouldShowLoading,
     staleTableKey,
     setStaleTableKey,
+    profileId,
     activeTableWindow.table,
     reloadTableData,
   ]);
 
   // When user chose Import/Clone/Structure from table context menu in left nav
   useEffect(() => {
-    if (!rt.pendingTableAction) return;
+    if (shouldShowLoading || !rt.pendingTableAction) return;
     const action = rt.pendingTableAction;
     // Structure is a view switch (read-only OK). Mutations still blocked when locked.
     if (isProfileLocked && action !== "structure") {
@@ -948,6 +1049,7 @@ export function MainTableDataPane(props: {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    shouldShowLoading,
     isProfileLocked,
     rt.pendingTableAction,
     rt.setPendingTableAction,
@@ -959,6 +1061,10 @@ export function MainTableDataPane(props: {
   /* ===========================================================================
    * Render
    * =========================================================================== */
+
+  // After every hook: the hook order must not depend on the loading state.
+  if (shouldShowLoading)
+    return <LoadingTableState progress={rowsLoadProgress} />;
 
   return (
     <div class="flex h-full min-h-0 flex-col">
@@ -1039,9 +1145,9 @@ export function MainTableDataPane(props: {
                 baseRows={hasError ? 0 : renderBasePageTotal}
                 totalRows={hasError ? 0 : visiblePageTotal}
                 getRowAt={hasError ? getEmptyRowAt : getRowAt}
-                readOnly={isDataReadOnly}
+                readOnly={!rowsChangeable}
                 onCellChange={
-                  hasError || isDataReadOnly ? undefined : onDataChange
+                  hasError || !rowsChangeable ? undefined : onDataChange
                 }
                 patches={hasError ? null : extractPatches(patches)}
                 newRowKeys={hasError ? [] : newRowKeys}
@@ -1057,7 +1163,7 @@ export function MainTableDataPane(props: {
                     : undefined
                 }
                 onDeleteRow={(rowIndex, rowKey) => {
-                  if (hasError || isDataReadOnly) return;
+                  if (hasError || !rowsChangeable) return;
                   handleDeleteRow(rowIndex, renderOffset, rowKey);
                 }}
                 onRefresh={handleContextRefresh}
@@ -1099,7 +1205,7 @@ export function MainTableDataPane(props: {
         loadedMax={hasError ? -1 : loadedMax}
         totalRows={hasError ? 0 : footerTotalRows}
         rowCountIsEstimated={!!meta.rowCountIsEstimated}
-        onPageChange={pageChange}
+        onPageChange={guardedPageChange}
         onCountExact={handleCountExact}
         onAddRow={() => {
           if (!canAddDataRow) return;
