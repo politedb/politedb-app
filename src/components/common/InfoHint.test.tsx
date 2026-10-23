@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/preact";
 import { Dialog } from "src/components/common/Dialog";
-import { InfoHint } from "./InfoHint";
+import { InfoHint } from "src/components/common/InfoHint";
 
 function tooltipFor(hint: HTMLElement): HTMLElement {
   return document.getElementById(hint.getAttribute("aria-describedby")!)!;

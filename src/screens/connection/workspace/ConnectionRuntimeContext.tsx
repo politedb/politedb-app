@@ -3,7 +3,10 @@ import { useContext } from "preact/hooks";
 import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
 import type { DatabaseEngine } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
-import { RunSqlReturn } from "../hooks/useSqlHistoryRunner";
+import type {
+  RunSqlReturn,
+  SqlHistoryTarget,
+} from "../hooks/useSqlHistoryRunner";
 
 export type SqlRunFn = (args: {
   windowId: string;
@@ -37,6 +40,7 @@ export type ConnectionRuntime = {
 
   // services
   runSqlWithHistory: SqlRunFn;
+  captureHistoryTarget: () => SqlHistoryTarget | null;
   refreshSchemaAndTables: () => Promise<void>;
 
   // new table

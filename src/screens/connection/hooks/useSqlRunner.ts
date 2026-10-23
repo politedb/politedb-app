@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import type { DatabaseEngine } from "src/types";
 import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import {
@@ -6,7 +12,7 @@ import {
   validateSqlClient,
   validateSqlQueryBE,
 } from "src/lib/tauri/queryValidate";
-import { RunSqlReturn } from "./useSqlHistoryRunner";
+import type { RunSqlReturn, SqlHistoryTarget } from "./useSqlHistoryRunner";
 import {
   ensureSqlStreamStarted,
   clearSqlStream,
@@ -17,7 +23,29 @@ import { operationCancel } from "src/lib/tauri/operation";
 import { isMutatingStatement } from "src/lib/sql/detect";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
 import { buildExplainSql } from "src/lib/queries/sql/explain";
-import type { QuerySafetyMode } from "@root/src/lib/queries/querySafety";
+import {
+  effectiveSafetyMode,
+  readNeedsTouchId,
+  readTouchIdPrompt,
+  type QuerySafetyMode,
+} from "@root/src/lib/queries/querySafety";
+import {
+  classifyForAnalyze,
+  supportsExplainAnalyze,
+} from "src/lib/sql/analyzeClassify";
+import {
+  EXPLAIN_ANALYZE_ATTEMPT_DEADLINE_MS,
+  EXPLAIN_ANALYZE_WATCHDOG_MS,
+  startExplainAnalyzeOperation,
+  type ExplainAnalyzeStart,
+} from "src/lib/tauri/explainAnalyze";
+import {
+  explainAnalyzeErrorMessage,
+  explainAnalyzeRefusalMessage,
+} from "src/lib/query-analyzer/explainAnalyzeMessages";
+import { confirmExplainAnalyze } from "src/stores/explainAnalyzeConfirm";
+import { useProGate } from "src/hooks/useProGate";
+import { hasProAccessNow } from "src/stores/license";
 
 function formatQueryError(err: unknown, index: number) {
   const msg = unwrapErrorMessage(err);
@@ -48,6 +76,45 @@ const runIdByWindow = new Map<string, number>();
 const inflightByWindow = new Map<string, boolean>();
 const lastRunAtByWindow = new Map<string, number>();
 
+/**
+ * One Explain Analyze attempt per window, from the click to a terminal event.
+ * Kept outside the runs so closing a run or the window still reaches it.
+ * `adopted` is set once the operation id is accepted.
+ */
+type AnalyzeAttempt = {
+  controller: AbortController;
+  runId: string | null;
+  adopted: boolean;
+};
+const analyzeAttemptByWindow = new Map<string, AnalyzeAttempt>();
+
+function abortAnalyzeAttempt(
+  windowId: string,
+  only?: (attempt: AnalyzeAttempt) => boolean
+) {
+  const attempt = analyzeAttemptByWindow.get(windowId);
+  if (!attempt || (only && !only(attempt))) return;
+  analyzeAttemptByWindow.delete(windowId);
+  attempt.controller.abort();
+}
+
+function startFailureMessage(
+  start: Exclude<ExplainAnalyzeStart, { kind: "started" }>
+) {
+  switch (start.kind) {
+    case "refused":
+      return explainAnalyzeRefusalMessage(start.reason);
+    case "busy":
+      return explainAnalyzeErrorMessage("busy");
+    case "aborted":
+      return explainAnalyzeErrorMessage("cancelled");
+    case "timeout":
+      return explainAnalyzeErrorMessage("no_response");
+    case "failed":
+      return explainAnalyzeErrorMessage("failed");
+  }
+}
+
 function emptyWindowState(): WindowState {
   return { runs: [], activeRunId: null, activeSlotIndex: 0 };
 }
@@ -73,6 +140,7 @@ export function clearSqlRunnerWindowState(windowId: string) {
     cleanupRun(run);
   }
 
+  abortAnalyzeAttempt(windowId);
   stateByWindowId.delete(windowId);
   runIdByWindow.delete(windowId);
   inflightByWindow.delete(windowId);
@@ -135,6 +203,8 @@ export function useSqlRunner(args: {
   sqlSafetyMode?: QuerySafetyMode;
   onRunSql: RunSqlFn;
   stopOnError?: boolean;
+  /** Profile tab for Explain Analyze history, captured at click time. */
+  captureHistoryTarget?: () => SqlHistoryTarget | null;
 }) {
   const {
     activeSqlWindowId,
@@ -144,7 +214,25 @@ export function useSqlRunner(args: {
     sqlSafetyMode = "default",
     onRunSql,
     stopOnError = false,
+    captureHistoryTarget,
   } = args;
+  const { requirePro } = useProGate();
+
+  // Current values, re-read after every await of Explain Analyze.
+  const latestRef = useRef({
+    runtimeConnectionId,
+    engine,
+    sqlSafetyMode,
+    isProfileLocked,
+    captureHistoryTarget,
+  });
+  latestRef.current = {
+    runtimeConnectionId,
+    engine,
+    sqlSafetyMode,
+    isProfileLocked,
+    captureHistoryTarget,
+  };
 
   const getSaved = useCallback((): WindowState => {
     if (!activeSqlWindowId) return emptyWindowState();
@@ -247,6 +335,8 @@ export function useSqlRunner(args: {
       kind: SqlResultRun["kind"];
       sourceSql: string;
       statements: string[];
+      /** Explain: the unwrapped statement behind every slot. */
+      sourceStatement?: string;
       validateBeforeRun: boolean;
       sequential?: boolean;
     }) => {
@@ -259,6 +349,7 @@ export function useSqlRunner(args: {
       const initialSlots: SqlResultSlot[] = args.statements.map((sql, i) => ({
         index: i,
         sql,
+        ...(args.sourceStatement ? { sourceSql: args.sourceStatement } : {}),
         status: "queued",
       }));
 
@@ -268,6 +359,7 @@ export function useSqlRunner(args: {
         title: makeRunTitle(args.kind, runIndex),
         createdAt: Date.now(),
         sql: args.sourceSql,
+        connectionId: runtimeConnectionId,
         slots: initialSlots,
       };
 
@@ -426,8 +518,10 @@ export function useSqlRunner(args: {
         }
 
         const list = v.statements;
-        const effectiveMode =
-          sqlSafetyMode === "lock" || isProfileLocked ? "lock" : sqlSafetyMode;
+        const effectiveMode = effectiveSafetyMode(
+          sqlSafetyMode,
+          isProfileLocked
+        );
 
         if (effectiveMode === "production") {
           const blockedIndex = list.findIndex((stmt) =>
@@ -469,13 +563,9 @@ export function useSqlRunner(args: {
           }
         }
 
-        if (effectiveMode === "safe" || effectiveMode === "production") {
+        if (readNeedsTouchId(effectiveMode)) {
           try {
-            await securityTouchIdAuthenticate(
-              effectiveMode === "production"
-                ? "Authenticate with Touch ID before reading production data."
-                : "Authenticate with Touch ID before sending queries."
-            );
+            await securityTouchIdAuthenticate(readTouchIdPrompt(effectiveMode));
           } catch (err) {
             appendRun(
               winId,
@@ -548,6 +638,7 @@ export function useSqlRunner(args: {
           kind: "explain",
           sourceSql: payload.sql,
           statements: explain.statements,
+          sourceStatement: explain.source,
           validateBeforeRun: false,
           sequential: true,
         });
@@ -558,9 +649,245 @@ export function useSqlRunner(args: {
     [appendRun, bumpRunId, engine, runStatements, runtimeConnectionId]
   );
 
+  /**
+   * Explain Analyze (plan .agent/plans/query-analyzer-explain-analyze.md,
+   * section 3): the only entry point for the toolbar button and the
+   * analyzer's "Run with ANALYZE". `origin` is the run whose estimated plan
+   * asked for it; the connection must still be the one that produced it.
+   * `sourceUnchanged` (toolbar) reports whether the editor still holds the
+   * same statement; a plan's statement is immutable.
+   */
+  const startExplainAnalyze = useCallback(
+    async (payload: {
+      windowId: string;
+      sql: string;
+      origin?: { connectionId?: string };
+      sourceUnchanged?: () => boolean;
+    }) => {
+      const winId = payload.windowId;
+      const connectionId = runtimeConnectionId;
+      if (!connectionId) return;
+      if (analyzeAttemptByWindow.has(winId)) return;
+
+      const attempt: AnalyzeAttempt = {
+        controller: new AbortController(),
+        runId: null,
+        adopted: false,
+      };
+      analyzeAttemptByWindow.set(winId, attempt);
+      const isCurrent = () =>
+        analyzeAttemptByWindow.get(winId) === attempt &&
+        !attempt.controller.signal.aborted;
+      const release = () => {
+        if (analyzeAttemptByWindow.get(winId) === attempt) {
+          analyzeAttemptByWindow.delete(winId);
+        }
+      };
+      const refuse = (title: string, error: string) => {
+        release();
+        appendRun(
+          winId,
+          createErrorRun({ kind: "explain", title, sql: payload.sql, error })
+        );
+      };
+
+      const snapshot = {
+        engine,
+        rawMode: sqlSafetyMode,
+        mode: effectiveSafetyMode(sqlSafetyMode, isProfileLocked),
+        locked: isProfileLocked,
+      };
+      const historyTarget = captureHistoryTarget?.() ?? null;
+      // Anything that changed since the click stops the attempt (step 6):
+      // connection, engine, raw safety mode, lock, Pro, profile tab and its
+      // connection, and the statement itself.
+      const stillAllowed = () => {
+        const now = latestRef.current;
+        const tabNow = now.captureHistoryTarget?.() ?? null;
+        return (
+          isCurrent() &&
+          now.runtimeConnectionId === connectionId &&
+          now.engine === snapshot.engine &&
+          now.sqlSafetyMode === snapshot.rawMode &&
+          now.isProfileLocked === snapshot.locked &&
+          hasProAccessNow() &&
+          (tabNow?.tabId ?? null) === (historyTarget?.tabId ?? null) &&
+          (historyTarget?.isCurrent() ?? true) &&
+          (payload.sourceUnchanged?.() ?? true)
+        );
+      };
+
+      let run: SqlResultRun | null = null;
+      const failSlot = (error: string) => {
+        if (!run) return;
+        const runId = run.id;
+        const slot = stateByWindowId
+          .get(winId)
+          ?.runs.find((entry) => entry.id === runId)?.slots[0];
+        if (slot?.status !== "running") return;
+        setSlot(winId, runId, 0, {
+          status: "error",
+          error,
+          finishedAt: Date.now(),
+        });
+      };
+
+      try {
+        if (payload.origin && payload.origin.connectionId !== connectionId) {
+          refuse(
+            "Explain Analyze",
+            "This plan came from an earlier connection. Run Explain again, then Explain Analyze."
+          );
+          return;
+        }
+        if (!requirePro("query-analyzer")) return;
+        if (!supportsExplainAnalyze(engine)) {
+          refuse(
+            "Explain Analyze",
+            explainAnalyzeRefusalMessage("unsupported_engine")
+          );
+          return;
+        }
+        const classified = classifyForAnalyze(payload.sql);
+        if (!classified.ok) {
+          refuse(
+            "Explain Analyze",
+            explainAnalyzeRefusalMessage(classified.reason)
+          );
+          return;
+        }
+        const statement = classified.statement;
+
+        if (readNeedsTouchId(snapshot.mode)) {
+          try {
+            await securityTouchIdAuthenticate(readTouchIdPrompt(snapshot.mode));
+          } catch (err) {
+            if (!isCurrent()) return;
+            refuse(
+              "Auth failed",
+              `Touch ID authentication failed: ${unwrapErrorMessage(err)}`
+            );
+            return;
+          }
+        }
+        if (!stillAllowed()) return;
+
+        const confirmed = await confirmExplainAnalyze({
+          target: historyTarget?.label ?? null,
+          statement,
+        });
+        if (!confirmed || !stillAllowed()) return;
+
+        const runIndex = (stateByWindowId.get(winId)?.runs.length ?? 0) + 1;
+        const created: SqlResultRun = {
+          id: makeRunId("explain"),
+          kind: "explain",
+          title: `Explain Analyze ${runIndex}`,
+          createdAt: Date.now(),
+          sql: statement,
+          connectionId,
+          slots: [
+            {
+              index: 0,
+              sql: statement,
+              status: "running",
+              startedAt: Date.now(),
+            },
+          ],
+        };
+        run = created;
+        attempt.runId = created.id;
+        appendRun(winId, created);
+
+        // One absolute deadline for the whole attempt; adoption never extends it.
+        const deadlineAt = Date.now() + EXPLAIN_ANALYZE_ATTEMPT_DEADLINE_MS;
+        const start = await startExplainAnalyzeOperation({
+          connectionId,
+          sql: statement,
+          signal: attempt.controller.signal,
+          deadlineAt,
+          stillAllowed,
+        });
+        if (start.kind !== "started") {
+          failSlot(startFailureMessage(start));
+          return;
+        }
+        if (!isCurrent()) {
+          // Closed or cancelled while the id was on its way.
+          void operationCancel(start.opId).catch(() => {});
+          return;
+        }
+
+        attempt.adopted = true;
+        historyTarget?.record(statement, "explain_analyze");
+        const opId = start.opId;
+        setSlot(winId, created.id, 0, {
+          status: "running",
+          mode: "stream",
+          opId,
+          startedAt: Date.now(),
+        });
+        ensureSqlStreamStarted(opId, {
+          terminalOnly: {
+            watchdogMs: Math.max(
+              0,
+              Math.min(EXPLAIN_ANALYZE_WATCHDOG_MS, deadlineAt - Date.now())
+            ),
+          },
+        });
+
+        // Follow the operation until it ends: no 65 s unsubscribe here.
+        let unsubscribe: (() => void) | null = null;
+        const sync = () => {
+          const stream = getSqlStreamSnapshot(opId);
+          if (stream.status !== "done" && stream.status !== "error") return;
+          unsubscribe?.();
+          unsubscribe = null;
+          if (analyzeAttemptByWindow.get(winId) !== attempt) return;
+          release();
+          if (stream.status === "done") {
+            setSlot(winId, created.id, 0, {
+              status: "done",
+              finishedAt: Date.now(),
+            });
+          } else {
+            failSlot(explainAnalyzeErrorMessage(stream.error ?? "failed"));
+          }
+        };
+        unsubscribe = subscribeSqlStream(opId, sync);
+        sync();
+      } catch {
+        // Dialog or IPC failure: a fixed message, never the raw error.
+        if (!attempt.adopted) failSlot(explainAnalyzeErrorMessage("failed"));
+      } finally {
+        // Until adoption the attempt owns nothing outside this call.
+        if (!attempt.adopted) release();
+      }
+    },
+    [
+      appendRun,
+      captureHistoryTarget,
+      engine,
+      isProfileLocked,
+      requirePro,
+      runtimeConnectionId,
+      setSlot,
+      sqlSafetyMode,
+    ]
+  );
+
+  // Leaving the window drops an attempt that has not started yet (an open
+  // dialog, a pending start call); a started one keeps running like Run.
+  useEffect(() => {
+    if (!activeSqlWindowId) return;
+    const winId = activeSqlWindowId;
+    return () => abortAnalyzeAttempt(winId, (attempt) => !attempt.adopted);
+  }, [activeSqlWindowId]);
+
   const reset = useCallback(() => {
     if (!activeSqlWindowId) return;
     const winId = activeSqlWindowId;
+    abortAnalyzeAttempt(winId);
 
     const prev = stateByWindowId.get(winId)?.runs;
     for (const run of prev ?? []) {
@@ -583,6 +910,7 @@ export function useSqlRunner(args: {
       if (index < 0) return;
 
       const run = cached.runs[index];
+      abortAnalyzeAttempt(activeSqlWindowId, (a) => a.runId === runId);
       cancelRunOperations(run);
       cleanupRun(run);
 
@@ -616,6 +944,7 @@ export function useSqlRunner(args: {
       if (runIndex < 0) return;
 
       const run = cached.runs[runIndex];
+      abortAnalyzeAttempt(activeSqlWindowId, (a) => a.runId === runId);
       cancelRunOperations(run);
 
       const finishedAt = Date.now();
@@ -651,6 +980,7 @@ export function useSqlRunner(args: {
     setActiveResultIndex,
     startRun,
     startExplain,
+    startExplainAnalyze,
     closeRun,
     cancelRun,
     reset,

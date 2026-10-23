@@ -95,7 +95,8 @@ mod tests {
 
     /// Supplementary architecture check: production code opens PostgreSQL
     /// sessions only from configs built by `build_pg_config` (runtime pools in
-    /// `connect_pg`, Test connection in `test_pg_direct`). Test modules may
+    /// `connect_pg`, Test connection in `test_pg_direct`, Explain Analyze from
+    /// the runtime's stored config). Test modules may
     /// build their own fixtures.
     #[test]
     fn production_code_opens_postgres_only_through_build_pg_config() {
@@ -112,6 +113,9 @@ mod tests {
             ("engines/postgres/config.rs", "Config::new()"),
             ("engines/postgres/driver.rs", "Manager::from_config"),
             ("engines/postgres/driver.rs", ".connect(NoTls"),
+            // Explain Analyze: the runtime's own config (`PgConn::config`,
+            // built here by `connect_pg`), on a quiet session.
+            ("engines/postgres/explain_analyze.rs", ".connect(NoTls"),
         ];
         // Whole files compiled only for tests.
         let test_only = ["ai/agent/live_smoke.rs"];

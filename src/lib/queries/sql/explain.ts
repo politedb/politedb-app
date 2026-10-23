@@ -1,31 +1,107 @@
 import type { DatabaseEngine } from "src/types";
+import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
+import {
+  lexPostgres,
+  pgLeadingKeyword,
+  pgStatements,
+} from "src/lib/sql/pgLexer";
+
+/** Leading keyword after whitespace and (nested) comments, upper-cased. */
+export function leadingSqlKeyword(sql: string): string {
+  return pgLeadingKeyword(sql);
+}
+
+/**
+ * PostgreSQL positional parameters ($1, $2, ...) outside strings, quoted
+ * identifiers, comments and dollar-quoted bodies.
+ */
+export function hasPositionalParameters(sql: string): boolean {
+  return lexPostgres(sql).tokens.some((token) => token.kind === "param");
+}
+
+/** Executable statements, ignoring comment-only fragments. */
+function executableStatements(
+  engine: DatabaseEngine,
+  sql: string
+): { statements: string[]; unreadable: boolean } {
+  if (engine === "postgres") {
+    const { statements, unterminated } = pgStatements(sql);
+    return { statements, unreadable: unterminated };
+  }
+  const statements = splitSqlStatements(sql)
+    .map((part) => part.text.replace(/;+\s*$/g, "").trim())
+    .filter((text) =>
+      lexPostgres(text).tokens.some((token) => token.kind !== "comment")
+    );
+  return { statements, unreadable: false };
+}
 
 export function buildExplainSql(
   engine: DatabaseEngine,
   sql: string
 ):
-  | { statements: string[]; error?: undefined }
-  | { statements?: undefined; error: string } {
-  const statement = sql.trim().replace(/;+$/g, "").trim();
-  if (!statement) return { error: "SQL is empty." };
+  | { statements: string[]; source?: string; error?: undefined }
+  | { statements?: undefined; source?: undefined; error: string } {
+  const { statements, unreadable } = executableStatements(engine, sql);
+  if (unreadable) {
+    return {
+      error:
+        "Could not read the statement: a quote, dollar quote or comment is not closed.",
+    };
+  }
+  if (!statements.length) return { error: "SQL is empty." };
+  if (statements.length > 1) {
+    return {
+      error:
+        "Explain works on one statement at a time. Put the cursor in a single statement or select just one.",
+    };
+  }
+  const statement = statements[0]!;
+  if (leadingSqlKeyword(statement) === "EXPLAIN") {
+    return {
+      error:
+        "This is already an EXPLAIN statement. Use Run to execute it; a JSON plan result opens in the Query Analyzer.",
+    };
+  }
+  if (engine === "postgres" && hasPositionalParameters(statement)) {
+    return {
+      error:
+        "Statements with parameters ($1, $2, ...) can't be explained. Replace them with sample values first.",
+    };
+  }
 
   switch (engine) {
     case "postgres":
-      return { statements: [`EXPLAIN (FORMAT JSON) ${statement}`] };
+      return {
+        statements: [`EXPLAIN (FORMAT JSON) ${statement}`],
+        source: statement,
+      };
     case "mysql":
-      return { statements: [`EXPLAIN FORMAT=JSON ${statement}`] };
+      return {
+        statements: [`EXPLAIN FORMAT=JSON ${statement}`],
+        source: statement,
+      };
     case "mariadb":
-      return { statements: [`EXPLAIN FORMAT=JSON ${statement}`] };
+      return {
+        statements: [`EXPLAIN FORMAT=JSON ${statement}`],
+        source: statement,
+      };
     case "duckdb":
-      return { statements: [`EXPLAIN ${statement}`] };
+      return { statements: [`EXPLAIN ${statement}`], source: statement };
     case "clickhouse":
-      return { statements: [`EXPLAIN json=1 ${statement}`] };
+      return { statements: [`EXPLAIN json=1 ${statement}`], source: statement };
     case "snowflake":
-      return { statements: [`EXPLAIN USING JSON ${statement}`] };
+      return {
+        statements: [`EXPLAIN USING JSON ${statement}`],
+        source: statement,
+      };
     case "sqlite":
     case "d1":
     case "turso":
-      return { statements: [`EXPLAIN QUERY PLAN ${statement}`] };
+      return {
+        statements: [`EXPLAIN QUERY PLAN ${statement}`],
+        source: statement,
+      };
     case "sqlserver":
       return {
         statements: [

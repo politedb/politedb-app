@@ -39,7 +39,7 @@ import type {
   HealthSection,
   HealthServerMetrics,
 } from "src/lib/health-inspector/types";
-import { InfoHint } from "./InfoHint";
+import { InfoHint } from "src/components/common/InfoHint";
 
 function formatCollectedAt(ts: number | null): string {
   return formatHealthInspectorTimestamp(ts);

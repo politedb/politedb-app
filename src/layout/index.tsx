@@ -9,6 +9,7 @@ import { UnsavedChangesDialogHost } from "src/screens/connection/workspace/Unsav
 import { FloatingAssistantLauncher } from "src/components/ai-assistant/FloatingAssistantLauncher";
 import { WelcomeDialogHost } from "src/components/modal/WelcomeDialogHost";
 import { ProUpgradeDialogHost } from "src/components/license/ProUpgradeDialogHost";
+import { ExplainAnalyzeConfirmHost } from "src/components/editor/query-analyzer/ExplainAnalyzeConfirmHost";
 import { Spinner } from "src/components/common/Spinner";
 import { Toast } from "@root/src/components/common/Toast";
 import { createRetryableLazy } from "src/components/common/RetryableLazy";
@@ -88,6 +89,7 @@ export function MainLayout() {
       <WelcomeDialogHost />
       <UnsavedChangesDialogHost />
       <ProUpgradeDialogHost />
+      <ExplainAnalyzeConfirmHost />
       <Toast />
     </div>
   );

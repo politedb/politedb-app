@@ -170,7 +170,31 @@ function getSnapshot(opId: string): SqlStreamResult {
  * Start stream
  * ============================================================================= */
 
-export function ensureSqlStreamStarted(opId: string) {
+/** The op:error payload is `{ op_id, error, elapsed_ms }`; read its text. */
+export function streamErrorText(err: unknown): string {
+  if (typeof err === "string") return err;
+  const record = err as { error?: unknown; message?: unknown } | null;
+  if (typeof record?.error === "string") return record.error;
+  if (typeof record?.message === "string") return record.message;
+  return "Unknown error";
+}
+
+export type SqlStreamStartOptions = {
+  /**
+   * Stay running until the backend's own done/error event (no idle-done
+   * failsafe). Used for operations that send nothing until they finish, such
+   * as EXPLAIN ANALYZE. After `watchdogMs` without a terminal event the
+   * stream ends as an error, never as an empty success.
+   */
+  terminalOnly?: { watchdogMs: number };
+};
+
+export const STREAM_NO_RESPONSE = "no_response";
+
+export function ensureSqlStreamStarted(
+  opId: string,
+  options?: SqlStreamStartOptions
+) {
   const entry = getOrCreate(opId);
   if (entry.started) return;
   entry.started = true;
@@ -178,23 +202,36 @@ export function ensureSqlStreamStarted(opId: string) {
   entry.lastEventAt = Date.now();
   notify(entry);
 
-  // ✅ failsafe: if BE never sends done for empty result, stop spinning
   if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);
-  entry.idleTimer = window.setInterval(() => {
-    if (entry.status !== "running") return;
-
-    const idleMs = Date.now() - entry.lastEventAt;
-
-    // no rows received yet + idle => treat as empty done
-    if (entry.maxIdx < 0 && idleMs > 1200) {
-      entry.status = "done";
-      entry.totalRows = 0;
+  if (options?.terminalOnly) {
+    const deadline = Date.now() + options.terminalOnly.watchdogMs;
+    entry.idleTimer = window.setInterval(() => {
+      if (entry.status !== "running") return;
+      if (Date.now() < deadline) return;
+      entry.status = "error";
+      entry.error = STREAM_NO_RESPONSE;
       notify(entry);
-
       if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);
       entry.idleTimer = null;
-    }
-  }, 300);
+    }, 1000);
+  } else {
+    // ✅ failsafe: if BE never sends done for empty result, stop spinning
+    entry.idleTimer = window.setInterval(() => {
+      if (entry.status !== "running") return;
+
+      const idleMs = Date.now() - entry.lastEventAt;
+
+      // no rows received yet + idle => treat as empty done
+      if (entry.maxIdx < 0 && idleMs > 1200) {
+        entry.status = "done";
+        entry.totalRows = 0;
+        notify(entry);
+
+        if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);
+        entry.idleTimer = null;
+      }
+    }, 300);
+  }
 
   operationBus
     .subscribe(opId, {
@@ -265,7 +302,7 @@ export function ensureSqlStreamStarted(opId: string) {
       onError: (err: any) => {
         entry.lastEventAt = Date.now();
         entry.status = "error";
-        entry.error = String(err?.message ?? err ?? "Unknown error");
+        entry.error = streamErrorText(err);
         notify(entry);
 
         if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);

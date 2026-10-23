@@ -152,7 +152,11 @@ pub async fn connect_pg(
     // Build config WITHOUT logging password
     let cfg = build_pg_config(&input, &password).context("build_pg_config failed")?;
 
-    let mgr = Manager::from_config(cfg, NoTls, deadpool_postgres::ManagerConfig::default());
+    let mgr = Manager::from_config(
+        cfg.clone(),
+        NoTls,
+        deadpool_postgres::ManagerConfig::default(),
+    );
 
     let max_size: usize = input.pool_max_size.unwrap_or(5).clamp(1, 20);
 
@@ -174,6 +178,7 @@ pub async fn connect_pg(
         id: conn_id,
         label,
         pool,
+        config: cfg,
     })
 }
 

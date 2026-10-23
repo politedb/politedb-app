@@ -160,6 +160,11 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
                 >
                   <div class="w-48 shrink-0 pt-0.5 text-xs text-neutral-500 tabular-nums">
                     {formatTimestamp(q.timestamp)}
+                    {q.kind === "explain_analyze" ? (
+                      <span class="mt-1 block w-fit rounded bg-blue-50 px-1.5 font-sans text-[11px] text-blue-700 dark:bg-blue-950 dark:text-blue-200">
+                        Explain Analyze
+                      </span>
+                    ) : null}
                   </div>
 
                   <div class="min-w-0 flex-1">

@@ -7,6 +7,9 @@ use uuid::Uuid;
 pub enum OperationKind {
     SqlQuery,
     RedisCommand,
+    /// PostgreSQL EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) of a read-only
+    /// statement, in a read-only transaction that is always rolled back.
+    ExplainAnalyze,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +66,14 @@ pub struct OperationExecuteInput {
 
     pub sql: Option<SqlQueryInput>,
     pub redis: Option<RedisCommandInput>,
+    #[serde(default)]
+    pub explain_analyze: Option<ExplainAnalyzeInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainAnalyzeInput {
+    /// The user's statement (not wrapped); the backend classifies and wraps it.
+    pub sql: String,
 }
 
 #[derive(Clone, serde::Deserialize)]

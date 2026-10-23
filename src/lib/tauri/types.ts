@@ -419,6 +419,11 @@ export type OperationExecuteInput =
       connection_id: string;
       kind: "redis_command";
       redis: RedisCommandPayload;
+    }
+  | {
+      connection_id: string;
+      kind: "explain_analyze";
+      explain_analyze: { sql: string };
     };
 
 export type ColumnMeta = {
@@ -466,6 +471,8 @@ export type MongoCollectionOverview = {
 export type SqlResultSlot = {
   index: number;
   sql: string;
+  /** Explain runs: the statement as written, before the EXPLAIN wrapper. */
+  sourceSql?: string;
   status: "queued" | "running" | "done" | "error";
   result?: QueryResult;
   error?: string;
@@ -482,6 +489,8 @@ export type SqlResultRun = {
   title: string;
   createdAt: number;
   sql: string;
+  /** Runtime connection the run used (absent on older or refused runs). */
+  connectionId?: string;
   slots: SqlResultSlot[];
 };
 

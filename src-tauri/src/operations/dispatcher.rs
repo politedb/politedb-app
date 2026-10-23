@@ -45,6 +45,28 @@ pub async fn cancel_operation(state: State<'_, AppState>, op_id: Uuid) -> Result
     Ok(())
 }
 
+/// PostgreSQL only; the statement is classified here (this check wins over
+/// the frontend's) and one analysis may run per runtime connection.
+fn spawn_explain_analyze(
+    state: &AppState,
+    conn: &crate::engines::EngineConnection,
+    conn_id: Uuid,
+    ctx: OperationCtx,
+    input: Option<crate::types::ExplainAnalyzeInput>,
+) -> Result<(), String> {
+    use crate::engines::postgres::explain_analyze::{self, AnalyzePermit};
+    let input = input.ok_or("EXPLAIN_ANALYZE_PAYLOAD_MISSING")?;
+    let crate::engines::EngineConnection::Postgres(pg) = conn else {
+        return Err("EXPLAIN_ANALYZE_UNSUPPORTED_ENGINE".into());
+    };
+    let statement = explain_analyze::classify_for_analyze(&input.sql)
+        .map_err(|refusal| format!("EXPLAIN_ANALYZE_REFUSED:{}", refusal.code()))?;
+    let permit = AnalyzePermit::acquire(&state.explain_analyze_running, conn_id)
+        .ok_or("EXPLAIN_ANALYZE_BUSY")?;
+    explain_analyze::spawn(ctx, pg.config.clone(), statement, permit);
+    Ok(())
+}
+
 pub async fn dispatch_operation(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -145,6 +167,9 @@ pub async fn dispatch_operation(
         OperationKind::RedisCommand => {
             let cmd_input = input.redis.ok_or("REDIS_PAYLOAD_MISSING")?;
             conn.spawn_redis_command(ctx, cmd_input)
+        }
+        OperationKind::ExplainAnalyze => {
+            spawn_explain_analyze(&state, &conn, conn_id, ctx, input.explain_analyze)
         }
     };
 

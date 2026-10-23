@@ -149,7 +149,11 @@ export type ConnectionState = {
   selectedRowByKey: Record<string, SelectedRowDetail | null>;
   rowFieldEditHandlerByKey: Record<string, RowFieldEditHandler | undefined>;
 
-  addQueryHistory: (windowId: string, sql: string) => void;
+  addQueryHistory: (
+    windowId: string,
+    sql: string,
+    options?: { kind?: SqlQuery["kind"] }
+  ) => void;
   clearQueryHistory: (windowId: string) => void;
 
   setSqlResult: (windowId: string, patch: Partial<SqlResultState>) => void;

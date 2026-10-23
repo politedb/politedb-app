@@ -13,6 +13,22 @@ type Options = {
   metadata?: MetadataApi;
 };
 
+/**
+ * The profile tab a statement started from, captured before any async step so
+ * a later history write still goes to that tab.
+ */
+export type SqlHistoryTarget = {
+  tabId: string;
+  label: string;
+  /** Still open and on the same runtime connection as when captured. */
+  isCurrent: () => boolean;
+  /**
+   * Adds to that tab's history; dropped if the tab was closed or moved to
+   * another connection meanwhile.
+   */
+  record: (sql: string, kind: "explain_analyze") => void;
+};
+
 export type RunSqlReturn =
   | { mode: "direct"; result: QueryResult }
   | { mode: "stream"; opId: string };
@@ -66,7 +82,30 @@ export function useSqlHistoryRunner(opts?: Options) {
     [activeTab, addQueryHistory, opts?.metadata, opts?.engine, opts?.profileId]
   );
 
+  const captureHistoryTarget = useCallback((): SqlHistoryTarget | null => {
+    if (!activeTab) return null;
+    const tabId = activeTab.id;
+    const runtimeId = activeTab.runtimeConnectionId;
+    // Same tab, still on the same connection (not reconnected or reused).
+    const isCurrent = () =>
+      useScreenStore
+        .getState()
+        .profileTabs.some(
+          (tab) => tab.id === tabId && tab.runtimeConnectionId === runtimeId
+        );
+    return {
+      tabId,
+      label: activeTab.label,
+      isCurrent,
+      record: (sql, kind) => {
+        if (!isCurrent()) return;
+        useConnectionStore.getState().addQueryHistory(tabId, sql, { kind });
+      },
+    };
+  }, [activeTab]);
+
   return {
     runSqlWithHistory: run,
+    captureHistoryTarget,
   };
 }

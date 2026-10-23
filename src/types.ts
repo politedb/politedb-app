@@ -36,6 +36,8 @@ export type WindowType =
 export type SqlQuery = {
   sql: string;
   timestamp: Date;
+  /** How it ran; absent for ordinary Run (and in older entries). */
+  kind?: "explain_analyze";
 };
 
 export type NavItem = {
