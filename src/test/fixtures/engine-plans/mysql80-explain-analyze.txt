@@ -1,0 +1,8 @@
+-> Sort: `count(*)` DESC  (actual time=0.103..0.103 rows=2 loops=1)
+    -> Table scan on <temporary>  (actual time=0.0876..0.0877 rows=2 loops=1)
+        -> Aggregate using temporary table  (actual time=0.087..0.087 rows=2 loops=1)
+            -> Nested loop inner join  (cost=1 rows=1) (actual time=0.0405..0.0457 rows=2 loops=1)
+                -> Filter: ((o.`status` = 'x') and (o.cid is not null))  (cost=0.65 rows=1) (actual time=0.0271..0.0305 rows=2 loops=1)
+                    -> Table scan on o  (cost=0.65 rows=4) (actual time=0.0214..0.0238 rows=4 loops=1)
+                -> Single-row index lookup on c using PRIMARY (id=o.cid)  (cost=0.35 rows=1) (actual time=0.00485..0.0049 rows=1 loops=2)
+
