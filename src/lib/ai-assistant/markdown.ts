@@ -15,7 +15,13 @@ export type Inline =
 export type Block =
   | { kind: "paragraph"; children: Inline[] }
   | { kind: "heading"; level: number; children: Inline[] }
-  | { kind: "list"; ordered: boolean; items: Inline[][] }
+  | {
+      kind: "list";
+      ordered: boolean;
+      /** First number of an ordered list ("3." starts at 3). */
+      start?: number;
+      items: Inline[][];
+    }
   | { kind: "code"; lang: string; text: string }
   | { kind: "quote"; children: Inline[] };
 
@@ -435,7 +441,11 @@ export function parseMarkdown(source: string): Block[] {
         }
         items.push(parseInline(text));
       }
-      blocks.push({ kind: "list", ordered, items });
+      blocks.push(
+        ordered
+          ? { kind: "list", ordered, start: Number(item[2]), items }
+          : { kind: "list", ordered, items }
+      );
       continue;
     }
     if (/^\s*>\s?/.test(line)) {

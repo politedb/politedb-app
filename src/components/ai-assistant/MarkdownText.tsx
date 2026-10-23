@@ -59,19 +59,29 @@ function renderBlock(block: Block, index: number) {
         </p>
       );
     case "list": {
-      const Tag = block.ordered ? "ol" : "ul";
+      if (block.ordered) {
+        const start = block.start ?? 1;
+        // Room for the widest marker ("10." needs more than "9."), else it is cut off.
+        const digits = String(start + block.items.length - 1).length;
+        return (
+          <ol
+            key={index}
+            start={start}
+            class="list-decimal space-y-1 tabular-nums"
+            style={{ paddingLeft: `calc(${digits}ch + 1rem)` }}
+          >
+            {block.items.map((item, itemIndex) => (
+              <li key={itemIndex}>{renderInline(item)}</li>
+            ))}
+          </ol>
+        );
+      }
       return (
-        <Tag
-          key={index}
-          class={cn(
-            "space-y-1 pl-5",
-            block.ordered ? "list-decimal" : "list-disc"
-          )}
-        >
+        <ul key={index} class="list-disc space-y-1 pl-5">
           {block.items.map((item, itemIndex) => (
             <li key={itemIndex}>{renderInline(item)}</li>
           ))}
-        </Tag>
+        </ul>
       );
     }
     case "code":

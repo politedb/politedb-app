@@ -38,6 +38,8 @@ describe("parseMarkdown", () => {
     expect(list.ordered).toBe(false);
     expect(list.items[0][0]).toEqual({ kind: "code", text: "orders.user_id" });
     expect((blocks[3] as any).ordered).toBe(true);
+    expect((blocks[3] as any).start).toBe(1);
+    expect(list.start).toBeUndefined();
     expect(blocks[4]).toEqual({ kind: "code", lang: "sql", text: "SELECT 1;" });
   });
 
