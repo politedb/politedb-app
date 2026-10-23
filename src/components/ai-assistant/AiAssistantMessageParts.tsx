@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useRef } from "preact/hooks";
 import { MarkdownText } from "./MarkdownText";
 import { ProBadge } from "src/components/license/ProBadge";
@@ -17,6 +18,8 @@ import {
 } from "src/components/common/OverlayScrollArea";
 
 export type SqlRunState = "idle" | "running" | "done" | "inserted" | "error";
+/** What happened to one SQL block's Run or Insert. */
+export type SqlRun = { state: SqlRunState; message: string };
 
 export function AssistantStreamingPlaceholder() {
   return (
@@ -109,38 +112,24 @@ function SqlCodeBlock(props: {
 }
 
 function SqlPreviewPart(props: {
-  messageId: string;
-  partIndex: number;
   part: Extract<
     NonNullable<ChatMessage["parts"]>[number],
     { type: "sqlPreview" }
   >;
   copied: boolean;
-  sqlRunState: SqlRunState;
-  sqlRunMessage: string;
-  onInsertSql?: (sql: string) => Promise<void> | void;
+  run?: SqlRun;
   onCopySql: (sql: string) => void;
-  onInsert: (sql: string) => void;
+  onInsert?: (sql: string) => void;
   onRun?: (sql: string, agent: boolean) => void;
+  /** This block's query result, when it was the last one run in the message. */
+  result?: ComponentChildren;
 }) {
-  const {
-    messageId,
-    partIndex,
-    part,
-    copied,
-    sqlRunState,
-    sqlRunMessage,
-    onInsertSql,
-    onCopySql,
-    onInsert,
-    onRun,
-  } = props;
+  const { part, copied, run, onCopySql, onInsert, onRun, result } = props;
+  const sqlRunState = run?.state ?? "idle";
+  const sqlRunMessage = run?.message ?? "";
 
   return (
-    <div
-      key={`${messageId}-part-${partIndex}`}
-      class="w-full min-w-0 overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 p-2"
-    >
+    <div class="w-full min-w-0 overflow-hidden rounded-lg border border-neutral-200 bg-neutral-50 p-2">
       <div class="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-neutral-500">
         <span class="min-w-0 truncate">
           SQL Preview
@@ -157,7 +146,7 @@ function SqlPreviewPart(props: {
               Run
             </Button>
           ) : null}
-          {onInsertSql ? (
+          {onInsert ? (
             <Button
               variant="default"
               class="px-2 py-1 text-xs"
@@ -184,36 +173,45 @@ function SqlPreviewPart(props: {
           {sqlRunMessage}
         </div>
       ) : null}
+      {result}
     </div>
   );
+}
+
+/**
+ * The SQL part a message's result belongs under, or null to show it at the end.
+ * Saved chats come from disk, so the stored index is checked, not trusted.
+ */
+export function resultPartIndexOf(message: ChatMessage): number | null {
+  const index = message.resultPartIndex;
+  if (typeof index !== "number" || !Number.isInteger(index)) return null;
+  return message.parts?.[index]?.type === "sqlPreview" ? index : null;
 }
 
 function MessageParts(props: {
   message: ChatMessage;
   floating: boolean;
-  copied: boolean;
-  sqlRunState: SqlRunState;
-  sqlRunMessage: string;
-  onInsertSql?: (sql: string) => Promise<void> | void;
-  onCopySql: (sql: string) => void;
-  onInsert: (sql: string) => void;
-  onRun?: (sql: string, agent: boolean) => void;
+  /** SQL parts that show a copied tick (by index; -1 is a legacy block). */
+  copiedIndexes: Record<number, unknown>;
+  sqlRuns: Record<number, SqlRun>;
+  onCopySql: (sql: string, index: number) => void;
+  onInsert?: (sql: string, index: number) => void;
+  onRun?: (sql: string, agent: boolean, index: number) => void;
   onDataAccess?: (allow: boolean, question: string) => void;
   dataAccessSaving?: boolean;
 }) {
   const {
     message,
     floating,
-    copied,
-    sqlRunState,
-    sqlRunMessage,
-    onInsertSql,
+    copiedIndexes,
+    sqlRuns,
     onCopySql,
     onInsert,
     onRun,
     onDataAccess,
     dataAccessSaving,
   } = props;
+  const resultIndex = resultPartIndexOf(message);
 
   return (
     <div class="max-w-full min-w-0 space-y-3">
@@ -243,16 +241,19 @@ function MessageParts(props: {
           return (
             <SqlPreviewPart
               key={`${message.id}-part-${index}`}
-              messageId={message.id}
-              partIndex={index}
               part={part}
-              copied={copied}
-              sqlRunState={sqlRunState}
-              sqlRunMessage={sqlRunMessage}
-              onInsertSql={onInsertSql}
-              onCopySql={onCopySql}
-              onInsert={onInsert}
-              onRun={onRun}
+              copied={index in copiedIndexes}
+              run={sqlRuns[index]}
+              onCopySql={(sql) => onCopySql(sql, index)}
+              onInsert={onInsert ? (sql) => onInsert(sql, index) : undefined}
+              onRun={
+                onRun ? (sql, agent) => onRun(sql, agent, index) : undefined
+              }
+              result={
+                resultIndex === index ? (
+                  <ResultPreviewBlock message={message} compact={floating} />
+                ) : null
+              }
             />
           );
         }
@@ -302,7 +303,7 @@ function MessageParts(props: {
 function LegacySqlBlock(props: {
   message: ChatMessage;
   copied: boolean;
-  onInsertSql?: (sql: string) => Promise<void> | void;
+  onInsertSql?: (sql: string) => void;
   onCopySql: () => void;
 }) {
   const { message, copied, onInsertSql, onCopySql } = props;
@@ -317,7 +318,7 @@ function LegacySqlBlock(props: {
             <Button
               variant="default"
               class="px-2 py-1"
-              onClick={() => void onInsertSql(message.sql!)}
+              onClick={() => onInsertSql(message.sql!)}
             >
               Insert into editor
             </Button>
@@ -331,12 +332,12 @@ function LegacySqlBlock(props: {
 
 function ResultPreviewBlock(props: {
   message: ChatMessage;
-  previewColumns: string[];
   compact?: boolean;
 }) {
-  const { message, previewColumns, compact = false } = props;
+  const { message, compact = false } = props;
   const tableScrollRef = useRef<HTMLDivElement>(null);
   if (!message.resultPreview?.length) return null;
+  const previewColumns = getPreviewColumns(message.resultPreview);
 
   const scrollTable = (direction: -1 | 1) => {
     tableScrollRef.current?.scrollBy({
@@ -483,15 +484,12 @@ export function AiAssistantMessageBody(props: {
   floating: boolean;
   hasParts: boolean;
   isStreamingEmpty: boolean;
-  copied: boolean;
-  sqlRunState: SqlRunState;
-  sqlRunMessage: string;
-  previewColumns: string[];
-  onInsertSql?: (sql: string) => Promise<void> | void;
-  onCopySql: () => void;
-  onCopySqlText: (sql: string) => void;
-  onInsertSqlPreview: (sql: string) => void;
-  onRunSqlPreview?: (sql: string, agent: boolean) => void;
+  /** SQL parts that show a copied tick (by index; -1 is the legacy `message.sql` block). */
+  copiedIndexes: Record<number, unknown>;
+  sqlRuns: Record<number, SqlRun>;
+  onInsertSql?: (sql: string, index: number) => void;
+  onCopySql: (sql: string, index: number) => void;
+  onRunSqlPreview?: (sql: string, agent: boolean, index: number) => void;
   onDataAccess?: (allow: boolean, question: string) => void;
   dataAccessSaving?: boolean;
 }) {
@@ -500,18 +498,16 @@ export function AiAssistantMessageBody(props: {
     floating,
     hasParts,
     isStreamingEmpty,
-    copied,
-    sqlRunState,
-    sqlRunMessage,
-    previewColumns,
+    copiedIndexes,
+    sqlRuns,
     onInsertSql,
     onCopySql,
-    onCopySqlText,
-    onInsertSqlPreview,
     onRunSqlPreview,
     onDataAccess,
     dataAccessSaving,
   } = props;
+  // A result run from a SQL part shows under that part; any other one at the end.
+  const resultInPart = hasParts && resultPartIndexOf(message) !== null;
 
   return (
     <>
@@ -539,12 +535,10 @@ export function AiAssistantMessageBody(props: {
         <MessageParts
           message={message}
           floating={floating}
-          copied={copied}
-          sqlRunState={sqlRunState}
-          sqlRunMessage={sqlRunMessage}
-          onInsertSql={onInsertSql}
-          onCopySql={onCopySqlText}
-          onInsert={onInsertSqlPreview}
+          copiedIndexes={copiedIndexes}
+          sqlRuns={sqlRuns}
+          onCopySql={onCopySql}
+          onInsert={onInsertSql}
           onRun={onRunSqlPreview}
           onDataAccess={onDataAccess}
           dataAccessSaving={dataAccessSaving}
@@ -554,17 +548,15 @@ export function AiAssistantMessageBody(props: {
       {!hasParts ? (
         <LegacySqlBlock
           message={message}
-          copied={copied}
-          onInsertSql={onInsertSql}
-          onCopySql={onCopySql}
+          copied={(-1) in copiedIndexes}
+          onInsertSql={onInsertSql ? (sql) => onInsertSql(sql, -1) : undefined}
+          onCopySql={() => message.sql && onCopySql(message.sql, -1)}
         />
       ) : null}
 
-      <ResultPreviewBlock
-        message={message}
-        previewColumns={previewColumns}
-        compact={floating}
-      />
+      {resultInPart ? null : (
+        <ResultPreviewBlock message={message} compact={floating} />
+      )}
 
       {message.assumptions?.length ? (
         <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-neutral-700">

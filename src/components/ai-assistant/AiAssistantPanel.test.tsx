@@ -10,6 +10,7 @@ import { AiAssistantPanel } from "./AiAssistantPanel";
 
 const isGeneralChatPromptMock = vi.fn();
 const chatReplyMock = vi.fn();
+const confirmDialogMock = vi.fn();
 const getDirectMetadataReplyMock = vi.fn();
 const planAssistantTurnMock = vi.fn();
 const isReadOnlySqlMock = vi.fn();
@@ -107,6 +108,10 @@ const LEGACY_BUNDLED = {
   models: ["Qwen2.5-Coder-7B"],
   enabled: true,
 };
+
+vi.mock("src/lib/system-dialog", () => ({
+  confirmDialog: (...args: unknown[]) => confirmDialogMock(...args),
+}));
 
 vi.mock("src/components/ai-assistant/AiAssistantMessageCard", () => ({
   AiAssistantMessageCard: ({ message }: any) => (
@@ -645,5 +650,108 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings..." }));
 
     await screen.findByText("AI Provider Settings");
+  });
+
+  it("asks before deleting a chat, from the menu and from History", async () => {
+    renderPanel({ chatSessionKey: "delete-confirm-test" });
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "keep me" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByText(/Hello! How can I help\?/);
+
+    confirmDialogMock.mockResolvedValue(false);
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Chat" }));
+    await waitFor(() => expect(confirmDialogMock).toHaveBeenCalledTimes(1));
+    expect(confirmDialogMock.mock.calls[0][0]).toContain('"keep me"');
+    expect(confirmDialogMock.mock.calls[0][1]).toMatchObject({
+      okLabel: "Delete",
+    });
+    expect(screen.getByText("keep me")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await screen.findByText("Chat History");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(confirmDialogMock).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByText("keep me").length).toBeGreaterThan(0);
+
+    confirmDialogMock.mockResolvedValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.queryByText("keep me")).not.toBeInTheDocument()
+    );
+  });
+});
+
+describe("AiAssistantPanel composer", () => {
+  it("focuses the prompt when the chat opens", async () => {
+    renderPanel({ presentation: "floating" });
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it("does not send on the Enter that ends an IME composition", async () => {
+    renderPanel({ presentation: "floating" });
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "xin chào" } });
+    fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(textarea, { key: "Enter", keyCode: 229 });
+    expect(textarea).toHaveValue("xin chào");
+    expect(screen.queryByTestId("message-user")).not.toBeInTheDocument();
+  });
+
+  it("lets the next question be typed during an answer without sending it", async () => {
+    planAssistantTurnMock.mockReturnValue(new Promise(() => {}));
+    chatReplyMock.mockReturnValue(new Promise(() => {}));
+    renderPanel({ presentation: "floating" });
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "first" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByRole("button", { name: "Stop" });
+
+    expect(textarea).not.toBeDisabled();
+    fireEvent.input(textarea, { target: { value: "second" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(textarea).toHaveValue("second");
+    expect(screen.getAllByTestId("message-user")).toHaveLength(1);
+    // Enter neither sends nor stops the running answer.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  });
+
+  it("keeps focus inside History when its active chat is deleted", async () => {
+    renderPanel({ presentation: "floating" });
+    const textarea = await screen.findByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "older chat" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await screen.findByText(/Hello! How can I help\?/);
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+
+    fireEvent.click(screen.getByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    await screen.findByText("Chat History");
+    confirmDialogMock.mockResolvedValue(true);
+    const deletes = screen.getAllByRole("button", { name: "Delete" });
+    // Newest first: the empty chat just started is the active one.
+    fireEvent.click(deletes[0]);
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1)
+    );
+    await waitFor(() =>
+      expect(document.activeElement?.textContent).toContain("older chat")
+    );
+    expect(document.activeElement).not.toBe(
+      screen.getByPlaceholderText("Ask anything...")
+    );
+
+    // Picking a chat closes History and returns to the prompt.
+    fireEvent.click(document.activeElement as HTMLElement);
+    await waitFor(() =>
+      expect(screen.queryByText("Chat History")).not.toBeInTheDocument()
+    );
+    expect(document.activeElement).toBe(
+      screen.getByPlaceholderText("Ask anything...")
+    );
   });
 });

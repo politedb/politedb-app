@@ -271,6 +271,8 @@ export type ChatMessage = {
   clarification?: string;
   resultPreview?: Record<string, unknown>[];
   rowCount?: number | null;
+  /** The SQL preview part whose run produced `resultPreview`; unset: shown at the end. */
+  resultPartIndex?: number;
   confidence?: "high" | "medium" | "low";
 };
 

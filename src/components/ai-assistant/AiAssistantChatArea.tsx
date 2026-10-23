@@ -1,5 +1,5 @@
 import type { Ref } from "preact";
-import { useLayoutEffect, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { AssistantModePicker } from "./AssistantModePicker";
 import {
   AiAssistantMessageCard,
@@ -30,6 +30,7 @@ import {
 import { Input } from "src/components/common/Input";
 import type { AssistantStatus } from "src/components/ai-assistant/hooks/useAiAssistantSubmit";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
+import { confirmDialog } from "src/lib/system-dialog";
 import type { AiChatSession, AiProviderConfig, ChatMessage } from "src/types";
 import { cn } from "src/utils/cn";
 import { Button } from "../common/Button";
@@ -289,6 +290,11 @@ export function AiAssistantChatArea(props: {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const historyListRef = useRef<HTMLDivElement>(null);
+  // The prompt takes focus for a newly shown chat once no dialog covers it.
+  const focusPromptRef = useRef(true);
   const floating = presentation === "floating";
   const activeSession = chatSessions.find(
     (session) => session.id === activeSessionId
@@ -301,6 +307,29 @@ export function AiAssistantChatArea(props: {
     if (!container) return;
     container.scrollTop = container.scrollHeight;
   }, [activeSessionId, messagesContainerRef]);
+
+  // Ready to type when the chat opens, after switching chats (once History or
+  // Rename closes), and once an answer ends, unless the user has moved on to
+  // something outside the composer.
+  useEffect(() => {
+    focusPromptRef.current = true;
+  }, [activeSessionId]);
+  useEffect(() => {
+    if (historyOpen || renameOpen || !focusPromptRef.current) return;
+    focusPromptRef.current = false;
+    promptRef.current?.focus();
+  }, [activeSessionId, historyOpen, renameOpen]);
+  useEffect(() => {
+    if (submitting || historyOpen || renameOpen) return;
+    const active = document.activeElement;
+    if (
+      !active ||
+      active === document.body ||
+      composerRef.current?.contains(active)
+    ) {
+      promptRef.current?.focus();
+    }
+  }, [submitting]);
   const handleRenameActiveChat = () => {
     if (!activeSessionId) return;
     setRenameTitle(activeTitle);
@@ -312,10 +341,32 @@ export function AiAssistantChatArea(props: {
     onRenameSession(activeSessionId, title);
     setRenameOpen(false);
   };
+  const confirmDeleteChat = async (
+    sessionId: string,
+    title: string,
+    fromHistory = false
+  ) => {
+    const ok = await confirmDialog(
+      `Delete the chat "${title}"? This cannot be undone.`,
+      {
+        title: "Delete chat",
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      }
+    );
+    if (!ok) return;
+    onDeleteSession(sessionId);
+    // The focused Delete button left with its row: stay inside History.
+    if (fromHistory) {
+      window.requestAnimationFrame(() =>
+        historyListRef.current?.querySelector("button")?.focus()
+      );
+    }
+  };
   const handleDeleteActiveChat = () => {
     if (!activeSessionId) return;
-    if (!window.confirm(`Delete chat "${activeTitle}"?`)) return;
-    onDeleteSession(activeSessionId);
+    void confirmDeleteChat(activeSessionId, activeTitle);
   };
 
   const menuItems = [
@@ -592,7 +643,7 @@ export function AiAssistantChatArea(props: {
         </button>
       ) : null}
 
-      <div class="shrink-0 p-3">
+      <div ref={composerRef} class="shrink-0 p-3">
         <div
           class={cn(
             "rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-sm"
@@ -638,6 +689,7 @@ export function AiAssistantChatArea(props: {
             itemClassName="whitespace-nowrap"
             trigger={
               <textarea
+                ref={promptRef}
                 value={prompt}
                 onInput={(e) =>
                   handlePromptInput(
@@ -646,17 +698,17 @@ export function AiAssistantChatArea(props: {
                   )
                 }
                 onKeyDown={(e) => {
+                  // Enter that ends an IME composition (Vietnamese, Japanese…)
+                  // only commits the text.
+                  if (e.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    if (submitting) {
-                      onCancelSubmit();
-                      return;
-                    }
-                    if (canSubmit) void onSubmit();
+                    // The next question can be typed during an answer and sent
+                    // with Enter once it ends; Stop cancels the answer.
+                    if (!submitting && canSubmit) void onSubmit();
                   }
                 }}
                 placeholder="Ask anything..."
-                disabled={submitting}
                 class={cn(
                   "w-full resize-none border-none bg-transparent px-1 py-1 text-neutral-900 outline-none placeholder:text-neutral-400",
                   floating ? "min-h-20 text-base" : "min-h-14 text-sm"
@@ -804,42 +856,50 @@ export function AiAssistantChatArea(props: {
         <DialogContent className="min-h-0 flex-1 p-0">
           <OverlayScrollArea
             className="min-h-0 flex-1"
-            contentClassName="space-y-2 px-6 py-4"
+            contentClassName="px-6 py-4"
           >
-            {chatSessions.map((session) => (
-              <div
-                key={session.id}
-                class={cn(
-                  "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
-                  session.id === activeSessionId
-                    ? "border-blue-200 bg-blue-50"
-                    : "border-neutral-200 bg-white"
-                )}
-              >
-                <button
-                  type="button"
-                  class="min-w-0 flex-1 text-left"
-                  onClick={() => {
-                    onSwitchSession(session.id);
-                    setHistoryOpen(false);
-                  }}
+            <div ref={historyListRef} class="space-y-2">
+              {chatSessions.map((session) => (
+                <div
+                  key={session.id}
+                  class={cn(
+                    "flex items-center justify-between gap-2 rounded-lg border px-3 py-2",
+                    session.id === activeSessionId
+                      ? "border-blue-200 bg-blue-50"
+                      : "border-neutral-200 bg-white"
+                  )}
                 >
-                  <div class="truncate text-sm font-semibold text-neutral-900">
-                    {session.title || "New Chat"}
-                  </div>
-                  <div class="text-xs text-neutral-500">
-                    {new Date(session.updatedAt).toLocaleString()}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  class="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                  onClick={() => onDeleteSession(session.id)}
-                >
-                  Delete
-                </button>
-              </div>
-            ))}
+                  <button
+                    type="button"
+                    class="min-w-0 flex-1 text-left"
+                    onClick={() => {
+                      onSwitchSession(session.id);
+                      setHistoryOpen(false);
+                    }}
+                  >
+                    <div class="truncate text-sm font-semibold text-neutral-900">
+                      {session.title || "New Chat"}
+                    </div>
+                    <div class="text-xs text-neutral-500">
+                      {new Date(session.updatedAt).toLocaleString()}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                    onClick={() =>
+                      void confirmDeleteChat(
+                        session.id,
+                        session.title || "New Chat",
+                        true
+                      )
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
           </OverlayScrollArea>
         </DialogContent>
       </Dialog>

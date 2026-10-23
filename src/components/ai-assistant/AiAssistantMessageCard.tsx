@@ -8,9 +8,8 @@ import type { ChatMessage } from "src/types";
 import {
   AiAssistantMessageBody,
   AssistantStreamingPlaceholder,
-  getPreviewColumns,
   MessageHoverActions,
-  type SqlRunState,
+  type SqlRun,
 } from "./AiAssistantMessageParts";
 
 type AssistantStreamStatus = "loading_model" | "thinking";
@@ -31,6 +30,8 @@ type Props = {
 };
 
 export { AssistantStreamingPlaceholder };
+
+let copyTokenSeq = 0;
 
 function formatMessageTime(value?: number) {
   if (!value) return "";
@@ -84,12 +85,12 @@ export function AiAssistantMessageCard({
   onUpdateMessage,
   onAllowDataAccess,
 }: Props) {
-  const [copied, setCopied] = useState(false);
+  // Per SQL preview part (by index; -1 is a legacy `message.sql` block).
+  // Copied ticks, each with the token of the copy that set it.
+  const [copiedTokens, setCopiedTokens] = useState<Record<number, number>>({});
+  const [sqlRuns, setSqlRuns] = useState<Record<number, SqlRun>>({});
   const [dataAccessSaving, setDataAccessSaving] = useState(false);
   const [messageCopied, setMessageCopied] = useState(false);
-  const [sqlRunState, setSqlRunState] = useState<SqlRunState>("idle");
-  const [sqlRunMessage, setSqlRunMessage] = useState("");
-  const previewColumns = getPreviewColumns(message.resultPreview);
   const hasParts = (message.parts?.length ?? 0) > 0;
   const messageTime = formatMessageTime(message.createdAt);
   const durationText =
@@ -104,17 +105,23 @@ export function AiAssistantMessageCard({
   const floatingAssistant = floating && message.role === "assistant";
   const floatingUser = floating && message.role === "user";
 
-  const handleCopySql = async () => {
-    if (!message.sql) return;
-    await navigator.clipboard.writeText(message.sql);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  };
+  const setSqlRun = (index: number, run: SqlRun) =>
+    setSqlRuns((runs) => ({ ...runs, [index]: run }));
 
-  const handleCopySqlText = async (sql: string) => {
+  const handleCopySql = async (sql: string, index: number) => {
     await navigator.clipboard.writeText(sql);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    const token = ++copyTokenSeq;
+    setCopiedTokens((tokens) => ({ ...tokens, [index]: token }));
+    // Only the latest copy of this block clears its tick.
+    window.setTimeout(
+      () =>
+        setCopiedTokens((tokens) => {
+          if (tokens[index] !== token) return tokens;
+          const { [index]: _done, ...rest } = tokens;
+          return rest;
+        }),
+      1500
+    );
   };
 
   const handleCopyMessage = async () => {
@@ -124,25 +131,27 @@ export function AiAssistantMessageCard({
     window.setTimeout(() => setMessageCopied(false), 1500);
   };
 
-  const handleInsertSql = async (sql: string) => {
+  const handleInsertSql = async (sql: string, index: number) => {
     if (!onInsertSql) return;
     try {
       await onInsertSql(sql);
-      setSqlRunState("inserted");
-      setSqlRunMessage(
-        "Inserted into SQL editor. Run it from the editor to apply the current safety policy."
-      );
+      setSqlRun(index, {
+        state: "inserted",
+        message:
+          "Inserted into SQL editor. Run it from the editor to apply the current safety policy.",
+      });
     } catch (error) {
-      setSqlRunState("error");
-      setSqlRunMessage(error instanceof Error ? error.message : String(error));
+      setSqlRun(index, {
+        state: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
-  const handleRunSql = async (sql: string, agent = false) => {
+  const handleRunSql = async (sql: string, agent: boolean, index: number) => {
     if (!runtimeConnectionId || !isReadOnlySql(sql)) return;
 
-    setSqlRunState("running");
-    setSqlRunMessage("");
+    setSqlRun(index, { state: "running", message: "" });
     try {
       if (querySafetyMode === "safe" || querySafetyMode === "production") {
         await securityTouchIdAuthenticate(
@@ -157,25 +166,32 @@ export function AiAssistantMessageCard({
         agent &&
         (await aiAgentSqlSafety(sql, runtimeConnectionId)) !== "read_only"
       ) {
-        setSqlRunState("error");
-        setSqlRunMessage(
-          "This query can no longer be run from the assistant. Insert it into the SQL editor to review and run it there."
-        );
+        setSqlRun(index, {
+          state: "error",
+          message:
+            "This query can no longer be run from the assistant. Insert it into the SQL editor to review and run it there.",
+        });
         return;
       }
       const result = await runSqlQuery(runtimeConnectionId, sql, {
         maxRows: 100,
       });
       const rows = queryResultToObjects(result, 100);
+      // One result per message, shown under the SQL that produced it.
       onUpdateMessage?.(message.id, {
         resultPreview: rows,
         rowCount: result.rowCount,
+        resultPartIndex: index,
       });
-      setSqlRunState("done");
-      setSqlRunMessage(rows.length ? "" : "Query completed with no rows.");
+      setSqlRun(index, {
+        state: "done",
+        message: rows.length ? "" : "Query completed with no rows.",
+      });
     } catch (error) {
-      setSqlRunState("error");
-      setSqlRunMessage(error instanceof Error ? error.message : String(error));
+      setSqlRun(index, {
+        state: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   };
 
@@ -243,14 +259,14 @@ export function AiAssistantMessageCard({
           floating={floating}
           hasParts={hasParts}
           isStreamingEmpty={isStreamingEmpty}
-          copied={copied}
-          sqlRunState={sqlRunState}
-          sqlRunMessage={sqlRunMessage}
-          previewColumns={previewColumns}
-          onInsertSql={onInsertSql ? handleInsertSql : undefined}
-          onCopySql={() => void handleCopySql()}
-          onCopySqlText={(sql) => void handleCopySqlText(sql)}
-          onInsertSqlPreview={(sql) => void handleInsertSql(sql)}
+          copiedIndexes={copiedTokens}
+          sqlRuns={sqlRuns}
+          onInsertSql={
+            onInsertSql
+              ? (sql, index) => void handleInsertSql(sql, index)
+              : undefined
+          }
+          onCopySql={(sql, index) => void handleCopySql(sql, index)}
           dataAccessSaving={dataAccessSaving}
           onDataAccess={(allow, question) => {
             if (dataAccessSaving) return;
@@ -274,7 +290,7 @@ export function AiAssistantMessageCard({
           }}
           onRunSqlPreview={
             runtimeConnectionId
-              ? (sql, agent) => void handleRunSql(sql, agent)
+              ? (sql, agent, index) => void handleRunSql(sql, agent, index)
               : undefined
           }
         />

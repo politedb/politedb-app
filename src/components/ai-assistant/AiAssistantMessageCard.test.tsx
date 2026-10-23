@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/preact";
 import { useState } from "preact/hooks";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "src/types";
@@ -300,5 +306,124 @@ describe("AiAssistantMessageCard floating header", () => {
       />
     );
     expect(screen.queryByText(/^Worked for/)).not.toBeInTheDocument();
+  });
+});
+
+describe("AiAssistantMessageCard with several SQL previews", () => {
+  const twoQueries: ChatMessage = {
+    id: "assistant-3",
+    role: "assistant",
+    text: "Two options.",
+    parts: [
+      { type: "sqlPreview", sql: "SELECT 1;", safety: "read_only" },
+      { type: "sqlPreview", sql: "SELECT 2;", safety: "read_only" },
+    ],
+  };
+
+  beforeEach(() => {
+    runSqlQueryMock.mockReset();
+    runSqlQueryMock.mockResolvedValue({
+      columns: [{ name: "n", db_type: "int4" }],
+      rows: [[42]],
+      rowCount: 1,
+    });
+  });
+
+  it("runs, copies and shows the result for one block only", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { container } = render(
+      <Harness initialMessage={twoQueries} runtimeConnectionId="conn-1" />
+    );
+    const blocks = () =>
+      Array.from(container.querySelectorAll("code")).map(
+        (code) => code.closest(".rounded-lg.border") as HTMLElement
+      );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Run" })[1]);
+    await screen.findByText("42");
+    expect(runSqlQueryMock).toHaveBeenCalledWith("conn-1", "SELECT 2;", {
+      maxRows: 100,
+    });
+    expect(blocks()[1]).toHaveTextContent("1 row(s)");
+    expect(blocks()[0]).not.toHaveTextContent("row(s)");
+
+    fireEvent.click(screen.getAllByTitle("Copy SQL")[0]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("SELECT 1;"));
+    expect(screen.getAllByTitle("Copied!")).toHaveLength(1);
+    expect(screen.getAllByTitle("Copy SQL")).toHaveLength(1);
+  });
+
+  it("shows a run error under the block that failed", async () => {
+    runSqlQueryMock.mockRejectedValue(new Error("relation missing"));
+    const { container } = render(
+      <Harness initialMessage={twoQueries} runtimeConnectionId="conn-1" />
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Run" })[0]);
+    await screen.findByText("relation missing");
+    expect(screen.getAllByText("relation missing")).toHaveLength(1);
+    const first = container
+      .querySelectorAll("code")[0]
+      .closest(".rounded-lg.border");
+    expect(first).toHaveTextContent("relation missing");
+  });
+
+  it("keeps each block's copied tick for its own time", async () => {
+    vi.useFakeTimers();
+    const step = async (run: () => unknown) => {
+      await act(async () => {
+        run();
+      });
+    };
+    try {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      });
+      render(<Harness initialMessage={twoQueries} />);
+      const copyButtons = screen.getAllByTitle("Copy SQL");
+      await step(() => fireEvent.click(copyButtons[0]));
+      await step(() => vi.advanceTimersByTime(1000));
+      await step(() => fireEvent.click(copyButtons[1]));
+      expect(screen.getAllByTitle("Copied!")).toHaveLength(2);
+
+      // Copy the second again: its first timer must not clear the new tick.
+      await step(() => vi.advanceTimersByTime(600));
+      expect(screen.getAllByTitle("Copied!")).toHaveLength(1);
+      await step(() => fireEvent.click(screen.getAllByTitle("Copied!")[0]));
+      await step(() => vi.advanceTimersByTime(1000));
+      expect(screen.getAllByTitle("Copied!")).toHaveLength(1);
+      await step(() => vi.advanceTimersByTime(600));
+      expect(screen.queryByTitle("Copied!")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a saved result at the end when its part index is not valid", () => {
+    for (const resultPartIndex of ["0", 1.5, 7, -1] as unknown[]) {
+      const { container, unmount } = render(
+        <Harness
+          initialMessage={{
+            ...twoQueries,
+            resultPreview: [{ n: 99 }],
+            rowCount: 1,
+            resultPartIndex: resultPartIndex as number,
+          }}
+        />
+      );
+      expect(screen.getByText("99")).toBeInTheDocument();
+      const sqlBlocks = Array.from(container.querySelectorAll("code"))
+        .filter((code) => code.textContent?.startsWith("SELECT"))
+        .map((code) => code.closest(".rounded-lg.border"));
+      expect(sqlBlocks).toHaveLength(2);
+      for (const block of sqlBlocks) {
+        expect(block).not.toHaveTextContent("99");
+      }
+      unmount();
+    }
   });
 });
