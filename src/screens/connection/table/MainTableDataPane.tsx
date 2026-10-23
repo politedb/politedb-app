@@ -1123,20 +1123,7 @@ export function MainTableDataPane(props: {
                 }}
               />
             )}
-            <div class="relative min-h-0 flex-1">
-              {!hasError &&
-              rowsSettled &&
-              visiblePageTotal === 0 &&
-              newRowKeys.length === 0 ? (
-                // Over the empty grid, below its header; clicks pass through.
-                <div class="pointer-events-none absolute inset-x-0 top-16 z-10 px-4 text-center text-sm text-neutral-500">
-                  {hasAppliedFilters
-                    ? "No rows match the filters."
-                    : renderOffset > 0
-                      ? "No rows on this page."
-                      : "This table has no rows."}
-                </div>
-              ) : null}
+            <div class="min-h-0 flex-1">
               <TableData
                 key={activeKey}
                 columns={tableColumns}
