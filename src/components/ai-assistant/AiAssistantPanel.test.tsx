@@ -235,7 +235,7 @@ describe("AiAssistantPanel", () => {
   it("shows a setup state without requests when no provider is enabled", async () => {
     aiProviderListMock.mockResolvedValue([{ ...LOCAL, enabled: false }]);
 
-    renderPanel({ presentation: "floating" });
+    renderPanel();
 
     expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
     await waitFor(() =>
@@ -250,10 +250,11 @@ describe("AiAssistantPanel", () => {
     expect(chatReplyMock).not.toHaveBeenCalled();
   });
 
-  it("opens AI settings from the panel header", async () => {
-    renderPanel({ presentation: "panel" });
+  it("opens AI settings from the chat menu", async () => {
+    renderPanel();
 
-    fireEvent.click(await screen.findByTitle("AI settings"));
+    fireEvent.click(await screen.findByTitle("Chat menu"));
+    fireEvent.click(screen.getByRole("button", { name: "Settings..." }));
     await screen.findByText("AI Provider Settings");
     expect(screen.getAllByText("Ollama").length).toBeGreaterThan(0);
     expect(
@@ -468,7 +469,9 @@ describe("AiAssistantPanel", () => {
     fireEvent.input(textarea, { target: { value: "hello" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await screen.findByText("hello");
+    expect(await screen.findByTestId("message-user")).toHaveTextContent(
+      "hello"
+    );
     await screen.findByText(/Hello! How can I help\?/);
     expect(chatReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -621,7 +624,9 @@ describe("AiAssistantPanel", () => {
     fireEvent.input(textarea, { target: { value: "first chat" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
-    await screen.findByText("first chat");
+    expect(await screen.findByTestId("message-user")).toHaveTextContent(
+      "first chat"
+    );
     await screen.findByText(/Hello! How can I help\?/);
 
     fireEvent.click(screen.getByTitle("Chat menu"));
@@ -644,7 +649,8 @@ describe("AiAssistantPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "History" }));
 
     await screen.findByText("Chat History");
-    expect(screen.getByText("Renamed chat")).toBeInTheDocument();
+    // In History, and as the title of the open chat.
+    expect(screen.getAllByText("Renamed chat")).toHaveLength(2);
 
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "Settings..." }));
@@ -667,7 +673,7 @@ describe("AiAssistantPanel", () => {
     expect(confirmDialogMock.mock.calls[0][1]).toMatchObject({
       okLabel: "Delete",
     });
-    expect(screen.getByText("keep me")).toBeInTheDocument();
+    expect(screen.getByTestId("message-user")).toHaveTextContent("keep me");
 
     fireEvent.click(screen.getByTitle("Chat menu"));
     fireEvent.click(screen.getByRole("button", { name: "History" }));
@@ -679,20 +685,20 @@ describe("AiAssistantPanel", () => {
     confirmDialogMock.mockResolvedValue(true);
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() =>
-      expect(screen.queryByText("keep me")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("message-user")).not.toBeInTheDocument()
     );
   });
 });
 
 describe("AiAssistantPanel composer", () => {
   it("focuses the prompt when the chat opens", async () => {
-    renderPanel({ presentation: "floating" });
+    renderPanel();
     const textarea = await screen.findByPlaceholderText("Ask anything...");
     expect(document.activeElement).toBe(textarea);
   });
 
   it("does not send on the Enter that ends an IME composition", async () => {
-    renderPanel({ presentation: "floating" });
+    renderPanel();
     const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "xin chào" } });
     fireEvent.keyDown(textarea, { key: "Enter", isComposing: true });
@@ -704,7 +710,7 @@ describe("AiAssistantPanel composer", () => {
   it("lets the next question be typed during an answer without sending it", async () => {
     planAssistantTurnMock.mockReturnValue(new Promise(() => {}));
     chatReplyMock.mockReturnValue(new Promise(() => {}));
-    renderPanel({ presentation: "floating" });
+    renderPanel();
     const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "first" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -720,7 +726,7 @@ describe("AiAssistantPanel composer", () => {
   });
 
   it("keeps focus inside History when its active chat is deleted", async () => {
-    renderPanel({ presentation: "floating" });
+    renderPanel();
     const textarea = await screen.findByPlaceholderText("Ask anything...");
     fireEvent.input(textarea, { target: { value: "older chat" } });
     fireEvent.keyDown(textarea, { key: "Enter" });

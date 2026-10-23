@@ -28,6 +28,14 @@ export function Dropdown(props: {
   contentClassName?: string;
   containerClassName?: string;
   itemClassName?: string;
+  /**
+   * Item highlighted for keyboard choice while focus stays in the trigger (e.g. a
+   * text field). With `idPrefix` the menu is a listbox (`${idPrefix}-list`) of
+   * options (`${idPrefix}-${index}`) for the trigger's aria-controls and
+   * aria-activedescendant.
+   */
+  activeIndex?: number;
+  idPrefix?: string;
 }) {
   const {
     trigger,
@@ -41,6 +49,8 @@ export function Dropdown(props: {
     contentClassName,
     containerClassName,
     itemClassName,
+    activeIndex,
+    idPrefix,
   } = props;
 
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -69,6 +79,8 @@ export function Dropdown(props: {
       )}
       content={
         <div
+          id={idPrefix ? `${idPrefix}-list` : undefined}
+          role={idPrefix ? "listbox" : undefined}
           class={cn(
             widthClassName,
             "overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700"
@@ -81,12 +93,17 @@ export function Dropdown(props: {
               ) : null}
               <button
                 type="button"
+                id={idPrefix ? `${idPrefix}-${idx}` : undefined}
+                role={idPrefix ? "option" : undefined}
+                aria-selected={idPrefix ? idx === activeIndex : undefined}
+                aria-disabled={idPrefix && item.disabled ? true : undefined}
                 disabled={item.disabled}
                 class={cn(
                   "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-slate-700",
                   item.disabled
                     ? "cursor-not-allowed opacity-58"
                     : "hover:bg-slate-50",
+                  idx === activeIndex && "bg-slate-100",
                   item.className,
                   itemClassName
                 )}

@@ -69,7 +69,6 @@ function Harness(props: {
   return (
     <AiAssistantMessageCard
       message={message}
-      presentation="floating"
       runtimeConnectionId={props.runtimeConnectionId}
       querySafetyMode={props.querySafetyMode}
       onUpdateMessage={(_, patch) =>
@@ -232,14 +231,12 @@ describe("AiAssistantMessageCard floating header", () => {
   it("switches from Thinking to the duration in place", () => {
     const view = render(
       <AiAssistantMessageCard
-        presentation="floating"
         message={{ id: "a", role: "assistant", text: "", streaming: true }}
       />
     );
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
     view.rerender(
       <AiAssistantMessageCard
-        presentation="floating"
         message={{
           id: "a",
           role: "assistant",
@@ -283,23 +280,7 @@ describe("AiAssistantMessageCard floating header", () => {
     expect(screen.getByText("Worked for 1s")).toBeInTheDocument();
   });
 
-  it("keeps the panel layout and never labels user messages", () => {
-    const view = render(
-      <AiAssistantMessageCard
-        presentation="panel"
-        message={{
-          id: "p",
-          role: "assistant",
-          text: "Done.",
-          durationMs: 3000,
-        }}
-      />
-    );
-    // Panel shows its own role label and a single duration line.
-    expect(screen.getByText("PoliteDB AI")).toBeInTheDocument();
-    expect(screen.getAllByText("Worked for 3s")).toHaveLength(1);
-    view.unmount();
-
+  it("never shows how long a user message took", () => {
     render(
       <Harness
         initialMessage={{ id: "u", role: "user", text: "hi", durationMs: 3000 }}
@@ -425,5 +406,33 @@ describe("AiAssistantMessageCard with several SQL previews", () => {
       }
       unmount();
     }
+  });
+
+  it("keeps copy controls reachable from the keyboard", () => {
+    render(<Harness initialMessage={twoQueries} />);
+    const copySql = screen.getAllByRole("button", { name: "Copy SQL" })[0];
+    // Revealed on hover or keyboard focus, never removed from the tab order.
+    expect(copySql.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(copySql.className).toContain("focus-visible:opacity-100");
+    const copyMessage = screen.getByRole("button", { name: "Copy message" });
+    expect(copyMessage.parentElement?.className).toContain(
+      "group-focus-within:opacity-100"
+    );
+  });
+
+  it("shows wide results as row cards without column scroll buttons", () => {
+    render(
+      <Harness
+        initialMessage={{
+          ...twoQueries,
+          resultPreview: [{ a: 1, b: 2, c: 3, d: 4 }],
+          rowCount: 1,
+        }}
+      />
+    );
+    expect(screen.getByText("Row 1")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Next result columns" })
+    ).not.toBeInTheDocument();
   });
 });

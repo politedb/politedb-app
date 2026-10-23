@@ -1,3 +1,4 @@
+import { memo } from "preact/compat";
 import { useState } from "preact/hooks";
 import { isReadOnlySql, queryResultToObjects } from "src/lib/ai-assistant";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
@@ -16,7 +17,6 @@ type AssistantStreamStatus = "loading_model" | "thinking";
 
 type Props = {
   message: ChatMessage;
-  presentation?: "panel" | "floating";
   streamStatus?: AssistantStreamStatus;
   onInsertSql?: (sql: string) => Promise<void> | void;
   runtimeConnectionId?: string;
@@ -76,9 +76,12 @@ function messageText(message: ChatMessage) {
   return message.text ?? "";
 }
 
-export function AiAssistantMessageCard({
+/**
+ * Memoized: while an answer streams, only the streaming message changes, so the
+ * other cards skip re-rendering (callers pass stable callbacks).
+ */
+export const AiAssistantMessageCard = memo(function AiAssistantMessageCard({
   message,
-  presentation = "panel",
   onInsertSql,
   runtimeConnectionId,
   querySafetyMode = "default",
@@ -101,9 +104,7 @@ export function AiAssistantMessageCard({
     Boolean(message.streaming) &&
     message.role === "assistant" &&
     !message.text.trim();
-  const floating = presentation === "floating";
-  const floatingAssistant = floating && message.role === "assistant";
-  const floatingUser = floating && message.role === "user";
+  const isUser = message.role === "user";
 
   const setSqlRun = (index: number, run: SqlRun) =>
     setSqlRuns((runs) => ({ ...runs, [index]: run }));
@@ -198,65 +199,36 @@ export function AiAssistantMessageCard({
   return (
     <div
       class={
-        floatingUser
+        isUser
           ? "group ml-auto flex w-fit max-w-[72%] flex-col items-end"
-          : floatingAssistant
-            ? "group flex w-full max-w-full min-w-0 flex-col items-start space-y-3 overflow-hidden"
-            : `group rounded-xl border p-3 ${
-                message.role === "user"
-                  ? "border-blue-200 bg-blue-50"
-                  : "border-neutral-200 bg-white"
-              }`
+          : "group flex w-full max-w-full min-w-0 flex-col items-start space-y-3 overflow-hidden"
       }
     >
-      {!floating ? (
-        <>
-          <div class="mb-1 flex items-center justify-between gap-2 text-xs font-bold tracking-wide text-neutral-500 uppercase">
-            <span>{message.role === "user" ? "You" : "PoliteDB AI"}</span>
-            <MessageHoverActions
-              messageTime={messageTime}
-              copied={messageCopied}
-              iconClassName="size-3.5 text-green-600"
-              className="flex items-center gap-2 opacity-0 group-hover:opacity-100"
-              onCopy={() => void handleCopyMessage()}
-            />
-          </div>
-          {durationText ? (
-            <div class="mb-2 text-sm font-medium text-neutral-400">
-              {durationText}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
       {/* While streaming the body shows "Thinking..."; afterwards only how long it
           took. No chevron: there is nothing to expand (thinking text is not kept). */}
-      {floatingAssistant && durationText ? (
+      {!isUser && durationText ? (
         <div class="text-sm font-medium text-neutral-500">{durationText}</div>
       ) : null}
 
-      {floatingUser ? (
+      {isUser ? (
         <MessageHoverActions
           messageTime={messageTime}
           copied={messageCopied}
           iconClassName="size-5"
-          className="mb-1 flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100"
+          className="mb-1 flex items-center justify-end gap-2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
           onCopy={() => void handleCopyMessage()}
         />
       ) : null}
 
       <div
         class={
-          floatingUser
+          isUser
             ? "max-w-full rounded-2xl bg-neutral-200 px-4 py-2 text-base leading-relaxed text-neutral-900"
-            : floatingAssistant
-              ? "w-full min-w-0 overflow-hidden text-base leading-relaxed text-neutral-900"
-              : ""
+            : "w-full min-w-0 overflow-hidden text-base leading-relaxed text-neutral-900"
         }
       >
         <AiAssistantMessageBody
           message={message}
-          floating={floating}
           hasParts={hasParts}
           isStreamingEmpty={isStreamingEmpty}
           copiedIndexes={copiedTokens}
@@ -296,15 +268,15 @@ export function AiAssistantMessageCard({
         />
       </div>
 
-      {floatingAssistant ? (
+      {!isUser ? (
         <MessageHoverActions
           messageTime={messageTime}
           copied={messageCopied}
           iconClassName="size-5"
-          className="flex items-center gap-2 text-neutral-500 opacity-0 group-hover:opacity-100"
+          className="flex items-center gap-2 text-neutral-500 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
           onCopy={() => void handleCopyMessage()}
         />
       ) : null}
     </div>
   );
-}
+});

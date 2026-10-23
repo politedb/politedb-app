@@ -15,7 +15,6 @@ import {
   type AiContextOption,
 } from "src/components/ai-assistant/AiAssistantChatArea";
 import { AiAssistantSettingsDialog } from "src/components/ai-assistant/AiAssistantSettingsDialog";
-import { AiAssistantPanelHeader } from "src/components/ai-assistant/AiAssistantPanelHeader";
 import type { AiColumnMetadata, DatabaseEngine, TableItem } from "src/types";
 import type { SavedConnectionSummary } from "src/lib/ai-assistant/types";
 import type { QuerySafetyMode } from "src/lib/queries/querySafety";
@@ -39,7 +38,6 @@ import {
 type Props = {
   chatSessionKey: string;
   engine: DatabaseEngine;
-  presentation?: "panel" | "floating";
   onClose?: () => void;
   runtimeConnectionId?: string;
   activeSchema?: string;
@@ -104,7 +102,6 @@ export function AiAssistantPanel(props: Props) {
   const {
     chatSessionKey,
     engine,
-    presentation = "panel",
     onClose,
     runtimeConnectionId,
     activeSchema,
@@ -495,19 +492,10 @@ export function AiAssistantPanel(props: Props) {
 
   return (
     <div class="flex h-full min-h-0 max-w-full min-w-0 flex-col overflow-hidden bg-slate-50">
-      {presentation === "panel" ? (
-        <AiAssistantPanelHeader
-          settingsOpen={settingsOpen}
-          onSettingsOpenChange={setSettingsOpen}
-        />
-      ) : null}
-
-      {presentation === "floating" ? (
-        <AiAssistantSettingsDialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-        />
-      ) : null}
+      <AiAssistantSettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       {pendingFallback || sessionProviderUnavailable ? (
         <div class="flex shrink-0 items-start justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -638,7 +626,6 @@ export function AiAssistantPanel(props: Props) {
           onSelectProviderModel={handleSelectProviderModel}
           contextOptions={contextOptions}
           onToggleContext={handleToggleContext}
-          presentation={presentation}
           onClose={handleClose}
           chatSessions={chatSessions}
           activeSessionId={activeSessionId}

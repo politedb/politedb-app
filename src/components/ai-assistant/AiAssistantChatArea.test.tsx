@@ -63,7 +63,6 @@ function renderArea(overrides: Record<string, unknown> = {}) {
     onSelectProviderModel: vi.fn(),
     contextOptions: [],
     onToggleContext: vi.fn(),
-    presentation: "floating",
     chatSessions: [session("s1", "Current", Date.now())],
     activeSessionId: "s1",
     onNewChat: vi.fn(),
@@ -221,5 +220,120 @@ describe("AiAssistantChatArea", () => {
     expect(document.activeElement).toBe(
       screen.getByPlaceholderText("Ask anything...")
     );
+  });
+
+  it("picks @ context with the arrow keys and Enter", () => {
+    const contextOptions = [
+      { id: "connection", label: "Connection", available: true, active: false },
+      { id: "sql", label: "Current SQL", available: true, active: false },
+    ];
+    const { props, rerender } = renderArea({ contextOptions });
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "@" } });
+    rerender(<AiAssistantChatArea {...props} prompt="@" />);
+    expect(
+      screen.getByRole("option", { name: "Current SQL" })
+    ).toBeInTheDocument();
+    expect(textarea).toHaveAttribute("aria-activedescendant", "ai-context-0");
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea).toHaveAttribute("aria-activedescendant", "ai-context-1");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(props.onToggleContext).toHaveBeenCalledWith("sql");
+    expect(props.onPromptChange).toHaveBeenLastCalledWith("");
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("option", { name: "Current SQL" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("closes the @ menu with Escape and keeps the chat open", () => {
+    const onClose = vi.fn();
+    const { props, rerender } = renderArea({
+      onClose,
+      contextOptions: [
+        { id: "sql", label: "Current SQL", available: true, active: false },
+      ],
+    });
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "@" } });
+    rerender(<AiAssistantChatArea {...props} prompt="@" />);
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(
+      screen.queryByRole("option", { name: "Current SQL" })
+    ).not.toBeInTheDocument();
+    expect(props.onToggleContext).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("names its icon-only buttons", () => {
+    renderArea({
+      contextOptions: [
+        { id: "sql", label: "Current SQL", available: true, active: true },
+      ],
+    });
+    for (const name of [
+      "Copy chat",
+      "New chat",
+      "Chat menu",
+      "Minimize",
+      "Remove Current SQL",
+    ]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("ties the prompt to the @ list for screen readers", () => {
+    const contextOptions = [
+      { id: "connection", label: "Connection", available: true, active: false },
+      { id: "sql", label: "Current SQL", available: true, active: false },
+      { id: "metadata", label: "Tables", available: true, active: false },
+    ];
+    const { props, rerender } = renderArea({ contextOptions });
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    expect(textarea).toHaveAttribute("aria-haspopup", "listbox");
+    expect(textarea).not.toHaveAttribute("aria-controls");
+    fireEvent.input(textarea, { target: { value: "@" } });
+    rerender(<AiAssistantChatArea {...props} prompt="@" />);
+
+    const list = screen.getByRole("listbox");
+    expect(textarea).toHaveAttribute("aria-controls", list.id);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    const active = document.getElementById(
+      textarea.getAttribute("aria-activedescendant") ?? ""
+    );
+    expect(active).toHaveAttribute("role", "option");
+    expect(active).toHaveAttribute("aria-selected", "true");
+    expect(active).toHaveTextContent("Tables");
+    expect(list.contains(active)).toBe(true);
+  });
+
+  it("keeps the highlighted @ item valid when context options shrink", () => {
+    const three = [
+      { id: "connection", label: "Connection", available: true, active: false },
+      { id: "sql", label: "Current SQL", available: true, active: false },
+      { id: "metadata", label: "Tables", available: true, active: false },
+    ];
+    const { props, rerender } = renderArea({ contextOptions: three });
+    const textarea = screen.getByPlaceholderText("Ask anything...");
+    fireEvent.input(textarea, { target: { value: "@" } });
+    rerender(<AiAssistantChatArea {...props} prompt="@" />);
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea).toHaveAttribute("aria-activedescendant", "ai-context-2");
+
+    rerender(
+      <AiAssistantChatArea {...props} prompt="@" contextOptions={[three[0]]} />
+    );
+    expect(textarea).toHaveAttribute("aria-activedescendant", "ai-context-0");
+    expect(document.getElementById("ai-context-0")).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+
+    rerender(<AiAssistantChatArea {...props} prompt="@" contextOptions={[]} />);
+    expect(textarea).not.toHaveAttribute("aria-activedescendant");
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(props.onToggleContext).not.toHaveBeenCalled();
+    expect(props.onSubmit).not.toHaveBeenCalled();
   });
 });

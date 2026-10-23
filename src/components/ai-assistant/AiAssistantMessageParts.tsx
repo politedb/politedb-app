@@ -1,21 +1,12 @@
 import type { ComponentChildren } from "preact";
-import { useRef } from "preact/hooks";
 import { MarkdownText } from "./MarkdownText";
 import { ProBadge } from "src/components/license/ProBadge";
 import { Button } from "src/components/common/Button";
-import {
-  CheckMarkIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-} from "src/components/icons";
+import { CheckMarkIcon, CopyIcon } from "src/components/icons";
 import type { AgentStepSummary, ChatMessage } from "src/types";
 import { cellToString } from "src/utils/convert";
 import { cn } from "src/utils/cn";
-import {
-  OverlayScrollArea,
-  OverlayScrollbars,
-} from "src/components/common/OverlayScrollArea";
+import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 
 export type SqlRunState = "idle" | "running" | "done" | "inserted" | "error";
 /** What happened to one SQL block's Run or Insert. */
@@ -51,6 +42,7 @@ export function MessageHoverActions(props: {
         type="button"
         class="rounded-md p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900"
         title={copied ? "Copied!" : "Copy message"}
+        aria-label={copied ? "Copied" : "Copy message"}
         onClick={onCopy}
       >
         {copied ? (
@@ -88,9 +80,11 @@ function SqlCodeBlock(props: {
         type="button"
         onClick={onCopy}
         title={copied ? "Copied!" : "Copy SQL"}
+        aria-label={copied ? "Copied" : "Copy SQL"}
+        // Shown on hover, and whenever it has keyboard focus.
         class={cn(
-          "absolute top-2 right-2 z-10 hidden rounded-md",
-          "border border-neutral-700 bg-neutral-900/80 p-1 text-neutral-200 transition-colors group-hover:block hover:bg-neutral-800 hover:text-white"
+          "absolute top-2 right-2 z-10 rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+          "border border-neutral-700 bg-neutral-900/80 p-1 text-neutral-200 transition hover:bg-neutral-800 hover:text-white"
         )}
       >
         {copied ? (
@@ -190,7 +184,6 @@ export function resultPartIndexOf(message: ChatMessage): number | null {
 
 function MessageParts(props: {
   message: ChatMessage;
-  floating: boolean;
   /** SQL parts that show a copied tick (by index; -1 is a legacy block). */
   copiedIndexes: Record<number, unknown>;
   sqlRuns: Record<number, SqlRun>;
@@ -202,7 +195,6 @@ function MessageParts(props: {
 }) {
   const {
     message,
-    floating,
     copiedIndexes,
     sqlRuns,
     onCopySql,
@@ -217,10 +209,7 @@ function MessageParts(props: {
     <div class="max-w-full min-w-0 space-y-3">
       {message.parts!.map((part, index) => {
         if (part.type === "text") {
-          const textClass = cn(
-            "max-w-full min-w-0",
-            floating ? "text-inherit" : "text-sm text-neutral-800"
-          );
+          const textClass = "max-w-full min-w-0 text-inherit";
           return message.role === "assistant" ? (
             <MarkdownText
               key={`${message.id}-part-${index}`}
@@ -251,7 +240,7 @@ function MessageParts(props: {
               }
               result={
                 resultIndex === index ? (
-                  <ResultPreviewBlock message={message} compact={floating} />
+                  <ResultPreviewBlock message={message} />
                 ) : null
               }
             />
@@ -330,59 +319,25 @@ function LegacySqlBlock(props: {
   );
 }
 
-function ResultPreviewBlock(props: {
-  message: ChatMessage;
-  compact?: boolean;
-}) {
-  const { message, compact = false } = props;
-  const tableScrollRef = useRef<HTMLDivElement>(null);
+function ResultPreviewBlock(props: { message: ChatMessage }) {
+  const { message } = props;
   if (!message.resultPreview?.length) return null;
   const previewColumns = getPreviewColumns(message.resultPreview);
 
-  const scrollTable = (direction: -1 | 1) => {
-    tableScrollRef.current?.scrollBy({
-      left: direction * 240,
-      behavior: "smooth",
-    });
-  };
-
   return (
     <div class="mt-3 w-full max-w-full min-w-0 overflow-hidden">
-      <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
-        <div class="min-w-0">
-          <div class="text-xs font-semibold text-neutral-500">Result</div>
-          <div class="text-xs text-neutral-500">
-            {message.rowCount != null
-              ? `${message.rowCount} row(s)`
-              : "Result preview"}
-            {message.confidence ? ` • confidence ${message.confidence}` : ""}
-          </div>
+      <div class="mb-1 min-w-0">
+        <div class="text-xs font-semibold text-neutral-500">Result</div>
+        <div class="text-xs text-neutral-500">
+          {message.rowCount != null
+            ? `${message.rowCount} row(s)`
+            : "Result preview"}
+          {message.confidence ? ` • confidence ${message.confidence}` : ""}
         </div>
-        {previewColumns.length > 2 ? (
-          <div class="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              class="rounded border border-neutral-200 bg-white p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-              title="Previous columns"
-              aria-label="Previous result columns"
-              onClick={() => scrollTable(-1)}
-            >
-              <ChevronLeftIcon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              class="rounded border border-neutral-200 bg-white p-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-              title="Next columns"
-              aria-label="Next result columns"
-              onClick={() => scrollTable(1)}
-            >
-              <ChevronRightIcon className="size-3.5" />
-            </button>
-          </div>
-        ) : null}
       </div>
 
-      {previewColumns.length && compact ? (
+      {/* One card per row: fits the narrow chat at any column count. */}
+      {previewColumns.length ? (
         <OverlayScrollArea className="max-h-72 w-full min-w-0 rounded-lg border border-neutral-200 bg-white">
           {message.resultPreview.map((row, rowIndex) => (
             <div
@@ -416,50 +371,6 @@ function ResultPreviewBlock(props: {
             </div>
           ))}
         </OverlayScrollArea>
-      ) : previewColumns.length ? (
-        <div class="relative w-full max-w-full min-w-0 overflow-hidden rounded-lg border border-neutral-200">
-          <div
-            ref={tableScrollRef}
-            class="no-scrollbar max-h-56 w-full overflow-auto"
-          >
-            <table class="w-max min-w-full divide-y divide-neutral-200 text-xs">
-              <thead class="sticky top-0 bg-neutral-50">
-                <tr>
-                  {previewColumns.map((column) => (
-                    <th
-                      key={`${message.id}-col-${column}`}
-                      class="max-w-64 min-w-44 px-3 py-2 text-left font-semibold whitespace-nowrap text-neutral-600"
-                    >
-                      <div class="max-w-64 truncate" title={column}>
-                        {column}
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-neutral-100 bg-white">
-                {message.resultPreview.map((row, index) => (
-                  <tr key={`${message.id}-row-${index}`}>
-                    {previewColumns.map((column) => (
-                      <td
-                        key={`${message.id}-row-${index}-${column}`}
-                        class="max-w-64 min-w-44 px-3 py-2 align-top text-neutral-800"
-                      >
-                        <div
-                          class="max-w-64 truncate whitespace-nowrap"
-                          title={cellToString(row[column]) ?? ""}
-                        >
-                          {cellToString(row[column])}
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <OverlayScrollbars scrollerRef={tableScrollRef} horizontal vertical />
-        </div>
       ) : null}
 
       <details class="mt-2">
@@ -481,7 +392,6 @@ function ResultPreviewBlock(props: {
 
 export function AiAssistantMessageBody(props: {
   message: ChatMessage;
-  floating: boolean;
   hasParts: boolean;
   isStreamingEmpty: boolean;
   /** SQL parts that show a copied tick (by index; -1 is the legacy `message.sql` block). */
@@ -495,7 +405,6 @@ export function AiAssistantMessageBody(props: {
 }) {
   const {
     message,
-    floating,
     hasParts,
     isStreamingEmpty,
     copiedIndexes,
@@ -516,17 +425,10 @@ export function AiAssistantMessageBody(props: {
       ) : !hasParts && message.role === "assistant" ? (
         <MarkdownText
           text={message.text}
-          class={cn(
-            "max-w-full min-w-0",
-            floating ? "text-inherit" : "text-sm text-neutral-800"
-          )}
+          class="max-w-full min-w-0 text-inherit"
         />
       ) : !hasParts ? (
-        <div
-          class={`max-w-full min-w-0 wrap-break-word whitespace-pre-wrap ${
-            floating ? "text-inherit" : "text-sm text-neutral-800"
-          }`}
-        >
+        <div class="max-w-full min-w-0 wrap-break-word whitespace-pre-wrap text-inherit">
           {message.text}
         </div>
       ) : null}
@@ -534,7 +436,6 @@ export function AiAssistantMessageBody(props: {
       {hasParts ? (
         <MessageParts
           message={message}
-          floating={floating}
           copiedIndexes={copiedIndexes}
           sqlRuns={sqlRuns}
           onCopySql={onCopySql}
@@ -554,9 +455,7 @@ export function AiAssistantMessageBody(props: {
         />
       ) : null}
 
-      {resultInPart ? null : (
-        <ResultPreviewBlock message={message} compact={floating} />
-      )}
+      {resultInPart ? null : <ResultPreviewBlock message={message} />}
 
       {message.assumptions?.length ? (
         <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-neutral-700">

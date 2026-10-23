@@ -252,7 +252,6 @@ export function FloatingAssistantLauncher() {
         >
           <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
             <AiAssistantPanel
-              presentation="floating"
               onClose={() => setOpen(false)}
               chatSessionKey={chatSessionKey}
               engine={context?.engine ?? "postgres"}

@@ -1,11 +1,20 @@
 import type { Ref } from "preact";
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "preact/hooks";
 import { AssistantModePicker } from "./AssistantModePicker";
 import {
   AiAssistantMessageCard,
   AssistantStreamingPlaceholder,
 } from "src/components/ai-assistant/AiAssistantMessageCard";
-import { Dropdown } from "src/components/common/Dropdown";
+import {
+  Dropdown,
+  type DropdownItemConfig,
+} from "src/components/common/Dropdown";
 import { Popover } from "src/components/common/Popover";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import {
@@ -237,7 +246,6 @@ export function AiAssistantChatArea(props: {
   onSelectProviderModel: (providerId: string, model: string) => void;
   contextOptions: AiContextOption[];
   onToggleContext: (contextId: AiContextKind) => void;
-  presentation?: "panel" | "floating";
   onClose?: () => void;
   chatSessions: AiChatSession[];
   activeSessionId: string;
@@ -274,7 +282,6 @@ export function AiAssistantChatArea(props: {
     onSelectProviderModel,
     contextOptions,
     onToggleContext,
-    presentation = "panel",
     onClose,
     chatSessions,
     activeSessionId,
@@ -286,6 +293,8 @@ export function AiAssistantChatArea(props: {
   } = props;
   const [menuOpen, setMenuOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  // The @ menu item chosen with the arrow keys; focus stays in the prompt.
+  const [contextActive, setContextActive] = useState(0);
   const [contextTriggerStart, setContextTriggerStart] = useState<number | null>(
     null
   );
@@ -297,11 +306,29 @@ export function AiAssistantChatArea(props: {
     "copied" | "failed" | null
   >(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  // Message cards are memoized: hand them callbacks that keep their identity
+  // across renders (streaming re-renders this list every frame) but always
+  // call the latest props.
+  const latestRef = useRef({ onInsertSql, onUpdateMessage, onAllowDataAccess });
+  latestRef.current = { onInsertSql, onUpdateMessage, onAllowDataAccess };
+  const stableInsertSql = useCallback(
+    (sql: string) => latestRef.current.onInsertSql?.(sql),
+    []
+  );
+  const stableUpdateMessage = useCallback(
+    (id: string, patch: Partial<ChatMessage>) =>
+      latestRef.current.onUpdateMessage(id, patch),
+    []
+  );
+  const stableAllowDataAccess = useCallback(
+    (question: string) =>
+      latestRef.current.onAllowDataAccess?.(question) ?? Promise.resolve(false),
+    []
+  );
   const composerRef = useRef<HTMLDivElement>(null);
   const historyListRef = useRef<HTMLDivElement>(null);
   // The prompt takes focus for a newly shown chat once no dialog covers it.
   const focusPromptRef = useRef(true);
-  const floating = presentation === "floating";
   const activeSession = chatSessions.find(
     (session) => session.id === activeSessionId
   );
@@ -410,7 +437,11 @@ export function AiAssistantChatArea(props: {
   const availableContextOptions = contextOptions.filter(
     (item) => item.available
   );
-  const contextItems = availableContextOptions.length
+  // The highlighted @ item, kept in range when the available context changes.
+  const contextActiveIndex = availableContextOptions.length
+    ? Math.min(contextActive, availableContextOptions.length - 1)
+    : undefined;
+  const contextItems: DropdownItemConfig[] = availableContextOptions.length
     ? availableContextOptions.map((item) => ({
         key: item.id,
         label: item.label,
@@ -438,6 +469,35 @@ export function AiAssistantChatArea(props: {
           disabled: true,
         },
       ];
+
+  /** Arrow keys, Enter/Tab and Escape for the open @ menu; true when handled. */
+  const handleContextKey = (e: KeyboardEvent) => {
+    const count = availableContextOptions.length;
+    const active = contextActiveIndex ?? 0;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextOpen(false);
+      setContextTriggerStart(null);
+      return true;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (count) {
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        setContextActive((active + step + count) % count);
+      }
+      return true;
+    }
+    if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+      e.preventDefault();
+      setContextOpen(false);
+      if (count) contextItems[active].onSelect?.();
+      else setContextTriggerStart(null);
+      return true;
+    }
+    return false;
+  };
 
   const handleCopyChat = async () => {
     const transcript = messages
@@ -499,6 +559,7 @@ export function AiAssistantChatArea(props: {
 
     if (startsContextToken) {
       setContextTriggerStart(triggerIndex);
+      setContextActive(0);
       setContextOpen(true);
       return;
     }
@@ -511,149 +572,145 @@ export function AiAssistantChatArea(props: {
 
   return (
     <>
-      {floating ? (
-        <div class="relative flex shrink-0 items-center justify-between p-2 shadow-xs">
-          <div class="flex min-w-0 items-center gap-2">
-            <Popover
-              open={titleOpen}
-              onOpenChange={setTitleOpen}
-              positions={["bottom"]}
-              align="start"
-              padding={2}
-              showArrow={false}
-              content={
-                <div class="w-70 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl">
-                  <OverlayScrollArea
-                    className="max-h-[min(24rem,60vh)]"
-                    contentClassName="px-2 py-3"
-                  >
-                    {sessionGroups.map((group) => (
-                      <div key={group.label} class="not-first:mt-2">
-                        <div class="mb-1 px-2 text-xs font-semibold text-neutral-500">
-                          {group.label}
-                        </div>
-                        {group.sessions.map((session) => (
-                          <button
-                            key={session.id}
-                            type="button"
-                            class="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-base text-neutral-900 hover:bg-neutral-50"
-                            onClick={() => {
-                              onSwitchSession(session.id);
-                              setTitleOpen(false);
-                            }}
-                          >
-                            <span class="min-w-0 flex-1 truncate">
-                              {session.title || "New Chat"}
-                            </span>
-                            {session.id === activeSessionId ? (
-                              <CheckMarkIcon className="size-4" />
-                            ) : null}
-                          </button>
-                        ))}
-                      </div>
-                    ))}
-                  </OverlayScrollArea>
-                </div>
-              }
-            >
-              <div>
-                <Button
-                  variant="ghost"
-                  onClick={() => setTitleOpen((open) => !open)}
-                  class="max-w-65 rounded-full px-2 py-0.5 text-base"
+      <div class="relative flex shrink-0 items-center justify-between p-2 shadow-xs">
+        <div class="flex min-w-0 items-center gap-2">
+          <Popover
+            open={titleOpen}
+            onOpenChange={setTitleOpen}
+            positions={["bottom"]}
+            align="start"
+            padding={2}
+            showArrow={false}
+            content={
+              <div class="w-70 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl">
+                <OverlayScrollArea
+                  className="max-h-[min(24rem,60vh)]"
+                  contentClassName="px-2 py-3"
                 >
-                  <span class="truncate">{activeTitle}</span>
-                  <ChevronDownIcon className="size-4 shrink-0 text-neutral-500" />
-                </Button>
+                  {sessionGroups.map((group) => (
+                    <div key={group.label} class="not-first:mt-2">
+                      <div class="mb-1 px-2 text-xs font-semibold text-neutral-500">
+                        {group.label}
+                      </div>
+                      {group.sessions.map((session) => (
+                        <button
+                          key={session.id}
+                          type="button"
+                          class="flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left text-base text-neutral-900 hover:bg-neutral-50"
+                          onClick={() => {
+                            onSwitchSession(session.id);
+                            setTitleOpen(false);
+                          }}
+                        >
+                          <span class="min-w-0 flex-1 truncate">
+                            {session.title || "New Chat"}
+                          </span>
+                          {session.id === activeSessionId ? (
+                            <CheckMarkIcon className="size-4" />
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </OverlayScrollArea>
               </div>
-            </Popover>
-          </div>
-
-          <div class="flex items-center gap-1 text-neutral-800">
-            <button
-              type="button"
-              class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
-              title="Copy chat"
-              aria-label="Copy chat"
-              onClick={() => void handleCopyChat()}
-            >
-              <CopyIcon className="size-5" />
-            </button>
-            {copyChatResult ? (
-              <div
-                role="status"
-                class={cn(
-                  "absolute top-10 right-3 z-20 rounded-lg border bg-white px-3 py-1.5",
-                  "flex items-center gap-2 text-xs font-semibold whitespace-nowrap shadow-lg",
-                  copyChatResult === "copied"
-                    ? "border-neutral-200 text-neutral-700"
-                    : "border-red-200 text-red-700"
-                )}
+            }
+          >
+            <div>
+              <Button
+                variant="ghost"
+                onClick={() => setTitleOpen((open) => !open)}
+                class="max-w-65 rounded-full px-2 py-0.5 text-base"
               >
-                {copyChatResult === "copied" ? (
-                  <>
-                    <CheckMarkIcon class="size-4 rounded-full border border-neutral-300 p-px" />
-                    <span>Chat copied to clipboard</span>
-                  </>
-                ) : (
-                  <span>Could not copy the chat</span>
-                )}
-              </div>
-            ) : null}
-            <button
-              type="button"
-              class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
-              title="New chat"
-              aria-label="New chat"
-              onClick={onNewChat}
-            >
-              <ChatPlusIcon className="size-5" />
-            </button>
-            <Dropdown
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
-              positions={["bottom"]}
-              align="end"
-              widthClassName="w-44"
-              items={menuItems}
-              trigger={
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setMenuOpen((open) => !open)}
-                    title="Chat menu"
-                    aria-label="Chat menu"
-                    class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
-                  >
-                    <MoreVerticalIcon className="size-5 rotate-90" />
-                  </button>
-                </div>
-              }
-            />
-            <Button
-              variant="ghost"
-              class="rounded-full border-0 p-1.5 hover:bg-neutral-100"
-              title="Minimize"
-              onClick={onClose}
-            >
-              <MinusIcon className="size-4" />
-            </Button>
-          </div>
+                <span class="truncate">{activeTitle}</span>
+                <ChevronDownIcon className="size-4 shrink-0 text-neutral-500" />
+              </Button>
+            </div>
+          </Popover>
         </div>
-      ) : null}
+
+        <div class="flex items-center gap-1 text-neutral-800">
+          <button
+            type="button"
+            class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+            title="Copy chat"
+            aria-label="Copy chat"
+            onClick={() => void handleCopyChat()}
+          >
+            <CopyIcon className="size-5" />
+          </button>
+          {copyChatResult ? (
+            <div
+              role="status"
+              class={cn(
+                "absolute top-10 right-3 z-20 rounded-lg border bg-white px-3 py-1.5",
+                "flex items-center gap-2 text-xs font-semibold whitespace-nowrap shadow-lg",
+                copyChatResult === "copied"
+                  ? "border-neutral-200 text-neutral-700"
+                  : "border-red-200 text-red-700"
+              )}
+            >
+              {copyChatResult === "copied" ? (
+                <>
+                  <CheckMarkIcon class="size-4 rounded-full border border-neutral-300 p-px" />
+                  <span>Chat copied to clipboard</span>
+                </>
+              ) : (
+                <span>Could not copy the chat</span>
+              )}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+            title="New chat"
+            aria-label="New chat"
+            onClick={onNewChat}
+          >
+            <ChatPlusIcon className="size-5" />
+          </button>
+          <Dropdown
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            positions={["bottom"]}
+            align="end"
+            widthClassName="w-44"
+            items={menuItems}
+            trigger={
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((open) => !open)}
+                  title="Chat menu"
+                  aria-label="Chat menu"
+                  class="flex items-center justify-center rounded-full p-1.5 text-neutral-700 hover:bg-neutral-100"
+                >
+                  <MoreVerticalIcon className="size-5 rotate-90" />
+                </button>
+              </div>
+            }
+          />
+          <Button
+            variant="ghost"
+            class="rounded-full border-0 p-1.5 hover:bg-neutral-100"
+            title="Minimize"
+            aria-label="Minimize"
+            onClick={onClose}
+          >
+            <MinusIcon className="size-4" />
+          </Button>
+        </div>
+      </div>
 
       <div
         ref={messagesContainerRef}
         class={cn(
           "no-scrollbar min-h-0 max-w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto",
-          floating ? "px-6 py-4" : "px-3 py-3"
+          "px-6 py-4"
         )}
       >
         <div
-          class={cn(
-            "w-full max-w-full min-w-0 overflow-hidden",
-            floating ? "space-y-6" : "space-y-3"
-          )}
+          class={cn("w-full max-w-full min-w-0 overflow-hidden", "space-y-6")}
         >
           <div class="w-full max-w-full min-w-0 space-y-1 overflow-hidden">
             {messages.length === 0 && enabledProviderCount === 0 ? (
@@ -700,12 +757,13 @@ export function AiAssistantChatArea(props: {
               <AiAssistantMessageCard
                 key={message.id}
                 message={message}
-                presentation={presentation}
-                onInsertSql={onInsertSql}
+                onInsertSql={onInsertSql ? stableInsertSql : undefined}
                 runtimeConnectionId={runtimeConnectionId}
                 querySafetyMode={querySafetyMode}
-                onUpdateMessage={onUpdateMessage}
-                onAllowDataAccess={onAllowDataAccess}
+                onUpdateMessage={stableUpdateMessage}
+                onAllowDataAccess={
+                  onAllowDataAccess ? stableAllowDataAccess : undefined
+                }
               />
             ))}
 
@@ -786,6 +844,8 @@ export function AiAssistantChatArea(props: {
             widthClassName="w-72"
             items={contextItems}
             itemClassName="whitespace-nowrap"
+            activeIndex={contextActiveIndex}
+            idPrefix="ai-context"
             trigger={
               <textarea
                 ref={promptRef}
@@ -800,6 +860,7 @@ export function AiAssistantChatArea(props: {
                   // Enter that ends an IME composition (Vietnamese, Japanese…)
                   // only commits the text.
                   if (e.isComposing || e.keyCode === 229) return;
+                  if (contextOpen && handleContextKey(e)) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     // The next question can be typed during an answer and sent
@@ -808,9 +869,16 @@ export function AiAssistantChatArea(props: {
                   }
                 }}
                 placeholder="Ask anything..."
+                aria-haspopup="listbox"
+                aria-controls={contextOpen ? "ai-context-list" : undefined}
+                aria-activedescendant={
+                  contextOpen && contextActiveIndex !== undefined
+                    ? `ai-context-${contextActiveIndex}`
+                    : undefined
+                }
                 class={cn(
                   "max-h-50 w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-1 text-neutral-900 outline-none placeholder:text-neutral-400",
-                  floating ? "min-h-20 text-base" : "min-h-14 text-sm"
+                  "min-h-20 text-base"
                 )}
               />
             }
@@ -819,17 +887,6 @@ export function AiAssistantChatArea(props: {
           <div class="mt-2 flex items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-2">
               {runtimeConnectionId ? <AssistantModePicker /> : null}
-              {floating ? null : (
-                <>
-                  <span class="inline-flex max-w-34 items-center gap-1 truncate rounded-md border border-neutral-200 px-2 py-1 text-xs font-medium text-neutral-700">
-                    <VaultIcon className="size-3.5 shrink-0" />
-                    <span class="truncate">{providerLabel}</span>
-                  </span>
-                  <span class="truncate text-xs font-medium text-neutral-500">
-                    {formatModelNameForDisplay(providerModel)}
-                  </span>
-                </>
-              )}
             </div>
 
             <div class="flex shrink-0 items-center gap-2">
@@ -843,58 +900,33 @@ export function AiAssistantChatArea(props: {
                 onSelectProviderModel={onSelectProviderModel}
               />
 
-              {floating ? (
-                <button
-                  type="button"
-                  class={cn(
-                    "rounded-full p-2.5 transition-colors",
-                    submitting
+              <button
+                type="button"
+                class={cn(
+                  "rounded-full p-2.5 transition-colors",
+                  submitting
+                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                    : canSubmit
                       ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : canSubmit
-                        ? "bg-blue-600 text-white hover:bg-blue-700"
-                        : "bg-neutral-100 text-neutral-300"
-                  )}
-                  title={submitting ? "Stop" : "Send"}
-                  aria-label={submitting ? "Stop" : "Send"}
-                  disabled={!submitting && !canSubmit}
-                  onClick={() => {
-                    if (submitting) {
-                      onCancelSubmit();
-                      return;
-                    }
-                    if (canSubmit) void onSubmit();
-                  }}
-                >
-                  {submitting ? (
-                    <span class="block size-2 rounded-xs bg-current" />
-                  ) : (
-                    <ArrowRightIcon className="size-3 -rotate-90" />
-                  )}
-                </button>
-              ) : (
-                <Dropdown
-                  open={menuOpen}
-                  onOpenChange={setMenuOpen}
-                  positions={["top"]}
-                  align="end"
-                  widthClassName="w-44"
-                  items={menuItems}
-                  trigger={
-                    <button
-                      type="button"
-                      onClick={() => setMenuOpen((open) => !open)}
-                      title="Chat menu"
-                      aria-label="Chat menu"
-                      class={cn(
-                        "rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-100",
-                        menuOpen && "bg-neutral-100 text-neutral-900"
-                      )}
-                    >
-                      <MoreVerticalIcon className="size-5" />
-                    </button>
+                      : "bg-neutral-100 text-neutral-300"
+                )}
+                title={submitting ? "Stop" : "Send"}
+                aria-label={submitting ? "Stop" : "Send"}
+                disabled={!submitting && !canSubmit}
+                onClick={() => {
+                  if (submitting) {
+                    onCancelSubmit();
+                    return;
                   }
-                />
-              )}
+                  if (canSubmit) void onSubmit();
+                }}
+              >
+                {submitting ? (
+                  <span class="block size-2 rounded-xs bg-current" />
+                ) : (
+                  <ArrowRightIcon className="size-3 -rotate-90" />
+                )}
+              </button>
             </div>
           </div>
         </div>

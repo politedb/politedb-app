@@ -621,10 +621,22 @@ export function useAiChatSession(chatSessionKey: string) {
     setActiveMessages((prev) => prev.filter((message) => !message.streaming));
   };
 
+  /**
+   * Updates a message in whichever chat holds it: a query or permission that
+   * finishes after the user switched chats still lands in its own chat.
+   */
   const updateMessage = (id: string, patch: Partial<ChatMessage>) => {
-    setActiveMessages((prev) =>
-      prev.map((message) =>
-        message.id === id ? { ...message, ...patch } : message
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.messages.some((message) => message.id === id)
+          ? {
+              ...session,
+              messages: session.messages.map((message) =>
+                message.id === id ? { ...message, ...patch } : message
+              ),
+              updatedAt: Date.now(),
+            }
+          : session
       )
     );
   };
