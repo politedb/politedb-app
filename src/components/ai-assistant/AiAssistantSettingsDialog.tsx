@@ -953,7 +953,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                     ) : null}
                   </div>
                   {keyInputShown ? (
-                    <div class="flex gap-2">
+                    <div class="flex items-center gap-2">
                       <div class="min-w-0 flex-1">
                         <Input
                           id="ai-provider-api-key"
@@ -969,7 +969,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                           right={
                             <Button
                               variant="ghost"
-                              className="h-6 text-xs"
+                              className="h-6 px-1 text-xs"
                               aria-pressed={showKey}
                               onClick={() => setShowKey((shown) => !shown)}
                             >
@@ -982,7 +982,7 @@ export function AiAssistantSettingsDialog(props: Props) {
                         <Button
                           type="button"
                           variant="ghost"
-                          className="h-10"
+                          className="h-8 px-2 py-0.5 text-xs"
                           onClick={() =>
                             changeKeyAuth(() => {
                               setApiKey("");

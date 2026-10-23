@@ -2930,7 +2930,6 @@ No new P0, P1, P2 or P3 finding established in the reviewed scope.
 - The two added tests exercise reused nonzero geometry on entry and capture cancellation from a sibling thumb that stops propagation. They do not mount the actual OverlayScrollArea/MainScreen, rerender the hook across page keys, assert listener removal directly, simulate TopBar search events, or reproduce asynchronous native scroll delivery. Those paths were assessed through source and DOM/event-flow tracing; no additional test files were written.
 - No desktop/dev-server launch, real browser layout, pointer capture/drag, native WebKit scroll scheduling, screenshot or deep History IntersectionObserver/pagination test. No emitting build or Rust checks; requested checks were non-emitting and review scope is frontend state/scroll behavior. Five-second delayed-content deadline and earlier native/integration limitations remain. Verification supports closure of the two concrete findings without claiming end-to-end native scroll validation.
 
-
 ## Review: PostgreSQL DB Health Inspector progressive collection and UX — 2026-10-21
 
 Status: CHANGES REQUIRED
@@ -2980,7 +2979,6 @@ No P0/P1 finding established. Findings 1–2 identify existing native behavior n
 - Attempted a temporary, fixture-only Overview Vite harness outside source files; server startup failed with `listen EPERM: operation not permitted ::1:1439`. No browser/native webview render, screenshots, tooltip keyboard interaction or measured dark-mode contrast obtained. No approval was requested or bypassed. Temporary harness does not modify application source.
 - Passing tests/build/check do not close the findings above. Follow-up tests should cover a full Refresh with deferred Overview, superseded onProgress, a delayed sibling after cancel, the seven-query capabilities/info path near deadline, native scoped settings/timeout error semantics and the PostgreSQL size/partition/permission matrix.
 
-
 ## Re-review: PostgreSQL DB Health Inspector progressive collection and UX — 2026-10-21
 
 Status: CHANGES REQUIRED
@@ -3022,7 +3020,6 @@ No new P0/P1 established. Findings 1–4 are closed at source-review level; find
 - Two temporary diagnostic tests against actual Dialog + InfoHint: **2 passed**. They assert the current hover-Escape defect, correct focused first/second Escape handling, and portal removal on unmount; they are diagnostic evidence, not committed regression fixes.
 - `git diff --check`: **passed** before report append. Local `pg_isready -h localhost -p 5432`: **no response**. No live PostgreSQL tests, PG12–17 matrix, restricted-role/DDL contention tests, native webview, visual dark-mode inspection or screen-reader check. The implementer's PG16 evidence remains attributed, not independently verified. No application source files modified.
 
-
 ## Re-review: PostgreSQL DB Health Inspector hint Escape capture and cleanup — 2026-10-22
 
 Status: VERIFIED WITH LIMITATIONS
@@ -3055,7 +3052,6 @@ Re-reviewed the full uncommitted task diff against HEAD, including untracked `sr
 - `git diff --check` — **passed** before append. No live PostgreSQL, PG12–17 matrix, restricted-role/DDL-contention, cancellation stress, native webview, dark-mode visual, or assistive-technology validation performed. DOM event probes cover the application handlers, not browser-default Escape behavior or every possible overlay composition.
 
 **New findings: none established.** Findings 1–6 are closed within the source/automated-test scope above. Remaining limitations prevent an unconditional native/visual/integration certification; they do not reopen finding 6.
-
 
 ## Review: PostgreSQL DB Health Inspector batches 3 and 4 — 2026-10-22
 
@@ -3092,7 +3088,6 @@ Reviewed the uncommitted working-tree diff against HEAD, including untracked `Se
 
 References: [PostgreSQL 17 statistics/visibility and lag semantics](https://www.postgresql.org/docs/17/monitoring-stats.html); [PG12 pgstatfuncs.c](https://github.com/postgres/postgres/blob/REL_12_STABLE/src/backend/utils/adt/pgstatfuncs.c); [PG17 pgstatfuncs.c](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/pgstatfuncs.c); [pg_index flags](https://www.postgresql.org/docs/17/catalog-pg-index.html); [DROP INDEX restrictions](https://www.postgresql.org/docs/17/sql-dropindex.html). Documentation consulted through Context7; masked backend_type confirmed against upstream source.
 
-
 ## Re-review: PostgreSQL DB Health Inspector batches 3 and 4, findings 1–4 — 2026-10-22
 
 Status: CHANGES REQUIRED
@@ -3123,7 +3118,6 @@ Read `AGENTS.md`, `.agent/WORKFLOW.md`, and referenced RTK instructions first. R
 - No independent live PostgreSQL role/worker/EXCLUDE integration, PG12–17 matrix, standby test, cancellation stress, native webview, visual dark-mode or assistive-technology validation performed. Implementer PG16 observations remain attributed evidence. No application runtime/visual certification claimed.
 
 References: [PG16 pg_stat_get_db_numbackends](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/pgstatfuncs.c#L926-L944); [PG16 backend status storage and database association](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/activity/backend_status.c#L26-L34); [autovacuum workers do not count toward max_connections](https://www.postgresql.org/docs/16/routine-vacuuming.html#AUTOVACUUM); [parallel-worker limits](https://www.postgresql.org/docs/16/how-parallel-query-works.html). Current PG16 documentation fetched through Context7; count implementation independently checked against upstream source.
-
 
 ## Re-review: PostgreSQL DB Health Inspector batches 3 and 4, client visibility and reserved slots — 2026-10-22
 
@@ -3158,7 +3152,6 @@ Reviewer: Codex. Baseline: HEAD plus all uncommitted task changes. Read AGENTS.m
 
 References: [PG16 role privilege semantics](https://www.postgresql.org/docs/16/functions-info.html), fetched through Context7; [PG16 ACL implementation: MEMBER vs USAGE and superuser shortcuts](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/acl.c#L4437-L4490); [PG15 statistics privilege macro](https://github.com/postgres/postgres/blob/REL_15_STABLE/src/backend/utils/adt/pgstatfuncs.c#L34); [PG16 statistics privilege macro](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/utils/adt/pgstatfuncs.c#L36); [PG17 activity visibility](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/pgstatfuncs.c#L336); [PG12 role inquiry functions](https://www.postgresql.org/docs/12/functions-info.html); [PG12 default roles](https://www.postgresql.org/docs/12/default-roles.html); [PG12 current_setting missing_ok](https://www.postgresql.org/docs/12/functions-admin.html); [PG12 release: WAL senders separated from max_connections](https://www.postgresql.org/docs/12/release-12.html); [PG16 separate process pools](https://github.com/postgres/postgres/blob/REL_16_STABLE/src/backend/storage/lmgr/proc.c#L223-L245); [PG17 reserved connection rules](https://www.postgresql.org/docs/17/runtime-config-connection.html), fetched through Context7. PG12–14 statistics macros independently checked in their upstream stable branches.
 
-
 ## Re-review: PostgreSQL DB Health Inspector batches 3 and 4, effective statistics privilege — 2026-10-22
 
 Status: VERIFIED WITH LIMITATIONS
@@ -3187,7 +3180,6 @@ Reviewer: Codex. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instr
 - SQL assertions verify generated text; unit/DOM tests mock database results. No independent live PostgreSQL role/worker/WAL-sender/EXCLUDE fixture, version matrix, standby test, native webview/visual inspection, assistive-technology check or cancellation stress performed. Prior replication NULL wording, broad race-matrix and derived-sort coverage limitations remain; they are not new confirmed regressions. Source/unit/DOM verification does not certify native runtime behavior.
 
 References: [PG16 role privilege inquiry](https://www.postgresql.org/docs/16/functions-info.html), [statistics visibility](https://www.postgresql.org/docs/16/monitoring-stats.html), [role inheritance](https://www.postgresql.org/docs/16/role-attributes.html), [reserved connection admission](https://www.postgresql.org/docs/16/runtime-config-connection.html). Documentation fetched through Context7 during this re-review.
-
 
 ## Review: health-inspector-session-actions — Revision 4.1 implementation
 
@@ -3235,11 +3227,11 @@ Scope: read `AGENTS.md`, RTK instructions, `.agent/WORKFLOW.md`, the task plan a
 
 ### Prior required findings
 
-| Prior finding | Status | Evidence and limits |
-| --- | --- | --- |
-| P1 — Unmount does not invalidate a destructive attempt | **Resolved** | `src/hooks/useDbHealthInspector.ts:315` cleanup advances epoch and collection generation, clears action ownership and aborts collection. Pending confirmation then fails `current()`; an issued attempt still reports analytics once but cannot write results, release a newer lock or reconcile. Passing regressions at `src/hooks/useDbHealthInspector.test.ts:636`, `:655`, `:673` exercise confirmation unmount, dispatch unmount and late older completion while a newer confirmation owns the lock. Existing context/Pro/collection-generation guards remain intact. |
+| Prior finding                                            | Status                                                                   | Evidence and limits                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — Unmount does not invalidate a destructive attempt   | **Resolved**                                                             | `src/hooks/useDbHealthInspector.ts:315` cleanup advances epoch and collection generation, clears action ownership and aborts collection. Pending confirmation then fails `current()`; an issued attempt still reports analytics once but cannot write results, release a newer lock or reconcile. Passing regressions at `src/hooks/useDbHealthInspector.test.ts:636`, `:655`, `:673` exercise confirmation unmount, dispatch unmount and late older completion while a newer confirmation owns the lock. Existing context/Pro/collection-generation guards remain intact.                                                                                                                                                             |
 | P2 — Required cancellation/deadline cleanup tests absent | **Resolved for the reported missing fixture; live verification limited** | `session_signal_faults` now drives the actual `signal_backend_with` runner through a wire-protocol proxy: BEGIN/Bind/COMMIT stalls, COMMIT transport drop after a real cancel, task abort, acquisition exhaustion, elapsed acquisition deducted from the overall deadline and closed pool. Clean COMMIT retains pool size; principal non-clean transaction cases assert size zero before recovery and a usable fresh client with `transaction_read_only = off`. Production still uses the original 8 s / 5 s timing and armed detach guard. Both live suites compile but were ignored in this review; implementer's PG16 execution remains supplied evidence, not independently reproduced. See nonblocking fixture limitations below. |
-| P2 — Analytics tested only at props helper | **Resolved** | `src/lib/analytics.sessionAction.test.ts` calls the real `trackHealthInspectorSessionAction` → opt-in `trackEvent` → sanitization/capture path, mocking PostHog itself. Exact payload equality and exact custom-key set cover signalled, denied, unknown and busy; denied/unknown/absent consent and malformed values produce no action capture. Wrapper tests independently establish IPC rejection → unknown; hook tests establish dismissal → no event and stale/unmounted issued completion → one event. These layers cover the requested path without leaking caller/IPC objects. |
+| P2 — Analytics tested only at props helper               | **Resolved**                                                             | `src/lib/analytics.sessionAction.test.ts` calls the real `trackHealthInspectorSessionAction` → opt-in `trackEvent` → sanitization/capture path, mocking PostHog itself. Exact payload equality and exact custom-key set cover signalled, denied, unknown and busy; denied/unknown/absent consent and malformed values produce no action capture. Wrapper tests independently establish IPC rejection → unknown; hook tests establish dismissal → no event and stale/unmounted issued completion → one event. These layers cover the requested path without leaking caller/IPC objects.                                                                                                                                                 |
 
 No new P0/P1/P2 findings identified in the reviewed scope.
 
@@ -3266,7 +3258,6 @@ No new P0/P1/P2 findings identified in the reviewed scope.
 - `git diff --check`: **passed** before report append.
 
 Limitations from the preceding review remain: PG12/PG17, real direct/SSH startup/replacement/test-connection observations, surviving checked-out clients after runtime removal, the remaining live privilege/identity/token matrix, concurrent editor/export/collection and native confirmation/VoiceOver checks were not independently exercised. The plan records only part of that matrix as implementer evidence. Accepted tag-renaming/proxy/PID-reuse/cancel-current-work limits remain accepted boundaries. Workflow still requires the separate Claude `/security-review`; this verdict does not mark that pass complete or authorize commit/push/merge.
-
 
 ## Review: Pro Query Analyzer polish — 2026-10-22
 
@@ -3308,7 +3299,6 @@ Scope: read `AGENTS.md`, `/Users/lamtung/.codex/RTK.md` and `.agent/WORKFLOW.md`
 
 Next: Claude fixes the findings, adds focused regressions, runs the requested checks and requests Codex re-review. No source implementation, commit, push or merge performed by this review.
 
-
 ## Re-review: Pro Query Analyzer polish — 2026-10-22
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `feat/query-analyzer-polish`. Baseline: HEAD, including staged, unstaged and task-owned untracked files.
@@ -3317,16 +3307,16 @@ Read `AGENTS.md`, `.agent/WORKFLOW.md` and RTK instructions first. Re-reviewed t
 
 ### Status of prior findings
 
-| Finding | Status | Evidence |
-| --- | --- | --- |
-| 1 — CTE timing attribution | **Resolved for reported cases** | `plan.ts:179-204` separates timing parents from display parents for measured plans. Single-reader producer time is subtracted from that reader rather than twice from its displayed ancestor; multi-reader scans have undefined self time and shared attribution. Tree shows an em dash and details explain unavailable attribution. Single/reused CTE fixtures pass; estimated-cost behavior remains unchanged. See limits below. |
-| 2 — PostgreSQL lexical checks | **Resolved** | `pgLexer.ts` handles nested comments, E-string escapes, digit-containing dollar tags, identifiers containing `$`, positional parameters and unclosed constructs. Explain checks and leading keyword detection use this shared lexer. Positive/negative regressions pass, including a real parameter after an escaped quote. |
-| 3 — Comment-only fragments | **Resolved** | `pgStatements` counts executable fragments and drops trailing comments; non-PG splitting filters comment-only fragments. Leading/internal comments remain intact. Tests cover line/block tails, unterminated PG input and refusal of two executable statements. |
-| 4 — Recommendations pagination | **Resolved** | Analyzer-owned `findingsPage` and Recommendations pager expose findings beyond 100 independently of Plan pagination. Large-plan regression passes. |
-| 5 — Keyboard entry and navigation | **Resolved** | Initial page contains hottest node; visible selected row or first page row is tabbable. Arrow navigation derives its origin from the focused row and queues focus after rendering. Existing off-page-selection test passes; independent cross-page ArrowDown probe verifies actual focus on the new page. |
-| 6 — Node shortcut reveal | **Partially resolved; P2 remains** | `revealInPlan` expands ancestors, clears filtering/order and calculates the target page from resulting rows. Page/selection tests pass. It does not request focus, so activating a recommendation loses focus when its source view unmounts; see required finding below. |
-| 7 — Earlier streamed baselines | **Resolved** | `SqlResultsPane.tsx:462-513` offers completed stream slots with opIds and loads bounded rows through `getSqlStreamSnapshot` only on selection. Direct results remain supported; rows retain one registry owner. Later timestamps and current/later slots of the active run are excluded. Earlier typed-stream/later-run regression passes; current Pro-revocation tests pass. |
-| 8 — Comparison persistence | **Resolved** | `comparison` and import counter belong to QueryAnalyzer, surviving Compare unmounts. Both run selection and file import use the shared counter, so a newer choice invalidates an older read across view changes. Selected-run persistence regression passes. Analyzer remounts use separate state/counter objects. |
+| Finding                           | Status                             | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — CTE timing attribution        | **Resolved for reported cases**    | `plan.ts:179-204` separates timing parents from display parents for measured plans. Single-reader producer time is subtracted from that reader rather than twice from its displayed ancestor; multi-reader scans have undefined self time and shared attribution. Tree shows an em dash and details explain unavailable attribution. Single/reused CTE fixtures pass; estimated-cost behavior remains unchanged. See limits below. |
+| 2 — PostgreSQL lexical checks     | **Resolved**                       | `pgLexer.ts` handles nested comments, E-string escapes, digit-containing dollar tags, identifiers containing `$`, positional parameters and unclosed constructs. Explain checks and leading keyword detection use this shared lexer. Positive/negative regressions pass, including a real parameter after an escaped quote.                                                                                                        |
+| 3 — Comment-only fragments        | **Resolved**                       | `pgStatements` counts executable fragments and drops trailing comments; non-PG splitting filters comment-only fragments. Leading/internal comments remain intact. Tests cover line/block tails, unterminated PG input and refusal of two executable statements.                                                                                                                                                                    |
+| 4 — Recommendations pagination    | **Resolved**                       | Analyzer-owned `findingsPage` and Recommendations pager expose findings beyond 100 independently of Plan pagination. Large-plan regression passes.                                                                                                                                                                                                                                                                                 |
+| 5 — Keyboard entry and navigation | **Resolved**                       | Initial page contains hottest node; visible selected row or first page row is tabbable. Arrow navigation derives its origin from the focused row and queues focus after rendering. Existing off-page-selection test passes; independent cross-page ArrowDown probe verifies actual focus on the new page.                                                                                                                          |
+| 6 — Node shortcut reveal          | **Partially resolved; P2 remains** | `revealInPlan` expands ancestors, clears filtering/order and calculates the target page from resulting rows. Page/selection tests pass. It does not request focus, so activating a recommendation loses focus when its source view unmounts; see required finding below.                                                                                                                                                           |
+| 7 — Earlier streamed baselines    | **Resolved**                       | `SqlResultsPane.tsx:462-513` offers completed stream slots with opIds and loads bounded rows through `getSqlStreamSnapshot` only on selection. Direct results remain supported; rows retain one registry owner. Later timestamps and current/later slots of the active run are excluded. Earlier typed-stream/later-run regression passes; current Pro-revocation tests pass.                                                      |
+| 8 — Comparison persistence        | **Resolved**                       | `comparison` and import counter belong to QueryAnalyzer, surviving Compare unmounts. Both run selection and file import use the shared counter, so a newer choice invalidates an older read across view changes. Selected-run persistence regression passes. Analyzer remounts use separate state/counter objects.                                                                                                                 |
 
 ### Required finding
 
@@ -3348,7 +3338,6 @@ Read `AGENTS.md`, `.agent/WORKFLOW.md` and RTK instructions first. Re-reviewed t
 
 Next: fix remaining P2 focus handoff, add actual-focus regression coverage, then request re-review. No commit/push/merge authorized.
 
-
 ## Re-review: Pro Query Analyzer focus and tabs — 2026-10-22
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `feat/query-analyzer-polish`. Baseline: HEAD, including staged, unstaged and task-owned untracked files.
@@ -3357,16 +3346,16 @@ Read `AGENTS.md`, `.agent/WORKFLOW.md` and RTK instructions first. Re-reviewed t
 
 ### Status of findings 1–8
 
-| Finding | Status | Evidence |
-| --- | --- | --- |
-| 1 — CTE timing attribution | **Remains resolved for reported cases** | Timing parents remain separate from display parents; single-reader CTE producer attribution and unavailable multi-reader self time remain covered by passing fixtures. Prior scope/recursive/real-plan limitations remain. |
-| 2 — PostgreSQL lexical checks | **Remains resolved** | Shared lexer still handles nested comments, E escapes, digit-containing dollar tags and identifier boundaries; positive/negative lexer and Explain regressions pass. |
-| 3 — Comment-only fragments | **Remains resolved** | Executable-fragment counting still removes comment-only tails and rejects two executable statements; focused tests pass. |
-| 4 — Recommendations pagination | **Remains resolved** | Separate findings page and pager expose recommendations beyond 100; large-plan test passes. |
-| 5 — Keyboard entry and navigation | **Remains resolved** | Visible selected/first row remains tabbable; independent cross-page ArrowDown probe verifies focus on the mounted page's first row. |
-| 6 — Node shortcut reveal | **Original reported case resolved; new related regression below** | `QueryAnalyzer.tsx:156` issues incrementing `{id, nonce}` requests; PlanTree queues focus after mount. Added recommendation/repeat regression passes. Independent off-page recommendation and repeated summary reveals pass actual-focus assertions. Consumed requests are nevertheless replayed on subsequent tree mounts. |
-| 7 — Earlier streamed baselines | **Remains resolved** | Completed stream candidates retain on-demand bounded registry snapshot loading; direct candidates and Pro gates remain intact. SqlResultsPane stream/chronology tests pass. |
-| 8 — Comparison persistence | **Remains resolved** | Comparison state and import version counter remain parent-owned across view switches; selected baseline persistence test passes. |
+| Finding                           | Status                                                            | Evidence                                                                                                                                                                                                                                                                                                                    |
+| --------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — CTE timing attribution        | **Remains resolved for reported cases**                           | Timing parents remain separate from display parents; single-reader CTE producer attribution and unavailable multi-reader self time remain covered by passing fixtures. Prior scope/recursive/real-plan limitations remain.                                                                                                  |
+| 2 — PostgreSQL lexical checks     | **Remains resolved**                                              | Shared lexer still handles nested comments, E escapes, digit-containing dollar tags and identifier boundaries; positive/negative lexer and Explain regressions pass.                                                                                                                                                        |
+| 3 — Comment-only fragments        | **Remains resolved**                                              | Executable-fragment counting still removes comment-only tails and rejects two executable statements; focused tests pass.                                                                                                                                                                                                    |
+| 4 — Recommendations pagination    | **Remains resolved**                                              | Separate findings page and pager expose recommendations beyond 100; large-plan test passes.                                                                                                                                                                                                                                 |
+| 5 — Keyboard entry and navigation | **Remains resolved**                                              | Visible selected/first row remains tabbable; independent cross-page ArrowDown probe verifies focus on the mounted page's first row.                                                                                                                                                                                         |
+| 6 — Node shortcut reveal          | **Original reported case resolved; new related regression below** | `QueryAnalyzer.tsx:156` issues incrementing `{id, nonce}` requests; PlanTree queues focus after mount. Added recommendation/repeat regression passes. Independent off-page recommendation and repeated summary reveals pass actual-focus assertions. Consumed requests are nevertheless replayed on subsequent tree mounts. |
+| 7 — Earlier streamed baselines    | **Remains resolved**                                              | Completed stream candidates retain on-demand bounded registry snapshot loading; direct candidates and Pro gates remain intact. SqlResultsPane stream/chronology tests pass.                                                                                                                                                 |
+| 8 — Comparison persistence        | **Remains resolved**                                              | Comparison state and import version counter remain parent-owned across view switches; selected baseline persistence test passes.                                                                                                                                                                                            |
 
 ### New required finding
 
@@ -3385,7 +3374,6 @@ Roving `tabIndex`, ArrowLeft/ArrowRight wrapping, Home/End selection and explici
 - No live database execution, native/browser visual inspection, real Tab traversal or screen-reader smoke run. Prior CTE attribution, timestamp-tie, unavailable-snapshot and imported-baseline coverage limitations remain; no universal timing-decomposition or complete accessibility claim. No other new actionable regression established in the reviewed diff. Common InfoHint move remains unchanged apart from imports; export Pro/consent gates remain intact.
 
 Next: fix request consumption across mounts and add the interaction regression; rerun focused checks and request Codex re-review.
-
 
 ## Implementation review: Explain Analyze Revision 5 + focus replay — 2026-10-23
 
@@ -3428,7 +3416,6 @@ Next: fix request consumption across mounts and add the interaction regression; 
 
 Next: Claude fixes findings, records focused regressions and reruns checks; independent re-review required. Security-sensitive implementation also retains the workflow's separate security-review gate. No commit/push/merge authorized.
 
-
 ## Implementation re-review: Explain Analyze post-fix + modal keyboard — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `feat/query-analyzer-polish`. Scope: uncommitted implementation, including task-owned untracked files, and Claude's “Fixes after Codex implementation review (Claude, 2026-10-23)” in `.agent/plans/query-analyzer-explain-analyze.md:415`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK instructions and preceding Revision-5 review first. Only this report appended; no application source/test edits, staging or commits. No live database, ignored database tests, or secrets accessed/printed.
@@ -3459,7 +3446,6 @@ Next: Claude fixes findings, records focused regressions and reruns checks; inde
 - `git diff --check`: **passed** before report append. No live database or PG-version matrix, Windows build, native webview/manual keyboard/screen-reader session, feature-off build, or live rollback/termination/hostile-error verification. Claude's PG16 smoke is handoff evidence only. Existing feature-off and orphan delivery limitations remain.
 
 Next: Claude fixes modal keyboard isolation and records integration evidence; remove accidental Windows test dependencies. Independent re-review remains required. No commit/push/merge authorized.
-
 
 ## Implementation re-review: Explain Analyze keyboard isolation + dependency fixes — 2026-10-23
 
@@ -3497,7 +3483,6 @@ Next: Claude fixes modal keyboard isolation and records integration evidence; re
 
 Both findings from the preceding re-review are resolved within available static/unit evidence. Verdict does not waive live/native/platform release checks or the workflow's separate security review for this execution path. No commit/push/merge authorized.
 
-
 ## Implementation re-review: Explain Analyze unified Explain toolbar — 2026-10-23
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Branch: `feat/query-analyzer-polish`. Scope: current uncommitted Explain Analyze change against HEAD, including staged/unstaged/task-owned untracked files; emphasis on the human's toolbar decision and follow-up in `.agent/plans/query-analyzer-explain-analyze.md:437-445`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK guidance and the previous review first. No application source/tests modified; only this section appended. No live database, ignored database tests, staging or commits.
@@ -3529,7 +3514,6 @@ Both findings from the preceding re-review are resolved within available static/
 - `git diff --check`: **passed** before append. No live PostgreSQL/version matrix, hostile-server NOTICE/error capture, rollback-failure/termination integration, Windows build or feature-off build performed. Earlier Claude PG16 evidence was not independently repeated. Existing feature-off and orphan-delivery limitations remain.
 
 The toolbar follow-up is implemented consistently with the recorded human decision. No source fixes requested by this pass. Verdict retains the live/native/platform limits and the workflow's separate security review requirement for the execution path. No commit/push/merge authorized.
-
 
 ## Implementation review: Query Analyzer batch 3 — 2026-10-23
 
@@ -3575,7 +3559,6 @@ The toolbar follow-up is implemented consistently with the recorded human decisi
 
 Next: Claude fixes P1 and the P2 correctness issues, adds focused regressions, then requests independent re-review. No commit/push/merge performed.
 
-
 ## Re-review: Query Analyzer batch 3 — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch confirmed: `feat/query-analyzer-polish`. Read `AGENTS.md` and `.agent/WORKFLOW.md` first, then RTK guidance and the previous batch-3 review. Scope: complete application/test diff against HEAD, including both untracked test files; `.claude/launch.json` excluded. Only this review section appended; no application source/test edits, staging or commits. Previous report preserved. Inputs in external probes are synthetic.
@@ -3614,7 +3597,6 @@ Next: Claude fixes P1 and the P2 correctness issues, adds focused regressions, t
 
 Next: fix the two P2 operand/context validation gaps, add focused regressions, then request independent re-review. P3 null-test expansion is optional.
 
-
 ## Re-review 2: Query Analyzer batch 3 — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `feat/query-analyzer-polish`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, RTK guidance and preceding review first. Scope: complete `git diff HEAD` plus both untracked application test files; `.claude/launch.json` excluded. Previous sections preserved. No application source/test modifications, staging or commits. Memory used only for architecture orientation; conclusions checked against current files.
@@ -3646,7 +3628,6 @@ Next: fix the two P2 operand/context validation gaps, add focused regressions, t
 
 Next: tighten complete operator/predicate recognition, add focused regressions, then request independent re-review. Prior two P2 findings are closed; this remaining P2 prevents verification.
 
-
 ## Re-review 3: Query Analyzer batch 3 — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch confirmed: `feat/query-analyzer-polish`. Read `AGENTS.md` and `.agent/WORKFLOW.md` first, then RTK guidance and Re-review 2. Scope: complete `git diff HEAD` plus both untracked application test files; `.claude/launch.json` excluded. Previous reports preserved. Only this section appended; no source/test edits, staging or commits.
@@ -3676,7 +3657,6 @@ Next: tighten complete operator/predicate recognition, add focused regressions, 
 
 Next: address RHS comparison collation, add focused regressions, then request independent re-review. Previous operator-prefix finding is closed; collation P2 prevents verification.
 
-
 ## Re-review 4: Query Analyzer batch 3 — 2026-10-23
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Branch confirmed: `feat/query-analyzer-polish`. Read `AGENTS.md` and `.agent/WORKFLOW.md` first, then RTK guidance and Re-review 3. Scope: complete `git diff HEAD` plus untracked `findings.test.ts` and `SqlResultsPane.planCache.test.tsx`; `.claude/launch.json` excluded. Previous sections preserved. Only this review section appended; no application source/test changes, staging or commits. Memory supplied architecture orientation only; current files and independent checks support conclusions.
@@ -3705,7 +3685,6 @@ Next: address RHS comparison collation, add focused regressions, then request in
 - `git diff --check`: **passed** before append. No launch-config changes, source edits, staging, commit, push or merge.
 
 Previous blocking collation finding is closed. No further source changes requested by this pass; verification retains the visual/native/live-database limitations above.
-
 
 ## Review: Query Analyzer batch 4 — other engines — 2026-10-23
 
@@ -3740,7 +3719,6 @@ Previous blocking collation finding is closed. No further source changes request
 - `git diff --check`: **passed** before report append. No live databases, native visual inspection, real SQL Server cancellation/failure integration or historical engine matrix run. Fixture provenance/versions are Claude's supplied capture claims, not independently recaptured here.
 
 Next: fix the four P2 findings, add focused regression coverage, then request independent re-review.
-
 
 ## Re-review: Query Analyzer batch 4 — other engines — 2026-10-23
 
@@ -3779,7 +3757,6 @@ Next: fix the four P2 findings, add focused regression coverage, then request in
 - `git diff --check`: **passed** before append. No source edits, launch-config edits, staging, commit, push or merge.
 
 All four prior blockers are closed. This verdict covers static review, captured fixtures and independent synthetic checks, with the runtime/coverage limitations above.
-
 
 ## Review: AI provider error codes, Gemini defaults, Settings batch 1 — 2026-10-23
 
@@ -3822,7 +3799,6 @@ All four prior blockers are closed. This verdict covers static review, captured 
 
 Next: resolve the five P2 findings, add targeted asynchronous/native-path regressions, then request independent re-review. P3 is a minor dirty-state false positive.
 
-
 ## Re-review: AI provider error codes, Gemini defaults, Settings batch 1 — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `fix/ai-provider-error-code`; scope: complete `git diff HEAD` plus both untracked `providerErrors` files, excluding `.claude/launch.json`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK guidance and the preceding review. Rechecked all changed source/test files and adjacent Dialog, Button, provider persistence and cancellation paths. Only this report appended; no application source/test edits, staging or commits.
@@ -3864,7 +3840,6 @@ Next: resolve the five P2 findings, add targeted asynchronous/native-path regres
 
 All six original cases are resolved. Fix the new P2 successful-save/edit synchronization gap and request re-review; P3 focus restoration is a minor additional correction.
 
-
 ## Re-review round 3: AI provider error codes, Gemini defaults, Settings batch 1 — 2026-10-23
 
 **Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `fix/ai-provider-error-code`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK guidance and both preceding task reviews. Reviewed the complete tracked diff against HEAD and both untracked `providerErrors` files; ignored `.claude/launch.json`. Only this review section appended; no repository source/test edits, staging or commit. Supplemental probes live outside the repository.
@@ -3904,7 +3879,6 @@ All six original cases are resolved. Fix the new P2 successful-save/edit synchro
 
 Native-control synchronization, live-invoker focus and the requested Test/question unmount lifecycle fixes are verified within these limits. Close the portaled-model persistence bypass before marking this branch verified.
 
-
 ## Re-review round 4: AI provider error codes, Gemini defaults, Settings batch 1 — 2026-10-23
 
 **Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Branch: `fix/ai-provider-error-code`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK guidance and round 3 before reviewing. Scope: complete `git diff HEAD` plus untracked `providerErrors.ts` and `providerErrors.test.ts`; `.claude/launch.json` excluded. Only this report changed in the repository; no source/test edits, staging or commits. Supplemental harness files are external to the repository.
@@ -3939,3 +3913,74 @@ The probe's 30-second limit still bounds asynchronous completion rather than pre
 - Targeted `npx eslint src/components/ai-assistant/AiModelCombobox.tsx`: **passed**, no diagnostics. Log: `/private/tmp/ai-round4-eslint.log`.
 - `npm run dev`: **blocked**, `listen EPERM ::1:1420`. Browser/native visual inspection, real Tab/Return automation, screen-reader behavior and live keychain/provider requests remain unverified. Log: `/private/tmp/ai-round4-dev.log`.
 - `git diff --check`: **passed** before report append. No secrets printed; ignored launch configuration untouched.
+
+## Review: AI Provider Settings batches 2–3 (layout and model discovery) — 2026-10-23
+
+**Verdict: CHANGES REQUIRED.** Reviewer: Codex. Branch: `fix/ai-provider-error-code`. Scope: current `git diff HEAD` and untracked files, excluding `.claude/launch.json` (the only untracked file). Earlier committed error-code/Gemini-default/batch-1 work is not reopened; preceding task reviews, including round 4, were read for context. Read `AGENTS.md`, `.agent/WORKFLOW.md` and referenced RTK instructions first. Only this section appended; no application source/test edits, staging or commits. Supplemental tests are outside the repository; no live provider calls or real keys used, and no secrets printed.
+
+### Findings
+
+**P1:** none established.
+
+1. **P2 — Invalidate discovery when Cancel/Remove/Undo changes the effective key.** `src/components/ai-assistant/AiAssistantSettingsDialog.tsx:953-958,991-994,1003-1006` only calls `markEdited`, which cancels Test but does not invalidate discovery (`:190-194`). Replacement Cancel changes auth from the typed key back to the saved key; Remove/Undo changes between saved-key and no-key auth. A pending request keeps its generation and its result/error is still accepted by `loadModels` (`:456-481`). Independent deferred-response reproductions pass: Replace → type synthetic key → Reload → Cancel still offers `replacement-key-only-model` while displaying “Saved in the OS keychain”; Reload with the saved key → Remove still accepts `removed-key-only-model`. Neither sends a cancellation. Users can consequently choose models discovered for credentials they just discarded, or see an obsolete authentication failure after Undo. **Fix:** route all effective-auth changes through discovery invalidation, as the key input already does at `:933-936`; reject late success/error/finally and clear auth-specific suggestions/hints when changing credentials. Add deferred Cancel/Remove/Undo coverage. These passing defect assertions demonstrate current bugs, not remediation.
+
+2. **P2 — “Get a key” silently does nothing in App Store builds.** `src/components/ai-assistant/AiAssistantSettingsDialog.tsx:909-918` renders the action unconditionally and uses `openExternalUrl`. Every destination in `src/lib/ai-assistant/providers.ts:94-102` is outside the existing App Store allowlist (`src-tauri/src/distribution.rs:38-44,69-95`, HTTPS restricted to the PoliteDB GitHub issues path). The command rejects these URLs before opening (`src-tauri/src/commands/license.rs:69-70`); `src/lib/tauri/license.ts:196-198` deliberately swallows that distribution rejection without fallback. Thus the new setup action is visibly offered but cannot work for any provider in that flavor. **Fix:** make the action distribution-aware: omit/replace it with useful copy when forbidden, or explicitly approve narrowly scoped key-management destinations through the distribution policy. Preserve the existing rejection/no-fallback boundary; do not bypass it with `window.open`. Current dialog tests mock `openExternalUrl`, so they miss this integration failure. Source-backed policy trace; no external opener invoked.
+
+**P3:** no additional actionable regression established.
+
+### API correctness and security
+
+- **Gemini:** Context7 official [Models reference](https://ai.google.dev/api/models) confirms `GET /v1beta/models`, maximum `pageSize=1000`, `pageToken` → `nextPageToken`, `models[].name` and `supportedGenerationMethods`. Implementation at `src-tauri/src/ai/chat.rs:390-410,489-529` uses those fields, keeps other paging parameters constant, strips `models/`, and excludes explicitly non-`generateContent` models. Header authentication is supported by Google's official [API-key guide](https://ai.google.dev/gemini-api/docs/api-key). Missing method metadata is intentionally treated permissively; an object without an array is treated as empty. These compatibility fallbacks do not strictly validate malformed gateway responses, but no official-response regression established.
+- **Anthropic:** Context7 official SDK documentation and the official [List Models reference](https://platform.claude.com/docs/en/api/models/list) confirm `GET /v1/models`, `limit` range 1–1000, `after_id`, `data[].id`, `has_more` and `last_id`. Implementation at `chat.rs:412-429,532-551` follows forward pagination and sends `x-api-key` plus `anthropic-version: 2023-06-01`. The newer documentation's default API version does not require changing this explicitly versioned existing client. No unsupported 1000-item-limit defect found.
+- **URL/auth containment:** `get_models` calls `provider::endpoint` before adding queries (`chat.rs:441-457`); that helper validates both base and derived endpoint (`src-tauri/src/ai/provider.rs:155-172`). Only fixed pagination parameter names and encoded values enter `query_pairs_mut().append_pair`. A token containing URL delimiters cannot change scheme/authority/path or inject another parameter. Keys enter headers only, never the new query. Redirect rejection, HTTP proxy/localhost policy, 2 MiB response cap and fixed/redacted transport/HTTP errors remain in place (`chat.rs:460-467`, `src-tauri/src/ai/transport.rs`). No new key/URL/body logging found. Pagination remains bounded to ten pages, 500 unique trimmed IDs and 256 bytes per ID; the 15-second timeout is per HTTP page, not a 15-second whole-discovery deadline.
+- **Cancellation:** the existing command wraps the entire paginated future in `run_cancellable` (`src-tauri/src/commands/ai.rs:113-125`), so cancellation drops subsequent paging as well. Existing eight cancellation-registry tests pass. New Rust tests cover parsing/filtering/cursors and merge limits, but do not exercise actual multi-page Gemini/Anthropic request construction and headers against a mock HTTP server. No live API behavior claimed.
+
+### UI/state compatibility
+
+- **Dirty/key state:** `keyChange` prioritizes a typed replacement, then explicit removal, otherwise keep (`AiAssistantSettingsDialog.tsx:422-426`); `dirty` includes `removeKey` and typed keys (`:635-640`). Remove therefore asks before departure; Undo restores a clean baseline. Replacement Cancel clears the typed key/show state and restores keep without falsely leaving a key-only draft dirty. Independent controls verify removal prompts and Cancel permits clean navigation. Empty Replace mode alone correctly carries no persisted change. Persistence fieldset, combobox busy protection, Save discovery invalidation and rollback baseline remain intact. The stale discovery exception is finding 1.
+- **Shared Input:** `src/components/common/Input.tsx:42-43,108-110,120-122` calls `useId` unconditionally, preserves explicit `id`, and sets matching `label.for` and input `id` after the spread. Repository-wide Input call-site scan found only the API-key control passing an explicit ID; no newly duplicated explicit ID found in ordinary single-dialog usage. Independent controls verify distinct generated IDs, preserved explicit ID and native `HTMLLabelElement.control` association. No change to existing change/focus/blur handlers. Existing externally rendered unassociated labels are not repaired by this patch. Actual browser label-click focus was not verified under jsdom.
+- **Accessibility:** switches expose labels and checked state through `role=switch`/`aria-label`/`aria-checked`; native buttons retain keyboard activation and fieldset disabling. Native labelled radios share a group name inside a named radiogroup. Advanced has `aria-expanded` and removes collapsed controls from the DOM; custom addresses open it automatically. Sidebar exposes textual On/Off/Not set up state to assistive technology. The generalized question bar has an accessible name and focuses safe Cancel/Keep editing. Existing absence of a focus trap/local Tab containment and fallback when an invoker disappears remains a previously documented limitation, not a new batch finding. Generalizing Delete retains confirmation before provider/key or legacy-file deletion. Actual screen-reader, Tab/Return and native rendering remain unverified.
+- **Existing behavior:** local auto-discovery remains suggestions-only; local host/subpath blur still reloads models and Ollama metadata. Default-model radio calls the existing default transition, including Ollama status invalidation. Reload is now available for every kind while the fallback OpenAI-compatible parser/bearer path remains unchanged. No additional regression established in save/delete selection, model removal or Ollama context handling.
+
+### Independent verification
+
+- `npm run build`: **passed**; existing externalization/mixed-import/chunk-size warnings. Log: `/private/tmp/ai-batch23-build.log`.
+- `npx vitest run`: **191 files / 1,418 tests passed**. Log: `/private/tmp/ai-batch23-vitest.log`.
+- `cargo test` from `src-tauri`: **421 passed / 47 failed / 20 ignored**. Forty-five failure bodies report loopback `Operation not permitted`; two native-model assertions fail downstream of unavailable listeners. New Gemini/Anthropic parser and merge tests plus all eight cancellation tests pass. Full Rust suite is not green in this sandbox. Log: `/private/tmp/ai-batch23-cargo.log`.
+- External `/private/tmp/ai-batch23-review/review.test.tsx`: **52 passed** (48 copied current dialog tests plus four independent probes: two key-discovery defect reproductions, dirty/Cancel control and Input ID/label control). I/O and Button are mocked as in the repository suite; Dialog/Input/combobox are real. Temporary harness configuration initially needed globals and external dependency resolution fixed; final run passes. Log: `/private/tmp/ai-batch23-harness.log`.
+- `npm run dev`: **blocked**, `listen EPERM ::1:1420`. No browser/native visual inspection, App Store launch, real keychain/provider request or live destructive deletion. Log: `/private/tmp/ai-batch23-dev.log`.
+- `git diff --check`: **passed** before report append. Ignored launch configuration untouched.
+
+Resolve the two P2 findings and request independent re-review. Earlier committed batch-1 verdict remains unchanged.
+
+## Re-review: AI Provider Settings batches 2–3 remediation — 2026-10-23
+
+**Verdict: VERIFIED WITH LIMITATIONS.** Reviewer: Codex. Branch: `fix/ai-provider-error-code`. Read `AGENTS.md`, `.agent/WORKFLOW.md`, referenced RTK guidance and the preceding batches 2–3 review. Scope: complete current `git diff HEAD` plus untracked-file inventory; `.claude/launch.json` excluded (only untracked file). Only this section appended in the repository; application source/tests untouched, no staging or commits. External harness uses synthetic credentials and mocked I/O; no secrets printed.
+
+### Findings
+
+- **P1:** none established.
+- **P2:** none established. Both preceding P2 findings resolved in the reviewed/tested paths.
+- **P3:** no new actionable regression established.
+
+### Fix verification and regression checks
+
+- **Dropped-key discovery — RESOLVED.** `src/components/ai-assistant/AiAssistantSettingsDialog.tsx:367-373` centralizes discovery generation invalidation, cancellation, suggestion/hint clearing and Test/result invalidation. Key typing (`:953-954`), replacement Cancel (`:978-982`), Remove (`:1017`) and Undo (`:1030`) all use it. Existing generation checks at `:469,483,494` suppress obsolete success, error and finalization. Independent deferred probes cover all four transitions with both success and rejection: exact old request ID is cancelled; old completion cannot offer its model, overwrite the newer Loading status, or enable Reload while a newer request remains pending. Fresh completion remains selectable; selected/default model survives.
+- **Completed suggestions on key keystrokes — no regression established.** Clearing discovered suggestions on every input event is intentional credential scoping; it does not clear `draft.models`, `draft.defaultModel`, or static suggestions (`:389-392`). Independent probe discovers with saved credentials, types a replacement, reloads with that replacement, then types another character: each old discovered list disappears while selected/default `qwen` remains. Reload still supplies fresh suggestions. Whitespace-only/equivalent edits may conservatively clear suggestions too; this is recoverable with Reload and does not change persisted selections.
+- **Replace mode without auth change — preserved.** `AiAssistantSettingsDialog.tsx:1003-1006` changes presentation and clears prior action status without invalidating discovery; `keyChange` at `:441-444` continues to return keep until a nonblank replacement exists. Independent pending saved-key request survives entering Replace and supplies its models. Merely entering Replace does not dirty the persisted form (`:646-652`). Cancel conservatively clears discovery even if no text was entered; no lost selected model or stuck loading state established.
+- **Keyless local providers — preserved.** Key UI remains gated by capability (`:917`), and `keyChange` returns keep for no-key providers (`:442`). Local automatic discovery (`:302-310`) and explicit Reload (`:1039-1049`) remain usable. Independent keyless Ollama probe verifies automatic suggestions, absence of key/link controls and keep-auth explicit Reload. Host/subpath change invalidation and URL-blur discovery remain unchanged (`:377-385,502-506`).
+- **App Store key link — RESOLVED.** `src/lib/distribution/index.ts:24-28,48,58` declares `providerKeyLinks`, false for appstore and true for direct. `AiAssistantSettingsDialog.tsx:718-720,926-942` gates the action and renders provider-account guidance when unavailable. Repository tests cover both flavor mappings and both rendered branches; direct still calls the existing opener. Backend allowlist and frontend no-fallback rejection remain unchanged (`src-tauri/src/distribution.rs:38-44,69-95`, `src/lib/tauri/license.ts:196-198`). No policy bypass introduced. Consumer/type search found no additional full `DistributionFeatures` object requiring the new field; existing narrow `Pick` consumers remain valid. Build and full tests pass.
+
+### Whole-diff pass
+
+Re-reviewed all application/test changes: Gemini/Anthropic paging/parsing and bounded merge in `src-tauri/src/ai/chat.rs:381-552,832-893`; shared Input generated/explicit label IDs in `src/components/common/Input.tsx:42-43,108-110,120-122`; friendly key/keychain/model-list errors in `src/lib/ai-assistant/providerErrors.ts:105-120`; provider key-page mapping in `src/lib/ai-assistant/providers.ts:94-103`; Settings sidebar, key state, generalized confirmation, radios, Advanced, dirty baseline, save/rollback/delete and discovery/Test interaction; distribution feature/tests and dialog regressions. No additional actionable correctness/security regression or new secret logging path established. Discovery still changes suggestions only; destructive confirmations and persistence locking remain intact. Provider API contracts were assessed in the preceding review; no fresh API-documentation lookup or live endpoint/model-availability validation performed in this re-review.
+
+### Independent verification
+
+- `npm run build`: **passed**; externalization, mixed-import, chunk-size and plugin-timing warnings. Log: `/private/tmp/ai-batch23-rereview-build.log`.
+- `npx vitest run`: **191 files / 1,420 tests passed**. Log: `/private/tmp/ai-batch23-rereview-vitest.log`.
+- `cargo test` from `src-tauri`: **421 passed / 47 failed / 20 ignored**. Same totals as preceding review: 45 failure bodies report `Operation not permitted` during listener setup; two native-model assertions fail downstream of unavailable listeners (IPv4 loopback must bind / missing captured response). Changed parser/merge tests pass. Full Rust suite remains unverified under this sandbox. Log: `/private/tmp/ai-batch23-rereview-cargo.log`.
+- Original `/private/tmp/ai-batch23-review/review.test.tsx` rerun unchanged: **50 passed / 2 failed**. Both historical defect assertions expect cancellation not to occur; both now fail because the old request is cancelled, consistent with remediation. Original harness preserved. Log: `/private/tmp/ai-batch23-rereview-original.log`.
+- External `remediation.test.tsx` / `remediation.config.mjs`: **60 passed** (50 copied current dialog tests plus 10 independent probes: eight stale success/error/newer-loading cases, completed suggestions/Replace/typing, and keyless local discovery). Real Dialog/Input/combobox; Button and backend/opener I/O mocked as in repository suite. Initial local probe used `fireEvent.focus`, which did not invoke Preact's focus path in this environment; corrected only the external harness to open suggestions with input. Final run passes. Log: `/private/tmp/ai-batch23-rereview-remediation.log`.
+- `npm run dev`: **blocked**, `listen EPERM ::1:1420`. Log: `/private/tmp/ai-batch23-rereview-dev.log`. No native/browser visual inspection, real Tab/Return/screen-reader session, App Store launch, live provider/keychain request or actual opener invocation. Multi-page HTTP integration remains limited by listener restrictions; existing discovery-unmount and focus-target limitations from preceding reviews remain outside these fixes.
+- `git diff --check`: **passed** before append. Ignored launch configuration untouched.
