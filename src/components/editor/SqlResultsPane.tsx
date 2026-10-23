@@ -29,6 +29,43 @@ import { explainModeFor } from "src/lib/sql/analyzeClassify";
  * UI blocks
  * ============================================================================= */
 
+/**
+ * Parsed plans, so switching between result tabs (or picking a Compare
+ * baseline) does not parse a large plan again. A direct result is keyed by
+ * its (immutable) result object; a stream by its operation id and content
+ * version (any chunk, column or status change bumps it), since a stream
+ * marked done early can still receive rows or columns.
+ */
+const PLAN_CACHE_SIZE = 16;
+const directPlans = new WeakMap<object, Map<string, QueryPlan | null>>();
+const streamPlans = new Map<string, QueryPlan | null>();
+
+function cachedDirectPlan(
+  result: object,
+  variant: string,
+  parse: () => QueryPlan | null
+) {
+  let byVariant = directPlans.get(result);
+  if (!byVariant) directPlans.set(result, (byVariant = new Map()));
+  if (!byVariant.has(variant)) byVariant.set(variant, parse());
+  return byVariant.get(variant)!;
+}
+
+function cachedStreamPlan(key: string, parse: () => QueryPlan | null) {
+  if (streamPlans.has(key)) {
+    const plan = streamPlans.get(key)!;
+    streamPlans.delete(key);
+    streamPlans.set(key, plan); // most recently used last
+    return plan;
+  }
+  const plan = parse();
+  streamPlans.set(key, plan);
+  if (streamPlans.size > PLAN_CACHE_SIZE) {
+    streamPlans.delete(streamPlans.keys().next().value!);
+  }
+  return plan;
+}
+
 function EmptyResults() {
   return (
     <div class="p-6 text-center">
@@ -419,6 +456,7 @@ export function SqlResultsPane(props: {
     columns: streamColumns,
     getRowAt,
     totalRows: streamRowCount,
+    rowsVersion: streamVersion,
   } = stream;
   // Explain runs, and statements the user ran as EXPLAIN themselves (for
   // example with ANALYZE), open in the analyzer when they return a plan.
@@ -430,25 +468,28 @@ export function SqlResultsPane(props: {
         : null;
   const plan = useMemo(() => {
     if (!explainKind || !hasPro) return null;
-    if (!props.engine || !slot || slot.status === "error") return null;
+    const engine = props.engine;
+    if (!engine || !slot || slot.status === "error") return null;
     // A typed EXPLAIN must return a real plan; never guess from a plain grid.
     const fallback = explainKind === "run";
+    const variant = `${engine}:${explainKind}`;
     if (slot.mode === "direct" && slot.status === "done" && slot.result) {
-      return planFromResult(
-        props.engine,
-        slot.result.columns,
-        slot.result.rows,
-        { fallback }
+      const result = slot.result;
+      return cachedDirectPlan(result, variant, () =>
+        planFromResult(engine, result.columns, result.rows, { fallback })
       );
     }
-    if (slot.mode === "stream" && streamStatus === "done") {
-      const rows: unknown[][] = [];
-      const limit = Math.min(streamRowCount, MAX_PLAN_NODES);
-      for (let i = 0; i < limit; i++) {
-        const row = getRowAt(i);
-        if (row) rows.push(row);
-      }
-      return planFromResult(props.engine, streamColumns, rows, { fallback });
+    if (slot.mode === "stream" && slot.opId && streamStatus === "done") {
+      const key = `${slot.opId}:${streamVersion}:${streamRowCount}:${variant}`;
+      return cachedStreamPlan(key, () => {
+        const rows: unknown[][] = [];
+        const limit = Math.min(streamRowCount, MAX_PLAN_NODES);
+        for (let i = 0; i < limit; i++) {
+          const row = getRowAt(i);
+          if (row) rows.push(row);
+        }
+        return planFromResult(engine, streamColumns, rows, { fallback });
+      });
     }
     return null;
   }, [
@@ -459,6 +500,7 @@ export function SqlResultsPane(props: {
     streamStatus,
     streamColumns,
     streamRowCount,
+    streamVersion,
     getRowAt,
   ]);
 
@@ -480,25 +522,32 @@ export function SqlResultsPane(props: {
               : null;
         if (!kind || candidate.status !== "done") continue;
         const fallback = kind === "run";
+        const variant = `${engine}:${kind}`;
         let load: (() => QueryPlan | null) | null = null;
         if (candidate.result) {
           const result = candidate.result;
           load = () =>
-            planFromResult(engine, result.columns, result.rows, { fallback });
+            cachedDirectPlan(result, variant, () =>
+              planFromResult(engine, result.columns, result.rows, { fallback })
+            );
         } else if (candidate.mode === "stream" && candidate.opId) {
           // Rows stay in the stream registry; read a bounded copy on demand.
           const opId = candidate.opId;
           load = () => {
             const snapshot = getSqlStreamSnapshot(opId);
+            // Only a finished stream is cached.
             if (snapshot.status !== "done") return null;
-            const rows: unknown[][] = [];
-            const limit = Math.min(snapshot.totalRows, MAX_PLAN_NODES);
-            for (let i = 0; i < limit; i++) {
-              const row = snapshot.getRowAt(i);
-              if (row) rows.push(row);
-            }
-            return planFromResult(engine, snapshot.columns, rows, {
-              fallback,
+            const key = `${opId}:${snapshot.rowsVersion}:${snapshot.totalRows}:${variant}`;
+            return cachedStreamPlan(key, () => {
+              const rows: unknown[][] = [];
+              const limit = Math.min(snapshot.totalRows, MAX_PLAN_NODES);
+              for (let i = 0; i < limit; i++) {
+                const row = snapshot.getRowAt(i);
+                if (row) rows.push(row);
+              }
+              return planFromResult(engine, snapshot.columns, rows, {
+                fallback,
+              });
             });
           };
         }

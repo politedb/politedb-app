@@ -312,10 +312,11 @@ describe("PostgreSQL query plans", () => {
   });
   it("reports selective scans, spills and estimate mismatch", () => {
     const findings = analyzeQueryPlan(parseQueryPlan(queryPlanFixture)!);
-    expect(findings.map((f) => f.title)).toEqual([
-      "Sort spilled to disk",
-      "Selective filter after sequential scan",
-      "Row estimate differs by at least 10x",
+    // Most severe first, plan order within a severity.
+    expect(findings.map((f) => [f.severity, f.title])).toEqual([
+      ["high", "Selective filter after sequential scan"],
+      ["medium", "Sort spilled to disk"],
+      ["medium", "Row estimate differs by at least 10x"],
     ]);
   });
   it("avoids estimate findings beneath LIMIT and parallel gathers", () => {

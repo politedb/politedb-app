@@ -486,3 +486,41 @@ describe("Query Analyzer", () => {
     expect(screen.getByRole("tab", { name: "Plan" })).toHaveFocus();
   });
 });
+
+describe("Recommendations and JSON view", () => {
+  it("shows severity, most severe first, and a copy-only index", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mount();
+    fireEvent.click(screen.getByRole("tab", { name: /Recommendations/ }));
+    const sections = screen.getAllByRole("heading", { level: 3 });
+    expect(sections[0]).toHaveTextContent(
+      "HighSelective filter after sequential scan"
+    );
+    const copy = screen.getByRole("button", {
+      name: /^Copy suggested SQL for node \d+$/,
+    });
+    fireEvent.click(copy);
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        expect.stringMatching(/^CREATE INDEX CONCURRENTLY ON .*"orders" \(/)
+      )
+    );
+    expect(
+      await screen.findByText("Copied", { selector: '[role="status"]' })
+    ).toBeInTheDocument();
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+
+  it("shows only the start of a very large plan document", () => {
+    const fixture = structuredClone(queryPlanFixture);
+    (fixture[0] as Record<string, unknown>).Padding = "x".repeat(300_000);
+    render(<QueryAnalyzer plan={parseQueryPlan(fixture)!} />);
+    fireEvent.click(screen.getByRole("tab", { name: "JSON" }));
+    expect(
+      screen.getByText(/Showing the first 200,000 characters/)
+    ).toBeInTheDocument();
+    const pre = document.querySelector("pre")!;
+    expect(pre.textContent!.length).toBeLessThan(200_100);
+  });
+});

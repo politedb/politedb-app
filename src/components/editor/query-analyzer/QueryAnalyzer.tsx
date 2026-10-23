@@ -12,7 +12,10 @@ import {
 import { useProGate } from "src/hooks/useProGate";
 import { saveDialog, confirmDialog } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
-import { analyzeQueryPlan } from "src/lib/query-analyzer/findings";
+import {
+  analyzeQueryPlan,
+  type FindingSeverity,
+} from "src/lib/query-analyzer/findings";
 import { queryPlanReport } from "src/lib/query-analyzer/report";
 import {
   formatPlanNumber,
@@ -42,6 +45,59 @@ type View = (typeof views)[number];
 
 function pageOf(index: number) {
   return Math.floor(Math.max(0, index) / PLAN_PAGE_SIZE);
+}
+
+/** A plan can be 5 MB; laying all of it out in one <pre> stalls the view. */
+const JSON_PREVIEW_CHARS = 200_000;
+
+const SEVERITY_LABEL: Record<FindingSeverity, string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
+};
+
+const SEVERITY_CHIP: Record<FindingSeverity, string> = {
+  high: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200",
+  medium: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  low: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
+};
+
+/** A suggested statement to copy; the analyzer never runs it. */
+function SuggestedSql(props: { sql: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div class="mt-2 flex items-start gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 dark:border-neutral-700 dark:bg-neutral-900">
+      <code class="min-w-0 flex-1 font-mono text-xs [overflow-wrap:anywhere] text-neutral-800 dark:text-neutral-200">
+        {props.sql}
+      </code>
+      <Button
+        type="button"
+        variant="ghost"
+        className="h-6 shrink-0 gap-1 px-1.5 text-xs"
+        title="Copy only; review it before running it yourself"
+        aria-label={props.label}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(props.sql);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1000);
+          } catch {
+            // Clipboard can be unavailable.
+          }
+        }}
+      >
+        {copied ? (
+          <CopyCheckIcon className="size-3.5 text-green-700" />
+        ) : (
+          <CopyIcon className="size-3.5" />
+        )}
+        {copied ? "Copied" : "Copy"}
+      </Button>
+      <span class="sr-only" role="status">
+        {copied ? "Copied" : ""}
+      </span>
+    </div>
+  );
 }
 
 /** Below this many nodes the filter box is noise. */
@@ -80,8 +136,16 @@ function JsonView(props: { plan: QueryPlan }) {
           {copied ? "Copied" : "Copy JSON"}
         </Button>
       </div>
+      {text.length > JSON_PREVIEW_CHARS ? (
+        <p class="text-xs text-neutral-500">
+          Showing the first {formatPlanNumber(JSON_PREVIEW_CHARS)} characters.
+          Copy JSON or export the plan for all of it.
+        </p>
+      ) : null}
       <pre class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 font-mono text-xs [overflow-wrap:anywhere] whitespace-pre-wrap dark:border-neutral-700 dark:bg-neutral-900">
-        {text}
+        {text.length > JSON_PREVIEW_CHARS
+          ? `${text.slice(0, JSON_PREVIEW_CHARS)}\n…`
+          : text}
       </pre>
     </div>
   );
@@ -483,10 +547,26 @@ export function QueryAnalyzer(props: {
                     key={`${finding.nodeId}:${index}`}
                     class="rounded-lg border border-neutral-200 p-3 dark:border-neutral-700"
                   >
-                    <h3 class="font-semibold">{finding.title}</h3>
+                    <h3 class="flex items-center gap-2 font-semibold">
+                      <span
+                        class={cn(
+                          "shrink-0 rounded px-1.5 text-xs font-medium",
+                          SEVERITY_CHIP[finding.severity]
+                        )}
+                      >
+                        {SEVERITY_LABEL[finding.severity]}
+                      </span>
+                      {finding.title}
+                    </h3>
                     <p class="mt-1 text-neutral-600 dark:text-neutral-300">
                       {finding.detail}
                     </p>
+                    {finding.sql ? (
+                      <SuggestedSql
+                        sql={finding.sql}
+                        label={`Copy suggested SQL for node ${finding.nodeId + 1}`}
+                      />
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => revealInPlan(finding.nodeId)}

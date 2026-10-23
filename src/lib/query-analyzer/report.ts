@@ -15,9 +15,10 @@ export function queryPlanReport(plan: QueryPlan): string {
     "",
     "## Review findings",
     "",
-    ...analyzeQueryPlan(plan).map(
-      (f) => `- Node ${f.nodeId + 1}: ${f.title}. ${f.detail}`
-    ),
+    ...analyzeQueryPlan(plan).flatMap((f) => [
+      `- [${f.severity}] Node ${f.nodeId + 1}: ${f.title}. ${f.detail}`,
+      ...(f.sql ? [`  Suggested (review first): \`${f.sql}\``] : []),
+    ]),
     "",
     "Heuristic findings are not proof of a performance problem. Costs are planner units, not milliseconds. Parent metrics include children; do not sum them. Node actual rows and times are per-loop averages. Parallel worker times overlap.",
     "",
