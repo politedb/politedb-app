@@ -1,6 +1,10 @@
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 import { PlayIcon, XIcon } from "src/components/icons";
+import { formatShortcutLabel } from "src/stores/keyboardShortcuts";
+
+const RUN_SHORTCUT = formatShortcutLabel("Mod+Enter");
+const RUN_ALL_SHORTCUT = formatShortcutLabel("Mod+Shift+Enter");
 
 type Props = {
   onExport?: () => void;
@@ -15,6 +19,8 @@ type Props = {
   onExplainAnalyze?: () => void;
 
   onRun: () => void;
+  /** Runs every statement in the editor. */
+  onRunAll?: () => void;
   onCancel?: () => void;
   isExecuting: boolean;
   hasSelection: boolean;
@@ -28,6 +34,7 @@ export function SqlEditorToolbar(props: Props) {
     onExplain,
     onExplainAnalyze,
     onRun,
+    onRunAll,
     onCancel,
     isExecuting,
     hasSelection,
@@ -50,9 +57,10 @@ export function SqlEditorToolbar(props: Props) {
           variant="ghost"
           onClick={onExport}
           disabled={!onExport}
+          title="Save the editor's SQL to a .sql file"
           class={toolBtn}
         >
-          Export
+          Save as…
         </Button>
 
         <Button
@@ -96,7 +104,17 @@ export function SqlEditorToolbar(props: Props) {
       </div>
 
       {/* Right: Run */}
-      <div class="ml-auto flex items-center">
+      <div class="ml-auto flex items-center gap-1">
+        {onRunAll && !isExecuting ? (
+          <Button
+            variant="ghost"
+            onClick={onRunAll}
+            title={`Run every statement in the editor (${RUN_ALL_SHORTCUT})`}
+            class={toolBtn}
+          >
+            Run All
+          </Button>
+        ) : null}
         <Button
           variant={canCancel ? "primary" : "default"}
           onClick={canCancel ? onCancel : onRun}
@@ -105,8 +123,8 @@ export function SqlEditorToolbar(props: Props) {
             canCancel
               ? "Cancel"
               : hasSelection
-                ? "Run Selected (⌘⏎)"
-                : "Run Current (⌘⏎)"
+                ? `Run the selected SQL (${RUN_SHORTCUT})`
+                : `Run the statement at the cursor (${RUN_SHORTCUT})`
           }
           class={cn("py-1.5 disabled:opacity-60")}
         >
@@ -124,7 +142,9 @@ export function SqlEditorToolbar(props: Props) {
                   ? "Run Selected"
                   : "Run Current"}
           </span>
-          <span class="ml-1 text-[10px] text-white/70">⌘⏎</span>
+          {canCancel ? null : (
+            <span class="ml-1 text-[10px] text-white/70">{RUN_SHORTCUT}</span>
+          )}
         </Button>
       </div>
     </div>

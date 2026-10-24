@@ -1,7 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
-import { TableFooter } from "src/components/table/TableFooter";
+import { SqlResultSummary } from "./SqlResultSummary";
 import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import {
   getSqlStreamSnapshot,
@@ -575,16 +575,35 @@ export function SqlResultsPane(props: {
     );
   }
 
-  const footerTotalRows =
-    slot.mode === "direct" && slot.status === "done" && slot.result
-      ? slot.result.rows.length
-      : slot.mode === "stream" && stream
-        ? stream.totalRows
-        : 0;
-
-  const footerLoadedMax = footerTotalRows > 0 ? footerTotalRows - 1 : -1;
-  const footerLimit = Math.max(footerTotalRows, 50);
-  const footerOffset = 0;
+  const slotElapsed =
+    slot.startedAt !== undefined && slot.finishedAt !== undefined
+      ? slot.finishedAt - slot.startedAt
+      : undefined;
+  // What a finished statement returned, for the summary line.
+  const summary =
+    slot.status === "error"
+      ? null
+      : slot.mode === "direct" && slot.status === "done" && slot.result
+        ? {
+            columns: slot.result.columns,
+            rowCount: slot.result.rows.length,
+            getRow: (index: number) => slot.result!.rows[index],
+            elapsedMs: slotElapsed,
+          }
+        : slot.mode === "stream" &&
+            slot.status === "done" &&
+            stream.status === "done"
+          ? {
+              columns: stream.columns,
+              rowCount: stream.totalRows,
+              getRow: stream.getRowAt,
+              truncated: stream.truncated,
+              // The backend's own timing; the statement's start/finish if absent.
+              elapsedMs: Number.isFinite(stream.elapsedMs)
+                ? stream.elapsedMs
+                : slotElapsed,
+            }
+          : null;
 
   const isDirectTable =
     slot.mode === "direct" && slot.status === "done" && !!slot.result;
@@ -671,30 +690,7 @@ export function SqlResultsPane(props: {
         </OverlayScrollArea>
       )}
 
-      {!plan && (
-        <TableFooter
-          className="justify-center"
-          viewMode="data"
-          onViewModeChange={() => {}}
-          structPaneTab="columns"
-          filterBarVisible={false}
-          limit={footerLimit}
-          offset={footerOffset}
-          loadedMax={footerLoadedMax}
-          totalRows={footerTotalRows}
-          rowCountIsEstimated={false}
-          onCountExact={undefined}
-          onPageChange={() => {}}
-          onAddRow={() => {}}
-          onAddColumn={() => {}}
-          onAddIndex={() => {}}
-          onFilters={() => {}}
-          readOnly
-          showViewToggle={false}
-          showActions={false}
-          showFiltersAndPaging={false}
-        />
-      )}
+      {!plan && summary ? <SqlResultSummary {...summary} /> : null}
     </div>
   );
 }

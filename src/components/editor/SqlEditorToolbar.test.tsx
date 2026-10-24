@@ -42,3 +42,24 @@ describe("SqlEditorToolbar Explain", () => {
     expect(screen.getByRole("button", { name: "Explain" })).toBeDisabled();
   });
 });
+
+describe("SqlEditorToolbar run buttons", () => {
+  it("offers Run All next to Run, but not while a statement runs", () => {
+    const onRunAll = vi.fn();
+    const view = render(<SqlEditorToolbar {...base} onRunAll={onRunAll} />);
+    fireEvent.click(screen.getByRole("button", { name: "Run All" }));
+    expect(onRunAll).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Run Current/ }).title).toMatch(
+      /Enter/
+    );
+    view.rerender(
+      <SqlEditorToolbar {...base} onRunAll={onRunAll} isExecuting />
+    );
+    expect(screen.queryByRole("button", { name: "Run All" })).toBeNull();
+  });
+
+  it("names the file action Save as", () => {
+    render(<SqlEditorToolbar {...base} onExport={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Save as…" })).toBeTruthy();
+  });
+});

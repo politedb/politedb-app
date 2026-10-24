@@ -28,8 +28,13 @@ vi.mock("src/components/table/TableData", () => ({
     return <div>Raw result table</div>;
   },
 }));
-vi.mock("src/components/table/TableFooter", () => ({
-  TableFooter: () => <div>Table footer</div>,
+vi.mock("src/components/common/Popover", () => ({
+  Popover: ({ children, content, open }: any) => (
+    <div>
+      {children}
+      {open ? content : null}
+    </div>
+  ),
 }));
 vi.mock("src/components/common/OverlayScrollArea", () => ({
   OverlayScrollArea: ({ children }: { children: preact.ComponentChildren }) => (
@@ -83,7 +88,8 @@ describe("SQL plan result integration", () => {
   it("renders direct plans and preserves normal results and unsupported engines", () => {
     const view = render(<SqlResultsPane {...base} runs={[run()]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
-    expect(screen.queryByText("Table footer")).toBeNull();
+    // The analyzer replaces the result summary line.
+    expect(screen.queryByText(/^1 row/)).toBeNull();
     view.rerender(<SqlResultsPane {...base} engine="mysql" runs={[run()]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     const mysql = run();
@@ -293,7 +299,7 @@ describe("SQL plan results without Pro", () => {
     render(<SqlResultsPane {...base} runs={[run()]} />);
     expect(screen.queryByText("Query Analyzer")).toBeNull();
     expect(screen.getByText("Raw result table")).toBeInTheDocument();
-    expect(screen.getByText("Table footer")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("1 row");
     expect(screen.getByText(BANNER)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Upgrade" }));
     expect(useProUpgradeStore.getState().feature).toBe("query-analyzer");
@@ -488,5 +494,107 @@ describe("SQL result grids", () => {
     expect(state.tableProps[state.tableProps.length - 1]).toMatchObject({
       readOnly: true,
     });
+  });
+});
+
+describe("SQL result summary", () => {
+  function queryRun(
+    slot: Partial<SqlResultRun["slots"][number]>
+  ): SqlResultRun {
+    return {
+      id: "a",
+      kind: "query",
+      title: "Query",
+      sql: "x",
+      createdAt: 1,
+      slots: [{ index: 0, sql: "x", status: "done", ...slot } as any],
+    };
+  }
+
+  it("says a statement that returns no rows completed, with its time", () => {
+    render(
+      <SqlResultsPane
+        {...base}
+        runs={[
+          queryRun({
+            mode: "direct",
+            startedAt: 1000,
+            finishedAt: 1035,
+            result: { columns: [], rows: [], rowCount: 0 },
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Statement completed · 35 ms"
+    );
+  });
+
+  it("says when a streamed result stopped at the row limit", () => {
+    state.streams.big = {
+      status: "done",
+      ended: true,
+      truncated: true,
+      elapsedMs: 1500,
+      columns: [{ name: "id", db_type: "int" }],
+      totalRows: 50000,
+      rowsVersion: 1,
+      getRowAt: (i: number) => [i],
+    };
+    render(
+      <SqlResultsPane
+        {...base}
+        runs={[queryRun({ mode: "stream", opId: "big" })]}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "50,000 rows (stopped at the row limit"
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1.5 s");
+  });
+
+  it("uses the statement's own timing when the backend sent none", () => {
+    state.streams.plain = {
+      status: "done",
+      ended: true,
+      columns: [{ name: "id", db_type: "int" }],
+      totalRows: 1,
+      rowsVersion: 1,
+      getRowAt: () => [1],
+    };
+    render(
+      <SqlResultsPane
+        {...base}
+        runs={[
+          queryRun({
+            mode: "stream",
+            opId: "plain",
+            startedAt: 1000,
+            finishedAt: 1035,
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("1 row · 35 ms");
+  });
+
+  it("shows Running, not No result, while an empty stream's statement runs", () => {
+    state.streams.slow = {
+      status: "done",
+      ended: false,
+      columns: [],
+      totalRows: 0,
+      rowsVersion: 0,
+      getRowAt: () => undefined,
+    };
+    render(
+      <SqlResultsPane
+        {...base}
+        runs={[queryRun({ mode: "stream", opId: "slow", status: "running" })]}
+      />
+    );
+    expect(screen.getByText("Running...")).toBeTruthy();
+    expect(screen.queryByText("No result.")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

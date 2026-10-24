@@ -19,7 +19,7 @@ import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
 import { SqlEditorToolbar } from "./SqlEditorToolbar";
 import { ensureSqlTheme, setSqlTheme } from "./registerSqlTheme";
 import { formatSql, minifySql } from "src/lib/sql/sqlFormatter";
-import { saveDialog } from "src/lib/system-dialog";
+import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import {
   matchesShortcut,
@@ -455,25 +455,35 @@ export function SqlEditorPane(props: Props) {
     await flushDraft();
   };
 
-  const onRun = useCallback(async () => {
-    const ed = editorRef.current;
-    if (!ed || !callbacksRef.current.onRunSql) return;
+  const onRun = useCallback(
+    async (all = false) => {
+      const ed = editorRef.current;
+      if (!ed || !callbacksRef.current.onRunSql) return;
 
-    const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
-    if (!picked.sql) return;
-    applyRunHighlight(picked.range);
+      const model = ed.getModel();
+      const picked =
+        all && model
+          ? {
+              sql: model.getValue().trim(),
+              range: model.getFullModelRange(),
+            }
+          : getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
+      if (!picked.sql) return;
+      applyRunHighlight(picked.range);
 
-    setIsLocalExecuting(true);
-    try {
-      await flushDraft();
-      await callbacksRef.current.onRunSql({
-        windowId: win.id,
-        sql: picked.sql,
-      });
-    } finally {
-      queueMicrotask(() => setIsLocalExecuting(false));
-    }
-  }, [applyRunHighlight, flushDraft, win.id]);
+      setIsLocalExecuting(true);
+      try {
+        await flushDraft();
+        await callbacksRef.current.onRunSql({
+          windowId: win.id,
+          sql: picked.sql,
+        });
+      } finally {
+        queueMicrotask(() => setIsLocalExecuting(false));
+      }
+    },
+    [applyRunHighlight, flushDraft, win.id]
+  );
 
   const explainWith = async (
     handler: "onExplainSql" | "onExplainAnalyzeSql"
@@ -514,23 +524,26 @@ export function SqlEditorPane(props: Props) {
   };
 
   const onExportClick = async () => {
-    // Always flush draft first so export matches latest editor content
-    const full = await flushDraft();
-
-    const path = await saveDialog({
-      title: "Export SQL…",
-      defaultPath: defaultSqlFilename(win),
-      filters: [{ name: "SQL", extensions: ["sql"] }],
-    });
-
-    if (!path) return;
-
-    const header = buildExportHeader({ engine, includeUrl: true });
-
+    // One boundary for the draft flush, the dialog and the write.
     try {
+      // Always flush draft first so the file matches the latest editor content
+      const full = await flushDraft();
+
+      const path = await saveDialog({
+        title: "Export SQL…",
+        defaultPath: defaultSqlFilename(win),
+        filters: [{ name: "SQL", extensions: ["sql"] }],
+      });
+
+      if (!path) return;
+
+      const header = buildExportHeader({ engine, includeUrl: true });
       await writeTextFile(path, header + full);
-    } catch (error) {
-      console.error("Failed to export SQL file:", error);
+    } catch {
+      await showMessage(
+        "The SQL file could not be saved. Check that the folder is writable, then try again.",
+        { title: "Save failed", kind: "error" }
+      );
     }
   };
 
@@ -647,22 +660,23 @@ export function SqlEditorPane(props: Props) {
 
       editor.addAction({
         id: "run-sql",
-        label: "Run Current",
+        label: "Run Selection or Current Statement",
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
         contextMenuGroupId: "navigation",
         contextMenuOrder: 1,
         run: () => void onRun(),
       });
 
-      if (callbacksRef.current.onRunSql) {
-        editor.addAction({
-          id: "run-sql-selection",
-          label: "Run Selection",
-          contextMenuGroupId: "navigation",
-          contextMenuOrder: 2,
-          run: () => void onRun(),
-        });
-      }
+      editor.addAction({
+        id: "run-sql-all",
+        label: "Run All",
+        keybindings: [
+          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter,
+        ],
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 2,
+        run: () => void onRun(true),
+      });
 
       const changeSub = editor.onDidChangeModelContent(() => {
         if (applyingExternalCounterRef.current > 0) return;
@@ -813,7 +827,8 @@ export function SqlEditorPane(props: Props) {
           onMinify={onMinifySql}
           onExplain={onExplain}
           onExplainAnalyze={onExplainAnalyzeSql ? onExplainAnalyze : undefined}
-          onRun={onRun}
+          onRun={() => void onRun()}
+          onRunAll={() => void onRun(true)}
           onCancel={onCancelSql}
           isExecuting={isExecuting}
           hasSelection={hasSelection}

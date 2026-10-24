@@ -17,6 +17,7 @@ import {
   listVisibleSnippets,
 } from "src/lib/snippets/library";
 import { useSnippetsStore } from "src/stores/snippets";
+import { confirmDialog } from "src/lib/system-dialog";
 import type { SavedSnippet } from "src/lib/snippets/types";
 import {
   formatShortcutLabel,
@@ -129,7 +130,16 @@ export function SnippetPickerDialog({
   const deleteAt = async (index: number) => {
     const row = rows[index];
     if (!row || row.type !== "snippet") return;
-    await removeSnippet(row.snippet.id);
+    const ok = await confirmDialog(
+      `Delete the snippet "${row.snippet.name}"? This cannot be undone.`,
+      {
+        title: "Delete snippet",
+        kind: "warning",
+        okLabel: "Delete",
+        cancelLabel: "Cancel",
+      }
+    );
+    if (ok) await removeSnippet(row.snippet.id);
     inputRef.current?.focus();
   };
 
