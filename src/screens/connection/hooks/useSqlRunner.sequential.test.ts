@@ -360,3 +360,16 @@ describe("useSqlRunner runs ended before the backend answered", () => {
     expect(mocks.cancel).toHaveBeenCalledWith("late-op");
   });
 });
+
+describe("useSqlRunner run identity", () => {
+  it("keeps the editor's source key on the run", async () => {
+    const { hook } = setup();
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "select 1",
+      sourceKey: "draft#7",
+    });
+    await flush();
+    expect(hook.result.current.sqlRuns[0]!.sourceKey).toBe("draft#7");
+  });
+});

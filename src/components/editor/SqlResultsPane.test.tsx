@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "preact/hooks";
 import type { SqlResultRun } from "src/lib/tauri";
 import { queryPlanFixture } from "src/test/fixtures/queryPlan";
 import { SqlResultsPane } from "./SqlResultsPane";
@@ -596,5 +597,129 @@ describe("SQL result summary", () => {
     expect(screen.getByText("Running...")).toBeTruthy();
     expect(screen.queryByText("No result.")).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+});
+
+describe("SQL result errors and tabs", () => {
+  const errorRun = (id: string, title: string): SqlResultRun => ({
+    id,
+    kind: "query",
+    title,
+    sql: "x",
+    createdAt: 1,
+    slots: [
+      {
+        index: 0,
+        sql: "select bad",
+        status: "error",
+        error: 'ERROR: column "bad" does not exist',
+      } as any,
+    ],
+  });
+
+  it("copies the error text", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<SqlResultsPane {...base} runs={[errorRun("a", "Run 1")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy error" }));
+    await act(async () => {});
+    expect(writeText).toHaveBeenCalledWith(
+      'ERROR: column "bad" does not exist'
+    );
+    expect(screen.getByRole("button", { name: "Error copied" })).toBeTruthy();
+  });
+
+  it("moves between run tabs with the arrow keys and closes with Delete", () => {
+    const setActiveRunId = vi.fn();
+    const onCloseRun = vi.fn();
+    render(
+      <SqlResultsPane
+        {...base}
+        activeRunId="a"
+        setActiveRunId={setActiveRunId}
+        onCloseRun={onCloseRun}
+        runs={[errorRun("a", "Run 1"), errorRun("b", "Run 2")]}
+      />
+    );
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(tabs[0]).toHaveAttribute("tabindex", "0");
+    expect(tabs[1]).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(tabs[0]!, { key: "ArrowRight" });
+    expect(setActiveRunId).toHaveBeenLastCalledWith("b");
+    fireEvent.keyDown(tabs[0]!, { key: "ArrowLeft" });
+    expect(setActiveRunId).toHaveBeenLastCalledWith("b");
+    fireEvent.keyDown(tabs[0]!, { key: "Delete" });
+    expect(onCloseRun).toHaveBeenCalledWith("a");
+  });
+
+  it("keeps keyboard focus on the selected tab after closing one", () => {
+    function Host() {
+      const [runs, setRuns] = useState([
+        errorRun("a", "Run 1"),
+        errorRun("b", "Run 2"),
+        errorRun("c", "Run 3"),
+      ]);
+      const [active, setActive] = useState("b");
+      return (
+        <SqlResultsPane
+          {...base}
+          runs={runs}
+          activeRunId={active}
+          setActiveRunId={setActive}
+          onCloseRun={(id) => {
+            const index = runs.findIndex((run) => run.id === id);
+            const rest = runs.filter((run) => run.id !== id);
+            setRuns(rest);
+            if (id === active) {
+              setActive((rest[Math.max(0, index - 1)] ?? rest[0])!.id);
+            }
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    const middle = screen.getByRole("tab", { name: /Run 2/ });
+    middle.focus();
+    act(() => {
+      fireEvent.keyDown(middle, { key: "Delete" });
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("tab", { name: /Run 1/ })
+    );
+
+    act(() => {
+      fireEvent.keyDown(document.activeElement!, { key: "Backspace" });
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("tab", { name: /Run 3/ })
+    );
+  });
+
+  it("focuses the empty results area after closing the last run", () => {
+    function Host() {
+      const [runs, setRuns] = useState([errorRun("a", "Run 1")]);
+      return (
+        <SqlResultsPane
+          {...base}
+          runs={runs}
+          activeRunId={runs[0]?.id ?? null}
+          onCloseRun={(id) => setRuns((all) => all.filter((r) => r.id !== id))}
+        />
+      );
+    }
+    render(<Host />);
+    const tab = screen.getByRole("tab", { name: /Run 1/ });
+    tab.focus();
+    act(() => {
+      fireEvent.keyDown(tab, { key: "Delete" });
+    });
+    const empty = screen.getByText("Run a query to see results here.")
+      .parentElement as HTMLElement;
+    expect(document.activeElement).toBe(empty);
   });
 });

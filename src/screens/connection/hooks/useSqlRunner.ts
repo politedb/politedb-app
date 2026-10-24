@@ -403,6 +403,8 @@ export function useSqlRunner(args: {
       windowId: string;
       kind: SqlResultRun["kind"];
       sourceSql: string;
+      /** The editor's identity for this run's SQL (where it ran). */
+      sourceKey?: string;
       statements: string[];
       /** Explain: the unwrapped statement behind every slot. */
       sourceStatement?: string;
@@ -428,6 +430,7 @@ export function useSqlRunner(args: {
         title: makeRunTitle(args.kind, runIndex),
         createdAt: Date.now(),
         sql: args.sourceSql,
+        ...(args.sourceKey ? { sourceKey: args.sourceKey } : {}),
         connectionId: runtimeConnectionId,
         slots: initialSlots,
       };
@@ -597,7 +600,7 @@ export function useSqlRunner(args: {
   );
 
   const startRun = useCallback(
-    async (payload: { windowId: string; sql: string }) => {
+    async (payload: { windowId: string; sql: string; sourceKey?: string }) => {
       const winId = payload.windowId;
       if (!runtimeConnectionId) return;
 
@@ -696,6 +699,7 @@ export function useSqlRunner(args: {
           windowId: winId,
           kind: "query",
           sourceSql: payload.sql,
+          sourceKey: payload.sourceKey,
           statements: list,
           validateBeforeRun: true,
           sequential: true,
