@@ -489,6 +489,8 @@ export type SqlResultRun = {
   title: string;
   createdAt: number;
   sql: string;
+  /** The editor's identity for where this run's SQL ran (query runs). */
+  sourceKey?: string;
   /** Runtime connection the run used (absent on older or refused runs). */
   connectionId?: string;
   slots: SqlResultSlot[];

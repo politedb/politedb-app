@@ -5,11 +5,13 @@ import { SnippetEditorDialog } from "src/components/modal/SnippetEditorDialog";
 type Props = {
   activeProfileScreen: string;
   connectionProfileId: string | null;
+  onInsertSql?: (sql: string) => void | Promise<void>;
 };
 
 export function ConnectionBottomPanel({
   activeProfileScreen,
   connectionProfileId,
+  onInsertSql,
 }: Props) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [draftSql, setDraftSql] = useState("");
@@ -19,6 +21,7 @@ export function ConnectionBottomPanel({
       <div class="min-h-0 flex-1 overflow-hidden">
         <QueryHistory
           activeProfileId={activeProfileScreen}
+          onInsertSql={onInsertSql}
           onSaveAsSnippet={(sql) => {
             setDraftSql(sql);
             setEditorOpen(true);

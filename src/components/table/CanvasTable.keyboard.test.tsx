@@ -187,3 +187,16 @@ describe("CanvasTable blank double-click", () => {
     expect(grid.props.onAddRow).not.toHaveBeenCalled();
   });
 });
+
+describe("CanvasTable in a read-only grid", () => {
+  it("offers no value menu or edit actions without a commit handler", () => {
+    const { props, root } = renderGrid({
+      onStartEdit: undefined,
+      onCommitEdit: undefined,
+    });
+    fireEvent.keyDown(root, { key: "x" });
+    fireEvent.keyDown(root, { key: "Enter" });
+    expect(props.onSelect).not.toHaveBeenCalled();
+    expect(root.querySelector("input")).toBeNull();
+  });
+});

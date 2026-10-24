@@ -5,7 +5,10 @@ import {
   CopyIcon,
   CopyCheckIcon,
   BookmarkIcon,
+  ArrowRightIcon,
 } from "src/components/icons";
+import { Input } from "src/components/common/Input";
+import { confirmDialog } from "src/lib/system-dialog";
 import { Button } from "src/components/common/Button";
 import { Box } from "src/components/common/Box";
 import { cn } from "src/utils/cn";
@@ -16,6 +19,8 @@ import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 interface Props {
   activeProfileId: string;
   onSaveAsSnippet?: (sql: string) => void;
+  /** Inserts the SQL at the cursor of the active SQL editor (opens one). */
+  onInsertSql?: (sql: string) => void | Promise<void>;
 }
 
 function pad2(n: number) {
@@ -86,20 +91,40 @@ export function highlightSql(sql: string): ComponentChildren {
   return parts;
 }
 
-export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
+export function QueryHistory({
+  activeProfileId,
+  onSaveAsSnippet,
+  onInsertSql,
+}: Props) {
   const queryHistory = useConnectionStore((s) => s.queryHistory);
   const clearHistory = useConnectionStore((s) => s.clearQueryHistory);
   const [copied, setCopied] = useState(false);
+  const [search, setSearch] = useState("");
 
-  const queries = useMemo(
+  const allQueries = useMemo(
     () => queryHistory[activeProfileId] ?? [],
     [queryHistory, activeProfileId]
   );
+  const queries = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return allQueries;
+    return allQueries.filter((q) =>
+      (q.sql ?? "").toLowerCase().includes(needle)
+    );
+  }, [allQueries, search]);
 
-  const onClear = useCallback(
-    () => clearHistory(activeProfileId),
-    [clearHistory, activeProfileId]
-  );
+  const onClear = useCallback(async () => {
+    const ok = await confirmDialog(
+      "Clear the SQL history of this connection? This cannot be undone.",
+      {
+        title: "Clear SQL history",
+        kind: "warning",
+        okLabel: "Clear",
+        cancelLabel: "Cancel",
+      }
+    );
+    if (ok) clearHistory(activeProfileId);
+  }, [clearHistory, activeProfileId]);
 
   const onCopy = useCallback(async (sql: string) => {
     try {
@@ -117,15 +142,31 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
         <div class="flex items-center gap-2">
           <ClockIcon className="size-4 text-neutral-500" />
           <h3 class="text-sm font-semibold text-neutral-800">SQL History</h3>
-          {queries.length > 0 ? (
-            <span class="text-[11px] text-neutral-500">({queries.length})</span>
+          {allQueries.length > 0 ? (
+            <span class="text-[11px] text-neutral-500">
+              ({allQueries.length})
+            </span>
           ) : null}
         </div>
 
-        {queries.length > 0 && (
+        {allQueries.length > 0 && (
+          <Input
+            type="search"
+            value={search}
+            onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearch("");
+            }}
+            placeholder="Search history"
+            aria-label="Search SQL history"
+            className="mx-3 h-7 max-w-64 flex-1 px-2 text-xs"
+          />
+        )}
+
+        {allQueries.length > 0 && (
           <Button
             variant="ghost"
-            onClick={onClear}
+            onClick={() => void onClear()}
             class={cn("h-7 px-2 text-neutral-600", "hover:bg-neutral-100")}
             title="Clear history"
           >
@@ -139,7 +180,11 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
         {queries.length === 0 ? (
           <Box className="text-center">
             <ClockIcon className="mx-auto mb-2 size-8 text-neutral-300" />
-            <p class="text-sm text-neutral-500">No query history</p>
+            <p class="text-sm text-neutral-500">
+              {allQueries.length > 0
+                ? "No query matches the search"
+                : "No query history"}
+            </p>
           </Box>
         ) : (
           <div class="font-mono text-sm leading-5">
@@ -173,7 +218,21 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
                     </div>
                   </div>
 
-                  <div class="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div class="flex shrink-0 gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+                    {onInsertSql ? (
+                      <Button
+                        variant="ghost"
+                        class="h-7 px-1 text-xs text-neutral-600 hover:bg-neutral-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onInsertSql(sqlRaw);
+                        }}
+                        title="Insert into the SQL editor"
+                        aria-label="Insert into the SQL editor"
+                      >
+                        <ArrowRightIcon className="size-4" />
+                      </Button>
+                    ) : null}
                     {onSaveAsSnippet ? (
                       <Button
                         variant="ghost"
@@ -183,6 +242,7 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
                           onSaveAsSnippet(sqlRaw);
                         }}
                         title="Save as snippet"
+                        aria-label="Save as snippet"
                       >
                         <BookmarkIcon className="size-4" />
                       </Button>
@@ -195,6 +255,7 @@ export function QueryHistory({ activeProfileId, onSaveAsSnippet }: Props) {
                         void onCopy(sqlRaw);
                       }}
                       title={copied ? "Copied" : "Copy"}
+                      aria-label={copied ? "Copied" : "Copy"}
                     >
                       {copied ? (
                         <CopyCheckIcon className="size-4" />

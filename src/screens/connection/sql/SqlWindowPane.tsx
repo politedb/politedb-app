@@ -18,6 +18,7 @@ import {
   supportsExplainAnalyze,
 } from "src/lib/sql/analyzeClassify";
 import { useProGate } from "src/hooks/useProGate";
+import { parseSqlErrorPosition } from "src/lib/sql/errorPosition";
 
 const loadSqlEditorPane = () =>
   import("src/components/editor/SqlEditorPane").then((module) => ({
@@ -115,6 +116,27 @@ export function SqlWindowPane(props: {
       (slot) => slot.status === "queued" || slot.status === "running"
     ) ?? false;
 
+  // The error of the statement on screen, where it points inside it.
+  const shownSlot = activeRun?.slots[activeResultIndex] ?? activeRun?.slots[0];
+  // Explain runs report positions in the wrapped statement: not underlined.
+  const errorPosition =
+    activeRun?.kind === "query" && shownSlot?.status === "error"
+      ? parseSqlErrorPosition(shownSlot.error)
+      : null;
+  const errorMarker =
+    shownSlot && errorPosition && activeRun?.sourceKey
+      ? {
+          runKey: activeRun!.sourceKey ?? "",
+          runSql: activeRun!.sql,
+          statementIndex: shownSlot.index,
+          ...errorPosition,
+          message: (shownSlot.error ?? "")
+            .split("\n")
+            .filter((line) => line.startsWith("ERROR:"))
+            .join("\n"),
+        }
+      : null;
+
   return (
     <div class="h-full min-h-0 overflow-hidden">
       <SplitPane
@@ -134,7 +156,11 @@ export function SqlWindowPane(props: {
               engine={engine}
               storageId={scopedWindowId}
               onRunSql={(payload) =>
-                startRun({ windowId: scopedWindowId, sql: payload.sql })
+                startRun({
+                  windowId: scopedWindowId,
+                  sql: payload.sql,
+                  sourceKey: payload.sourceKey,
+                })
               }
               onExplainSql={(payload) =>
                 startExplain({ windowId: scopedWindowId, sql: payload.sql })
@@ -158,6 +184,7 @@ export function SqlWindowPane(props: {
                 if (activeRun?.id) cancelRun(activeRun.id);
               }}
               isExecuting={isExecutingSql}
+              errorMarker={errorMarker}
             />
 
             {!runtimeConnectionId ? (
