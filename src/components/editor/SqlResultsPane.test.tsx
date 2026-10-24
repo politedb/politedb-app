@@ -7,7 +7,10 @@ import { useLicenseStore } from "src/stores/license";
 import { useProUpgradeStore } from "src/stores/proUpgrade";
 import type { LicenseState } from "src/lib/tauri/license";
 
-const state = vi.hoisted(() => ({ streams: {} as Record<string, unknown> }));
+const state = vi.hoisted(() => ({
+  streams: {} as Record<string, unknown>,
+  tableProps: [] as Record<string, unknown>[],
+}));
 const idleStream = {
   status: "idle",
   columns: [],
@@ -20,7 +23,10 @@ vi.mock("src/screens/connection/hooks/useSqlStreamResult", () => ({
   getSqlStreamSnapshot: (id: string) => state.streams[id] || idleStream,
 }));
 vi.mock("src/components/table/TableData", () => ({
-  TableData: () => <div>Raw result table</div>,
+  TableData: (props: Record<string, unknown>) => {
+    state.tableProps.push(props);
+    return <div>Raw result table</div>;
+  },
 }));
 vi.mock("src/components/table/TableFooter", () => ({
   TableFooter: () => <div>Table footer</div>,
@@ -68,6 +74,7 @@ const setProAccess = (pro_access: boolean) =>
 const BANNER = "Visual analyzer and recommendations are Pro";
 beforeEach(() => {
   state.streams = {};
+  state.tableProps = [];
   setProAccess(true);
   useProUpgradeStore.setState({ feature: null });
 });
@@ -439,5 +446,47 @@ describe("plan statements on other engines", () => {
     render(<SqlResultsPane {...base} engine="mariadb" runs={[typed]} />);
     expect(screen.getByText("Query Analyzer")).toBeInTheDocument();
     expect(screen.getByText("Measured plan")).toBeInTheDocument();
+  });
+});
+
+describe("SQL result grids", () => {
+  it("are read-only, for direct and streamed results", () => {
+    const direct = run();
+    direct.kind = "query";
+    direct.title = "Query";
+    direct.slots[0].sql = "select id from t";
+    direct.slots[0].result!.columns = [{ name: "id", db_type: "int" }];
+    direct.slots[0].result!.rows = [[1]];
+    const view = render(<SqlResultsPane {...base} runs={[direct]} />);
+    expect(state.tableProps[state.tableProps.length - 1]).toMatchObject({
+      readOnly: true,
+    });
+    expect(
+      state.tableProps[state.tableProps.length - 1]?.onCellChange
+    ).toBeUndefined();
+
+    state.streams.s1 = {
+      status: "done",
+      columns: [{ name: "id", db_type: "int" }],
+      totalRows: 2,
+      rowsVersion: 1,
+      getRowAt: (i: number) => [i],
+    };
+    const streamed: SqlResultRun = {
+      ...direct,
+      slots: [
+        {
+          index: 0,
+          sql: "select id from t",
+          status: "done",
+          mode: "stream",
+          opId: "s1",
+        },
+      ],
+    };
+    view.rerender(<SqlResultsPane {...base} runs={[streamed]} />);
+    expect(state.tableProps[state.tableProps.length - 1]).toMatchObject({
+      readOnly: true,
+    });
   });
 });

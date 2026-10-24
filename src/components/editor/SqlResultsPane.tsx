@@ -363,7 +363,8 @@ function ResultsContent(props: {
         totalRows={slot.result.rows.length}
         getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
         rowsVersion={0}
-        onCellChange={() => {}}
+        // Query results are not editable: an edit here would go nowhere.
+        readOnly
       />
     );
   }
@@ -378,12 +379,13 @@ function ResultsContent(props: {
           totalRows={stream.totalRows}
           getRowAt={stream.getRowAt}
           rowsVersion={stream.rowsVersion}
-          onCellChange={() => {}}
+          readOnly
         />
       );
     }
 
-    if (stream.status === "done") {
+    // An empty stream's "done" is provisional until the statement ends.
+    if (stream.status === "done" && slot.status !== "running") {
       return (
         <div class="p-3">
           <SmallStateCard kind="empty" />
