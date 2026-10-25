@@ -373,3 +373,63 @@ describe("useSqlRunner run identity", () => {
     expect(hook.result.current.sqlRuns[0]!.sourceKey).toBe("draft#7");
   });
 });
+
+describe("useSqlRunner result tabs per statement", () => {
+  it("names every statement Query n, continuing across runs", async () => {
+    const { hook } = setup();
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "select 1; select 2",
+    });
+    await flush();
+    finish("op-1");
+    await flush();
+    finish("op-2");
+    await flush();
+    vi.useFakeTimers();
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    void hook.result.current.startRun({ windowId: WIN, sql: "select 3" });
+    await flush();
+    const titles = hook.result.current.sqlRuns.flatMap((run) =>
+      run.slots.map((slot: { title?: string }) => slot.title)
+    );
+    expect(titles).toEqual(["Query 1", "Query 2", "Query 3"]);
+  });
+
+  it("closes one finished statement, but a running script as a whole", async () => {
+    const { hook } = setup();
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "select 1; select 2",
+    });
+    await flush();
+    finish("op-1");
+    await flush();
+    finish("op-2");
+    await flush();
+    const runId = hook.result.current.sqlRuns[0]!.id;
+    act(() => hook.result.current.closeSlot(runId, 0));
+    expect(
+      hook.result.current.sqlRuns[0]!.slots.map(
+        (slot: { title?: string }) => slot.title
+      )
+    ).toEqual(["Query 2"]);
+
+    vi.useFakeTimers();
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    void hook.result.current.startRun({
+      windowId: WIN,
+      sql: "select pg_sleep(9); select 4",
+    });
+    await flush();
+    const running = hook.result.current.sqlRuns[1]!;
+    act(() => hook.result.current.closeSlot(running.id, 1));
+    await flush();
+    expect(hook.result.current.sqlRuns.map((run) => run.id)).toEqual([runId]);
+    expect(order).not.toContain("run:select 4");
+  });
+});

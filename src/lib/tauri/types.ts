@@ -471,6 +471,8 @@ export type MongoCollectionOverview = {
 export type SqlResultSlot = {
   index: number;
   sql: string;
+  /** The statement's tab title ("Query 3"); the run's title when absent. */
+  title?: string;
   /** Explain runs: the statement as written, before the EXPLAIN wrapper. */
   sourceSql?: string;
   status: "queued" | "running" | "done" | "error";

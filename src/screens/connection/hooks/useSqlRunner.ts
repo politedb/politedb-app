@@ -384,11 +384,13 @@ export function useSqlRunner(args: {
       if (runIndex < 0) return;
 
       const run = cached.runs[runIndex];
-      const slot = run.slots[i];
+      // By statement index: closing a finished result can remove slots.
+      const position = run.slots.findIndex((slot) => slot.index === i);
+      const slot = run.slots[position];
       if (!slot) return;
 
       const nextSlots = run.slots.slice();
-      nextSlots[i] = { ...slot, ...patch };
+      nextSlots[position] = { ...slot, ...patch };
 
       const nextRuns = cached.runs.slice();
       nextRuns[runIndex] = { ...run, slots: nextSlots };
@@ -416,18 +418,27 @@ export function useSqlRunner(args: {
 
       const runIndex =
         (stateByWindowId.get(winId)?.runs.length ?? sqlRuns.length) + 1;
+      // Every statement of a query run is its own "Query n" tab, numbered
+      // after the tabs already shown.
+      const shownTabs = (stateByWindowId.get(winId)?.runs ?? sqlRuns).reduce(
+        (count, run) => count + Math.max(1, run.slots.length),
+        0
+      );
       const resultRunId = makeRunId(args.kind);
       const initialSlots: SqlResultSlot[] = args.statements.map((sql, i) => ({
         index: i,
         sql,
         ...(args.sourceStatement ? { sourceSql: args.sourceStatement } : {}),
+        ...(args.kind === "query"
+          ? { title: makeRunTitle("query", shownTabs + i + 1) }
+          : {}),
         status: "queued",
       }));
 
       const resultRun: SqlResultRun = {
         id: resultRunId,
         kind: args.kind,
-        title: makeRunTitle(args.kind, runIndex),
+        title: initialSlots[0]?.title ?? makeRunTitle(args.kind, runIndex),
         createdAt: Date.now(),
         sql: args.sourceSql,
         ...(args.sourceKey ? { sourceKey: args.sourceKey } : {}),
@@ -1065,6 +1076,45 @@ export function useSqlRunner(args: {
     [activeSqlWindowId, bumpRunId, saveWindowState]
   );
 
+  /**
+   * Closes one statement's result. A single-statement run, or a script still
+   * running, closes as a whole (closing stops it).
+   */
+  const closeSlot = useCallback(
+    (runId: string, slotPosition: number) => {
+      if (!activeSqlWindowId) return;
+      const cached = stateByWindowId.get(activeSqlWindowId);
+      const runIndex = cached?.runs.findIndex((run) => run.id === runId) ?? -1;
+      if (!cached || runIndex < 0) return;
+      const run = cached.runs[runIndex]!;
+      const running = run.slots.some(
+        (slot) => slot.status === "queued" || slot.status === "running"
+      );
+      if (run.slots.length <= 1 || running) {
+        closeRun(runId);
+        return;
+      }
+      const slot = run.slots[slotPosition];
+      if (!slot) return;
+      if (slot.mode === "stream" && slot.opId) clearSqlStream(slot.opId);
+
+      const nextRuns = cached.runs.slice();
+      nextRuns[runIndex] = {
+        ...run,
+        slots: run.slots.filter((_, position) => position !== slotPosition),
+      };
+      let activeSlotIndex = cached.activeSlotIndex;
+      if (cached.activeRunId === runId && activeSlotIndex >= slotPosition) {
+        activeSlotIndex = Math.max(0, activeSlotIndex - 1);
+      }
+      saveWindowState(activeSqlWindowId, {
+        runs: nextRuns,
+        activeSlotIndex,
+      });
+    },
+    [activeSqlWindowId, closeRun, saveWindowState]
+  );
+
   const cancelRun = useCallback(
     (runId: string) => {
       if (!activeSqlWindowId) return;
@@ -1114,6 +1164,7 @@ export function useSqlRunner(args: {
     startExplain,
     startExplainAnalyze,
     closeRun,
+    closeSlot,
     cancelRun,
     reset,
     clearWindow,

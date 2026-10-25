@@ -92,6 +92,7 @@ export function SqlWindowPane(props: {
     startExplain,
     startExplainAnalyze,
     closeRun,
+    closeSlot,
     cancelRun,
   } = useSqlRunner({
     activeSqlWindowId: scopedWindowId,
@@ -206,6 +207,7 @@ export function SqlWindowPane(props: {
             activeIndex={activeResultIndex}
             setActiveIndex={setActiveResultIndex}
             onCloseRun={closeRun}
+            onCloseSlot={closeSlot}
             onRunAnalyze={
               canExplainAnalyze
                 ? (origin) =>

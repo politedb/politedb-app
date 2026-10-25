@@ -186,28 +186,56 @@ function statusTone(status: SqlResultSlot["status"]) {
   return "text-neutral-400";
 }
 
-function runStatus(run: SqlResultRun): SqlResultSlot["status"] {
-  if (run.slots.some((slot) => slot.status === "error")) return "error";
-  if (run.slots.some((slot) => slot.status === "running")) return "running";
-  if (run.slots.some((slot) => slot.status === "queued")) return "queued";
-  return "done";
+/** One result tab: a statement of a run (every statement is its own tab). */
+type ResultTab = {
+  key: string;
+  runId: string;
+  /** The statement's position in its run's slots. */
+  position: number;
+  title: string;
+  status: SqlResultSlot["status"];
+  sql: string;
+};
+
+/** A statement result's name, the same on its tab and anywhere else. */
+export function slotTitle(run: SqlResultRun, position: number): string {
+  const slot = run.slots[position];
+  return (
+    slot?.title ??
+    (run.slots.length > 1 ? `${run.title} · ${position + 1}` : run.title)
+  );
 }
 
-function RunTabs(props: {
-  runs: SqlResultRun[];
-  activeRunId: string;
-  onSelect: (runId: string) => void;
-  onClose: (runId: string) => void;
-  /** The keyboard closed the last run: focus must move outside the tabs. */
-  onLastClosedByKeyboard?: () => void;
+export function resultTabs(runs: SqlResultRun[]): ResultTab[] {
+  return runs.flatMap((run) =>
+    run.slots.map((slot, position) => ({
+      key: `${run.id}:${slot.index}`,
+      runId: run.id,
+      position,
+      title: slotTitle(run, position),
+      status: slot.status,
+      sql: slot.sql,
+    }))
+  );
+}
+
+function ResultTabs(props: {
+  tabs: ResultTab[];
+  activeKey: string;
+  onSelect: (tab: ResultTab) => void;
+  /** Closes these tabs (a run whose tabs all close, closes as a whole). */
+  onClose: (tabs: ResultTab[]) => void;
+  /**
+   * The keyboard closed a tab: the owner moves focus once the results show
+   * (to the selected tab, or the empty area when none is left).
+   */
+  onClosedByKeyboard?: () => void;
 }) {
-  const { runs, activeRunId, onSelect, onClose, onLastClosedByKeyboard } =
-    props;
+  const { tabs, activeKey, onSelect, onClose, onClosedByKeyboard } = props;
   const [ctx, setCtx] = useState<{
     x: number;
     y: number;
-    runId: string;
-    runIndex: number;
+    index: number;
   } | null>(null);
 
   const menuItems: MenuItem[] = ctx
@@ -215,63 +243,48 @@ function RunTabs(props: {
         {
           type: "item",
           label: "Close",
-          onClick: () => onClose(ctx.runId),
+          onClick: () => onClose([tabs[ctx.index]!]),
         },
         {
           type: "item",
           label: "Close Others",
-          disabled: runs.length <= 1,
-          onClick: () =>
-            runs.forEach((run) => {
-              if (run.id !== ctx.runId) onClose(run.id);
-            }),
+          disabled: tabs.length <= 1,
+          onClick: () => onClose(tabs.filter((_, i) => i !== ctx.index)),
         },
         {
           type: "item",
           label: "Close to the Right",
-          disabled: ctx.runIndex >= runs.length - 1,
-          onClick: () =>
-            runs.slice(ctx.runIndex + 1).forEach((run) => onClose(run.id)),
+          disabled: ctx.index >= tabs.length - 1,
+          onClick: () => onClose(tabs.slice(ctx.index + 1)),
         },
         { type: "sep" },
         {
           type: "item",
           label: "Close All",
-          onClick: () => runs.forEach((run) => onClose(run.id)),
+          onClick: () => onClose(tabs),
         },
       ]
     : [];
 
   const listRef = useRef<HTMLDivElement>(null);
-  // After closing the focused tab, focus the tab that is selected next.
-  const focusSelectedRef = useRef(false);
-  useEffect(() => {
-    if (!focusSelectedRef.current) return;
-    focusSelectedRef.current = false;
-    (
-      listRef.current?.querySelector(
-        '[role="tab"][aria-selected="true"]'
-      ) as HTMLElement | null
-    )?.focus();
-  });
 
   // Arrow keys move between tabs; Delete closes the focused one.
   const onTabKey = (e: KeyboardEvent, idx: number) => {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (step) {
       e.preventDefault();
-      const next = runs[(idx + step + runs.length) % runs.length];
+      const next = tabs[(idx + step + tabs.length) % tabs.length];
       if (!next) return;
-      onSelect(next.id);
-      const list = (e.currentTarget as HTMLElement).parentElement;
+      onSelect(next);
       (
-        list?.querySelector(`[data-run-id="${next.id}"]`) as HTMLElement | null
+        listRef.current?.querySelector(
+          `[data-tab-key="${next.key}"]`
+        ) as HTMLElement | null
       )?.focus();
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      if (runs.length === 1) onLastClosedByKeyboard?.();
-      else focusSelectedRef.current = true;
-      onClose(runs[idx]!.id);
+      onClosedByKeyboard?.();
+      onClose([tabs[idx]!]);
     }
   };
 
@@ -282,28 +295,23 @@ function RunTabs(props: {
         horizontal
         vertical={false}
       >
-        <div ref={listRef} role="tablist" aria-label="Runs" class="contents">
-          {runs.map((run, idx) => {
-            const status = runStatus(run);
-            const active = run.id === activeRunId;
+        <div ref={listRef} role="tablist" aria-label="Results" class="contents">
+          {tabs.map((tab, idx) => {
+            const active = tab.key === activeKey;
             return (
               <div
-                key={run.id}
+                key={tab.key}
                 role="tab"
-                data-run-id={run.id}
+                data-tab-key={tab.key}
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
+                title={tab.sql.slice(0, 400)}
                 onKeyDown={(e) => onTabKey(e, idx)}
-                onClick={() => onSelect(run.id)}
+                onClick={() => onSelect(tab)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  setCtx({
-                    x: e.clientX,
-                    y: e.clientY,
-                    runId: run.id,
-                    runIndex: idx,
-                  });
+                  setCtx({ x: e.clientX, y: e.clientY, index: idx });
                 }}
                 class={cn(
                   "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
@@ -313,19 +321,19 @@ function RunTabs(props: {
                     : "bg-neutral-100 text-neutral-600 hover:bg-neutral-100"
                 )}
               >
-                <span class={cn("mr-0.5 text-xs", statusTone(status))}>
-                  {statusMark(status)}
+                <span class={cn("mr-0.5 text-xs", statusTone(tab.status))}>
+                  {statusMark(tab.status)}
                 </span>
-                <span>{run.title}</span>
+                <span>{tab.title}</span>
                 <Button
                   variant="ghost"
                   tabIndex={-1}
                   class="invisible justify-center rounded-full p-px group-focus-within:visible group-hover:visible"
-                  aria-label={`Close ${run.title}`}
-                  title={`Close ${run.title}`}
+                  aria-label={`Close ${tab.title}`}
+                  title={`Close ${tab.title}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onClose(run.id);
+                    onClose([tab]);
                   }}
                 >
                   <XIcon className="size-3" />
@@ -344,48 +352,6 @@ function RunTabs(props: {
         onClose={() => setCtx(null)}
       />
     </div>
-  );
-}
-
-function StatementTabs(props: {
-  slots: SqlResultSlot[];
-  activeIndex: number;
-  onSelect: (idx: number) => void;
-}) {
-  const { slots, activeIndex, onSelect } = props;
-  if (slots.length <= 1) return null;
-
-  return (
-    <OverlayScrollArea
-      className="shrink-0 border-b border-neutral-200 bg-neutral-50"
-      contentClassName="flex items-center gap-1 px-2 py-1"
-      horizontal
-      vertical={false}
-    >
-      <div role="tablist" aria-label="Statements" class="contents">
-        {slots.map((slot, idx) => (
-          <button
-            key={slot.index}
-            type="button"
-            role="tab"
-            aria-selected={idx === activeIndex}
-            onClick={() => onSelect(idx)}
-            class={cn(
-              "inline-flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs",
-              idx === activeIndex
-                ? "bg-white text-neutral-800 ring-1 ring-neutral-200"
-                : "text-neutral-600 hover:bg-neutral-100"
-            )}
-            title={slot.sql.slice(0, 400)}
-          >
-            <span>Statement {idx + 1}</span>
-            <span class={cn("text-[10px]", statusTone(slot.status))}>
-              {statusMark(slot.status)}
-            </span>
-          </button>
-        ))}
-      </div>
-    </OverlayScrollArea>
   );
 }
 
@@ -503,6 +469,8 @@ export function SqlResultsPane(props: {
   activeIndex: number;
   setActiveIndex: (idx: number) => void;
   onCloseRun: (runId: string) => void;
+  /** Closes one statement's result (the runner closes the run if needed). */
+  onCloseSlot?: (runId: string, slotPosition: number) => void;
   /** Measure the statement behind an estimated plan (Explain runs only). */
   onRunAnalyze?: (origin: { sql: string; connectionId?: string }) => void;
 }) {
@@ -514,19 +482,49 @@ export function SqlResultsPane(props: {
     activeIndex,
     setActiveIndex,
     onCloseRun,
+    onCloseSlot,
   } = props;
 
   const activeRun =
     runs.find((run) => run.id === activeRunId) ?? runs[runs.length - 1];
 
-  // After the keyboard closes the last run, focus the empty results area.
+  // After the keyboard closes a tab, focus what is left: the selected tab,
+  // or the empty results area. Decided from the results actually shown (one
+  // tab can close a whole running script).
   const emptyRef = useRef<HTMLDivElement>(null);
-  const focusEmptyRef = useRef(false);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const focusAfterCloseRef = useRef(false);
   useEffect(() => {
-    if (!focusEmptyRef.current || activeRun) return;
-    focusEmptyRef.current = false;
-    emptyRef.current?.focus();
+    if (!focusAfterCloseRef.current) return;
+    focusAfterCloseRef.current = false;
+    if (!activeRun) {
+      emptyRef.current?.focus();
+      return;
+    }
+    (
+      paneRef.current?.querySelector(
+        '[role="tab"][aria-selected="true"]'
+      ) as HTMLElement | null
+    )?.focus();
   });
+
+  const tabs = useMemo(() => resultTabs(runs), [runs]);
+  const closeTabs = (closing: ResultTab[]) => {
+    for (const run of runs) {
+      const positions = closing
+        .filter((tab) => tab.runId === run.id)
+        .map((tab) => tab.position);
+      if (!positions.length) continue;
+      if (positions.length >= run.slots.length || !onCloseSlot) {
+        onCloseRun(run.id);
+        continue;
+      }
+      // Last first, so earlier positions stay valid.
+      for (const position of positions.sort((a, b) => b - a)) {
+        onCloseSlot(run.id, position);
+      }
+    }
+  };
   const safeIndex = Math.min(
     Math.max(activeIndex, 0),
     (activeRun?.slots.length ?? 0) - 1
@@ -640,10 +638,8 @@ export function SqlResultsPane(props: {
         if (!load) continue;
         options.push({
           id: `${run.id}:${candidate.index}`,
-          title:
-            run.slots.length > 1
-              ? `${run.title} · ${candidate.index + 1}`
-              : run.title,
+          // The name its result tab shows.
+          title: slotTitle(run, run.slots.indexOf(candidate)),
           load,
         });
       }
@@ -703,24 +699,18 @@ export function SqlResultsPane(props: {
     !(slot.mode === "stream" && stream.status === "error");
 
   return (
-    <div class="flex h-full min-h-0 flex-col bg-white">
-      <RunTabs
-        runs={runs}
-        activeRunId={activeRun.id}
-        onSelect={(runId) => {
-          setActiveRunId(runId);
-          setActiveIndex(0);
+    <div ref={paneRef} class="flex h-full min-h-0 flex-col bg-white">
+      <ResultTabs
+        tabs={tabs}
+        activeKey={`${activeRun.id}:${slot.index}`}
+        onSelect={(tab) => {
+          setActiveRunId(tab.runId);
+          setActiveIndex(tab.position);
         }}
-        onClose={onCloseRun}
-        onLastClosedByKeyboard={() => {
-          focusEmptyRef.current = true;
+        onClose={closeTabs}
+        onClosedByKeyboard={() => {
+          focusAfterCloseRef.current = true;
         }}
-      />
-
-      <StatementTabs
-        slots={activeRun.slots}
-        activeIndex={safeIndex}
-        onSelect={setActiveIndex}
       />
 
       {showAnalyzerUpgrade && (

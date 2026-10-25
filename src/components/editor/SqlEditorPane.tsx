@@ -963,7 +963,6 @@ export function SqlEditorPane(props: Props) {
           onExplain={onExplain}
           onExplainAnalyze={onExplainAnalyzeSql ? onExplainAnalyze : undefined}
           onRun={() => void onRun()}
-          onRunAll={() => void onRun(true)}
           onCancel={onCancelSql}
           isExecuting={isExecuting}
           hasSelection={hasSelection}

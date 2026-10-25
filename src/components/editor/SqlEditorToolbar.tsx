@@ -4,7 +4,6 @@ import { PlayIcon, XIcon } from "src/components/icons";
 import { formatShortcutLabel } from "src/stores/keyboardShortcuts";
 
 const RUN_SHORTCUT = formatShortcutLabel("Mod+Enter");
-const RUN_ALL_SHORTCUT = formatShortcutLabel("Mod+Shift+Enter");
 
 type Props = {
   onExport?: () => void;
@@ -19,8 +18,6 @@ type Props = {
   onExplainAnalyze?: () => void;
 
   onRun: () => void;
-  /** Runs every statement in the editor. */
-  onRunAll?: () => void;
   onCancel?: () => void;
   isExecuting: boolean;
   hasSelection: boolean;
@@ -34,7 +31,6 @@ export function SqlEditorToolbar(props: Props) {
     onExplain,
     onExplainAnalyze,
     onRun,
-    onRunAll,
     onCancel,
     isExecuting,
     hasSelection,
@@ -104,17 +100,7 @@ export function SqlEditorToolbar(props: Props) {
       </div>
 
       {/* Right: Run */}
-      <div class="ml-auto flex items-center gap-1">
-        {onRunAll && !isExecuting ? (
-          <Button
-            variant="ghost"
-            onClick={onRunAll}
-            title={`Run every statement in the editor (${RUN_ALL_SHORTCUT})`}
-            class={toolBtn}
-          >
-            Run All
-          </Button>
-        ) : null}
+      <div class="ml-auto flex items-center">
         <Button
           variant={canCancel ? "primary" : "default"}
           onClick={canCancel ? onCancel : onRun}

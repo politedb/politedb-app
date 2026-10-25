@@ -95,17 +95,21 @@ export function SqlResultSummary(props: {
             { label: "JSON", onSelect: () => void exportAs("json") },
           ]}
           trigger={
-            <Button
-              variant="ghost"
-              class="ml-auto h-6 gap-1 px-2 text-xs"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              title="Export the result rows"
-            >
-              Export
-              <ChevronDownIcon className="size-3" />
-            </Button>
+            // A DOM element the popover can measure (Button does not pass a
+            // ref through), else the menu opens at the window's corner.
+            <div class="ml-auto">
+              <Button
+                variant="ghost"
+                class="h-6 gap-1 px-2 text-xs"
+                onClick={() => setMenuOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                title="Export the result rows"
+              >
+                Export
+                <ChevronDownIcon className="size-3" />
+              </Button>
+            </div>
           }
         />
       ) : null}

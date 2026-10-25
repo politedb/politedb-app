@@ -723,3 +723,155 @@ describe("SQL result errors and tabs", () => {
     expect(document.activeElement).toBe(empty);
   });
 });
+
+describe("SQL result tabs per statement", () => {
+  const script: SqlResultRun = {
+    id: "s",
+    kind: "query",
+    title: "Query 1",
+    sql: "select 1; select 2",
+    createdAt: 1,
+    slots: [
+      {
+        index: 0,
+        sql: "select 1",
+        title: "Query 1",
+        status: "done",
+        mode: "direct",
+        result: {
+          columns: [{ name: "a", db_type: "int" }],
+          rows: [[1]],
+          rowCount: 1,
+        },
+      } as any,
+      {
+        index: 1,
+        sql: "select 2",
+        title: "Query 2",
+        status: "done",
+        mode: "direct",
+        result: {
+          columns: [{ name: "b", db_type: "int" }],
+          rows: [[2]],
+          rowCount: 1,
+        },
+      } as any,
+    ],
+  };
+
+  it("shows one row of tabs, one per statement", () => {
+    const setActiveRunId = vi.fn();
+    const setActiveIndex = vi.fn();
+    render(
+      <SqlResultsPane
+        {...base}
+        activeRunId="s"
+        setActiveRunId={setActiveRunId}
+        setActiveIndex={setActiveIndex}
+        runs={[script]}
+      />
+    );
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "OKQuery 1",
+      "OKQuery 2",
+    ]);
+    expect(screen.getAllByRole("tablist")).toHaveLength(1);
+    expect(screen.queryByText(/Statement 1/)).toBeNull();
+
+    fireEvent.click(tabs[1]!);
+    expect(setActiveRunId).toHaveBeenCalledWith("s");
+    expect(setActiveIndex).toHaveBeenCalledWith(1);
+  });
+
+  it("closes one statement's tab through the slot close", () => {
+    const onCloseSlot = vi.fn();
+    const onCloseRun = vi.fn();
+    render(
+      <SqlResultsPane
+        {...base}
+        activeRunId="s"
+        onCloseRun={onCloseRun}
+        onCloseSlot={onCloseSlot}
+        runs={[script]}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close Query 2" }));
+    expect(onCloseSlot).toHaveBeenCalledWith("s", 1);
+    expect(onCloseRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("statement tab names and focus", () => {
+  it("names Compare baselines like their result tabs", () => {
+    // Two typed EXPLAIN statements ran as Query 1 and Query 2; Query 1's tab
+    // was closed, so its run now holds only Query 2.
+    const earlier = run("e");
+    earlier.kind = "query";
+    earlier.title = "Query 1";
+    earlier.slots = [
+      {
+        ...run().slots[0]!,
+        index: 1,
+        title: "Query 2",
+        sql: "EXPLAIN (FORMAT JSON) select 2",
+      },
+    ];
+    const current = run("c");
+    current.title = "Explain 2";
+    current.createdAt = 2;
+    render(
+      <SqlResultsPane {...base} activeRunId="c" runs={[earlier, current]} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Compare" }));
+    expect(screen.getByRole("option", { name: "Query 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Query 1" })).toBeNull();
+  });
+
+  it("focuses the empty area when one tab closes the only running script", () => {
+    const running: SqlResultRun = {
+      id: "r",
+      kind: "query",
+      title: "Query 1",
+      sql: "select pg_sleep(9); select 2",
+      createdAt: 1,
+      slots: [
+        {
+          index: 0,
+          sql: "select pg_sleep(9)",
+          title: "Query 1",
+          status: "running",
+        } as any,
+        {
+          index: 1,
+          sql: "select 2",
+          title: "Query 2",
+          status: "queued",
+        } as any,
+      ],
+    };
+    function Host() {
+      const [runs, setRuns] = useState([running]);
+      // The runner closes a running script as a whole.
+      const closeAll = () => setRuns([]);
+      return (
+        <SqlResultsPane
+          {...base}
+          runs={runs}
+          activeRunId={runs[0]?.id ?? null}
+          onCloseRun={closeAll}
+          onCloseSlot={closeAll}
+        />
+      );
+    }
+    render(<Host />);
+    const tab = screen.getByRole("tab", { name: /Query 2/ });
+    tab.focus();
+    act(() => {
+      fireEvent.keyDown(tab, { key: "Backspace" });
+    });
+    const empty = screen.getByText("Run a query to see results here.")
+      .parentElement as HTMLElement;
+    expect(document.activeElement).toBe(empty);
+  });
+});
