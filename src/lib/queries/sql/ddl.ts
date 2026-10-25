@@ -7,6 +7,7 @@ import {
   truncateTableSql,
 } from "src/lib/sql/sqlDialect";
 import { isMySqlLike, qIdent, qLiteral, regexEscape } from "./shared";
+import { parseNullable } from "src/lib/sql/columnFlags";
 
 export const createTableQuery = (
   schema: string,
@@ -19,7 +20,7 @@ export const createTableQuery = (
     let def = `${qIdent(col.column_name, engine)} ${col.data_type}`;
 
     // Add NOT NULL constraint if specified
-    if (col.is_nullable === "NOT NULL") {
+    if (parseNullable(col.is_nullable) === false) {
       def += " NOT NULL";
     }
 

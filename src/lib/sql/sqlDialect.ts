@@ -281,6 +281,79 @@ export function addPrimaryKeySql(
     .join(", ")});`;
 }
 
+/** A MySQL string literal (backslashes escaped too, the default SQL mode). */
+function mysqlStringLiteral(value: string) {
+  return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
+}
+
+const TIME_DEFAULT =
+  /^(CURRENT_TIMESTAMP|NOW|LOCALTIME|LOCALTIMESTAMP|CURRENT_DATE|CURRENT_TIME|UTC_TIMESTAMP)(\(\d*\))?$/i;
+const NUMBER = /^-?\d+(\.\d+)?$/;
+/** One whole quoted literal: inner quotes doubled or escaped, nothing after. */
+const SINGLE_QUOTED_LITERAL = /^'(?:[^'\\]|''|\\.)*'$/s;
+const BIT_OR_HEX_LITERAL = /^(b'[01]*'|x'[0-9a-f]*')$/i;
+const MYSQL_NUMERIC_TYPE =
+  /^(tinyint|smallint|mediumint|int|integer|bigint|decimal|dec|numeric|fixed|float|double|real|bit|year|bool|boolean)\b/i;
+
+/**
+ * A MySQL/MariaDB column's current default, from the catalog, as a DEFAULT
+ * expression to restate in MODIFY COLUMN; undefined when it has none.
+ *
+ * The text comes from the database and may have been written by anyone with
+ * DDL rights, so it is only passed through when it is one well-formed
+ * literal or keyword; anything else is quoted as a string or refused.
+ */
+export function mysqlDefaultFromCatalog(
+  value: string | null | undefined,
+  extra = "",
+  engine?: DatabaseEngine,
+  /** The column's type: a time keyword is a default only for time types. */
+  dataType = ""
+): string | undefined {
+  if (value == null) return undefined;
+  const text = value.trim();
+
+  if (engine === "mariadb") {
+    // MariaDB reports defaults as SQL: quoted literals, NULL, functions.
+    if (
+      /^NULL$/i.test(text) ||
+      TIME_DEFAULT.test(text) ||
+      NUMBER.test(text) ||
+      SINGLE_QUOTED_LITERAL.test(text) ||
+      BIT_OR_HEX_LITERAL.test(text)
+    ) {
+      return text;
+    }
+    unsupportedSql("Restating a column whose default is an expression", engine);
+  }
+
+  // MySQL reports a literal default as its raw text. MySQL 5.7 does not
+  // mark CURRENT_TIMESTAMP on time columns as DEFAULT_GENERATED.
+  if (
+    TIME_DEFAULT.test(text) &&
+    /^(timestamp|datetime|date|time)\b/i.test(dataType.trim())
+  ) {
+    return text;
+  }
+  if (/\bDEFAULT_GENERATED\b/i.test(extra)) {
+    if (TIME_DEFAULT.test(text)) return text;
+    unsupportedSql("Restating a column whose default is an expression", engine);
+  }
+  // A number or b'..' is one only on a numeric or BIT column; on a text
+  // column "001" or "b'1'" is text.
+  const type = dataType.trim();
+  if (NUMBER.test(text) && MYSQL_NUMERIC_TYPE.test(type)) return text;
+  if (/^b'[01]*'$/i.test(text) && /^bit\b/i.test(type)) return text;
+  return mysqlStringLiteral(value);
+}
+
+/** What MySQL MODIFY COLUMN must restate besides type, null and default. */
+export type MysqlColumnKeep = {
+  extra?: string;
+  comment?: string;
+  collation?: string;
+};
+
 export function alterColumnStatements(args: {
   schema: string;
   tableName: string;
@@ -289,6 +362,8 @@ export function alterColumnStatements(args: {
   nullable?: boolean;
   defaultExpression?: string | null;
   engine?: DatabaseEngine;
+  /** MySQL/MariaDB: the column's attributes MODIFY would otherwise drop. */
+  mysqlKeep?: MysqlColumnKeep;
 }) {
   const {
     schema,
@@ -298,6 +373,7 @@ export function alterColumnStatements(args: {
     nullable,
     defaultExpression,
     engine,
+    mysqlKeep = {},
   } = args;
   const table = quoteTableName(schema, tableName, engine);
   const col = quoteIdentifier(columnName, engine);
@@ -309,15 +385,46 @@ export function alterColumnStatements(args: {
         engine
       );
     }
-    const nullClause = nullable === false ? " NOT NULL" : "";
+    // MODIFY replaces the whole definition: restate what it would drop.
+    const extra = mysqlKeep.extra ?? "";
+    if (/\b(VIRTUAL|STORED) GENERATED\b/i.test(extra)) {
+      unsupportedSql("Changing a generated column", engine);
+    }
+    // Anything else in extra (INVISIBLE, ...) would be dropped: refuse.
+    const unknownExtra = extra
+      .replace(/\bAUTO_INCREMENT\b/gi, "")
+      .replace(/\bDEFAULT_GENERATED\b/gi, "")
+      .replace(/\bON UPDATE [A-Z_]+(?:\(\d*\))?/gi, "")
+      .trim();
+    if (unknownExtra) {
+      unsupportedSql(`Restating a column marked "${unknownExtra}"`, engine);
+    }
+    const collation = mysqlKeep.collation?.trim() ?? "";
+    const collateClause = /^[A-Za-z0-9_]+$/.test(collation)
+      ? ` COLLATE ${collation}`
+      : "";
+    // Explicit NULL: a TIMESTAMP is NOT NULL without it on servers with
+    // explicit_defaults_for_timestamp off (MySQL 5.7).
+    const nullClause =
+      nullable === false ? " NOT NULL" : nullable === true ? " NULL" : "";
     const defaultClause =
       defaultExpression === undefined
         ? ""
         : defaultExpression === null
           ? " DEFAULT NULL"
           : ` DEFAULT ${defaultExpression}`;
+    const autoIncrement = /\bAUTO_INCREMENT\b/i.test(extra)
+      ? " AUTO_INCREMENT"
+      : "";
+    const onUpdate = extra.match(/\bON UPDATE ([A-Z_]+(?:\(\d*\))?)/i)?.[1];
+    const onUpdateClause = onUpdate
+      ? ` ON UPDATE ${onUpdate.toUpperCase()}`
+      : "";
+    const commentClause = mysqlKeep.comment
+      ? ` COMMENT ${mysqlStringLiteral(mysqlKeep.comment)}`
+      : "";
     return [
-      `ALTER TABLE ${table} MODIFY COLUMN ${col} ${dataType}${nullClause}${defaultClause};`,
+      `ALTER TABLE ${table} MODIFY COLUMN ${col} ${dataType}${collateClause}${nullClause}${defaultClause}${autoIncrement}${onUpdateClause}${commentClause};`,
     ];
   }
 
@@ -434,7 +541,13 @@ export function createIndexSql(args: {
   const unique = args.unique ? "UNIQUE " : "";
   const table = quoteTableName(args.schema, args.tableName, args.engine);
   const index = quoteIdentifier(args.indexName, args.engine);
-  const column = quoteIdentifier(args.columnName, args.engine);
+  // Several columns come comma-separated ("last_name,first_name").
+  const column = args.columnName
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .map((name) => quoteIdentifier(name, args.engine))
+    .join(", ");
 
   if (isMysqlFamilyEngine(args.engine)) {
     const using = args.algorithm ? ` USING ${args.algorithm}` : "";

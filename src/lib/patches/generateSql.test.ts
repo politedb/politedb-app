@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TableStructure } from "src/types";
 import {
   analyzePatchIdentitySafety,
   generateSqlFromPatches,
@@ -899,5 +900,422 @@ describe("generateSqlPlanFromPatches", () => {
       ...plan.data,
       ...plan.postData,
     ]);
+  });
+});
+
+describe("column and index flags written as text", () => {
+  // The structure editor commits "true"/"false" strings; the catalog says
+  // YES/NO. A non-empty string must not count as true.
+  const usersTable = (patches: unknown): PatchMap =>
+    ({
+      "table:public.users": {
+        tableWindow: {
+          id: "table:public.users",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "email", db_type: "text" },
+          ],
+          structure: [
+            {
+              column_name: "id",
+              data_type: "int",
+              is_nullable: "NO",
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+            {
+              column_name: "email",
+              data_type: "text",
+              is_nullable: "YES",
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+          ],
+          constraints: [],
+          foreignKeys: [],
+          sizeInfo: null,
+          rowCount: 0,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches,
+      },
+    }) as unknown as PatchMap;
+
+  it('sets NOT NULL for "false" and drops it for "true"', () => {
+    expect(
+      generateSqlFromPatches(
+        usersTable({
+          update: { structure: { "1": { is_nullable: "false" } } },
+        }),
+        "postgres"
+      )
+    ).toEqual([
+      'ALTER TABLE "public"."users" ALTER COLUMN "email" SET NOT NULL;',
+    ]);
+    expect(
+      generateSqlFromPatches(
+        usersTable({ update: { structure: { "0": { is_nullable: "true" } } } }),
+        "postgres"
+      )
+    ).toEqual([
+      'ALTER TABLE "public"."users" ALTER COLUMN "id" DROP NOT NULL;',
+    ]);
+  });
+
+  it("changes nothing when only the spelling differs", () => {
+    expect(
+      generateSqlFromPatches(
+        usersTable({
+          update: {
+            structure: {
+              "0": { is_nullable: "false" },
+              "1": { is_nullable: "true" },
+            },
+          },
+        }),
+        "postgres"
+      )
+    ).toEqual([]);
+  });
+
+  it("adds a column NOT NULL only when asked", () => {
+    const add = (is_nullable: unknown) =>
+      generateSqlFromPatches(
+        usersTable({
+          create: {
+            structure: {
+              "2": { column_name: "n", data_type: "text", is_nullable },
+            },
+          },
+        }),
+        "postgres"
+      );
+    expect(add("false")[0]).toContain('"n" text NOT NULL');
+    expect(add("NO")[0]).toContain('"n" text NOT NULL');
+    expect(add("true")[0]).not.toContain("NOT NULL");
+    expect(add("YES")[0]).not.toContain("NOT NULL");
+    expect(add("")[0]).not.toContain("NOT NULL");
+  });
+
+  it('creates a plain index for unique "false"', () => {
+    const create = (is_unique: unknown) =>
+      generateSqlFromPatches(
+        usersTable({
+          create: {
+            constraints: {
+              "0": {
+                index_name: "users_email_idx",
+                column_name: "email",
+                is_unique,
+                index_algorithm: "BTREE",
+              },
+            },
+          },
+        }),
+        "postgres"
+      );
+    expect(create("false")[0]).toMatch(/^CREATE INDEX /);
+    expect(create("true")[0]).toMatch(/^CREATE UNIQUE INDEX /);
+  });
+});
+
+describe("structure edits keep what the user did not change", () => {
+  const table = (
+    engine: string,
+    structure: Record<string, unknown>[],
+    constraints: Record<string, unknown>[],
+    patches: unknown
+  ): PatchMap =>
+    ({
+      [`table:${engine}`]: {
+        tableWindow: {
+          id: `table:${engine}`,
+          type: "table",
+          table: { schema: "shop", name: "items" },
+        },
+        tableData: {
+          columns: [],
+          structure,
+          constraints,
+          foreignKeys: [],
+          sizeInfo: null,
+          rowCount: 0,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches,
+      },
+    }) as unknown as PatchMap;
+
+  const mysqlColumn: TableStructure = {
+    column_name: "qty",
+    data_type: "int",
+    is_nullable: false,
+    check: "",
+    column_default: "7",
+    foreign_key: "",
+    comment: "How many",
+    extra: "",
+    collation: "",
+  };
+  const mysqlEdit = (patch: Record<string, unknown>, column = mysqlColumn) =>
+    generateSqlFromPatches(
+      table("mysql", [column], [], { update: { structure: { "0": patch } } }),
+      "mysql"
+    );
+
+  it("MySQL: a type change restates NOT NULL, default and comment", () => {
+    expect(mysqlEdit({ data_type: "bigint" })).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `qty` bigint NOT NULL DEFAULT 7 COMMENT 'How many';",
+    ]);
+  });
+
+  it("MySQL: a nullable-only change keeps the type and default", () => {
+    expect(mysqlEdit({ is_nullable: "YES" })).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `qty` int NULL DEFAULT 7 COMMENT 'How many';",
+    ]);
+  });
+
+  it("MySQL: keeps AUTO_INCREMENT, ON UPDATE and collation", () => {
+    expect(
+      mysqlEdit(
+        { data_type: "bigint unsigned" },
+        {
+          ...mysqlColumn,
+          column_default: null as unknown as string,
+          comment: "",
+          extra: "auto_increment",
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `qty` bigint unsigned NOT NULL AUTO_INCREMENT;",
+    ]);
+    expect(
+      mysqlEdit(
+        { is_nullable: "NO" },
+        {
+          ...mysqlColumn,
+          column_name: "updated_at",
+          data_type: "timestamp",
+          is_nullable: true,
+          column_default: "CURRENT_TIMESTAMP",
+          comment: "",
+          extra: "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;",
+    ]);
+    expect(
+      mysqlEdit(
+        { data_type: "varchar(80)" },
+        {
+          ...mysqlColumn,
+          column_name: "name",
+          data_type: "varchar(40)",
+          column_default: "it's",
+          comment: "",
+          collation: "utf8mb4_bin",
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `name` varchar(80) COLLATE utf8mb4_bin NOT NULL DEFAULT 'it''s';",
+    ]);
+  });
+
+  it("MySQL: refuses to restate a generated column", () => {
+    expect(() =>
+      mysqlEdit(
+        { data_type: "bigint" },
+        { ...mysqlColumn, extra: "STORED GENERATED" }
+      )
+    ).toThrow(/generated column/);
+  });
+
+  const index = {
+    index_name: "items_name_idx",
+    index_algorithm: "BTREE",
+    is_unique: false,
+    is_primary: false,
+    column_name: "last_name,first_name",
+    condition: "",
+    include: "",
+    comment: "",
+  };
+  const pgIndexEdit = (patch: Record<string, unknown>, original = index) =>
+    generateSqlFromPatches(
+      table("postgres", [], [original], {
+        update: { constraints: { "0": patch } },
+      }),
+      "postgres"
+    );
+
+  it("does not drop an index for a no-op or comment-only edit", () => {
+    expect(pgIndexEdit({ comment: "names" })).toEqual([]);
+    expect(
+      pgIndexEdit({ is_unique: "false", index_algorithm: "btree" })
+    ).toEqual([]);
+  });
+
+  it("recreates a changed index with every column quoted", () => {
+    expect(pgIndexEdit({ is_unique: "true" })).toEqual([
+      'DROP INDEX IF EXISTS "shop"."items_name_idx";',
+      'CREATE UNIQUE INDEX "items_name_idx" ON "shop"."items" USING BTREE ("last_name", "first_name");',
+    ]);
+  });
+
+  it("refuses edits that would lose the primary key or index options", () => {
+    expect(() =>
+      pgIndexEdit({ is_unique: "true" }, { ...index, is_primary: true })
+    ).toThrow(/primary key/);
+    expect(() => pgIndexEdit({ condition: "active" })).toThrow(/condition/);
+    expect(() =>
+      pgIndexEdit({ is_unique: "true" }, { ...index, condition: "active" })
+    ).toThrow(/lose its condition/);
+  });
+
+  it("MySQL: a crafted catalog default stays one quoted literal", () => {
+    const [sql] = mysqlEdit(
+      { data_type: "varchar(20)" },
+      {
+        ...mysqlColumn,
+        column_name: "note",
+        data_type: "varchar(10)",
+        column_default: "'x'; DROP TABLE users; -- '",
+        comment: "",
+      }
+    );
+    expect(sql).toBe(
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `note` varchar(20) NOT NULL DEFAULT '''x''; DROP TABLE users; -- ''';"
+    );
+  });
+
+  it("MySQL: refuses a column with attributes MODIFY would drop", () => {
+    expect(() =>
+      mysqlEdit({ data_type: "bigint" }, { ...mysqlColumn, extra: "INVISIBLE" })
+    ).toThrow(/INVISIBLE/);
+  });
+
+  it("ClickHouse keeps its own MODIFY without restating defaults", () => {
+    const sql = generateSqlFromPatches(
+      table(
+        "clickhouse",
+        [{ ...mysqlColumn, column_default: "toDate(now())", comment: "" }],
+        [],
+        { update: { structure: { "0": { data_type: "Int64" } } } }
+      ),
+      "clickhouse"
+    );
+    expect(sql.join("\n")).not.toContain("toDate");
+  });
+
+  it("refuses recreating a MySQL index that has prefixes, a comment or expressions", () => {
+    const mysqlIndexEdit = (original: Record<string, unknown>) =>
+      generateSqlFromPatches(
+        table("mysql", [], [{ ...index, ...original }], {
+          update: { constraints: { "0": { is_unique: "true" } } },
+        }),
+        "mysql"
+      );
+    expect(() => mysqlIndexEdit({ has_prefix: true })).toThrow(/prefix/);
+    expect(() => mysqlIndexEdit({ has_descending: true })).toThrow(
+      /descending/
+    );
+    expect(() => mysqlIndexEdit({ comment: "hot path" })).toThrow(/comment/);
+    expect(() =>
+      mysqlIndexEdit({ has_expression: true, column_name: "" })
+    ).toThrow(/expressions/);
+    expect(mysqlIndexEdit({})).toHaveLength(2);
+  });
+
+  it("MySQL: no catalog default restates no DEFAULT at all", () => {
+    const noDefault = {
+      ...mysqlColumn,
+      column_default: "",
+      default_is_null: true,
+      comment: "",
+    };
+    expect(mysqlEdit({ data_type: "bigint" }, noDefault)).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `qty` bigint NOT NULL;",
+    ]);
+    expect(
+      mysqlEdit(
+        { data_type: "bigint" },
+        { ...noDefault, extra: "auto_increment" }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `qty` bigint NOT NULL AUTO_INCREMENT;",
+    ]);
+    // A real empty-string default is kept.
+    expect(
+      mysqlEdit(
+        { is_nullable: "YES" },
+        {
+          ...noDefault,
+          column_name: "tag",
+          data_type: "varchar(10)",
+          default_is_null: false,
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `tag` varchar(10) NULL DEFAULT '';",
+    ]);
+  });
+
+  it("MySQL: a nullable TIMESTAMP is restated with an explicit NULL", () => {
+    expect(
+      mysqlEdit(
+        { is_nullable: "YES" },
+        {
+          ...mysqlColumn,
+          column_name: "seen_at",
+          data_type: "timestamp",
+          column_default: "CURRENT_TIMESTAMP",
+          comment: "",
+          extra: "DEFAULT_GENERATED",
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `seen_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP;",
+    ]);
+  });
+
+  it("MySQL: keeps number-looking text defaults on text columns", () => {
+    expect(
+      mysqlEdit(
+        { is_nullable: "YES" },
+        {
+          ...mysqlColumn,
+          column_name: "code",
+          data_type: "varchar(5)",
+          column_default: "001",
+          comment: "",
+        }
+      )
+    ).toEqual([
+      "ALTER TABLE `shop`.`items` MODIFY COLUMN `code` varchar(5) NULL DEFAULT '001';",
+    ]);
+  });
+
+  it("refuses recreating a FULLTEXT index", () => {
+    expect(() =>
+      generateSqlFromPatches(
+        table("mysql", [], [{ ...index, index_algorithm: "FULLTEXT" }], {
+          update: { constraints: { "0": { index_name: "renamed" } } },
+        }),
+        "mysql"
+      )
+    ).toThrow(/FULLTEXT/);
   });
 });

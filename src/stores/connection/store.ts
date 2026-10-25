@@ -16,6 +16,7 @@ import {
   normalizePrimaryKeyValue,
 } from "./rowCache";
 import { createRowsUiActions } from "./rowsSlice";
+import { parseNullable } from "src/lib/sql/columnFlags";
 
 export const useConnectionStore = create<ConnectionState>()(
   subscribeWithSelector((set, get) => {
@@ -615,6 +616,15 @@ export const useConnectionStore = create<ConnectionState>()(
                       origVal = `${existingFk.ref_table_name}(${existingFk.ref_column_names})`;
                     }
                   }
+                }
+                if (dataKey === DATA_KEYS.structure && key === "is_nullable") {
+                  // Same meaning, different spelling (catalog true vs
+                  // editor YES) is no change.
+                  const same =
+                    parseNullable(value) !== undefined &&
+                    parseNullable(value) === parseNullable(origVal);
+                  if (!same) cleaned[key] = value;
+                  continue;
                 }
                 if (!cellEditValuesEqual(value, origVal)) cleaned[key] = value;
               }

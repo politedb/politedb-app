@@ -7,6 +7,8 @@ import type {
   DatabaseEngine,
 } from "src/types";
 import { cellToString } from "src/utils/convert";
+import { cellIsTruthy } from "src/utils/primaryKey";
+import { parseNullable } from "src/lib/sql/columnFlags";
 import {
   isPatchMetaKey,
   patchFieldEntries,
@@ -25,6 +27,7 @@ import {
   addPrimaryKeySql,
   alterColumnStatements,
   createIndexSql,
+  mysqlDefaultFromCatalog,
   dropColumnSql,
   dropForeignKeySql,
   dropIndexSql,
@@ -373,7 +376,8 @@ export function generateStructureSqlFromPatches(
       const columnDefault = patchData.column_default;
 
       let columnDef = `${qIdent(columnName, engine)} ${dataType || "UNKNOWN"}`;
-      if (!isNullable) {
+      // Only an explicit "not nullable" adds NOT NULL ("false" is a string).
+      if (parseNullable(isNullable) === false) {
         columnDef += " NOT NULL";
       }
       if (columnDefault && columnDefault.trim() !== "") {
@@ -520,14 +524,14 @@ export function generateStructureSqlFromPatches(
         }
 
         // Handle nullable change
-        if (
-          "is_nullable" in patchData &&
-          patchData.is_nullable !== originalColumn.is_nullable
-        ) {
-          if (patchData.is_nullable) {
-            nullable = true;
-          } else {
-            nullable = false;
+        if ("is_nullable" in patchData) {
+          // Compare meanings, not spellings: YES and "true" are the same.
+          const next = parseNullable(patchData.is_nullable);
+          if (
+            next !== undefined &&
+            next !== parseNullable(originalColumn.is_nullable)
+          ) {
+            nullable = next;
           }
         }
 
@@ -560,14 +564,39 @@ export function generateStructureSqlFromPatches(
           nullable !== undefined ||
           defaultExpression !== undefined
         ) {
+          // MySQL/MariaDB only (not ClickHouse, which MODIFY differently).
+          const restate = engine === "mysql" || engine === "mariadb";
           sqlStatements.push(
             ...alterColumnStatements({
               schema,
               tableName,
               columnName,
-              dataType,
-              nullable,
-              defaultExpression,
+              // MySQL MODIFY replaces the whole column definition, so the
+              // parts the user did not change are restated as they are.
+              dataType: restate
+                ? (dataType ?? originalColumn.data_type)
+                : dataType,
+              nullable: restate
+                ? (nullable ?? parseNullable(originalColumn.is_nullable))
+                : nullable,
+              defaultExpression:
+                restate && defaultExpression === undefined
+                  ? mysqlDefaultFromCatalog(
+                      originalColumn.default_is_null
+                        ? null
+                        : originalColumn.column_default,
+                      originalColumn.extra,
+                      engine,
+                      originalColumn.data_type
+                    )
+                  : defaultExpression,
+              mysqlKeep: restate
+                ? {
+                    extra: originalColumn.extra,
+                    comment: originalColumn.comment,
+                    collation: originalColumn.collation,
+                  }
+                : undefined,
               engine,
             })
           );
@@ -790,7 +819,7 @@ export function generateConstraintSqlFromPatches(
     for (const [_rowKey, patchData] of Object.entries(createPatches)) {
       const indexName = patchData.index_name;
       const columnName = patchData.column_name;
-      const isUnique = patchData.is_unique;
+      const isUnique = cellIsTruthy(patchData.is_unique);
       const algorithm = patchData.index_algorithm;
 
       if (!columnName) continue;
@@ -825,21 +854,71 @@ export function generateConstraintSqlFromPatches(
       if (!originalConstraint) continue;
 
       const indexName = originalConstraint.index_name;
-
-      // For updates, we typically need to drop and recreate
-      // Drop the old index
-      sqlStatements.push(dropIndexSql(schema, tableName, indexName, engine));
-
-      // Create the new index with updated properties
       const newIndexName = patchData.index_name || indexName;
       const columnName =
         patchData.column_name || originalConstraint.column_name;
-      const isUnique =
+      const isUnique = cellIsTruthy(
         "is_unique" in patchData
           ? patchData.is_unique
-          : originalConstraint.is_unique;
+          : originalConstraint.is_unique
+      );
       const algorithm =
         patchData.index_algorithm || originalConstraint.index_algorithm;
+
+      const text = (value: unknown) => (cellToString(value) ?? "").trim();
+      const columnList = (value: string) =>
+        value
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean)
+          .join(",");
+      const changed =
+        text(newIndexName) !== text(indexName) ||
+        columnList(columnName) !== columnList(originalConstraint.column_name) ||
+        isUnique !== cellIsTruthy(originalConstraint.is_unique) ||
+        text(algorithm).toUpperCase() !==
+          text(originalConstraint.index_algorithm).toUpperCase();
+      const changes = (key: "condition" | "include") =>
+        key in patchData &&
+        text(patchData[key]) !== text(originalConstraint[key]);
+
+      if (changes("condition") || changes("include")) {
+        throw new Error(
+          `Changing the condition or INCLUDE columns of index "${indexName}" isn't supported yet.`
+        );
+      }
+      // A comment-only (or no-op) edit must not drop and recreate the index.
+      if (!changed) continue;
+      if (cellIsTruthy(originalConstraint.is_primary)) {
+        throw new Error(
+          `"${indexName}" is the primary key's index. Change the primary key with Primary above the columns instead.`
+        );
+      }
+      // Drop and recreate keeps only name, columns, uniqueness and
+      // algorithm: refuse when the index has anything else.
+      const kept = [
+        text(originalConstraint.condition) && "its condition",
+        text(originalConstraint.include) && "its INCLUDE columns",
+        text(originalConstraint.comment) && "its comment",
+        originalConstraint.has_prefix && "its column prefix lengths",
+        originalConstraint.has_descending && "its descending order",
+        (originalConstraint.has_expression ||
+          !columnList(originalConstraint.column_name)) &&
+          "its expressions",
+        // FULLTEXT/SPATIAL are index kinds, not USING algorithms.
+        /^(FULLTEXT|SPATIAL)$/i.test(
+          text(originalConstraint.index_algorithm)
+        ) &&
+          `its ${text(originalConstraint.index_algorithm).toUpperCase()} kind`,
+      ].filter(Boolean);
+      if (kept.length) {
+        throw new Error(
+          `Recreating index "${indexName}" would lose ${kept.join(", ")}; change it with SQL instead.`
+        );
+      }
+
+      // Indexes change by drop and recreate.
+      sqlStatements.push(dropIndexSql(schema, tableName, indexName, engine));
 
       sqlStatements.push(
         createIndexSql({

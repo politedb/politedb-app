@@ -246,3 +246,62 @@ describe("row cache reset", () => {
     expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
   });
 });
+
+describe("structure nullable edits", () => {
+  // The catalog loaders give booleans; the structure editor writes YES/NO.
+  function seedStructure(isNullable: boolean) {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: {
+        [key]: {
+          ...tableData,
+          structure: [
+            {
+              column_name: "name",
+              data_type: "text",
+              is_nullable: isNullable,
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+          ],
+        },
+      },
+    });
+  }
+  const choose = (value: string) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow,
+      rowKey: "0",
+      data: { is_nullable: value },
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["0"];
+
+  it("keeps no change when the current value is chosen", () => {
+    seedStructure(true);
+    choose("YES");
+    expect(pending()).toBeUndefined();
+  });
+
+  it("clears the change after true -> NO -> YES", () => {
+    seedStructure(true);
+    choose("NO");
+    expect(pending()).toEqual({ is_nullable: "NO" });
+    choose("YES");
+    expect(pending()).toBeUndefined();
+  });
+
+  it("clears the change after false -> YES -> NO", () => {
+    seedStructure(false);
+    choose("YES");
+    expect(pending()).toEqual({ is_nullable: "YES" });
+    choose("NO");
+    expect(pending()).toBeUndefined();
+  });
+});
