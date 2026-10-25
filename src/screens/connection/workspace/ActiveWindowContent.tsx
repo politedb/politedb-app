@@ -222,6 +222,7 @@ export function ActiveWindowContent() {
       <SqlWindowPane
         win={activeSqlWindow}
         engine={rt.engine}
+        activeSchema={rt.activeSchema}
         runtimeConnectionId={rt.runtimeConnectionId}
         isProfileLocked={isProfileLocked}
         sqlSafetyMode={rt.sqlSafetyMode}

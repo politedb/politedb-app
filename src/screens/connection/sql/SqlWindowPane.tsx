@@ -41,6 +41,8 @@ function makeSqlWindowScopeId(metaKey: string, windowId: string) {
 export function SqlWindowPane(props: {
   win: SqlEditorWindow;
   engine: DatabaseEngine;
+  /** The schema picked for the connection: unqualified names resolve there. */
+  activeSchema?: string;
   metaKey: string;
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
@@ -57,6 +59,7 @@ export function SqlWindowPane(props: {
   const {
     win,
     engine,
+    activeSchema,
     metaKey,
     metadata,
     runtimeConnectionId,
@@ -152,6 +155,7 @@ export function SqlWindowPane(props: {
             <SqlEditorPane
               win={win}
               schemas={meta.schemas}
+              activeSchema={activeSchema}
               tables={meta.tables}
               columnsByTable={meta.columnsByTable}
               engine={engine}
