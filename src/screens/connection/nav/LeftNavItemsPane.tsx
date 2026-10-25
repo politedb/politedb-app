@@ -1,10 +1,9 @@
 import { SetStateAction } from "preact/compat";
 import { Dispatch, useState } from "preact/hooks";
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
   KeyIcon,
   EyeIcon,
+  RefreshCwIcon,
   TableIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
@@ -33,48 +32,14 @@ import {
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 import { SidebarSearch } from "./SidebarSearch";
+import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { quoteTableName } from "src/lib/sql/sqlDialect";
+import { tableSelectSnippet } from "src/lib/queries/sql";
 
 const VIEW_LIST_PAGE_SIZE = 20;
 
 function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
   return `table:${table.schema}.${table.name}`;
-}
-
-function SectionHeader(props: {
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-  onOpen?: () => void;
-}) {
-  const { title, expanded, onToggle, onOpen } = props;
-
-  return (
-    <Button
-      data-density-item
-      variant="ghost"
-      class="w-full justify-start rounded-md border-none px-2 py-1.5 hover:bg-neutral-200/60 active:bg-neutral-200/80"
-      onClick={onOpen ?? onToggle}
-    >
-      <div
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggle();
-        }}
-        className="shrink-0"
-        title={expanded ? `Collapse ${title}` : `Expand ${title}`}
-      >
-        {expanded ? (
-          <ChevronDownIcon className="size-3.5 text-neutral-500" />
-        ) : (
-          <ChevronRightIcon className="size-3.5 text-neutral-500" />
-        )}
-      </div>
-      <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
-        {title}
-      </span>
-    </Button>
-  );
 }
 
 function TableName({ className, name }: { className?: string; name: string }) {
@@ -206,6 +171,15 @@ export function LeftNavItemsPane({
     useState<TableItem | null>(null);
   const [cloneNewTableTarget, setCloneNewTableTarget] =
     useState<TableItem | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshList = async () => {
+    setRefreshing(true);
+    try {
+      await rt.refreshSchemaAndTables();
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const getNewTableDraft = (table: TableItem) => {
     return useConnectionStore.getState().newTableData[profileId]?.[
       tableWindowId(table)
@@ -259,7 +233,10 @@ export function LeftNavItemsPane({
           },
           {
             type: "item",
-            label: "Open overview",
+            label:
+              tableMenu.table.kind === "view"
+                ? "Show in views list"
+                : "Show in tables list",
             onClick: () => {
               const catalogKind =
                 tableMenu.table.kind === "view" ? "views" : "tables";
@@ -275,6 +252,36 @@ export function LeftNavItemsPane({
             label: "Copy name",
             onClick: () => navigator.clipboard.writeText(tableMenu.table.name),
           },
+          // SQL text: not for Mongo collections.
+          ...(isMongo
+            ? []
+            : ([
+                {
+                  type: "item",
+                  label: "Copy qualified name",
+                  onClick: () =>
+                    navigator.clipboard.writeText(
+                      quoteTableName(
+                        tableMenu.table.schema,
+                        tableMenu.table.name,
+                        engine
+                      )
+                    ),
+                },
+                {
+                  type: "item",
+                  label: "Copy SELECT",
+                  disabled: !!tableMenu.table.new,
+                  onClick: () =>
+                    navigator.clipboard.writeText(
+                      tableSelectSnippet(
+                        tableMenu.table.schema,
+                        tableMenu.table.name,
+                        engine
+                      )
+                    ),
+                },
+              ] satisfies MenuItem[])),
           { type: "sep" },
           {
             type: "item",
@@ -319,6 +326,7 @@ export function LeftNavItemsPane({
           },
           {
             type: "item",
+            color: "red",
             label: "Truncate...",
             disabled:
               !!tableMenu.table.new ||
@@ -328,6 +336,7 @@ export function LeftNavItemsPane({
           },
           {
             type: "item",
+            color: "red",
             label: "Drop...",
             disabled: isProfileLocked || !supportsTableMutations,
             onClick: () => {
@@ -367,10 +376,11 @@ export function LeftNavItemsPane({
         {/* Table Views (hidden for Mongo/Redis) */}
         {!isMongo && !isRedis && (
           <div class="mb-2">
-            <SectionHeader
+            <SidebarSectionHeader
               title="Views"
+              count={filteredViews.length}
               expanded={expandedSections.views}
-              onOpen={() => openDatabaseCatalog("views", currSchema)}
+              onOpenList={() => openDatabaseCatalog("views", currSchema)}
               onToggle={() =>
                 setExpandedSections((prev) => ({
                   ...prev,
@@ -459,10 +469,11 @@ export function LeftNavItemsPane({
 
         {/* Tables / Collections */}
         <div>
-          <SectionHeader
+          <SidebarSectionHeader
             title={tablesSectionTitle}
+            count={filteredTables.length}
             expanded={expandedSections.tables}
-            onOpen={
+            onOpenList={
               isRedis || isMongo
                 ? undefined
                 : () => openDatabaseCatalog("tables", currSchema)
@@ -656,6 +667,22 @@ export function LeftNavItemsPane({
               <option value={schema}>{schema}</option>
             ))}
           </Select>
+
+          <Button
+            variant="outline"
+            className="size-7 shrink-0 border-neutral-300 bg-white p-1"
+            title={`Refresh ${tablesSectionTitle.toLowerCase()}`}
+            aria-label={`Refresh ${tablesSectionTitle.toLowerCase()}`}
+            disabled={connectionChromeBlocked || refreshing}
+            onClick={() => void refreshList()}
+          >
+            <RefreshCwIcon
+              className={cn(
+                "size-3.5 text-neutral-700",
+                refreshing && "animate-spin"
+              )}
+            />
+          </Button>
         </div>
       </div>
     </div>

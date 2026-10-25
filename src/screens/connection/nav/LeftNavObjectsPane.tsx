@@ -1,22 +1,10 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
+import { confirmDialog } from "src/lib/system-dialog";
 import { useScreenStore } from "src/stores/screen";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  PlusIcon,
-  SquareFunctionIcon,
-  TrashIcon,
-} from "src/components/icons";
+import { PlusIcon, SquareFunctionIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "src/components/common/Dialog";
 import { cn } from "src/utils/cn";
 import type { DatabaseObjectItem, DatabaseObjectKind } from "src/types";
 import {
@@ -35,52 +23,62 @@ import {
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 import { SidebarSearch } from "./SidebarSearch";
+import { SidebarSectionHeader } from "./SidebarSectionHeader";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];
 const EMPTY_WINDOWS: import("src/types").OpenWindow[] = [];
 
-type Props = {
-  profileId: string;
-};
+/**
+ * Objects being dropped, by profile and object id. Module-level so a second
+ * drop of the same object stays blocked even if the pane remounts (switching
+ * sidebar tabs) while the first is still running.
+ */
+const droppingObjects = new Set<string>();
+const droppingListeners = new Set<() => void>();
 
-function SectionHeader(props: {
-  title: string;
-  expanded: boolean;
-  onToggle: () => void;
-  onOpen?: () => void;
-}) {
-  const { title, expanded, onToggle, onOpen } = props;
+function setDropping(key: string, dropping: boolean) {
+  if (dropping) droppingObjects.add(key);
+  else droppingObjects.delete(key);
+  // Every mounted pane re-renders, so an open menu shows the current state.
+  droppingListeners.forEach((listener) => listener());
+}
 
+/** Re-renders when any object starts or stops being dropped. */
+function useDroppingObjects() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const listener = () => setTick((n) => n + 1);
+    droppingListeners.add(listener);
+    return () => {
+      droppingListeners.delete(listener);
+    };
+  }, []);
+}
+
+function isProfileLockedNow(profileId: string) {
   return (
-    <Button
-      data-density-item
-      variant="ghost"
-      class="w-full justify-start rounded-md border-none px-2 py-1.5 hover:bg-neutral-200/60 active:bg-neutral-200/80"
-      onClick={onOpen ?? onToggle}
-    >
-      <div
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggle();
-        }}
-        className="shrink-0"
-        title={expanded ? `Collapse ${title}` : `Expand ${title}`}
-      >
-        {expanded ? (
-          <ChevronDownIcon className="size-3.5 text-neutral-500" />
-        ) : (
-          <ChevronRightIcon className="size-3.5 text-neutral-500" />
-        )}
-      </div>
-      <span class="min-w-0 truncate text-start text-sm font-semibold tracking-wide text-neutral-600">
-        {title}
-      </span>
-    </Button>
+    useScreenStore.getState().profileTabs.find((t) => t.id === profileId)
+      ?.isLocked ?? false
   );
 }
 
-export function LeftNavObjectsPane({ profileId }: Props) {
+/** A new object's sidebar name: its title, else new_<kind>. */
+function draftDisplayName(draft: { title?: string; initialKind?: string }) {
+  return draft.title?.trim() || `new_${draft.initialKind ?? "function"}`;
+}
+
+type Props = {
+  profileId: string;
+  /** The schema the sidebar shows, shared with the Items tab. */
+  currSchema: string;
+  onSchemaChange: (schema: string) => void;
+};
+
+export function LeftNavObjectsPane({
+  profileId,
+  currSchema,
+  onSchemaChange,
+}: Props) {
   const rt = useConnectionRuntimeCtx();
   const { openDatabaseObjectsManager, openDatabaseCatalog, selectWindow } =
     useConnectionWindows(profileId);
@@ -104,7 +102,12 @@ export function LeftNavObjectsPane({ profileId }: Props) {
   }, [openWindows, activeWindowId]);
 
   const [query, setQuery] = useState("");
-  const [schemaFilter, setSchemaFilter] = useState("");
+  const schemaFilter = currSchema;
+  useDroppingObjects();
+  const isProfileLocked = useScreenStore(
+    (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
+  );
+  const dropKey = (item: DatabaseObjectItem) => `${profileId}\0${item.id}`;
   const [expanded, setExpanded] = useState<Record<DatabaseObjectKind, boolean>>(
     {
       function: true,
@@ -117,8 +120,6 @@ export function LeftNavObjectsPane({ profileId }: Props) {
     y: number;
     item: DatabaseObjectItem;
   } | null>(null);
-  const [dropTarget, setDropTarget] = useState<DatabaseObjectItem | null>(null);
-  const [dropping, setDropping] = useState(false);
 
   const meta = useMemo(
     () =>
@@ -132,15 +133,6 @@ export function LeftNavObjectsPane({ profileId }: Props) {
   );
 
   const availableSchemas = useMemo(() => meta.schemas ?? [], [meta.schemas]);
-
-  useEffect(() => {
-    if (!availableSchemas.length) {
-      setSchemaFilter(rt.activeSchema || "");
-      return;
-    }
-    if (schemaFilter && availableSchemas.includes(schemaFilter)) return;
-    setSchemaFilter(rt.activeSchema || availableSchemas[0] || "");
-  }, [availableSchemas, schemaFilter, rt.activeSchema]);
 
   const objectsByKind = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -242,7 +234,7 @@ export function LeftNavObjectsPane({ profileId }: Props) {
         },
         {
           type: "item",
-          label: "Open overview",
+          label: `Show in ${objectKindLabel(menu.item.kind).toLowerCase()} list`,
           onClick: () => openCatalogForItem(menu.item),
         },
         { type: "sep" },
@@ -256,37 +248,66 @@ export function LeftNavObjectsPane({ profileId }: Props) {
           type: "item",
           label: "Drop…",
           color: "red",
-          disabled: !menu.item.capability.canDelete || !rt.runtimeConnectionId,
-          onClick: () => setDropTarget(menu.item),
+          disabled:
+            !menu.item.capability.canDelete ||
+            !rt.runtimeConnectionId ||
+            isProfileLocked ||
+            droppingObjects.has(dropKey(menu.item)),
+          onClick: () => void dropObject(menu.item),
         },
       ]
     : [];
 
-  const confirmDrop = async () => {
-    if (!dropTarget || !rt.runtimeConnectionId) return;
-    setDropping(true);
+  /** Confirms natively, like dropping a table, then drops the object. */
+  const dropObject = async (item: DatabaseObjectItem) => {
+    const connectionId = rt.runtimeConnectionId;
+    const key = dropKey(item);
+    // Taken before the confirmation, so the object cannot be dropped twice.
+    if (!connectionId || droppingObjects.has(key)) return;
+    if (isProfileLockedNow(profileId)) return;
+    setDropping(key, true);
+    const kind = objectKindSingular(item.kind);
     try {
-      const sql = buildDropDatabaseObjectSql({
-        engine: rt.engine,
-        item: dropTarget,
-      });
-      await runSqlQuery(rt.runtimeConnectionId, sql);
-      await rt.refreshSchemaAndTables();
-      showToast(
-        `Dropped ${objectKindSingular(dropTarget.kind)} “${dropTarget.name}”.`,
+      const ok = await confirmDialog(
+        `Permanently drop the ${kind} "${item.schema}.${item.name}"? This cannot be undone.`,
         {
-          tone: "success",
+          title: `Drop ${kind}`,
+          kind: "warning",
+          okLabel: "Drop",
+          cancelLabel: "Cancel",
         }
       );
-      setDropTarget(null);
+      // The profile may have been locked while the dialog was open.
+      if (!ok || isProfileLockedNow(profileId)) return;
+      const sql = buildDropDatabaseObjectSql({ engine: rt.engine, item });
+      await runSqlQuery(connectionId, sql);
+      await rt.refreshSchemaAndTables();
+      showToast(`Dropped ${kind} “${item.name}”.`, { tone: "success" });
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err ?? ""), {
         tone: "error",
       });
     } finally {
-      setDropping(false);
+      setDropping(key, false);
     }
   };
+
+  // Drafts of new objects, shown (and counted) in their kind's section.
+  const draftsByKind = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const grouped: Record<DatabaseObjectKind, typeof createDrafts> = {
+      function: [],
+      procedure: [],
+      trigger: [],
+    };
+    for (const draft of createDrafts) {
+      const kind = draft.initialKind ?? "function";
+      if (!q || draftDisplayName(draft).toLowerCase().includes(q)) {
+        grouped[kind].push(draft);
+      }
+    }
+    return grouped;
+  }, [createDrafts, query]);
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -317,27 +338,17 @@ export function LeftNavObjectsPane({ profileId }: Props) {
               const isExpanded = expanded[kind];
               return (
                 <div key={kind}>
-                  <SectionHeader
+                  <SidebarSectionHeader
                     title={objectKindLabel(kind)}
+                    count={items.length + draftsByKind[kind].length}
                     expanded={isExpanded}
                     onToggle={() => toggleKind(kind)}
-                    onOpen={() => openCatalogForKind(kind)}
+                    onOpenList={() => openCatalogForKind(kind)}
                   />
                   {isExpanded ? (
                     <div class="mt-1">
                       {(() => {
-                        const draftsForKind = createDrafts.filter((draft) => {
-                          const draftKind = draft.initialKind ?? "function";
-                          if (draftKind !== kind) return false;
-                          const draftName =
-                            draft.title?.trim() ||
-                            (draftKind === "trigger"
-                              ? "new_trigger"
-                              : `new_${draftKind}`);
-                          const q = query.trim().toLowerCase();
-                          if (!q) return true;
-                          return draftName.toLowerCase().includes(q);
-                        });
+                        const draftsForKind = draftsByKind[kind];
                         if (items.length === 0 && draftsForKind.length === 0) {
                           return (
                             <EmptyExpandSection
@@ -349,12 +360,7 @@ export function LeftNavObjectsPane({ profileId }: Props) {
                         return (
                           <div class="space-y-1 pl-3">
                             {draftsForKind.map((draft) => {
-                              const draftKind = draft.initialKind ?? "function";
-                              const draftName =
-                                draft.title?.trim() ||
-                                (draftKind === "trigger"
-                                  ? "new_trigger"
-                                  : `new_${draftKind}`);
+                              const draftName = draftDisplayName(draft);
                               const isActive = activeWindowId === draft.id;
                               return (
                                 <Button
@@ -495,7 +501,7 @@ export function LeftNavObjectsPane({ profileId }: Props) {
             )}
             value={schemaFilter}
             onChange={(e) =>
-              setSchemaFilter((e.currentTarget as HTMLSelectElement).value)
+              onSchemaChange((e.currentTarget as HTMLSelectElement).value)
             }
           >
             {availableSchemas.map((schema) => (
@@ -514,44 +520,6 @@ export function LeftNavObjectsPane({ profileId }: Props) {
         items={menuItems}
         onClose={() => setMenu(null)}
       />
-
-      <Dialog
-        open={!!dropTarget}
-        onClose={() => (dropping ? null : setDropTarget(null))}
-        size="sm"
-      >
-        <DialogHeader className="border-b border-neutral-200">
-          <DialogTitle className="flex items-center gap-2">
-            <TrashIcon className="size-4 text-neutral-600" />
-            Drop {dropTarget ? objectKindSingular(dropTarget.kind) : "object"}
-          </DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <p class="text-sm text-neutral-600">
-            Drop{" "}
-            {dropTarget
-              ? `${dropTarget.schema}.${dropTarget.name}`
-              : "this object"}
-            ? This cannot be undone.
-          </p>
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            variant="ghost"
-            disabled={dropping}
-            onClick={() => setDropTarget(null)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            loading={dropping}
-            onClick={() => void confirmDrop()}
-          >
-            Drop
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }
