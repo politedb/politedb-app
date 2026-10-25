@@ -189,6 +189,8 @@ type Props = {
     event: MouseEvent;
   }) => boolean | void;
   cellOptions?: Record<string, CanvasCellOption[]>;
+  /** Header text by column name, when the name is a field key. */
+  columnLabels?: Record<string, string>;
   actionColumns?: string[];
   viewKey?: string;
 
@@ -579,6 +581,7 @@ export function CanvasTable({
   onActivateRow,
   onRowContextMenu,
   cellOptions,
+  columnLabels,
   actionColumns,
   viewKey,
 }: Props) {
@@ -2235,7 +2238,11 @@ export function CanvasTable({
                         : undefined
                   }
                   tabIndex={onChangeSort ? 0 : undefined}
-                  title={onChangeSort ? `Sort by ${col.name}` : undefined}
+                  title={
+                    onChangeSort
+                      ? `Sort by ${columnLabels?.[col.name] ?? col.name}`
+                      : undefined
+                  }
                   onKeyDown={(e) => {
                     if (!onChangeSort) return;
                     if (e.key === "Enter" || e.key === " ") {
@@ -2269,7 +2276,9 @@ export function CanvasTable({
                     });
                   }}
                 >
-                  <span class="truncate">{col.name}</span>
+                  <span class="truncate">
+                    {columnLabels?.[col.name] ?? col.name}
+                  </span>
 
                   {isSorted &&
                     (sortDir === "asc" ? (

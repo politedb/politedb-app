@@ -218,4 +218,20 @@ describe("schema canvas editing", () => {
     expect(screen.queryByPlaceholderText("NULL")).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("shows column labels in the header, keys when unlabeled", () => {
+    render(
+      <SchemaCanvasTable
+        rows={rows}
+        columns={[{ key: "name", label: "Name" }, { key: "type" }]}
+        onChange={() => {}}
+      />
+    );
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim());
+    expect(headers).toContain("Name");
+    expect(headers).toContain("type");
+    expect(headers).not.toContain("name");
+  });
 });

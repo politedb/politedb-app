@@ -8,6 +8,7 @@ import type { InputOption } from "src/components/common/Input";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { getDbConfig } from "src/lib/engines/dbConfig";
+import { INDEX_COLUMN_LABELS } from "./schemaColumnLabels";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   postgres: [
@@ -117,6 +118,7 @@ export function TableConstraints({
     () =>
       COLUMNS_NAME[engine].map((key) => ({
         key,
+        label: INDEX_COLUMN_LABELS[key],
         options: columnInputOptions[key]?.map((option) =>
           typeof option === "string" ? { label: option, value: option } : option
         ),

@@ -19,6 +19,7 @@ import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
 import { TableFilterBar } from "src/components/table/TableFilterBar";
 import { TableFooter } from "src/components/table/TableFooter";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
+import { structureReadOnlyReason } from "../lib/structureReadOnly";
 import { LoadingTableState } from "./LoadingTableState";
 
 import { DATA_KEYS, DEFAULT_FILTER_STATE } from "src/constant";
@@ -124,8 +125,11 @@ export function MainTableDataPane(props: {
   const isRedis = engine === "redis";
   const isNewTable = !!activeTableWindow.table.new;
   const isDataReadOnly = isProfileLocked;
-  const isStructureReadOnly =
-    isProfileLocked || engine === "mongo" || engine === "cassandra" || isRedis;
+  const structureReadOnlyNote = structureReadOnlyReason(
+    engine,
+    isProfileLocked
+  );
+  const isStructureReadOnly = structureReadOnlyNote !== null;
   const canAddDataRow = !isDataReadOnly && !isRedis;
 
   const { loadTableData } = useLoadTableData();
@@ -1066,6 +1070,7 @@ export function MainTableDataPane(props: {
               engine={engine}
               profileId={profileId}
               readOnly={isStructureReadOnly}
+              readOnlyReason={structureReadOnlyNote}
               activeTableWindow={activeTableWindow as any}
               activeTableMeta={meta}
               structPaneTab={structPaneTab}

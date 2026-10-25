@@ -18,12 +18,14 @@ import { TagSelect } from "src/components/common/TagSelect";
 import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 import { StructPaneTab } from "src/screens/connection/table/MainTableDataPane";
-import { SearchIcon } from "src/components/icons";
+import { LockIcon, SearchIcon } from "src/components/icons";
 
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
   profileId: string;
   readOnly?: boolean;
+  /** Shown above the editor when it is read-only. */
+  readOnlyReason?: string | null;
   activeTableMeta: TableMetaState;
   activeTableWindow: TableWindow;
   structPaneTab: StructPaneTab;
@@ -48,6 +50,7 @@ export function TableStructurePane(props: {
     engine,
     profileId,
     readOnly = false,
+    readOnlyReason,
     activeTableMeta,
     activeTableWindow,
     structPaneTab,
@@ -161,7 +164,7 @@ export function TableStructurePane(props: {
             }}
             placeholder={
               structPaneTab === "constraints"
-                ? "Search constraints..."
+                ? "Search indexes..."
                 : "Search columns..."
             }
             left={<SearchIcon className="size-4 text-neutral-400" />}
@@ -170,6 +173,16 @@ export function TableStructurePane(props: {
           />
         </div>
       </div>
+
+      {readOnlyReason ? (
+        <div
+          role="note"
+          class="flex items-center gap-2 border-b border-neutral-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800"
+        >
+          <LockIcon className="size-3.5 shrink-0" />
+          {readOnlyReason}
+        </div>
+      ) : null}
 
       <Tabs
         value={structPaneTab}
@@ -200,7 +213,7 @@ export function TableStructurePane(props: {
           },
           {
             value: "constraints",
-            label: "Constraints",
+            label: "Indexes",
             children: (
               <TableConstraints
                 engine={engine}

@@ -7,23 +7,29 @@ interface Props {
   onViewModeChange?: (mode: TableViewMode) => void;
 }
 
+const MODES: { mode: TableViewMode; label: string }[] = [
+  { mode: "data", label: "Data" },
+  { mode: "structure", label: "Structure" },
+];
+
 export function TableViewToggle({ viewMode, onViewModeChange }: Props) {
   return (
-    <div class="flex items-center rounded-md bg-neutral-100">
-      <Button
-        variant={viewMode === "data" ? "default" : "ghost"}
-        onClick={() => onViewModeChange?.("data")}
-        className="px-5 py-0.75 text-sm font-medium"
-      >
-        Data
-      </Button>
-      <Button
-        variant={viewMode === "structure" ? "default" : "ghost"}
-        onClick={() => onViewModeChange?.("structure")}
-        className="px-3 py-0.75 text-sm font-medium"
-      >
-        Structure
-      </Button>
+    <div
+      role="group"
+      aria-label="Table view"
+      class="flex items-center rounded-md bg-neutral-100"
+    >
+      {MODES.map(({ mode, label }) => (
+        <Button
+          key={mode}
+          variant={viewMode === mode ? "default" : "ghost"}
+          aria-pressed={viewMode === mode}
+          onClick={() => onViewModeChange?.(mode)}
+          className="px-4 py-0.75 text-sm font-medium"
+        >
+          {label}
+        </Button>
+      ))}
     </div>
   );
 }

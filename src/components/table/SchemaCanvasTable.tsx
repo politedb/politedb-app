@@ -8,6 +8,8 @@ import {
 
 export interface SchemaCanvasColumn<T> {
   key: Extract<keyof T, string>;
+  /** Header text; the key when unset. */
+  label?: string;
   options?: CanvasCellOption[];
   width?: number;
   action?: (sourceIndex: number) => void;
@@ -137,6 +139,13 @@ export function SchemaCanvasTable<T>({
       ),
     [columns]
   );
+  const labels = useMemo(
+    () =>
+      Object.fromEntries(
+        columns.flatMap((col) => (col.label ? [[col.key, col.label]] : []))
+      ),
+    [columns]
+  );
   const actions = useMemo(
     () => columns.filter((col) => col.action).map((col) => col.key),
     [columns]
@@ -175,6 +184,7 @@ export function SchemaCanvasTable<T>({
       emptyColumnWidth={0}
       dataVersion={0}
       cellOptions={options}
+      columnLabels={labels}
       actionColumns={actions}
       sortState={sort}
       onChangeSort={setSort}
