@@ -2,7 +2,6 @@ import { useState } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Dropdown } from "src/components/common/Dropdown";
 import { Button } from "src/components/common/Button";
-import { ChevronDownIcon } from "src/components/icons";
 import { formatRowsForClipboard } from "src/components/table/CanvasTable";
 import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
@@ -100,14 +99,13 @@ export function SqlResultSummary(props: {
             <div class="ml-auto">
               <Button
                 variant="ghost"
-                class="h-6 gap-1 px-2 text-xs"
+                class="h-6 px-2 text-xs"
                 onClick={() => setMenuOpen((open) => !open)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 title="Export the result rows"
               >
                 Export
-                <ChevronDownIcon className="size-3" />
               </Button>
             </div>
           }
