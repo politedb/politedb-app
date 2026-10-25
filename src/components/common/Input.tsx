@@ -9,6 +9,7 @@ export type InputOption = string | { label: string; value: string };
 
 export function Input(
   props: HTMLAttributes<HTMLInputElement> & {
+    rootClassName?: string;
     showSelect?: boolean;
     options?: InputOption[];
     value: string;
@@ -24,6 +25,7 @@ export function Input(
   }
 ) {
   const {
+    rootClassName,
     className,
     showSelect,
     options = [],
@@ -104,7 +106,7 @@ export function Input(
   }, [isOpen]);
 
   return (
-    <div ref={containerRef} class="relative">
+    <div ref={containerRef} class={cn("relative", rootClassName)}>
       {label && (
         <label for={inputId} class="mb-1 block text-sm font-medium">
           {label}

@@ -6,6 +6,7 @@ import {
   CopyCheckIcon,
   BookmarkIcon,
   ArrowRightIcon,
+  SearchIcon,
 } from "src/components/icons";
 import { Input } from "src/components/common/Input";
 import { confirmDialog } from "src/lib/system-dialog";
@@ -157,9 +158,11 @@ export function QueryHistory({
             onKeyDown={(e) => {
               if (e.key === "Escape") setSearch("");
             }}
+            left={<SearchIcon className="size-4 text-neutral-500" />}
             placeholder="Search history"
             aria-label="Search SQL history"
-            className="mx-3 h-7 max-w-64 flex-1 px-2 text-xs"
+            className="h-7 text-xs"
+            rootClassName="w-full ml-6 mr-3 flex-1"
           />
         )}
 
