@@ -262,6 +262,22 @@ export function dropPrimaryKeySql(
   return `ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(constraintName, engine)};`;
 }
 
+/**
+ * MySQL/MariaDB: drop and add the primary key in one statement. DDL
+ * commits on its own there, so two statements could leave the table with
+ * no primary key when the ADD fails.
+ */
+export function replacePrimaryKeySql(
+  schema: string,
+  tableName: string,
+  columns: string[],
+  engine?: DatabaseEngine
+) {
+  return `ALTER TABLE ${quoteTableName(schema, tableName, engine)} DROP PRIMARY KEY, ADD PRIMARY KEY (${columns
+    .map((col) => quoteIdentifier(col, engine))
+    .join(", ")});`;
+}
+
 export function addPrimaryKeySql(
   schema: string,
   tableName: string,

@@ -1426,4 +1426,199 @@ describe("structure edits keep what the user did not change", () => {
     );
     expect(sql).toEqual(['DROP INDEX IF EXISTS "shop"."items_name_idx";']);
   });
+
+  it("MySQL: replaces the PRIMARY key in one statement", () => {
+    const sql = generateSqlFromPatches(
+      table(
+        "mysql",
+        [],
+        [
+          {
+            ...index,
+            index_name: "PRIMARY",
+            column_name: "id",
+            is_unique: true,
+            is_primary: true,
+          },
+        ],
+        { update: { structure: { "-1": { primaryKey: ["id", "tenant_id"] } } } }
+      ),
+      "mysql"
+    );
+    // One statement: MySQL DDL commits on its own, so a failing ADD must
+    // not leave the table without a primary key.
+    expect(sql).toEqual([
+      "ALTER TABLE `shop`.`items` DROP PRIMARY KEY, ADD PRIMARY KEY (`id`, `tenant_id`);",
+    ]);
+  });
+
+  it("PostgreSQL: finds the primary key by its flag, whatever its name", () => {
+    const change = (name: string, primaryKey: string[]) =>
+      generateSqlFromPatches(
+        table(
+          "postgres",
+          [],
+          [
+            {
+              ...index,
+              index_name: name,
+              column_name: "id",
+              is_unique: true,
+              is_primary: true,
+            },
+          ],
+          { update: { structure: { "-1": { primaryKey } } } }
+        ),
+        "postgres"
+      );
+    expect(change("items_pkey", ["code"])).toEqual([
+      'ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "items_pkey";',
+      'ALTER TABLE "shop"."items" ADD PRIMARY KEY ("code");',
+    ]);
+    // A renamed primary key constraint is still the primary key.
+    expect(change("items_main", ["code"])[0]).toBe(
+      'ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "items_main";'
+    );
+    // The same columns are no change.
+    expect(change("items_pkey", ["id"])).toEqual([]);
+  });
+
+  it("changes the flagged primary key, not a UNIQUE index named like one", () => {
+    const constraints = [
+      {
+        ...index,
+        index_name: "primary_email",
+        column_name: "email",
+        is_unique: true,
+        is_primary: false,
+      },
+      {
+        ...index,
+        index_name: "items_main",
+        column_name: "id",
+        is_unique: true,
+        is_primary: true,
+      },
+    ];
+    const pk = (primaryKey: string[]) =>
+      generateSqlFromPatches(
+        table("postgres", [], constraints, {
+          update: { structure: { "-1": { primaryKey } } },
+        }),
+        "postgres"
+      );
+    expect(pk([])).toEqual([
+      'ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "items_main";',
+    ]);
+    expect(pk(["code"])[0]).toBe(
+      'ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "items_main";'
+    );
+    expect(pk(["id"])).toEqual([]);
+  });
+
+  it("MySQL: clearing the primary key drops it alone", () => {
+    expect(
+      generateSqlFromPatches(
+        table(
+          "mysql",
+          [],
+          [
+            {
+              ...index,
+              index_name: "PRIMARY",
+              column_name: "id",
+              is_primary: true,
+            },
+          ],
+          { update: { structure: { "-1": { primaryKey: [] } } } }
+        ),
+        "mysql"
+      )
+    ).toEqual(["ALTER TABLE `shop`.`items` DROP PRIMARY KEY;"]);
+  });
+
+  it("ClickHouse: refuses primary key changes, keeps a no-op quiet", () => {
+    const pk = (primaryKey: string[]) =>
+      generateSqlFromPatches(
+        table(
+          "clickhouse",
+          [],
+          [
+            {
+              ...index,
+              index_name: "PRIMARY",
+              column_name: "id",
+              is_primary: true,
+            },
+          ],
+          { update: { structure: { "-1": { primaryKey } } } }
+        ),
+        "clickhouse"
+      );
+    expect(() => pk([])).toThrow(/primary key/i);
+    expect(() => pk(["id", "ts"])).toThrow(/primary key/i);
+    expect(pk(["id"])).toEqual([]);
+  });
+
+  it("refuses deleting the primary key's index, allows other indexes", () => {
+    const drop = (engine: string, constraints: Record<string, unknown>[]) =>
+      generateSqlFromPatches(
+        table(engine, [], constraints, {
+          delete: { constraints: { "0": {} } },
+        }),
+        engine as never
+      );
+    expect(() =>
+      drop("mysql", [
+        {
+          ...index,
+          index_name: "PRIMARY",
+          column_name: "id",
+          is_primary: true,
+        },
+      ])
+    ).toThrow(/Clear Primary/);
+    expect(() =>
+      drop("postgres", [
+        {
+          ...index,
+          index_name: "items_pkey",
+          column_name: "id",
+          is_primary: true,
+        },
+      ])
+    ).toThrow(/Clear Primary/);
+    expect(drop("postgres", [index])).toEqual([
+      'DROP INDEX IF EXISTS "shop"."items_name_idx";',
+    ]);
+  });
+
+  it("PostgreSQL: a UNIQUE constraint named PRIMARY is an ordinary index", () => {
+    const uniquePrimary = {
+      ...index,
+      index_name: "PRIMARY",
+      column_name: "email",
+      is_unique: true,
+      is_primary: false,
+    };
+    const run = (patches: unknown) =>
+      generateSqlFromPatches(
+        table("postgres", [], [uniquePrimary], patches),
+        "postgres"
+      );
+    // No primary key to clear; adding one only adds.
+    expect(
+      run({ update: { structure: { "-1": { primaryKey: [] } } } })
+    ).toEqual([]);
+    expect(
+      run({ update: { structure: { "-1": { primaryKey: ["id"] } } } })
+    ).toEqual(['ALTER TABLE "shop"."items" ADD PRIMARY KEY ("id");']);
+    // It can be edited and dropped like any index.
+    expect(run({ delete: { constraints: { "0": {} } } })).toEqual([
+      'DROP INDEX IF EXISTS "shop"."PRIMARY";',
+    ]);
+    expect(
+      run({ update: { constraints: { "0": { is_unique: "false" } } } })
+    ).toHaveLength(2);
+  });
 });

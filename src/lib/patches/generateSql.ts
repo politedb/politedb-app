@@ -16,7 +16,9 @@ import {
   type RecordedRows,
 } from "./rowPositionPatches";
 import {
+  findPrimaryKeyConstraint,
   isPrimaryKeyColumn,
+  primaryKeyColumnsFromConstraints,
   resolvePrimaryKeyColumns,
 } from "src/utils/primaryKey";
 import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
@@ -29,6 +31,8 @@ import {
   alterColumnStatements,
   createIndexSql,
   mysqlDefaultFromCatalog,
+  unsupportedSql,
+  replacePrimaryKeySql,
   dropColumnSql,
   dropForeignKeySql,
   dropIndexSql,
@@ -414,19 +418,11 @@ export function generateStructureSqlFromPatches(
       if (metadataPatch.primaryKey && Array.isArray(metadataPatch.primaryKey)) {
         const newPrimaryKey = metadataPatch.primaryKey.filter(Boolean).sort();
 
-        // Find existing primary key constraint
-        const existingPkConstraint = initConstraints?.find((c) =>
-          c.index_name.toLowerCase().includes("pkey")
-        );
-
-        // Get existing primary key columns
-        const existingPkColumns = existingPkConstraint
-          ? existingPkConstraint.column_name
-              .split(",")
-              .map((col) => col.trim())
-              .filter(Boolean)
-              .sort()
-          : [];
+        // The existing primary key, found the same way everywhere (by the
+        // is_primary flag first: MySQL names it PRIMARY, not *_pkey).
+        const existingPkConstraint = findPrimaryKeyConstraint(initConstraints);
+        const existingPkColumns =
+          primaryKeyColumnsFromConstraints(initConstraints).sort();
 
         // Only change primary key if it's actually different
         const pkChanged =
@@ -435,7 +431,20 @@ export function generateStructureSqlFromPatches(
             (col: string, idx: number) => col !== existingPkColumns[idx]
           );
 
-        if (pkChanged) {
+        if (pkChanged && engine === "clickhouse") {
+          // ClickHouse's key is part of the table engine definition.
+          unsupportedSql("Changing primary key", engine);
+        }
+        if (
+          pkChanged &&
+          existingPkConstraint &&
+          newPrimaryKey.length > 0 &&
+          (engine === "mysql" || engine === "mariadb")
+        ) {
+          sqlStatements.push(
+            replacePrimaryKeySql(schema, tableName, newPrimaryKey, engine)
+          );
+        } else if (pkChanged) {
           // Drop existing primary key if it exists
           if (existingPkConstraint) {
             sqlStatements.push(
@@ -908,7 +917,7 @@ export function generateConstraintSqlFromPatches(
       }
       // A comment-only (or no-op) edit must not drop and recreate the index.
       if (!changed) continue;
-      if (cellIsTruthy(originalConstraint.is_primary)) {
+      if (originalConstraint === findPrimaryKeyConstraint(initConstraints)) {
         throw new Error(
           `"${indexName}" is the primary key's index. Change the primary key with Primary above the columns instead.`
         );
@@ -968,6 +977,13 @@ export function generateConstraintSqlFromPatches(
 
       const originalConstraint = initConstraints[rowIndex];
       if (!originalConstraint) continue;
+      // Dropping the key's index (DROP INDEX PRIMARY on MySQL) would drop
+      // the primary key: that is done with Primary, not here.
+      if (originalConstraint === findPrimaryKeyConstraint(initConstraints)) {
+        throw new Error(
+          `"${originalConstraint.index_name}" is the primary key's index. Clear Primary above the columns to remove the primary key.`
+        );
+      }
 
       sqlStatements.push(
         dropIndexSql(schema, tableName, originalConstraint.index_name, engine)
