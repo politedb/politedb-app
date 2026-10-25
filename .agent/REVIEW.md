@@ -4926,3 +4926,58 @@ Clock harness and copied tests live only under `/private/tmp/batch3-rereview/`. 
 - `rtk npm run build`: **passed**, TypeScript + Vite. Existing node:zlib browser externalization, mixed static/dynamic import and >500 kB chunk warnings remain.
 - `rtk proxy git diff --check`: **passed** before report append. Rust unchanged; no Rust checks required. No native Tauri/WebView, live database writes, rendered light/dark or physical keyboard validation performed. Business-logic review; library/API documentation lookup unnecessary.
 - The pre-existing missing `isProfileLocked` object-drop check remains outside these fixes, as requested. Existing DROP SQL generation and capability/menu checks remain unchanged. This Codex review does not replace the destructive-scope Claude security-review pass required by `.agent/WORKFLOW.md`.
+
+
+## Connection sidebar UI/UX — batch 3 working-tree review (Codex, 2026-10-25)
+
+**Verdict: CHANGES REQUIRED**
+
+Scope: branch `feat/sidebar-polish`; tracked working-tree diff plus untracked application/test files. Batches 1–2 are committed baseline. Excluded `.claude/launch.json` and prior `.agent/REVIEW.md` history. No application source changes.
+
+### Finding
+
+- **P2 — Modified navigation keys run two actions.** `src/screens/connection/nav/sidebarListKeys.ts:39–52`; same issue in `src/components/common/ContextMenu.tsx:87–108` and section-header left/right handling. Navigation matches only `e.key`, consumes modifier chords and lets them bubble. Reproduction: assign a snippet `Alt+ArrowDown`, focus a sidebar row, press that chord: focus moves to the next row AND `useConnectionShortcuts` invokes `insertSnippetByHotkey("Alt+ArrowDown")`. This is a supported binding (snippet recording permits Alt plus an arrow); the global handler does not check `defaultPrevented`. Menus similarly navigate on modified arrows while global shortcuts remain eligible. Keep ordinary list/menu navigation limited to unmodified keys; preserve the explicit Shift+F10 exception. Add integration regression tests with the real connection shortcut handler so modified arrows/Home/End do not also navigate, and plain navigation plus Enter/Space and context-menu keys still work. Do not blanket-stop every key: existing app shortcuts must remain available.
+
+### Verification
+
+- Relevant Vitest run: **15 files / 74 tests passed**, covering ContextMenu keyboard, CanvasTable, SchemaCanvasTable, infinite scroll, navigation tests and sidebar name classes.
+- Shortcut/snippet run: **3 files / 12 tests passed** (`useConnectionShortcuts.test.ts`, `src/lib/snippets`, `keyboardShortcuts.test.ts`).
+- Temporary review-only probes: **4 tests passed**. Verified Escape callback, no interception of an outside input's arrow event, safe cleanup after opener removal, preserving focus moved to another input, and reproduced modified-arrow double handling with the actual `useConnectionShortcuts` hook. Temporary files removed afterward.
+- `npm run build`: **passed** (`tsc` + Vite). Warnings: browser externalization of `node:zlib`, ineffective dynamic imports, and chunks above 500 kB; outside changed paths.
+- `git diff --check`: passed before this report append.
+
+### Reviewed behavior and limits
+
+- Table pagination slices the existing filtered list, including appended drafts; schema/search reset keys are explicit. Active-table lookup extends the prefix through the active row, and loadMore advances from that shown prefix. Existing hook test covers an active index beyond the first page and continuation. Search/schema/draft combinations were traced in source, not exercised in a live connected sidebar.
+- All shared ContextMenu call sites inspected. Only the three sidebar panes opt into autofocus; other users retain their existing focus behavior. CanvasTable already excludes menu descendants from table key handling. Role changes are reflected in affected table tests. Escape's global close listener and mouse submenu opening/click handlers remain intact; submenu keyboard traversal has passing tests. No new editor/input interception outside the menu found.
+- Drop extraction preserves module-level duplicate-drop state, current lock checks before/after confirmation, SQL construction/execution, refresh, toasts and finally cleanup. Object-pane regression tests pass. No real destructive database operation executed. Workflow-required second Claude security review still applies to destructive-action scope.
+- Snippet tooltip/preview renders local user content as text; no new logging, analytics or network transmission introduced. Tooltip SQL capped at 500 characters plus ellipsis; preview uses the first non-empty trimmed line. Scope/hotkey/name/preview flex constraints and dark overrides inspected; literal focus classes survive production build.
+- **Visual/runtime limitation:** no live Tauri/webview interaction or screenshot validation performed. Two-line snippet layout at narrow widths and both density settings, actual dark-mode contrast, OS context-menu keys, native dialogs, and pointer travel across submenu boundaries still need visual smoke testing. DOM tests do not establish browser-native Enter/Space activation or pixel layout.
+
+
+## Connection sidebar UI/UX — batch 3 re-review (Codex, 2026-10-25)
+
+**Verdict: VERIFIED WITH LIMITATIONS**
+
+Scope: branch `feat/sidebar-polish`, HEAD `83a04f9f6efcf49ca9c1a9b8ba426adc45b0244a`; full uncommitted tracked diff and untracked source/tests, excluding `.claude/launch.json`. No staged changes. Rechecked the P2 in “Connection sidebar UI/UX — batch 3 working-tree review (Codex, 2026-10-25)” and the remaining batch 3 changes. Only this report appended; no repository application/test source changes, staging or commits.
+
+### Finding disposition
+
+- **P2 modified navigation keys run two actions — resolved.** `sidebarListKeys.ts` checks Alt/Ctrl/Meta/Shift before Up/Down/Home/End handling, without preventing default or stopping propagation for those chords. Shift+F10 and ContextMenu remain handled before that guard. `SidebarSectionHeader` applies the same guard before either horizontal-arrow toggle; `ContextMenu` guards its local navigation handler before root/submenu traversal. The existing global Escape-close listener remains intact. Enter/Space native-button activation paths and click handlers are unchanged.
+- New `sidebarKeys.shortcuts.test.tsx` uses the production `useConnectionShortcuts` hook with default shortcut configuration and a spy snippet action: Alt+Down/Alt+End on a row and Alt+Down in an autofocused menu reach the snippet action without moving focus; Alt+Right does not expand a header; plain Down still moves focus. This establishes event propagation through the real hook, rather than persisted snippet lookup/execution against a live editor.
+- Independent temporary probes additionally pass all four modifier flags against Up/Down/Home/End in lists, both header expansion states, root-menu navigation/submenu opening, and submenu navigation/closing. Modified events remain uncancelled locally; plain Right/Left still enter/leave submenus and plain Escape still calls close. No new actionable regression found in this scope.
+
+### Remaining batch 3 compatibility
+
+- **Pagination:** tables still derive from the existing schema/search-filtered list, including its drafts; counts use the full list. The 100-row prefix extends through the active table, and subsequent loading advances from that extended prefix. Schema/search reset keys remain explicit. Views retain their existing 20-row pagination; other hook callers omit the optional index and preserve previous behavior. Hook tests cover late sentinel mounting, active-row extension and continued loading. Live database/search/schema/draft combinations were inspected in source, not exercised in a connected desktop app.
+- **Keyboard/menu consumers:** all shared ContextMenu call sites rechecked; only the three sidebar panes opt into autofocus. Other consumers keep their prior focus policy. CanvasTable excludes menu descendants from its own key handling; its tests and SchemaCanvasTable tests pass with the new menuitem roles. Disabled-item skipping, wrapping, submenu traversal, focus restoration and autofocus opt-out tests pass. Sidebar navigation remains limited to marked enabled rows; unrelated controls are excluded. Existing Shift+F10/ContextMenu tests pass. Native Enter/Space synthesis remains a runtime limitation below.
+- **Snippets:** first non-empty trimmed SQL line, scope, formatted hotkey, accessible insertion label and capped tooltip remain intact. Content renders as text; no new telemetry, logging or network transmission. Layout/focus classes and dark overrides inspected; pixel layout/contrast not certified.
+- **Drop hook extraction:** compares as relocation of the existing shared guard/subscription, profile isolation, lock checks before/after confirmation, SQL execution, refresh, toast and finally cleanup. Object-pane tests pass for duplicate drops across remount, cancellation/confirmation rejection, remounted-menu re-enabling and locking during confirmation. No destructive database requests executed. The workflow-required Claude security-review pass still applies; this report does not replace it.
+
+### Verification and limitations
+
+- `rtk npm run test:run -- src/screens/connection/nav src/screens/connection/lib src/components/common/ContextMenu.keyboard.test.tsx src/components/table/CanvasTable.test.ts src/components/table/SchemaCanvasTable.test.tsx src/hooks/useInfiniteScroll.test.tsx src/screens/connection/hooks/useConnectionShortcuts.test.ts src/screens/connection/hooks/useTableDestructiveActions.test.ts src/lib/snippets src/stores/keyboardShortcuts.test.ts src/lib/databaseObjects.test.ts src/lib/system-dialog/index.test.ts`: **26 files / 122 tests passed**.
+- `rtk proxy npm exec -- vitest run --config /private/tmp/sidebar-batch3-rereview/config.mjs`: **1 file / 4 independent modifier-matrix tests passed**, importing production components/helper. Initial probe used an exact accessible name that omitted the submenu chevron; corrected the temporary selector before the passing run. No repository tests modified.
+- `rtk npm run build`: **passed**, TypeScript + Vite. Existing warnings remain: `node:zlib` browser externalization, ineffective dynamic imports and chunks over 500 kB.
+- `rtk proxy git diff --check`: **passed** before report append. Rust unchanged; no Rust checks needed. Ordinary code review; no library/API documentation lookup needed.
+- **Limitations:** functional checks use jsdom; no native Tauri/WebView or screenshot smoke test performed. Narrow-width/two-density snippet layout, actual light/dark contrast, physical OS context-menu keys, native Enter/Space activation, native dialogs and pointer travel across submenu gaps remain unverified. No live database session was used for this review. Verdict verifies the P2 fix and inspected/tested compatibility, subject to these runtime/visual limits.
