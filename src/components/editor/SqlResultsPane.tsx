@@ -1,7 +1,8 @@
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { Ref } from "preact";
 import { cn } from "src/utils/cn";
 import { TableData } from "src/components/table/TableData";
-import { TableFooter } from "src/components/table/TableFooter";
+import { SqlResultSummary } from "./SqlResultSummary";
 import type { SqlResultRun, SqlResultSlot } from "src/lib/tauri";
 import {
   getSqlStreamSnapshot,
@@ -66,9 +67,14 @@ function cachedStreamPlan(key: string, parse: () => QueryPlan | null) {
   return plan;
 }
 
-function EmptyResults() {
+function EmptyResults(props: { focusRef?: Ref<HTMLDivElement> }) {
   return (
-    <div class="p-6 text-center">
+    // Focusable, so keyboard focus has a place after the last run closes.
+    <div
+      ref={props.focusRef}
+      tabIndex={-1}
+      class="p-6 text-center outline-none"
+    >
       <p class="text-sm text-neutral-500">Run a query to see results here.</p>
     </div>
   );
@@ -102,15 +108,35 @@ function SmallStateCard(props: { kind: "queued" | "running" | "empty" }) {
 }
 
 function ErrorCard(props: { title?: string; right?: string; error?: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.error || "Unknown error.");
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable: the text stays selectable.
+    }
+  };
   return (
     <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
-      <div class="mb-2 flex items-center justify-between">
+      <div class="mb-2 flex items-center justify-between gap-2">
         <p class="text-sm font-medium text-rose-700">
           {props.title ?? "Error"}
         </p>
-        {props.right ? (
-          <span class="text-xs text-rose-600">{props.right}</span>
-        ) : null}
+        <div class="flex items-center gap-2">
+          {props.right ? (
+            <span class="text-xs text-rose-600">{props.right}</span>
+          ) : null}
+          <Button
+            variant="ghost"
+            class="h-6 px-2 text-xs text-rose-700 hover:bg-rose-100"
+            onClick={() => void copy()}
+            aria-label={copied ? "Error copied" : "Copy error"}
+          >
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
       </div>
 
       <OverlayScrollArea
@@ -160,25 +186,56 @@ function statusTone(status: SqlResultSlot["status"]) {
   return "text-neutral-400";
 }
 
-function runStatus(run: SqlResultRun): SqlResultSlot["status"] {
-  if (run.slots.some((slot) => slot.status === "error")) return "error";
-  if (run.slots.some((slot) => slot.status === "running")) return "running";
-  if (run.slots.some((slot) => slot.status === "queued")) return "queued";
-  return "done";
+/** One result tab: a statement of a run (every statement is its own tab). */
+type ResultTab = {
+  key: string;
+  runId: string;
+  /** The statement's position in its run's slots. */
+  position: number;
+  title: string;
+  status: SqlResultSlot["status"];
+  sql: string;
+};
+
+/** A statement result's name, the same on its tab and anywhere else. */
+export function slotTitle(run: SqlResultRun, position: number): string {
+  const slot = run.slots[position];
+  return (
+    slot?.title ??
+    (run.slots.length > 1 ? `${run.title} · ${position + 1}` : run.title)
+  );
 }
 
-function RunTabs(props: {
-  runs: SqlResultRun[];
-  activeRunId: string;
-  onSelect: (runId: string) => void;
-  onClose: (runId: string) => void;
+export function resultTabs(runs: SqlResultRun[]): ResultTab[] {
+  return runs.flatMap((run) =>
+    run.slots.map((slot, position) => ({
+      key: `${run.id}:${slot.index}`,
+      runId: run.id,
+      position,
+      title: slotTitle(run, position),
+      status: slot.status,
+      sql: slot.sql,
+    }))
+  );
+}
+
+function ResultTabs(props: {
+  tabs: ResultTab[];
+  activeKey: string;
+  onSelect: (tab: ResultTab) => void;
+  /** Closes these tabs (a run whose tabs all close, closes as a whole). */
+  onClose: (tabs: ResultTab[]) => void;
+  /**
+   * The keyboard closed a tab: the owner moves focus once the results show
+   * (to the selected tab, or the empty area when none is left).
+   */
+  onClosedByKeyboard?: () => void;
 }) {
-  const { runs, activeRunId, onSelect, onClose } = props;
+  const { tabs, activeKey, onSelect, onClose, onClosedByKeyboard } = props;
   const [ctx, setCtx] = useState<{
     x: number;
     y: number;
-    runId: string;
-    runIndex: number;
+    index: number;
   } | null>(null);
 
   const menuItems: MenuItem[] = ctx
@@ -186,32 +243,50 @@ function RunTabs(props: {
         {
           type: "item",
           label: "Close",
-          onClick: () => onClose(ctx.runId),
+          onClick: () => onClose([tabs[ctx.index]!]),
         },
         {
           type: "item",
           label: "Close Others",
-          disabled: runs.length <= 1,
-          onClick: () =>
-            runs.forEach((run) => {
-              if (run.id !== ctx.runId) onClose(run.id);
-            }),
+          disabled: tabs.length <= 1,
+          onClick: () => onClose(tabs.filter((_, i) => i !== ctx.index)),
         },
         {
           type: "item",
           label: "Close to the Right",
-          disabled: ctx.runIndex >= runs.length - 1,
-          onClick: () =>
-            runs.slice(ctx.runIndex + 1).forEach((run) => onClose(run.id)),
+          disabled: ctx.index >= tabs.length - 1,
+          onClick: () => onClose(tabs.slice(ctx.index + 1)),
         },
         { type: "sep" },
         {
           type: "item",
           label: "Close All",
-          onClick: () => runs.forEach((run) => onClose(run.id)),
+          onClick: () => onClose(tabs),
         },
       ]
     : [];
+
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Arrow keys move between tabs; Delete closes the focused one.
+  const onTabKey = (e: KeyboardEvent, idx: number) => {
+    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (step) {
+      e.preventDefault();
+      const next = tabs[(idx + step + tabs.length) % tabs.length];
+      if (!next) return;
+      onSelect(next);
+      (
+        listRef.current?.querySelector(
+          `[data-tab-key="${next.key}"]`
+        ) as HTMLElement | null
+      )?.focus();
+    } else if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      onClosedByKeyboard?.();
+      onClose([tabs[idx]!]);
+    }
+  };
 
   return (
     <div class="shrink-0 border-b border-neutral-200 bg-neutral-100">
@@ -220,50 +295,53 @@ function RunTabs(props: {
         horizontal
         vertical={false}
       >
-        {runs.map((run, idx) => {
-          const status = runStatus(run);
-          const active = run.id === activeRunId;
-          return (
-            <div
-              key={run.id}
-              onClick={() => onSelect(run.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setCtx({
-                  x: e.clientX,
-                  y: e.clientY,
-                  runId: run.id,
-                  runIndex: idx,
-                });
-              }}
-              class={cn(
-                "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
-                "border border-neutral-200 transition-colors",
-                active
-                  ? "bg-white text-neutral-800"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-100"
-              )}
-            >
-              <span class={cn("mr-0.5 text-xs", statusTone(status))}>
-                {statusMark(status)}
-              </span>
-              <span>{run.title}</span>
-              <Button
-                variant="ghost"
-                class="invisible justify-center rounded-full p-px group-hover:visible"
-                aria-label={`Close ${run.title}`}
-                title={`Close ${run.title}`}
-                onClick={(e) => {
+        <div ref={listRef} role="tablist" aria-label="Results" class="contents">
+          {tabs.map((tab, idx) => {
+            const active = tab.key === activeKey;
+            return (
+              <div
+                key={tab.key}
+                role="tab"
+                data-tab-key={tab.key}
+                aria-selected={active}
+                tabIndex={active ? 0 : -1}
+                title={tab.sql.slice(0, 400)}
+                onKeyDown={(e) => onTabKey(e, idx)}
+                onClick={() => onSelect(tab)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
                   e.stopPropagation();
-                  onClose(run.id);
+                  setCtx({ x: e.clientX, y: e.clientY, index: idx });
                 }}
+                class={cn(
+                  "group flex shrink-0 items-center justify-between gap-1 rounded-md px-2 py-1 text-xs",
+                  "border border-neutral-200 transition-colors",
+                  active
+                    ? "bg-white text-neutral-800"
+                    : "bg-neutral-100 text-neutral-600 hover:bg-neutral-100"
+                )}
               >
-                <XIcon className="size-3" />
-              </Button>
-            </div>
-          );
-        })}
+                <span class={cn("mr-0.5 text-xs", statusTone(tab.status))}>
+                  {statusMark(tab.status)}
+                </span>
+                <span>{tab.title}</span>
+                <Button
+                  variant="ghost"
+                  tabIndex={-1}
+                  class="invisible justify-center rounded-full p-px group-focus-within:visible group-hover:visible"
+                  aria-label={`Close ${tab.title}`}
+                  title={`Close ${tab.title}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose([tab]);
+                  }}
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       </OverlayScrollArea>
 
       <ContextMenu
@@ -274,43 +352,6 @@ function RunTabs(props: {
         onClose={() => setCtx(null)}
       />
     </div>
-  );
-}
-
-function StatementTabs(props: {
-  slots: SqlResultSlot[];
-  activeIndex: number;
-  onSelect: (idx: number) => void;
-}) {
-  const { slots, activeIndex, onSelect } = props;
-  if (slots.length <= 1) return null;
-
-  return (
-    <OverlayScrollArea
-      className="shrink-0 border-b border-neutral-200 bg-neutral-50"
-      contentClassName="flex items-center gap-1 px-2 py-1"
-      horizontal
-      vertical={false}
-    >
-      {slots.map((slot, idx) => (
-        <button
-          key={slot.index}
-          onClick={() => onSelect(idx)}
-          class={cn(
-            "inline-flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-xs",
-            idx === activeIndex
-              ? "bg-white text-neutral-800 ring-1 ring-neutral-200"
-              : "text-neutral-600 hover:bg-neutral-100"
-          )}
-          title={slot.sql.slice(0, 400)}
-        >
-          <span>Statement {idx + 1}</span>
-          <span class={cn("text-[10px]", statusTone(slot.status))}>
-            {statusMark(slot.status)}
-          </span>
-        </button>
-      ))}
-    </OverlayScrollArea>
   );
 }
 
@@ -363,7 +404,8 @@ function ResultsContent(props: {
         totalRows={slot.result.rows.length}
         getRowAt={(rowIndex) => slot.result!.rows[rowIndex]}
         rowsVersion={0}
-        onCellChange={() => {}}
+        // Query results are not editable: an edit here would go nowhere.
+        readOnly
       />
     );
   }
@@ -378,12 +420,13 @@ function ResultsContent(props: {
           totalRows={stream.totalRows}
           getRowAt={stream.getRowAt}
           rowsVersion={stream.rowsVersion}
-          onCellChange={() => {}}
+          readOnly
         />
       );
     }
 
-    if (stream.status === "done") {
+    // An empty stream's "done" is provisional until the statement ends.
+    if (stream.status === "done" && slot.status !== "running") {
       return (
         <div class="p-3">
           <SmallStateCard kind="empty" />
@@ -426,6 +469,8 @@ export function SqlResultsPane(props: {
   activeIndex: number;
   setActiveIndex: (idx: number) => void;
   onCloseRun: (runId: string) => void;
+  /** Closes one statement's result (the runner closes the run if needed). */
+  onCloseSlot?: (runId: string, slotPosition: number) => void;
   /** Measure the statement behind an estimated plan (Explain runs only). */
   onRunAnalyze?: (origin: { sql: string; connectionId?: string }) => void;
 }) {
@@ -437,10 +482,49 @@ export function SqlResultsPane(props: {
     activeIndex,
     setActiveIndex,
     onCloseRun,
+    onCloseSlot,
   } = props;
 
   const activeRun =
     runs.find((run) => run.id === activeRunId) ?? runs[runs.length - 1];
+
+  // After the keyboard closes a tab, focus what is left: the selected tab,
+  // or the empty results area. Decided from the results actually shown (one
+  // tab can close a whole running script).
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
+  const focusAfterCloseRef = useRef(false);
+  useEffect(() => {
+    if (!focusAfterCloseRef.current) return;
+    focusAfterCloseRef.current = false;
+    if (!activeRun) {
+      emptyRef.current?.focus();
+      return;
+    }
+    (
+      paneRef.current?.querySelector(
+        '[role="tab"][aria-selected="true"]'
+      ) as HTMLElement | null
+    )?.focus();
+  });
+
+  const tabs = useMemo(() => resultTabs(runs), [runs]);
+  const closeTabs = (closing: ResultTab[]) => {
+    for (const run of runs) {
+      const positions = closing
+        .filter((tab) => tab.runId === run.id)
+        .map((tab) => tab.position);
+      if (!positions.length) continue;
+      if (positions.length >= run.slots.length || !onCloseSlot) {
+        onCloseRun(run.id);
+        continue;
+      }
+      // Last first, so earlier positions stay valid.
+      for (const position of positions.sort((a, b) => b - a)) {
+        onCloseSlot(run.id, position);
+      }
+    }
+  };
   const safeIndex = Math.min(
     Math.max(activeIndex, 0),
     (activeRun?.slots.length ?? 0) - 1
@@ -554,10 +638,8 @@ export function SqlResultsPane(props: {
         if (!load) continue;
         options.push({
           id: `${run.id}:${candidate.index}`,
-          title:
-            run.slots.length > 1
-              ? `${run.title} · ${candidate.index + 1}`
-              : run.title,
+          // The name its result tab shows.
+          title: slotTitle(run, run.slots.indexOf(candidate)),
           load,
         });
       }
@@ -568,21 +650,40 @@ export function SqlResultsPane(props: {
   if (!activeRun || !slot) {
     return (
       <div class="flex h-full min-h-0 flex-col bg-white">
-        <EmptyResults />
+        <EmptyResults focusRef={emptyRef} />
       </div>
     );
   }
 
-  const footerTotalRows =
-    slot.mode === "direct" && slot.status === "done" && slot.result
-      ? slot.result.rows.length
-      : slot.mode === "stream" && stream
-        ? stream.totalRows
-        : 0;
-
-  const footerLoadedMax = footerTotalRows > 0 ? footerTotalRows - 1 : -1;
-  const footerLimit = Math.max(footerTotalRows, 50);
-  const footerOffset = 0;
+  const slotElapsed =
+    slot.startedAt !== undefined && slot.finishedAt !== undefined
+      ? slot.finishedAt - slot.startedAt
+      : undefined;
+  // What a finished statement returned, for the summary line.
+  const summary =
+    slot.status === "error"
+      ? null
+      : slot.mode === "direct" && slot.status === "done" && slot.result
+        ? {
+            columns: slot.result.columns,
+            rowCount: slot.result.rows.length,
+            getRow: (index: number) => slot.result!.rows[index],
+            elapsedMs: slotElapsed,
+          }
+        : slot.mode === "stream" &&
+            slot.status === "done" &&
+            stream.status === "done"
+          ? {
+              columns: stream.columns,
+              rowCount: stream.totalRows,
+              getRow: stream.getRowAt,
+              truncated: stream.truncated,
+              // The backend's own timing; the statement's start/finish if absent.
+              elapsedMs: Number.isFinite(stream.elapsedMs)
+                ? stream.elapsedMs
+                : slotElapsed,
+            }
+          : null;
 
   const isDirectTable =
     slot.mode === "direct" && slot.status === "done" && !!slot.result;
@@ -598,21 +699,18 @@ export function SqlResultsPane(props: {
     !(slot.mode === "stream" && stream.status === "error");
 
   return (
-    <div class="flex h-full min-h-0 flex-col bg-white">
-      <RunTabs
-        runs={runs}
-        activeRunId={activeRun.id}
-        onSelect={(runId) => {
-          setActiveRunId(runId);
-          setActiveIndex(0);
+    <div ref={paneRef} class="flex h-full min-h-0 flex-col bg-white">
+      <ResultTabs
+        tabs={tabs}
+        activeKey={`${activeRun.id}:${slot.index}`}
+        onSelect={(tab) => {
+          setActiveRunId(tab.runId);
+          setActiveIndex(tab.position);
         }}
-        onClose={onCloseRun}
-      />
-
-      <StatementTabs
-        slots={activeRun.slots}
-        activeIndex={safeIndex}
-        onSelect={setActiveIndex}
+        onClose={closeTabs}
+        onClosedByKeyboard={() => {
+          focusAfterCloseRef.current = true;
+        }}
       />
 
       {showAnalyzerUpgrade && (
@@ -669,30 +767,7 @@ export function SqlResultsPane(props: {
         </OverlayScrollArea>
       )}
 
-      {!plan && (
-        <TableFooter
-          className="justify-center"
-          viewMode="data"
-          onViewModeChange={() => {}}
-          structPaneTab="columns"
-          filterBarVisible={false}
-          limit={footerLimit}
-          offset={footerOffset}
-          loadedMax={footerLoadedMax}
-          totalRows={footerTotalRows}
-          rowCountIsEstimated={false}
-          onCountExact={undefined}
-          onPageChange={() => {}}
-          onAddRow={() => {}}
-          onAddColumn={() => {}}
-          onAddIndex={() => {}}
-          onFilters={() => {}}
-          readOnly
-          showViewToggle={false}
-          showActions={false}
-          showFiltersAndPaging={false}
-        />
-      )}
+      {!plan && summary ? <SqlResultSummary {...summary} /> : null}
     </div>
   );
 }

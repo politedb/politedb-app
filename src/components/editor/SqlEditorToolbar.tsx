@@ -1,6 +1,9 @@
 import { Button } from "src/components/common/Button";
 import { cn } from "src/utils/cn";
 import { PlayIcon, XIcon } from "src/components/icons";
+import { formatShortcutLabel } from "src/stores/keyboardShortcuts";
+
+const RUN_SHORTCUT = formatShortcutLabel("Mod+Enter");
 
 type Props = {
   onExport?: () => void;
@@ -50,9 +53,10 @@ export function SqlEditorToolbar(props: Props) {
           variant="ghost"
           onClick={onExport}
           disabled={!onExport}
+          title="Save the editor's SQL to a .sql file"
           class={toolBtn}
         >
-          Export
+          Save as…
         </Button>
 
         <Button
@@ -105,8 +109,8 @@ export function SqlEditorToolbar(props: Props) {
             canCancel
               ? "Cancel"
               : hasSelection
-                ? "Run Selected (⌘⏎)"
-                : "Run Current (⌘⏎)"
+                ? `Run the selected SQL (${RUN_SHORTCUT})`
+                : `Run the statement at the cursor (${RUN_SHORTCUT})`
           }
           class={cn("py-1.5 disabled:opacity-60")}
         >
@@ -124,7 +128,9 @@ export function SqlEditorToolbar(props: Props) {
                   ? "Run Selected"
                   : "Run Current"}
           </span>
-          <span class="ml-1 text-[10px] text-white/70">⌘⏎</span>
+          {canCancel ? null : (
+            <span class="ml-1 text-[10px] text-white/70">{RUN_SHORTCUT}</span>
+          )}
         </Button>
       </div>
     </div>

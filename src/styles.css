@@ -727,6 +727,12 @@ table {
   border-radius: 4px;
 }
 
+.monaco-editor .sql-error-highlight {
+  text-decoration: underline wavy rgb(225, 29, 72);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+
 /* container */
 .split-pane {
   position: relative;

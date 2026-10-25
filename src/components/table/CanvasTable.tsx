@@ -365,11 +365,32 @@ function escapeMarkdownCell(value: string): string {
     .replace(/\n/g, "<br>");
 }
 
+/**
+ * One key per column: a repeated name (SELECT 1 AS id, 2 AS id) gets _2, _3…,
+ * skipping names the result already uses, so no value overwrites another.
+ */
+export function uniqueColumnKeys(names: string[]): string[] {
+  const used = new Set(names);
+  const seen = new Set<string>();
+  return names.map((name) => {
+    if (!seen.has(name)) {
+      seen.add(name);
+      return name;
+    }
+    let n = 2;
+    while (used.has(`${name}_${n}`) || seen.has(`${name}_${n}`)) n++;
+    const key = `${name}_${n}`;
+    seen.add(key);
+    return key;
+  });
+}
+
 function getRowObjects(columns: ColumnMeta[], rows: unknown[][]) {
+  const keys = uniqueColumnKeys(columns.map((col) => col.name));
   return rows.map((row) => {
     const obj: Record<string, string | null> = {};
-    columns.forEach((col, idx) => {
-      obj[col.name] = cellToString(row[idx], true);
+    keys.forEach((key, idx) => {
+      obj[key] = cellToString(row[idx], true);
     });
     return obj;
   });
@@ -409,7 +430,7 @@ function parseRowsFromInternalClipboard(text: string): {
   }
 }
 
-function formatRowsForClipboard(args: {
+export function formatRowsForClipboard(args: {
   format:
     | "plain"
     | "json"

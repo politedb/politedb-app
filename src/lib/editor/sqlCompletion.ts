@@ -5,13 +5,16 @@ import {
   getFunctionsForEngine,
   ALL_COMPLETION_KEYWORDS,
 } from "src/sqlConstants";
+import { maskSql } from "./sqlLexer";
+import { cursorScopes, type Scope } from "./sqlScope";
+import { dialectFor, type SqlDialect } from "./sqlDialect";
 
 /**
  * Smart SQL Completion - TablePlus-level
  *
  * Features:
  * - Engine-specific keywords and functions (PostgreSQL, MySQL, SQLite)
- * - Quoted identifier support (PostgreSQL "", MySQL ``)
+ * - Dialect-aware lexing and quoting (sqlLexer, sqlDialect)
  * - Multi-table column suggestions with alias awareness
  * - CTE (WITH clause) support
  * - INSERT INTO (columns), UPDATE SET context
@@ -33,6 +36,10 @@ type TableRef = {
   schema?: string;
   table: string;
   alias?: string;
+  /** The alias, else the table, as written ("U", [order], u). */
+  written: string;
+  /** The table name was quoted ("Users"). */
+  tableQuoted: boolean;
 };
 
 type CteRef = {
@@ -42,10 +49,11 @@ type CteRef = {
 
 type ParsedContext = {
   state: EditorState;
-  aliasMap: Map<string, AliasRef>;
+  /** Alias maps by scope, innermost first. */
+  aliasMaps: Array<Map<string, AliasRef>>;
   recentTables: TableRef[];
   ctes: CteRef[];
-  dotBase?: string;
+  dotRef?: AliasRef;
   dotSchema?: string;
   dotTable?: string;
   insertTable?: string;
@@ -69,44 +77,133 @@ type EditorState =
   | "DEFAULT";
 
 /* =========================
- * Engine-specific quoting
+ * Names as written
  * ========================= */
 
-function isPg(ctx: CompletionCtx): boolean {
-  return !ctx.engine || ctx.engine === "postgres";
+/** One identifier as written: "quoted", `quoted`, [quoted] or plain. */
+const IDENT_PART = String.raw`(?:"(?:[^"]|"")*"|\x60(?:[^\x60]|\x60\x60)*\x60|\[(?:[^\]]|\]\])*\]|[A-Za-z_][A-Za-z0-9_$]*)`;
+
+function isQuoted(part: string): boolean {
+  return /^["`[]/.test(part);
 }
 
-function isMySql(ctx: CompletionCtx): boolean {
-  return ctx.engine === "mysql" || ctx.engine === "mariadb";
+function unquoteIdent(part: string): string {
+  if (part.startsWith('"') && part.endsWith('"')) {
+    return part.slice(1, -1).replace(/""/g, '"');
+  }
+  if (part.startsWith("`") && part.endsWith("`")) {
+    return part.slice(1, -1).replace(/``/g, "`");
+  }
+  if (part.startsWith("[") && part.endsWith("]")) {
+    return part.slice(1, -1).replace(/\]\]/g, "]");
+  }
+  return part;
 }
 
-function isSqlite(ctx: CompletionCtx): boolean {
+/** Blanks string literals and quoted names, so keywords inside them are ignored. */
+function stripLiterals(sql: string): string {
+  return sql
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/"(?:[^"]|"")*"/g, '""')
+    .replace(/`(?:[^`]|``)*`/g, "``");
+}
+
+/**
+ * Alias map key: a quoted name matches exactly, an unquoted one in any case
+ * (U and u).
+ */
+function refKey(name: string, quoted: boolean): string {
+  return quoted ? `q:${name}` : `u:${name.toLowerCase()}`;
+}
+
+function lookupInScope(
+  aliasMap: Map<string, AliasRef>,
+  name: string,
+  quoted: boolean
+): AliasRef | undefined {
+  if (quoted) {
+    // "u" also names an unquoted alias u (folded to lower case).
+    return (
+      aliasMap.get(refKey(name, true)) ??
+      (name === name.toLowerCase()
+        ? aliasMap.get(refKey(name, false))
+        : undefined)
+    );
+  }
   return (
-    ctx.engine === "sqlite" || ctx.engine === "d1" || ctx.engine === "turso"
+    aliasMap.get(refKey(name, false)) ??
+    aliasMap.get(refKey(name.toLowerCase(), true))
   );
 }
 
-const PG_SAFE_IDENT = /^[a-z_][a-z0-9_]*$/;
-const MYSQL_SAFE_IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-
-function quoteIdentPg(name: string): string {
-  if (!name) return name;
-  if (name.startsWith('"') && name.endsWith('"')) return name;
-  if (PG_SAFE_IDENT.test(name)) return name;
-  return `"${name.replace(/"/g, '""')}"`;
+/** The nearest scope's table a name refers to. */
+function lookupRef(
+  aliasMaps: Array<Map<string, AliasRef>>,
+  name: string,
+  quoted: boolean
+): AliasRef | undefined {
+  for (const aliasMap of aliasMaps) {
+    const ref = lookupInScope(aliasMap, name, quoted);
+    if (ref) return ref;
+  }
+  return undefined;
 }
 
-function quoteIdentMySql(name: string): string {
-  if (!name) return name;
-  if (name.startsWith("`") && name.endsWith("`")) return name;
-  if (MYSQL_SAFE_IDENT.test(name)) return name;
-  return `\`${name.replace(/`/g, "``")}\``;
+/**
+ * The schema name `name` refers to: exact, else in any case for an unquoted
+ * name.
+ */
+function findSchema(
+  ctx: CompletionCtx,
+  name: string,
+  quoted = false
+): string | undefined {
+  return (
+    ctx.schemas.find((schema) => schema === name) ??
+    (quoted
+      ? undefined
+      : ctx.schemas.find(
+          (schema) => schema.toLowerCase() === name.toLowerCase()
+        ))
+  );
+}
+
+/**
+ * The columnsByTable key and schema of a table reference: an unqualified name
+ * resolves among the known tables, preferring the active schema.
+ */
+function resolveTable(
+  ctx: CompletionCtx,
+  schema: string | undefined,
+  table: string
+): { key: string; schema: string; table: string } {
+  const lower = table.toLowerCase();
+  const matches = ctx.tables.filter(
+    (t) =>
+      (t.name === table || t.name.toLowerCase() === lower) &&
+      (!schema ||
+        t.schema === schema ||
+        t.schema.toLowerCase() === schema.toLowerCase())
+  );
+  const pick =
+    matches.find(
+      (t) => t.name === table && t.schema === (schema ?? ctx.activeSchema)
+    ) ??
+    matches.find((t) => t.schema === (schema ?? ctx.activeSchema)) ??
+    matches[0];
+  if (pick) {
+    return {
+      key: `${pick.schema}.${pick.name}`,
+      schema: pick.schema,
+      table: pick.name,
+    };
+  }
+  const fallbackSchema = schema ?? ctx.activeSchema ?? "public";
+  return { key: `${fallbackSchema}.${table}`, schema: fallbackSchema, table };
 }
 
 function quoteIdent(ctx: CompletionCtx, name: string): string {
-  if (isPg(ctx) || isSqlite(ctx)) return quoteIdentPg(name);
-  if (isMySql(ctx)) return quoteIdentMySql(name);
-  return name;
+  return dialectFor(ctx.engine).quote(name);
 }
 
 function quotePath(ctx: CompletionCtx, ...parts: string[]): string {
@@ -116,14 +213,6 @@ function quotePath(ctx: CompletionCtx, ...parts: string[]): string {
 /* =========================
  * Parsing utilities
  * ========================= */
-
-function makeKey(
-  schema: string | undefined,
-  table: string,
-  defaultSchema = "public"
-): string {
-  return `${schema ?? defaultSchema}.${table}`;
-}
 
 function getWordRange(
   model: monaco.editor.ITextModel,
@@ -138,150 +227,82 @@ function getWordRange(
   );
 }
 
-function getContextText(
-  model: monaco.editor.ITextModel,
-  pos: monaco.Position,
-  maxChars = 500
-): string {
-  const offset = model.getOffsetAt(pos);
-  const start = Math.max(0, offset - maxChars);
-  return model.getValue().slice(start, offset);
-}
+// Lex the whole buffer when it is not huge, so a literal or comment that
+// starts far above the cursor and a statement end far below it are known;
+// else a window around the cursor.
+const LEX_WHOLE_BELOW = 200_000;
+const MAX_BEFORE = 20_000;
+const MAX_AFTER = 20_000;
+// State detection looks at the end of the text before the cursor.
+const MAX_STATE_CONTEXT = 1000;
+
+type Statement = {
+  /** The cursor's statement, masked (see maskSql). */
+  text: string;
+  /** `text` for finding keywords (see maskSql). */
+  keywords: string;
+  /** The cursor's offset in `text`. */
+  cursor: number;
+};
 
 /**
- * Remove comments and normalize whitespace, preserving string contents
+ * The statement around the cursor, both sides of it, or null when the cursor
+ * is in a string literal or a comment.
  */
-function normalizeContext(sql: string): string {
-  let result = "";
-  let i = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inBacktick = false;
+function readStatement(
+  model: monaco.editor.ITextModel,
+  pos: monaco.Position,
+  dialect: SqlDialect
+): Statement | null {
+  const value = model.getValue();
+  const offset = model.getOffsetAt(pos);
+  const whole = value.length <= LEX_WHOLE_BELOW;
+  const start = whole ? 0 : Math.max(0, offset - MAX_BEFORE);
+  const end = whole ? value.length : Math.min(value.length, offset + MAX_AFTER);
+  const cursor = offset - start;
+  const masked = maskSql(value.slice(start, end), dialect.lex, cursor);
+  if (masked.cursorIn !== "code") return null;
 
-  while (i < sql.length) {
-    const ch = sql[i]!;
-    const next = sql[i + 1] ?? "";
-
-    // Line comment
-    if (!inSingle && !inDouble && !inBacktick && ch === "-" && next === "-") {
-      const nl = sql.indexOf("\n", i);
-      i = nl === -1 ? sql.length : nl + 1;
-      result += " ";
-      continue;
+  let from = 0;
+  let to = masked.text.length;
+  for (const at of masked.semicolons) {
+    if (at < cursor) from = at + 1;
+    else {
+      to = at;
+      break;
     }
-
-    // Block comment
-    if (!inSingle && !inDouble && !inBacktick && ch === "/" && next === "*") {
-      const end = sql.indexOf("*/", i + 2);
-      i = end === -1 ? sql.length : end + 2;
-      result += " ";
-      continue;
-    }
-
-    // MySQL # comment
-    if (!inSingle && !inDouble && !inBacktick && ch === "#") {
-      const nl = sql.indexOf("\n", i);
-      i = nl === -1 ? sql.length : nl + 1;
-      result += " ";
-      continue;
-    }
-
-    // String/identifier tracking
-    if (ch === "'" && !inDouble && !inBacktick) {
-      if (inSingle && next === "'") {
-        result += "''";
-        i += 2;
-        continue;
-      }
-      inSingle = !inSingle;
-    } else if (ch === '"' && !inSingle && !inBacktick) {
-      if (inDouble && next === '"') {
-        result += '""';
-        i += 2;
-        continue;
-      }
-      inDouble = !inDouble;
-    } else if (ch === "`" && !inSingle && !inDouble) {
-      if (inBacktick && next === "`") {
-        result += "``";
-        i += 2;
-        continue;
-      }
-      inBacktick = !inBacktick;
-    }
-
-    // Normalize whitespace outside strings
-    if (!inSingle && !inDouble && !inBacktick && /\s/.test(ch)) {
-      if (!result.endsWith(" ")) result += " ";
-    } else {
-      result += ch;
-    }
-
-    i++;
   }
-
-  return result.trim();
+  return {
+    text: masked.text.slice(from, to),
+    keywords: masked.keywords.slice(from, to),
+    cursor: cursor - from,
+  };
 }
 
-function lastUnquotedSemicolon(sql: string): number {
-  let last = -1;
-  let i = 0;
-  let inSingle = false;
-  let inDouble = false;
-  let inBacktick = false;
-
-  while (i < sql.length) {
-    const ch = sql[i]!;
-    const next = sql[i + 1] ?? "";
-
-    if (!inSingle && !inDouble && !inBacktick && ch === "-" && next === "-") {
-      const nl = sql.indexOf("\n", i);
-      i = nl === -1 ? sql.length : nl + 1;
-      continue;
-    }
-    if (!inSingle && !inDouble && !inBacktick && ch === "/" && next === "*") {
-      const end = sql.indexOf("*/", i + 2);
-      i = end === -1 ? sql.length : end + 2;
-      continue;
-    }
-    if (!inSingle && !inDouble && !inBacktick && ch === "#") {
-      const nl = sql.indexOf("\n", i);
-      i = nl === -1 ? sql.length : nl + 1;
-      continue;
-    }
-
-    if (ch === "'" && !inDouble && !inBacktick) {
-      if (inSingle && next === "'") {
-        i += 2;
-        continue;
-      }
-      inSingle = !inSingle;
-    } else if (ch === '"' && !inSingle && !inBacktick) {
-      if (inDouble && next === '"') {
-        i += 2;
-        continue;
-      }
-      inDouble = !inDouble;
-    } else if (ch === "`" && !inSingle && !inDouble) {
-      if (inBacktick && next === "`") {
-        i += 2;
-        continue;
-      }
-      inBacktick = !inBacktick;
-    } else if (ch === ";" && !inSingle && !inDouble && !inBacktick) {
-      last = i;
-    }
-
-    i++;
-  }
-
-  return last;
+function collapseSpaces(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim();
 }
 
-function currentStatement(sql: string): string {
-  const idx = lastUnquotedSemicolon(sql);
-  if (idx === -1) return sql;
-  return sql.slice(idx + 1);
+const IDENT_CHAR = /[A-Za-z0-9_$]/;
+const SPACE = /\s/;
+
+/**
+ * The text before the cursor that decides what to suggest: at most about
+ * `max` characters, starting at a space outside quoted names, without the
+ * word being typed ("FROM us" expects a table). Scans backwards, so a huge
+ * statement costs no more than a short one.
+ */
+function stateContext(statement: Statement, max: number): string {
+  const { text, keywords, cursor } = statement;
+  let end = cursor;
+  while (end > 0 && IDENT_CHAR.test(text[end - 1]!)) end--;
+  let start = 0;
+  if (end > max) {
+    start = end - max;
+    // keywords has spaces only between tokens, never inside quoted names.
+    while (start < end && !SPACE.test(keywords[start]!)) start++;
+  }
+  return collapseSpaces(text.slice(start, end));
 }
 
 /**
@@ -342,10 +363,19 @@ function parseIdentifier(sql: string, start: number): [string, number] | null {
 
   // Bracket-quoted identifier (SQL Server style, also works in SQLite)
   if (ch === "[") {
-    const end = sql.indexOf("]", i + 1);
-    if (end === -1) return null;
-    const name = sql.slice(i + 1, end);
-    return [name, end - start + 1];
+    let end = i + 1;
+    while (end < sql.length) {
+      if (sql[end] === "]") {
+        if (sql[end + 1] === "]") {
+          end += 2;
+          continue;
+        }
+        const name = sql.slice(i + 1, end).replace(/\]\]/g, "]");
+        return [name, end - start + 1];
+      }
+      end++;
+    }
+    return null;
   }
 
   // Unquoted identifier
@@ -369,6 +399,7 @@ function parseTableRef(sql: string, start: number): [TableRef, number] | null {
   const first = parseIdentifier(sql, i);
   if (!first) return null;
 
+  let tableAt = i;
   i += first[1];
 
   while (i < sql.length && /\s/.test(sql[i]!)) i++;
@@ -382,6 +413,7 @@ function parseTableRef(sql: string, start: number): [TableRef, number] | null {
     const second = parseIdentifier(sql, i);
     if (!second) return null;
     table = second[0];
+    tableAt = i;
     i += second[1];
   } else {
     table = first[0];
@@ -390,9 +422,11 @@ function parseTableRef(sql: string, start: number): [TableRef, number] | null {
   while (i < sql.length && /\s/.test(sql[i]!)) i++;
 
   let alias: string | undefined;
+  let written = sql.slice(tableAt, i).trim();
+  const tableQuoted = isQuoted(written);
 
   // Skip AS keyword if present
-  if (sql.slice(i, i + 3).toUpperCase() === "AS ") {
+  if (/^AS\s/i.test(sql.slice(i, i + 3))) {
     i += 3;
     while (i < sql.length && /\s/.test(sql[i]!)) i++;
   }
@@ -419,47 +453,62 @@ function parseTableRef(sql: string, start: number): [TableRef, number] | null {
       "VALUES",
       "RETURNING",
       "FETCH",
+      "NATURAL",
+      "USING",
+      "LATERAL",
+      "WINDOW",
+      "EXCEPT",
+      "INTERSECT",
+      "FOR",
     ];
-    if (!reserved.includes(upper)) {
+    const aliasText = sql.slice(i, i + maybeAlias[1]).trim();
+    // A quoted alias can be any word ("order").
+    if (isQuoted(aliasText) || !reserved.includes(upper)) {
       alias = maybeAlias[0];
+      written = aliasText;
       i += maybeAlias[1];
     }
   }
 
-  return [{ schema, table, alias }, i - start];
+  return [{ schema, table, alias, written, tableQuoted }, i - start];
 }
 
 /**
- * Extract all table references from context
+ * Extract all table references of a scope. Keywords are found in its keyword
+ * view, names read from its text (see maskSql). Alias keys come from refKey.
  */
-function extractTableRefs(ctx: string): {
+function extractTableRefs(scope: Scope): {
   tables: TableRef[];
   aliasMap: Map<string, AliasRef>;
 } {
   const tables: TableRef[] = [];
   const aliasMap = new Map<string, AliasRef>();
+  const add = (tableRef: TableRef) => {
+    tables.push(tableRef);
+    const ref = { schema: tableRef.schema, table: tableRef.table };
+    if (tableRef.alias) {
+      aliasMap.set(refKey(tableRef.alias, isQuoted(tableRef.written)), ref);
+    }
+    aliasMap.set(refKey(tableRef.table, tableRef.tableQuoted), ref);
+  };
 
   const re =
     /\b(FROM|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN)\s+/gi;
+  const ctx = scope.text;
   let match: RegExpExecArray | null;
 
-  while ((match = re.exec(ctx)) !== null) {
-    const ref = parseTableRef(ctx, match.index + match[0].length);
-    if (ref) {
-      const [tableRef] = ref;
-      tables.push(tableRef);
-
-      if (tableRef.alias) {
-        aliasMap.set(tableRef.alias, {
-          schema: tableRef.schema,
-          table: tableRef.table,
-        });
-      }
-
-      aliasMap.set(tableRef.table, {
-        schema: tableRef.schema,
-        table: tableRef.table,
-      });
+  while ((match = re.exec(scope.keywords)) !== null) {
+    let at = match.index + match[0].length;
+    // FROM a, b c, d: every table of the list.
+    for (;;) {
+      const ref = parseTableRef(ctx, at);
+      if (!ref) break;
+      add(ref[0]);
+      at += ref[1];
+      let next = at;
+      while (next < ctx.length && /\s/.test(ctx[next]!)) next++;
+      if (ctx[next] !== ",") break;
+      at = next + 1;
     }
   }
 
@@ -498,21 +547,25 @@ function extractCtes(ctx: string): CteRef[] {
 }
 
 /**
- * Detect dot context for completion
+ * Detect dot context for completion: `a.`, `schema.table.`, `"Quoted".`,
+ * with an optional partial name after the last dot. Parts are unquoted,
+ * with whether they were quoted.
  */
-function detectDotContext(
-  ctx: string
-): { base: string; parts: string[] } | null {
-  const match = ctx.match(
-    /([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\.\s*([a-zA-Z_][a-zA-Z0-9_]*)?\s*$/
-  );
+const DOT_CONTEXT_RE = new RegExp(
+  `(${IDENT_PART}(?:\\s*\\.\\s*${IDENT_PART})*)\\s*\\.\\s*(?:[A-Za-z_][A-Za-z0-9_$]*)?$`
+);
+const IDENT_PART_RE = new RegExp(IDENT_PART, "g");
 
+type DotPart = { name: string; quoted: boolean };
+
+function detectDotContext(ctx: string): DotPart[] | null {
+  const match = ctx.match(DOT_CONTEXT_RE);
   if (!match) return null;
-
-  const full = match[1];
-  const parts = full.split(".");
-
-  return { base: parts[0], parts };
+  const parts = (match[1]!.match(IDENT_PART_RE) ?? []).map((part) => ({
+    name: unquoteIdent(part),
+    quoted: isQuoted(part),
+  }));
+  return parts.length ? parts : null;
 }
 
 /**
@@ -529,87 +582,117 @@ function detectInsertContext(ctx: string): string | null {
  * Detect UPDATE table SET context
  */
 function detectUpdateContext(ctx: string): string | null {
-  const match = ctx.match(/\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+SET\s+/i);
+  const match = ctx.match(
+    /\bUPDATE\s+([a-zA-Z_][a-zA-Z0-9_.]*)\s+SET(?:\s+|$)/i
+  );
   return match ? match[1].split(".").pop()! : null;
 }
 
 /**
- * Find the last significant keyword
+ * Find the last significant keyword: whole words only (not ON inside
+ * "reason"), outside strings and quoted names.
  */
+const LAST_KEYWORD_RE =
+  /\b(LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|FULL\s+JOIN|CROSS\s+JOIN|GROUP\s+BY|ORDER\s+BY|SELECT|FROM|WHERE|JOIN|ON|AND|OR|HAVING|SET|VALUES|INSERT|UPDATE|DELETE)\b/gi;
+
 function findLastKeyword(ctx: string): string {
-  const upper = ctx.toUpperCase();
-  const keywords = [
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "JOIN",
-    "LEFT JOIN",
-    "RIGHT JOIN",
-    "INNER JOIN",
-    "ON",
-    "AND",
-    "OR",
-    "GROUP BY",
-    "ORDER BY",
-    "HAVING",
-    "SET",
-    "VALUES",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-  ];
-
-  let lastKw = "";
-  let lastIdx = -1;
-
-  for (const kw of keywords) {
-    const idx = upper.lastIndexOf(kw);
-    if (idx > lastIdx) {
-      lastIdx = idx;
-      lastKw = kw;
-    }
+  let last = "";
+  for (const match of stripLiterals(ctx).matchAll(LAST_KEYWORD_RE)) {
+    last = match[1]!.toUpperCase().replace(/\s+/g, " ");
   }
-
-  return lastKw;
+  return last;
 }
 
 /**
- * Detect post-table context
+ * Detect post-table context: the statement ends right after a FROM/JOIN table
+ * list (`FROM users u`), not after a clause keyword (`FROM users WHERE`).
  */
+const TABLE_REF_SRC = `${IDENT_PART}(?:\\s*\\.\\s*${IDENT_PART})?(?:\\s+(?:AS\\s+)?${IDENT_PART})?`;
+const POST_FROM_RE = new RegExp(
+  `\\bFROM\\s+${TABLE_REF_SRC}(?:\\s*,\\s*${TABLE_REF_SRC})*$`,
+  "i"
+);
+const POST_JOIN_RE = new RegExp(
+  `\\b(?:LEFT\\s+|RIGHT\\s+|INNER\\s+|FULL\\s+|CROSS\\s+)?JOIN\\s+${TABLE_REF_SRC}$`,
+  "i"
+);
+const CLAUSE_WORDS = new Set([
+  "WHERE",
+  "JOIN",
+  "LEFT",
+  "RIGHT",
+  "INNER",
+  "FULL",
+  "CROSS",
+  "ON",
+  "GROUP",
+  "ORDER",
+  "LIMIT",
+  "OFFSET",
+  "HAVING",
+  "UNION",
+  "SET",
+  "VALUES",
+  "RETURNING",
+  "FETCH",
+  "NATURAL",
+  "USING",
+  "LATERAL",
+  "WINDOW",
+  "EXCEPT",
+  "INTERSECT",
+  "FOR",
+  "AS",
+  "BY",
+  "AND",
+  "OR",
+  "NOT",
+  "SELECT",
+  "FROM",
+]);
+
 function detectPostTableContext(ctx: string): "FROM" | "JOIN" | null {
   const trimmed = ctx.trimEnd();
-
-  const fromMatch = trimmed.match(
-    /\bFROM\s+[a-zA-Z_][a-zA-Z0-9_."`\[\]]*(?:\s+(?:AS\s+)?[a-zA-Z_][a-zA-Z0-9_]*)?\s*$/i
-  );
-  if (fromMatch) return "FROM";
-
-  const joinMatch = trimmed.match(
-    /\b(?:LEFT\s+|RIGHT\s+|INNER\s+|FULL\s+|CROSS\s+)?JOIN\s+[a-zA-Z_][a-zA-Z0-9_."`\[\]]*(?:\s+(?:AS\s+)?[a-zA-Z_][a-zA-Z0-9_]*)?\s*$/i
-  );
-  if (joinMatch) return "JOIN";
-
+  const lastWord = trimmed.match(/([A-Za-z_]+)$/)?.[1]?.toUpperCase();
+  // A clause keyword typed after the table starts that clause.
+  if (lastWord && CLAUSE_WORDS.has(lastWord)) return null;
+  if (POST_JOIN_RE.test(trimmed)) return "JOIN";
+  if (POST_FROM_RE.test(trimmed)) return "FROM";
   return null;
 }
 
 /**
- * Main context parser
+ * Main context parser. `statement` is masked (see maskSql) and `cursor` is
+ * the cursor's offset in it.
  */
 function parseContext(
-  rawCtx: string,
+  statement: Statement,
   completionCtx: CompletionCtx
 ): ParsedContext {
-  const ctx = normalizeContext(currentStatement(rawCtx));
-  const { tables, aliasMap } = extractTableRefs(ctx);
-  const ctes = extractCtes(ctx);
+  const ctx = stateContext(statement, MAX_STATE_CONTEXT);
 
+  // Names refer to the tables of the cursor's own query, which may be named
+  // after the cursor (SELECT | FROM users), and of the queries around it; the
+  // innermost wins.
+  const scopes = cursorScopes(
+    statement.text,
+    statement.keywords,
+    statement.cursor
+  ).map(extractTableRefs);
+  const tables = scopes[scopes.length - 1]?.tables ?? [];
+  const aliasMaps = scopes.map((scope) => scope.aliasMap).reverse();
+  const ctes = extractCtes(collapseSpaces(statement.keywords));
+
+  const statementMap = aliasMaps[aliasMaps.length - 1]!;
   for (const cte of ctes) {
-    aliasMap.set(cte.name, { table: cte.name });
+    if (!statementMap.has(refKey(cte.name, false))) {
+      statementMap.set(refKey(cte.name, false), { table: cte.name });
+    }
   }
 
   const result: ParsedContext = {
     state: "DEFAULT",
-    aliasMap,
+    aliasMaps,
     recentTables: tables.slice(-5),
     ctes,
   };
@@ -621,28 +704,29 @@ function parseContext(
 
   const dot = detectDotContext(ctx);
   if (dot) {
-    result.dotBase = dot.base;
-
-    if (aliasMap.has(dot.base)) {
+    const base = dot[0]!;
+    const dotRef =
+      dot.length === 1
+        ? lookupRef(aliasMaps, base.name, base.quoted)
+        : undefined;
+    if (dotRef) {
       result.state = "DOT_ALIAS";
+      result.dotRef = dotRef;
       return result;
     }
 
-    if (completionCtx.schemas.includes(dot.base)) {
+    const dotSchema = findSchema(completionCtx, base.name, base.quoted);
+    if (dot.length === 1 && dotSchema) {
       result.state = "DOT_SCHEMA";
-      result.dotSchema = dot.base;
+      result.dotSchema = dotSchema;
       return result;
     }
 
-    if (dot.parts.length === 2) {
-      const schema = dot.parts[0];
-      const table = dot.parts[1];
-      if (completionCtx.schemas.includes(schema)) {
-        result.state = "DOT_SCHEMA_TABLE";
-        result.dotSchema = schema;
-        result.dotTable = table;
-        return result;
-      }
+    if (dot.length === 2 && dotSchema) {
+      result.state = "DOT_SCHEMA_TABLE";
+      result.dotSchema = dotSchema;
+      result.dotTable = dot[1]!.name;
+      return result;
     }
   }
 
@@ -673,6 +757,7 @@ function parseContext(
   const lastKw = findLastKeyword(ctx);
 
   if (lastKw === "FROM" || lastKw === "JOIN" || lastKw.includes("JOIN")) {
+    // After FROM a, b ... the next name is a table too.
     result.state = "EXPECT_TABLE";
     return result;
   }
@@ -728,12 +813,15 @@ function tableItem(
   range: monaco.Range,
   table: TableItem,
   ctx: CompletionCtx,
-  priority: Priority = 2
+  priority: Priority = 2,
+  /** Prefix the schema when it is not the active one (not after `schema.`). */
+  qualify = true
 ): monaco.languages.CompletionItem {
   const isSameSchema = table.schema === ctx.activeSchema;
-  const insertText = isSameSchema
-    ? quoteIdent(ctx, table.name)
-    : quotePath(ctx, table.schema, table.name);
+  const insertText =
+    isSameSchema || !qualify
+      ? quoteIdent(ctx, table.name)
+      : quotePath(ctx, table.schema, table.name);
 
   const kind =
     (table as any).kind === "view"
@@ -789,7 +877,7 @@ function prefixedColumnItem(
   return {
     label,
     kind: monaco.languages.CompletionItemKind.Field,
-    insertText: `${quoteIdent(ctx, prefix)}.${quoteIdent(ctx, column)}`,
+    insertText: `${prefix}.${quoteIdent(ctx, column)}`,
     filterText: column,
     sortText: sortText(priority, column),
     detail,
@@ -841,11 +929,12 @@ export function registerSqlCompletionSmart(
     provideCompletionItems(model, position) {
       const ctx = getCtx();
       const range = getWordRange(model, position);
-      const rawContext = getContextText(model, position);
-      const parsed = parseContext(rawContext, ctx);
+      const statement = readStatement(model, position, dialectFor(ctx.engine));
+      // Nothing to suggest inside a string literal or a comment.
+      if (!statement) return { suggestions: [] };
+      const parsed = parseContext(statement, ctx);
 
       const suggestions: monaco.languages.CompletionItem[] = [];
-      const defaultSchema = ctx.activeSchema ?? "public";
 
       // Get engine-specific keywords and functions
       const KEYWORDS = getKeywordsForEngine(ctx.engine);
@@ -860,27 +949,27 @@ export function registerSqlCompletionSmart(
       }
 
       /* ---------- DOT_ALIAS (alias.column) ---------- */
-      if (parsed.state === "DOT_ALIAS" && parsed.dotBase) {
-        const ref = parsed.aliasMap.get(parsed.dotBase);
-        if (ref) {
-          const schema = ref.schema ?? defaultSchema;
-          const key = makeKey(ref.schema, ref.table, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
+      if (parsed.state === "DOT_ALIAS" && parsed.dotRef) {
+        const ref = parsed.dotRef;
+        const resolved = resolveTable(ctx, ref.schema, ref.table);
+        const columns = ctx.columnsByTable?.[resolved.key] ?? [];
 
-          columns.forEach((col) => {
-            suggestions.push(columnItem(range, col, ctx, ref.table, schema, 0));
-          });
-        }
+        columns.forEach((col) => {
+          suggestions.push(
+            columnItem(range, col, ctx, resolved.table, resolved.schema, 0)
+          );
+        });
         return { suggestions };
       }
 
       /* ---------- DOT_SCHEMA (schema.table) ---------- */
       if (parsed.state === "DOT_SCHEMA" && parsed.dotSchema) {
         const schema = parsed.dotSchema;
+        // The schema is already written: insert only the table name.
         ctx.tables
           .filter((t) => t.schema === schema)
           .forEach((t) => {
-            suggestions.push(tableItem(range, t, ctx, 0));
+            suggestions.push(tableItem(range, t, ctx, 0, false));
           });
         return { suggestions };
       }
@@ -891,12 +980,12 @@ export function registerSqlCompletionSmart(
         parsed.dotSchema &&
         parsed.dotTable
       ) {
-        const key = makeKey(parsed.dotSchema, parsed.dotTable, defaultSchema);
-        const columns = ctx.columnsByTable?.[key] ?? [];
+        const resolved = resolveTable(ctx, parsed.dotSchema, parsed.dotTable);
+        const columns = ctx.columnsByTable?.[resolved.key] ?? [];
 
         columns.forEach((col) => {
           suggestions.push(
-            columnItem(range, col, ctx, parsed.dotTable, parsed.dotSchema, 0)
+            columnItem(range, col, ctx, resolved.table, resolved.schema, 0)
           );
         });
         return { suggestions };
@@ -942,8 +1031,8 @@ export function registerSqlCompletionSmart(
           (t) => t.name.toLowerCase() === parsed.insertTable!.toLowerCase()
         );
         if (table) {
-          const key = makeKey(table.schema, table.name, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
+          const columns =
+            ctx.columnsByTable?.[`${table.schema}.${table.name}`] ?? [];
 
           columns.forEach((col) => {
             suggestions.push(
@@ -960,8 +1049,8 @@ export function registerSqlCompletionSmart(
           (t) => t.name.toLowerCase() === parsed.updateTable!.toLowerCase()
         );
         if (table) {
-          const key = makeKey(table.schema, table.name, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
+          const columns =
+            ctx.columnsByTable?.[`${table.schema}.${table.name}`] ?? [];
 
           columns.forEach((col) => {
             suggestions.push(
@@ -982,10 +1071,11 @@ export function registerSqlCompletionSmart(
         const addedColumns = new Set<string>();
 
         parsed.recentTables.forEach((t) => {
-          const schema = t.schema ?? defaultSchema;
-          const key = makeKey(t.schema, t.table, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
-          const prefix = t.alias ?? t.table;
+          const resolved = resolveTable(ctx, t.schema, t.table);
+          const schema = resolved.schema;
+          const columns = ctx.columnsByTable?.[resolved.key] ?? [];
+          // The alias or table as written in the statement.
+          const prefix = t.written;
 
           columns.forEach((col) => {
             if (!addedColumns.has(col)) {
@@ -1021,10 +1111,11 @@ export function registerSqlCompletionSmart(
       /* ---------- ORDER_BY / GROUP_BY ---------- */
       if (parsed.state === "ORDER_BY" || parsed.state === "GROUP_BY") {
         parsed.recentTables.forEach((t) => {
-          const schema = t.schema ?? defaultSchema;
-          const key = makeKey(t.schema, t.table, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
-          const prefix = t.alias ?? t.table;
+          const resolved = resolveTable(ctx, t.schema, t.table);
+          const schema = resolved.schema;
+          const columns = ctx.columnsByTable?.[resolved.key] ?? [];
+          // The alias or table as written in the statement.
+          const prefix = t.written;
 
           columns.forEach((col) => {
             suggestions.push(columnItem(range, col, ctx, t.table, schema, 0));
@@ -1049,10 +1140,11 @@ export function registerSqlCompletionSmart(
       /* ---------- EXPECT_COLUMN (WHERE, ON, AND, OR) ---------- */
       if (parsed.state === "EXPECT_COLUMN") {
         parsed.recentTables.forEach((t) => {
-          const schema = t.schema ?? defaultSchema;
-          const key = makeKey(t.schema, t.table, defaultSchema);
-          const columns = ctx.columnsByTable?.[key] ?? [];
-          const prefix = t.alias ?? t.table;
+          const resolved = resolveTable(ctx, t.schema, t.table);
+          const schema = resolved.schema;
+          const columns = ctx.columnsByTable?.[resolved.key] ?? [];
+          // The alias or table as written in the statement.
+          const prefix = t.written;
 
           columns.forEach((col) => {
             suggestions.push(columnItem(range, col, ctx, t.table, schema, 0));

@@ -73,7 +73,71 @@ const RUN_THROTTLE_MS = 400;
 // Persist SQL result state across component remounts (e.g. toggling bottom panel).
 const stateByWindowId = new Map<string, WindowState>();
 const runIdByWindow = new Map<string, number>();
-const inflightByWindow = new Map<string, boolean>();
+/** The Run/Explain start that owns a window's gate (a token, so an older
+ * start finishing late never opens the gate a newer one holds). */
+const inflightByWindow = new Map<string, number>();
+let inflightSeq = 0;
+/** Result run currently executing statements in a window. */
+const executingRunByWindow = new Map<string, string>();
+/**
+ * Statements waiting for their stream to end, by result run: closing,
+ * cancelling, clearing or replacing the run ends these waits (a cleared stream
+ * sends no more events).
+ */
+const runWaits = new Map<string, Set<() => void>>();
+
+function addRunWait(runId: string, end: () => void) {
+  let waits = runWaits.get(runId);
+  if (!waits) runWaits.set(runId, (waits = new Set()));
+  waits.add(end);
+}
+
+function forgetRunWait(runId: string, end: () => void) {
+  const waits = runWaits.get(runId);
+  waits?.delete(end);
+  if (waits?.size === 0) runWaits.delete(runId);
+}
+
+function settleRunWaits(runId: string) {
+  const waits = runWaits.get(runId);
+  if (!waits) return;
+  runWaits.delete(runId);
+  for (const end of [...waits]) end();
+}
+
+const RUN_ENDED = Symbol("run-ended");
+
+/**
+ * `work`, or RUN_ENDED as soon as the result run is closed, cancelled, cleared
+ * or replaced (an IPC call may never answer).
+ */
+function untilRunEnds<T>(
+  runId: string,
+  work: Promise<T>
+): Promise<T | typeof RUN_ENDED> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      forgetRunWait(runId, end);
+      fn();
+    };
+    const end = () => finish(() => resolve(RUN_ENDED));
+    addRunWait(runId, end);
+    work.then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error))
+    );
+  });
+}
+
+/** A stream started for a run that ended meanwhile: stop it. */
+function dropLateStream(response: RunSqlReturn | undefined) {
+  if (response?.mode !== "stream") return;
+  void operationCancel(response.opId).catch(() => {});
+  clearSqlStream(response.opId);
+}
 const lastRunAtByWindow = new Map<string, number>();
 
 /**
@@ -126,6 +190,7 @@ function cleanupRun(run: SqlResultRun) {
 }
 
 function cancelRunOperations(run: SqlResultRun) {
+  settleRunWaits(run.id);
   for (const slot of run.slots) {
     if (slot.mode !== "stream" || !slot.opId) continue;
     void operationCancel(slot.opId).catch(() => {});
@@ -134,6 +199,10 @@ function cancelRunOperations(run: SqlResultRun) {
 }
 
 export function clearSqlRunnerWindowState(windowId: string) {
+  // Invalidate before ending waits. The generation only grows, even across a
+  // clear: window ids are reused, and an older worker must never match a
+  // later run's generation.
+  runIdByWindow.set(windowId, (runIdByWindow.get(windowId) ?? 0) + 1);
   const prev = stateByWindowId.get(windowId)?.runs;
   for (const run of prev ?? []) {
     cancelRunOperations(run);
@@ -142,8 +211,8 @@ export function clearSqlRunnerWindowState(windowId: string) {
 
   abortAnalyzeAttempt(windowId);
   stateByWindowId.delete(windowId);
-  runIdByWindow.delete(windowId);
   inflightByWindow.delete(windowId);
+  executingRunByWindow.delete(windowId);
   lastRunAtByWindow.delete(windowId);
 }
 
@@ -315,11 +384,13 @@ export function useSqlRunner(args: {
       if (runIndex < 0) return;
 
       const run = cached.runs[runIndex];
-      const slot = run.slots[i];
+      // By statement index: closing a finished result can remove slots.
+      const position = run.slots.findIndex((slot) => slot.index === i);
+      const slot = run.slots[position];
       if (!slot) return;
 
       const nextSlots = run.slots.slice();
-      nextSlots[i] = { ...slot, ...patch };
+      nextSlots[position] = { ...slot, ...patch };
 
       const nextRuns = cached.runs.slice();
       nextRuns[runIndex] = { ...run, slots: nextSlots };
@@ -334,6 +405,8 @@ export function useSqlRunner(args: {
       windowId: string;
       kind: SqlResultRun["kind"];
       sourceSql: string;
+      /** The editor's identity for this run's SQL (where it ran). */
+      sourceKey?: string;
       statements: string[];
       /** Explain: the unwrapped statement behind every slot. */
       sourceStatement?: string;
@@ -345,25 +418,40 @@ export function useSqlRunner(args: {
 
       const runIndex =
         (stateByWindowId.get(winId)?.runs.length ?? sqlRuns.length) + 1;
+      // Every statement of a query run is its own "Query n" tab, numbered
+      // after the tabs already shown.
+      const shownTabs = (stateByWindowId.get(winId)?.runs ?? sqlRuns).reduce(
+        (count, run) => count + Math.max(1, run.slots.length),
+        0
+      );
       const resultRunId = makeRunId(args.kind);
       const initialSlots: SqlResultSlot[] = args.statements.map((sql, i) => ({
         index: i,
         sql,
         ...(args.sourceStatement ? { sourceSql: args.sourceStatement } : {}),
+        ...(args.kind === "query"
+          ? { title: makeRunTitle("query", shownTabs + i + 1) }
+          : {}),
         status: "queued",
       }));
 
       const resultRun: SqlResultRun = {
         id: resultRunId,
         kind: args.kind,
-        title: makeRunTitle(args.kind, runIndex),
+        title: initialSlots[0]?.title ?? makeRunTitle(args.kind, runIndex),
         createdAt: Date.now(),
         sql: args.sourceSql,
+        ...(args.sourceKey ? { sourceKey: args.sourceKey } : {}),
         connectionId: runtimeConnectionId,
         slots: initialSlots,
       };
 
       const runId = bumpRunId(winId);
+      // A new run replaces the window's earlier ones: their waits end.
+      for (const run of stateByWindowId.get(winId)?.runs ?? []) {
+        settleRunWaits(run.id);
+      }
+      executingRunByWindow.set(winId, resultRunId);
       appendRun(
         winId,
         resultRun,
@@ -380,21 +468,34 @@ export function useSqlRunner(args: {
 
         try {
           if (args.validateBeforeRun) {
-            await validateSqlQueryBE(runtimeConnectionId, args.statements[i], {
-              timeoutMs: 20_000,
-              statementTimeoutMs: 15_000,
-            });
+            const validated = await untilRunEnds(
+              resultRunId,
+              validateSqlQueryBE(runtimeConnectionId, args.statements[i], {
+                timeoutMs: 20_000,
+                statementTimeoutMs: 15_000,
+              })
+            );
+            if (validated === RUN_ENDED) return;
           }
 
           if (currentRunId(winId) !== runId) return;
 
-          const response = await onRunSql({
+          const started = onRunSql({
             windowId: winId,
             connectionId: runtimeConnectionId,
             sql: args.statements[i],
           });
+          const response = await untilRunEnds(resultRunId, started);
+          if (response === RUN_ENDED) {
+            // The run ended before the start answered: stop what it starts.
+            void started.then(dropLateStream, () => {});
+            return;
+          }
 
-          if (currentRunId(winId) !== runId) return;
+          if (currentRunId(winId) !== runId) {
+            dropLateStream(response);
+            return;
+          }
 
           if (response.mode === "direct") {
             setSlot(winId, resultRunId, i, {
@@ -415,33 +516,51 @@ export function useSqlRunner(args: {
 
           ensureSqlStreamStarted(response.opId);
 
-          const syncStreamStatus = () => {
-            if (currentRunId(winId) !== runId) return;
+          // Follows the stream until it ends (however long it runs) or the
+          // run is replaced or cancelled, then marks the statement.
+          const streamEnded = new Promise<void>((resolve) => {
+            let unsubStream: (() => void) | null = null;
+            let ended = false;
+            const end = () => {
+              if (ended) return;
+              ended = true;
+              unsubStream?.();
+              forgetRunWait(resultRunId, end);
+              resolve();
+            };
+            const syncStreamStatus = () => {
+              if (ended) return;
+              if (currentRunId(winId) !== runId) return end();
 
-            const snapshot = getSqlStreamSnapshot(response.opId);
-            if (snapshot.status === "done") {
-              setSlot(winId, resultRunId, i, {
-                status: "done",
-                finishedAt: Date.now(),
-              });
-            } else if (snapshot.status === "error") {
-              setSlot(winId, resultRunId, i, {
-                status: "error",
-                error: formatQueryError(snapshot.error ?? "Unknown error", i),
-                finishedAt: Date.now(),
-              });
-            }
-          };
+              // Only the backend's own done/error ends the statement: an
+              // empty stream's idle "done" is provisional (it may still run).
+              const snapshot = getSqlStreamSnapshot(response.opId);
+              if (!snapshot.ended) return;
+              if (snapshot.status === "error") {
+                setSlot(winId, resultRunId, i, {
+                  status: "error",
+                  error: formatQueryError(snapshot.error ?? "Unknown error", i),
+                  finishedAt: Date.now(),
+                });
+              } else {
+                setSlot(winId, resultRunId, i, {
+                  status: "done",
+                  finishedAt: Date.now(),
+                });
+              }
+              end();
+            };
+            addRunWait(resultRunId, end);
+            unsubStream = subscribeSqlStream(response.opId, syncStreamStatus);
+            if (ended) unsubStream();
+            syncStreamStatus();
+          });
 
-          const unsubStream = subscribeSqlStream(
-            response.opId,
-            syncStreamStatus
-          );
-          syncStreamStatus();
-
-          window.setTimeout(() => {
-            unsubStream();
-          }, 65_000);
+          // A script's next statement starts only after this one has
+          // finished; a single or last statement does not hold the run.
+          if (args.sequential && i < args.statements.length - 1) {
+            await streamEnded;
+          }
         } catch (err) {
           if (currentRunId(winId) !== runId) return;
 
@@ -475,6 +594,9 @@ export function useSqlRunner(args: {
       }
 
       await Promise.all(workers);
+      if (executingRunByWindow.get(winId) === resultRunId) {
+        executingRunByWindow.delete(winId);
+      }
     },
     [
       appendRun,
@@ -489,7 +611,7 @@ export function useSqlRunner(args: {
   );
 
   const startRun = useCallback(
-    async (payload: { windowId: string; sql: string }) => {
+    async (payload: { windowId: string; sql: string; sourceKey?: string }) => {
       const winId = payload.windowId;
       if (!runtimeConnectionId) return;
 
@@ -498,8 +620,9 @@ export function useSqlRunner(args: {
       if (now - lastAt < RUN_THROTTLE_MS) return;
       lastRunAtByWindow.set(winId, now);
 
-      if (inflightByWindow.get(winId)) return;
-      inflightByWindow.set(winId, true);
+      if (inflightByWindow.has(winId)) return;
+      const gate = ++inflightSeq;
+      inflightByWindow.set(winId, gate);
 
       try {
         const v = validateSqlClient(payload.sql);
@@ -581,15 +704,21 @@ export function useSqlRunner(args: {
           }
         }
 
+        // Statements run one after another, in order: a script may depend on
+        // what the statements before it did.
         await runStatements({
           windowId: winId,
           kind: "query",
           sourceSql: payload.sql,
+          sourceKey: payload.sourceKey,
           statements: list,
           validateBeforeRun: true,
+          sequential: true,
         });
       } finally {
-        inflightByWindow.set(winId, false);
+        if (inflightByWindow.get(winId) === gate) {
+          inflightByWindow.delete(winId);
+        }
       }
     },
     [
@@ -612,8 +741,9 @@ export function useSqlRunner(args: {
       if (now - lastAt < RUN_THROTTLE_MS) return;
       lastRunAtByWindow.set(winId, now);
 
-      if (inflightByWindow.get(winId)) return;
-      inflightByWindow.set(winId, true);
+      if (inflightByWindow.has(winId)) return;
+      const gate = ++inflightSeq;
+      inflightByWindow.set(winId, gate);
 
       try {
         const explain = buildExplainSql(engine, payload.sql);
@@ -643,7 +773,9 @@ export function useSqlRunner(args: {
           sequential: true,
         });
       } finally {
-        inflightByWindow.set(winId, false);
+        if (inflightByWindow.get(winId) === gate) {
+          inflightByWindow.delete(winId);
+        }
       }
     },
     [appendRun, bumpRunId, engine, runStatements, runtimeConnectionId]
@@ -888,6 +1020,11 @@ export function useSqlRunner(args: {
     if (!activeSqlWindowId) return;
     const winId = activeSqlWindowId;
     abortAnalyzeAttempt(winId);
+    // Invalidate first, so no worker continues once its waits end, and free
+    // Run: a start still waiting on the backend no longer holds the window.
+    bumpRunId(winId);
+    executingRunByWindow.delete(winId);
+    inflightByWindow.delete(winId);
 
     const prev = stateByWindowId.get(winId)?.runs;
     for (const run of prev ?? []) {
@@ -896,7 +1033,6 @@ export function useSqlRunner(args: {
     }
 
     saveWindowState(winId, emptyWindowState());
-    bumpRunId(winId);
   }, [activeSqlWindowId, bumpRunId, saveWindowState]);
 
   const closeRun = useCallback(
@@ -911,6 +1047,13 @@ export function useSqlRunner(args: {
 
       const run = cached.runs[index];
       abortAnalyzeAttempt(activeSqlWindowId, (a) => a.runId === runId);
+      // Closing the run that is executing stops it: no further statement of
+      // it runs once its waits end.
+      if (executingRunByWindow.get(activeSqlWindowId) === runId) {
+        bumpRunId(activeSqlWindowId);
+        executingRunByWindow.delete(activeSqlWindowId);
+        inflightByWindow.delete(activeSqlWindowId);
+      }
       cancelRunOperations(run);
       cleanupRun(run);
 
@@ -930,7 +1073,46 @@ export function useSqlRunner(args: {
         activeSlotIndex: nextActiveSlotIndex,
       });
     },
-    [activeSqlWindowId, saveWindowState]
+    [activeSqlWindowId, bumpRunId, saveWindowState]
+  );
+
+  /**
+   * Closes one statement's result. A single-statement run, or a script still
+   * running, closes as a whole (closing stops it).
+   */
+  const closeSlot = useCallback(
+    (runId: string, slotPosition: number) => {
+      if (!activeSqlWindowId) return;
+      const cached = stateByWindowId.get(activeSqlWindowId);
+      const runIndex = cached?.runs.findIndex((run) => run.id === runId) ?? -1;
+      if (!cached || runIndex < 0) return;
+      const run = cached.runs[runIndex]!;
+      const running = run.slots.some(
+        (slot) => slot.status === "queued" || slot.status === "running"
+      );
+      if (run.slots.length <= 1 || running) {
+        closeRun(runId);
+        return;
+      }
+      const slot = run.slots[slotPosition];
+      if (!slot) return;
+      if (slot.mode === "stream" && slot.opId) clearSqlStream(slot.opId);
+
+      const nextRuns = cached.runs.slice();
+      nextRuns[runIndex] = {
+        ...run,
+        slots: run.slots.filter((_, position) => position !== slotPosition),
+      };
+      let activeSlotIndex = cached.activeSlotIndex;
+      if (cached.activeRunId === runId && activeSlotIndex >= slotPosition) {
+        activeSlotIndex = Math.max(0, activeSlotIndex - 1);
+      }
+      saveWindowState(activeSqlWindowId, {
+        runs: nextRuns,
+        activeSlotIndex,
+      });
+    },
+    [activeSqlWindowId, closeRun, saveWindowState]
   );
 
   const cancelRun = useCallback(
@@ -963,7 +1145,7 @@ export function useSqlRunner(args: {
 
       saveWindowState(activeSqlWindowId, { runs: nextRuns });
       bumpRunId(activeSqlWindowId);
-      inflightByWindow.set(activeSqlWindowId, false);
+      inflightByWindow.delete(activeSqlWindowId);
     },
     [activeSqlWindowId, bumpRunId, saveWindowState]
   );
@@ -982,6 +1164,7 @@ export function useSqlRunner(args: {
     startExplain,
     startExplainAnalyze,
     closeRun,
+    closeSlot,
     cancelRun,
     reset,
     clearWindow,

@@ -18,6 +18,7 @@ import {
   supportsExplainAnalyze,
 } from "src/lib/sql/analyzeClassify";
 import { useProGate } from "src/hooks/useProGate";
+import { parseSqlErrorPosition } from "src/lib/sql/errorPosition";
 
 const loadSqlEditorPane = () =>
   import("src/components/editor/SqlEditorPane").then((module) => ({
@@ -40,6 +41,8 @@ function makeSqlWindowScopeId(metaKey: string, windowId: string) {
 export function SqlWindowPane(props: {
   win: SqlEditorWindow;
   engine: DatabaseEngine;
+  /** The schema picked for the connection: unqualified names resolve there. */
+  activeSchema?: string;
   metaKey: string;
   metadata: MetadataApi;
   runtimeConnectionId: string | undefined;
@@ -56,6 +59,7 @@ export function SqlWindowPane(props: {
   const {
     win,
     engine,
+    activeSchema,
     metaKey,
     metadata,
     runtimeConnectionId,
@@ -91,6 +95,7 @@ export function SqlWindowPane(props: {
     startExplain,
     startExplainAnalyze,
     closeRun,
+    closeSlot,
     cancelRun,
   } = useSqlRunner({
     activeSqlWindowId: scopedWindowId,
@@ -115,6 +120,27 @@ export function SqlWindowPane(props: {
       (slot) => slot.status === "queued" || slot.status === "running"
     ) ?? false;
 
+  // The error of the statement on screen, where it points inside it.
+  const shownSlot = activeRun?.slots[activeResultIndex] ?? activeRun?.slots[0];
+  // Explain runs report positions in the wrapped statement: not underlined.
+  const errorPosition =
+    activeRun?.kind === "query" && shownSlot?.status === "error"
+      ? parseSqlErrorPosition(shownSlot.error)
+      : null;
+  const errorMarker =
+    shownSlot && errorPosition && activeRun?.sourceKey
+      ? {
+          runKey: activeRun!.sourceKey ?? "",
+          runSql: activeRun!.sql,
+          statementIndex: shownSlot.index,
+          ...errorPosition,
+          message: (shownSlot.error ?? "")
+            .split("\n")
+            .filter((line) => line.startsWith("ERROR:"))
+            .join("\n"),
+        }
+      : null;
+
   return (
     <div class="h-full min-h-0 overflow-hidden">
       <SplitPane
@@ -129,12 +155,17 @@ export function SqlWindowPane(props: {
             <SqlEditorPane
               win={win}
               schemas={meta.schemas}
+              activeSchema={activeSchema}
               tables={meta.tables}
               columnsByTable={meta.columnsByTable}
               engine={engine}
               storageId={scopedWindowId}
               onRunSql={(payload) =>
-                startRun({ windowId: scopedWindowId, sql: payload.sql })
+                startRun({
+                  windowId: scopedWindowId,
+                  sql: payload.sql,
+                  sourceKey: payload.sourceKey,
+                })
               }
               onExplainSql={(payload) =>
                 startExplain({ windowId: scopedWindowId, sql: payload.sql })
@@ -158,6 +189,7 @@ export function SqlWindowPane(props: {
                 if (activeRun?.id) cancelRun(activeRun.id);
               }}
               isExecuting={isExecutingSql}
+              errorMarker={errorMarker}
             />
 
             {!runtimeConnectionId ? (
@@ -179,6 +211,7 @@ export function SqlWindowPane(props: {
             activeIndex={activeResultIndex}
             setActiveIndex={setActiveResultIndex}
             onCloseRun={closeRun}
+            onCloseSlot={closeSlot}
             onRunAnalyze={
               canExplainAnalyze
                 ? (origin) =>

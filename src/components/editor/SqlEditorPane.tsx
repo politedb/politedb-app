@@ -19,13 +19,35 @@ import { loadSqlDraft, saveSqlDraft } from "src/lib/tauri/sql";
 import { SqlEditorToolbar } from "./SqlEditorToolbar";
 import { ensureSqlTheme, setSqlTheme } from "./registerSqlTheme";
 import { formatSql, minifySql } from "src/lib/sql/sqlFormatter";
-import { saveDialog } from "src/lib/system-dialog";
+import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import {
   matchesShortcut,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
 import { splitSqlStatements } from "./splitSqlStatements";
+import {
+  errorRangeInStatement,
+  runStatementStarts,
+} from "src/lib/sql/errorPosition";
+
+/**
+ * Where each recent run's SQL started in its editor, by the run's sourceKey,
+ * so an error maps onto the statement that ran (not onto other text that looks
+ * the same, nor another run of the same SQL). Kept across editor remounts.
+ */
+const runStarts = new Map<string, number>();
+const RUN_STARTS_KEPT = 200;
+let runKeySeq = 0;
+
+function recordRunStart(draftId: string, start: number) {
+  const key = `${draftId}#${++runKeySeq}`;
+  runStarts.set(key, start);
+  if (runStarts.size > RUN_STARTS_KEPT) {
+    runStarts.delete(runStarts.keys().next().value!);
+  }
+  return key;
+}
 
 type Props = {
   win: SqlEditorWindow;
@@ -37,6 +59,8 @@ type Props = {
   onRunSql?: (payload: {
     windowId: string;
     sql: string;
+    /** Identifies where this SQL ran in the editor (for error underlines). */
+    sourceKey: string;
   }) => Promise<void> | void;
   onExplainSql?: (payload: {
     windowId: string;
@@ -58,6 +82,19 @@ type Props = {
 
   engine: DatabaseEngine;
   toolbar?: ComponentChildren | null;
+  /**
+   * A query error to underline: the run's SQL, which of its statements
+   * failed, and where inside that statement.
+   */
+  errorMarker?: {
+    /** The run's sourceKey, as passed to onRunSql. */
+    runKey: string;
+    runSql: string;
+    statementIndex: number;
+    line: number;
+    column: number;
+    message: string;
+  } | null;
 };
 
 interface ExtendedEditor extends monaco.editor.IStandaloneCodeEditor {
@@ -170,6 +207,7 @@ export function SqlEditorPane(props: Props) {
     columnsByTable,
     engine,
     toolbar,
+    errorMarker = null,
   } = props;
   const draftId = storageId || win.id;
 
@@ -177,6 +215,9 @@ export function SqlEditorPane(props: Props) {
   const editorRef = useRef<ExtendedEditor | null>(null);
   const lastCursorPositionRef = useRef<monaco.Position | null>(null);
   const runHighlightIdsRef = useRef<string[]>([]);
+  const errorHighlightIdsRef = useRef<string[]>([]);
+  /** Bumped when Monaco is (re)created, so editor-bound effects rerun. */
+  const [editorVersion, setEditorVersion] = useState(0);
 
   const completionCtxRef = useRef<CompletionCtx>({
     schemas,
@@ -234,11 +275,20 @@ export function SqlEditorPane(props: Props) {
 
   const clearRunHighlight = () => {
     const editor = editorRef.current;
-    if (!editor || runHighlightIdsRef.current.length === 0) return;
-    runHighlightIdsRef.current = editor.deltaDecorations(
-      runHighlightIdsRef.current,
-      []
-    );
+    if (!editor) return;
+    if (runHighlightIdsRef.current.length > 0) {
+      runHighlightIdsRef.current = editor.deltaDecorations(
+        runHighlightIdsRef.current,
+        []
+      );
+    }
+    // An edit also makes an underlined error position stale.
+    if (errorHighlightIdsRef.current.length > 0) {
+      errorHighlightIdsRef.current = editor.deltaDecorations(
+        errorHighlightIdsRef.current,
+        []
+      );
+    }
   };
 
   const applyRunHighlight = useCallback((range: monaco.IRange | null) => {
@@ -262,6 +312,71 @@ export function SqlEditorPane(props: Props) {
       ]
     );
   }, []);
+
+  // Underline where the shown statement's error points, when the statement
+  // is still in the editor.
+  useEffect(() => {
+    const editor = editorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    const clear = () => {
+      errorHighlightIdsRef.current = editor.deltaDecorations(
+        errorHighlightIdsRef.current,
+        []
+      );
+    };
+    if (!errorMarker) return clear();
+    // The run's SQL where it ran, if the editor still holds it unchanged.
+    const runStart = runStarts.get(errorMarker.runKey);
+    const full = model.getValue();
+    if (
+      runStart === undefined ||
+      full.slice(runStart, runStart + errorMarker.runSql.length) !==
+        errorMarker.runSql
+    ) {
+      return clear();
+    }
+    const statement = runStatementStarts(
+      errorMarker.runSql,
+      splitSqlStatements
+    )[errorMarker.statementIndex];
+    const range = statement
+      ? errorRangeInStatement(statement.text, errorMarker)
+      : null;
+    if (!statement || !range) return clear();
+    const at = runStart + statement.start;
+    const start = model.getPositionAt(at + range.start);
+    const end = model.getPositionAt(at + range.end);
+    errorHighlightIdsRef.current = editor.deltaDecorations(
+      errorHighlightIdsRef.current,
+      [
+        {
+          range: new monaco.Range(
+            start.lineNumber,
+            start.column,
+            end.lineNumber,
+            end.column
+          ),
+          options: {
+            inlineClassName: "sql-error-highlight",
+            hoverMessage: errorMarker.message
+              ? { value: errorMarker.message }
+              : undefined,
+          },
+        },
+      ]
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    editorVersion,
+    draftId,
+    errorMarker?.runKey,
+    errorMarker?.runSql,
+    errorMarker?.statementIndex,
+    errorMarker?.line,
+    errorMarker?.column,
+    errorMarker?.message,
+  ]);
 
   const flushDraft = useCallback(async () => {
     const full = getFullSql();
@@ -455,25 +570,54 @@ export function SqlEditorPane(props: Props) {
     await flushDraft();
   };
 
-  const onRun = useCallback(async () => {
-    const ed = editorRef.current;
-    if (!ed || !callbacksRef.current.onRunSql) return;
+  /** Remembers where the SQL about to run starts, for error underlines. */
+  const recordPickedStart = (
+    ed: monaco.editor.IStandaloneCodeEditor,
+    picked: { sql: string; range: monaco.IRange | null }
+  ) => {
+    const model = ed.getModel();
+    if (!model || !picked.range || !picked.sql) return "";
+    const raw = model.getValueInRange(picked.range);
+    const lead = raw.length - raw.trimStart().length;
+    const rangeStart = model.getOffsetAt({
+      lineNumber: picked.range.startLineNumber,
+      column: picked.range.startColumn,
+    });
+    return recordRunStart(draftId, rangeStart + lead);
+  };
 
-    const picked = getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
-    if (!picked.sql) return;
-    applyRunHighlight(picked.range);
+  const onRun = useCallback(
+    async (all = false) => {
+      const ed = editorRef.current;
+      if (!ed || !callbacksRef.current.onRunSql) return;
 
-    setIsLocalExecuting(true);
-    try {
-      await flushDraft();
-      await callbacksRef.current.onRunSql({
-        windowId: win.id,
-        sql: picked.sql,
-      });
-    } finally {
-      queueMicrotask(() => setIsLocalExecuting(false));
-    }
-  }, [applyRunHighlight, flushDraft, win.id]);
+      const model = ed.getModel();
+      const picked =
+        all && model
+          ? {
+              sql: model.getValue().trim(),
+              range: model.getFullModelRange(),
+            }
+          : getSelectedOrCurrentSql(ed, lastCursorPositionRef.current);
+      if (!picked.sql) return;
+      applyRunHighlight(picked.range);
+      const sourceKey = recordPickedStart(ed, picked);
+
+      setIsLocalExecuting(true);
+      try {
+        await flushDraft();
+        await callbacksRef.current.onRunSql({
+          windowId: win.id,
+          sql: picked.sql,
+          sourceKey,
+        });
+      } finally {
+        queueMicrotask(() => setIsLocalExecuting(false));
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [applyRunHighlight, flushDraft, win.id, draftId]
+  );
 
   const explainWith = async (
     handler: "onExplainSql" | "onExplainAnalyzeSql"
@@ -514,23 +658,26 @@ export function SqlEditorPane(props: Props) {
   };
 
   const onExportClick = async () => {
-    // Always flush draft first so export matches latest editor content
-    const full = await flushDraft();
-
-    const path = await saveDialog({
-      title: "Export SQL…",
-      defaultPath: defaultSqlFilename(win),
-      filters: [{ name: "SQL", extensions: ["sql"] }],
-    });
-
-    if (!path) return;
-
-    const header = buildExportHeader({ engine, includeUrl: true });
-
+    // One boundary for the draft flush, the dialog and the write.
     try {
+      // Always flush draft first so the file matches the latest editor content
+      const full = await flushDraft();
+
+      const path = await saveDialog({
+        title: "Export SQL…",
+        defaultPath: defaultSqlFilename(win),
+        filters: [{ name: "SQL", extensions: ["sql"] }],
+      });
+
+      if (!path) return;
+
+      const header = buildExportHeader({ engine, includeUrl: true });
       await writeTextFile(path, header + full);
-    } catch (error) {
-      console.error("Failed to export SQL file:", error);
+    } catch {
+      await showMessage(
+        "The SQL file could not be saved. Check that the folder is writable, then try again.",
+        { title: "Save failed", kind: "error" }
+      );
     }
   };
 
@@ -619,6 +766,7 @@ export function SqlEditorPane(props: Props) {
       });
 
       editorRef.current = editor;
+      setEditorVersion((version) => version + 1);
       const onThemeChange = (event: Event) => {
         const detail = (event as CustomEvent<{ resolved?: "light" | "dark" }>)
           .detail;
@@ -647,22 +795,23 @@ export function SqlEditorPane(props: Props) {
 
       editor.addAction({
         id: "run-sql",
-        label: "Run Current",
+        label: "Run Selection or Current Statement",
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
         contextMenuGroupId: "navigation",
         contextMenuOrder: 1,
         run: () => void onRun(),
       });
 
-      if (callbacksRef.current.onRunSql) {
-        editor.addAction({
-          id: "run-sql-selection",
-          label: "Run Selection",
-          contextMenuGroupId: "navigation",
-          contextMenuOrder: 2,
-          run: () => void onRun(),
-        });
-      }
+      editor.addAction({
+        id: "run-sql-all",
+        label: "Run All",
+        keybindings: [
+          monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter,
+        ],
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 2,
+        run: () => void onRun(true),
+      });
 
       const changeSub = editor.onDidChangeModelContent(() => {
         if (applyingExternalCounterRef.current > 0) return;
@@ -813,7 +962,7 @@ export function SqlEditorPane(props: Props) {
           onMinify={onMinifySql}
           onExplain={onExplain}
           onExplainAnalyze={onExplainAnalyzeSql ? onExplainAnalyze : undefined}
-          onRun={onRun}
+          onRun={() => void onRun()}
           onCancel={onCancelSql}
           isExecuting={isExecuting}
           hasSelection={hasSelection}

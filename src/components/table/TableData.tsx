@@ -457,7 +457,8 @@ export function TableData({
           setEditing(null);
           publishSelectedRowDetail(null);
         }}
-        onCommitEdit={handleCommitEdit}
+        // Read-only: no editor, value menu or Set NULL/default actions.
+        onCommitEdit={readOnly ? undefined : handleCommitEdit}
         onExitEdit={() => setEditing(null)}
         dataVersion={
           (rowsVersion ?? 0) * 1000 +

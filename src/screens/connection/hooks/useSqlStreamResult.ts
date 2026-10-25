@@ -10,6 +10,16 @@ type StreamStatus = "idle" | "running" | "done" | "error";
 
 export type SqlStreamResult = {
   status: StreamStatus;
+  /**
+   * The backend sent its own done or error (or the stream failed). A "done"
+   * without it is provisional: an empty result the idle failsafe stopped
+   * showing as loading, while the operation may still be running.
+   */
+  ended?: boolean;
+  /** From the backend's done: the result stopped at the row limit. */
+  truncated?: boolean;
+  /** From the backend's done/error: how long the statement ran. */
+  elapsedMs?: number;
   columns: ColumnMeta[];
   totalRows: number;
   rowsVersion: number;
@@ -22,6 +32,9 @@ type Listener = () => void;
 type StreamEntry = {
   opId: string;
   status: StreamStatus;
+  ended: boolean;
+  truncated?: boolean;
+  elapsedMs?: number;
 
   columns: ColumnMeta[];
   rowsByIdx: Map<number, unknown[]>;
@@ -123,6 +136,7 @@ function getOrCreate(opId: string): StreamEntry {
     entry = {
       opId,
       status: "idle",
+      ended: false,
 
       columns: [],
       rowsByIdx: new Map(),
@@ -158,6 +172,9 @@ function getSnapshot(opId: string): SqlStreamResult {
 
   return {
     status: entry.status,
+    ended: entry.ended,
+    truncated: entry.truncated,
+    elapsedMs: entry.elapsedMs,
     columns: entry.columns,
     totalRows: entry.totalRows,
     rowsVersion: entry.version,
@@ -209,6 +226,7 @@ export function ensureSqlStreamStarted(
       if (entry.status !== "running") return;
       if (Date.now() < deadline) return;
       entry.status = "error";
+      entry.ended = true;
       entry.error = STREAM_NO_RESPONSE;
       notify(entry);
       if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);
@@ -293,6 +311,10 @@ export function ensureSqlStreamStarted(
         }
 
         entry.status = "done";
+        entry.ended = true;
+        entry.truncated = !!(done as { truncated?: boolean })?.truncated;
+        const elapsed = Number((done as { elapsed_ms?: number })?.elapsed_ms);
+        if (Number.isFinite(elapsed)) entry.elapsedMs = elapsed;
         notify(entry);
 
         if (entry.idleTimer != null) window.clearInterval(entry.idleTimer);
@@ -302,6 +324,7 @@ export function ensureSqlStreamStarted(
       onError: (err: any) => {
         entry.lastEventAt = Date.now();
         entry.status = "error";
+        entry.ended = true;
         entry.error = streamErrorText(err);
         notify(entry);
 
@@ -314,6 +337,7 @@ export function ensureSqlStreamStarted(
     })
     .catch((e) => {
       entry.status = "error";
+      entry.ended = true;
       entry.error = String((e as any)?.message ?? e ?? "Unknown error");
       notify(entry);
 

@@ -130,6 +130,7 @@ export function ConnectionWorkspaceLayout(props: {
           <ConnectionBottomPanel
             activeProfileScreen={activeProfileScreen}
             connectionProfileId={connectionProfileId}
+            onInsertSql={onInsertSnippet}
           />
         </div>
       }

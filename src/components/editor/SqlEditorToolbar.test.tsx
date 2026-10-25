@@ -42,3 +42,18 @@ describe("SqlEditorToolbar Explain", () => {
     expect(screen.getByRole("button", { name: "Explain" })).toBeDisabled();
   });
 });
+
+describe("SqlEditorToolbar run buttons", () => {
+  it("shows the platform's Run shortcut", () => {
+    render(<SqlEditorToolbar {...base} />);
+    expect(screen.getByRole("button", { name: /Run Current/ }).title).toMatch(
+      /Enter/
+    );
+    expect(screen.queryByRole("button", { name: "Run All" })).toBeNull();
+  });
+
+  it("names the file action Save as", () => {
+    render(<SqlEditorToolbar {...base} onExport={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Save as…" })).toBeTruthy();
+  });
+});

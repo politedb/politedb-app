@@ -255,7 +255,8 @@ pub async fn run_pg_sql_query(
      * ========================================================================= */
     if validate_only {
         if is_explainable(&sql_input.sql) {
-            let explain_sql = format!("EXPLAIN {}", sql_input.sql);
+            const EXPLAIN_PREFIX: &str = "EXPLAIN ";
+            let explain_sql = format!("{EXPLAIN_PREFIX}{}", sql_input.sql);
 
             if let Err(e) = tx.batch_execute(&explain_sql).await {
                 if cancelled_by_user(&ctx, &e) {
@@ -270,10 +271,12 @@ pub async fn run_pg_sql_query(
                     return;
                 }
 
+                // The position counts the EXPLAIN prefix; point into the
+                // statement as written.
                 emit_error(
                     &ctx.app,
                     op_id,
-                    format_pg_error(&e, &sql_input.sql),
+                    format_pg_error_after_prefix(&e, &sql_input.sql, EXPLAIN_PREFIX.len() as u32),
                     started_at.elapsed().as_millis(),
                 );
                 return;
@@ -499,6 +502,12 @@ pub async fn run_pg_sql_query(
 /// (`message`, `detail`, `hint`). Prefer that (and optional SQL caret) so
 /// callers — including Health Inspector — never surface `"ROW_STREAM_FAILED: db error"`.
 fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
+    format_pg_error_after_prefix(e, sql, 0)
+}
+
+/// `format_pg_error` for an error from `{prefix}{sql}`: the reported position
+/// is shifted back by `prefix_len` bytes so the caret points into `sql`.
+fn format_pg_error_after_prefix(e: &tokio_postgres::Error, sql: &str, prefix_len: u32) -> String {
     let Some(db) = e.as_db_error() else {
         // Non-db kinds have useful Display labels ("connection closed", …).
         // Include the source when present (e.g. IO cause).
@@ -509,36 +518,54 @@ fn format_pg_error(e: &tokio_postgres::Error, sql: &str) -> String {
     };
 
     // DbError Display = "{severity}: {message}" + optional DETAIL/HINT.
-    let core = db.to_string();
-
-    let pos_u32 = match db.position() {
-        Some(ErrorPosition::Original(p)) => *p,
-        Some(ErrorPosition::Internal { position, .. }) => *position,
-        None => return core,
-    };
-
-    annotate_sql_error_position(&core, sql, pos_u32)
+    annotate_db_error(&db.to_string(), sql, db.position(), prefix_len)
 }
 
-/// Attach `LINE n: …` + caret under `pos` (1-based byte offset into `sql`).
+/// `core` with a `LINE n:` + caret annotation when the error position points
+/// into the statement sent (`{prefix}{sql}`). An internal position counts
+/// within an internal query (a function body, …), not the caller's SQL, so it
+/// is left unannotated.
+fn annotate_db_error(
+    core: &str,
+    sql: &str,
+    position: Option<&ErrorPosition>,
+    prefix_len: u32,
+) -> String {
+    let Some(ErrorPosition::Original(p)) = position else {
+        return core.to_string();
+    };
+    match statement_position(*p, prefix_len) {
+        Some(pos) => annotate_sql_error_position(core, sql, pos),
+        None => core.to_string(),
+    }
+}
+
+/// A 1-based position in `{prefix}{sql}` as a 1-based position in `sql`;
+/// None when it falls inside the prefix.
+fn statement_position(pos: u32, prefix_len: u32) -> Option<u32> {
+    pos.checked_sub(prefix_len).filter(|p| *p >= 1)
+}
+
+/// Attach `LINE n: …` + caret under `pos`, PostgreSQL's 1-based position in
+/// characters (not bytes) into `sql`; the caret indent counts characters too.
 fn annotate_sql_error_position(core: &str, sql: &str, pos_u32: u32) -> String {
-    let pos = pos_u32 as usize;
+    let target = (pos_u32 as usize).saturating_sub(1);
 
     let mut line = 1usize;
-    let mut last_line_start = 0usize;
+    let mut line_start = 0usize;
 
-    for (i, ch) in sql.char_indices() {
-        if i >= pos.saturating_sub(1) {
+    for (i, ch) in sql.chars().enumerate() {
+        if i >= target {
             break;
         }
         if ch == '\n' {
             line += 1;
-            last_line_start = i + 1;
+            line_start = i + 1;
         }
     }
 
     let line_text = sql.lines().nth(line - 1).unwrap_or("");
-    let caret_pos = pos.saturating_sub(last_line_start).saturating_sub(1);
+    let caret_pos = target.saturating_sub(line_start);
 
     format!(
         "ERROR at Line {}:\n{}\nLINE {}: {}\n{}^",
@@ -552,7 +579,10 @@ fn annotate_sql_error_position(core: &str, sql: &str, pos_u32: u32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{annotate_sql_error_position, ends_as_user_cancel};
+    use super::{
+        annotate_db_error, annotate_sql_error_position, ends_as_user_cancel, statement_position,
+    };
+    use tokio_postgres::error::ErrorPosition;
 
     #[test]
     fn only_app_requested_cancels_end_quietly() {
@@ -575,6 +605,49 @@ mod tests {
         // Caret should sit under 'b' of bad_col (7 spaces after "LINE 1: " prefix is separate).
         let caret_line = out.lines().last().unwrap();
         assert_eq!(caret_line.chars().filter(|c| *c == ' ').count(), 7);
+    }
+
+    #[test]
+    fn statement_position_drops_the_explain_prefix() {
+        // "EXPLAIN SELECT bad" — Postgres reports 'b' at 16; in the statement it is 8.
+        assert_eq!(statement_position(16, 8), Some(8));
+        assert_eq!(statement_position(9, 8), Some(1));
+        assert_eq!(statement_position(8, 8), None);
+        assert_eq!(statement_position(3, 8), None);
+        assert_eq!(statement_position(5, 0), Some(5));
+    }
+
+    #[test]
+    fn annotate_counts_characters_not_bytes() {
+        // 'b' is character 13 of "SELECT 'é', bad" (é is two bytes).
+        let out = annotate_sql_error_position("ERROR: x", "SELECT 'é', bad", 13);
+        assert!(out.ends_with(&format!("{}^", " ".repeat(12))));
+        // Non-ASCII on an earlier line does not move the line or the caret.
+        let out = annotate_sql_error_position("ERROR: x", "-- éé\nSELECT bad", 14);
+        assert!(out.starts_with("ERROR at Line 2:\n"));
+        assert!(out.contains("LINE 2: SELECT bad"));
+        assert!(out.ends_with(&format!("{}^", " ".repeat(7))));
+    }
+
+    #[test]
+    fn only_original_positions_annotate_the_statement() {
+        let original = ErrorPosition::Original(16);
+        let out = annotate_db_error("ERROR: x", "SELECT bad", Some(&original), 8);
+        assert!(out.contains("LINE 1: SELECT bad"));
+        assert!(out.ends_with(&format!("{}^", " ".repeat(7))));
+
+        let internal = ErrorPosition::Internal {
+            position: 16,
+            query: "select bad from t".to_string(),
+        };
+        assert_eq!(
+            annotate_db_error("ERROR: x", "SELECT bad", Some(&internal), 8),
+            "ERROR: x"
+        );
+        assert_eq!(
+            annotate_db_error("ERROR: x", "SELECT bad", None, 0),
+            "ERROR: x"
+        );
     }
 
     #[test]
