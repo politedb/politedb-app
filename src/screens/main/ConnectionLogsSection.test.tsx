@@ -48,7 +48,10 @@ class IntersectionObserverMock {
   disconnect() {}
 }
 
-const now = Date.now();
+// A fixed midday clock: sessions placed minutes before "now" must stay on
+// the same day whenever the suite runs (real time failed just after
+// midnight, when 30 minutes ago was yesterday).
+const now = new Date(2026, 9, 21, 12, 0, 0).getTime();
 const min = 60_000;
 let seq = 0;
 function session(over: Partial<ConnectionOpenLogEntry> = {}) {
@@ -94,12 +97,18 @@ const table = () => within(screen.getByRole("table"));
 const row = (text: string) => table().getByText(text).closest("tr")!;
 
 beforeEach(() => {
+  // Only Date: timers and observers stay real.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
   view.reset();
   vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
   log.state.clearLog.mockReset();
   log.confirmDialog.mockReset().mockResolvedValue(true);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("ConnectionLogsSection", () => {
   it("puts the connection first and groups sessions by day", () => {
