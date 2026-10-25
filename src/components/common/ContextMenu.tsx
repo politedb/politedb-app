@@ -10,6 +10,8 @@ export type MenuItem =
       icon?: JSX.Element;
       shortcut?: string;
       disabled?: boolean;
+      /** Set for an on/off item: announced as a checkbox with its state. */
+      checked?: boolean;
       onClick?: () => void;
       submenu?: MenuItem[];
     }
@@ -198,7 +200,10 @@ export function ContextMenu(props: {
             <div key={idx} class="relative">
               <button
                 type="button"
-                role="menuitem"
+                role={
+                  it.checked === undefined ? "menuitem" : "menuitemcheckbox"
+                }
+                aria-checked={it.checked}
                 data-menu-item
                 data-menu-index={idx}
                 data-has-submenu={hasSubmenu ? "true" : undefined}
@@ -232,7 +237,11 @@ export function ContextMenu(props: {
                 )}
               >
                 <div class="flex min-w-0 items-center gap-2">
-                  {it.icon ? <span class="shrink-0">{it.icon}</span> : null}
+                  {it.icon ? (
+                    <span class="shrink-0" aria-hidden="true">
+                      {it.icon}
+                    </span>
+                  ) : null}
                   <span class="truncate">{it.label}</span>
                 </div>
 

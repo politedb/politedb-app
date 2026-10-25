@@ -54,3 +54,47 @@ describe("SaveChangesDialog when SQL cannot be generated", () => {
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe("SaveChangesDialog with a deleted empty index draft", () => {
+  it("can be confirmed", () => {
+    const patchMap = {
+      "table:public.items": {
+        tableWindow: {
+          id: "table:public.items",
+          type: "table",
+          table: { schema: "public", name: "items" },
+        },
+        tableData: {
+          columns: [],
+          structure: [],
+          constraints: [],
+          foreignKeys: [],
+          sizeInfo: null,
+          rowCount: 0,
+          connectionId: "conn",
+          busy: false,
+          error: null,
+        },
+        patches: {
+          create: {
+            constraints: { "0": { index_name: "", column_name: "" } },
+          },
+          delete: { constraints: { "0": {} } },
+          update: { structure: { "-1": { tableName: "goods" } } },
+        },
+      },
+    } as unknown as PatchMap;
+    render(
+      <SaveChangesDialog
+        open
+        onClose={() => {}}
+        onConfirm={() => {}}
+        patchMap={patchMap}
+        engine="postgres"
+      />
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    const confirm = screen.getByRole("button", { name: "Confirm & Apply" });
+    expect((confirm as HTMLButtonElement).disabled).toBe(false);
+  });
+});

@@ -392,3 +392,43 @@ describe("renaming a table whose name has spaces", () => {
     expect(pending()).toEqual({ primaryKey: ["name"] });
   });
 });
+
+describe("deleting a draft index in the editor", () => {
+  it("leaves nothing that blocks saving the other changes", async () => {
+    const { generateSqlFromPatches } = await import("src/lib/patches");
+    const withConstraints = { ...tableData, constraints: [], structure: [] };
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: { [key]: withConstraints },
+    });
+    const store = useConnectionStore.getState();
+    store.setDataPatchMap(tabId, {
+      dataKey: "constraints",
+      action: "create",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "0",
+      data: { index_name: "", column_name: "" },
+    });
+    store.setDataPatchMap(tabId, {
+      dataKey: "constraints",
+      action: "delete",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "0",
+      data: {},
+    });
+    store.setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "-1",
+      data: { tableName: "goods" },
+    });
+    const patchMap = useConnectionStore.getState().dataPatchMap[tabId];
+    expect(generateSqlFromPatches(patchMap as never, "postgres")).toEqual([
+      'ALTER TABLE "public"."items" RENAME TO "goods";',
+    ]);
+  });
+});

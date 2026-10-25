@@ -23,6 +23,7 @@ import {
   STRUCTURE_COLUMN_WIDTHS,
 } from "./schemaColumnLabels";
 import { nullableLabel, parseNullable } from "src/lib/sql/columnFlags";
+import { canvasOptions, schemaEditorRows } from "./schemaEditorRows";
 
 const COLUMNS_NAME: (keyof TableStructure)[] = [
   "column_name",
@@ -100,11 +101,10 @@ export function TableStructure({
     onDeleteRecord,
   });
 
-  const tableData = useMemo(() => {
-    if (error) return [];
-    if (editedData.length > 0) return editedData;
-    return initData ?? [];
-  }, [editedData, initData, error]);
+  const tableData = useMemo(
+    () => schemaEditorRows(editedData, initData, error),
+    [editedData, initData, error]
+  );
 
   const dbConfig = getDbConfig(engine);
   const allowForeignKeyEditing = supportsForeignKeyEditing(engine);
@@ -170,9 +170,7 @@ export function TableStructure({
         key,
         label: STRUCTURE_COLUMN_LABELS[key],
         width: STRUCTURE_COLUMN_WIDTHS[key],
-        options: columnInputOptions[key]?.map((option) =>
-          typeof option === "string" ? { label: option, value: option } : option
-        ),
+        options: canvasOptions(columnInputOptions[key]),
         action: key === "foreign_key" ? openFkDialog : undefined,
       })),
     [visibleColumns, columnInputOptions, openFkDialog]

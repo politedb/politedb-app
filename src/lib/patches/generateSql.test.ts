@@ -1365,4 +1365,65 @@ describe("structure edits keep what the user did not change", () => {
       'ALTER TABLE "shop"." items " RENAME TO "items";',
     ]);
   });
+
+  it("refuses an index without columns instead of skipping it", () => {
+    const createIndex = (column_name: string) =>
+      generateSqlFromPatches(
+        table("postgres", [], [index], {
+          create: {
+            constraints: {
+              "1": {
+                index_name: "items_new_idx",
+                column_name,
+                is_unique: "false",
+                index_algorithm: "BTREE",
+              },
+            },
+          },
+        }),
+        "postgres"
+      );
+    expect(() => createIndex("")).toThrow(/needs at least one column/);
+    expect(() => createIndex(" , ")).toThrow(/needs at least one column/);
+    expect(() => pgIndexEdit({ column_name: "" })).toThrow(
+      /needs at least one column/
+    );
+    expect(() =>
+      pgIndexEdit({ column_name: "", index_name: "renamed_idx" })
+    ).toThrow(/needs at least one column/);
+    // Editing a sibling field still keeps the existing columns.
+    expect(pgIndexEdit({ is_unique: "true" })[1]).toContain(
+      '("last_name", "first_name")'
+    );
+  });
+
+  it("cancels a deleted empty draft index and keeps other changes", () => {
+    const sql = generateSqlFromPatches(
+      table("postgres", [], [index], {
+        create: {
+          constraints: {
+            "1": { index_name: "", column_name: "", is_unique: "" },
+          },
+        },
+        update: { constraints: { "0": { is_unique: "true" } } },
+        delete: { constraints: { "1": {} } },
+      }),
+      "postgres"
+    );
+    expect(sql).toEqual([
+      'DROP INDEX IF EXISTS "shop"."items_name_idx";',
+      'CREATE UNIQUE INDEX "items_name_idx" ON "shop"."items" USING BTREE ("last_name", "first_name");',
+    ]);
+  });
+
+  it("drops a deleted index even after its columns were cleared", () => {
+    const sql = generateSqlFromPatches(
+      table("postgres", [], [index], {
+        update: { constraints: { "0": { column_name: "" } } },
+        delete: { constraints: { "0": {} } },
+      }),
+      "postgres"
+    );
+    expect(sql).toEqual(['DROP INDEX IF EXISTS "shop"."items_name_idx";']);
+  });
 });

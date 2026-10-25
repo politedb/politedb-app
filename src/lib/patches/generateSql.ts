@@ -813,16 +813,28 @@ export function generateConstraintSqlFromPatches(
 ): string[] {
   const sqlStatements: string[] = [];
 
+  // Rows deleted in the editor: a deleted draft is cancelled and an edit
+  // to a deleted index is superseded by its DROP (below).
+  const deletedConstraintRows = new Set(
+    Object.keys(patchMap["delete"]?.["constraints"] ?? {})
+  );
+
   // Handle CREATE (new indexes/constraints)
   const createPatches = patchMap["create"]?.["constraints"];
   if (createPatches && initConstraints) {
-    for (const [_rowKey, patchData] of Object.entries(createPatches)) {
+    for (const [rowKey, patchData] of Object.entries(createPatches)) {
+      if (deletedConstraintRows.has(rowKey)) continue;
       const indexName = patchData.index_name;
       const columnName = patchData.column_name;
       const isUnique = cellIsTruthy(patchData.is_unique);
       const algorithm = patchData.index_algorithm;
 
-      if (!columnName) continue;
+      // An index needs a column: say so instead of silently skipping it.
+      if (!String(columnName ?? "").replace(/[\s,]/g, "")) {
+        throw new Error(
+          `Index "${String(indexName ?? "").trim() || "(new index)"}" needs at least one column.`
+        );
+      }
       sqlStatements.push(
         createIndexSql({
           schema,
@@ -841,6 +853,7 @@ export function generateConstraintSqlFromPatches(
   const updatePatches = patchMap["update"]?.["constraints"];
   if (updatePatches && initConstraints) {
     for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+      if (deletedConstraintRows.has(rowKey)) continue;
       const rowIndex = parseInt(rowKey, 10);
       if (
         isNaN(rowIndex) ||
@@ -854,6 +867,12 @@ export function generateConstraintSqlFromPatches(
       if (!originalConstraint) continue;
 
       const indexName = originalConstraint.index_name;
+      if (
+        "column_name" in patchData &&
+        !String(patchData.column_name ?? "").replace(/[\s,]/g, "")
+      ) {
+        throw new Error(`Index "${indexName}" needs at least one column.`);
+      }
       const newIndexName = patchData.index_name || indexName;
       const columnName =
         patchData.column_name || originalConstraint.column_name;

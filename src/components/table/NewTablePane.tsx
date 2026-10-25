@@ -18,6 +18,7 @@ import {
   STRUCTURE_COLUMN_LABELS,
   STRUCTURE_COLUMN_WIDTHS,
 } from "./schemaColumnLabels";
+import { canvasOptions } from "./schemaEditorRows";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -109,9 +110,7 @@ export function NewTablePane({
           STRUCTURE_COLUMN_LABELS[key as keyof typeof STRUCTURE_COLUMN_LABELS],
         width:
           STRUCTURE_COLUMN_WIDTHS[key as keyof typeof STRUCTURE_COLUMN_WIDTHS],
-        options: columnOptions[key]?.map((option) =>
-          typeof option === "string" ? { label: option, value: option } : option
-        ),
+        options: canvasOptions(columnOptions[key]),
       })),
     [columnOptions]
   );

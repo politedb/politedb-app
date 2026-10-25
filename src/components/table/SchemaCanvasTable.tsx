@@ -13,6 +13,8 @@ export interface SchemaCanvasColumn<T> {
   options?: CanvasCellOption[];
   width?: number;
   action?: (sourceIndex: number) => void;
+  /** Options pick several values, stored comma-separated (index columns). */
+  multiple?: boolean;
 }
 
 interface Props<T> {
@@ -153,6 +155,10 @@ export function SchemaCanvasTable<T>({
     () => columns.filter((col) => col.action).map((col) => col.key),
     [columns]
   );
+  const multiValue = useMemo(
+    () => columns.filter((col) => col.multiple).map((col) => col.key),
+    [columns]
+  );
   const canvasDeleted = useMemo(
     () =>
       new Set(
@@ -189,6 +195,10 @@ export function SchemaCanvasTable<T>({
         dataVersion={0}
         cellOptions={options}
         columnLabels={labels}
+        multiValueColumns={multiValue}
+        // A schema field left empty has no value: not SQL NULL.
+        emptyCellText=""
+        emptyActionText="Set…"
         actionColumns={actions}
         sortState={sort}
         onChangeSort={setSort}

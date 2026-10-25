@@ -115,13 +115,12 @@ export function TableStructurePane(props: {
         activeTableMeta.structure
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     profileId,
     activeTableWindow.id,
     activeTableMeta.structure,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    JSON.stringify(tableStructure),
+    // Only whether there is an edited copy matters, not its contents.
+    tableStructure.length,
     setTableStructure,
   ]);
 
@@ -133,13 +132,11 @@ export function TableStructurePane(props: {
         activeTableMeta.constraints
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     profileId,
     activeTableWindow.id,
     activeTableMeta.constraints,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    JSON.stringify(tableConstraints),
+    tableConstraints.length,
     setTableConstraints,
   ]);
 
