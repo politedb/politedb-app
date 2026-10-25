@@ -60,4 +60,41 @@ describe("useInfiniteScroll", () => {
       20
     );
   });
+
+  it("keeps an item past the loaded pages visible, then loads on from it", () => {
+    function KeepList(props: { keep: number }) {
+      const { visibleItems, sentinelRef, hasMore } = useInfiniteScroll(
+        Array.from({ length: 30 }, (_, index) => index),
+        { pageSize: 10, keepVisibleIndex: props.keep }
+      );
+      return (
+        <div data-scroll-root>
+          {visibleItems.map((item) => (
+            <div key={item} data-list-item />
+          ))}
+          {hasMore ? <div ref={sentinelRef} data-sentinel /> : null}
+        </div>
+      );
+    }
+    const view = render(<KeepList keep={14} />);
+    expect(view.container.querySelectorAll("[data-list-item]")).toHaveLength(
+      15
+    );
+
+    act(() => {
+      observerCallbacks[observerCallbacks.length - 1]?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver
+      );
+    });
+    expect(view.container.querySelectorAll("[data-list-item]")).toHaveLength(
+      25
+    );
+
+    // No open item: the loaded pages stay.
+    view.rerender(<KeepList keep={-1} />);
+    expect(view.container.querySelectorAll("[data-list-item]")).toHaveLength(
+      25
+    );
+  });
 });

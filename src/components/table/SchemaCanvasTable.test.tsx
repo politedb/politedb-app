@@ -86,7 +86,7 @@ describe("schema canvas editing", () => {
       <SchemaCanvasTable rows={rows} columns={columns} onChange={onChange} />
     );
     fireEvent.mouseDown(scroller(), { clientX: 445, clientY: 40 });
-    fireEvent.click(screen.getByRole("button", { name: "INTEGER" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "INTEGER" }));
     expect(onChange).toHaveBeenCalledWith(0, "type", "integer");
   });
 

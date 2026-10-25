@@ -160,3 +160,19 @@ export const tableOidQuery = (
   const queryStr = `SELECT '${qIdent(schema)}.${qIdent(tableName)}'::regclass::oid;`;
   return regexEscape(queryStr);
 };
+
+/** A first look at a table, for the clipboard: its first `limit` rows. */
+export const tableSelectSnippet = (
+  schema: string,
+  tableName: string,
+  engine?: DatabaseEngine,
+  limit = 100
+) => {
+  const tableIdent = quoteTableName(schema, tableName, engine);
+  if (engine === "sqlserver")
+    return `SELECT TOP ${limit} * FROM ${tableIdent};`;
+  if (engine === "oracle") {
+    return `SELECT * FROM ${tableIdent} FETCH FIRST ${limit} ROWS ONLY;`;
+  }
+  return `SELECT * FROM ${tableIdent} LIMIT ${limit};`;
+};

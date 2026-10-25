@@ -302,6 +302,7 @@ html.dark .bg-neutral-200\/70,
 html.dark .bg-neutral-200\/80,
 html.dark .hover\:bg-slate-100:hover,
 html.dark .hover\:bg-neutral-100:hover,
+html.dark .focus-visible\:bg-neutral-100:focus-visible,
 html.dark .hover\:bg-neutral-50:hover,
 html.dark .hover\:bg-slate-50:hover,
 html.dark .hover\:bg-neutral-200:hover,
@@ -349,6 +350,7 @@ html.dark .bg-sky-100 {
 }
 
 html.dark .hover\:bg-red-50:hover,
+html.dark .focus-visible\:bg-red-50:focus-visible,
 html.dark .bg-red-50 {
   background-color: rgb(127 29 29 / 0.4) !important;
 }

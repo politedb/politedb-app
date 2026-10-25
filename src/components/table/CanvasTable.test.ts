@@ -158,9 +158,9 @@ describe("CanvasTable cell editor", () => {
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByText("Set NULL")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "DEFAULT" })
+      screen.queryByRole("menuitem", { name: "DEFAULT" })
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "FALSE" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "FALSE" }));
 
     expect(onCommitEdit).toHaveBeenCalledWith({ rowIdx: 0, colIdx: 0 }, false);
   });
@@ -201,7 +201,7 @@ describe("CanvasTable cell editor", () => {
     const scroller = document.querySelector(".overflow-auto");
     if (!scroller) throw new Error("Canvas scroller not found");
     fireEvent.mouseDown(scroller, { clientX: 130, clientY: 40 });
-    fireEvent.click(screen.getByRole("button", { name: "DEFAULT" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "DEFAULT" }));
 
     const value = onCommitEdit.mock.calls[0]?.[1];
     expect(isDefaultCellEditValue(value)).toBe(true);

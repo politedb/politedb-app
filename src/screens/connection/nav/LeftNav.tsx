@@ -127,7 +127,11 @@ export function LeftNav({
           onInsert={onInsertSnippet}
         />
       ) : (
-        <LeftNavObjectsPane profileId={profileId} />
+        <LeftNavObjectsPane
+          profileId={profileId}
+          currSchema={currSchema}
+          onSchemaChange={onSchemaChange}
+        />
       )}
     </aside>
   );
