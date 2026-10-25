@@ -33,10 +33,13 @@ import {
 import { EmptyExpandSection } from "./EmptyExpandSection";
 import { SidebarSearch } from "./SidebarSearch";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { handleSidebarListKeyDown } from "./sidebarListKeys";
 import { quoteTableName } from "src/lib/sql/sqlDialect";
 import { tableSelectSnippet } from "src/lib/queries/sql";
 
 const VIEW_LIST_PAGE_SIZE = 20;
+// Tables render a page at a time: a schema can hold thousands.
+const TABLE_LIST_PAGE_SIZE = 100;
 
 function tableWindowId(table: Pick<TableItem, "schema" | "name">) {
   return `table:${table.schema}.${table.name}`;
@@ -158,6 +161,19 @@ export function LeftNavItemsPane({
   } = useInfiniteScroll(filteredViews, {
     pageSize: VIEW_LIST_PAGE_SIZE,
     resetKey: `${currSchema}\0${tableSearchQuery}`,
+  });
+
+  const activeTableIndex = filteredTables.findIndex(
+    (table) => activeWindowId === tableWindowId(table)
+  );
+  const {
+    visibleItems: visibleTables,
+    sentinelRef: tableListSentinelRef,
+    hasMore: hasMoreTables,
+  } = useInfiniteScroll(filteredTables, {
+    pageSize: TABLE_LIST_PAGE_SIZE,
+    resetKey: `${currSchema}\0${tableSearchQuery}`,
+    keepVisibleIndex: activeTableIndex,
   });
 
   const [tableMenu, setTableMenu] = useState<{
@@ -372,7 +388,11 @@ export function LeftNavItemsPane({
       />
 
       {/* Middle: Sections */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-2"
+        data-scroll-root
+        onKeyDown={handleSidebarListKeyDown}
+      >
         {/* Table Views (hidden for Mongo/Redis) */}
         {!isMongo && !isRedis && (
           <div class="mb-2">
@@ -408,6 +428,7 @@ export function LeftNavItemsPane({
                       return (
                         <Button
                           data-density-item
+                          data-sidebar-item
                           variant={
                             isActive && !hasChanges ? "default" : "ghost"
                           }
@@ -496,7 +517,7 @@ export function LeftNavItemsPane({
                 />
               ) : (
                 <div class="space-y-1 pl-3">
-                  {filteredTables.map((table) => {
+                  {visibleTables.map((table) => {
                     const key = `${table.schema}.${table.name}`;
                     const isActive = activeWindowId === `table:${key}`;
                     const hasChanges = windowHasPatchChanges(
@@ -509,6 +530,7 @@ export function LeftNavItemsPane({
                     return (
                       <Button
                         data-density-item
+                        data-sidebar-item
                         variant={useDefaultActive ? "default" : "ghost"}
                         active={useDefaultActive}
                         key={key}
@@ -564,6 +586,13 @@ export function LeftNavItemsPane({
                       </Button>
                     );
                   })}
+                  {hasMoreTables ? (
+                    <div
+                      ref={tableListSentinelRef}
+                      class="h-px"
+                      aria-hidden="true"
+                    />
+                  ) : null}
                 </div>
               )}
             </div>
@@ -572,6 +601,7 @@ export function LeftNavItemsPane({
       </div>
 
       <ContextMenu
+        autoFocus
         open={!!tableMenu}
         x={tableMenu?.x ?? 0}
         y={tableMenu?.y ?? 0}

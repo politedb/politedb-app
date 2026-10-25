@@ -4,6 +4,7 @@ import {
   ListIcon,
 } from "src/components/icons";
 import { cn } from "src/utils/cn";
+import { hasModifier } from "./sidebarListKeys";
 
 /**
  * A collapsible sidebar section's header: the whole row expands or
@@ -26,6 +27,7 @@ export function SidebarSectionHeader(props: {
       <button
         type="button"
         data-density-item
+        data-sidebar-item
         aria-expanded={expanded}
         class={cn(
           "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left",
@@ -34,6 +36,17 @@ export function SidebarSectionHeader(props: {
           onOpenList && "pr-8"
         )}
         onClick={onToggle}
+        onKeyDown={(e) => {
+          // Tree-style: Right opens, Left closes (plain keys only).
+          if (hasModifier(e)) return;
+          if (
+            (e.key === "ArrowRight" && !expanded) ||
+            (e.key === "ArrowLeft" && expanded)
+          ) {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
       >
         <Chevron className="size-3.5 shrink-0 text-neutral-500" />
         <span class="min-w-0 truncate text-sm font-semibold tracking-wide text-neutral-600">

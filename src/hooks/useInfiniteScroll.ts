@@ -4,7 +4,12 @@ const DEFAULT_PAGE_SIZE = 40;
 
 export function useInfiniteScroll<T>(
   items: T[],
-  opts?: { pageSize?: number; resetKey?: string | number }
+  opts?: {
+    pageSize?: number;
+    resetKey?: string | number;
+    /** An item that must be shown even past the loaded pages (the open one). */
+    keepVisibleIndex?: number;
+  }
 ) {
   const pageSize = opts?.pageSize ?? DEFAULT_PAGE_SIZE;
   const resetKey = opts?.resetKey ?? items.length;
@@ -19,16 +24,19 @@ export function useInfiniteScroll<T>(
     setVisibleCount(pageSize);
   }, [resetKey, pageSize]);
 
+  const shownCount = Math.max(visibleCount, (opts?.keepVisibleIndex ?? -1) + 1);
   const visibleItems = useMemo(
-    () => items.slice(0, visibleCount),
-    [items, visibleCount]
+    () => items.slice(0, shownCount),
+    [items, shownCount]
   );
 
-  const hasMore = visibleCount < items.length;
+  const hasMore = shownCount < items.length;
 
   const loadMore = useCallback(() => {
-    setVisibleCount((current) => Math.min(current + pageSize, items.length));
-  }, [items.length, pageSize]);
+    setVisibleCount((current) =>
+      Math.min(Math.max(current, shownCount) + pageSize, items.length)
+    );
+  }, [items.length, pageSize, shownCount]);
 
   useEffect(() => {
     if (!sentinel || !hasMore) return;
@@ -51,7 +59,7 @@ export function useInfiniteScroll<T>(
     visibleItems,
     sentinelRef,
     hasMore,
-    visibleCount,
+    visibleCount: shownCount,
     totalCount: items.length,
   };
 }

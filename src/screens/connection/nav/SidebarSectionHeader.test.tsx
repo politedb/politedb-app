@@ -50,4 +50,27 @@ describe("SidebarSectionHeader", () => {
     render(<SidebarSectionHeader title="Keys" expanded onToggle={() => {}} />);
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
+
+  it("opens with Right and closes with Left, like a tree", () => {
+    const onToggle = vi.fn();
+    const view = render(
+      <SidebarSectionHeader
+        title="Tables"
+        expanded={false}
+        onToggle={onToggle}
+      />
+    );
+    const row = screen.getByRole("button", { name: /Tables/ });
+    fireEvent.keyDown(row, { key: "ArrowLeft" });
+    expect(onToggle).not.toHaveBeenCalled();
+    fireEvent.keyDown(row, { key: "ArrowRight" });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <SidebarSectionHeader title="Tables" expanded onToggle={onToggle} />
+    );
+    fireEvent.keyDown(row, { key: "ArrowRight" });
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(row, { key: "ArrowLeft" });
+    expect(onToggle).toHaveBeenCalledTimes(2);
+  });
 });

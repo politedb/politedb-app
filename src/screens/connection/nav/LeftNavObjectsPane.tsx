@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { confirmDialog } from "src/lib/system-dialog";
 import { useScreenStore } from "src/stores/screen";
 import { PlusIcon, SquareFunctionIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
@@ -7,15 +6,10 @@ import { Select } from "src/components/common/Select";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import { cn } from "src/utils/cn";
 import type { DatabaseObjectItem, DatabaseObjectKind } from "src/types";
-import {
-  buildDropDatabaseObjectSql,
-  objectKindLabel,
-  objectKindSingular,
-} from "src/lib/databaseObjects";
-import { runSqlQuery } from "src/lib/tauri/query";
-import { showToast } from "src/stores/toast";
+import { objectKindLabel, objectKindSingular } from "src/lib/databaseObjects";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionWindows } from "../hooks/useConnectionWindows";
+import { useDropDatabaseObject } from "../hooks/useDropDatabaseObject";
 import {
   tableSidebarButtonClass,
   tableSidebarIconClass,
@@ -23,44 +17,11 @@ import {
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
 import { SidebarSearch } from "./SidebarSearch";
+import { handleSidebarListKeyDown } from "./sidebarListKeys";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];
 const EMPTY_WINDOWS: import("src/types").OpenWindow[] = [];
-
-/**
- * Objects being dropped, by profile and object id. Module-level so a second
- * drop of the same object stays blocked even if the pane remounts (switching
- * sidebar tabs) while the first is still running.
- */
-const droppingObjects = new Set<string>();
-const droppingListeners = new Set<() => void>();
-
-function setDropping(key: string, dropping: boolean) {
-  if (dropping) droppingObjects.add(key);
-  else droppingObjects.delete(key);
-  // Every mounted pane re-renders, so an open menu shows the current state.
-  droppingListeners.forEach((listener) => listener());
-}
-
-/** Re-renders when any object starts or stops being dropped. */
-function useDroppingObjects() {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const listener = () => setTick((n) => n + 1);
-    droppingListeners.add(listener);
-    return () => {
-      droppingListeners.delete(listener);
-    };
-  }, []);
-}
-
-function isProfileLockedNow(profileId: string) {
-  return (
-    useScreenStore.getState().profileTabs.find((t) => t.id === profileId)
-      ?.isLocked ?? false
-  );
-}
 
 /** A new object's sidebar name: its title, else new_<kind>. */
 function draftDisplayName(draft: { title?: string; initialKind?: string }) {
@@ -103,11 +64,7 @@ export function LeftNavObjectsPane({
 
   const [query, setQuery] = useState("");
   const schemaFilter = currSchema;
-  useDroppingObjects();
-  const isProfileLocked = useScreenStore(
-    (s) => s.profileTabs.find((t) => t.id === profileId)?.isLocked ?? false
-  );
-  const dropKey = (item: DatabaseObjectItem) => `${profileId}\0${item.id}`;
+  const { canDrop, dropObject } = useDropDatabaseObject(profileId);
   const [expanded, setExpanded] = useState<Record<DatabaseObjectKind, boolean>>(
     {
       function: true,
@@ -248,49 +205,11 @@ export function LeftNavObjectsPane({
           type: "item",
           label: "Drop…",
           color: "red",
-          disabled:
-            !menu.item.capability.canDelete ||
-            !rt.runtimeConnectionId ||
-            isProfileLocked ||
-            droppingObjects.has(dropKey(menu.item)),
+          disabled: !canDrop(menu.item),
           onClick: () => void dropObject(menu.item),
         },
       ]
     : [];
-
-  /** Confirms natively, like dropping a table, then drops the object. */
-  const dropObject = async (item: DatabaseObjectItem) => {
-    const connectionId = rt.runtimeConnectionId;
-    const key = dropKey(item);
-    // Taken before the confirmation, so the object cannot be dropped twice.
-    if (!connectionId || droppingObjects.has(key)) return;
-    if (isProfileLockedNow(profileId)) return;
-    setDropping(key, true);
-    const kind = objectKindSingular(item.kind);
-    try {
-      const ok = await confirmDialog(
-        `Permanently drop the ${kind} "${item.schema}.${item.name}"? This cannot be undone.`,
-        {
-          title: `Drop ${kind}`,
-          kind: "warning",
-          okLabel: "Drop",
-          cancelLabel: "Cancel",
-        }
-      );
-      // The profile may have been locked while the dialog was open.
-      if (!ok || isProfileLockedNow(profileId)) return;
-      const sql = buildDropDatabaseObjectSql({ engine: rt.engine, item });
-      await runSqlQuery(connectionId, sql);
-      await rt.refreshSchemaAndTables();
-      showToast(`Dropped ${kind} “${item.name}”.`, { tone: "success" });
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err ?? ""), {
-        tone: "error",
-      });
-    } finally {
-      setDropping(key, false);
-    }
-  };
 
   // Drafts of new objects, shown (and counted) in their kind's section.
   const draftsByKind = useMemo(() => {
@@ -318,7 +237,11 @@ export function LeftNavObjectsPane({
         label="Search database objects"
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto p-2"
+        data-scroll-root
+        onKeyDown={handleSidebarListKeyDown}
+      >
         {!rt.runtimeConnectionId ? (
           <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-sm">
             <div class="text-sm font-medium text-neutral-700">
@@ -366,6 +289,7 @@ export function LeftNavObjectsPane({
                                 <Button
                                   key={draft.id}
                                   data-density-item
+                                  data-sidebar-item
                                   variant="ghost"
                                   title={draftName}
                                   onClick={() => selectWindow(draft.id)}
@@ -416,6 +340,7 @@ export function LeftNavObjectsPane({
                                 <Button
                                   key={item.id}
                                   data-density-item
+                                  data-sidebar-item
                                   variant={
                                     useDefaultActive ? "default" : "ghost"
                                   }
@@ -514,6 +439,7 @@ export function LeftNavObjectsPane({
       </div>
 
       <ContextMenu
+        autoFocus
         open={!!menu}
         x={menu?.x ?? 0}
         y={menu?.y ?? 0}

@@ -18,7 +18,7 @@ export function tableSidebarButtonClass(opts: {
   hasChanges: boolean;
 }) {
   const base =
-    "w-full justify-start rounded-md border px-2.5 py-1.5 gap-2 text-left text-sm font-medium overflow-hidden text-ellipsis select-none transition-none";
+    "w-full justify-start rounded-md border px-2.5 py-1.5 gap-2 text-left text-sm font-medium overflow-hidden text-ellipsis select-none transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400";
 
   // The active row stays blue; dirty and new colors go on its name chip
   // (tableSidebarNameClass).
