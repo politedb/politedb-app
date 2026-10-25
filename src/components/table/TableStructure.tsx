@@ -20,6 +20,7 @@ import { ForeignKeyDialog } from "src/components/modal/ForeignKeyDialog";
 import {
   NULLABLE_OPTIONS,
   STRUCTURE_COLUMN_LABELS,
+  STRUCTURE_COLUMN_WIDTHS,
 } from "./schemaColumnLabels";
 import { nullableLabel, parseNullable } from "src/lib/sql/columnFlags";
 
@@ -168,6 +169,7 @@ export function TableStructure({
       visibleColumns.map((key) => ({
         key,
         label: STRUCTURE_COLUMN_LABELS[key],
+        width: STRUCTURE_COLUMN_WIDTHS[key],
         options: columnInputOptions[key]?.map((option) =>
           typeof option === "string" ? { label: option, value: option } : option
         ),
@@ -207,6 +209,15 @@ export function TableStructure({
         onChange={handleDataChange}
         onDelete={(index) => handleDeleteRecord(index, deletedRows)}
         onAdd={onAddNewRecord}
+        emptyMessage={
+          busy && !tableData.length
+            ? "Loading columns…"
+            : searchQuery.trim()
+              ? "No columns match the search."
+              : readOnly
+                ? "No columns."
+                : "No columns yet. Add one with + Column."
+        }
       />
 
       {allowForeignKeyEditing && fkRowIndex !== null && (

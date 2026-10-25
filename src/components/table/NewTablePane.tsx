@@ -16,6 +16,7 @@ import { getDbConfig } from "src/lib/engines/dbConfig";
 import {
   NULLABLE_OPTIONS,
   STRUCTURE_COLUMN_LABELS,
+  STRUCTURE_COLUMN_WIDTHS,
 } from "./schemaColumnLabels";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
@@ -106,6 +107,8 @@ export function NewTablePane({
         key,
         label:
           STRUCTURE_COLUMN_LABELS[key as keyof typeof STRUCTURE_COLUMN_LABELS],
+        width:
+          STRUCTURE_COLUMN_WIDTHS[key as keyof typeof STRUCTURE_COLUMN_WIDTHS],
         options: columnOptions[key]?.map((option) =>
           typeof option === "string" ? { label: option, value: option } : option
         ),

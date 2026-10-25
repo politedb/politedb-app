@@ -17,6 +17,7 @@ import {
 } from "./rowCache";
 import { createRowsUiActions } from "./rowsSlice";
 import { parseNullable } from "src/lib/sql/columnFlags";
+import { tableRenameTarget } from "src/lib/sql/tableRename";
 
 export const useConnectionStore = create<ConnectionState>()(
   subscribeWithSelector((set, get) => {
@@ -616,6 +617,12 @@ export const useConnectionStore = create<ConnectionState>()(
                       origVal = `${existingFk.ref_table_name}(${existingFk.ref_column_names})`;
                     }
                   }
+                }
+                if (dataKey === DATA_KEYS.structure && key === "tableName") {
+                  if (tableRenameTarget(value, String(origVal ?? ""))) {
+                    cleaned[key] = value;
+                  }
+                  continue;
                 }
                 if (dataKey === DATA_KEYS.structure && key === "is_nullable") {
                   // Same meaning, different spelling (catalog true vs

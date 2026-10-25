@@ -1318,4 +1318,51 @@ describe("structure edits keep what the user did not change", () => {
       )
     ).toThrow(/FULLTEXT/);
   });
+
+  it("renames a table to the trimmed name, and never to blank", () => {
+    const rename = (tableName: string) =>
+      generateSqlFromPatches(
+        table("postgres", [], [], {
+          update: { structure: { "-1": { tableName } } },
+        }),
+        "postgres"
+      );
+    expect(rename("  goods  ")).toEqual([
+      'ALTER TABLE "shop"."items" RENAME TO "goods";',
+    ]);
+    expect(rename("   ")).toEqual([]);
+    expect(rename(" items ")).toEqual([]);
+  });
+
+  it("generates no rename after undo on a name with spaces", () => {
+    const padded = (tableName: string) =>
+      generateSqlFromPatches(
+        {
+          "table:padded": {
+            tableWindow: {
+              id: "table:padded",
+              type: "table",
+              table: { schema: "shop", name: " items " },
+            },
+            tableData: {
+              columns: [],
+              structure: [],
+              constraints: [],
+              foreignKeys: [],
+              sizeInfo: null,
+              rowCount: 0,
+              connectionId: "conn",
+              busy: false,
+              error: null,
+            },
+            patches: { update: { structure: { "-1": { tableName } } } },
+          },
+        } as unknown as PatchMap,
+        "postgres"
+      );
+    expect(padded(" items ")).toEqual([]);
+    expect(padded("items")).toEqual([
+      'ALTER TABLE "shop"." items " RENAME TO "items";',
+    ]);
+  });
 });

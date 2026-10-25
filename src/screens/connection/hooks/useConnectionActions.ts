@@ -54,6 +54,7 @@ import { RunSqlReturn } from "./useSqlHistoryRunner";
 import { createTableQuery } from "src/lib/queries/sql";
 import { buildTableReloadQueryFlags } from "src/screens/connection/lib/tableReloadQueryFlags";
 import { tablesToReloadOnManualRefresh } from "src/screens/connection/lib/refreshTableTarget";
+import { tableRenameTarget } from "src/lib/sql/tableRename";
 
 /* =============================================================================
  * Types
@@ -661,12 +662,12 @@ export function useConnectionActions(
           const metadataPatch = entry.patches?.update?.structure?.["-1"] as
             | { tableName?: unknown }
             | undefined;
+          // Same rule as the rename SQL.
           const targetTableName =
-            metadataPatch &&
-            typeof metadataPatch.tableName === "string" &&
-            metadataPatch.tableName !== tableWindow.table.name
-              ? metadataPatch.tableName
-              : tableWindow.table.name;
+            tableRenameTarget(
+              metadataPatch?.tableName,
+              tableWindow.table.name
+            ) ?? tableWindow.table.name;
 
           if (targetTableName !== tableWindow.table.name) {
             shouldRefreshSchema = true;

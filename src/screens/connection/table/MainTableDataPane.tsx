@@ -19,6 +19,8 @@ import { useTablePatches } from "src/screens/connection/hooks/useTablePatches";
 import { TableFilterBar } from "src/components/table/TableFilterBar";
 import { TableFooter } from "src/components/table/TableFooter";
 import { TableStructurePane } from "src/components/table/TableStructurePane";
+import { Button } from "src/components/common/Button";
+import { supportsMetaOnlyLoad } from "src/lib/table-data/loadPlan";
 import { structureReadOnlyReason } from "../lib/structureReadOnly";
 import { LoadingTableState } from "./LoadingTableState";
 
@@ -1059,11 +1061,31 @@ export function MainTableDataPane(props: {
     <div class="flex h-full min-h-0 flex-col">
       <div class="min-h-0 flex-1 overflow-hidden">
         {viewMode === "structure" ? (
-          hasError ? (
-            <div class="flex h-full min-h-0 flex-col overflow-hidden">
-              <div class="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-neutral-400">
-                Unable to load structure while the data query has an error.
-              </div>
+          // A failed data query (e.g. a bad filter) does not hide a
+          // structure that has loaded; without one, offer to load it.
+          hasError && !meta.structure ? (
+            <div class="flex h-full min-h-0 flex-col items-center justify-center gap-3 px-4 text-center">
+              <p class="text-sm text-neutral-500">
+                The structure has not loaded because the table query failed.
+              </p>
+              {supportsMetaOnlyLoad(engine) ? (
+                <Button
+                  variant="outline"
+                  loading={meta.busy}
+                  onClick={() =>
+                    // Structure only: the failed data query and its
+                    // filters stay as they are.
+                    void loadTableData(
+                      activeTableWindow.table.schema,
+                      activeTableWindow.table.name,
+                      { limit, offset },
+                      { metaOnly: true, refreshForeignKeys: true }
+                    )
+                  }
+                >
+                  Load structure
+                </Button>
+              ) : null}
             </div>
           ) : (
             <TableStructurePane

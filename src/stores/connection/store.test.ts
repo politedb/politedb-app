@@ -305,3 +305,90 @@ describe("structure nullable edits", () => {
     expect(pending()).toBeUndefined();
   });
 });
+
+describe("structure rename edits", () => {
+  const rename = (data: Record<string, unknown>) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow,
+      rowKey: "-1",
+      data,
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["-1"];
+
+  beforeEach(() => {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: { [key]: { ...tableData, constraints: [] } },
+    });
+  });
+
+  it("keeps no rename for the same name with spaces, or a blank one", () => {
+    rename({ tableName: " items " });
+    expect(pending()).toBeUndefined();
+    rename({ tableName: "   " });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a real rename as typed and clears it on undo", () => {
+    rename({ tableName: " goods " });
+    expect(pending()).toEqual({ tableName: " goods " });
+    rename({ tableName: "items" });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a primary key edit when the rename is undone", () => {
+    rename({ tableName: "goods", primaryKey: ["name"] });
+    rename({ tableName: "items" });
+    expect(pending()).toEqual({ primaryKey: ["name"] });
+  });
+});
+
+describe("renaming a table whose name has spaces", () => {
+  const paddedWindow = {
+    ...tableWindow,
+    table: { schema: "public", name: " items " },
+  } as TableWindow;
+  const rename = (data: Record<string, unknown>) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow: paddedWindow,
+      rowKey: "-1",
+      data,
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["-1"];
+
+  beforeEach(() => {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: {
+        [`${tabId}.public. items `]: { ...tableData, constraints: [] },
+      },
+    });
+  });
+
+  it("keeps the rename to the trimmed name", () => {
+    rename({ tableName: "items" });
+    expect(pending()).toEqual({ tableName: "items" });
+  });
+
+  it("drops the rename on undo to the exact name", () => {
+    rename({ tableName: "goods" });
+    rename({ tableName: " items " });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a primary key edit when the rename is undone", () => {
+    rename({ tableName: "goods", primaryKey: ["name"] });
+    rename({ tableName: " items " });
+    expect(pending()).toEqual({ primaryKey: ["name"] });
+  });
+});

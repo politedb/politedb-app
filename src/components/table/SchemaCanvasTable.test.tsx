@@ -234,4 +234,25 @@ describe("schema canvas editing", () => {
     expect(headers).toContain("type");
     expect(headers).not.toContain("name");
   });
+
+  it("shows the empty message only without rows", () => {
+    const view = render(
+      <SchemaCanvasTable
+        rows={[] as Row[]}
+        columns={columns}
+        onChange={() => {}}
+        emptyMessage="No columns yet."
+      />
+    );
+    expect(screen.getByRole("status").textContent).toBe("No columns yet.");
+    view.rerender(
+      <SchemaCanvasTable
+        rows={rows}
+        columns={columns}
+        onChange={() => {}}
+        emptyMessage="No columns yet."
+      />
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });

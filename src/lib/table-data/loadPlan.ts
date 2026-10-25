@@ -48,6 +48,24 @@ export function computeLoadPlan(params: {
 
   const hasForeignKeys = Array.isArray(prev.foreignKeys);
 
+  if (flags.metaOnly) {
+    const needMeta = true;
+    const needForeignKeys = refreshForeignKeys || !hasForeignKeys;
+    return {
+      key,
+      prev,
+      force: false,
+      isFirstLoad: false,
+      needColumns: false,
+      needRows: false,
+      needRowCount: false,
+      needSizeInfo: false,
+      needMeta,
+      needForeignKeys,
+      needAnyMetaWork: needMeta || needForeignKeys,
+    };
+  }
+
   const isFirstLoad = !hasColumns || !hasRowsWindow;
 
   const needColumns = force || isFirstLoad || !hasColumns;
@@ -100,6 +118,19 @@ export function computeLoadPlan(params: {
   };
 }
 
+/**
+ * Engines whose loader can load structure alone (metaOnly) without touching
+ * rows or clearing a data error: the SQL loader.
+ */
+export function supportsMetaOnlyLoad(engine?: DatabaseEngine): boolean {
+  return (
+    engine !== "mongo" &&
+    engine !== "cassandra" &&
+    engine !== "redis" &&
+    engine !== "google_sheets"
+  );
+}
+
 export function shouldDoAnything(p: LoadPlan) {
   return (
     p.needColumns ||
@@ -136,6 +167,7 @@ export function buildLoadSignature(params: {
     refreshMeta: flags.refreshMeta ?? false,
     refreshForeignKeys: flags.refreshForeignKeys ?? false,
     refreshStats: flags.refreshStats ?? false,
+    metaOnly: !!flags.metaOnly,
     filterCombine: flags.filterCombine ?? "AND",
     sortBy: flags.sortBy ?? null,
     filters,

@@ -18,7 +18,10 @@ import { TagSelect } from "src/components/common/TagSelect";
 import { Tabs } from "src/components/common/Tabs";
 import { useTableMetaState } from "src/hooks/useTableStructureMeta";
 import { StructPaneTab } from "src/screens/connection/table/MainTableDataPane";
-import { LockIcon, SearchIcon } from "src/components/icons";
+import { LockIcon, RevertIcon, SearchIcon } from "src/components/icons";
+import { Button } from "src/components/common/Button";
+import { cn } from "src/utils/cn";
+import { tableRenameTarget } from "src/lib/sql/tableRename";
 
 export function TableStructurePane(props: {
   engine: DatabaseEngine;
@@ -87,6 +90,20 @@ export function TableStructurePane(props: {
   const [columnSearch, setColumnSearch] = useState("");
   const [constraintSearch, setConstraintSearch] = useState("");
 
+  // A row added while searching would be hidden by the search: clear it.
+  const columnCount = tableStructure.length;
+  const indexCount = tableConstraints.length;
+  const [counts, setCounts] = useState({ columnCount, indexCount });
+  if (counts.columnCount !== columnCount || counts.indexCount !== indexCount) {
+    if (columnCount > counts.columnCount) setColumnSearch("");
+    if (indexCount > counts.indexCount) setConstraintSearch("");
+    setCounts({ columnCount, indexCount });
+  }
+
+  const originalName = activeTableWindow.table.name;
+  const nameEmpty = !tableName.trim();
+  const nameChanged = tableRenameTarget(tableName, originalName) !== null;
+
   const activeSearchValue =
     structPaneTab === "constraints" ? constraintSearch : columnSearch;
 
@@ -132,14 +149,51 @@ export function TableStructurePane(props: {
       <div class="border-b border-neutral-200 bg-neutral-50 p-2">
         <div class="flex items-center gap-4">
           <div class="flex w-fit items-center gap-2">
-            <label class="text-sm font-semibold text-neutral-700">Name</label>
+            <label
+              for="structure-table-name"
+              class="text-sm font-semibold text-neutral-700"
+            >
+              Name
+            </label>
             <Input
+              id="structure-table-name"
               value={tableName}
               onInput={(e) => changeTableName(e.currentTarget.value)}
               placeholder="table_name"
-              className="h-7 border border-neutral-200 bg-white py-1 text-sm"
+              aria-invalid={nameEmpty}
+              aria-describedby="structure-table-name-note"
+              title="Changing the name renames the table when you save."
+              className={cn(
+                "h-7 border border-neutral-200 bg-white py-1 text-sm",
+                nameChanged && "border-amber-400",
+                nameEmpty && "border-red-400"
+              )}
               disabled={activeTableMeta.busy || readOnly}
             />
+            {nameChanged && !readOnly ? (
+              <Button
+                variant="ghost"
+                className="h-7 px-1.5"
+                title={`Undo the rename (back to ${originalName})`}
+                aria-label="Undo the rename"
+                onClick={() => changeTableName(originalName)}
+              >
+                <RevertIcon className="size-3.5" />
+              </Button>
+            ) : null}
+            <span
+              id="structure-table-name-note"
+              class={cn(
+                "text-xs whitespace-nowrap",
+                nameEmpty ? "text-red-600" : "text-amber-700"
+              )}
+            >
+              {nameEmpty
+                ? "The name can't be empty."
+                : nameChanged
+                  ? "Renamed on save"
+                  : ""}
+            </span>
           </div>
           <div class="flex-1">
             <TagSelect
@@ -200,7 +254,8 @@ export function TableStructurePane(props: {
                 editedData={tableStructure}
                 foreignKeys={activeTableMeta.foreignKeys}
                 busy={activeTableMeta.busy}
-                error={activeTableMeta.error}
+                // A data-query error does not hide loaded columns.
+                error={activeTableMeta.structure ? null : activeTableMeta.error}
                 readOnly={readOnly}
                 onDataChange={onDataChange}
                 onAddNewRecord={onAddNewColumn}
@@ -223,7 +278,9 @@ export function TableStructurePane(props: {
                 columnNames={columnNames}
                 editedData={tableConstraints}
                 busy={activeTableMeta.busy}
-                error={activeTableMeta.error}
+                error={
+                  activeTableMeta.constraints ? null : activeTableMeta.error
+                }
                 readOnly={readOnly}
                 onDataChange={onDataChange}
                 onAddNewRecord={onAddIndex}

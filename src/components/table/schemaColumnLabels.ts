@@ -31,3 +31,28 @@ export const NULLABLE_OPTIONS = [
   { label: "YES", value: "YES" },
   { label: "NO", value: "NO" },
 ];
+
+/** Starting widths: short flags narrow, free text wide. */
+export const STRUCTURE_COLUMN_WIDTHS: Partial<
+  Record<keyof TableStructure, number>
+> = {
+  column_name: 200,
+  data_type: 170,
+  is_nullable: 100,
+  column_default: 220,
+  foreign_key: 220,
+  comment: 320,
+  check: 220,
+};
+
+export const INDEX_COLUMN_WIDTHS: Partial<
+  Record<keyof TableConstraint, number>
+> = {
+  index_name: 240,
+  index_algorithm: 120,
+  is_unique: 90,
+  column_name: 280,
+  condition: 260,
+  include: 200,
+  comment: 260,
+};

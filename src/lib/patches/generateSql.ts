@@ -9,6 +9,7 @@ import type {
 import { cellToString } from "src/utils/convert";
 import { cellIsTruthy } from "src/utils/primaryKey";
 import { parseNullable } from "src/lib/sql/columnFlags";
+import { tableRenameTarget } from "src/lib/sql/tableRename";
 import {
   isPatchMetaKey,
   patchFieldEntries,
@@ -404,10 +405,9 @@ export function generateStructureSqlFromPatches(
     const metadataPatch = updatePatches["-1"];
     if (metadataPatch) {
       // Handle table name change
-      if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
-        sqlStatements.push(
-          renameTableSql(schema, tableName, metadataPatch.tableName, engine)
-        );
+      const nextName = tableRenameTarget(metadataPatch.tableName, tableName);
+      if (nextName) {
+        sqlStatements.push(renameTableSql(schema, tableName, nextName, engine));
       }
 
       // Handle primary key change

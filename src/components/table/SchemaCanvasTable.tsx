@@ -35,6 +35,8 @@ interface Props<T> {
   ) => void;
   onDelete?: (sourceIndex: number) => void;
   onAdd?: () => void;
+  /** Shown over the grid when it has no rows (loading or empty). */
+  emptyMessage?: string;
 }
 
 type Sort = { colName: string; direction: "asc" | "desc" } | null;
@@ -52,6 +54,7 @@ export function SchemaCanvasTable<T>({
   onChange,
   onDelete,
   onAdd,
+  emptyMessage,
 }: Props<T>) {
   const [sort, setSort] = useState<Sort>(null);
   const [selected, setSelected] = useState<CanvasEditingCell | null>(null);
@@ -175,107 +178,117 @@ export function SchemaCanvasTable<T>({
     !canvasDeleted.has(cell.rowIdx);
 
   return (
-    <CanvasTable
-      viewKey={projection}
-      columns={canvasColumns}
-      totalRows={view.length}
-      getRowAt={getRowAt}
-      widthByName={widths}
-      emptyColumnWidth={0}
-      dataVersion={0}
-      cellOptions={options}
-      columnLabels={labels}
-      actionColumns={actions}
-      sortState={sort}
-      onChangeSort={setSort}
-      selected={selected}
-      selectedRows={selectedRows}
-      editing={editing && canEdit(editing) ? editing : null}
-      deletedRows={canvasDeleted}
-      isNewRow={(index) =>
-        !!view[index] && !!isNewRow?.(view[index].sourceIndex)
-      }
-      isCellDirty={(index, name) =>
-        !!view[index] &&
-        name !== "#" &&
-        !!isCellDirty?.(
-          view[index].sourceIndex,
-          name as Extract<keyof T, string>
-        )
-      }
-      onSelect={(rowIdx, colIdx, multi, range) => {
-        if (!view[rowIdx]) return;
-        setSelected({ rowIdx, colIdx });
-        setSelectedRows((previous) => {
-          const next = multi || range ? new Set(previous) : new Set<number>();
-          if (range && anchor !== null) {
-            for (
-              let i = Math.min(anchor, rowIdx);
-              i <= Math.max(anchor, rowIdx);
-              i++
-            )
-              next.add(i);
-          } else if (multi && next.has(rowIdx)) next.delete(rowIdx);
-          else next.add(rowIdx);
-          return next;
-        });
-        if (!range) setAnchor(rowIdx);
-      }}
-      onClearSelection={clearSelection}
-      onSelectAllRows={() => {
-        setSelectedRows(new Set(view.map((_, index) => index)));
-        setSelected(view.length ? { rowIdx: 0, colIdx: 1 } : null);
-        setAnchor(0);
-      }}
-      onStartEdit={
-        readOnly
-          ? undefined
-          : (cell) => {
-              if (canEdit(cell)) setEditing(cell);
-            }
-      }
-      onExitEdit={() => setEditing(null)}
-      onCommitEdit={
-        readOnly
-          ? undefined
-          : (cell, value) => {
-              const column = columns[cell.colIdx - 1];
-              if (!canEdit(cell) || !column || column.action) return;
-              onChange(
-                view[cell.rowIdx].sourceIndex,
-                column.key,
-                value == null ? "" : String(value)
-              );
-              setEditing(null);
-            }
-      }
-      onCellActivate={(cell) => {
-        const column = columns[cell.colIdx - 1];
-        if (!canEdit(cell) || !column?.action) return false;
-        setEditing(null);
-        column.action(view[cell.rowIdx].sourceIndex);
-        return true;
-      }}
-      onAddRow={readOnly || searchQuery.trim() ? undefined : onAdd}
-      onDeleteRows={
-        readOnly || !onDelete
-          ? undefined
-          : (indices) => {
-              // New-table deletion splices the array, so remove highest source index first.
-              const sources = new Set(
-                indices.flatMap((index) =>
-                  view[index] && !canvasDeleted.has(index)
-                    ? [view[index].sourceIndex]
-                    : []
-                )
-              );
-              [...sources]
-                .sort((a, b) => b - a)
-                .forEach((index) => onDelete(index));
-              setEditing(null);
-              clearSelection();
-            }
-      }
-    />
+    <div class="relative h-full w-full">
+      <CanvasTable
+        viewKey={projection}
+        columns={canvasColumns}
+        totalRows={view.length}
+        getRowAt={getRowAt}
+        widthByName={widths}
+        emptyColumnWidth={0}
+        dataVersion={0}
+        cellOptions={options}
+        columnLabels={labels}
+        actionColumns={actions}
+        sortState={sort}
+        onChangeSort={setSort}
+        selected={selected}
+        selectedRows={selectedRows}
+        editing={editing && canEdit(editing) ? editing : null}
+        deletedRows={canvasDeleted}
+        isNewRow={(index) =>
+          !!view[index] && !!isNewRow?.(view[index].sourceIndex)
+        }
+        isCellDirty={(index, name) =>
+          !!view[index] &&
+          name !== "#" &&
+          !!isCellDirty?.(
+            view[index].sourceIndex,
+            name as Extract<keyof T, string>
+          )
+        }
+        onSelect={(rowIdx, colIdx, multi, range) => {
+          if (!view[rowIdx]) return;
+          setSelected({ rowIdx, colIdx });
+          setSelectedRows((previous) => {
+            const next = multi || range ? new Set(previous) : new Set<number>();
+            if (range && anchor !== null) {
+              for (
+                let i = Math.min(anchor, rowIdx);
+                i <= Math.max(anchor, rowIdx);
+                i++
+              )
+                next.add(i);
+            } else if (multi && next.has(rowIdx)) next.delete(rowIdx);
+            else next.add(rowIdx);
+            return next;
+          });
+          if (!range) setAnchor(rowIdx);
+        }}
+        onClearSelection={clearSelection}
+        onSelectAllRows={() => {
+          setSelectedRows(new Set(view.map((_, index) => index)));
+          setSelected(view.length ? { rowIdx: 0, colIdx: 1 } : null);
+          setAnchor(0);
+        }}
+        onStartEdit={
+          readOnly
+            ? undefined
+            : (cell) => {
+                if (canEdit(cell)) setEditing(cell);
+              }
+        }
+        onExitEdit={() => setEditing(null)}
+        onCommitEdit={
+          readOnly
+            ? undefined
+            : (cell, value) => {
+                const column = columns[cell.colIdx - 1];
+                if (!canEdit(cell) || !column || column.action) return;
+                onChange(
+                  view[cell.rowIdx].sourceIndex,
+                  column.key,
+                  value == null ? "" : String(value)
+                );
+                setEditing(null);
+              }
+        }
+        onCellActivate={(cell) => {
+          const column = columns[cell.colIdx - 1];
+          if (!canEdit(cell) || !column?.action) return false;
+          setEditing(null);
+          column.action(view[cell.rowIdx].sourceIndex);
+          return true;
+        }}
+        onAddRow={readOnly || searchQuery.trim() ? undefined : onAdd}
+        onDeleteRows={
+          readOnly || !onDelete
+            ? undefined
+            : (indices) => {
+                // New-table deletion splices the array, so remove highest source index first.
+                const sources = new Set(
+                  indices.flatMap((index) =>
+                    view[index] && !canvasDeleted.has(index)
+                      ? [view[index].sourceIndex]
+                      : []
+                  )
+                );
+                [...sources]
+                  .sort((a, b) => b - a)
+                  .forEach((index) => onDelete(index));
+                setEditing(null);
+                clearSelection();
+              }
+        }
+      />
+      {emptyMessage && view.length === 0 ? (
+        <div
+          role="status"
+          class="pointer-events-none absolute inset-x-0 top-16 text-center text-sm text-neutral-500"
+        >
+          {emptyMessage}
+        </div>
+      ) : null}
+    </div>
   );
 }
