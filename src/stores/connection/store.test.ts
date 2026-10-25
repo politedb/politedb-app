@@ -246,3 +246,189 @@ describe("row cache reset", () => {
     expect(windowEntry()?.originalRows).toEqual({ "0": ["Ada"] });
   });
 });
+
+describe("structure nullable edits", () => {
+  // The catalog loaders give booleans; the structure editor writes YES/NO.
+  function seedStructure(isNullable: boolean) {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: {
+        [key]: {
+          ...tableData,
+          structure: [
+            {
+              column_name: "name",
+              data_type: "text",
+              is_nullable: isNullable,
+              check: "",
+              column_default: "",
+              foreign_key: "",
+              comment: "",
+            },
+          ],
+        },
+      },
+    });
+  }
+  const choose = (value: string) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow,
+      rowKey: "0",
+      data: { is_nullable: value },
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["0"];
+
+  it("keeps no change when the current value is chosen", () => {
+    seedStructure(true);
+    choose("YES");
+    expect(pending()).toBeUndefined();
+  });
+
+  it("clears the change after true -> NO -> YES", () => {
+    seedStructure(true);
+    choose("NO");
+    expect(pending()).toEqual({ is_nullable: "NO" });
+    choose("YES");
+    expect(pending()).toBeUndefined();
+  });
+
+  it("clears the change after false -> YES -> NO", () => {
+    seedStructure(false);
+    choose("YES");
+    expect(pending()).toEqual({ is_nullable: "YES" });
+    choose("NO");
+    expect(pending()).toBeUndefined();
+  });
+});
+
+describe("structure rename edits", () => {
+  const rename = (data: Record<string, unknown>) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow,
+      rowKey: "-1",
+      data,
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["-1"];
+
+  beforeEach(() => {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: { [key]: { ...tableData, constraints: [] } },
+    });
+  });
+
+  it("keeps no rename for the same name with spaces, or a blank one", () => {
+    rename({ tableName: " items " });
+    expect(pending()).toBeUndefined();
+    rename({ tableName: "   " });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a real rename as typed and clears it on undo", () => {
+    rename({ tableName: " goods " });
+    expect(pending()).toEqual({ tableName: " goods " });
+    rename({ tableName: "items" });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a primary key edit when the rename is undone", () => {
+    rename({ tableName: "goods", primaryKey: ["name"] });
+    rename({ tableName: "items" });
+    expect(pending()).toEqual({ primaryKey: ["name"] });
+  });
+});
+
+describe("renaming a table whose name has spaces", () => {
+  const paddedWindow = {
+    ...tableWindow,
+    table: { schema: "public", name: " items " },
+  } as TableWindow;
+  const rename = (data: Record<string, unknown>) =>
+    useConnectionStore.getState().setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData,
+      tableWindow: paddedWindow,
+      rowKey: "-1",
+      data,
+    });
+  const pending = () =>
+    useConnectionStore.getState().dataPatchMap[tabId]?.[windowId]?.patches
+      ?.update?.structure?.["-1"];
+
+  beforeEach(() => {
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: {
+        [`${tabId}.public. items `]: { ...tableData, constraints: [] },
+      },
+    });
+  });
+
+  it("keeps the rename to the trimmed name", () => {
+    rename({ tableName: "items" });
+    expect(pending()).toEqual({ tableName: "items" });
+  });
+
+  it("drops the rename on undo to the exact name", () => {
+    rename({ tableName: "goods" });
+    rename({ tableName: " items " });
+    expect(pending()).toBeUndefined();
+  });
+
+  it("keeps a primary key edit when the rename is undone", () => {
+    rename({ tableName: "goods", primaryKey: ["name"] });
+    rename({ tableName: " items " });
+    expect(pending()).toEqual({ primaryKey: ["name"] });
+  });
+});
+
+describe("deleting a draft index in the editor", () => {
+  it("leaves nothing that blocks saving the other changes", async () => {
+    const { generateSqlFromPatches } = await import("src/lib/patches");
+    const withConstraints = { ...tableData, constraints: [], structure: [] };
+    useConnectionStore.setState({
+      dataPatchMap: {},
+      tableDataMap: { [key]: withConstraints },
+    });
+    const store = useConnectionStore.getState();
+    store.setDataPatchMap(tabId, {
+      dataKey: "constraints",
+      action: "create",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "0",
+      data: { index_name: "", column_name: "" },
+    });
+    store.setDataPatchMap(tabId, {
+      dataKey: "constraints",
+      action: "delete",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "0",
+      data: {},
+    });
+    store.setDataPatchMap(tabId, {
+      dataKey: "structure",
+      action: "update",
+      tableData: withConstraints,
+      tableWindow,
+      rowKey: "-1",
+      data: { tableName: "goods" },
+    });
+    const patchMap = useConnectionStore.getState().dataPatchMap[tabId];
+    expect(generateSqlFromPatches(patchMap as never, "postgres")).toEqual([
+      'ALTER TABLE "public"."items" RENAME TO "goods";',
+    ]);
+  });
+});

@@ -33,6 +33,8 @@ type ChangeSummary = {
   constraintChanges: number;
   totalSqlStatements: number;
   sqlStatements: string[];
+  /** Why the SQL could not be generated, if it could not. */
+  sqlError: string | null;
 };
 
 function countByAction(patches: PatchData, key: DataKey): number {
@@ -72,12 +74,21 @@ function analyzePatches(
     constraintChanges += countByAction(patches, "constraints");
   }
 
-  const sqlStatements =
-    engine === "mongo"
-      ? buildMongoOperations(patchMap, options)
-      : generateSqlFromPatches(patchMap, engine, options);
+  // A change the engine cannot express (e.g. altering a SQLite column)
+  // throws; show why instead of breaking the dialog.
+  let sqlStatements: string[] = [];
+  let sqlError: string | null = null;
+  try {
+    sqlStatements =
+      engine === "mongo"
+        ? buildMongoOperations(patchMap, options)
+        : generateSqlFromPatches(patchMap, engine, options);
+  } catch (error) {
+    sqlError = error instanceof Error ? error.message : String(error);
+  }
 
   return {
+    sqlError,
     inserts,
     updates,
     deletes,
@@ -460,7 +471,14 @@ export function SaveChangesDialog({
               className="max-h-52 w-full"
               contentClassName="p-4"
             >
-              {allSqlStatements.length === 0 ? (
+              {summary.sqlError ? (
+                <div
+                  role="alert"
+                  class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                >
+                  These changes can't be saved: {summary.sqlError}
+                </div>
+              ) : allSqlStatements.length === 0 ? (
                 <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   {isMongo
                     ? "There are pending changes, but no Mongo operations were generated."
@@ -515,7 +533,11 @@ export function SaveChangesDialog({
         <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="default" onClick={onConfirm}>
+        <Button
+          variant="default"
+          onClick={onConfirm}
+          disabled={!!summary.sqlError}
+        >
           Confirm & Apply
         </Button>
       </DialogFooter>

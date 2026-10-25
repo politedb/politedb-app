@@ -10,6 +10,11 @@ export type LoadFlags = {
   refreshMeta?: boolean;
   refreshForeignKeys?: boolean;
   refreshStats?: boolean;
+  /**
+   * Load only structure, constraints and foreign keys: no rows, counts or
+   * sizes, and the current (data) error stays as it is.
+   */
+  metaOnly?: boolean;
   filters?: TableFilterCondition[];
   filterCombine?: "AND" | "OR";
   sortBy?: TableSort | null;

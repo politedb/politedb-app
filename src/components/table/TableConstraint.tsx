@@ -8,6 +8,8 @@ import type { InputOption } from "src/components/common/Input";
 import { DataAction, DataKey } from "src/stores/connection";
 import { useTableConstraintOperations } from "src/screens/connection/hooks/useTableConstraintOperations";
 import { getDbConfig } from "src/lib/engines/dbConfig";
+import { INDEX_COLUMN_LABELS, INDEX_COLUMN_WIDTHS } from "./schemaColumnLabels";
+import { canvasOptions, schemaEditorRows } from "./schemaEditorRows";
 
 const COLUMNS_NAME: Record<DatabaseEngine, (keyof TableConstraint)[]> = {
   postgres: [
@@ -86,11 +88,10 @@ export function TableConstraints({
     }
   );
 
-  const tableData = useMemo(() => {
-    if (error) return [];
-    if (editedData.length > 0) return editedData;
-    return initData ?? [];
-  }, [editedData, initData, error]);
+  const tableData = useMemo(
+    () => schemaEditorRows(editedData, initData, error),
+    [editedData, initData, error]
+  );
 
   const dbConfig = getDbConfig(engine);
 
@@ -113,15 +114,22 @@ export function TableConstraints({
     [columnNames, dbConfig.indexAlgorithms]
   );
 
+  const multiColumnSafe = columnNames.every(
+    (name) => !name.includes(",") && name === name.trim()
+  );
+
   const tableColumns = useMemo<SchemaCanvasColumn<TableConstraint>[]>(
     () =>
       COLUMNS_NAME[engine].map((key) => ({
         key,
-        options: columnInputOptions[key]?.map((option) =>
-          typeof option === "string" ? { label: option, value: option } : option
-        ),
+        label: INDEX_COLUMN_LABELS[key],
+        width: INDEX_COLUMN_WIDTHS[key],
+        // Several columns are stored comma-separated, which a name with a
+        // comma or surrounding spaces cannot survive: pick one then.
+        multiple: key === "column_name" && multiColumnSafe,
+        options: canvasOptions(columnInputOptions[key]),
       })),
-    [engine, columnInputOptions]
+    [engine, columnInputOptions, multiColumnSafe]
   );
 
   return (
@@ -138,6 +146,15 @@ export function TableConstraints({
       onChange={handleDataChange}
       onDelete={handleDeleteRecord}
       onAdd={onAddNewRecord}
+      emptyMessage={
+        busy && !tableData.length
+          ? "Loading indexes…"
+          : searchQuery.trim()
+            ? "No indexes match the search."
+            : readOnly
+              ? "No indexes."
+              : "No indexes. Add one with + Index."
+      }
     />
   );
 }

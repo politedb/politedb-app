@@ -13,6 +13,12 @@ import { TableViewToggle } from "./TableViewToggle";
 import { TagSelect } from "src/components/common/TagSelect";
 import { useNewTableState } from "src/hooks/useNewTableState";
 import { getDbConfig } from "src/lib/engines/dbConfig";
+import {
+  NULLABLE_OPTIONS,
+  STRUCTURE_COLUMN_LABELS,
+  STRUCTURE_COLUMN_WIDTHS,
+} from "./schemaColumnLabels";
+import { canvasOptions } from "./schemaEditorRows";
 
 const COLUMN_PROPERTIES: (keyof TableColumn)[] = [
   "column_name",
@@ -91,10 +97,7 @@ export function NewTablePane({
           label: type,
           value: type,
         })),
-        is_nullable: [
-          { label: "YES", value: "YES" },
-          { label: "NO", value: "NO" },
-        ],
+        is_nullable: NULLABLE_OPTIONS,
       }) as Record<keyof TableColumn, InputOption[]>,
     [dbConfig]
   );
@@ -103,9 +106,11 @@ export function NewTablePane({
     () =>
       COLUMN_PROPERTIES.map((key) => ({
         key,
-        options: columnOptions[key]?.map((option) =>
-          typeof option === "string" ? { label: option, value: option } : option
-        ),
+        label:
+          STRUCTURE_COLUMN_LABELS[key as keyof typeof STRUCTURE_COLUMN_LABELS],
+        width:
+          STRUCTURE_COLUMN_WIDTHS[key as keyof typeof STRUCTURE_COLUMN_WIDTHS],
+        options: canvasOptions(columnOptions[key]),
       })),
     [columnOptions]
   );

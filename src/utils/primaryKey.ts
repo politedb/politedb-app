@@ -47,21 +47,34 @@ function splitColumnList(columnName: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-export function primaryKeyColumnsFromConstraints(
-  constraints: PrimaryKeyConstraint[] | null | undefined
-): string[] {
-  if (!constraints?.length) return [];
-
-  const pkConstraint = constraints.find(
+/**
+ * The primary key's index among a table's constraints. When the catalog
+ * flags rows (is_primary), only a flagged row is the key: a UNIQUE index
+ * named like one (orders_legacy_pkey, primary_email, or PostgreSQL's legal
+ * "PRIMARY") is never taken for it. The loaders always set the flag (MySQL
+ * from index_name = 'PRIMARY'); names (PRIMARY, *_pkey) are guessed only
+ * for metadata without it.
+ */
+export function findPrimaryKeyConstraint<T extends PrimaryKeyConstraint>(
+  constraints: T[] | null | undefined
+): T | undefined {
+  if (!constraints?.length) return undefined;
+  const flagged = constraints.find((c) => cellIsTruthy(c.is_primary));
+  if (flagged) return flagged;
+  if (constraints.some((c) => c.is_primary != null)) return undefined;
+  return constraints.find(
     (c) =>
-      cellIsTruthy(c.is_primary) ||
       c.index_name?.toLowerCase() === "primary" ||
       c.index_name?.toLowerCase().includes("pkey") ||
       (cellIsTruthy(c.is_unique) &&
         c.index_name?.toLowerCase().includes("primary"))
   );
+}
 
-  return splitColumnList(pkConstraint?.column_name);
+export function primaryKeyColumnsFromConstraints(
+  constraints: PrimaryKeyConstraint[] | null | undefined
+): string[] {
+  return splitColumnList(findPrimaryKeyConstraint(constraints)?.column_name);
 }
 
 export function primaryKeyColumnsFromColumns(

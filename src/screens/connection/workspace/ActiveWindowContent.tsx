@@ -121,7 +121,8 @@ export function ActiveWindowContent() {
     const newRecord: TableStructureType = {
       column_name: "",
       data_type: "",
-      is_nullable: "",
+      // New columns allow NULL unless set otherwise, like new tables.
+      is_nullable: "YES",
       check: "",
       column_default: "",
       foreign_key: "",

@@ -260,11 +260,11 @@ export function useMainTableDataLoading(args: {
     if (meta.busy) return;
     if (meta.error) return;
 
-    const hasStructure =
-      Array.isArray(meta.structure) && meta.structure.length > 0;
-    const hasConstraints =
-      Array.isArray(meta.constraints) && meta.constraints.length > 0;
-    if (hasStructure && hasConstraints) return;
+    // A loaded empty list (a table without indexes) is loaded: only null
+    // means not loaded yet. Requiring rows reloaded such tables forever.
+    if (Array.isArray(meta.structure) && Array.isArray(meta.constraints)) {
+      return;
+    }
 
     void loadTableData(
       activeTableWindow.table.schema,

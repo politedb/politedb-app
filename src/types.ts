@@ -186,6 +186,10 @@ export type TableStructure = {
   foreign_key: string;
   comment: string;
   extra?: string;
+  /** MySQL/MariaDB: the catalog has no default (not an empty string). */
+  default_is_null?: boolean;
+  /** MySQL/MariaDB column collation (to restate it in MODIFY COLUMN). */
+  collation?: string;
   is_identity?: boolean;
   isNew?: boolean;
 };
@@ -199,6 +203,12 @@ export type TableConstraint = {
   condition?: string;
   include?: string;
   comment?: string;
+  /** MySQL: a column indexed by prefix (name(10)). */
+  has_prefix?: boolean;
+  /** MySQL: a column indexed in descending order. */
+  has_descending?: boolean;
+  /** MySQL: a functional index part (an expression, not a column). */
+  has_expression?: boolean;
   isNew?: boolean;
 };
 

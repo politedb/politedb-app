@@ -126,7 +126,10 @@ export function useLoadTableData() {
           const limit = pagination?.limit ?? DEFAULT_LIMIT;
           const offset = pagination?.offset ?? DEFAULT_OFFSET;
 
-          if (plan.needAnyMetaWork) {
+          if (flags.metaOnly) {
+            // Keep the data query's error: this load does not rerun it.
+            patchMeta(setMeta, key, prev, { busy: true });
+          } else if (plan.needAnyMetaWork) {
             patchMeta(setMeta, key, prev, { busy: true, error: null });
           } else if (!prev.error) {
             patchMeta(setMeta, key, prev, { error: null });

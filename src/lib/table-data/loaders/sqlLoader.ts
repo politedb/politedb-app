@@ -375,7 +375,12 @@ export async function loadMeta(params: {
       is_nullable: (cellToString(row?.[3]) ?? "").toLowerCase() === "yes",
       check: "",
       column_default: cellToString(row?.[4]),
+      // No default (SQL NULL) is not an empty-string default.
+      default_is_null: cellToString(row?.[4], true) === null,
       comment: cellToString(row?.[5]) ?? "",
+      // Kept so MODIFY COLUMN can restate what the user did not change.
+      collation: cellToString(row?.[7]) ?? "",
+      extra: cellToString(row?.[8]) ?? "",
     }));
 
     const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({
@@ -387,7 +392,10 @@ export async function loadMeta(params: {
       column_name: cellToString(row?.[4]) ?? "",
       condition: "",
       include: "",
-      comment: "",
+      comment: cellToString(row?.[8]) ?? "",
+      has_prefix: cellIsTruthy(row?.[5]),
+      has_descending: cellIsTruthy(row?.[6]),
+      has_expression: cellIsTruthy(row?.[7]),
     }));
 
     return { structure, constraints };

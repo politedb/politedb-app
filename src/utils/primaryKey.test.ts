@@ -4,6 +4,7 @@ import {
   isPrimaryKeyColumn,
   primaryKeyColumnsFromConstraints,
   resolvePrimaryKeyColumns,
+  findPrimaryKeyConstraint,
 } from "./primaryKey";
 
 describe("cellIsTruthy", () => {
@@ -32,17 +33,27 @@ describe("cellIsTruthy", () => {
 });
 
 describe("resolvePrimaryKeyColumns", () => {
-  it("detects MySQL PRIMARY by index_name even when is_primary is numeric 1 stored wrong", () => {
+  it("detects MySQL PRIMARY by index_name when the flag is missing", () => {
+    expect(
+      primaryKeyColumnsFromConstraints([
+        { index_name: "PRIMARY", is_unique: true, column_name: "id" },
+      ])
+    ).toEqual(["id"]);
+  });
+
+  it("trusts an explicit false flag even on an index named PRIMARY", () => {
+    // PostgreSQL allows CONSTRAINT "PRIMARY" UNIQUE (email); the MySQL
+    // loader always flags its PRIMARY index, so false is authoritative.
     expect(
       primaryKeyColumnsFromConstraints([
         {
           index_name: "PRIMARY",
           is_unique: true,
           is_primary: false,
-          column_name: "id",
+          column_name: "email",
         },
       ])
-    ).toEqual(["id"]);
+    ).toEqual([]);
   });
 
   it("detects MySQL is_primary from numeric and string 1 flags", () => {
@@ -86,5 +97,58 @@ describe("resolvePrimaryKeyColumns", () => {
         },
       ])
     ).toEqual(["org_id", "user_id"]);
+  });
+});
+
+describe("findPrimaryKeyConstraint", () => {
+  it("takes the flagged row over a UNIQUE index named like a key", () => {
+    const decoys = [
+      {
+        index_name: "primary_email",
+        column_name: "email",
+        is_unique: true,
+        is_primary: false,
+      },
+      {
+        index_name: "orders_legacy_pkey",
+        column_name: "legacy_id",
+        is_unique: true,
+        is_primary: false,
+      },
+      {
+        index_name: "items_main",
+        column_name: "id",
+        is_unique: true,
+        is_primary: true,
+      },
+    ];
+    expect(findPrimaryKeyConstraint(decoys)?.index_name).toBe("items_main");
+    expect(primaryKeyColumnsFromConstraints(decoys)).toEqual(["id"]);
+  });
+
+  it("never guesses by name when rows carry the flag", () => {
+    expect(
+      findPrimaryKeyConstraint([
+        {
+          index_name: "orders_legacy_pkey",
+          column_name: "legacy_id",
+          is_unique: true,
+          is_primary: false,
+        },
+      ])
+    ).toBeUndefined();
+  });
+
+  it("guesses by name only for metadata without the flag", () => {
+    expect(
+      findPrimaryKeyConstraint([
+        {
+          index_name: "users_email_key",
+          column_name: "email",
+          is_unique: true,
+        },
+        { index_name: "users_pkey", column_name: "id", is_unique: true },
+      ])?.index_name
+    ).toBe("users_pkey");
   });
 });

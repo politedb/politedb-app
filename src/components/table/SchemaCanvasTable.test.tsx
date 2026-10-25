@@ -218,4 +218,115 @@ describe("schema canvas editing", () => {
     expect(screen.queryByPlaceholderText("NULL")).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it("shows column labels in the header, keys when unlabeled", () => {
+    render(
+      <SchemaCanvasTable
+        rows={rows}
+        columns={[{ key: "name", label: "Name" }, { key: "type" }]}
+        onChange={() => {}}
+      />
+    );
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent?.trim());
+    expect(headers).toContain("Name");
+    expect(headers).toContain("type");
+    expect(headers).not.toContain("name");
+  });
+
+  it("shows the empty message only without rows", () => {
+    const view = render(
+      <SchemaCanvasTable
+        rows={[] as Row[]}
+        columns={columns}
+        onChange={() => {}}
+        emptyMessage="No columns yet."
+      />
+    );
+    expect(screen.getByRole("status").textContent).toBe("No columns yet.");
+    view.rerender(
+      <SchemaCanvasTable
+        rows={rows}
+        columns={columns}
+        onChange={() => {}}
+        emptyMessage="No columns yet."
+      />
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("adds and removes columns of a multi-value cell", () => {
+    type IndexRow = { name: string; cols: string };
+    const indexColumns: SchemaCanvasColumn<IndexRow>[] = [
+      { key: "name" },
+      {
+        key: "cols",
+        multiple: true,
+        options: [
+          { label: "last_name", value: "last_name" },
+          { label: "first_name", value: "first_name" },
+        ],
+      },
+    ];
+    const onChange = vi.fn();
+    render(
+      <SchemaCanvasTable
+        rows={[{ name: "people_idx", cols: "last_name" }]}
+        columns={indexColumns}
+        onChange={onChange}
+      />
+    );
+    const openMenu = () =>
+      fireEvent.mouseDown(scroller(), { clientX: 445, clientY: 40 });
+
+    openMenu();
+    // The state is announced, not only drawn.
+    const last = screen.getByRole("menuitemcheckbox", { name: "last_name" });
+    const first = screen.getByRole("menuitemcheckbox", { name: "first_name" });
+    expect(last.getAttribute("aria-checked")).toBe("true");
+    expect(first.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(first);
+    expect(onChange).toHaveBeenLastCalledWith(
+      0,
+      "cols",
+      "last_name,first_name"
+    );
+
+    openMenu();
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", { name: "last_name" })
+    );
+    expect(onChange).toHaveBeenLastCalledWith(0, "cols", "");
+  });
+
+  it("draws the option control on an empty option cell", () => {
+    const fills: number[] = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_target, key) => {
+          if (key === "measureText") return () => ({ width: 5 });
+          if (key === "fill") return () => fills.push(1);
+          return () => {};
+        },
+        set: () => true,
+      }
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      ctx as never
+    );
+    // jsdom lays nothing out: give the grid a viewport to draw into.
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+    render(
+      <SchemaCanvasTable
+        rows={[{ name: "a", type: "" }]}
+        columns={columns}
+        onChange={() => {}}
+      />
+    );
+    // Two triangles (up and down) for the empty "type" cell.
+    expect(fills.length).toBeGreaterThanOrEqual(2);
+  });
 });

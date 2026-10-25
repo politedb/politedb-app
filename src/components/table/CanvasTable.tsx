@@ -8,7 +8,11 @@ import {
 } from "preact/hooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { cellToString } from "src/utils/convert";
-import { ChevronDownIcon, ChevronUpIcon } from "src/components/icons";
+import {
+  CheckMarkIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+} from "src/components/icons";
 import { cn } from "src/utils/cn";
 import type { DatabaseEngine, TableForeignKey } from "src/types";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
@@ -189,7 +193,18 @@ type Props = {
     event: MouseEvent;
   }) => boolean | void;
   cellOptions?: Record<string, CanvasCellOption[]>;
+  /** Header text by column name, when the name is a field key. */
+  columnLabels?: Record<string, string>;
   actionColumns?: string[];
+  /**
+   * Option columns whose value is a comma-separated list: the menu adds or
+   * removes an option instead of replacing the value.
+   */
+  multiValueColumns?: string[];
+  /** Text for an empty cell ("NULL" for data; blank for schema editors). */
+  emptyCellText?: string;
+  /** Muted text for an empty action cell, hinting it can be set. */
+  emptyActionText?: string;
   viewKey?: string;
 
   // Called when user clicks a column header to change sort.
@@ -579,7 +594,11 @@ export function CanvasTable({
   onActivateRow,
   onRowContextMenu,
   cellOptions,
+  columnLabels,
   actionColumns,
+  multiValueColumns,
+  emptyCellText = "NULL",
+  emptyActionText,
   viewKey,
 }: Props) {
   const devicePixelRatio = useDevicePixelRatio();
@@ -802,7 +821,11 @@ export function CanvasTable({
         const cached = cellTextCacheRef.current.get(valueKey);
         let s = cached?.text;
         if (!cached || !Object.is(cached.raw, v)) {
-          s = formatTableCellValue(v, col.db_type) || "NULL";
+          s =
+            formatTableCellValue(v, col.db_type) ||
+            (actionColumns?.includes(col.name) && emptyActionText
+              ? emptyActionText
+              : emptyCellText);
           if (cellTextCacheRef.current.size > 50000) {
             cellTextCacheRef.current.clear();
           }
@@ -860,7 +883,7 @@ export function CanvasTable({
           }
 
           const textColor =
-            s === "NULL"
+            s === "NULL" || (!!emptyActionText && s === emptyActionText)
               ? palette.textMuted
               : isRowSelected && !isFocused
                 ? palette.textSelectedUnfocused
@@ -870,7 +893,8 @@ export function CanvasTable({
           if (
             isFkCol &&
             !isBooleanCol &&
-            (s !== "NULL" || actionColumns?.includes(col.name))
+            ((s !== "NULL" && s !== emptyCellText) ||
+              actionColumns?.includes(col.name))
           ) {
             const centerY = y + ROW_HEIGHT / 2;
             const arrowRight = x + w - 8;
@@ -893,28 +917,33 @@ export function CanvasTable({
             ctx.stroke();
           }
 
-          if (isBooleanCol) {
-            const centerX = x + w - BOOLEAN_CONTROL_WIDTH / 2;
-            const centerY = y + ROW_HEIGHT / 2;
-            ctx.fillStyle = palette.textMuted;
-
-            ctx.beginPath();
-            ctx.moveTo(centerX - 3, centerY - 2);
-            ctx.lineTo(centerX + 3, centerY - 2);
-            ctx.lineTo(centerX, centerY - 5);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.moveTo(centerX - 3, centerY + 2);
-            ctx.lineTo(centerX + 3, centerY + 2);
-            ctx.lineTo(centerX, centerY + 5);
-            ctx.closePath();
-            ctx.fill();
-          }
-
           ctx.fillStyle = textColor;
           ctx.fillText(displayText, x + 8, y + ROW_HEIGHT / 2);
+        }
+
+        // The option control shows even on an empty cell (blank schema
+        // fields), where the menu still opens.
+        if (
+          getCellEditorKind(col) === "bool" ||
+          !!cellOptions?.[col.name]?.length
+        ) {
+          const centerX = x + w - BOOLEAN_CONTROL_WIDTH / 2;
+          const centerY = y + ROW_HEIGHT / 2;
+          ctx.fillStyle = palette.textMuted;
+
+          ctx.beginPath();
+          ctx.moveTo(centerX - 3, centerY - 2);
+          ctx.lineTo(centerX + 3, centerY - 2);
+          ctx.lineTo(centerX, centerY - 5);
+          ctx.closePath();
+          ctx.fill();
+
+          ctx.beginPath();
+          ctx.moveTo(centerX - 3, centerY + 2);
+          ctx.lineTo(centerX + 3, centerY + 2);
+          ctx.lineTo(centerX, centerY + 5);
+          ctx.closePath();
+          ctx.fill();
         }
       }
     }
@@ -935,6 +964,8 @@ export function CanvasTable({
     foreignKeyMap,
     cellOptions,
     actionColumns,
+    emptyCellText,
+    emptyActionText,
     theme,
     uiFontStack,
     ROW_HEIGHT,
@@ -943,7 +974,7 @@ export function CanvasTable({
   useEffect(() => {
     textCacheRef.current.clear();
     cellTextCacheRef.current.clear();
-  }, [dataVersion]);
+  }, [dataVersion, emptyCellText, emptyActionText]);
 
   // --------------------------------------------------------------------------
   // Resize Observer
@@ -1626,6 +1657,33 @@ export function CanvasTable({
   const booleanMenuItems = useMemo<MenuItem[]>(() => {
     const column = booleanMenu ? columns[booleanMenu.colIdx] : undefined;
     const options = column && cellOptions?.[column.name];
+    if (options && booleanMenu && multiValueColumns?.includes(column.name)) {
+      // Add or remove one option from the comma-separated value.
+      const raw = getRowAt(booleanMenu.rowIdx)?.[booleanMenu.colIdx];
+      const chosen = String(raw ?? "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      return options.map((option) => {
+        const on = chosen.includes(option.value);
+        return {
+          type: "item",
+          label: option.label,
+          checked: on,
+          icon: (
+            <CheckMarkIcon className={on ? "size-3.5" : "size-3.5 opacity-0"} />
+          ),
+          onClick: () =>
+            onCommitEdit?.(
+              booleanMenu,
+              (on
+                ? chosen.filter((value) => value !== option.value)
+                : [...chosen, option.value]
+              ).join(",")
+            ),
+        };
+      });
+    }
     if (options) {
       return options.map((option) => ({
         type: "item",
@@ -1665,7 +1723,14 @@ export function CanvasTable({
       });
     }
     return items;
-  }, [booleanMenu, columns, onCommitEdit, cellOptions]);
+  }, [
+    booleanMenu,
+    columns,
+    onCommitEdit,
+    cellOptions,
+    multiValueColumns,
+    getRowAt,
+  ]);
 
   const openCellEditor = useCallback(
     /** `initialText` (a typed character) replaces the value, like a spreadsheet. */
@@ -2235,7 +2300,11 @@ export function CanvasTable({
                         : undefined
                   }
                   tabIndex={onChangeSort ? 0 : undefined}
-                  title={onChangeSort ? `Sort by ${col.name}` : undefined}
+                  title={
+                    onChangeSort
+                      ? `Sort by ${columnLabels?.[col.name] ?? col.name}`
+                      : undefined
+                  }
                   onKeyDown={(e) => {
                     if (!onChangeSort) return;
                     if (e.key === "Enter" || e.key === " ") {
@@ -2269,7 +2338,9 @@ export function CanvasTable({
                     });
                   }}
                 >
-                  <span class="truncate">{col.name}</span>
+                  <span class="truncate">
+                    {columnLabels?.[col.name] ?? col.name}
+                  </span>
 
                   {isSorted &&
                     (sortDir === "asc" ? (

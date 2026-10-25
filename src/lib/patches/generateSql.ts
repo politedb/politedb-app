@@ -7,13 +7,18 @@ import type {
   DatabaseEngine,
 } from "src/types";
 import { cellToString } from "src/utils/convert";
+import { cellIsTruthy } from "src/utils/primaryKey";
+import { parseNullable } from "src/lib/sql/columnFlags";
+import { tableRenameTarget } from "src/lib/sql/tableRename";
 import {
   isPatchMetaKey,
   patchFieldEntries,
   type RecordedRows,
 } from "./rowPositionPatches";
 import {
+  findPrimaryKeyConstraint,
   isPrimaryKeyColumn,
+  primaryKeyColumnsFromConstraints,
   resolvePrimaryKeyColumns,
 } from "src/utils/primaryKey";
 import { isDefaultCellEditValue } from "src/lib/table-data/cellEditValue";
@@ -25,6 +30,9 @@ import {
   addPrimaryKeySql,
   alterColumnStatements,
   createIndexSql,
+  mysqlDefaultFromCatalog,
+  unsupportedSql,
+  replacePrimaryKeySql,
   dropColumnSql,
   dropForeignKeySql,
   dropIndexSql,
@@ -373,7 +381,8 @@ export function generateStructureSqlFromPatches(
       const columnDefault = patchData.column_default;
 
       let columnDef = `${qIdent(columnName, engine)} ${dataType || "UNKNOWN"}`;
-      if (!isNullable) {
+      // Only an explicit "not nullable" adds NOT NULL ("false" is a string).
+      if (parseNullable(isNullable) === false) {
         columnDef += " NOT NULL";
       }
       if (columnDefault && columnDefault.trim() !== "") {
@@ -400,29 +409,20 @@ export function generateStructureSqlFromPatches(
     const metadataPatch = updatePatches["-1"];
     if (metadataPatch) {
       // Handle table name change
-      if (metadataPatch.tableName && metadataPatch.tableName !== tableName) {
-        sqlStatements.push(
-          renameTableSql(schema, tableName, metadataPatch.tableName, engine)
-        );
+      const nextName = tableRenameTarget(metadataPatch.tableName, tableName);
+      if (nextName) {
+        sqlStatements.push(renameTableSql(schema, tableName, nextName, engine));
       }
 
       // Handle primary key change
       if (metadataPatch.primaryKey && Array.isArray(metadataPatch.primaryKey)) {
         const newPrimaryKey = metadataPatch.primaryKey.filter(Boolean).sort();
 
-        // Find existing primary key constraint
-        const existingPkConstraint = initConstraints?.find((c) =>
-          c.index_name.toLowerCase().includes("pkey")
-        );
-
-        // Get existing primary key columns
-        const existingPkColumns = existingPkConstraint
-          ? existingPkConstraint.column_name
-              .split(",")
-              .map((col) => col.trim())
-              .filter(Boolean)
-              .sort()
-          : [];
+        // The existing primary key, found the same way everywhere (by the
+        // is_primary flag first: MySQL names it PRIMARY, not *_pkey).
+        const existingPkConstraint = findPrimaryKeyConstraint(initConstraints);
+        const existingPkColumns =
+          primaryKeyColumnsFromConstraints(initConstraints).sort();
 
         // Only change primary key if it's actually different
         const pkChanged =
@@ -431,7 +431,20 @@ export function generateStructureSqlFromPatches(
             (col: string, idx: number) => col !== existingPkColumns[idx]
           );
 
-        if (pkChanged) {
+        if (pkChanged && engine === "clickhouse") {
+          // ClickHouse's key is part of the table engine definition.
+          unsupportedSql("Changing primary key", engine);
+        }
+        if (
+          pkChanged &&
+          existingPkConstraint &&
+          newPrimaryKey.length > 0 &&
+          (engine === "mysql" || engine === "mariadb")
+        ) {
+          sqlStatements.push(
+            replacePrimaryKeySql(schema, tableName, newPrimaryKey, engine)
+          );
+        } else if (pkChanged) {
           // Drop existing primary key if it exists
           if (existingPkConstraint) {
             sqlStatements.push(
@@ -520,14 +533,14 @@ export function generateStructureSqlFromPatches(
         }
 
         // Handle nullable change
-        if (
-          "is_nullable" in patchData &&
-          patchData.is_nullable !== originalColumn.is_nullable
-        ) {
-          if (patchData.is_nullable) {
-            nullable = true;
-          } else {
-            nullable = false;
+        if ("is_nullable" in patchData) {
+          // Compare meanings, not spellings: YES and "true" are the same.
+          const next = parseNullable(patchData.is_nullable);
+          if (
+            next !== undefined &&
+            next !== parseNullable(originalColumn.is_nullable)
+          ) {
+            nullable = next;
           }
         }
 
@@ -560,14 +573,39 @@ export function generateStructureSqlFromPatches(
           nullable !== undefined ||
           defaultExpression !== undefined
         ) {
+          // MySQL/MariaDB only (not ClickHouse, which MODIFY differently).
+          const restate = engine === "mysql" || engine === "mariadb";
           sqlStatements.push(
             ...alterColumnStatements({
               schema,
               tableName,
               columnName,
-              dataType,
-              nullable,
-              defaultExpression,
+              // MySQL MODIFY replaces the whole column definition, so the
+              // parts the user did not change are restated as they are.
+              dataType: restate
+                ? (dataType ?? originalColumn.data_type)
+                : dataType,
+              nullable: restate
+                ? (nullable ?? parseNullable(originalColumn.is_nullable))
+                : nullable,
+              defaultExpression:
+                restate && defaultExpression === undefined
+                  ? mysqlDefaultFromCatalog(
+                      originalColumn.default_is_null
+                        ? null
+                        : originalColumn.column_default,
+                      originalColumn.extra,
+                      engine,
+                      originalColumn.data_type
+                    )
+                  : defaultExpression,
+              mysqlKeep: restate
+                ? {
+                    extra: originalColumn.extra,
+                    comment: originalColumn.comment,
+                    collation: originalColumn.collation,
+                  }
+                : undefined,
               engine,
             })
           );
@@ -784,16 +822,28 @@ export function generateConstraintSqlFromPatches(
 ): string[] {
   const sqlStatements: string[] = [];
 
+  // Rows deleted in the editor: a deleted draft is cancelled and an edit
+  // to a deleted index is superseded by its DROP (below).
+  const deletedConstraintRows = new Set(
+    Object.keys(patchMap["delete"]?.["constraints"] ?? {})
+  );
+
   // Handle CREATE (new indexes/constraints)
   const createPatches = patchMap["create"]?.["constraints"];
   if (createPatches && initConstraints) {
-    for (const [_rowKey, patchData] of Object.entries(createPatches)) {
+    for (const [rowKey, patchData] of Object.entries(createPatches)) {
+      if (deletedConstraintRows.has(rowKey)) continue;
       const indexName = patchData.index_name;
       const columnName = patchData.column_name;
-      const isUnique = patchData.is_unique;
+      const isUnique = cellIsTruthy(patchData.is_unique);
       const algorithm = patchData.index_algorithm;
 
-      if (!columnName) continue;
+      // An index needs a column: say so instead of silently skipping it.
+      if (!String(columnName ?? "").replace(/[\s,]/g, "")) {
+        throw new Error(
+          `Index "${String(indexName ?? "").trim() || "(new index)"}" needs at least one column.`
+        );
+      }
       sqlStatements.push(
         createIndexSql({
           schema,
@@ -812,6 +862,7 @@ export function generateConstraintSqlFromPatches(
   const updatePatches = patchMap["update"]?.["constraints"];
   if (updatePatches && initConstraints) {
     for (const [rowKey, patchData] of Object.entries(updatePatches)) {
+      if (deletedConstraintRows.has(rowKey)) continue;
       const rowIndex = parseInt(rowKey, 10);
       if (
         isNaN(rowIndex) ||
@@ -825,21 +876,77 @@ export function generateConstraintSqlFromPatches(
       if (!originalConstraint) continue;
 
       const indexName = originalConstraint.index_name;
-
-      // For updates, we typically need to drop and recreate
-      // Drop the old index
-      sqlStatements.push(dropIndexSql(schema, tableName, indexName, engine));
-
-      // Create the new index with updated properties
+      if (
+        "column_name" in patchData &&
+        !String(patchData.column_name ?? "").replace(/[\s,]/g, "")
+      ) {
+        throw new Error(`Index "${indexName}" needs at least one column.`);
+      }
       const newIndexName = patchData.index_name || indexName;
       const columnName =
         patchData.column_name || originalConstraint.column_name;
-      const isUnique =
+      const isUnique = cellIsTruthy(
         "is_unique" in patchData
           ? patchData.is_unique
-          : originalConstraint.is_unique;
+          : originalConstraint.is_unique
+      );
       const algorithm =
         patchData.index_algorithm || originalConstraint.index_algorithm;
+
+      const text = (value: unknown) => (cellToString(value) ?? "").trim();
+      const columnList = (value: string) =>
+        value
+          .split(",")
+          .map((name) => name.trim())
+          .filter(Boolean)
+          .join(",");
+      const changed =
+        text(newIndexName) !== text(indexName) ||
+        columnList(columnName) !== columnList(originalConstraint.column_name) ||
+        isUnique !== cellIsTruthy(originalConstraint.is_unique) ||
+        text(algorithm).toUpperCase() !==
+          text(originalConstraint.index_algorithm).toUpperCase();
+      const changes = (key: "condition" | "include") =>
+        key in patchData &&
+        text(patchData[key]) !== text(originalConstraint[key]);
+
+      if (changes("condition") || changes("include")) {
+        throw new Error(
+          `Changing the condition or INCLUDE columns of index "${indexName}" isn't supported yet.`
+        );
+      }
+      // A comment-only (or no-op) edit must not drop and recreate the index.
+      if (!changed) continue;
+      if (originalConstraint === findPrimaryKeyConstraint(initConstraints)) {
+        throw new Error(
+          `"${indexName}" is the primary key's index. Change the primary key with Primary above the columns instead.`
+        );
+      }
+      // Drop and recreate keeps only name, columns, uniqueness and
+      // algorithm: refuse when the index has anything else.
+      const kept = [
+        text(originalConstraint.condition) && "its condition",
+        text(originalConstraint.include) && "its INCLUDE columns",
+        text(originalConstraint.comment) && "its comment",
+        originalConstraint.has_prefix && "its column prefix lengths",
+        originalConstraint.has_descending && "its descending order",
+        (originalConstraint.has_expression ||
+          !columnList(originalConstraint.column_name)) &&
+          "its expressions",
+        // FULLTEXT/SPATIAL are index kinds, not USING algorithms.
+        /^(FULLTEXT|SPATIAL)$/i.test(
+          text(originalConstraint.index_algorithm)
+        ) &&
+          `its ${text(originalConstraint.index_algorithm).toUpperCase()} kind`,
+      ].filter(Boolean);
+      if (kept.length) {
+        throw new Error(
+          `Recreating index "${indexName}" would lose ${kept.join(", ")}; change it with SQL instead.`
+        );
+      }
+
+      // Indexes change by drop and recreate.
+      sqlStatements.push(dropIndexSql(schema, tableName, indexName, engine));
 
       sqlStatements.push(
         createIndexSql({
@@ -870,6 +977,13 @@ export function generateConstraintSqlFromPatches(
 
       const originalConstraint = initConstraints[rowIndex];
       if (!originalConstraint) continue;
+      // Dropping the key's index (DROP INDEX PRIMARY on MySQL) would drop
+      // the primary key: that is done with Primary, not here.
+      if (originalConstraint === findPrimaryKeyConstraint(initConstraints)) {
+        throw new Error(
+          `"${originalConstraint.index_name}" is the primary key's index. Clear Primary above the columns to remove the primary key.`
+        );
+      }
 
       sqlStatements.push(
         dropIndexSql(schema, tableName, originalConstraint.index_name, engine)
