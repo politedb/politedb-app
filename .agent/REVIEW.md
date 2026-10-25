@@ -5298,3 +5298,103 @@ Scope: `feat/structure-polish`, HEAD `949d56a60f7ca93788110560af431697d1192771`;
 - `rtk proxy git diff --check`: passed. Rust unchanged; no Rust checks run. Business-logic review; no library API documentation lookup required.
 - `ConnectionLogsSection.test.tsx` was not included in these focused runs. Its reported midnight failure was not independently rerun or attributed to this diff: the unchanged test uses `Date.now() - 30 minutes` while expecting a `Today` group, which can cross the local date boundary. No source evidence contradicts the supplied pre-existing classification.
 - No live database, SQL execution, native Tauri/WebView, browser visual inspection, physical screen-reader/Enter/Space activation, actual clipboard or end-to-end save/reload. Canvas tests assert drawing calls, not rendered pixels. Earlier batch limitations and workflow-required implementer security review remain applicable.
+
+
+## Primary-key change bug fix — working-tree review (Codex, 2026-10-26)
+
+**Verdict: CHANGES REQUIRED**
+
+Scope: branch `feat/structure-polish`, HEAD `f8e9bb8a653335724e463f380fbc79ee5fb7ff55`; uncommitted diff in `src/utils/primaryKey.ts`, `src/lib/patches/generateSql.ts`, and `src/lib/patches/generateSql.test.ts`. Structure batches 1–3 are committed and outside this review. `.claude/launch.json` ignored. Read AGENTS.md, RTK instructions and `.agent/WORKFLOW.md`. No application/test source edits, staging, commits or database writes; only this report appended.
+
+### Findings
+
+1. **P1 — `src/utils/primaryKey.ts:57–63`, consumed at `src/lib/patches/generateSql.ts:421–440`: name fallback can beat authoritative `is_primary`, causing an unrelated UNIQUE constraint to be dropped.** The single `.find()` checks an OR predicate per row; it does not search all flagged rows before applying fallbacks. Reproduction: constraints ordered as `{index_name: "primary_email", column_name: "email", is_unique: true, is_primary: false}` followed by `{index_name: "items_main", column_name: "id", is_unique: true, is_primary: true}`. Clearing Primary generates `ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "primary_email";`, removing the unrelated UNIQUE constraint and leaving the actual primary key. With replacement columns, ADD then encounters the still-existing primary key. The old column-resolution predicate already had this ambiguity, but this diff newly uses its result as the destructive DROP target for names without `pkey`. Fix: search all truthy `is_primary` flags first; only if none exist apply compatibility name fallbacks. Add regression coverage with the misleading UNIQUE row before a renamed flagged PK, including clear, replace and unchanged selections.
+
+2. **P2 — `src/lib/patches/generateSql.ts:421–440`: newly recognized ClickHouse PRIMARY metadata reaches an unsupported DROP operation.** `tableConstraintsQuery` returns ClickHouse's key as `index_name: "PRIMARY", is_primary: true`; clearing the selector now generates `ALTER TABLE `shop`.`items` DROP PRIMARY KEY;`. `dropPrimaryKeySql` uses `isMysqlFamilyEngine`, which includes ClickHouse, so the change sends MySQL primary-key DDL for ClickHouse's sorting/primary-key metadata. Previously this PRIMARY row was not found and clearing generated no SQL. Replacement was already unsupported; the new DROP path exposes that gap further. Fix: explicitly refuse ClickHouse primary-key changes through the existing unsupported-operation mechanism before generating either DROP or ADD. Cover clear/change refusal and unchanged-selection no-op; preserve MySQL/MariaDB behavior.
+
+### Compatibility checks
+
+- MySQL/MariaDB use `DROP PRIMARY KEY` without a constraint name, then ADD for replacements. Temporary probes confirm clearing works with `PRIMARY` and no `is_primary`; repository regression confirms MySQL DROP-before-ADD. PostgreSQL uses quoted `DROP CONSTRAINT IF EXISTS`, including renamed flagged PKs. First-match issue above prevents full approval.
+- SQLite/DuckDB, SQL Server, Oracle and Snowflake still throw for actual changes through existing dialect guards. Temporary probes confirm changed selections throw and unchanged selections yield no SQL for all five engines. Snowflake's real constraint query returns no rows, so its unchanged probe is synthetic; ADD still refuses when metadata is absent.
+- `normalizeIdentName` itself is unchanged. Its use in this comparison is new via `primaryKeyColumnsFromConstraints`: quoted catalog column lists now match unquoted selector values, consistent with the existing metadata hook and store baseline. Sorting remains case-sensitive and order-insensitive as before; requested values are not newly normalized. Arbitrary comma-containing/escaped identifiers and fallback false positives are pre-existing parser limitations, not fixed here.
+- Store's original primary-key comparison still calls `getPrimaryKeyColumnsFromConstraints`, then trims/sorts both values. No second state path introduced. Its baseline inherits helper selection ambiguity; changing helper precedence must remain shared across store, UI and SQL generation.
+- Index editing still refuses actual edits when `cellIsTruthy(originalConstraint.is_primary)` is true, and allows no-op/comment-only patches without recreating indexes. Combining a flagged index edit with a metadata PK edit throws during SQL generation; no executable partial SQL result is returned. Missing/false flags can still bypass index-edit refusal even when name fallbacks identify a PK: pre-existing guard inconsistency, unchanged by this diff. Compatibility fallback tests should not imply that independent guard is fixed.
+
+### Verification and limitations
+
+- `rtk npm run test:run -- src/lib/patches src/utils/primaryKey.test.ts src/stores/connection src/lib/sql src/lib/queries/sql src/components/table`: **37 files / 313 tests passed**.
+- `rtk npm run build`: **passed**, TypeScript + Vite. Existing node:zlib browser externalization, ineffective dynamic-import and >500 kB chunk warnings remain.
+- Independent harness outside repository: `rtk proxy npm exec -- vitest run --config /private/tmp/pk-review/config.mjs`: **1 file / 10 tests passed** after correcting the harness's argument placement and ClickHouse expected output. Includes two passing defect reproductions (wrong UNIQUE target and ClickHouse MySQL-form DROP), not acceptance passes for those defects; other probes cover flagless MySQL/MariaDB clearing, five unsupported engines and quoted-column no-op.
+- `rtk proxy git diff --check`: passed before report append. No Rust changes; no Rust checks. Business-logic review; no library API documentation lookup required.
+- `ConnectionLogsSection.test.tsx` excluded from focused run; supplied pre-existing midnight failure was not rerun or independently attributed here.
+- No live database execution, native Tauri/WebView or end-to-end save/reload. Generated SQL and source paths reviewed; live dialect execution remains unverified. Workflow-required implementer security review for destructive DB operations remains applicable after fixes and Codex re-review.
+
+
+## Primary-key change bug fix — working-tree re-review (Codex, 2026-10-26)
+
+**Verdict: CHANGES REQUIRED**
+
+Scope: `feat/structure-polish`, HEAD `f8e9bb8a653335724e463f380fbc79ee5fb7ff55`; uncommitted working-tree diff, excluding `.claude/launch.json`. Read project/RTK instructions, `.agent/WORKFLOW.md`, and the preceding primary-key report. Reviewed all five application/test diffs initially present. Two additional styling-only diffs appeared during review (`DbHealthInspectorDialog.tsx`, `DiagramGeneratorDialog.tsx`); inspected and preserved, no primary-key impact. Only this report appended; no application/test source edits, staging, commits, or database writes.
+
+### Remaining finding
+
+1. **P1 — `src/utils/primaryKey.ts:63–67`, consumed by `src/lib/patches/generateSql.ts:423–454`: the reserved-name exception ignores authoritative false flags on non-MySQL engines, allowing an unrelated UNIQUE constraint to be dropped.** PostgreSQL permits `CONSTRAINT "PRIMARY" UNIQUE (email)` on a table without a primary key. Its real catalog query returns `index_name: "PRIMARY", column_name: "email", is_unique: true, is_primary: false`. With no truthy primary row, the unconditional reserved-name branch selects that UNIQUE constraint before the explicit-flag guard. Clearing Primary emits `ALTER TABLE "shop"."items" DROP CONSTRAINT IF EXISTS "PRIMARY";`; choosing `id` emits that destructive DROP followed by ADD PRIMARY KEY. Thus the earlier wrong-UNIQUE-target issue remains for this exact name. The helper's name interpretation already affected UI/data identity before this diff, but using it as the DDL DROP target newly makes this case destructive. Restrict the explicit-false `PRIMARY` compatibility exception to MySQL/MariaDB using engine context consistently across store/UI/SQL consumers, or otherwise ensure explicit non-primary metadata on other engines is authoritative. Preserve the existing MySQL false-flag compatibility test. Add PostgreSQL clear/add and ordinary index edit/delete regressions for a non-primary index named exactly PRIMARY; do not drop or protect that UNIQUE index as a primary key.
+
+### Resolved findings and compatibility
+
+- Flagged renamed PK now wins over preceding `primary_email` and `*_pkey` decoys. Clear, replacement and unchanged cases pass. Defined false flags suppress heuristic name guesses; flagless compatibility fallback remains. The exact PRIMARY exception above remains too broad.
+- ClickHouse changed/cleared selections now throw before returning SQL; unchanged selection emits none. MySQL/MariaDB replacement uses one quoted ALTER TABLE with DROP and ADD; clearing emits DROP alone. Independent probes cover both engines, including false-flag PRIMARY compatibility. No live server atomicity guarantee tested.
+- PK index edits and deletion use the same selected constraint object. Actual edits/deletion throw with Primary guidance; no-op/comment-only edits remain no-ops. Ordinary index operations remain available except the non-primary PRIMARY misclassification above. Deleted draft cancellation and original-index deletion precedence remain intact.
+- Shared consumers traced: store metadata baseline (`rowCache`/`store`), `useTableStructureMeta`, PK-aware UPDATE/DELETE WHERE clauses, virtual-key assessment, patch diff labels and table sorting all retain shared resolution. Constraint-first then column-flag fallback remains; explicit false decoys now correctly permit column fallback or virtual-key safety. Existing row edit/delete, original-row, store, identity and patch tests pass. No new parallel entity state introduced.
+- Diagram metadata obtains column primary flags from its own engine queries and uses unchanged `cellIsTruthy`; it does not consume the changed constraint selector. Diagram tests pass.
+- SQLite, DuckDB, SQL Server, Oracle and Snowflake retain refusal for actual primary-key changes and no SQL for unchanged selections in independent synthetic-metadata probes. Snowflake's real constraint query remains empty; synthetic no-op coverage does not certify real metadata round-trips.
+- Rename-plus-other-edits ordering and NO_BACKSLASH_ESCAPES handling remain unchanged and outside this fix. No additional actionable regression identified in reviewed changes.
+
+### Verification and limitations
+
+- `rtk npm run test:run -- src/lib/patches src/utils/primaryKey.test.ts src/utils/tableSort.test.ts src/stores/connection src/lib/table-data src/lib/sql src/lib/queries/sql src/components/table src/screens/connection/hooks`: **57 files / 450 tests passed**.
+- `rtk npm run test:run -- src/components/diagram src/utils/tableSort.test.ts`: **8 files / 56 tests passed** (overlapping table-sort coverage; counts are separate runs).
+- Independent external harness: `rtk proxy npm exec -- vitest run --config /private/tmp/pk-rereview/config.mjs`: **1 file / 11 tests passed**. Covers flagged-row precedence, both MySQL-family replacement/clear/index guards, six unsupported-engine change/clear/no-op paths, column-flag fallback, and one passing defect reproduction for the PostgreSQL PRIMARY-named UNIQUE DROP. That reproduction is not an acceptance pass.
+- `rtk npm run build`: **passed**, TypeScript + Vite, with existing node:zlib externalization, ineffective dynamic-import and large-chunk warnings. `rtk proxy git diff --check`: **passed** before append.
+- `ConnectionLogsSection.test.tsx` excluded; unchanged test captures Date.now() and subtracts 30 minutes while expecting Today, consistent with the reported midnight-sensitive failure. Not independently rerun or attributed through execution here.
+- No live database execution, destructive writes, native Tauri/WebView, visual inspection or end-to-end save/reload. Rust unchanged; no Rust checks. Business-logic review; no library documentation lookup needed. Workflow-required implementer security review remains applicable after fixes and Codex re-review.
+
+
+## Primary-key change bug fix — second working-tree re-review (Codex, 2026-10-26)
+
+**Verdict: VERIFIED WITH LIMITATIONS**
+
+Scope: branch `feat/structure-polish`, HEAD `f8e9bb8a653335724e463f380fbc79ee5fb7ff55`; uncommitted diffs in `src/utils/primaryKey.ts`, `src/utils/primaryKey.test.ts`, `src/lib/patches/generateSql.ts`, `src/lib/patches/generateSql.test.ts`, and `src/lib/sql/sqlDialect.ts`. Read AGENTS.md, RTK instructions, `.agent/WORKFLOW.md`, and preceding primary-key reports. Human explicitly chose removal of the exact-PRIMARY exception; the previous request to preserve false-flag MySQL compatibility is superseded by that decision. `.claude/launch.json` and both unrelated dialog styling diffs excluded. Only this report appended; no source/test edits, staging, commits, or database writes.
+
+### Finding disposition
+
+- **Latest P1 resolved.** `findPrimaryKeyConstraint` searches all truthy flags first, then returns undefined when any non-null flag exists, then applies legacy name guesses only to entirely flagless metadata. Explicit false on PostgreSQL's PRIMARY-named UNIQUE index cannot select it as the primary-key DROP target or trigger the PK index edit/delete guard. Repository regression verifies clear emits no SQL, add emits only ADD PRIMARY KEY, and ordinary index edit/delete generation remains available. Flagged renamed keys still beat misleading names. Null/undefined count as absent; mixed defined/absent metadata suppresses guessing, as intended.
+- **MySQL rationale confirmed against the actual loader.** `tableConstraintsMySqlQuery` selects `CASE WHEN UPPER(index_name) = 'PRIMARY' THEN 'true' ELSE 'false' END` at ordinal 3; both MySQL and MariaDB branches of `loadMeta` map that ordinal through `cellIsTruthy`. Thus a loaded PRIMARY row has true, and the removed synthetic false-PRIMARY compatibility test did not represent this loading path. Missing-flag legacy PRIMARY recognition remains tested. No engine context needs threading through consumers.
+- **No additional actionable regression found** in the five-file diff. MySQL/MariaDB replacement retains one DROP+ADD statement, clearing retains DROP alone, ClickHouse changes refuse before returning SQL, and unchanged selections remain no-ops. PK index edit/delete protection uses the same selected object; comment/no-op edits and deleted-draft cancellation retain existing behavior.
+
+### Loader and consumer audit
+
+| Source | Confirmed contract and effect |
+| --- | --- |
+| MySQL / MariaDB | Shared dedicated statistics query and loader described above; every index carries a boolean flag. |
+| PostgreSQL | `indisprimary` at ordinal 3 maps through `cellIsTruthy`; explicit-false named decoys remain ordinary indexes. |
+| SQLite / D1 / Turso | PRAGMA query synthesizes a flagged PRIMARY row from ordered PK columns; other index rows flag `origin = 'pk'`; SQLite-family loader preserves flags. |
+| DuckDB | `duckdb_constraints()` flags PRIMARY KEY versus UNIQUE; secondary indexes explicitly false; SQLite-like loader maps ordinal 3. |
+| SQL Server | `i.is_primary_key` becomes true/false at ordinal 3; common SQL loader normalizes it. |
+| Oracle | Joined primary constraint type P sets the flag; other indexes false; dedicated loader normalizes ordinal 3. |
+| ClickHouse | Synthetic PRIMARY from system.tables explicitly true; dedicated loader preserves it. Change/clear refusal remains active. |
+| Snowflake | Constraint query returns zero rows; loader produces empty constraints, so no heuristic selection. Existing unsupported-change behavior retained. |
+| MongoDB | Native index DTO supplies boolean `is_primary`; `loadMongoOverview` copies it with boolean coercion. Native identification uses `_id_` or `_id` key membership, unchanged. |
+| Cassandra / Sheets / Redis | Overview/execute paths supply empty constraints; no name fallback introduced. |
+| Diagram metadata | MySQL/MariaDB schema-wide query uses the same PRIMARY-name flag; PostgreSQL uses `indisprimary`. Per-table constraints use the dedicated MySQL query or shared engine query and inspect raw flag cells for uniqueness/cardinality. Diagram primary markers come from schema flags or column queries, not the changed selector; `cellIsTruthy` unchanged. |
+
+Shared consumers checked: `useTableStructureMeta` selection, `rowCache`/store metadata baseline, structure SQL comparison and constraint guards, UPDATE/DELETE row identity, virtual-key assessment through the PK resolver, patch-diff labels and table sorting. All retain the shared constraint resolution; column-flag fallback remains available when no constraint PK is resolved. No parallel authoritative entity state added. Existing identifier normalization, comma-list parsing and order-insensitive comparison remain unchanged in scope.
+
+### Verification and limitations
+
+- `rtk npm run test:run -- src/lib/patches src/utils/primaryKey.test.ts src/utils/tableSort.test.ts src/stores/connection src/lib/table-data src/lib/sql src/lib/queries/sql src/components/table src/screens/connection/hooks src/components/diagram`: **64 files / 504 tests passed**.
+- Independent temporary harness: `rtk proxy npm exec -- vitest run --config /private/tmp/pk-rereview3/config.mjs`: **1 file / 14 tests passed**. Covers flagged-row precedence, MySQL/MariaDB replace/clear/index guards with real-loader-compatible true flags, eight unsupported-engine change/clear/no-op paths (including D1/Turso), column fallback, explicit-false PRIMARY clear/add, mixed metadata and wrapped truthy flags. Harness lives outside repository.
+- `rtk npm run build`: **passed**, TypeScript + Vite. Existing node:zlib browser externalization, ineffective dynamic imports and large-chunk warnings remain. `rtk proxy git diff --check`: **passed** before append.
+- Loader guarantees verified by source trace, not live database responses. No SQL execution, native Tauri/WebView, visual or end-to-end save/reload verification. Rust unchanged; no Rust checks. Focused tests exclude `ConnectionLogsSection.test.tsx`; no claim about its reported midnight-sensitive failure. Business-logic review; no library documentation lookup needed.
+- The PRIMARY-named UNIQUE regression certifies classification and generated SQL only. Existing generic PostgreSQL index editing uses DROP INDEX, which cannot remove an index backing a UNIQUE constraint; this pre-existing execution limitation is not fixed or certified by the new test. It does not restore the erroneous primary-key DROP target.
+- Workflow-required implementer security review for destructive database operations remains applicable; this Codex verdict does not substitute for it.
