@@ -11,6 +11,7 @@ import { tableKey, useLoadTableData } from "src/hooks/useLoadTableData";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionStore } from "src/stores/connection";
 import { getTablePagination } from "./lib/tablePagination";
+import { matchesSidebarSearch } from "./lib/sidebarSearch";
 
 import { MenuBar } from "./workspace/MenuBar";
 import { Box } from "src/components/common/Box";
@@ -396,13 +397,13 @@ export function ConnectionScreen() {
       )
       .map((w) => w.table)
       .filter((t) => !activeSchema || t.schema === activeSchema)
-      .filter((t) => {
-        const q = tableSearchQuery.trim().toLowerCase();
-        if (!q) return true;
-        return (
-          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
-        );
-      });
+      .filter((t) =>
+        matchesSidebarSearch(
+          t,
+          tableSearchQuery.trim().toLowerCase(),
+          activeSchema
+        )
+      );
 
     const persistedDraftTables = Object.entries(newTableDrafts)
       .map(([windowId, data]) => {
@@ -425,13 +426,13 @@ export function ConnectionScreen() {
       })
       .filter((t): t is TableItem => !!t)
       .filter((t) => !activeSchema || t.schema === activeSchema)
-      .filter((t) => {
-        const q = tableSearchQuery.trim().toLowerCase();
-        if (!q) return true;
-        return (
-          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
-        );
-      });
+      .filter((t) =>
+        matchesSidebarSearch(
+          t,
+          tableSearchQuery.trim().toLowerCase(),
+          activeSchema
+        )
+      );
 
     for (const draft of [...draftTables, ...persistedDraftTables]) {
       if (

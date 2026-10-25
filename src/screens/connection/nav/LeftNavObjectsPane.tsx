@@ -4,12 +4,10 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   PlusIcon,
-  SearchIcon,
   SquareFunctionIcon,
   TrashIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
-import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import {
@@ -36,6 +34,7 @@ import {
   tableSidebarNameClass,
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
+import { SidebarSearch } from "./SidebarSearch";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];
 const EMPTY_WINDOWS: import("src/types").OpenWindow[] = [];
@@ -291,20 +290,12 @@ export function LeftNavObjectsPane({ profileId }: Props) {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div data-density-sidebar-header class="p-2">
-        <div class="relative">
-          <Input
-            type="text"
-            placeholder="Search objects…"
-            left={<SearchIcon className="size-4 text-neutral-500" />}
-            value={query}
-            onValueChange={setQuery}
-            className={cn(
-              "rounded-lg border border-neutral-200 bg-white py-1.5 text-sm"
-            )}
-          />
-        </div>
-      </div>
+      <SidebarSearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search objects…"
+        label="Search database objects"
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
         {!rt.runtimeConnectionId ? (

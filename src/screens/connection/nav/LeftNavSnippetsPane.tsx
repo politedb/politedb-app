@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
-import { ConsoleIcon, PlusIcon, SearchIcon } from "src/components/icons";
+import { ConsoleIcon, PlusIcon } from "src/components/icons";
 import { Button } from "src/components/common/Button";
-import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import {
@@ -23,6 +22,7 @@ import {
   tableSidebarNameClass,
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
+import { SidebarSearch } from "./SidebarSearch";
 
 type ScopeFilter = "all" | SnippetScope;
 
@@ -130,20 +130,12 @@ export function LeftNavSnippetsPane({ profileId, onInsert }: Props) {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div data-density-sidebar-header class="p-2">
-        <div class="relative">
-          <Input
-            type="text"
-            placeholder="Search snippets…"
-            left={<SearchIcon className="size-4 text-neutral-500" />}
-            value={query}
-            onValueChange={setQuery}
-            className={cn(
-              "rounded-lg border border-neutral-200 bg-white py-1.5 text-sm"
-            )}
-          />
-        </div>
-      </div>
+      <SidebarSearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search snippets…"
+        label="Search snippets"
+      />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
         {snippets.length === 0 ? (

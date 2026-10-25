@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import type { DatabaseEngine, TableItem } from "src/types";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import { preferredSchemaFromList } from "src/lib/engines";
+import { matchesSidebarSearch } from "../lib/sidebarSearch";
 
 export function useSchemaTablesPanel(args: {
   metadata: MetadataApi;
@@ -95,10 +96,7 @@ export function useSchemaTablesPanel(args: {
         ? byKind.filter((t) => t.schema === activeSchema)
         : byKind;
       if (!q) return bySchema;
-      return bySchema.filter(
-        (t) =>
-          t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)
-      );
+      return bySchema.filter((t) => matchesSidebarSearch(t, q, activeSchema));
     },
     [activeSchema, tableSearchQuery]
   );

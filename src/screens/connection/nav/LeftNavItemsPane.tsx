@@ -5,9 +5,7 @@ import {
   ChevronRightIcon,
   KeyIcon,
   EyeIcon,
-  SearchIcon,
   TableIcon,
-  LightBulbIcon,
 } from "src/components/icons";
 import { Button } from "src/components/common/Button";
 import { Select } from "src/components/common/Select";
@@ -27,7 +25,6 @@ import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
 import { useConnectionWindows } from "../hooks/useConnectionWindows";
-import { Input } from "src/components/common/Input";
 import { useInfiniteScroll } from "src/hooks/useInfiniteScroll";
 import {
   tableSidebarButtonClass,
@@ -35,6 +32,7 @@ import {
   tableSidebarNameClass,
 } from "../lib/tableSidebarNameClass";
 import { EmptyExpandSection } from "./EmptyExpandSection";
+import { SidebarSearch } from "./SidebarSearch";
 
 const VIEW_LIST_PAGE_SIZE = 20;
 
@@ -345,21 +343,24 @@ export function LeftNavItemsPane({
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Top: Search */}
-      <div data-density-sidebar-header class="p-2">
-        <div class="relative">
-          <Input
-            type="text"
-            placeholder="Search tables, views…"
-            left={<SearchIcon className="size-4 text-neutral-500" />}
-            value={tableSearchQuery}
-            onInput={(e: any) => setTableSearchQuery(e.currentTarget.value)}
-            className={cn(
-              "rounded-lg border border-neutral-200 bg-white py-1.5 text-sm"
-            )}
-          />
-        </div>
-      </div>
+      <SidebarSearch
+        value={tableSearchQuery}
+        onChange={setTableSearchQuery}
+        placeholder={
+          isRedis
+            ? "Search keys…"
+            : isMongo
+              ? "Search collections…"
+              : "Search tables, views…"
+        }
+        label={
+          isRedis
+            ? "Search keys"
+            : isMongo
+              ? "Search collections"
+              : "Search tables and views"
+        }
+      />
 
       {/* Middle: Sections */}
       <div className="min-h-0 flex-1 overflow-y-auto p-2" data-scroll-root>
@@ -461,10 +462,11 @@ export function LeftNavItemsPane({
           <SectionHeader
             title={tablesSectionTitle}
             expanded={expandedSections.tables}
-            onOpen={() => {
-              if (!isRedis && !isMongo)
-                openDatabaseCatalog("tables", currSchema);
-            }}
+            onOpen={
+              isRedis || isMongo
+                ? undefined
+                : () => openDatabaseCatalog("tables", currSchema)
+            }
             onToggle={() =>
               setExpandedSections((prev) => ({
                 ...prev,
@@ -616,23 +618,6 @@ export function LeftNavItemsPane({
         />
       )}
 
-      <div
-        class={cn(
-          "m-2 rounded-xl p-2 text-xs text-blue-600",
-          "border border-blue-300 bg-blue-100",
-          "shadow-md"
-        )}
-      >
-        <div class="flex items-center gap-1">
-          <LightBulbIcon className="inline-block size-4" />
-          <span>Quick tips:</span>
-        </div>
-        <ul class="list-disc pl-5">
-          <li>Right-click a table for actions.</li>
-          <li>Shift+Click to select multiple rows.</li>
-        </ul>
-      </div>
-
       {/* Bottom: Toolbar — Database (Mongo) / Schema (SQL) selector */}
       <div class="border-t border-neutral-200 bg-neutral-100 p-2">
         <div class="flex items-center gap-1">
@@ -665,7 +650,9 @@ export function LeftNavItemsPane({
             value={currSchema}
             onChange={(e) => onSchemaChange(e.currentTarget.value)}
           >
-            {(isMongo ? [schemas[0]] : schemas).map((schema) => (
+            {/* A Mongo tab is one database (open others from the database
+                manager), so it lists only its own. */}
+            {(isMongo ? [currSchema || schemas[0]] : schemas).map((schema) => (
               <option value={schema}>{schema}</option>
             ))}
           </Select>
