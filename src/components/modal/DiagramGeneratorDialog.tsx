@@ -65,10 +65,10 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
   return (
     <OverlayModal open={open} onClose={onClose}>
       <div class="flex h-[85vh] w-full max-w-10/12 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4">
+        <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-3">
           <div>
-            <div class="flex items-center gap-2 text-xl font-semibold text-slate-900">
-              <DiagramIcon className="size-5" />
+            <div class="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <DiagramIcon className="size-4" />
               Database schema diagram
             </div>
             <div class="mt-1 text-sm text-slate-500">
@@ -78,7 +78,7 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
           <button
             type="button"
             onClick={onClose}
-            class="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            class="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Close diagram dialog"
           >
             <XIcon className="size-4" />
