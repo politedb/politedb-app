@@ -49,3 +49,46 @@ describe("serializeExportChunk", () => {
     ).toBe("[]");
   });
 });
+
+describe("CSV chunks appended into one file", () => {
+  it("keep every row on its own line across chunk boundaries", async () => {
+    const { serializeExportChunk } = await import("./serializeChunk");
+    const { parseCsvRecords } = await import("src/utils/csv");
+    const chunk = (rows: unknown[][], isFirstChunk: boolean) =>
+      serializeExportChunk({
+        format: "csv",
+        columns: ["id", "updated_at"],
+        rows,
+        isFirstChunk,
+        csvOptions: {},
+        preserveJsonNulls: false,
+        schema: "public",
+        tableName: "users",
+      });
+    const file =
+      chunk([["a", "2026-05-22T19:45:39.105027+00:00"]], true) +
+      chunk([["b", "2026-05-23T08:00:00+00:00"]], false) +
+      chunk([["c", "2026-05-24T08:00:00+00:00"]], false);
+    expect(parseCsvRecords(file, ",")).toEqual([
+      ["id", "updated_at"],
+      ["a", "2026-05-22T19:45:39.105027+00:00"],
+      ["b", "2026-05-23T08:00:00+00:00"],
+      ["c", "2026-05-24T08:00:00+00:00"],
+    ]);
+  });
+
+  it("uses the chosen line break between chunks", async () => {
+    const { serializeExportChunk } = await import("./serializeChunk");
+    const second = serializeExportChunk({
+      format: "csv",
+      columns: ["id"],
+      rows: [["b"]],
+      isFirstChunk: false,
+      csvOptions: { lineBreak: "\r\n" },
+      preserveJsonNulls: false,
+      schema: "public",
+      tableName: "users",
+    });
+    expect(second).toBe("\r\nb");
+  });
+});
