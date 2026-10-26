@@ -1,4 +1,14 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
+import {
+  formatShortcutLabel,
+  isMacPlatform,
+} from "src/stores/keyboardShortcuts";
 import { Button } from "../common/Button";
 import {
   Dialog,
@@ -18,7 +28,7 @@ import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
-import { buildPatchDiffs } from "src/lib/patches/patchDiff";
+import { buildPatchDiffs, type PatchRowDiff } from "src/lib/patches/patchDiff";
 import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
@@ -27,6 +37,11 @@ import type {
   ObjectSaveNotice,
 } from "src/lib/objectEditorDraftCache";
 import { emptyObjectChangeSummary } from "src/lib/objectEditorDraftCache";
+import {
+  classifySaveStatement,
+  describeDestructiveChanges,
+  type SaveStatementKind,
+} from "./saveReviewSql";
 
 type ChangeSummary = {
   inserts: number;
@@ -134,7 +149,7 @@ function SummaryItem({ label, color, parts }: SummaryItemProps) {
   );
 }
 
-const SQL_BORDER_COLORS = {
+const SQL_BORDER_COLORS: Record<SaveStatementKind, string> = {
   // Prefer utilities that have html.dark remaps in styles.css (light text on tinted dark cards).
   create: "border-blue-300 bg-blue-100",
   insert: "border-green-200 bg-green-50",
@@ -142,57 +157,138 @@ const SQL_BORDER_COLORS = {
   delete: "border-rose-300 bg-red-50",
   structure: "border-blue-300 bg-blue-100",
   constraint: "border-indigo-200 bg-indigo-100",
+  destructive: "border-rose-300 bg-red-50 border-l-4 border-l-red-500",
 };
 
-function getSqlType(sql: string): keyof typeof SQL_BORDER_COLORS {
-  const upperSql = sql.trim().toUpperCase();
-  if (upperSql.startsWith("CREATE TABLE")) return "create";
-  if (
-    upperSql.startsWith("CREATE FUNCTION") ||
-    upperSql.startsWith("CREATE OR REPLACE FUNCTION") ||
-    upperSql.startsWith("CREATE PROCEDURE") ||
-    upperSql.startsWith("CREATE OR REPLACE PROCEDURE") ||
-    upperSql.startsWith("CREATE TRIGGER") ||
-    upperSql.startsWith("CREATE OR REPLACE TRIGGER") ||
-    upperSql.startsWith("CREATE CONSTRAINT TRIGGER")
-  ) {
-    return "create";
+/** A diff value: SQL NULL and an empty string never look alike. */
+function DiffValue(props: {
+  value: string | null | undefined;
+  tone: "old" | "new";
+}) {
+  const { value, tone } = props;
+  const base = cn(
+    "truncate rounded px-2 py-1 font-mono",
+    tone === "old" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+  );
+  if (value === undefined) {
+    return (
+      <span
+        class={cn(base, "bg-transparent text-neutral-400")}
+        title="No previous value"
+      >
+        —
+      </span>
+    );
   }
-  if (
-    upperSql.startsWith("DROP FUNCTION") ||
-    upperSql.startsWith("DROP PROCEDURE") ||
-    upperSql.startsWith("DROP TRIGGER")
-  ) {
-    return "delete";
+  if (value === null) {
+    return (
+      <span class={cn(base, "italic opacity-70")} title="NULL">
+        NULL
+      </span>
+    );
   }
-  if (upperSql.startsWith("INSERT")) return "insert";
-  if (upperSql.startsWith("UPDATE")) return "update";
-  if (upperSql.startsWith("DELETE")) return "delete";
-  if (upperSql.includes(".INSERTONE(") || upperSql.includes(".INSERTMANY("))
-    return "insert";
-  if (upperSql.includes(".UPDATEONE(") || upperSql.includes(".UPDATEMANY("))
-    return "update";
-  if (upperSql.includes(".DELETEONE(") || upperSql.includes(".DELETEMANY("))
-    return "delete";
-  if (upperSql.startsWith("ALTER TABLE")) {
-    // Check if it's a constraint change
-    if (
-      upperSql.includes("ADD CONSTRAINT") ||
-      upperSql.includes("DROP CONSTRAINT") ||
-      upperSql.includes("CONSTRAINT")
-    ) {
-      return "constraint";
-    }
-    return "structure";
+  if (value === "") {
+    return (
+      <span class={cn(base, "italic opacity-70")} title="Empty string">
+        (empty)
+      </span>
+    );
   }
-  return "create"; // default
+  return (
+    <span class={base} title={value}>
+      {value}
+    </span>
+  );
+}
+
+/** One changed row. A new row lists only the values that were set. */
+function RowDiffCard(props: { diff: PatchRowDiff }) {
+  const { diff } = props;
+  const isInsert = diff.action === "insert";
+  const [showAll, setShowAll] = useState(false);
+  const quiet = isInsert
+    ? diff.cells.filter((c) => c.newValue === null || c.newIsDefault)
+    : [];
+  const cells =
+    isInsert && !showAll
+      ? diff.cells.filter((c) => c.newValue !== null && !c.newIsDefault)
+      : diff.cells;
+  const nulls = quiet.filter((c) => c.newValue === null).length;
+  const defaults = quiet.length - nulls;
+  const quietLabel = [
+    nulls ? `${nulls} ${nulls === 1 ? "column" : "columns"} NULL` : null,
+    defaults ? `${defaults} DEFAULT` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div class="space-y-2 rounded-md border border-neutral-200 bg-white p-3">
+      <div class="flex items-center justify-between gap-2">
+        <p
+          class="min-w-0 truncate font-mono text-xs text-neutral-600"
+          title={diff.identity}
+        >
+          {diff.identity}
+        </p>
+        <span
+          class={cn(
+            "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
+            diff.action === "insert" && "bg-green-50 text-green-700",
+            diff.action === "update" && "bg-amber-50 text-amber-700",
+            diff.action === "delete" && "bg-red-50 text-red-700"
+          )}
+        >
+          {diff.action}
+        </span>
+      </div>
+      {cells.length > 0 && (
+        <div class="space-y-1">
+          {cells.map((cell) => (
+            <div
+              key={cell.column}
+              class={cn(
+                "grid gap-2 text-xs",
+                // A new row has no previous values: name and value only.
+                isInsert
+                  ? "grid-cols-[minmax(90px,140px)_1fr]"
+                  : "grid-cols-[minmax(90px,140px)_1fr_1fr]"
+              )}
+            >
+              <span
+                class="truncate font-medium text-neutral-700"
+                title={cell.column}
+              >
+                {cell.column}
+              </span>
+              {isInsert ? null : <DiffValue value={cell.oldValue} tone="old" />}
+              <DiffValue value={cell.newValue} tone="new" />
+            </div>
+          ))}
+        </div>
+      )}
+      {quiet.length > 0 ? (
+        <button
+          type="button"
+          class="text-xs text-neutral-500 underline-offset-2 hover:underline"
+          aria-expanded={showAll}
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? "Hide NULL and DEFAULT columns" : `+ ${quietLabel}`}
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  /** Runs the save; a rejection keeps the dialog open with its message. */
+  onConfirm: () => void | Promise<void>;
   patchMap: PatchMap;
+  /** Where the changes go, e.g. "Production · shop" (shown, never logged). */
+  targetLabel?: string;
   engine: DatabaseEngine;
   newTableSql?: string[];
   objectSql?: string[];
@@ -210,6 +306,7 @@ export function SaveChangesDialog({
   onClose,
   onConfirm,
   patchMap,
+  targetLabel,
   engine,
   newTableSql = [],
   objectSql = [],
@@ -222,6 +319,12 @@ export function SaveChangesDialog({
 }: Props) {
   const isMongo = engine === "mongo";
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // A ref, so a second click before the re-render cannot start a 2nd save.
+  const savingRef = useRef(false);
 
   const summary = useMemo(
     () =>
@@ -264,6 +367,79 @@ export function SaveChangesDialog({
   );
 
   const objectSummary = objectChangeSummary ?? emptyObjectChangeSummary();
+
+  const destructiveParts = useMemo(
+    () =>
+      describeDestructiveChanges({
+        statements: allSqlStatements,
+        deletedRows: summary.deletes,
+        engine,
+        rowNoun: isMongo
+          ? { one: "document", many: "documents" }
+          : { one: "row", many: "rows" },
+      }),
+    [allSqlStatements, summary.deletes, isMongo, engine]
+  );
+
+  const confirm = useCallback(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onConfirm();
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : String(error ?? "")
+      );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [onConfirm]);
+
+  const close = useCallback(() => {
+    if (!savingRef.current) onClose();
+  }, [onClose]);
+
+  const destructive = destructiveParts.length > 0;
+  // Only something to run can be confirmed (click or Mod+Enter).
+  const canConfirm =
+    !summary.sqlError && !saving && allSqlStatements.length > 0;
+
+  // Focus starts on Save, or on Cancel when the save cannot be undone.
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!open || focusedRef.current) return;
+    const target = document.querySelector<HTMLButtonElement>(
+      destructive || !canConfirm
+        ? "[data-review-cancel]"
+        : "[data-review-confirm]"
+    );
+    if (!target || target.disabled) return;
+    focusedRef.current = true;
+    target.focus();
+  }, [open, destructive, canConfirm]);
+
+  // Mod+Enter saves, except when the save cannot be undone (click it).
+  // Any Mod+Enter is kept inside the dialog (captured on window before the
+  // app's shortcuts and the editor see it); only the exact chord saves.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      const mac = isMacPlatform();
+      const mod = mac ? e.metaKey : e.ctrlKey;
+      if (!mod) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const exact = !e.shiftKey && !e.altKey && !(mac ? e.ctrlKey : e.metaKey);
+      if (!exact || destructive || !canConfirm) return;
+      void confirm();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, destructive, canConfirm, confirm]);
 
   const rowEntity = isMongo ? "document" : "row";
   const rowEntityPlural = isMongo ? "documents" : "rows";
@@ -344,6 +520,32 @@ export function SaveChangesDialog({
     objectSql?.length > 0 ||
     objectNotices.length > 0;
 
+  const onCopyAll = useCallback(async () => {
+    setCopiedAll(true);
+    await navigator.clipboard.writeText(displaySqlStatements.join("\n\n"));
+    setTimeout(() => setCopiedAll(false), 1000);
+  }, [displaySqlStatements]);
+
+  const toggleExpanded = useCallback((index: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  // Diffs grouped by table, so the table name shows once.
+  const diffsByTable = useMemo(() => {
+    const groups = new Map<string, typeof rowDiffs>();
+    for (const diff of rowDiffs) {
+      const list = groups.get(diff.table) ?? [];
+      list.push(diff);
+      groups.set(diff.table, list);
+    }
+    return [...groups.entries()];
+  }, [rowDiffs]);
+
   const onCopyStatement = useCallback(async (sql: string, index: number) => {
     setCopiedIndex(index);
     await navigator.clipboard.writeText(sql);
@@ -352,7 +554,10 @@ export function SaveChangesDialog({
     }, 1000);
   }, []);
 
-  if (!hasChanges) {
+  // Everything was written but a later step (refresh, reopening a table)
+  // failed: say so, rather than hide the dialog with its error.
+  const writtenWithError = !hasChanges && !!saveError;
+  if (!hasChanges && !saving && !saveError) {
     return null;
   }
 
@@ -360,7 +565,7 @@ export function SaveChangesDialog({
     <Dialog
       size="lg"
       open={open}
-      onClose={onClose}
+      onClose={close}
       closeOnOutsideClick={false}
       className="flex max-h-[min(90vh,50rem)] flex-col overflow-hidden"
     >
@@ -369,7 +574,13 @@ export function SaveChangesDialog({
           Review changes before saving
         </DialogTitle>
         <DialogDescription>
-          Review all changes before saving to the database.
+          {targetLabel ? (
+            <>
+              Saving to <span class="font-medium">{targetLabel}</span>
+            </>
+          ) : (
+            "Nothing is written until you confirm."
+          )}
         </DialogDescription>
       </DialogHeader>
 
@@ -378,105 +589,39 @@ export function SaveChangesDialog({
           className="h-full min-h-0"
           contentClassName="space-y-4"
         >
-          {/* Summary Section */}
-          <div class="w-full rounded-lg border border-neutral-200">
-            <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-              <h3 class="text-sm font-semibold text-neutral-900">
-                Summary of Changes
-              </h3>
-            </div>
-            <div class="grid grid-cols-1 gap-2 p-4 text-sm sm:grid-cols-2">
-              <SummaryItem
-                label="INSERT"
-                color="bg-green-50 text-green-700"
-                parts={insertSummaryParts}
-              />
-              <SummaryItem
-                label="UPDATE"
-                color="bg-amber-100 text-amber-800"
-                parts={updateSummaryParts}
-              />
-              <SummaryItem
-                label="DELETE"
-                color="bg-red-50 text-red-700"
-                parts={deleteSummaryParts}
-              />
-              <SummaryItem
-                label="STRUCTURE"
-                color="bg-blue-100 text-blue-800"
-                parts={structureSummaryParts}
-              />
-            </div>
-          </div>
-
-          {rowDiffs.length > 0 && (
-            <div class="w-full rounded-lg border border-neutral-200">
-              <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-                <h3 class="text-sm font-semibold text-neutral-900">
-                  Row & Column Diff ({rowDiffs.length})
-                </h3>
+          {saveError ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">
+                {writtenWithError
+                  ? "Your changes were saved, but a later step failed."
+                  : "Not everything was saved."}
               </div>
-              <OverlayScrollArea
-                className="max-h-45 w-full"
-                contentClassName="space-y-3 p-4"
-              >
-                {rowDiffs.map((diff, index) => (
-                  <div
-                    key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
-                    class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
-                  >
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="min-w-0">
-                        <p class="truncate font-mono text-xs text-neutral-600">
-                          Table: {diff.table}
-                        </p>
-                        <p class="truncate font-mono text-xs text-neutral-600">
-                          {diff.identity}
-                        </p>
-                      </div>
-                      <span
-                        class={cn(
-                          "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
-                          diff.action === "insert" &&
-                            "bg-green-50 text-green-700",
-                          diff.action === "update" &&
-                            "bg-amber-50 text-amber-700",
-                          diff.action === "delete" && "bg-red-50 text-red-700"
-                        )}
-                      >
-                        {diff.action}
-                      </span>
-                    </div>
-                    {diff.cells.length > 0 && (
-                      <div class="space-y-1">
-                        {diff.cells.map((cell) => (
-                          <div
-                            key={cell.column}
-                            class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
-                          >
-                            <span class="truncate font-medium text-neutral-700">
-                              {cell.column}
-                            </span>
-                            <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
-                              {cell.oldValue || "NULL"}
-                            </span>
-                            <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
-                              {cell.newValue || "NULL"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </OverlayScrollArea>
+              <div class="mt-1 break-words">{saveError}</div>
+              {writtenWithError ? null : (
+                <div class="mt-1">
+                  What is listed below is still unsaved; fix it and try again.
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
+
+          {destructiveParts.length > 0 ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <span class="font-medium">Cannot be undone:</span> this save{" "}
+              {destructiveParts.join(", ")}.
+            </div>
+          ) : null}
 
           {conflictNotices.length > 0 ? (
             <div
               role="alert"
-              class="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+              class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
             >
               <div class="font-medium">
                 Changed in the database since you opened it:
@@ -494,7 +639,7 @@ export function SaveChangesDialog({
           {skippedNotices.length > 0 ? (
             <div
               role="status"
-              class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+              class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
             >
               <div class="font-medium">Not saved, kept as unsaved work:</div>
               <ul class="mt-1 list-disc pl-5">
@@ -509,89 +654,195 @@ export function SaveChangesDialog({
             </div>
           ) : null}
 
-          {/* SQL Statements Section */}
-          <div class="mb-1 w-full rounded-lg border border-neutral-200">
-            <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-              <h3 class="text-sm font-semibold text-neutral-900">
-                {isMongo
-                  ? `Mongo Operations to Execute (${allSqlStatements.length})`
-                  : `SQL Statements to Execute (${allSqlStatements.length})`}
-              </h3>
-            </div>
-            <OverlayScrollArea
-              className="max-h-52 w-full"
-              contentClassName="p-4"
-            >
-              {summary.sqlError ? (
-                <div
-                  role="alert"
-                  class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-                >
-                  These changes can't be saved: {summary.sqlError}
+          {writtenWithError ? null : (
+            <>
+              {/* Summary Section */}
+              <div class="w-full rounded-lg border border-neutral-200">
+                <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+                  <h3 class="text-sm font-semibold text-neutral-900">
+                    Summary
+                  </h3>
                 </div>
-              ) : onlyNotices ? (
-                <div class="text-sm text-neutral-600">Nothing to run yet.</div>
-              ) : allSqlStatements.length === 0 ? (
-                <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  {isMongo
-                    ? "There are pending changes, but no Mongo operations were generated."
-                    : "There are pending changes, but no SQL statements were generated. Review the diff before saving."}
+                <div class="grid grid-cols-1 gap-2 p-4 text-sm sm:grid-cols-2">
+                  <SummaryItem
+                    label="Add"
+                    color="bg-green-50 text-green-700"
+                    parts={insertSummaryParts}
+                  />
+                  <SummaryItem
+                    label="Change"
+                    color="bg-amber-100 text-amber-800"
+                    parts={updateSummaryParts}
+                  />
+                  <SummaryItem
+                    label="Delete"
+                    color="bg-red-50 text-red-700"
+                    parts={deleteSummaryParts}
+                  />
+                  <SummaryItem
+                    label="Structure"
+                    color="bg-blue-100 text-blue-800"
+                    parts={structureSummaryParts}
+                  />
                 </div>
-              ) : (
-                <div class="space-y-3">
-                  {displaySqlStatements.map((sql, index) => {
-                    const sqlType = getSqlType(sql);
-                    const borderColor = SQL_BORDER_COLORS[sqlType];
-                    const copied = copiedIndex === index;
-                    return (
-                      <div
-                        key={index}
-                        class={`group relative rounded border p-3 ${borderColor}`}
+              </div>
+
+              {rowDiffs.length > 0 && (
+                <div class="w-full rounded-lg border border-neutral-200">
+                  <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+                    <h3 class="text-sm font-semibold text-neutral-900">
+                      Changed {rowEntityPlural} ({rowDiffs.length})
+                    </h3>
+                  </div>
+                  {/* No inner scroll: the dialog scrolls as one. Tables
+                      with many rows start folded. */}
+                  <div class="space-y-4 p-4">
+                    {diffsByTable.map(([table, diffs]) => (
+                      <details
+                        key={table}
+                        open={diffs.length <= 5}
+                        class="space-y-2"
                       >
-                        <div class="absolute top-2 right-2 z-10">
-                          <Button
-                            variant="ghost"
-                            class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
-                              copied
-                                ? "opacity-100"
-                                : "opacity-0 group-hover:opacity-100"
-                            } transition-opacity`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void onCopyStatement(sql, index);
-                            }}
-                            title={copied ? "Copied!" : "Copy statement"}
-                          >
-                            {copied ? (
-                              <CopyCheckIcon className="size-3.5 text-green-700" />
-                            ) : (
-                              <CopyIcon className="size-3.5" />
-                            )}
-                          </Button>
+                        <summary class="cursor-pointer truncate font-mono text-xs font-semibold text-neutral-700 select-none">
+                          {table}
+                          <span class="ml-2 font-sans font-normal text-neutral-500">
+                            {diffs.length}{" "}
+                            {diffs.length === 1 ? rowEntity : rowEntityPlural}
+                          </span>
+                        </summary>
+                        <div class="mt-2 space-y-2">
+                          {diffs.map((diff, index) => (
+                            <RowDiffCard
+                              key={`${diff.action}:${diff.rowKey}:${index}`}
+                              diff={diff}
+                            />
+                          ))}
                         </div>
-                        <div class="line-clamp-3 pr-8 font-mono text-xs wrap-break-word">
-                          {highlightSql(sql)}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      </details>
+                    ))}
+                  </div>
                 </div>
               )}
-            </OverlayScrollArea>
-          </div>
+
+              {/* SQL Statements Section */}
+              <div class="mb-1 w-full rounded-lg border border-neutral-200">
+                <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <h3 class="text-sm font-semibold text-neutral-900">
+                      {isMongo
+                        ? `Mongo operations to run (${allSqlStatements.length})`
+                        : `SQL to run (${allSqlStatements.length})`}
+                    </h3>
+                    {allSqlStatements.length > 1 ? (
+                      <Button
+                        variant="ghost"
+                        class="h-6 px-2 text-xs text-neutral-600"
+                        onClick={() => void onCopyAll()}
+                      >
+                        {copiedAll ? "Copied" : "Copy all"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+                <div class="p-4">
+                  {summary.sqlError ? (
+                    <div
+                      role="alert"
+                      class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                    >
+                      These changes can't be saved: {summary.sqlError}
+                    </div>
+                  ) : onlyNotices ? (
+                    <div class="text-sm text-neutral-600">
+                      Nothing to run yet.
+                    </div>
+                  ) : allSqlStatements.length === 0 ? (
+                    <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      {isMongo
+                        ? "There are pending changes, but no Mongo operations were generated."
+                        : "There are pending changes, but no SQL statements were generated. Review the diff before saving."}
+                    </div>
+                  ) : (
+                    <div class="space-y-3">
+                      {displaySqlStatements.map((sql, index) => {
+                        const sqlType = classifySaveStatement(sql, engine);
+                        const borderColor = SQL_BORDER_COLORS[sqlType];
+                        const copied = copiedIndex === index;
+                        return (
+                          <div
+                            key={index}
+                            class={`group relative rounded border p-3 ${borderColor}`}
+                          >
+                            <div class="absolute top-2 right-2 z-10">
+                              <Button
+                                variant="ghost"
+                                class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
+                                  copied
+                                    ? "opacity-100"
+                                    : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
+                                } transition-opacity`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void onCopyStatement(sql, index);
+                                }}
+                                title={copied ? "Copied!" : "Copy statement"}
+                                aria-label="Copy statement"
+                              >
+                                {copied ? (
+                                  <CopyCheckIcon className="size-3.5 text-green-700" />
+                                ) : (
+                                  <CopyIcon className="size-3.5" />
+                                )}
+                              </Button>
+                            </div>
+                            <div
+                              class={cn(
+                                "pr-8 font-mono text-xs wrap-break-word",
+                                !expanded.has(index) && "line-clamp-3"
+                              )}
+                            >
+                              {highlightSql(sql)}
+                            </div>
+                            {sql.split("\n").length > 3 || sql.length > 240 ? (
+                              <button
+                                type="button"
+                                class="mt-1 text-xs font-medium text-neutral-600 underline-offset-2 hover:underline"
+                                aria-expanded={expanded.has(index)}
+                                onClick={() => toggleExpanded(index)}
+                              >
+                                {expanded.has(index) ? "Show less" : "Show all"}
+                              </button>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </OverlayScrollArea>
       </DialogContent>
 
       <DialogFooter className="shrink-0">
-        <Button variant="outline" onClick={onClose}>
-          Cancel
+        <Button
+          variant="outline"
+          onClick={close}
+          disabled={saving}
+          data-review-cancel
+        >
+          {writtenWithError ? "Close" : "Cancel"}
         </Button>
         <Button
           variant="default"
-          onClick={onConfirm}
-          disabled={!!summary.sqlError || onlyNotices}
+          onClick={() => void confirm()}
+          disabled={!canConfirm}
+          aria-busy={saving}
+          data-review-confirm
+          title={destructive ? undefined : formatShortcutLabel("Mod+Enter")}
         >
-          Confirm & Apply
+          {saving ? "Saving…" : "Save changes"}
         </Button>
       </DialogFooter>
     </Dialog>

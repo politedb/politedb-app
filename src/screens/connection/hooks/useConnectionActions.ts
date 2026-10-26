@@ -17,6 +17,7 @@ import {
 } from "src/lib/objectEditorDraftCache";
 import { useObjectDraftStore } from "src/stores/objectDrafts";
 import type { ObjectMetadataRefresh } from "src/screens/connection/lib/objectWindows";
+import { runSaveJobs } from "src/screens/connection/lib/saveJobs";
 import {
   discardObjectDraftsForTab,
   saveObjectDraftsForTab,
@@ -880,7 +881,8 @@ export function useConnectionActions(
       jobs.push(saveObjectDrafts());
     }
 
-    if (jobs.length) await Promise.all(jobs);
+    // Settles only when every job has finished, with all failures.
+    if (jobs.length) await runSaveJobs(jobs);
   }, [
     isActiveTabLocked,
     activeTab,

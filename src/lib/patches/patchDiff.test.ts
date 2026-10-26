@@ -85,8 +85,42 @@ describe("buildPatchDiffs", () => {
       {
         column: "customer_email",
         oldValue: "tony@example.com",
-        newValue: "",
+        newValue: null,
       },
+    ]);
+  });
+
+  it("keeps SQL NULL, empty strings and missing previous values apart", () => {
+    const patchMap: PatchMap = {
+      win1: {
+        tableWindow: {
+          id: "win1",
+          type: "table",
+          table: { schema: "public", name: "users" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "note", db_type: "text" },
+          ],
+          rows: [],
+          rowCount: 1,
+        } as any,
+        patches: {
+          create: { data: { new_1: { note: "" } } },
+          update: { data: { "0": { note: "" } } },
+        },
+      },
+    };
+    const diffs = buildPatchDiffs(patchMap, {
+      activeScreen: "tab1",
+      getRowAt: () => [1, null],
+    });
+    expect(diffs[0]?.cells).toEqual([
+      { column: "note", oldValue: undefined, newValue: "" },
+    ]);
+    expect(diffs[1]?.cells).toEqual([
+      { column: "note", oldValue: null, newValue: "" },
     ]);
   });
 });
