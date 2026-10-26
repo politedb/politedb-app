@@ -131,9 +131,7 @@ describe("StandaloneTableImportHost", () => {
       expect.objectContaining({ schema: "public", tableName: "users" })
     );
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain(
-        "Imported 1 row into public.users."
-      )
+      expect(screen.getByRole("status").textContent).toContain("Imported 1 row")
     );
   });
 });
@@ -258,16 +256,18 @@ describe("StandaloneTableImportHost sessions", () => {
     await waitFor(() =>
       expect(screen.getByText("The import stopped.")).toBeTruthy()
     );
-    expect(screen.getByText("server closed the connection")).toBeTruthy();
+    expect(screen.getByText(/server closed the connection/)).toBeTruthy();
     expect(
       screen.getByText(/The connection changed since this import started/)
     ).toBeTruthy();
+    // The request was taken over when it arrived; closing is up to the user.
+    expect(onClearTarget).toHaveBeenCalledTimes(1);
+    // Back to the settings: importing again stays blocked.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(
       (screen.getByRole("button", { name: "Import" }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
-    // The request was taken over when it arrived; closing is up to the user.
-    expect(onClearTarget).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() =>
       expect(screen.queryByText("Import CSV data")).toBeNull()
@@ -288,9 +288,7 @@ describe("StandaloneTableImportHost sessions", () => {
     );
     finish();
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain(
-        "Imported 1 row into public.users."
-      )
+      expect(screen.getByRole("status").textContent).toContain("Imported 1 row")
     );
     expect(mocks.openDialog).toHaveBeenCalledTimes(1);
   });

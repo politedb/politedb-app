@@ -9,6 +9,9 @@ import {
 } from "src/components/table/tableHooks";
 import type { ColumnMeta } from "src/lib/tauri/types";
 
+/** Just enough below the last row for the horizontal scrollbar. */
+const PREVIEW_BOTTOM_SPACE = 10;
+
 /**
  * Read-only preview of the rows an import will insert, in the same canvas
  * grid as table data: one column per mapped table column, values as they
@@ -35,7 +38,7 @@ export function ImportPreviewGrid(props: {
     () => rows.map((row) => canvasColumns.map((col) => row[col.name] ?? null)),
     [rows, canvasColumns]
   );
-  const height = canvasTableHeightForRows(rows.length);
+  const height = canvasTableHeightForRows(rows.length, PREVIEW_BOTTOM_SPACE);
 
   return (
     // The frame draws all four edges. The grid sits 1px outside it on
@@ -87,6 +90,7 @@ export function ImportPreviewGrid(props: {
           onClearSelection={() => setSelected(null)}
           addRowOnBlankDoubleClick={false}
           focusable={false}
+          bottomSpace={PREVIEW_BOTTOM_SPACE}
         />
       </div>
     </div>

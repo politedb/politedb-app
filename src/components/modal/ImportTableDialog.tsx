@@ -25,7 +25,6 @@ import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { ImportPreviewGrid } from "./import/ImportPreviewGrid";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import { Spinner } from "src/components/common/Spinner";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { DownloadIcon } from "../icons";
 
@@ -276,13 +275,123 @@ export function ImportTableDialog({
   // only "running" and "done".
   const done = !!progress && !importing && !dataPreview;
 
+  // A run that ended in an error shows just that error (like export);
+  // "Back" returns to the settings, which then leave that error out.
+  const [runFailed, setRunFailed] = useState(false);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const wasImportingRef = useRef(importing);
+  useEffect(() => {
+    if (wasImportingRef.current && !importing && error && dataPreview) {
+      setRunFailed(true);
+    }
+    wasImportingRef.current = importing;
+  }, [importing, error, dataPreview]);
+  const formError = error && error !== dismissedError ? error : null;
+
+  const runView: "running" | "done" | "failed" | null = importing
+    ? "running"
+    : done
+      ? "done"
+      : runFailed && error
+        ? "failed"
+        : null;
+
+  if (runView) {
+    const rows = (n: number) =>
+      `${n.toLocaleString()} ${n === 1 ? "row" : "rows"}`;
+    return (
+      <Dialog open={open} onClose={onClose} size="sm">
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <DownloadIcon className="size-4.5 text-neutral-600" />
+            Import CSV data
+          </DialogTitle>
+          <DialogDescription className="truncate font-mono dark:text-neutral-400">
+            {schema}.{tableName}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogContent className="gap-3">
+          {runView === "failed" ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">The import stopped.</div>
+              <div class="mt-1 wrap-break-word">{error}</div>
+              <div class="mt-1">
+                {usesTransaction
+                  ? "It ran in a transaction, so usually nothing was saved. Check the table before importing again."
+                  : "Rows before the failing one may already be saved: check the table before importing again."}
+              </div>
+            </div>
+          ) : (
+            <div
+              class="space-y-2 rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-sm"
+              role="status"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-neutral-800">
+                  {runView === "done"
+                    ? `Imported ${rows(progress!.imported)}`
+                    : `Importing ${rows(progress?.total ?? 0)}…`}
+                </span>
+              </div>
+              <div
+                class="h-2 w-full overflow-hidden rounded-full bg-neutral-200"
+                role="progressbar"
+                aria-label="Import progress"
+                aria-busy={runView === "running"}
+              >
+                <div
+                  class={
+                    runView === "done"
+                      ? "h-full w-full rounded-full bg-green-500"
+                      : "h-full w-full animate-pulse rounded-full bg-blue-500"
+                  }
+                />
+              </div>
+              {runView === "done" && error ? (
+                <p class="text-amber-700">{error}</p>
+              ) : null}
+            </div>
+          )}
+          {runView === "failed" && blockedReason ? (
+            <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {blockedReason}
+            </div>
+          ) : null}
+        </DialogContent>
+        <DialogFooter>
+          {runView === "failed" ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDismissedError(error);
+                setRunFailed(false);
+              }}
+            >
+              Back
+            </Button>
+          ) : null}
+          <Button
+            variant="default"
+            onClick={onClose}
+            disabled={runView === "running"}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    );
+  }
+
   return (
     <>
       {/* Header and footer stay put; only the content between them scrolls. */}
       <Dialog
         open={open}
         onClose={onClose}
-        size={progress ? "sm" : "xl"}
+        size="xl"
         className="flex max-h-[85vh] flex-col overflow-hidden"
       >
         <DialogHeader className="shrink-0 border-b border-neutral-200">
@@ -299,24 +408,13 @@ export function ImportTableDialog({
             className="h-full min-h-0"
             contentClassName="flex flex-col gap-2 px-6 py-4"
           >
-            {error ? (
+            {formError ? (
               <div
                 role="alert"
                 class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
               >
-                <div class="font-medium">
-                  {done
-                    ? "The rows were imported, but a later step failed."
-                    : "The import stopped."}
-                </div>
-                <div class="mt-1 wrap-break-word">{error}</div>
-                {done ? null : (
-                  <div class="mt-1">
-                    {usesTransaction
-                      ? "It ran in a transaction, so usually nothing was saved. Check the table before importing again."
-                      : "Rows before the failing one may already be saved: check the table before importing again."}
-                  </div>
-                )}
+                <div class="font-medium">The import could not start.</div>
+                <div class="mt-1 wrap-break-word">{formError}</div>
               </div>
             ) : null}
             {blockedReason ? (
@@ -406,90 +504,6 @@ export function ImportTableDialog({
                   </div>
                 </div>
 
-                <div class="rounded-lg">
-                  <p class="mb-1 py-1 text-sm font-medium">
-                    Preview of the rows to insert{" "}
-                    <span class="font-normal text-neutral-500">
-                      (first {PREVIEW_ROWS} rows)
-                    </span>
-                  </p>
-                  {mappedColumns.length > 0 ? (
-                    <ImportPreviewGrid
-                      columns={previewColumns}
-                      rows={tableData}
-                    />
-                  ) : (
-                    <div
-                      role="status"
-                      class="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-600"
-                    >
-                      {separatorHint ? (
-                        <>
-                          Only one column was found: the file seems to use{" "}
-                          {separatorHint.label.toLowerCase()} as its separator.{" "}
-                          {onDelimiterChange ? (
-                            <button
-                              type="button"
-                              class="font-medium text-blue-600 underline-offset-2 hover:underline"
-                              onClick={() =>
-                                onDelimiterChange(separatorHint.value)
-                              }
-                            >
-                              Use {separatorHint.label}
-                            </button>
-                          ) : null}
-                        </>
-                      ) : (
-                        "No CSV column is matched to a table column yet. Choose them under Column mapping."
-                      )}
-                    </div>
-                  )}
-                </div>
-                <p class="text-xs text-neutral-600">
-                  CSV {dataPreview.headers.length} columns,{" "}
-                  {dataPreview.rows.length} rows, {mappedColumnCount} mapped
-                  columns
-                </p>
-                {issueGroups.length > 0 && (
-                  <div
-                    role="alert"
-                    class="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700"
-                  >
-                    <p class="mb-1 font-medium">
-                      {validationIssues.length}{" "}
-                      {validationIssues.length === 1
-                        ? "value needs fixing"
-                        : "values need fixing"}
-                      {fullValidation ? "" : ` in the first 100 rows`}:
-                    </p>
-                    <ul class="space-y-0.5">
-                      {issueGroups.map((group) => (
-                        <li key={`${group.column}:${group.message}`}>
-                          <span class="font-mono">{group.column}</span>:{" "}
-                          {group.message} — row
-                          {group.rows.length === 1 ? "" : "s"}{" "}
-                          {group.rows.slice(0, ISSUE_EXAMPLES).join(", ")}
-                          {group.rows.length > ISSUE_EXAMPLES
-                            ? ` and ${group.rows.length - ISSUE_EXAMPLES} more`
-                            : ""}
-                          {/* The offending value, so the cause is visible. */}
-                          <span class="text-red-600/80">
-                            {" "}
-                            (e.g.{" "}
-                            <span class="font-mono" title={group.example}>
-                              {JSON.stringify(
-                                group.example.length > 40
-                                  ? `${group.example.slice(0, 40)}…`
-                                  : group.example
-                              )}
-                            </span>
-                            )
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
                 {/* The mapping folds away once every column is matched;
                     it opens by itself when something needs a choice. */}
                 <details
@@ -580,43 +594,98 @@ export function ImportTableDialog({
                     </table>
                   </div>
                 </details>
-              </>
-            )}
 
-            {progress && (
-              <div
-                class="flex items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-sm"
-                role="status"
-              >
-                {done ? (
-                  <span class="text-green-700">
-                    Imported {progress.imported.toLocaleString()}{" "}
-                    {progress.imported === 1 ? "row" : "rows"} into{" "}
-                    <span class="font-mono">
-                      {schema}.{tableName}
+                <div class="rounded-lg">
+                  <p class="mb-1 py-1 text-sm font-medium">
+                    Preview of the rows to insert{" "}
+                    <span class="font-normal text-neutral-500">
+                      (first {PREVIEW_ROWS} rows)
                     </span>
-                    .
-                  </span>
-                ) : (
-                  <>
-                    <Spinner className="size-4 text-blue-600" />
-                    <span>
-                      Importing {progress.total.toLocaleString()}{" "}
-                      {progress.total === 1 ? "row" : "rows"} into{" "}
-                      <span class="font-mono">
-                        {schema}.{tableName}
-                      </span>
-                      …
-                    </span>
-                  </>
+                  </p>
+                  {mappedColumns.length > 0 ? (
+                    <ImportPreviewGrid
+                      columns={previewColumns}
+                      rows={tableData}
+                    />
+                  ) : (
+                    <div
+                      role="status"
+                      class="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-600"
+                    >
+                      {separatorHint ? (
+                        <>
+                          Only one column was found: the file seems to use{" "}
+                          {separatorHint.label.toLowerCase()} as its separator.{" "}
+                          {onDelimiterChange ? (
+                            <button
+                              type="button"
+                              class="font-medium text-blue-600 underline-offset-2 hover:underline"
+                              onClick={() =>
+                                onDelimiterChange(separatorHint.value)
+                              }
+                            >
+                              Use {separatorHint.label}
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        "No CSV column is matched to a table column yet. Choose them under Column mapping."
+                      )}
+                    </div>
+                  )}
+                </div>
+                <p class="text-xs text-neutral-600">
+                  CSV {dataPreview.headers.length} columns,{" "}
+                  {dataPreview.rows.length} rows, {mappedColumnCount} mapped
+                  columns
+                </p>
+                {issueGroups.length > 0 && (
+                  <div
+                    role="alert"
+                    class="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+                  >
+                    <p class="mb-1 font-medium">
+                      {validationIssues.length}{" "}
+                      {validationIssues.length === 1
+                        ? "value needs fixing"
+                        : "values need fixing"}
+                      {fullValidation ? "" : ` in the first 100 rows`}:
+                    </p>
+                    <ul class="space-y-0.5">
+                      {issueGroups.map((group) => (
+                        <li key={`${group.column}:${group.message}`}>
+                          <span class="font-mono">{group.column}</span>:{" "}
+                          {group.message} — row
+                          {group.rows.length === 1 ? "" : "s"}{" "}
+                          {group.rows.slice(0, ISSUE_EXAMPLES).join(", ")}
+                          {group.rows.length > ISSUE_EXAMPLES
+                            ? ` and ${group.rows.length - ISSUE_EXAMPLES} more`
+                            : ""}
+                          {/* The offending value, so the cause is visible. */}
+                          <span class="text-red-600/80">
+                            {" "}
+                            (e.g.{" "}
+                            <span class="font-mono" title={group.example}>
+                              {JSON.stringify(
+                                group.example.length > 40
+                                  ? `${group.example.slice(0, 40)}…`
+                                  : group.example
+                              )}
+                            </span>
+                            )
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
-              </div>
+              </>
             )}
           </OverlayScrollArea>
         </DialogContent>
         <DialogFooter className="shrink-0 border-t border-neutral-200">
-          <Button variant="outline" onClick={onClose} disabled={importing}>
-            {done ? "Close" : "Cancel"}
+          <Button variant="outline" onClick={onClose}>
+            Cancel
           </Button>
           {dataPreview && (dataPreview.rows.length > 0 || !firstIsHeaders) && (
             <Button
@@ -637,7 +706,7 @@ export function ImportTableDialog({
                 !!blockedReason
               }
             >
-              {importing ? "Importing…" : "Import"}
+              Import
             </Button>
           )}
         </DialogFooter>

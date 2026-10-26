@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import { ImportTableDialog, previewTableData } from "./ImportTableDialog";
 
@@ -140,73 +140,129 @@ describe("ImportTableDialog readability", () => {
     );
   });
 
-  it("says what is running instead of a progress bar it cannot fill", () => {
+  it("shows only a progress view while running, then the result", () => {
+    const props = {
+      open: true,
+      schema: "public",
+      tableName: "users",
+      columns,
+      error: null,
+      handleClose: vi.fn(),
+      onImport: vi.fn(),
+    };
     const { rerender } = render(
       <ImportTableDialog
-        open
-        schema="public"
-        tableName="users"
-        columns={columns}
+        {...props}
         dataPreview={{ headers: ["id"], rows: [["1"], ["2"]] }}
-        error={null}
         importing
         progress={{ imported: 0, total: 2 }}
-        handleClose={vi.fn()}
-        onImport={vi.fn()}
       />
     );
     expect(screen.getByRole("status").textContent).toContain(
-      "Importing 2 rows into public.users…"
+      "Importing 2 rows…"
     );
-    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+    // The settings are not shown while it runs.
+    expect(screen.queryByText("Column mapping")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Close" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
     rerender(
       <ImportTableDialog
-        open
-        schema="public"
-        tableName="users"
-        columns={columns}
+        {...props}
         dataPreview={null}
-        error={null}
         importing={false}
         progress={{ imported: 2, total: 2 }}
-        handleClose={vi.fn()}
-        onImport={vi.fn()}
       />
     );
-    expect(screen.getByRole("status").textContent).toContain(
-      "Imported 2 rows into public.users."
-    );
-    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Imported 2 rows");
+    expect(screen.getByText("public.users")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Close" }) as HTMLButtonElement)
+        .disabled
+    ).toBe(false);
   });
 });
 
+/** Render a run that ends with `error` (importing true, then false). */
+function renderFailedRun(extra: Record<string, unknown>) {
+  const props = {
+    open: true,
+    schema: "public",
+    tableName: "users",
+    columns,
+    dataPreview: { headers: ["id"], rows: [["1"]] },
+    progress: null,
+    handleClose: vi.fn(),
+    onImport: vi.fn(),
+    ...extra,
+  };
+  const view = render(
+    <ImportTableDialog
+      {...props}
+      error={null}
+      importing
+      progress={{ imported: 0, total: 1 }}
+    />
+  );
+  view.rerender(
+    <ImportTableDialog
+      {...props}
+      error={"Import failed at data row 1: duplicate key"}
+      importing={false}
+    />
+  );
+  return view;
+}
+
 describe("ImportTableDialog failure wording", () => {
-  it("never promises that nothing was saved", () => {
-    renderDialog({ error: "boom", usesTransaction: true });
-    expect(screen.getByText("The import stopped.")).toBeTruthy();
-    expect(screen.queryByText("Nothing was imported.")).toBeNull();
+  it("shows only the error after a failed run, never promising nothing was saved", async () => {
+    renderFailedRun({ usesTransaction: true });
+    await waitFor(() =>
+      expect(screen.getByText("The import stopped.")).toBeTruthy()
+    );
+    expect(screen.getByText(/duplicate key/)).toBeTruthy();
     expect(screen.getByText(/usually nothing was saved/)).toBeTruthy();
+    expect(screen.queryByText("Nothing was imported.")).toBeNull();
+    expect(screen.queryByText("Column mapping")).toBeNull();
   });
 
-  it("warns that earlier rows may be saved where it runs row by row", () => {
-    renderDialog({ error: "boom", usesTransaction: false });
-    expect(screen.getByText("The import stopped.")).toBeTruthy();
-    expect(
-      screen.getByText(/Rows before the failing one may already be saved/)
-    ).toBeTruthy();
+  it("warns that earlier rows may be saved where it runs row by row", async () => {
+    renderFailedRun({ usesTransaction: false });
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Rows before the failing one may already be saved/)
+      ).toBeTruthy()
+    );
   });
 
-  it("tells a failed reload apart from a failed import", () => {
+  it("goes back to the settings without the old error", async () => {
+    renderFailedRun({ usesTransaction: true });
+    await waitFor(() =>
+      expect(screen.getByText("The import stopped.")).toBeTruthy()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText("Column mapping")).toBeTruthy();
+    expect(screen.queryByText(/duplicate key/)).toBeNull();
+  });
+
+  it("mentions a failed reload with the imported count", () => {
     renderDialog({
       dataPreview: null,
       progress: { imported: 3, total: 3 },
       error: "The table could not be reloaded: timeout",
       usesTransaction: true,
     });
-    expect(
-      screen.getByText("The rows were imported, but a later step failed.")
-    ).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("Imported 3 rows");
+    expect(
+      screen.getByText("The table could not be reloaded: timeout")
+    ).toBeTruthy();
+  });
+
+  it("shows a problem found before running in the settings", () => {
+    renderDialog({ error: "No CSV columns match table columns." });
+    expect(screen.getByText("The import could not start.")).toBeTruthy();
   });
 });
 
@@ -214,7 +270,7 @@ describe("ImportTableDialog layout", () => {
   const mappingDetails = () =>
     screen.getByText("Column mapping").closest("details") as HTMLDetailsElement;
 
-  it("folds the mapping when every column is matched, preview first", () => {
+  it("folds the mapping when every column is matched", () => {
     renderDialog({
       columns: [
         { name: "id", db_type: "int" },
@@ -224,11 +280,7 @@ describe("ImportTableDialog layout", () => {
     });
     expect(mappingDetails().open).toBe(false);
     expect(mappingDetails().textContent).toContain("2 of 2 matched");
-    const preview = screen.getByText("Preview of the rows to insert");
-    expect(
-      preview.compareDocumentPosition(mappingDetails()) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
+    expect(screen.getByText("Preview of the rows to insert")).toBeTruthy();
   });
 
   it("opens the mapping when a column has no CSV column", () => {

@@ -50,12 +50,16 @@ const COMPACT_HEADER_HEIGHT = 26;
  * bottom leaves room for the overlay horizontal scrollbar), and a 1px top
  * border.
  */
-export function canvasTableHeightForRows(rows: number): number {
+export function canvasTableHeightForRows(
+  rows: number,
+  /** Same as the table's `bottomSpace`; default one header height. */
+  bottomSpace?: number
+): number {
   const compact = getAppliedUiDensity() === "compact";
   const row = compact ? COMPACT_ROW_HEIGHT : COMFORTABLE_ROW_HEIGHT;
   const header = compact ? COMPACT_HEADER_HEIGHT : COMFORTABLE_HEADER_HEIGHT;
   // +1 for the top border, +1 so rounding never adds a scrollbar.
-  return header * 2 + Math.max(1, rows) * row + 2;
+  return header + (bottomSpace ?? header) + Math.max(1, rows) * row + 2;
 }
 const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
 const BOOLEAN_CONTROL_WIDTH = 18;
@@ -223,6 +227,11 @@ type Props = {
   viewKey?: string;
   /** false: not in the Tab order (e.g. a read-only preview with its own text alternative). */
   focusable?: boolean;
+  /**
+   * Empty space below the last row (room for the overlay horizontal
+   * scrollbar). Defaults to one header height.
+   */
+  bottomSpace?: number;
 
   // Called when user clicks a column header to change sort.
   onChangeSort?: (
@@ -618,6 +627,7 @@ export function CanvasTable({
   emptyActionText,
   viewKey,
   focusable = true,
+  bottomSpace,
 }: Props) {
   const devicePixelRatio = useDevicePixelRatio();
   // --- Refs for DOM elements ---
@@ -2396,7 +2406,10 @@ export function CanvasTable({
         <div
           style={{
             width: Math.max(1, totalWidth),
-            height: Math.max(1, HEADER_HEIGHT + totalRows * ROW_HEIGHT),
+            height: Math.max(
+              1,
+              (bottomSpace ?? HEADER_HEIGHT) + totalRows * ROW_HEIGHT
+            ),
             position: "relative",
           }}
         />
