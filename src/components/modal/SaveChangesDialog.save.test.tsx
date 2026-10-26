@@ -71,7 +71,7 @@ describe("SaveChangesDialog saving", () => {
 
     finish();
     await waitFor(() =>
-      expect(confirmButton().textContent).toBe("Save 1 change")
+      expect(confirmButton().textContent).toBe("Save changes")
     );
   });
 
@@ -102,7 +102,7 @@ describe("SaveChangesDialog content", () => {
     expect(screen.getByText("Staging · shop")).toBeTruthy();
   });
 
-  it("warns about deletes and makes Confirm destructive", () => {
+  it("warns about deletes; the save button keeps its color", () => {
     renderDialog({
       newTableSql: [],
       patchMap: deletePatchMap(),
@@ -112,7 +112,7 @@ describe("SaveChangesDialog content", () => {
     expect(
       screen.getAllByRole("alert").map((a) => a.textContent)
     ).toContainEqual(expect.stringContaining("deletes 1 row"));
-    expect(confirmButton().className).toContain("bg-red-500");
+    expect(confirmButton().className).not.toContain("bg-red-500");
   });
 
   it("shows SQL NULL and an empty string differently", () => {
@@ -164,7 +164,7 @@ describe("SaveChangesDialog readability", () => {
     expect(writeText.mock.calls[0]![0]).toContain('"wide"');
   });
 
-  it("labels changes plainly and counts them on the save button", () => {
+  it("labels changes plainly", () => {
     renderDialog({
       newTableSql: [],
       patchMap: deletePatchMap(),
@@ -173,7 +173,7 @@ describe("SaveChangesDialog readability", () => {
     });
     expect(screen.getByText("Change")).toBeTruthy();
     expect(screen.getByText("Delete")).toBeTruthy();
-    expect(confirmButton().textContent).toBe("Save 2 changes");
+    expect(confirmButton().textContent).toBe("Save changes");
     // The table name heads its rows once.
     expect(screen.getAllByText("public.users")).toHaveLength(1);
     expect(screen.getByText("Changed rows (2)")).toBeTruthy();
@@ -341,5 +341,69 @@ describe("SaveChangesDialog on SQL Server", () => {
       ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
     });
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("SaveChangesDialog diff layout", () => {
+  function insertPatchMap(rows: number): PatchMap {
+    const data: Record<string, Record<string, unknown>> = {};
+    for (let i = 0; i < rows; i++) {
+      data[`new:${i}`] = {
+        id: { __politedbCellEdit: "default" },
+        name: `row ${i}`,
+        note: null,
+        city: null,
+      };
+    }
+    return {
+      win1: {
+        tableWindow: {
+          id: "win1",
+          type: "table",
+          table: { schema: "public", name: "addresses" },
+        },
+        tableData: {
+          columns: [
+            { name: "id", db_type: "int" },
+            { name: "name", db_type: "text" },
+            { name: "note", db_type: "text" },
+            { name: "city", db_type: "text" },
+          ],
+          rows: [],
+          rowCount: 0,
+        } as never,
+        patches: { create: { data } } as never,
+      },
+    };
+  }
+
+  it("shows a new row's set values only, with the rest one click away", () => {
+    renderDialog({ newTableSql: [], patchMap: insertPatchMap(1) });
+    expect(screen.getByText("row 0")).toBeTruthy();
+    expect(screen.queryByText("note")).toBeNull();
+    expect(screen.queryByTitle("No previous value")).toBeNull();
+    const more = screen.getByRole("button", {
+      name: "+ 2 columns NULL · 1 DEFAULT",
+    });
+    fireEvent.click(more);
+    expect(screen.getByText("note")).toBeTruthy();
+    expect(screen.getByText("city")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Hide NULL and DEFAULT columns" })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+  });
+
+  it("scrolls as one dialog and folds tables with many rows", () => {
+    const { container } = renderDialog({
+      newTableSql: [],
+      patchMap: insertPatchMap(6),
+    });
+    expect(container.ownerDocument.querySelector(".max-h-72")).toBeNull();
+    expect(container.ownerDocument.querySelector(".max-h-52")).toBeNull();
+    const table = screen.getByText("public.addresses").closest("details")!;
+    expect(table.open).toBe(false);
+    expect(table.textContent).toContain("6 rows");
   });
 });

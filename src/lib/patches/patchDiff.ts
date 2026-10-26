@@ -1,6 +1,7 @@
 import type { PatchMap } from "./generateSql";
 import { patchFieldEntries, recordedRow } from "./rowPositionPatches";
 import { cellToString } from "../../utils/convert";
+import { isDefaultCellEditValue } from "../table-data/cellEditValue";
 import { resolvePrimaryKeyColumns } from "../../utils/primaryKey";
 import { isBlobColumnType, isJsonColumnType } from "../sql/sqlDialect";
 
@@ -10,6 +11,8 @@ export type PatchCellDiff = {
   oldValue: string | null | undefined;
   /** null: SQL NULL; "" stays an empty string. */
   newValue: string | null;
+  /** The new value is the column's DEFAULT (not the text "DEFAULT"). */
+  newIsDefault?: boolean;
 };
 
 export type PatchRowDiff = {
@@ -110,6 +113,7 @@ export function buildPatchDiffs(
           column,
           oldValue: undefined,
           newValue: displayValue(value),
+          ...(isDefaultCellEditValue(value) ? { newIsDefault: true } : {}),
         })),
       });
     }

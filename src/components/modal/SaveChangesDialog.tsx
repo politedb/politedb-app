@@ -28,7 +28,7 @@ import { DataKey } from "src/stores/connection";
 import { highlightSql } from "src/screens/connection/sql/QueryHistory";
 import type { DatabaseEngine } from "src/types";
 import { CopyCheckIcon, CopyIcon } from "src/components/icons";
-import { buildPatchDiffs } from "src/lib/patches/patchDiff";
+import { buildPatchDiffs, type PatchRowDiff } from "src/lib/patches/patchDiff";
 import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
@@ -198,6 +198,86 @@ function DiffValue(props: {
     <span class={base} title={value}>
       {value}
     </span>
+  );
+}
+
+/** One changed row. A new row lists only the values that were set. */
+function RowDiffCard(props: { diff: PatchRowDiff }) {
+  const { diff } = props;
+  const isInsert = diff.action === "insert";
+  const [showAll, setShowAll] = useState(false);
+  const quiet = isInsert
+    ? diff.cells.filter((c) => c.newValue === null || c.newIsDefault)
+    : [];
+  const cells =
+    isInsert && !showAll
+      ? diff.cells.filter((c) => c.newValue !== null && !c.newIsDefault)
+      : diff.cells;
+  const nulls = quiet.filter((c) => c.newValue === null).length;
+  const defaults = quiet.length - nulls;
+  const quietLabel = [
+    nulls ? `${nulls} ${nulls === 1 ? "column" : "columns"} NULL` : null,
+    defaults ? `${defaults} DEFAULT` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div class="space-y-2 rounded-md border border-neutral-200 bg-white p-3">
+      <div class="flex items-center justify-between gap-2">
+        <p
+          class="min-w-0 truncate font-mono text-xs text-neutral-600"
+          title={diff.identity}
+        >
+          {diff.identity}
+        </p>
+        <span
+          class={cn(
+            "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
+            diff.action === "insert" && "bg-green-50 text-green-700",
+            diff.action === "update" && "bg-amber-50 text-amber-700",
+            diff.action === "delete" && "bg-red-50 text-red-700"
+          )}
+        >
+          {diff.action}
+        </span>
+      </div>
+      {cells.length > 0 && (
+        <div class="space-y-1">
+          {cells.map((cell) => (
+            <div
+              key={cell.column}
+              class={cn(
+                "grid gap-2 text-xs",
+                // A new row has no previous values: name and value only.
+                isInsert
+                  ? "grid-cols-[minmax(90px,140px)_1fr]"
+                  : "grid-cols-[minmax(90px,140px)_1fr_1fr]"
+              )}
+            >
+              <span
+                class="truncate font-medium text-neutral-700"
+                title={cell.column}
+              >
+                {cell.column}
+              </span>
+              {isInsert ? null : <DiffValue value={cell.oldValue} tone="old" />}
+              <DiffValue value={cell.newValue} tone="new" />
+            </div>
+          ))}
+        </div>
+      )}
+      {quiet.length > 0 ? (
+        <button
+          type="button"
+          class="text-xs text-neutral-500 underline-offset-2 hover:underline"
+          aria-expanded={showAll}
+          onClick={() => setShowAll((v) => !v)}
+        >
+          {showAll ? "Hide NULL and DEFAULT columns" : `+ ${quietLabel}`}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -466,24 +546,6 @@ export function SaveChangesDialog({
     return [...groups.entries()];
   }, [rowDiffs]);
 
-  const totalChanges =
-    summary.inserts +
-    summary.updates +
-    summary.deletes +
-    summary.structureChanges +
-    summary.constraintChanges +
-    (newTableSql?.length ?? 0) +
-    objectSummary.insertFunctions +
-    objectSummary.insertProcedures +
-    objectSummary.insertTriggers +
-    objectSummary.updateFunctions +
-    objectSummary.updateProcedures +
-    objectSummary.updateTriggers;
-  const confirmLabel =
-    totalChanges > 0
-      ? `Save ${totalChanges} ${totalChanges === 1 ? "change" : "changes"}`
-      : "Save changes";
-
   const onCopyStatement = useCallback(async (sql: string, index: number) => {
     setCopiedIndex(index);
     await navigator.clipboard.writeText(sql);
@@ -632,71 +694,33 @@ export function SaveChangesDialog({
                       Changed {rowEntityPlural} ({rowDiffs.length})
                     </h3>
                   </div>
-                  <OverlayScrollArea
-                    className="max-h-72 w-full"
-                    contentClassName="space-y-4 p-4"
-                  >
+                  {/* No inner scroll: the dialog scrolls as one. Tables
+                      with many rows start folded. */}
+                  <div class="space-y-4 p-4">
                     {diffsByTable.map(([table, diffs]) => (
-                      <section key={table} class="space-y-2">
-                        <h4 class="truncate font-mono text-xs font-semibold text-neutral-700">
+                      <details
+                        key={table}
+                        open={diffs.length <= 5}
+                        class="space-y-2"
+                      >
+                        <summary class="cursor-pointer truncate font-mono text-xs font-semibold text-neutral-700 select-none">
                           {table}
-                        </h4>
-                        {diffs.map((diff, index) => (
-                          <div
-                            key={`${diff.action}:${diff.rowKey}:${index}`}
-                            class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
-                          >
-                            <div class="flex items-center justify-between gap-2">
-                              <p
-                                class="min-w-0 truncate font-mono text-xs text-neutral-600"
-                                title={diff.identity}
-                              >
-                                {diff.identity}
-                              </p>
-                              <span
-                                class={cn(
-                                  "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
-                                  diff.action === "insert" &&
-                                    "bg-green-50 text-green-700",
-                                  diff.action === "update" &&
-                                    "bg-amber-50 text-amber-700",
-                                  diff.action === "delete" &&
-                                    "bg-red-50 text-red-700"
-                                )}
-                              >
-                                {diff.action}
-                              </span>
-                            </div>
-                            {diff.cells.length > 0 && (
-                              <div class="space-y-1">
-                                {diff.cells.map((cell) => (
-                                  <div
-                                    key={cell.column}
-                                    class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
-                                  >
-                                    <span
-                                      class="truncate font-medium text-neutral-700"
-                                      title={cell.column}
-                                    >
-                                      {cell.column}
-                                    </span>
-                                    <DiffValue
-                                      value={cell.oldValue}
-                                      tone="old"
-                                    />
-                                    <DiffValue
-                                      value={cell.newValue}
-                                      tone="new"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </section>
+                          <span class="ml-2 font-sans font-normal text-neutral-500">
+                            {diffs.length}{" "}
+                            {diffs.length === 1 ? rowEntity : rowEntityPlural}
+                          </span>
+                        </summary>
+                        <div class="mt-2 space-y-2">
+                          {diffs.map((diff, index) => (
+                            <RowDiffCard
+                              key={`${diff.action}:${diff.rowKey}:${index}`}
+                              diff={diff}
+                            />
+                          ))}
+                        </div>
+                      </details>
                     ))}
-                  </OverlayScrollArea>
+                  </div>
                 </div>
               )}
 
@@ -720,10 +744,7 @@ export function SaveChangesDialog({
                     ) : null}
                   </div>
                 </div>
-                <OverlayScrollArea
-                  className="max-h-52 w-full"
-                  contentClassName="p-4"
-                >
+                <div class="p-4">
                   {summary.sqlError ? (
                     <div
                       role="alert"
@@ -797,7 +818,7 @@ export function SaveChangesDialog({
                       })}
                     </div>
                   )}
-                </OverlayScrollArea>
+                </div>
               </div>
             </>
           )}
@@ -814,14 +835,14 @@ export function SaveChangesDialog({
           {writtenWithError ? "Close" : "Cancel"}
         </Button>
         <Button
-          variant={destructive ? "destructive" : "default"}
+          variant="default"
           onClick={() => void confirm()}
           disabled={!canConfirm}
           aria-busy={saving}
           data-review-confirm
           title={destructive ? undefined : formatShortcutLabel("Mod+Enter")}
         >
-          {saving ? "Saving…" : confirmLabel}
+          {saving ? "Saving…" : "Save changes"}
         </Button>
       </DialogFooter>
     </Dialog>
