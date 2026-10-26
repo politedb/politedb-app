@@ -38,7 +38,11 @@ import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
 import { tableIdentity } from "../hooks/useTableDestructiveActions";
 import { useTableFilter } from "src/components/table/tableHooks";
-import { useImportTableData } from "src/hooks/useImportTableData";
+import {
+  useImportTableData,
+  requiredImportColumns,
+  importUsesTransaction,
+} from "src/hooks/useImportTableData";
 import {
   cloneTableQuery,
   copyTableDataQuery,
@@ -143,6 +147,8 @@ export function MainTableDataPane(props: {
     runImport,
     reset: resetImport,
     loadDataImport,
+    delimiter: importDelimiter,
+    setDelimiter: setImportDelimiter,
   } = useImportTableData();
 
   const { onImportSqlDump: importSqlDumpFile } = useDatabaseBackup();
@@ -483,6 +489,11 @@ export function MainTableDataPane(props: {
           /int/i.test(col.db_type)),
     }));
   }, [engine, meta.columns, meta.structure]);
+  // Known only once the table structure has loaded; otherwise none.
+  const importRequiredColumns = useMemo(
+    () => requiredImportColumns(tableColumns, meta.structure, engine),
+    [tableColumns, meta.structure, engine]
+  );
   const columnsKey = useMemo(
     () => tableColumns.map((col) => col.name).join("\0"),
     [tableColumns]
@@ -1265,6 +1276,10 @@ export function MainTableDataPane(props: {
         engine={engine}
         dataImportPreview={dataImportPreview}
         importError={importError}
+        importRequiredColumns={importRequiredColumns}
+        importUsesTransaction={importUsesTransaction(engine)}
+        importDelimiter={importDelimiter}
+        onImportDelimiterChange={setImportDelimiter}
         importBusy={importBusy}
         importProgressState={importProgressState}
         handleImport={handleImport}

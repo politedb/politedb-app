@@ -200,3 +200,28 @@ describe("CanvasTable in a read-only grid", () => {
     expect(root.querySelector("input")).toBeNull();
   });
 });
+
+describe("CanvasTable focusable={false}", () => {
+  it("selects on click without taking focus (so it never holds Tab)", () => {
+    const grid = renderGrid({ focusable: false });
+    const scroller = grid.root.firstElementChild as HTMLElement;
+    fireEvent.mouseDown(scroller, { button: 0, clientX: 20, clientY: 40 });
+    expect(grid.props.onSelect).toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(grid.root);
+    // No tabindex at all: not focusable by Tab or by a click.
+    expect(grid.root.hasAttribute("tabindex")).toBe(false);
+    grid.root.focus();
+    expect(document.activeElement).not.toBe(grid.root);
+    // And it handles no keys.
+    fireEvent.keyDown(grid.root, { key: "Tab" });
+    expect(grid.props.onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("still takes focus on click by default", () => {
+    const grid = renderGrid({});
+    const scroller = grid.root.firstElementChild as HTMLElement;
+    fireEvent.mouseDown(scroller, { button: 0, clientX: 20, clientY: 40 });
+    expect(grid.props.onSelect).toHaveBeenCalled();
+    expect(document.activeElement).toBe(grid.root);
+  });
+});

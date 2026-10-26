@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
-import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Button } from "src/components/common/Button";
@@ -30,10 +29,9 @@ import {
   type MaskRuleKind,
 } from "src/lib/export-masking";
 import { cn } from "src/utils/cn";
-import { showMessage } from "src/lib/system-dialog";
 import { useProGate } from "src/hooks/useProGate";
 import { ProBadge } from "src/components/license/ProBadge";
-import { BackupIcon } from "../icons";
+import { UploadIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -69,11 +67,11 @@ export function ExportTableDialog({
 }: Props) {
   const {
     format,
+    savedPath,
     exporting,
     progress,
     exportOptions,
     setExportOptions,
-    setFileName,
     setProgress,
     handleChangeFormat,
     handleExport,
@@ -122,22 +120,14 @@ export function ExportTableDialog({
     return cancelled || hardError ? 0 : 100;
   }, [cancelled, exporting, hardError, progress, totalKnown, totalRows]);
 
-  // Cancellation is reported only after the pipeline has settled. At this
-  // point requestCancel has awaited operation cancellation and temp cleanup,
-  // and the hook has observed the final progress state.
+  // A cancelled export closes quietly once the pipeline has settled
+  // (requestCancel has awaited cancellation and temp-file cleanup).
   useEffect(() => {
     if (!cancelled || exporting) return;
-
-    // Close the export window before showing the app's native info dialog,
-    // matching the completed-export message flow elsewhere in the app.
     setProgress(null);
     clearMaskState();
     void requestCancel();
     handleClose();
-    void showMessage("Export is cancelled", {
-      title: "Aborted",
-      kind: "info",
-    });
   }, [
     cancelled,
     exporting,
@@ -148,15 +138,15 @@ export function ExportTableDialog({
     requestCancel,
   ]);
 
+  // A failed export goes back to its settings with the reason, so it can
+  // be retried without choosing everything again.
+  const [exportError, setExportError] = useState<string | null>(null);
   useEffect(() => {
-    if (!hardError || !progress?.error) return;
+    if (!hardError || !progress?.error || exporting) return;
+    setExportError(progress.error);
     void requestCancel();
-    handleClose();
-    void showMessage(progress.error, {
-      title: "Export error",
-      kind: "error",
-    });
-  }, [hardError, progress?.error, requestCancel, handleClose]);
+    setProgress(null);
+  }, [hardError, progress?.error, exporting, requestCancel, setProgress]);
 
   // Authoritative selection — never fall back empty → all.
   const selectedColumns = exportOptions.columns;
@@ -283,6 +273,7 @@ export function ExportTableDialog({
   }, [exporting, requestCancel, onClose]);
 
   const onExport = useCallback(async () => {
+    setExportError(null);
     const exportConfig: ExportConfig = {
       connectionId,
       schema,
@@ -319,8 +310,11 @@ export function ExportTableDialog({
   const scopeLabel = pagination
     ? "Current page"
     : appliedFilters.length > 0
-      ? "Filtered rows"
+      ? "Rows matching the filters"
       : "All rows";
+  const scopeDetail = totalKnown
+    ? `${scopeLabel} · ${totalRows!.toLocaleString()} ${totalRows === 1 ? "row" : "rows"}`
+    : scopeLabel;
 
   const exportDisabled =
     exporting ||
@@ -342,15 +336,17 @@ export function ExportTableDialog({
         )}
       >
         <DialogHeader className="shrink-0 border-b border-neutral-200 pr-10">
-          <DialogTitle className="flex items-center gap-2 text-base dark:text-neutral-100">
-            <BackupIcon className="size-4.5 text-neutral-600" />
+          <DialogTitle className="flex items-center gap-2">
+            <UploadIcon className="size-4.5 text-neutral-600" />
             Export data
           </DialogTitle>
           <DialogDescription className="truncate dark:text-neutral-400">
-            <span title={`${tableIdentity} · ${scopeLabel}`}>
+            <span title={`${tableIdentity} · ${scopeDetail}`}>
               <span class="font-mono text-neutral-700 dark:text-neutral-200">
                 {tableIdentity}
               </span>
+              <span class="text-neutral-400"> · </span>
+              <span data-export-scope>{scopeDetail}</span>
               {hasActiveMasking ? (
                 <>
                   <span class="text-neutral-400"> · </span>
@@ -364,31 +360,18 @@ export function ExportTableDialog({
         <DialogContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           {!progress ? (
             <>
+              {exportError ? (
+                <div
+                  role="alert"
+                  class="shrink-0 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                >
+                  <div class="font-medium">The export failed.</div>
+                  <div class="mt-1 wrap-break-word">{exportError}</div>
+                </div>
+              ) : null}
               <div class="shrink-0 space-y-3">
+                {/* The file name is chosen in the save dialog. */}
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <div class="min-w-0 flex-1">
-                    <label class="mb-1 block text-sm font-medium text-neutral-600">
-                      File name
-                    </label>
-                    <div class="flex min-w-0 items-stretch justify-between overflow-hidden rounded-md border border-neutral-300">
-                      <Input
-                        value={suggestedName}
-                        onValueChange={(value) => setFileName(value, tableName)}
-                        placeholder={tableName}
-                        className="rounded-none border-0 px-2 py-1.75 font-mono text-sm focus:outline-none"
-                        disabled={exporting}
-                        aria-label="Export file name"
-                      />
-                      <span
-                        class={cn(
-                          "flex shrink-0 items-center border-l border-neutral-300 bg-neutral-50 px-2 font-mono",
-                          "text-xs text-neutral-500"
-                        )}
-                      >
-                        .{format}
-                      </span>
-                    </div>
-                  </div>
                   <div class="min-w-0 flex-1 shrink-0">
                     <label class="mb-1 block text-sm font-medium text-neutral-600 dark:text-neutral-300">
                       Format
@@ -468,10 +451,31 @@ export function ExportTableDialog({
                 </div>
 
                 {completed && !progress.error ? (
-                  <p class="text-right text-green-600">Completed!</p>
+                  <div class="space-y-1">
+                    <p class="text-green-700">Export complete.</p>
+                    {savedPath ? (
+                      <div class="flex min-w-0 items-center gap-2">
+                        <span
+                          class="min-w-0 flex-1 truncate font-mono text-xs text-neutral-600"
+                          title={savedPath}
+                        >
+                          {savedPath}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          class="h-6 shrink-0 px-2 text-xs"
+                          onClick={() =>
+                            void navigator.clipboard.writeText(savedPath)
+                          }
+                        >
+                          Copy path
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : (
                   <p class="shrink-0 text-right font-medium text-blue-600 tabular-nums">
-                    Processing...
+                    Exporting…
                   </p>
                 )}
                 {progress.warning && (
@@ -515,7 +519,7 @@ export function ExportTableDialog({
                 onClick={onExport}
                 disabled={exportDisabled}
               >
-                {exporting ? "Exporting..." : "Export"}
+                {exporting ? "Exporting…" : "Export"}
               </Button>
             )}
           </div>

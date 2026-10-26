@@ -42,6 +42,25 @@ const COMFORTABLE_ROW_HEIGHT = 28;
 const COMFORTABLE_HEADER_HEIGHT = 28;
 const COMPACT_ROW_HEIGHT = 24;
 const COMPACT_HEADER_HEIGHT = 26;
+
+/**
+ * Height a CanvasTable needs to show `rows` rows without a vertical
+ * scrollbar, at the current density. The scroller holds the sticky header
+ * plus a spacer that again includes the header (the spare band at the
+ * bottom leaves room for the overlay horizontal scrollbar), and a 1px top
+ * border.
+ */
+export function canvasTableHeightForRows(
+  rows: number,
+  /** Same as the table's `bottomSpace`; default one header height. */
+  bottomSpace?: number
+): number {
+  const compact = getAppliedUiDensity() === "compact";
+  const row = compact ? COMPACT_ROW_HEIGHT : COMFORTABLE_ROW_HEIGHT;
+  const header = compact ? COMPACT_HEADER_HEIGHT : COMFORTABLE_HEADER_HEIGHT;
+  // +1 for the top border, +1 so rounding never adds a scrollbar.
+  return header + (bottomSpace ?? header) + Math.max(1, rows) * row + 2;
+}
 const COLUMN_RESIZE_COMMIT_INTERVAL_MS = 32;
 const BOOLEAN_CONTROL_WIDTH = 18;
 
@@ -206,6 +225,13 @@ type Props = {
   /** Muted text for an empty action cell, hinting it can be set. */
   emptyActionText?: string;
   viewKey?: string;
+  /** false: not in the Tab order (e.g. a read-only preview with its own text alternative). */
+  focusable?: boolean;
+  /**
+   * Empty space below the last row (room for the overlay horizontal
+   * scrollbar). Defaults to one header height.
+   */
+  bottomSpace?: number;
 
   // Called when user clicks a column header to change sort.
   onChangeSort?: (
@@ -600,6 +626,8 @@ export function CanvasTable({
   emptyCellText = "NULL",
   emptyActionText,
   viewKey,
+  focusable = true,
+  bottomSpace,
 }: Props) {
   const devicePixelRatio = useDevicePixelRatio();
   // --- Refs for DOM elements ---
@@ -1914,7 +1942,9 @@ export function CanvasTable({
         commitAndExit();
       }
 
-      rootRef.current?.focus();
+      // A non-focusable grid (visual only) never takes focus, so it never
+      // holds Tab or receives keys either.
+      if (focusable) rootRef.current?.focus();
       onSelect?.(rowIdx, colIdx, e.metaKey || e.ctrlKey, e.shiftKey);
     },
     [
@@ -1935,6 +1965,7 @@ export function CanvasTable({
       onClearSelection,
       ROW_HEIGHT,
       HEADER_HEIGHT,
+      focusable,
     ]
   );
 
@@ -2100,8 +2131,11 @@ export function CanvasTable({
         "table-focus-root relative h-full min-h-0 w-full bg-white outline-none",
         isResizing && "cursor-col-resize select-none"
       )}
-      tabIndex={0}
+      // Visual only: no tabindex at all, so neither Tab nor a click can
+      // focus it, and no key is handled.
+      tabIndex={focusable ? 0 : undefined}
       onKeyDown={(e) => {
+        if (!focusable) return;
         const target = e.target as HTMLElement;
         if (
           target.closest(
@@ -2372,7 +2406,10 @@ export function CanvasTable({
         <div
           style={{
             width: Math.max(1, totalWidth),
-            height: Math.max(1, HEADER_HEIGHT + totalRows * ROW_HEIGHT),
+            height: Math.max(
+              1,
+              (bottomSpace ?? HEADER_HEIGHT) + totalRows * ROW_HEIGHT
+            ),
             position: "relative",
           }}
         />
@@ -2483,7 +2520,9 @@ export function CanvasTable({
                     moveSelection(next.rowIdx, next.colIdx);
                   }
                   queueMicrotask(() => {
-                    if (!editorRef.current) rootRef.current?.focus();
+                    if (!editorRef.current && focusable) {
+                      rootRef.current?.focus();
+                    }
                   });
                 }
               }}

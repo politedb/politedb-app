@@ -749,7 +749,15 @@ export function useDatabaseBackup() {
   const runSqlDumpImport = useCallback(
     async (
       onRefresh?: () => void,
-      opts?: { dialogTitle?: string; successToast?: string }
+      opts?: {
+        dialogTitle?: string;
+        successToast?: string;
+        /**
+         * Checked after the confirmation, right before anything runs (the
+         * tab may have been locked while the file was being chosen).
+         */
+        canRun?: () => boolean;
+      }
     ) => {
       if (!rt.runtimeConnectionId) return;
 
@@ -792,6 +800,12 @@ export function useDatabaseBackup() {
           `This will execute ${statements.length} SQL statements on current database. Continue?`
         );
         if (!ok) return;
+        if (opts?.canRun && !opts.canRun()) {
+          showToast("The tab is locked: nothing was imported.", {
+            tone: "info",
+          });
+          return;
+        }
 
         for (let i = 0; i < statements.length; i++) {
           const statementSql = statements[i].text.trim();
@@ -865,10 +879,11 @@ export function useDatabaseBackup() {
 
   // Table-level SQL dump import, like database backup and restore, is free.
   const onImportSqlDump = useCallback(
-    async (onRefresh?: () => void) => {
+    async (onRefresh?: () => void, opts?: { canRun?: () => boolean }) => {
       await runSqlDumpImport(onRefresh, {
         dialogTitle: "Import SQL dump",
         successToast: "SQL dump imported.",
+        canRun: opts?.canRun,
       });
     },
     [runSqlDumpImport]

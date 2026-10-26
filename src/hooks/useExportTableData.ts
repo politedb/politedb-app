@@ -39,6 +39,8 @@ export function useExportTableData() {
   const [exportOptions, setExportOptions] =
     useState<ExportOptions>(defaultOptions);
   const [format, setFormat] = useState<ExportFormat>("csv");
+  /** Where the last export was written (shown once it completes). */
+  const [savedPath, setSavedPath] = useState<string | null>(null);
   const ownedRef = useRef<OwnedExport | null>(null);
   const runIdRef = useRef(0);
 
@@ -192,6 +194,7 @@ export function useExportTableData() {
       if (!path) return;
 
       setExporting(true);
+      setSavedPath(path);
       setProgress({ exported: 0 });
 
       const { cancel, done } = runStreamingExport(path, config, opts, {
@@ -237,6 +240,7 @@ export function useExportTableData() {
     progress,
     exportOptions,
     format,
+    savedPath,
     setProgress,
     setExporting,
     setExportOptions,

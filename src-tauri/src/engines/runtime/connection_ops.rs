@@ -146,13 +146,21 @@ impl ConnectionOps for EngineConnection {
                 for (idx, stmt) in statements.iter().enumerate() {
                     if let Err(e) = tx.batch_execute(stmt).await {
                         let _ = tx.rollback().await;
-                        return Err(format!("SQL_TX_STATEMENT_{}_FAILED: {e}", idx + 1));
+                        // The database's message, not tokio-postgres' "db error".
+                        return Err(format!(
+                            "SQL_TX_STATEMENT_{}_FAILED: {}",
+                            idx + 1,
+                            crate::engines::postgres::operation::pg_error_text(&e)
+                        ));
                     }
                 }
 
-                tx.commit()
-                    .await
-                    .map_err(|e| format!("POSTGRES_TX_COMMIT_FAILED: {e}"))
+                tx.commit().await.map_err(|e| {
+                    format!(
+                        "POSTGRES_TX_COMMIT_FAILED: {}",
+                        crate::engines::postgres::operation::pg_error_text(&e)
+                    )
+                })
             }
             EngineConnection::MySql(my) => {
                 reject_non_transactional_ddl("MYSQL_MARIADB", &statements)?;

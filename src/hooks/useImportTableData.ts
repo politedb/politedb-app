@@ -1,10 +1,12 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback, useRef, useState } from "preact/hooks";
 import { openDialog } from "src/lib/system-dialog";
 import { readTextFile } from "src/lib/system-fs";
 import { parseCsv } from "src/utils/csv";
 import { operationImportCsvTransaction } from "src/lib/tauri";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import type { DatabaseEngine } from "src/types";
+import type { DatabaseEngine, TableStructure } from "src/types";
+import { parseNullable } from "src/lib/sql/columnFlags";
+import { showMessage } from "src/lib/system-dialog";
 
 export type DataImportPreview = {
   headers: string[];
@@ -28,6 +30,11 @@ export type ImportOptions = {
   fullValidation?: boolean;
 };
 
+export type ImportOutcome =
+  | { status: "not-started" }
+  | { status: "failed"; message: string }
+  | { status: "imported"; imported: number; reloadError?: string };
+
 export type ImportConfig = {
   connectionId: string | null;
   schema: string;
@@ -42,6 +49,27 @@ export type ImportConfig = {
   fullValidation?: boolean;
   onSuccess: () => Promise<void>;
 };
+
+const SQL_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2}`;
+const SQL_TIME = String.raw`\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d{1,9})?)?`;
+const SQL_ZONE = String.raw`(?:\s*(?:Z|z|UTC|GMT|[+-]\d{1,2}(?::?\d{2})?))?`;
+const SQL_DATE_TIME_RE = new RegExp(
+  `^(?:${SQL_DATE}(?:[ T]${SQL_TIME}${SQL_ZONE})?|${SQL_TIME}${SQL_ZONE})$`
+);
+
+/**
+ * Whether text reads as a date, time or timestamp the database can take:
+ * the SQL/ISO forms databases print (any fraction of a second, "+07",
+ * "+0700" or "+07:00" zones, a space or a "T"), PostgreSQL's infinity,
+ * or anything the WebView's own parser accepts. The database still has
+ * the last word; this only catches obvious mistakes in the preview.
+ */
+export function isDateTimeText(value: string): boolean {
+  const text = value.trim();
+  if (/^[+-]?infinity$/i.test(text)) return true;
+  if (SQL_DATE_TIME_RE.test(text)) return true;
+  return !Number.isNaN(Date.parse(text));
+}
 
 function typeIssue(value: string, dbType?: string): string | null {
   if (value === "") return null;
@@ -65,7 +93,7 @@ function typeIssue(value: string, dbType?: string): string | null {
     return /^(true|false|1|0)$/i.test(value) ? null : "Invalid boolean";
   }
   if (/\b(date|time|timestamp|datetime)\b/.test(type)) {
-    return Number.isNaN(Date.parse(value)) ? "Invalid date/time" : null;
+    return isDateTimeText(value) ? null : "Invalid date/time";
   }
   return null;
 }
@@ -78,9 +106,18 @@ export function buildDefaultImportMapping(
   const mapping: ImportColumnMapping = {};
   const tableCols = columns.map((c) => c.name);
   if (firstIsHeaders) {
-    const headerToIndex = new Map(preview.headers.map((h, i) => [h.trim(), i]));
+    // Exact header first, then the same name ignoring case and spaces.
+    const exact = new Map<string, number>();
+    const loose = new Map<string, number>();
+    preview.headers.forEach((h, i) => {
+      const trimmed = h.trim();
+      if (!exact.has(trimmed)) exact.set(trimmed, i);
+      const key = trimmed.toLowerCase();
+      if (!loose.has(key)) loose.set(key, i);
+    });
     for (const name of tableCols) {
-      mapping[name] = headerToIndex.has(name) ? headerToIndex.get(name)! : null;
+      const index = exact.get(name) ?? loose.get(name.trim().toLowerCase());
+      mapping[name] = index ?? null;
     }
     return mapping;
   }
@@ -125,6 +162,77 @@ export function validateImportPreview(
   return issues;
 }
 
+/**
+ * Engines whose structure metadata says which columns are generated
+ * (identity, auto-increment, computed). Elsewhere (SQL Server, Oracle, ...)
+ * an identity column looks like NOT NULL without a default, so no column
+ * is called required there.
+ */
+const REQUIRED_COLUMN_ENGINES = new Set<DatabaseEngine>([
+  "postgres",
+  "mysql",
+  "mariadb",
+  "sqlite",
+  "turso",
+  "d1",
+]);
+
+/**
+ * Columns an import must fill: NOT NULL, without a default, not generated
+ * (identity, auto-increment, computed). Unknown nullability, an engine
+ * without generated-column metadata, or a table structure that has not
+ * loaded never marks a column required.
+ */
+export function requiredImportColumns(
+  columns: ColumnMeta[],
+  structure: TableStructure[] | null | undefined,
+  engine?: DatabaseEngine
+): string[] {
+  if (!structure?.length) return [];
+  if (!engine || !REQUIRED_COLUMN_ENGINES.has(engine)) return [];
+  const byName = new Map(structure.map((col) => [col.column_name, col]));
+  return columns
+    .filter((column) => {
+      const info = byName.get(column.name);
+      if (!info) return false;
+      if (parseNullable(info.is_nullable) !== false) return false;
+      if (column.auto_generated || info.is_identity || info.is_generated) {
+        return false;
+      }
+      if (/auto_increment|generated|identity|serial/i.test(info.extra ?? "")) {
+        return false;
+      }
+      const hasDefault =
+        info.default_is_null === undefined
+          ? !!(info.column_default ?? column.column_default ?? "").trim()
+          : !info.default_is_null;
+      return !hasDefault;
+    })
+    .map((column) => column.name);
+}
+
+/**
+ * Engines whose import runs in one transaction. Usually a failure leaves
+ * the table as it was, but that is not certain (MySQL MyISAM tables ignore
+ * ROLLBACK; a lost COMMIT reply may follow a successful commit), so the
+ * dialog never promises it. D1, Snowflake and ClickHouse run row by row:
+ * rows before the failing one may already be saved.
+ */
+const ATOMIC_IMPORT_ENGINES = new Set<DatabaseEngine>([
+  "postgres",
+  "mysql",
+  "mariadb",
+  "sqlite",
+  "turso",
+  "duckdb",
+  "sqlserver",
+  "oracle",
+]);
+
+export function importUsesTransaction(engine?: DatabaseEngine): boolean {
+  return !!engine && ATOMIC_IMPORT_ENGINES.has(engine);
+}
+
 function importIssueMessage(issue: ImportIssue): string {
   const preview =
     issue.value.length > 32 ? `${issue.value.slice(0, 32)}...` : issue.value;
@@ -133,10 +241,10 @@ function importIssueMessage(issue: ImportIssue): string {
 
 function importExecutionErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
-  const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*(.*)/);
+  const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*([\s\S]*)/);
   if (!match) return raw || "Import failed.";
   const reason = match[2]?.trim() || "Database rejected the row.";
-  return `Import failed at row ${match[1]}, column unknown, value unavailable: ${reason}`;
+  return `Import failed at data row ${match[1]}: ${reason}`;
 }
 
 export function useImportTableData() {
@@ -144,8 +252,12 @@ export function useImportTableData() {
     null
   );
   const [csvText, setCsvText] = useState<string | null>(null);
+  /** The field separator in use: detected on load, or chosen. */
+  const [delimiter, setDelimiterState] = useState(",");
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  // One import at a time, even for two clicks before a re-render.
+  const runningRef = useRef(false);
   const [importProgress, setImportProgress] = useState<{
     imported: number;
     total: number;
@@ -156,7 +268,7 @@ export function useImportTableData() {
       title: "Import table data",
       multiple: false,
       directory: false,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
+      filters: [{ name: "CSV / TSV", extensions: ["csv", "tsv", "txt"] }],
     });
 
     if (path == null || typeof path !== "string") {
@@ -166,20 +278,30 @@ export function useImportTableData() {
     setError(null);
     try {
       const text = await readTextFile(path);
-      const { headers, rows } = parseCsv(text);
+      const parsed = parseCsv(text, /\.tsv$/i.test(path) ? "\t" : undefined);
       setCsvText(text);
-      setDataPreview({ headers, rows });
+      setDelimiterState(parsed.delimiter);
+      setDataPreview({ headers: parsed.headers, rows: parsed.rows });
       return true;
     } catch {
       setDataPreview(null);
       setCsvText(null);
-      setError("Failed to read or parse CSV file.");
+      // The import dialog is not open yet: say so here, not silently.
+      void showMessage("The CSV file could not be read or parsed.", {
+        title: "Import error",
+        kind: "error",
+      });
       return false;
     }
   }, []);
 
   const runImport = useCallback(
-    async (config: ImportConfig) => {
+    /**
+     * How it ended: rows imported (and reloaded, or not), failed, or not
+     * started (nothing to do, or already running). Callers that may have
+     * gone away meanwhile use it to report the outcome elsewhere.
+     */
+    async (config: ImportConfig): Promise<ImportOutcome> => {
       const {
         connectionId,
         schema,
@@ -193,7 +315,8 @@ export function useImportTableData() {
         onSuccess,
       } = config;
 
-      if (!dataPreview || csvText == null) return;
+      if (runningRef.current) return { status: "not-started" };
+      if (!dataPreview || csvText == null) return { status: "not-started" };
 
       const mapping =
         columnMapping ??
@@ -204,7 +327,7 @@ export function useImportTableData() {
       let dataRows: string[][];
 
       if (firstIsHeaders) {
-        if (dataPreview.rows.length === 0) return;
+        if (dataPreview.rows.length === 0) return { status: "not-started" };
         dataRows = dataPreview.rows;
       } else {
         dataRows = [dataPreview.headers, ...dataPreview.rows];
@@ -216,12 +339,12 @@ export function useImportTableData() {
             ? "No CSV columns match table columns."
             : "Table has no columns or CSV has no columns."
         );
-        return;
+        return { status: "not-started" };
       }
 
       if (!connectionId) {
         setError("Not connected.");
-        return;
+        return { status: "not-started" };
       }
 
       const issues = validateImportPreview(dataPreview, columns, {
@@ -237,13 +360,15 @@ export function useImportTableData() {
             .map(importIssueMessage)
             .join("; ")}`
         );
-        return;
+        return { status: "not-started" };
       }
 
+      runningRef.current = true;
       setImporting(true);
       setError(null);
       setImportProgress({ imported: 0, total: dataRows.length });
 
+      let imported: number;
       try {
         const result = await operationImportCsvTransaction({
           connectionId,
@@ -256,22 +381,53 @@ export function useImportTableData() {
           firstIsHeaders,
           fullValidation,
           csvText,
+          delimiter,
         });
-        setImportProgress({
-          imported: result.imported,
-          total: dataRows.length,
-        });
-
-        setDataPreview(null);
-        setCsvText(null);
-        await onSuccess();
+        imported = result.imported;
       } catch (err) {
-        setError(importExecutionErrorMessage(err));
+        // Back to the mapping, with the reason; the file and options stay.
+        setImportProgress(null);
+        const message = importExecutionErrorMessage(err);
+        setError(message);
+        setImporting(false);
+        runningRef.current = false;
+        return { status: "failed", message };
+      }
+
+      // The rows are in: from here on a failure is not an import failure.
+      setImportProgress({ imported, total: dataRows.length });
+      setDataPreview(null);
+      setCsvText(null);
+      try {
+        await onSuccess();
+        return { status: "imported", imported };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err ?? "");
+        const message = `The table could not be reloaded: ${reason}`;
+        setError(message);
+        return { status: "imported", imported, reloadError: message };
       } finally {
         setImporting(false);
+        runningRef.current = false;
       }
     },
-    [csvText, dataPreview]
+    [csvText, dataPreview, delimiter]
+  );
+
+  /** Split the loaded file again with another separator. */
+  const setDelimiter = useCallback(
+    (next: string) => {
+      if (csvText == null) return;
+      try {
+        const parsed = parseCsv(csvText, next);
+        setDelimiterState(parsed.delimiter);
+        setDataPreview({ headers: parsed.headers, rows: parsed.rows });
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err ?? ""));
+      }
+    },
+    [csvText]
   );
 
   const reset = useCallback(() => {
@@ -283,6 +439,8 @@ export function useImportTableData() {
 
   return {
     dataPreview,
+    delimiter,
+    setDelimiter,
     error,
     importing,
     importProgress,

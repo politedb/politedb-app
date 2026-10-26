@@ -72,7 +72,14 @@ export function serializeExportChunk(args: {
   } = args;
 
   if (format === "csv") {
-    return serializeCsvChunk(columns, rows, csvOptions, isFirstChunk);
+    const part = serializeCsvChunk(columns, rows, csvOptions, isFirstChunk);
+    // Chunks are appended to the file one after another: every chunk after
+    // the first starts on its own line, or its first row would run on from
+    // the previous chunk's last row.
+    if (!isFirstChunk && part.length > 0) {
+      return (csvOptions.lineBreak ?? "\n") + part;
+    }
+    return part;
   }
   if (format === "json") {
     if (preserveJsonNulls && policy) {

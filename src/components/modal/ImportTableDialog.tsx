@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -12,21 +18,36 @@ import {
   DataImportPreview,
   ImportColumnMapping,
   ImportNullMode,
+  type ImportIssue,
   validateImportPreview,
 } from "src/hooks/useImportTableData";
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
-import { Table } from "src/components/common/Table";
-import { showMessage } from "src/lib/system-dialog";
+import { ImportPreviewGrid } from "./import/ImportPreviewGrid";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
-import { RestoreIcon } from "../icons";
+import { DownloadIcon } from "../icons";
 
 interface Props {
   open: boolean;
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
+  /** Columns the import must fill (NOT NULL, no default, not generated). */
+  requiredColumns?: string[];
+  /**
+   * The import runs in one transaction on this engine: a failure usually
+   * saves nothing, though that is never promised.
+   */
+  usesTransaction?: boolean;
+  /**
+   * Why importing (again) is not possible now, e.g. the connection changed
+   * or the tab was locked after the import was submitted.
+   */
+  blockedReason?: string | null;
+  /** Field separator in use (detected on load) and how to change it. */
+  delimiter?: string;
+  onDelimiterChange?: (delimiter: string) => void;
   dataPreview: DataImportPreview | null;
   error: string | null;
   importing: boolean;
@@ -40,22 +61,57 @@ interface Props {
   }) => void;
 }
 
-/** Normalize rows to header length so every row has exactly one cell per column. */
-function previewTableData(preview: DataImportPreview, firstIsHeaders: boolean) {
-  const { headers, rows } = preview;
+const PREVIEW_ROWS = 10;
+const ISSUE_EXAMPLES = 5;
 
-  const displayedRows = firstIsHeaders
-    ? rows.slice(0, 100)
-    : [headers, ...rows.slice(0, 100)];
+const DELIMITERS: { value: string; label: string }[] = [
+  { value: ",", label: "Comma (,)" },
+  { value: ";", label: "Semicolon (;)" },
+  { value: "\t", label: "Tab" },
+  { value: "|", label: "Pipe (|)" },
+];
 
-  const data: Record<string, string>[] = displayedRows.map((row) => {
-    const obj: Record<string, string> = {};
-    for (let i = 0; i < headers.length; i++) {
-      obj[`col_${i}`] = row[i] ?? "";
+/** Validation issues grouped by column and problem, with example rows. */
+function groupIssues(issues: ImportIssue[]) {
+  const groups = new Map<
+    string,
+    { column: string; message: string; rows: number[]; example: string }
+  >();
+  for (const issue of issues) {
+    const key = `${issue.column}\u0000${issue.message}`;
+    const group = groups.get(key) ?? {
+      column: issue.column,
+      message: issue.message,
+      rows: [],
+      example: issue.value,
+    };
+    group.rows.push(issue.row);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * The first rows as they will land in the table: one column per mapped
+ * table column, each taking its value from the chosen CSV column.
+ */
+export function previewTableData(
+  preview: DataImportPreview,
+  firstIsHeaders: boolean,
+  mapped: { name: string; csvIndex: number }[],
+  nullMode: ImportNullMode
+) {
+  const rows = firstIsHeaders
+    ? preview.rows.slice(0, PREVIEW_ROWS)
+    : [preview.headers, ...preview.rows.slice(0, PREVIEW_ROWS - 1)];
+  return rows.map((row) => {
+    const obj: Record<string, string | null> = {};
+    for (const { name, csvIndex } of mapped) {
+      const raw = row[csvIndex] ?? "";
+      obj[name] = raw === "" && nullMode === "empty-as-null" ? null : raw;
     }
     return obj;
   });
-  return data;
 }
 
 export function ImportTableDialog({
@@ -63,6 +119,11 @@ export function ImportTableDialog({
   schema,
   tableName,
   columns,
+  requiredColumns = [],
+  usesTransaction = false,
+  blockedReason = null,
+  delimiter = ",",
+  onDelimiterChange,
   dataPreview,
   error,
   importing,
@@ -74,36 +135,112 @@ export function ImportTableDialog({
   const [nullMode, setNullMode] = useState<ImportNullMode>("empty-string");
   const [fullValidation, setFullValidation] = useState(false);
   const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
+  // Columns the user mapped by hand: re-guessing never overrides them.
+  const touchedRef = useRef(new Set<string>());
 
   const onClose = useCallback(() => {
     if (importing) return;
     handleClose();
   }, [importing, handleClose]);
 
-  const tableColumns = useMemo(() => {
-    return columns.map((col, i) => ({
-      key: `col_${i}`,
-      label: col.name,
-      className: "max-w-38 py-1.5 truncate font-mono text-xs",
-      render: (value: string) => (
-        <span class="block truncate" title={value ?? ""}>
-          {value ?? ""}
-        </span>
+  const mappedColumns = useMemo(
+    () =>
+      columns.flatMap((col) => {
+        const csvIndex = columnMapping[col.name];
+        // Only columns the current file has (see selectValue).
+        return csvIndex != null &&
+          csvIndex >= 0 &&
+          csvIndex < (dataPreview?.headers.length ?? 0)
+          ? [{ name: col.name, csvIndex }]
+          : [];
+      }),
+    [columns, columnMapping, dataPreview]
+  );
+
+  // Table columns that receive a CSV value, with their types.
+  const previewColumns = useMemo(
+    () =>
+      mappedColumns.map(
+        ({ name }) =>
+          columns.find((col) => col.name === name) ?? { name, db_type: "" }
       ),
-    }));
-  }, [columns]);
+    [mappedColumns, columns]
+  );
 
   const tableData = useMemo(() => {
     if (!dataPreview) return [];
-    return previewTableData(dataPreview, firstIsHeaders);
-  }, [dataPreview, firstIsHeaders]);
+    return previewTableData(
+      dataPreview,
+      firstIsHeaders,
+      mappedColumns,
+      nullMode
+    );
+  }, [dataPreview, firstIsHeaders, mappedColumns, nullMode]);
 
   useEffect(() => {
     if (!dataPreview) return;
-    setColumnMapping(
-      buildDefaultImportMapping(dataPreview, columns, firstIsHeaders)
+    const guessed = buildDefaultImportMapping(
+      dataPreview,
+      columns,
+      firstIsHeaders
     );
+    setColumnMapping((prev) => {
+      const next = { ...guessed };
+      for (const name of touchedRef.current) {
+        const index = prev[name];
+        if (index == null || index < dataPreview.headers.length) {
+          next[name] = index ?? null;
+        }
+      }
+      return next;
+    });
   }, [dataPreview, columns, firstIsHeaders]);
+
+  const missingRequired = useMemo(
+    () =>
+      requiredColumns.filter((name) => {
+        const index = columnMapping[name];
+        return index == null || index < 0;
+      }),
+    [requiredColumns, columnMapping]
+  );
+
+  const csvColumnsKey = dataPreview
+    ? `${delimiter}\u0000${firstIsHeaders}\u0000${dataPreview.headers.join("\u0000")}`
+    : "";
+
+  // The choice to show: an index from before the CSV columns changed
+  // (the mapping is re-guessed right after) shows as Skip, never blank.
+  const selectValue = (name: string) => {
+    const index = columnMapping[name];
+    return index != null &&
+      index >= 0 &&
+      index < (dataPreview?.headers.length ?? 0)
+      ? String(index)
+      : "";
+  };
+
+  // One column only, yet it contains another separator: likely the wrong
+  // separator is selected.
+  const separatorHint = useMemo(() => {
+    if (!dataPreview || dataPreview.headers.length !== 1) return null;
+    const sample = [
+      dataPreview.headers[0] ?? "",
+      ...(dataPreview.rows[0] ?? []),
+    ].join("\n");
+    const other = DELIMITERS.find(
+      (d) => d.value !== delimiter && sample.includes(d.value)
+    );
+    return other ?? null;
+  }, [dataPreview, delimiter]);
+
+  // Open the mapping when a column is left without a CSV column.
+  const mappingNeedsAttention =
+    missingRequired.length > 0 ||
+    columns.some((col) => {
+      const index = columnMapping[col.name];
+      return index == null || index < 0;
+    });
 
   const validationIssues = useMemo(() => {
     if (!dataPreview) return [];
@@ -130,192 +267,426 @@ export function ImportTableDialog({
     [columnMapping]
   );
 
-  const progressPct = useMemo(() => {
-    if (!progress || progress.total === 0) return 0;
-    return (progress.imported / progress.total) * 100;
-  }, [progress]);
+  const issueGroups = useMemo(
+    () => groupIssues(validationIssues),
+    [validationIssues]
+  );
+  // The import runs as one transaction: there is no row-by-row progress,
+  // only "running" and "done".
+  const done = !!progress && !importing && !dataPreview;
 
+  // A run that ended in an error shows just that error (like export);
+  // "Back" returns to the settings, which then leave that error out.
+  const [runFailed, setRunFailed] = useState(false);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const wasImportingRef = useRef(importing);
   useEffect(() => {
-    if (!error) return;
-    void showMessage(error, { title: "Import error", kind: "error" }).then(
-      () => {
-        handleClose();
-      }
+    if (wasImportingRef.current && !importing && error && dataPreview) {
+      setRunFailed(true);
+    }
+    wasImportingRef.current = importing;
+  }, [importing, error, dataPreview]);
+  const formError = error && error !== dismissedError ? error : null;
+
+  const runView: "running" | "done" | "failed" | null = importing
+    ? "running"
+    : done
+      ? "done"
+      : runFailed && error
+        ? "failed"
+        : null;
+
+  if (runView) {
+    const rows = (n: number) =>
+      `${n.toLocaleString()} ${n === 1 ? "row" : "rows"}`;
+    return (
+      <Dialog open={open} onClose={onClose} size="sm">
+        <DialogHeader className="border-b border-neutral-200">
+          <DialogTitle className="flex items-center gap-2">
+            <DownloadIcon className="size-4.5 text-neutral-600" />
+            Import CSV data
+          </DialogTitle>
+          <DialogDescription className="truncate font-mono dark:text-neutral-400">
+            {schema}.{tableName}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogContent className="gap-3">
+          {runView === "failed" ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">The import stopped.</div>
+              <div class="mt-1 wrap-break-word whitespace-pre-line">
+                {error}
+              </div>
+              <div class="mt-1">
+                {usesTransaction
+                  ? "It ran in a transaction, so usually nothing was saved. Check the table before importing again."
+                  : "Rows before the failing one may already be saved: check the table before importing again."}
+              </div>
+            </div>
+          ) : (
+            <div
+              class="space-y-2 rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-sm"
+              role="status"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-neutral-800">
+                  {runView === "done"
+                    ? `Imported ${rows(progress!.imported)}`
+                    : `Importing ${rows(progress?.total ?? 0)}…`}
+                </span>
+              </div>
+              <div
+                class="h-2 w-full overflow-hidden rounded-full bg-neutral-200"
+                role="progressbar"
+                aria-label="Import progress"
+                aria-busy={runView === "running"}
+              >
+                <div
+                  class={
+                    runView === "done"
+                      ? "h-full w-full rounded-full bg-green-500"
+                      : "h-full w-full animate-pulse rounded-full bg-blue-500"
+                  }
+                />
+              </div>
+              {runView === "done" && error ? (
+                <p class="text-amber-700">{error}</p>
+              ) : null}
+            </div>
+          )}
+          {runView === "failed" && blockedReason ? (
+            <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {blockedReason}
+            </div>
+          ) : null}
+        </DialogContent>
+        <DialogFooter>
+          {runView === "failed" ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDismissedError(error);
+                setRunFailed(false);
+              }}
+            >
+              Back
+            </Button>
+          ) : null}
+          <Button
+            variant="default"
+            onClick={onClose}
+            disabled={runView === "running"}
+          >
+            Close
+          </Button>
+        </DialogFooter>
+      </Dialog>
     );
-  }, [error, handleClose]);
+  }
 
   return (
     <>
-      <Dialog open={open} onClose={onClose} size={progress ? "sm" : "xl"}>
-        <DialogHeader className="border-b border-neutral-200">
+      {/* Header and footer stay put; only the content between them scrolls. */}
+      <Dialog
+        open={open}
+        onClose={onClose}
+        size="xl"
+        className="flex max-h-[85vh] flex-col overflow-hidden"
+      >
+        <DialogHeader className="shrink-0 border-b border-neutral-200">
           <DialogTitle className="flex items-center gap-2">
-            <RestoreIcon className="size-4 text-neutral-600" />
+            <DownloadIcon className="size-4.5 text-neutral-600" />
             Import CSV data
           </DialogTitle>
           <DialogDescription className="truncate dark:text-neutral-400">
             Import the CSV data into the selected table.
           </DialogDescription>
         </DialogHeader>
-        <DialogContent className="gap-2">
-          {dataPreview && (
-            <>
-              <div class="space-y-2">
-                <p class="flex items-center gap-2 text-sm font-medium">
-                  Table{" "}
-                  <span class="rounded-md border border-neutral-200 px-2 py-1 font-mono text-xs shadow">
-                    {schema}.{tableName}
-                  </span>
-                </p>
-                <div class="flex items-center gap-6">
-                  <p class="text-xs text-neutral-600">
-                    {fullValidation
-                      ? "Validating all rows"
-                      : "First 100 rows of the CSV file"}
-                  </p>
-                  <Checkbox
-                    checked={firstIsHeaders}
-                    onChange={(e) =>
-                      setFirstIsHeaders((e.target as HTMLInputElement).checked)
-                    }
-                    label="First row is headers"
-                  />
-                  <Checkbox
-                    checked={nullMode === "empty-as-null"}
-                    onChange={(e) =>
-                      setNullMode(
-                        (e.target as HTMLInputElement).checked
-                          ? "empty-as-null"
-                          : "empty-string"
-                      )
-                    }
-                    label="Empty values as NULL"
-                  />
-                  <Checkbox
-                    checked={fullValidation}
-                    onChange={(e) =>
-                      setFullValidation((e.target as HTMLInputElement).checked)
-                    }
-                    label="Validate all rows before import"
-                  />
-                </div>
-              </div>
-
-              <OverlayScrollArea
-                className="max-h-40 rounded-lg border border-neutral-200"
-                horizontal
-                vertical
+        <DialogContent className="min-h-0 flex-1 overflow-hidden p-0">
+          <OverlayScrollArea
+            className="h-full min-h-0"
+            contentClassName="flex flex-col gap-2 px-6 py-4"
+          >
+            {formError ? (
+              <div
+                role="alert"
+                class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
               >
-                <table class="w-full">
-                  <thead class="sticky top-0 bg-neutral-50 text-sm">
-                    <tr>
-                      <th class="p-2 text-left font-medium">Table column</th>
-                      <th class="p-2 text-left font-medium">Data type</th>
-                      <th class="p-2 text-left font-medium">CSV column</th>
-                    </tr>
-                  </thead>
-                  <tbody class="text-xs">
-                    {columns.map((column) => (
-                      <tr key={column.name} class="border-t border-neutral-100">
-                        <td class="px-2 py-1 font-mono">{column.name}</td>
-                        <td class="px-2 py-1 font-mono">
-                          {column.db_type || "text"}
-                        </td>
-                        <td class="px-2 py-1">
-                          <select
-                            class="h-6 w-full rounded border border-neutral-200 bg-white px-2 py-1 font-mono! text-xs!"
-                            value={
-                              columnMapping[column.name] == null
-                                ? ""
-                                : String(columnMapping[column.name])
-                            }
-                            onChange={(e) => {
-                              const value = (
-                                e.currentTarget as HTMLSelectElement
-                              ).value;
-                              setColumnMapping((prev) => ({
-                                ...prev,
-                                [column.name]:
-                                  value === "" ? null : Number(value),
-                              }));
-                            }}
-                          >
-                            <option value="">Skip</option>
-                            {dataPreview.headers.map((header, index) => (
-                              <option key={`${header}:${index}`} value={index}>
-                                {firstIsHeaders
-                                  ? header || `Column ${index + 1}`
-                                  : `Column ${index + 1}`}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </OverlayScrollArea>
-
-              <div class="mt-2 max-h-48 overflow-hidden rounded-lg">
-                <p class="mb-1 py-1 text-sm font-medium">Table preview</p>
-                <Table
-                  columns={tableColumns}
-                  data={tableData}
-                  showEmptyMessage={true}
-                  keyExtractor={(_, i) => i}
-                  className="rounded-lg"
-                />
+                <div class="font-medium">The import could not start.</div>
+                <div class="mt-1 wrap-break-word">{formError}</div>
               </div>
-              <p class="text-xs text-neutral-600">
-                CSV {dataPreview.headers.length} columns,{" "}
-                {dataPreview.rows.length} rows, {mappedColumnCount} mapped
-                columns
-              </p>
-              {validationIssues.length > 0 && (
-                <OverlayScrollArea
-                  className="max-h-28 rounded border border-red-200 bg-red-50"
-                  contentClassName="p-2 text-xs text-red-700"
-                  horizontal
-                  vertical
-                >
-                  <p class="mb-1 font-medium">
-                    {validationIssues.length} validation issue(s)
-                  </p>
-                  {validationIssues.slice(0, 8).map((issue) => (
-                    <p key={`${issue.row}:${issue.column}:${issue.value}`}>
-                      Row {issue.row}, {issue.column}: {issue.message}
+            ) : null}
+            {blockedReason ? (
+              <div
+                role="alert"
+                class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+              >
+                {blockedReason}
+              </div>
+            ) : null}
+            {missingRequired.length > 0 ? (
+              <div
+                role="alert"
+                class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+              >
+                Choose a CSV column for {missingRequired.join(", ")}: the table
+                requires a value and has no default.
+              </div>
+            ) : null}
+            {dataPreview && (
+              <>
+                {/* Compact options: the data and its preview get the room. */}
+                <div class="space-y-2">
+                  <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                    <p class="flex items-center gap-2 font-medium">
+                      Table{" "}
+                      <span class="rounded-md border border-neutral-200 px-2 py-1 font-mono text-xs shadow">
+                        {schema}.{tableName}
+                      </span>
                     </p>
-                  ))}
-                </OverlayScrollArea>
-              )}
-            </>
-          )}
+                    <label class="flex items-center gap-2 text-sm">
+                      Separator
+                      <select
+                        class="h-7 rounded border border-neutral-200 bg-white px-2 font-mono! text-xs!"
+                        value={delimiter}
+                        disabled={importing || !onDelimiterChange}
+                        onChange={(e) =>
+                          onDelimiterChange?.(
+                            (e.currentTarget as HTMLSelectElement).value
+                          )
+                        }
+                      >
+                        {DELIMITERS.map((d) => (
+                          <option key={d.value} value={d.value}>
+                            {d.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-x-5 gap-y-1">
+                    <span title="Use the first row as column names.">
+                      <Checkbox
+                        checked={firstIsHeaders}
+                        onChange={(e) =>
+                          setFirstIsHeaders(
+                            (e.target as HTMLInputElement).checked
+                          )
+                        }
+                        label="First row is headers"
+                      />
+                    </span>
+                    <span title="Otherwise an empty cell is saved as an empty string.">
+                      <Checkbox
+                        checked={nullMode === "empty-as-null"}
+                        onChange={(e) =>
+                          setNullMode(
+                            (e.target as HTMLInputElement).checked
+                              ? "empty-as-null"
+                              : "empty-string"
+                          )
+                        }
+                        label="Empty values as NULL"
+                      />
+                    </span>
+                    <span title="Check every row, not only the first 100.">
+                      <Checkbox
+                        checked={fullValidation}
+                        onChange={(e) =>
+                          setFullValidation(
+                            (e.target as HTMLInputElement).checked
+                          )
+                        }
+                        label="Validate all rows before import"
+                      />
+                    </span>
+                  </div>
+                </div>
 
-          {progress && (
-            <div class="rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-xs">
-              <div class="space-y-2">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="min-w-0 truncate font-medium text-neutral-800">
-                    {tableName}
+                {/* The mapping folds away once every column is matched;
+                    it opens by itself when something needs a choice. */}
+                <details
+                  open={mappingNeedsAttention}
+                  class="rounded-lg border border-neutral-200"
+                >
+                  <summary class="cursor-pointer px-2 py-2 text-sm font-medium select-none">
+                    Column mapping{" "}
+                    <span class="font-normal text-neutral-500">
+                      · {mappedColumnCount} of {columns.length} matched
+                      {missingRequired.length > 0
+                        ? ` · ${missingRequired.length} required not mapped`
+                        : ""}
+                    </span>
+                  </summary>
+                  <div class="overflow-x-auto border-t border-neutral-200">
+                    <table class="w-full">
+                      <thead class="sticky top-0 bg-neutral-50 text-sm">
+                        <tr>
+                          <th class="p-2 text-left font-medium">
+                            Table column
+                          </th>
+                          <th class="p-2 text-left font-medium">Data type</th>
+                          <th class="p-2 text-left font-medium">CSV column</th>
+                        </tr>
+                      </thead>
+                      <tbody class="text-xs">
+                        {columns.map((column) => (
+                          <tr
+                            key={column.name}
+                            class="border-t border-neutral-100"
+                          >
+                            <td class="px-2 py-1 font-mono">
+                              {column.name}
+                              {requiredColumns.includes(column.name) ? (
+                                <span
+                                  class={
+                                    missingRequired.includes(column.name)
+                                      ? "ml-1.5 font-sans text-red-600"
+                                      : "ml-1.5 font-sans text-neutral-400"
+                                  }
+                                  title="NOT NULL without a default: needs a CSV column"
+                                >
+                                  required
+                                </span>
+                              ) : null}
+                            </td>
+                            <td class="px-2 py-1 font-mono">
+                              {column.db_type || "text"}
+                            </td>
+                            <td class="px-2 py-1">
+                              <select
+                                // New CSV columns (separator, header row):
+                                // a fresh select, so it never shows a choice
+                                // that no longer exists.
+                                key={csvColumnsKey}
+                                aria-label={`CSV column for ${column.name}`}
+                                class="h-6 w-full rounded border border-neutral-200 bg-white px-2 py-1 font-mono! text-xs!"
+                                value={selectValue(column.name)}
+                                onChange={(e) => {
+                                  const value = (
+                                    e.currentTarget as HTMLSelectElement
+                                  ).value;
+                                  touchedRef.current.add(column.name);
+                                  setColumnMapping((prev) => ({
+                                    ...prev,
+                                    [column.name]:
+                                      value === "" ? null : Number(value),
+                                  }));
+                                }}
+                              >
+                                <option value="">Skip</option>
+                                {dataPreview.headers.map((header, index) => (
+                                  <option
+                                    key={`${header}:${index}`}
+                                    value={index}
+                                  >
+                                    {firstIsHeaders
+                                      ? header || `Column ${index + 1}`
+                                      : `Column ${index + 1}`}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+
+                <div class="rounded-lg">
+                  <p class="mb-1 py-1 text-sm font-medium">
+                    Preview of the rows to insert{" "}
+                    <span class="font-normal text-neutral-500">
+                      (first {PREVIEW_ROWS} rows)
+                    </span>
                   </p>
-                  <span class="shrink-0 text-neutral-500 tabular-nums">
-                    {progress.imported} / {progress.total} rows
-                  </span>
+                  {mappedColumns.length > 0 ? (
+                    <ImportPreviewGrid
+                      columns={previewColumns}
+                      rows={tableData}
+                    />
+                  ) : (
+                    <div
+                      role="status"
+                      class="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-600"
+                    >
+                      {separatorHint ? (
+                        <>
+                          Only one column was found: the file seems to use{" "}
+                          {separatorHint.label.toLowerCase()} as its separator.{" "}
+                          {onDelimiterChange ? (
+                            <button
+                              type="button"
+                              class="font-medium text-blue-600 underline-offset-2 hover:underline"
+                              onClick={() =>
+                                onDelimiterChange(separatorHint.value)
+                              }
+                            >
+                              Use {separatorHint.label}
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        "No CSV column is matched to a table column yet. Choose them under Column mapping."
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200">
+                <p class="text-xs text-neutral-600">
+                  CSV {dataPreview.headers.length} columns,{" "}
+                  {dataPreview.rows.length} rows, {mappedColumnCount} mapped
+                  columns
+                </p>
+                {issueGroups.length > 0 && (
                   <div
-                    class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
-                    style={{ width: `${Math.min(100, progressPct)}%` }}
-                  />
-                </div>
-                {progress.imported === progress.total && (
-                  <p class="text-right text-green-600">Completed!</p>
+                    role="alert"
+                    class="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700"
+                  >
+                    <p class="mb-1 font-medium">
+                      {validationIssues.length}{" "}
+                      {validationIssues.length === 1
+                        ? "value needs fixing"
+                        : "values need fixing"}
+                      {fullValidation ? "" : ` in the first 100 rows`}:
+                    </p>
+                    <ul class="space-y-0.5">
+                      {issueGroups.map((group) => (
+                        <li key={`${group.column}:${group.message}`}>
+                          <span class="font-mono">{group.column}</span>:{" "}
+                          {group.message} — row
+                          {group.rows.length === 1 ? "" : "s"}{" "}
+                          {group.rows.slice(0, ISSUE_EXAMPLES).join(", ")}
+                          {group.rows.length > ISSUE_EXAMPLES
+                            ? ` and ${group.rows.length - ISSUE_EXAMPLES} more`
+                            : ""}
+                          {/* The offending value, so the cause is visible. */}
+                          <span class="text-red-600/80">
+                            {" "}
+                            (e.g.{" "}
+                            <span class="font-mono" title={group.example}>
+                              {JSON.stringify(
+                                group.example.length > 40
+                                  ? `${group.example.slice(0, 40)}…`
+                                  : group.example
+                              )}
+                            </span>
+                            )
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </OverlayScrollArea>
         </DialogContent>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={importing}>
+        <DialogFooter className="shrink-0 border-t border-neutral-200">
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
           {dataPreview && (dataPreview.rows.length > 0 || !firstIsHeaders) && (
@@ -332,10 +703,12 @@ export function ImportTableDialog({
               disabled={
                 importing ||
                 mappedColumnCount === 0 ||
-                validationIssues.length > 0
+                validationIssues.length > 0 ||
+                missingRequired.length > 0 ||
+                !!blockedReason
               }
             >
-              {importing ? "Importing..." : "Import"}
+              Import
             </Button>
           )}
         </DialogFooter>

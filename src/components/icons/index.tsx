@@ -51,6 +51,7 @@ export * from "./Settings";
 export * from "./Stop";
 export * from "./Chat";
 export * from "./Download";
+export * from "./Upload";
 export * from "./Sort";
 export * from "./DateAsc";
 export * from "./DateDesc";

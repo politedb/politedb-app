@@ -6,6 +6,7 @@ import { DiagramIcon, XIcon } from "src/components/icons";
 import type { MetadataApi } from "src/hooks/useDatabaseMetadata";
 import type { DatabaseEngine } from "src/types";
 import { OverlayModal } from "./OverlayModal";
+import { DialogDescription, DialogTitle } from "../common/Dialog";
 
 type DiagramGeneratorDialogProps = {
   open: boolean;
@@ -67,13 +68,13 @@ export function DiagramGeneratorDialog(props: DiagramGeneratorDialogProps) {
       <div class="flex h-[85vh] w-full max-w-10/12 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div class="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-3">
           <div>
-            <div class="flex items-center gap-2 text-lg font-semibold text-slate-900">
-              <DiagramIcon className="size-4" />
+            <DialogTitle className="flex items-center gap-2">
+              <DiagramIcon className="size-4.5" />
               Database schema diagram
-            </div>
-            <div class="mt-1 text-sm text-slate-500">
+            </DialogTitle>
+            <DialogDescription>
               Generate Visual ER diagram for the current schema.
-            </div>
+            </DialogDescription>
           </div>
           <button
             type="button"
