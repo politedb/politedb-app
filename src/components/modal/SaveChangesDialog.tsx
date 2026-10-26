@@ -1,4 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
+import {
+  formatShortcutLabel,
+  isMacPlatform,
+} from "src/stores/keyboardShortcuts";
 import { Button } from "../common/Button";
 import {
   Dialog,
@@ -311,6 +321,36 @@ export function SaveChangesDialog({
     if (!savingRef.current) onClose();
   }, [onClose]);
 
+  const destructive = destructiveParts.length > 0;
+  const canConfirm = !summary.sqlError && !onlyNotices && !saving;
+
+  // Focus starts on Save, or on Cancel when the save cannot be undone.
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!open || focusedRef.current) return;
+    const target = document.querySelector<HTMLButtonElement>(
+      destructive ? "[data-review-cancel]" : "[data-review-confirm]"
+    );
+    if (!target || target.disabled) return;
+    focusedRef.current = true;
+    target.focus();
+  }, [open, destructive]);
+
+  // Mod+Enter saves, except when the save cannot be undone (click it).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || !(isMacPlatform() ? e.metaKey : e.ctrlKey)) {
+        return;
+      }
+      if (destructive || !canConfirm) return;
+      e.preventDefault();
+      void confirm();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, destructive, canConfirm, confirm]);
+
   const rowEntity = isMongo ? "document" : "row";
   const rowEntityPlural = isMongo ? "documents" : "rows";
   const structureEntity = isMongo ? "field" : "column";
@@ -570,7 +610,7 @@ export function SaveChangesDialog({
                 </h3>
               </div>
               <OverlayScrollArea
-                className="max-h-45 w-full"
+                className="max-h-72 w-full"
                 contentClassName="space-y-4 p-4"
               >
                 {diffsByTable.map(([table, diffs]) => (
@@ -732,14 +772,21 @@ export function SaveChangesDialog({
       </DialogContent>
 
       <DialogFooter className="shrink-0">
-        <Button variant="outline" onClick={close} disabled={saving}>
+        <Button
+          variant="outline"
+          onClick={close}
+          disabled={saving}
+          data-review-cancel
+        >
           Cancel
         </Button>
         <Button
-          variant={destructiveParts.length > 0 ? "destructive" : "default"}
+          variant={destructive ? "destructive" : "default"}
           onClick={() => void confirm()}
-          disabled={!!summary.sqlError || onlyNotices || saving}
+          disabled={!canConfirm}
           aria-busy={saving}
+          data-review-confirm
+          title={destructive ? undefined : formatShortcutLabel("Mod+Enter")}
         >
           {saving ? "Saving…" : confirmLabel}
         </Button>

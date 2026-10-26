@@ -183,3 +183,49 @@ describe("SaveChangesDialog readability", () => {
     expect(copy.className).toContain("focus-visible:opacity-100");
   });
 });
+
+describe("SaveChangesDialog keyboard", () => {
+  const modEnter = () =>
+    fireEvent.keyDown(document, {
+      key: "Enter",
+      metaKey: true,
+      ctrlKey: true,
+    });
+
+  it("focuses Save and saves on Mod+Enter", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ onConfirm });
+    expect(document.activeElement).toBe(confirmButton());
+    modEnter();
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses Cancel and ignores Mod+Enter when the save cannot be undone", () => {
+    const onConfirm = vi.fn();
+    renderDialog({
+      onConfirm,
+      newTableSql: [],
+      patchMap: deletePatchMap(),
+      activeScreen: "tab1",
+      getRowAt: (_key, index) => (index === 0 ? [1, null] : [2, "x"]),
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Cancel" })
+    );
+    modEnter();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("ignores Mod+Enter when nothing would run", () => {
+    const onConfirm = vi.fn();
+    renderDialog({
+      onConfirm,
+      newTableSql: [],
+      objectNotices: [
+        { kind: "skipped", key: "k", name: "f", reason: "its SQL is empty" },
+      ],
+    });
+    modEnter();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
