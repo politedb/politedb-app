@@ -70,6 +70,7 @@ import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
 import { StandaloneTableExportHost } from "./export/StandaloneTableExportHost";
 import { StandaloneTableImportHost } from "./import/StandaloneTableImportHost";
+import { StandaloneSqlDumpImportHost } from "./import/StandaloneSqlDumpImportHost";
 import {
   forgetImportedTableRows,
   importNeedsTableTab,
@@ -185,6 +186,12 @@ export function ConnectionScreen() {
     useState<StandaloneExportTarget | null>(null);
   const clearStandaloneExportTarget = useCallback(() => {
     setStandaloneExportTarget(null);
+  }, []);
+  // SQL dump import started from the sidebar without opening the table.
+  const [standaloneDumpTarget, setStandaloneDumpTarget] =
+    useState<StandaloneExportTarget | null>(null);
+  const clearStandaloneDumpTarget = useCallback(() => {
+    setStandaloneDumpTarget(null);
   }, []);
   // CSV import started from the sidebar without opening the table.
   const [standaloneImportTarget, setStandaloneImportTarget] =
@@ -721,8 +728,27 @@ export function ConnectionScreen() {
       },
       importTableSqlDump: (table: TableItem) => {
         if (isProfileLocked) return;
-        void actionsRef.current.selectTable(table).then(() => {
-          setPendingTableAction("importSqlDump");
+        const connectionId = runtimeConnectionId;
+        // Like CSV import: without opening the table, unless its tab is
+        // open or holds unsaved row changes (then the tab asks first).
+        if (
+          table.new ||
+          !connectionId ||
+          !engine ||
+          importNeedsTableTab(activeProfileScreen, table)
+        ) {
+          void actionsRef.current.selectTable(table).then(() => {
+            setPendingTableAction("importSqlDump");
+          });
+          return;
+        }
+        setStandaloneDumpTarget({
+          requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          connectionId,
+          engine,
+          schema: table.schema,
+          tableName: table.name,
+          kind: table.kind,
         });
       },
       cloneTable: (table: TableItem) => {
@@ -1083,6 +1109,12 @@ export function ConnectionScreen() {
           engine={engine}
           target={standaloneExportTarget}
           onClearTarget={clearStandaloneExportTarget}
+        />
+
+        <StandaloneSqlDumpImportHost
+          profileScreenId={activeProfileScreen}
+          target={standaloneDumpTarget}
+          onClearTarget={clearStandaloneDumpTarget}
         />
 
         <StandaloneTableImportHost
