@@ -497,6 +497,16 @@ pub async fn run_pg_sql_query(
 
 /// Format a tokio-postgres error for the UI.
 ///
+/// The database's own message for a Postgres error (severity, message,
+/// DETAIL/HINT), without SQL annotation; the error's Display otherwise.
+/// `tokio_postgres::Error` displays every database error as "db error".
+pub(crate) fn pg_error_text(e: &tokio_postgres::Error) -> String {
+    match e.as_db_error() {
+        Some(db) => db.to_string(),
+        None => e.to_string(),
+    }
+}
+
 /// `tokio_postgres::Error`'s Display for database errors is the opaque label
 /// `"db error"`; the actionable Postgres text lives on the `DbError` source
 /// (`message`, `detail`, `hint`). Prefer that (and optional SQL caret) so
