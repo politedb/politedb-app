@@ -31,7 +31,7 @@ import {
 import { cn } from "src/utils/cn";
 import { useProGate } from "src/hooks/useProGate";
 import { ProBadge } from "src/components/license/ProBadge";
-import { DownloadIcon } from "../icons";
+import { UploadIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -336,8 +336,8 @@ export function ExportTableDialog({
         )}
       >
         <DialogHeader className="shrink-0 border-b border-neutral-200 pr-10">
-          <DialogTitle className="flex items-center gap-2 text-base dark:text-neutral-100">
-            <DownloadIcon className="size-4.5 text-neutral-600" />
+          <DialogTitle className="flex items-center gap-2">
+            <UploadIcon className="size-4.5 text-neutral-600" />
             Export data
           </DialogTitle>
           <DialogDescription className="truncate dark:text-neutral-400">

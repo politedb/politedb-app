@@ -1236,8 +1236,8 @@ export function DbHealthInspectorDialog(props: Props) {
       className="flex h-[80vh] flex-col overflow-hidden"
     >
       <DialogHeader className="shrink-0 border-b border-neutral-200 pr-12">
-        <DialogTitle className="flex items-center gap-2 text-lg">
-          <DbInspectorIcon className="size-4 text-neutral-600" />
+        <DialogTitle className="flex items-center gap-2">
+          <DbInspectorIcon className="size-4.5 text-neutral-600" />
           Database Health Inspector
         </DialogTitle>
         <DialogDescription>

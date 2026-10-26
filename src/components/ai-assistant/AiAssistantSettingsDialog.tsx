@@ -765,8 +765,8 @@ export function AiAssistantSettingsDialog(props: Props) {
       className="max-w-4xl overflow-hidden"
     >
       <DialogHeader className="border-b border-neutral-200">
-        <DialogTitle className="flex items-center gap-2 font-semibold">
-          <SparklesIcon className="size-4" />
+        <DialogTitle className="flex items-center gap-2">
+          <SparklesIcon className="size-4.5" />
           AI Provider Settings
         </DialogTitle>
         <DialogDescription className="text-xs text-neutral-500">
