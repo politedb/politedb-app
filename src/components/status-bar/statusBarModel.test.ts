@@ -10,14 +10,14 @@ describe("app status bar model", () => {
     const model = buildAppStatusBarModel({
       isConnectionTab: false,
       connected: false,
-      appVersion: "1.6.0",
+      appVersion: "1.7.0",
       isDev: false,
       telemetryConsent: "granted",
     });
 
     expect(model.dot).toBe("idle");
     expect(model.left).toEqual(["No active connection"]);
-    expect(model.right).toEqual(["PoliteDB v1.6.0"]);
+    expect(model.right).toEqual(["PoliteDB v1.7.0"]);
   });
 
   it("shows engine and query mode for a live connection", () => {
@@ -26,14 +26,14 @@ describe("app status bar model", () => {
       engine: "sqlite",
       connected: true,
       querySafetyMode: "production",
-      appVersion: "1.6.0",
+      appVersion: "1.7.0",
       isDev: false,
       telemetryConsent: "denied",
     });
 
     expect(model.dot).toBe("connected");
     expect(model.left).toEqual(["Connected: SQLite", "Query mode: Production"]);
-    expect(model.right).toEqual(["PoliteDB v1.6.0"]);
+    expect(model.right).toEqual(["PoliteDB v1.7.0"]);
   });
 
   it("marks a connection tab without a runtime as connecting", () => {
@@ -41,14 +41,14 @@ describe("app status bar model", () => {
       isConnectionTab: true,
       engine: "postgres",
       connected: false,
-      appVersion: "1.6.0",
+      appVersion: "1.7.0",
       isDev: true,
       telemetryConsent: "unknown",
     });
 
     expect(model.dot).toBe("connecting");
     expect(model.left).toEqual(["Connecting: Postgres"]);
-    expect(model.right).toEqual(["PoliteDB v1.6.0-dev"]);
+    expect(model.right).toEqual(["PoliteDB v1.7.0-dev"]);
   });
 });
 
