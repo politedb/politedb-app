@@ -303,26 +303,36 @@ export function NavigationTabs({
                 >
                   {getWindowTitle(w)}
                 </span>
-                {unsaved ? (
-                  <span
-                    class="-ml-1 text-[10px] leading-none text-amber-600 dark:text-amber-400"
-                    title="Unsaved changes"
-                  >
-                    <span aria-hidden="true">●</span>
-                    <span class="sr-only">Unsaved changes</span>
-                  </span>
-                ) : null}
+                {unsaved ? <span class="sr-only">Unsaved changes</span> : null}
 
+                {/* Unsaved: the dot sits where × is; hovering or focusing
+                    the tab shows × in its place. */}
                 <Button
                   variant="ghost"
                   onClick={(e) => {
                     e.stopPropagation();
                     closeNow(w.id);
                   }}
-                  class={navigationTabCloseClass()}
-                  title="Close"
+                  class={cn(navigationTabCloseClass(), "relative")}
+                  title={unsaved ? "Unsaved changes — close" : "Close"}
+                  aria-label="Close"
                 >
-                  <XIcon className="size-3" />
+                  {unsaved ? (
+                    <span
+                      aria-hidden="true"
+                      data-unsaved-dot
+                      class="absolute inset-0 flex items-center justify-center group-focus-within:opacity-0 group-hover:opacity-0"
+                    >
+                      <span class="size-2 rounded-full bg-slate-400 dark:bg-slate-300" />
+                    </span>
+                  ) : null}
+                  <XIcon
+                    className={cn(
+                      "size-3",
+                      unsaved &&
+                        "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+                    )}
+                  />
                 </Button>
               </div>
             );
