@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { useState } from "preact/hooks";
 import { describe, expect, it, vi } from "vitest";
 import type { PatchMap } from "src/lib/patches/generateSql";
 import { SaveChangesDialog } from "./SaveChangesDialog";
+import { isMacPlatform } from "src/stores/keyboardShortcuts";
 
 function renderDialog(
   props: Partial<Parameters<typeof SaveChangesDialog>[0]> = {}
@@ -188,8 +190,7 @@ describe("SaveChangesDialog keyboard", () => {
   const modEnter = () =>
     fireEvent.keyDown(document, {
       key: "Enter",
-      metaKey: true,
-      ctrlKey: true,
+      ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
     });
 
   it("focuses Save and saves on Mod+Enter", () => {
@@ -226,6 +227,119 @@ describe("SaveChangesDialog keyboard", () => {
       ],
     });
     modEnter();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("SaveChangesDialog after review fixes", () => {
+  it("cannot confirm when no statement was generated", () => {
+    const onConfirm = vi.fn();
+    renderDialog({
+      onConfirm,
+      newTableSql: [],
+      // A structure entry the generator turns into no SQL.
+      patchMap: {
+        win1: {
+          tableWindow: {
+            id: "win1",
+            type: "table",
+            table: { schema: "public", name: "users" },
+          },
+          tableData: { columns: [], rows: [], rowCount: 0 } as never,
+          patches: { update: { structure: { x: {} } } } as never,
+        },
+      },
+    });
+    expect(screen.queryByText(/can't be saved/)).toBeNull();
+    expect(screen.getByText(/no SQL statements were generated/)).toBeTruthy();
+    expect(confirmButton().disabled).toBe(true);
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Cancel" })
+    );
+    fireEvent.keyDown(document, { key: "Enter", metaKey: true, ctrlKey: true });
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("keeps Mod+Enter away from other shortcuts and ignores extra modifiers", () => {
+    const onConfirm = vi.fn();
+    const appShortcut = vi.fn();
+    window.addEventListener("keydown", appShortcut);
+    try {
+      renderDialog({ onConfirm });
+      fireEvent.keyDown(document, {
+        key: "Enter",
+        ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+        shiftKey: true,
+      });
+      expect(onConfirm).not.toHaveBeenCalled();
+      expect(appShortcut).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", appShortcut);
+    }
+  });
+
+  it("stays visible to report a failure after everything was written", async () => {
+    let written = false;
+    const view = render(
+      <Harness
+        onConfirm={async () => {
+          written = true;
+          throw new Error("could not reload table users");
+        }}
+        written={() => written}
+      />
+    );
+    fireEvent.click(confirmButton());
+    await waitFor(() =>
+      expect(
+        screen.getByText("Your changes were saved, but a later step failed.")
+      ).toBeTruthy()
+    );
+    expect(screen.getByText("could not reload table users")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    view.unmount();
+  });
+});
+
+/** Changes disappear once written, as the real save does. */
+function Harness(props: {
+  onConfirm: () => Promise<void>;
+  written: () => boolean;
+}) {
+  const [, setTick] = useState(0);
+  return (
+    <SaveChangesDialog
+      open
+      onClose={() => {}}
+      onConfirm={async () => {
+        try {
+          await props.onConfirm();
+        } finally {
+          setTick((n) => n + 1);
+        }
+      }}
+      patchMap={{}}
+      engine="postgres"
+      newTableSql={props.written() ? [] : ['CREATE TABLE "a" (id int);']}
+    />
+  );
+}
+
+describe("SaveChangesDialog on SQL Server", () => {
+  it("warns about a real drop on a bracket-quoted name and ignores Mod+Enter", () => {
+    const onConfirm = vi.fn();
+    renderDialog({
+      onConfirm,
+      engine: "sqlserver",
+      newTableSql: ["ALTER TABLE [dbo].[a]]'] DROP COLUMN [note];"],
+    });
+    expect(
+      screen.getAllByRole("alert").map((a) => a.textContent)
+    ).toContainEqual(expect.stringContaining("drops 1 column"));
+    fireEvent.keyDown(document, {
+      key: "Enter",
+      ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+    });
     expect(onConfirm).not.toHaveBeenCalled();
   });
 });

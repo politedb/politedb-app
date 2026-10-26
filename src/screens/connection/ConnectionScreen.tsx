@@ -48,6 +48,7 @@ import { useSnippetsStore } from "src/stores/snippets";
 import { useConnectionActions } from "./hooks/useConnectionActions";
 import { metaKeyForTab, type ObjectMetadataRefresh } from "./lib/objectWindows";
 import { reconcileObjectDraftsOnMetadataLoads } from "./lib/objectReconcile";
+import { saveFailureMessages } from "./lib/saveJobs";
 import { useObjectSaveReview } from "./hooks/useObjectSaveReview";
 import { ConnectionActionsProvider } from "./workspace/ConnectionActionsContext";
 import { ConnectionRuntimeProvider } from "./workspace/ConnectionRuntimeContext";
@@ -959,14 +960,13 @@ export function ConnectionScreen() {
                 } catch (error) {
                   thrown = error;
                 }
-                const reported = saveErrorsRef.current ?? [];
+                // saveChanges settles only after every job, so nothing
+                // reports after this point.
+                const messages = saveFailureMessages(
+                  saveErrorsRef.current ?? [],
+                  thrown
+                );
                 saveErrorsRef.current = null;
-                const messages = [...new Set(reported)];
-                if (!messages.length && thrown) {
-                  messages.push(
-                    thrown instanceof Error ? thrown.message : String(thrown)
-                  );
-                }
                 // Keep the review open with what failed; it still lists
                 // whatever is unsaved.
                 if (messages.length) throw new Error(messages.join("\n"));
