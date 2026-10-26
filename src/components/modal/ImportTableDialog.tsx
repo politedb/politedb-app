@@ -26,7 +26,7 @@ import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Spinner } from "src/components/common/Spinner";
-import { RestoreIcon } from "../icons";
+import { UploadIcon } from "../icons";
 
 interface Props {
   open: boolean;
@@ -235,7 +235,7 @@ export function ImportTableDialog({
       <Dialog open={open} onClose={onClose} size={progress ? "sm" : "xl"}>
         <DialogHeader className="border-b border-neutral-200">
           <DialogTitle className="flex items-center gap-2">
-            <RestoreIcon className="size-4 text-neutral-600" />
+            <UploadIcon className="size-4 text-neutral-600" />
             Import CSV data
           </DialogTitle>
           <DialogDescription className="truncate dark:text-neutral-400">
@@ -270,7 +270,7 @@ export function ImportTableDialog({
                     {schema}.{tableName}
                   </span>
                 </p>
-                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+                <div class="space-y-2">
                   <label class="flex items-center gap-2 text-sm">
                     Separator
                     <select
@@ -296,6 +296,7 @@ export function ImportTableDialog({
                       setFirstIsHeaders((e.target as HTMLInputElement).checked)
                     }
                     label="First row is headers"
+                    description="Use the first row as column names."
                   />
                   <Checkbox
                     checked={nullMode === "empty-as-null"}
@@ -307,6 +308,7 @@ export function ImportTableDialog({
                       )
                     }
                     label="Empty values as NULL"
+                    description="Otherwise an empty cell is saved as an empty string."
                   />
                   <Checkbox
                     checked={fullValidation}
@@ -314,6 +316,7 @@ export function ImportTableDialog({
                       setFullValidation((e.target as HTMLInputElement).checked)
                     }
                     label="Validate all rows before import"
+                    description="Check every row, not only the first 100."
                   />
                 </div>
               </div>
