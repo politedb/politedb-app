@@ -11,6 +11,8 @@ export type ConnectionActions = {
   getPatchMap(): PatchMap | null;
 
   closeWindow(windowId: string, e: MouseEvent): Promise<void>;
+  /** Close several windows at once (one transition, one new active tab). */
+  closeWindows(windowIds: string[]): Promise<void>;
   closeTab(tabId: string, skipCheck?: boolean): Promise<void>;
 
   pageChange(limit: number, offset: number): Promise<void>;

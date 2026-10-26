@@ -14,12 +14,6 @@ export type SqlRunFn = (args: {
   sql: string;
 }) => Promise<RunSqlReturn>;
 
-/** Registered by DbObjectsManagerPane for global Cmd/Ctrl+S save. */
-export type ObjectSaveHandler = {
-  getPendingSql: () => string[];
-  save: () => Promise<void>;
-};
-
 export type ConnectionRuntime = {
   profileId: string;
   engine: DatabaseEngine;
@@ -45,9 +39,6 @@ export type ConnectionRuntime = {
 
   // new table
   newTableSaveRef: { current: (() => Promise<void>) | null };
-
-  // database objects (functions/procedures/triggers)
-  objectSaveRef: { current: ObjectSaveHandler | null };
 
   /** When set by context menu, MainTableDataPane runs import/clone/structure then clears */
   pendingTableAction: PendingTableAction | null;

@@ -46,11 +46,11 @@ import {
 import { useSnippetsStore } from "src/stores/snippets";
 
 import { useConnectionActions } from "./hooks/useConnectionActions";
+import { metaKeyForTab, type ObjectMetadataRefresh } from "./lib/objectWindows";
+import { reconcileObjectDraftsOnMetadataLoads } from "./lib/objectReconcile";
+import { useObjectSaveReview } from "./hooks/useObjectSaveReview";
 import { ConnectionActionsProvider } from "./workspace/ConnectionActionsContext";
-import {
-  ConnectionRuntimeProvider,
-  type ObjectSaveHandler,
-} from "./workspace/ConnectionRuntimeContext";
+import { ConnectionRuntimeProvider } from "./workspace/ConnectionRuntimeContext";
 import { useConnectionShortcuts } from "./hooks/useConnectionShortcuts";
 import { useRefreshTrigger } from "./hooks/useRefreshTrigger";
 import { registerConnectionTabCloseBridge } from "./lib/connectionTabCloseBridge";
@@ -198,6 +198,7 @@ export function ConnectionScreen() {
     openSqlEditor,
     openTable,
     closeWindow,
+    closeWindows,
     openDatabaseObjectsManager,
   } = useConnectionWindows(activeProfileScreen, sqlScopeKey);
 
@@ -280,7 +281,7 @@ export function ConnectionScreen() {
     if (!activeTab?.id) return "";
     // Use tab-scoped key so tabs opened from the same profile but different
     // databases do not share stale metadata cache.
-    return `${engine ?? "postgres"}:${activeTab.id}`;
+    return metaKeyForTab({ id: activeTab.id, engine });
   }, [engine, activeTab?.id]);
 
   /* =============================================================================
@@ -474,7 +475,41 @@ export function ConnectionScreen() {
    * New table save ref (runtime)
    * ============================================================================= */
   const newTableSaveRef = useRef<(() => Promise<void>) | null>(null);
-  const objectSaveRef = useRef<ObjectSaveHandler | null>(null);
+
+  // Object drafts follow every complete metadata load (missing objects).
+  useEffect(() => reconcileObjectDraftsOnMetadataLoads(), []);
+
+  // Fresh metadata for any connection screen tab, read from the live store,
+  // so the object save and its toast's Open action check the right tab.
+  const refreshObjectMetadata = useCallback<ObjectMetadataRefresh>(
+    async (screenTabId) => {
+      const tab = useScreenStore
+        .getState()
+        .profileTabs.find((t) => t.id === screenTabId);
+      const metaKeyOfTab = tab ? metaKeyForTab(tab) : "";
+      const connectionId = tab?.runtimeConnectionId;
+      if (!tab || !connectionId) {
+        return {
+          ok: false,
+          metaKey: metaKeyOfTab,
+          connectionId: connectionId ?? "",
+          error: "No active connection.",
+        };
+      }
+      return metadata.refreshWithOutcome({
+        metaKey: metaKeyOfTab,
+        engine: tab.engine,
+        connectionId,
+        currentDatabase:
+          tab.databaseOverride ||
+          currentDatabaseFromInput(
+            tab.engine,
+            getProfileById(tab.profileId)?.input
+          ),
+      });
+    },
+    [metadata.refreshWithOutcome, getProfileById]
+  );
 
   /* =============================================================================
    * SQL history runner (depends on engine + metadata + profileId)
@@ -514,21 +549,14 @@ export function ConnectionScreen() {
     openSqlEditor,
     openTable,
     closeWindow,
+    closeWindows,
 
     removeTab,
     setActiveProfileScreen,
 
     newTableSaveRef,
-    objectSaveRef,
     refreshRuntimeConnection: reloadRuntime,
-    listDatabaseObjects: () =>
-      metadata.get({
-        metaKey,
-        engine: engine ?? "postgres",
-        connectionId: runtimeConnectionId,
-        lazy: true,
-      }).objects ?? [],
-    activeSchema,
+    refreshObjectMetadata,
   });
 
   // ✅ stable provider value (avoid context rerender cascades)
@@ -606,11 +634,13 @@ export function ConnectionScreen() {
       getNewTableSql: () => actionsRef.current.getNewTableSql(),
       getObjectSql: () => actionsRef.current.getObjectSql(),
       getObjectChangeSummary: () => actionsRef.current.getObjectChangeSummary(),
+      getObjectSaveNotices: () => actionsRef.current.getObjectSaveNotices(),
       beforeSaveChanges: () => actionsRef.current.beforeSaveChanges(),
       saveChanges: () => actionsRef.current.saveChanges(),
       discardChanges: () => actionsRef.current.discardChanges(),
       closeWindow: (id: string, e: MouseEvent) =>
         actionsRef.current.closeWindow(id, e),
+      closeWindows: (ids: string[]) => actionsRef.current.closeWindows(ids),
       closeTab: (id: string, skip?: boolean) =>
         actionsRef.current.closeTab(id, skip),
       pageChange: (l: number, o: number) => actionsRef.current.pageChange(l, o),
@@ -700,15 +730,12 @@ export function ConnectionScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actions.getNewTableSql().data]);
 
-  const objectSql = useMemo(() => {
-    return actions.getObjectSql();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actions.getObjectSql(), showSaveDialog]);
-
-  const objectChangeSummary = useMemo(() => {
-    return actions.getObjectChangeSummary();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actions.getObjectChangeSummary(), showSaveDialog]);
+  const { objectSql, objectChangeSummary, objectSaveNotices } =
+    useObjectSaveReview({
+      tabId: activeProfileScreen,
+      engine,
+      open: showSaveDialog,
+    });
 
   const diagramDatabase = useMemo(() => {
     if (!profile) return "";
@@ -813,7 +840,6 @@ export function ConnectionScreen() {
       captureHistoryTarget,
       refreshSchemaAndTables,
       newTableSaveRef,
-      objectSaveRef,
       pendingTableAction,
       setPendingTableAction,
       staleTableKey,
@@ -913,6 +939,7 @@ export function ConnectionScreen() {
               newTableSql={newTableSql}
               objectSql={objectSql}
               objectChangeSummary={objectChangeSummary}
+              objectNotices={objectSaveNotices}
               activeScreen={activeProfileScreen}
               getRowAt={useConnectionStore.getState().getRowAt}
               getOriginalRowAt={useConnectionStore.getState().getOriginalRowAt}

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DatabaseObjectItem, OpenWindow } from "src/types";
 import { LeftNavObjectsPane } from "./LeftNavObjectsPane";
+import { useObjectDraftStore } from "src/stores/objectDrafts";
 
 const mocks = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -11,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   objects: [] as DatabaseObjectItem[],
   windows: [] as OpenWindow[],
   locked: false,
+  openObjectDraft: vi.fn(),
+  openDatabaseObjectsManager: vi.fn(),
 }));
 
 vi.mock("src/lib/system-dialog", () => ({
@@ -32,9 +35,9 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
 }));
 vi.mock("../hooks/useConnectionWindows", () => ({
   useConnectionWindows: () => ({
-    openDatabaseObjectsManager: vi.fn(),
+    openDatabaseObjectsManager: mocks.openDatabaseObjectsManager,
     openDatabaseCatalog: vi.fn(),
-    selectWindow: vi.fn(),
+    openObjectDraft: mocks.openObjectDraft,
   }),
 }));
 vi.mock("src/stores/screen", () => {
@@ -88,6 +91,9 @@ beforeEach(() => {
   mocks.objects = [fn];
   mocks.windows = [];
   mocks.locked = false;
+  mocks.openObjectDraft.mockReset();
+  mocks.openDatabaseObjectsManager.mockReset();
+  useObjectDraftStore.getState().clearAll();
 });
 
 describe("LeftNavObjectsPane drop", () => {
@@ -192,20 +198,103 @@ describe("LeftNavObjectsPane drop state and locked profiles", () => {
   });
 });
 
-describe("LeftNavObjectsPane counts", () => {
-  it("counts drafts of new objects with the saved ones", () => {
+describe("LeftNavObjectsPane drafts", () => {
+  const createDraft = (key: string, name: string, schema = "public") =>
+    useObjectDraftStore.getState().ensureCreateDraft("profile-1", key, {
+      kind: "function",
+      form: { schema, name, tableName: "" },
+      sql: `CREATE FUNCTION ${name}()`,
+    });
+
+  it("lists new-object drafts, open or closed, in counts and search", () => {
     mocks.objects = [];
-    mocks.windows = [
-      {
-        id: "draft-1",
-        type: "db-object-manager",
-        title: "",
-        initialKind: "function",
-      } as unknown as OpenWindow,
-    ];
+    createDraft("new:function:a", "calc_total");
+    createDraft("new:function:b", "other_schema_fn", "audit");
     renderPane();
     const header = screen.getByRole("button", { name: /^Functions/ });
     expect(header.textContent).toContain("1");
-    expect(screen.getByText("new_function")).toBeTruthy();
+    expect(screen.getByText("calc_total")).toBeTruthy();
+    // The schema filter applies to drafts too.
+    expect(screen.queryByText("other_schema_fn")).toBeNull();
+
+    fireEvent.click(screen.getByText("calc_total"));
+    expect(mocks.openObjectDraft).toHaveBeenCalledWith("new:function:a");
+  });
+
+  it("finds drafts by search", () => {
+    mocks.objects = [];
+    createDraft("new:function:a", "calc_total");
+    renderPane();
+    fireEvent.input(screen.getByLabelText("Search database objects"), {
+      target: { value: "nomatch" },
+    });
+    expect(screen.queryByText("calc_total")).toBeNull();
+    fireEvent.input(screen.getByLabelText("Search database objects"), {
+      target: { value: "calc" },
+    });
+    expect(screen.getByText("calc_total")).toBeTruthy();
+  });
+
+  it("tints an object with unsaved edits even when its tab is closed", () => {
+    const store = useObjectDraftStore.getState();
+    store.ensureEditDraft("profile-1", `obj:${fn.id}`, fn);
+    store.applyDefinition(
+      "profile-1",
+      `obj:${fn.id}`,
+      useObjectDraftStore.getState().drafts["profile-1"]![`obj:${fn.id}`]!
+        .generation,
+      "CREATE FUNCTION recalc()",
+      fn
+    );
+    renderPane();
+    const clean = screen.getByTitle("public.recalc").className;
+    store.setSql("profile-1", `obj:${fn.id}`, "CREATE FUNCTION recalc2()");
+    renderPane();
+    const dirty = screen.getAllByTitle("public.recalc")[1]!.className;
+    expect(dirty).not.toBe(clean);
+  });
+
+  it("New object starts a draft from a template", () => {
+    renderPane();
+    fireEvent.click(screen.getByTitle("New object"));
+    const opts = mocks.openDatabaseObjectsManager.mock.calls[0]?.[0];
+    expect(opts.createInit.kind).toBe("function");
+    expect(opts.createInit.form.schema).toBe("public");
+    expect(opts.createInit.sql).toContain("new_function");
+  });
+
+  it("warns that dropping discards unsaved edits", async () => {
+    const store = useObjectDraftStore.getState();
+    store.ensureEditDraft("profile-1", `obj:${fn.id}`, fn);
+    store.applyDefinition(
+      "profile-1",
+      `obj:${fn.id}`,
+      useObjectDraftStore.getState().drafts["profile-1"]![`obj:${fn.id}`]!
+        .generation,
+      "v1",
+      fn
+    );
+    store.setSql("profile-1", `obj:${fn.id}`, "v2");
+    mocks.confirmDialog.mockResolvedValue(false);
+    renderPane();
+    fireEvent.click(openDrop());
+    await waitFor(() => expect(mocks.confirmDialog).toHaveBeenCalled());
+    expect(mocks.confirmDialog.mock.calls[0]![0]).toContain(
+      "unsaved edits to it will be discarded"
+    );
+  });
+
+  it("removes the draft of a dropped object", async () => {
+    useObjectDraftStore
+      .getState()
+      .ensureEditDraft("profile-1", `obj:${fn.id}`, fn);
+    mocks.confirmDialog.mockResolvedValue(true);
+    mocks.runSqlQuery.mockResolvedValue({});
+    renderPane();
+    fireEvent.click(openDrop());
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalled());
+    expect(
+      useObjectDraftStore.getState().drafts["profile-1"]?.[`obj:${fn.id}`]
+    ).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import { operationCancel } from "src/lib/tauri/operation";
 import { tableKey } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
+import { useObjectDraftStore } from "src/stores/objectDrafts";
 import { useUnsavedChangesDialogStore } from "src/stores/unsavedChangesDialog";
 import { getConnectionTabCloseBridge } from "./connectionTabCloseBridge";
 import { clearConnectionTabChanges, connectionTabHasChanges } from "./tabDirty";
@@ -37,6 +38,7 @@ export async function forceCloseConnectionTab(tabId: string) {
   const newTabs = profileTabs.filter((tab) => tab.id !== tabId);
 
   removeTab(tabId);
+  useObjectDraftStore.getState().clearTab(tabId);
 
   if (activeProfileScreen === tabId) {
     setActiveProfileScreen(

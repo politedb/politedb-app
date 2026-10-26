@@ -1,152 +1,122 @@
-import type {
-  DatabaseEngine,
-  DatabaseObjectItem,
-  DatabaseObjectKind,
-  OpenWindow,
-} from "src/types";
+import type { DatabaseEngine } from "src/types";
 import {
-  buildCreateDatabaseObjectTemplate,
   buildSaveStatements,
-  defaultNewObjectName,
   getDatabaseObjectCapability,
 } from "src/lib/databaseObjects";
+import {
+  canExecute,
+  hasPendingWork,
+  objectDraftsForTab,
+  type ObjectDraft,
+} from "src/stores/objectDrafts";
 
-export type ObjectCreateDraftState = {
-  schema: string;
-  name: string;
-  tableName: string;
-};
-
-export type ObjectCreateDraft = {
-  draft: ObjectCreateDraftState;
-  kind: DatabaseObjectKind;
-  sql: string;
-};
-
-export type ObjectEditDraft = {
-  item: DatabaseObjectItem;
-  sql: string;
-  baselineSql: string;
-};
-
-/** Survive Object pane remounts when switching tabs (keyed by window id). */
-export const objectCreateDraftCache = new Map<string, ObjectCreateDraft>();
-export const objectEditDraftCache = new Map<string, ObjectEditDraft>();
-
-export function clearObjectEditorDraft(windowId: string) {
-  objectCreateDraftCache.delete(windowId);
-  objectEditDraftCache.delete(windowId);
-  pendingObjectEditorResets.delete(windowId);
-}
-
-/** Pane should restore editor SQL to baseline after discard. */
-const pendingObjectEditorResets = new Set<string>();
-
-export function markObjectEditorReset(windowId: string) {
-  pendingObjectEditorResets.add(windowId);
-}
-
-export function hasObjectEditorReset(windowId: string): boolean {
-  return pendingObjectEditorResets.has(windowId);
-}
-
-export function consumeObjectEditorReset(windowId: string): boolean {
-  if (!pendingObjectEditorResets.has(windowId)) return false;
-  pendingObjectEditorResets.delete(windowId);
-  return true;
-}
-
-export function revertObjectEditDraft(windowId: string): boolean {
-  const cached = objectEditDraftCache.get(windowId);
-  if (!cached) return false;
-  objectEditDraftCache.set(windowId, {
-    ...cached,
-    sql: cached.baselineSql,
-  });
-  markObjectEditorReset(windowId);
-  return true;
-}
-
+/**
+ * What saving a connection tab's object drafts would run, read from the
+ * draft store (closed windows included). Read-only: nothing is seeded here.
+ */
 export type PendingObjectSaveEntry = {
-  windowId: string;
+  key: string;
   mode: "create" | "edit";
   statements: string[];
-  create?: ObjectCreateDraft;
-  edit?: ObjectEditDraft;
+  /** The draft as submitted: completion compares against it. */
+  snapshot: ObjectDraft;
 };
 
+/** A draft with unsaved work that this save will not run, and why. */
+export type SkippedObjectDraft = {
+  key: string;
+  name: string;
+  reason: string;
+};
+
+function capabilityAllows(draft: ObjectDraft, engine: DatabaseEngine) {
+  if (draft.mode === "create") {
+    return getDatabaseObjectCapability(engine, draft.kind).canCreate;
+  }
+  return !!draft.item?.capability.canEdit;
+}
+
 export function collectPendingObjectSaveEntries(args: {
-  openWindows: OpenWindow[];
+  tabId: string;
   engine: DatabaseEngine;
-  defaultSchema?: string;
 }): PendingObjectSaveEntry[] {
   const result: PendingObjectSaveEntry[] = [];
-
-  for (const w of args.openWindows) {
-    if (w.type !== "db-object-manager") continue;
-
-    const objectId = (w.initialObjectId ?? "").trim();
-    if (!objectId) {
-      let cached = objectCreateDraftCache.get(w.id);
-      if (!cached?.sql.trim()) {
-        const kind = w.initialKind ?? "function";
-        const schema = (args.defaultSchema || "public").trim() || "public";
-        const name = w.title?.trim() || defaultNewObjectName(kind);
-        const draft = { schema, name, tableName: "" };
-        const sql = buildCreateDatabaseObjectTemplate({
-          engine: args.engine,
-          kind,
-          schema,
-          name,
-          tableName: "",
-        });
-        cached = { draft, kind, sql };
-        objectCreateDraftCache.set(w.id, cached);
-      }
-      if (!cached.sql.trim()) continue;
-      const capability = getDatabaseObjectCapability(args.engine, cached.kind);
-      if (!capability.canCreate) continue;
-      const statements = buildSaveStatements({
-        engine: args.engine,
-        item: null,
-        sql: cached.sql,
-      });
-      if (!statements.length) continue;
-      result.push({
-        windowId: w.id,
-        mode: "create",
-        statements,
-        create: cached,
-      });
-      continue;
-    }
-
-    if (!w.dirty) continue;
-    const cached = objectEditDraftCache.get(w.id);
-    if (!cached) continue;
-    if (!cached.item.capability.canEdit) continue;
-    if (cached.sql.trim() === cached.baselineSql.trim()) continue;
+  for (const draft of objectDraftsForTab(args.tabId)) {
+    if (!canExecute(draft) || !capabilityAllows(draft, args.engine)) continue;
     const statements = buildSaveStatements({
       engine: args.engine,
-      item: cached.item,
-      sql: cached.sql,
+      item: draft.mode === "edit" ? (draft.item ?? null) : null,
+      sql: draft.sql,
     });
     if (!statements.length) continue;
     result.push({
-      windowId: w.id,
-      mode: "edit",
+      key: draft.key,
+      mode: draft.mode,
       statements,
-      edit: cached,
+      snapshot: draft,
     });
   }
-
   return result;
 }
 
-export function collectPendingObjectSql(args: {
-  openWindows: OpenWindow[];
+/** Unsaved drafts that cannot run now (empty SQL, missing object, ...). */
+export function collectSkippedObjectDrafts(args: {
+  tabId: string;
   engine: DatabaseEngine;
-  defaultSchema?: string;
+}): SkippedObjectDraft[] {
+  const skipped: SkippedObjectDraft[] = [];
+  for (const draft of objectDraftsForTab(args.tabId)) {
+    if (!hasPendingWork(draft)) continue;
+    const name = draft.form.name || draft.item?.name || "object";
+    if (draft.saving) continue;
+    if (draft.missing) {
+      skipped.push({
+        key: draft.key,
+        name,
+        reason: "no longer exists in the database",
+      });
+    } else if (!draft.sql.trim()) {
+      skipped.push({ key: draft.key, name, reason: "its SQL is empty" });
+    } else if (!capabilityAllows(draft, args.engine)) {
+      skipped.push({
+        key: draft.key,
+        name,
+        reason: "this database cannot save it here",
+      });
+    }
+  }
+  return skipped;
+}
+
+/** What the save review says about object drafts beyond their SQL. */
+export type ObjectSaveNotice =
+  | { kind: "skipped"; key: string; name: string; reason: string }
+  | { kind: "conflict"; key: string; name: string };
+
+/**
+ * Unsaved drafts this save leaves as they are (and why), and drafts it
+ * runs although their definition changed in the database since loaded.
+ */
+export function collectObjectSaveNotices(args: {
+  tabId: string;
+  engine: DatabaseEngine;
+}): ObjectSaveNotice[] {
+  const conflicts: ObjectSaveNotice[] = collectPendingObjectSaveEntries(args)
+    .filter((entry) => entry.snapshot.conflict)
+    .map((entry) => ({
+      kind: "conflict",
+      key: entry.key,
+      name: entry.snapshot.form.name || entry.snapshot.item?.name || "object",
+    }));
+  const skipped: ObjectSaveNotice[] = collectSkippedObjectDrafts(args).map(
+    (s) => ({ kind: "skipped", ...s })
+  );
+  return [...conflicts, ...skipped];
+}
+
+export function collectPendingObjectSql(args: {
+  tabId: string;
+  engine: DatabaseEngine;
 }): string[] {
   return collectPendingObjectSaveEntries(args).flatMap(
     (entry) => entry.statements
@@ -173,34 +143,31 @@ export function emptyObjectChangeSummary(): ObjectChangeSummary {
   };
 }
 
-/** Classify by window mode (create vs edit), not by CREATE OR REPLACE text. */
+/** Classify by draft mode (create vs edit), not by CREATE OR REPLACE text. */
 export function summarizePendingObjectEntries(
   entries: PendingObjectSaveEntry[]
 ): ObjectChangeSummary {
   const summary = emptyObjectChangeSummary();
 
   for (const entry of entries) {
-    if (entry.mode === "create" && entry.create) {
-      if (entry.create.kind === "function") summary.insertFunctions += 1;
-      else if (entry.create.kind === "procedure") summary.insertProcedures += 1;
+    const kind = entry.snapshot.kind;
+    if (entry.mode === "create") {
+      if (kind === "function") summary.insertFunctions += 1;
+      else if (kind === "procedure") summary.insertProcedures += 1;
       else summary.insertTriggers += 1;
       continue;
     }
-    if (entry.mode === "edit" && entry.edit) {
-      const kind = entry.edit.item.kind;
-      if (kind === "function") summary.updateFunctions += 1;
-      else if (kind === "procedure") summary.updateProcedures += 1;
-      else summary.updateTriggers += 1;
-    }
+    if (kind === "function") summary.updateFunctions += 1;
+    else if (kind === "procedure") summary.updateProcedures += 1;
+    else summary.updateTriggers += 1;
   }
 
   return summary;
 }
 
 export function collectObjectChangeSummary(args: {
-  openWindows: OpenWindow[];
+  tabId: string;
   engine: DatabaseEngine;
-  defaultSchema?: string;
 }): ObjectChangeSummary {
   return summarizePendingObjectEntries(collectPendingObjectSaveEntries(args));
 }

@@ -1,4 +1,8 @@
 import { useCallback, useRef, useState } from "preact/hooks";
+import {
+  objectListLoadStarted,
+  objectListLoaded,
+} from "src/lib/metadataEvents";
 import type {
   AiColumnMetadata,
   DatabaseEngine,
@@ -193,6 +197,13 @@ export function useDatabaseMetadata() {
             : 0,
         stage: columnsOnly ? "columns" : "schemas",
       });
+
+      // Announced before any query runs, so listeners can tell which of
+      // their state predates this object list.
+      const objectLoadId = columnsOnly
+        ? null
+        : objectListLoadStarted({ metaKey, connectionId });
+      let fetchedObjects: DatabaseObjectItem[] | null = null;
 
       const p = (async (): Promise<DbMetadata> => {
         try {
@@ -601,6 +612,7 @@ export function useDatabaseMetadata() {
             rows: [...(routinesRes.rows ?? []), ...(triggersRes.rows ?? [])],
           });
           setCache(metaKey, { objects, progress: 20, stage: "tables" });
+          fetchedObjects = objects;
 
           const tables: TableItem[] = (tablesRes.rows ?? [])
             .map((r: any): TableItem => {
@@ -673,6 +685,16 @@ export function useDatabaseMetadata() {
             progress: 100,
             stage: "done",
           });
+
+          // A complete, successful load of the object list.
+          if (objectLoadId !== null && fetchedObjects) {
+            objectListLoaded({
+              loadId: objectLoadId,
+              metaKey,
+              connectionId,
+              objects: fetchedObjects,
+            });
+          }
 
           return cacheRef.current[metaKey]!;
         } catch (e: any) {
@@ -774,7 +796,66 @@ export function useDatabaseMetadata() {
     [clear, load]
   );
 
-  return { get, load, refresh, clear };
+  /**
+   * A refresh that says whether it worked. `ok` only when this refresh
+   * itself completed without error for that metaKey and connection: a load
+   * already in flight is awaited first and a new one started, so the result
+   * post-dates the caller's request; cached data is never reported as ok.
+   */
+  const refreshWithOutcome = useCallback(
+    async (args: {
+      metaKey: string;
+      engine?: DatabaseEngine;
+      connectionId: string;
+      currentDatabase?: string;
+    }): Promise<MetadataRefreshOutcome> => {
+      const { metaKey, connectionId } = args;
+      const pending = inflightRef.current[metaKey];
+      if (pending) {
+        try {
+          await pending;
+        } catch {
+          // a failed earlier load does not matter: a new one starts below
+        }
+      }
+      try {
+        const result = await refresh(args);
+        if (result.error || !result.loaded) {
+          return {
+            ok: false,
+            metaKey,
+            connectionId,
+            error: result.error || "The metadata refresh did not complete.",
+          };
+        }
+        return {
+          ok: true,
+          metaKey,
+          connectionId,
+          objects: result.objects ?? [],
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          metaKey,
+          connectionId,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    },
+    [refresh]
+  );
+
+  return { get, load, refresh, refreshWithOutcome, clear };
 }
+
+export type MetadataRefreshOutcome =
+  | {
+      ok: true;
+      metaKey: string;
+      connectionId: string;
+      objects: DatabaseObjectItem[];
+    }
+  | { ok: false; metaKey: string; connectionId: string; error: string };
 
 export type MetadataApi = ReturnType<typeof useDatabaseMetadata>;

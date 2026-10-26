@@ -53,6 +53,12 @@ type Props = {
   win: SqlEditorWindow;
   storageId?: string;
   controlledContent?: boolean;
+  /**
+   * false: the text is never written to the SQL draft files; every change
+   * reaches onCommitContent synchronously and the model is dropped with the
+   * editor (the parent's store owns the text). Default true.
+   */
+  persistDraft?: boolean;
 
   onCommitContent?: (windowId: string, next: string) => void;
 
@@ -195,6 +201,7 @@ export function SqlEditorPane(props: Props) {
     win,
     storageId,
     controlledContent = false,
+    persistDraft = true,
     onCommitContent,
     onRunSql,
     onExplainSql,
@@ -257,6 +264,16 @@ export function SqlEditorPane(props: Props) {
     () => monaco.Uri.parse(`inmemory://sql/${draftId}.sql`),
     [draftId]
   );
+
+  const persistDraftRef = useRef(persistDraft);
+  persistDraftRef.current = persistDraft;
+  const writeDraft = useCallback(async (id: string, sql: string) => {
+    if (persistDraftRef.current) await saveSqlDraft(id, sql);
+  }, []);
+  // Initial text for a new model; later changes arrive through the
+  // external content sync below, not by re-creating the editor.
+  const initialContentRef = useRef(win.content);
+  initialContentRef.current = win.content;
 
   const saveTimerRef = useRef<number | null>(null);
   const loadedDraftRef = useRef(false);
@@ -387,7 +404,7 @@ export function SqlEditorPane(props: Props) {
 
     savingRef.current = true;
     try {
-      await saveSqlDraft(draftId, full);
+      await writeDraft(draftId, full);
       callbacksRef.current.onCommitContent?.(win.id, full);
 
       const isCurrent = getFullSql() === full;
@@ -396,7 +413,7 @@ export function SqlEditorPane(props: Props) {
       savingRef.current = false;
     }
     return full;
-  }, [draftId, win.id]);
+  }, [draftId, win.id, writeDraft]);
 
   const scheduleBackgroundSave = useCallback(() => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
@@ -411,7 +428,7 @@ export function SqlEditorPane(props: Props) {
 
         savingRef.current = true;
         try {
-          await saveSqlDraft(draftId, next);
+          await writeDraft(draftId, next);
           callbacksRef.current.onCommitContent?.(win.id, next);
 
           const current = editorRef.current?.getModel()?.getValue() ?? "";
@@ -424,7 +441,7 @@ export function SqlEditorPane(props: Props) {
         }
       })();
     }, 700);
-  }, [draftId, win.id]);
+  }, [draftId, win.id, writeDraft]);
 
   const appendSqlToEditor = useCallback(
     async (sql: string) => {
@@ -457,7 +474,7 @@ export function SqlEditorPane(props: Props) {
       clearRunHighlight();
       savingRef.current = true;
       try {
-        await saveSqlDraft(draftId, merged);
+        await writeDraft(draftId, merged);
         callbacksRef.current.onCommitContent?.(win.id, merged);
       } catch (error) {
         dirtyRef.current = true;
@@ -466,7 +483,7 @@ export function SqlEditorPane(props: Props) {
       }
       editor.focus();
     },
-    [draftId, win.id]
+    [draftId, win.id, writeDraft]
   );
 
   const insertSqlAtCursor = useCallback(
@@ -508,7 +525,7 @@ export function SqlEditorPane(props: Props) {
       const merged = model.getValue();
       savingRef.current = true;
       try {
-        await saveSqlDraft(draftId, merged);
+        await writeDraft(draftId, merged);
         callbacksRef.current.onCommitContent?.(win.id, merged);
         dirtyRef.current = false;
       } catch {
@@ -518,7 +535,7 @@ export function SqlEditorPane(props: Props) {
       }
       editor.focus();
     },
-    [draftId, win.id]
+    [draftId, win.id, writeDraft]
   );
 
   // Apply transformation to selection (if any) or whole doc; preserve selection.
@@ -815,8 +832,17 @@ export function SqlEditorPane(props: Props) {
 
       const changeSub = editor.onDidChangeModelContent(() => {
         if (applyingExternalCounterRef.current > 0) return;
-        dirtyRef.current = true;
         clearRunHighlight();
+        if (!persistDraftRef.current) {
+          // The parent's store is the only copy: hand over every change now.
+          dirtyRef.current = false;
+          callbacksRef.current.onCommitContent?.(
+            win.id,
+            editor.getModel()?.getValue() ?? ""
+          );
+          return;
+        }
+        dirtyRef.current = true;
         if (!savingRef.current) scheduleBackgroundSave();
       });
 
@@ -863,7 +889,10 @@ export function SqlEditorPane(props: Props) {
         completionDisposable.dispose();
         clearRunHighlight();
         unregisterLiveEditor();
+        const ownModel = !persistDraftRef.current ? editor.getModel() : null;
         editor.dispose();
+        // Not kept for a later editor: its parent's store holds the text.
+        ownModel?.dispose();
         editorRef.current = null;
         lastCursorPositionRef.current = null;
       };
@@ -890,14 +919,17 @@ export function SqlEditorPane(props: Props) {
         loadedDraftRef.current = true;
 
         const initial = normalizeEol(
-          ((controlledContent ? win.content : (draft ?? win.content)) ?? "") ||
+          ((controlledContent
+            ? initialContentRef.current
+            : (draft ?? initialContentRef.current)) ??
+            "") ||
             ""
         );
         model = monaco.editor.createModel(initial, "sql", modelUri);
         createEditor(model);
       } catch {
         if (disposed) return;
-        const initial = normalizeEol((win.content ?? "") || "");
+        const initial = normalizeEol((initialContentRef.current ?? "") || "");
         model = monaco.editor.createModel(initial, "sql", modelUri);
         createEditor(model);
       }
@@ -916,7 +948,6 @@ export function SqlEditorPane(props: Props) {
     modelUri,
     onRun,
     scheduleBackgroundSave,
-    win.content,
     win.id,
   ]);
 

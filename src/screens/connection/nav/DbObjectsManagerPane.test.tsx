@@ -5,20 +5,27 @@ import type { DatabaseObjectItem } from "src/types";
 import type { ConnectionRuntime } from "../workspace/ConnectionRuntimeContext";
 import { ConnectionRuntimeProvider } from "../workspace/ConnectionRuntimeContext";
 import { DbObjectsManagerPane } from "./DbObjectsManagerPane";
+import { useObjectDraftStore } from "src/stores/objectDrafts";
+import { collectPendingObjectSql } from "src/lib/objectEditorDraftCache";
 
+// The editor stand-in keeps its latest props, so tests can fire editor
+// changes through the pane's real callback without a re-render.
+const editor = vi.hoisted(() => ({
+  props: null as null | {
+    onCommitContent?: (id: string, next: string) => void;
+    persistDraft?: boolean;
+    storageId?: string;
+  },
+}));
 vi.mock("src/components/common/RetryableLazy", () => ({
-  createRetryableLazy: () => () => <div data-testid="sql-editor" />,
+  createRetryableLazy: () => (props: NonNullable<typeof editor.props>) => {
+    editor.props = props;
+    return <div data-testid="sql-editor" />;
+  },
 }));
 
-vi.mock("./hooks/useLoadDbObjectDefinition", () => ({
-  useLoadDbObjectDefinition: () => ({
-    sql: "CREATE FUNCTION new_function() RETURNS void AS $$ BEGIN END; $$ LANGUAGE plpgsql;",
-    setSql: vi.fn(),
-    baselineSql: "",
-    setBaselineSql: vi.fn(),
-    loading: false,
-    loadError: null,
-  }),
+vi.mock("../hooks/useLoadDbObjectDefinition", () => ({
+  useLoadDbObjectDefinition: () => ({ loading: false, loadError: null }),
 }));
 
 class IntersectionObserverMock {
@@ -52,16 +59,17 @@ function functionItems(count: number): DatabaseObjectItem[] {
 
 describe("DbObjectsManagerPane", () => {
   beforeEach(() => {
+    useObjectDraftStore.getState().clearAll();
     vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
     vi.stubGlobal("ResizeObserver", ResizeObserverMock);
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("opens create mode without Save/Refresh toolbar and registers object save", () => {
+  function runtimeWith(objects: DatabaseObjectItem[]) {
     const get = vi.fn((_args: Parameters<MetadataApi["get"]>[0]) => ({
       schemas: ["public"],
-      objects: functionItems(500),
+      objects,
       tables: [],
       columnsByTable: {},
       columnDetailsByTable: {},
@@ -75,7 +83,6 @@ describe("DbObjectsManagerPane", () => {
       engine: "postgres" as const,
     }));
     const metadata = { get } as unknown as MetadataApi;
-    const objectSaveRef: ConnectionRuntime["objectSaveRef"] = { current: null };
     const runtime = {
       profileId: "profile-1",
       engine: "postgres",
@@ -92,15 +99,23 @@ describe("DbObjectsManagerPane", () => {
       runSqlWithHistory: vi.fn(),
       refreshSchemaAndTables: vi.fn(),
       newTableSaveRef: { current: null },
-      objectSaveRef,
       pendingTableAction: null,
       setPendingTableAction: vi.fn(),
     } as unknown as ConnectionRuntime;
+    return { runtime, get };
+  }
 
-    render(
+  it("seeds a create draft in the store, kept after the window closes", () => {
+    const { runtime, get } = runtimeWith(functionItems(500));
+    const { unmount } = render(
       <ConnectionRuntimeProvider value={runtime}>
         <DbObjectsManagerPane
-          win={{ id: "objects-1", type: "db-object-manager" }}
+          win={{
+            id: "db-object-manager:new:function:abc",
+            type: "db-object-manager",
+            initialKind: "function",
+            initialObjectId: "",
+          }}
         />
       </ConnectionRuntimeProvider>
     );
@@ -109,8 +124,110 @@ describe("DbObjectsManagerPane", () => {
     expect(screen.getByText("Regenerate")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-    expect(objectSaveRef.current).not.toBeNull();
-    expect(objectSaveRef.current?.getPendingSql().length).toBeGreaterThan(0);
+    const draft =
+      useObjectDraftStore.getState().drafts["profile-1"]?.["new:function:abc"];
+    expect(draft?.mode).toBe("create");
+    expect(draft?.form.name).toBe("new_function");
+    expect(
+      collectPendingObjectSql({ tabId: "profile-1", engine: "postgres" }).length
+    ).toBeGreaterThan(0);
     expect(get.mock.calls[0]?.[0]).not.toHaveProperty("includeColumns");
+
+    unmount();
+    expect(
+      useObjectDraftStore.getState().drafts["profile-1"]?.["new:function:abc"]
+    ).toBeTruthy();
+  });
+
+  it("starts a clean edit draft for an existing object", () => {
+    const items = functionItems(3);
+    const { runtime } = runtimeWith(items);
+    render(
+      <ConnectionRuntimeProvider value={runtime}>
+        <DbObjectsManagerPane
+          win={{
+            id: `db-object-manager:obj:${items[1]!.id}`,
+            type: "db-object-manager",
+            initialKind: "function",
+            initialObjectId: items[1]!.id,
+          }}
+        />
+      </ConnectionRuntimeProvider>
+    );
+
+    const draft =
+      useObjectDraftStore.getState().drafts["profile-1"]?.[
+        `obj:${items[1]!.id}`
+      ];
+    expect(draft?.mode).toBe("edit");
+    expect(draft?.item?.name).toBe("function_1");
+    expect(
+      collectPendingObjectSql({ tabId: "profile-1", engine: "postgres" })
+    ).toEqual([]);
+  });
+
+  it("stores every editor change, including a return to the rendered text", () => {
+    const items = functionItems(1);
+    const key = `obj:${items[0]!.id}`;
+    const store = useObjectDraftStore.getState();
+    store.ensureEditDraft("profile-1", key, items[0]!);
+    store.applyDefinition(
+      "profile-1",
+      key,
+      useObjectDraftStore.getState().drafts["profile-1"]![key]!.generation,
+      "v1",
+      items[0]!
+    );
+    const { runtime } = runtimeWith(items);
+    render(
+      <ConnectionRuntimeProvider value={runtime}>
+        <DbObjectsManagerPane
+          win={{
+            id: `db-object-manager:${key}`,
+            type: "db-object-manager",
+            initialKind: "function",
+            initialObjectId: items[0]!.id,
+          }}
+        />
+      </ConnectionRuntimeProvider>
+    );
+    expect(editor.props?.persistDraft).toBe(false);
+    expect(editor.props?.storageId).toBe(`db-object:profile-1:${key}`);
+
+    // Edit, then undo back to the rendered text, before any re-render.
+    const commit = editor.props!.onCommitContent!;
+    commit("w", "v2");
+    commit("w", "v1");
+    const draft = useObjectDraftStore.getState().drafts["profile-1"]![key]!;
+    expect(draft.sql).toBe("v1");
+    expect(
+      collectPendingObjectSql({ tabId: "profile-1", engine: "postgres" })
+    ).toEqual([]);
+  });
+
+  it("does the same for a new object", () => {
+    const { runtime } = runtimeWith([]);
+    render(
+      <ConnectionRuntimeProvider value={runtime}>
+        <DbObjectsManagerPane
+          win={{
+            id: "db-object-manager:new:function:abc",
+            type: "db-object-manager",
+            initialKind: "function",
+            initialObjectId: "",
+          }}
+        />
+      </ConnectionRuntimeProvider>
+    );
+    const rendered =
+      useObjectDraftStore.getState().drafts["profile-1"]!["new:function:abc"]!
+        .sql;
+    const commit = editor.props!.onCommitContent!;
+    commit("w", "CREATE FUNCTION other()");
+    commit("w", rendered);
+    expect(
+      useObjectDraftStore.getState().drafts["profile-1"]!["new:function:abc"]!
+        .sql
+    ).toBe(rendered);
   });
 });

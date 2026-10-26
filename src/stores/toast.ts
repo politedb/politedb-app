@@ -2,21 +2,31 @@ import { create } from "zustand";
 
 export type ToastTone = "success" | "error" | "info";
 
+/** A button on the toast; the toast stays until its action settles. */
+export type ToastAction = {
+  label: string;
+  onClick: () => void | Promise<void>;
+};
+
 export type ToastItem = {
   id: string;
   message: string;
   tone: ToastTone;
+  action?: ToastAction;
 };
 
 type ShowToastOptions = {
   tone?: ToastTone;
   durationMs?: number;
+  action?: ToastAction;
 };
 
 type ToastState = {
   toasts: ToastItem[];
   showToast: (message: string, opts?: ShowToastOptions) => string;
   dismissToast: (id: string) => void;
+  /** Stop a toast's timer (its action is running). */
+  holdToast: (id: string) => void;
 };
 
 const DEFAULT_DURATION_MS = 3_500;
@@ -38,7 +48,12 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const durationMs = opts?.durationMs ?? DEFAULT_DURATION_MS;
 
     set((state) => ({
-      toasts: [...state.toasts, { id, message, tone }],
+      toasts: [
+        ...state.toasts,
+        opts?.action
+          ? { id, message, tone, action: opts.action }
+          : { id, message, tone },
+      ],
     }));
 
     if (durationMs > 0 && typeof window !== "undefined") {
@@ -51,6 +66,7 @@ export const useToastStore = create<ToastState>((set, get) => ({
 
     return id;
   },
+  holdToast: (id) => clearTimer(id),
   dismissToast: (id) => {
     clearTimer(id);
     set((state) => ({
