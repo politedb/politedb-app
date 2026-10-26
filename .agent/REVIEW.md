@@ -2,9 +2,9 @@
 
 ## Status
 
-VERIFIED WITH LIMITATIONS
+CHANGES REQUIRED
 
-Latest assessment: **Re-review (round 7)** below, 2026-10-26. Earlier rounds retained as history.
+Latest assessment: **Re-review (round 8)** below, 2026-10-26. Earlier rounds retained as history.
 
 Codex, 2026-10-26. Reviewed every commit in `main..HEAD` on `feat/import-export-polish`: `3b24e35`, `b5cbc54`, `d96c1df`. Requirements are the three human-approved batches in the review request; no plan file required. Read AGENTS.md, RTK.md and .agent/WORKFLOW.md. `.claude/launch.json` excluded. Application code unchanged.
 
@@ -216,3 +216,33 @@ No new P0–P3 finding established. Both round-6 findings are resolved in the re
 - `git diff --check`: **exit 0**, including after report update.
 - No live database writes, native WebView/browser inspection, screen-reader run, native picker/save-dialog integration or clipboard-rejection exercise. Real browser focus transitions, visual scrolling/contrast, actual engine metadata, partial-write/commit transport failures and full cross-screen lifecycle integration remain unverified. Source and jsdom evidence support the fixes; these limitations prevent an unrestricted VERIFIED label.
 - No application code edits or temporary application probes, staging, commit, push or merge. Only this report was edited; earlier rounds retained. No secrets printed. No library documentation lookup needed for this business-logic/code-review task.
+
+
+## Re-review (round 8)
+
+Codex, 2026-10-26. **CHANGES REQUIRED.** Reviewed `299f3f0..9c2e682175f52bb548692715c74cff70ee783c94` on `feat/import-export-polish`: `58fafee`, `3503ab2`, `7e7212c`, `c3d9fdb`, `9c2e682`. Inspected all 15 changed files and supporting import/export, transaction, lock and confirmation paths. Application source and tests unchanged; existing untracked `.claude/launch.json` untouched.
+
+### Finding
+
+1. **P2 — Preserve PostgreSQL DETAIL/HINT through the CSV import error formatter.** `src-tauri/src/engines/postgres/operation.rs:505`; consumer: `src/hooks/useImportTableData.ts:244-247`. The new helper returns multiline database error text, but `importExecutionErrorMessage` captures its reason using `(.*)` without dot-all. Everything after the first newline is discarded before the hook exposes the error to the dialog or detached outcome toast. For example, `SQL_TX_STATEMENT_2_FAILED: ERROR: duplicate key value violates unique constraint "users_email_key"\nDETAIL: Key (email)=(duplicate@example.test) already exists.` becomes only `Import failed at data row 2: ERROR: duplicate key value violates unique constraint "users_email_key"`. The offending value and remediation hints are lost in exactly the server-side failures that preview validation cannot diagnose. This is an integration omission in the new PostgreSQL error-text feature; the consumer regex predates this range. **Fix:** preserve the entire suffix after the statement prefix, retaining the row number and multiline detail/hint. **Regression test:** reject `operationImportCsvTransaction` with a multiline PostgreSQL statement error; assert both hook error and returned failed outcome retain row number, DETAIL and HINT, then assert the failed dialog displays them. Retain single-line and non-statement error behavior. Evidence: installed tokio-postgres 0.7.18 `DbError::Display` explicitly appends DETAIL/HINT on separate lines; a deterministic probe of the exact consumer regex reproduces truncation. No database required for reproduction.
+
+### Reviewed behavior
+
+- **CSV export:** separator is added only to nonempty subsequent CSV chunks, using the chosen line break; the first chunk/header and empty-export trailer retain their behavior. Streaming caller skips empty row batches and advances first-chunk state only after enqueue. JSON/SQL serialization, masking, file ownership and cancellation are unchanged. Added tests cover three appended chunks and CRLF. Headerless, embedded-newline and empty-chunk combinations lack new explicit serializer tests.
+- **Date/time and validation messages:** SQL-style fractional seconds, timezone forms, time-only text and infinity now pass the preview gate; text reaches the database unchanged. The permissive regex deliberately leaves calendar/range and engine-specific acceptance to the server. Existing required/generated-column, mapping, null and parser behavior is unchanged. Failing preview values render as escaped text with a bounded visible example; no HTML injection or new logging found.
+- **PostgreSQL transactions:** statement failure still attempts rollback; commit remains awaited. Statement numbering and error prefixes are retained. Database severity/message now reaches the UI instead of opaque `db error`; multiline loss is finding R8-1. No SQL caret annotation, logging or telemetry was added. Actual PostgreSQL rejection/rollback/commit behavior was not exercised against a server.
+- **Sidebar SQL dump:** closed/clean targets take the new host; open/dirty targets retain table selection, pending action and existing unsaved-row confirmation. The host consumes the request once, drops concurrent requests and captures the originating screen/table for cache invalidation. Shared dump code retains file cancellation, engine mismatch rejection, statement splitting and destructive execution confirmation. New `canRun` is checked after confirmation before execution and reads current originating-tab lock state. The existing table-tab caller does not pass `canRun`; its pre-picker lock guard remains unchanged. Dump imports still run statements individually with existing ignore/error behavior; this change does not make dumps transactional or restrict their SQL to the clicked table.
+- **Import views and CanvasTable:** running/success/failure views preserve close blocking while running; Back restores settings without the old execution error; committed-import reload failures remain with the imported count. Failure wording retains partial-write uncertainty. Existing CanvasTable callers keep the prior default bottom space; only import preview opts into 10px. jsdom tests cannot establish actual scrollbar/viewport geometry or visual accessibility.
+- **Privacy:** no new log/analytics calls in changed paths. Database error details and CSV examples may contain customer values and are displayed locally. The shared dump importer already included a bounded SQL excerpt in its native error dialog before this range; that is existing local presentation, not new logging. No new secrets, raw SQL, data or paths were added to telemetry by this diff.
+
+### Verification and limitations
+
+- `npm run build`: **exit 0**. Non-failing warnings include browser externalization, ineffective dynamic imports and bundle size. Log: `/tmp/review8-build.log`.
+- Focused Vitest: **exit 0; 12 files / 80 tests passed**. Scope: export pipeline, import helpers/dialog, standalone import/export hosts. Log: `/tmp/review8-vitest.log`. The initial command also named nonexistent `useDatabaseBackup.test.ts`; the actual `useDatabaseBackup.free.test.ts` ran in the adjacent batch below.
+- Adjacent Vitest: **exit 0; 8 files / 52 tests passed**. Scope: import execution hook, CSV parser/parity, import preview, CanvasTable sizing/IME/keyboard, backup/restore/import free-access gates. Log: `/tmp/review8-adjacent.log`. Combined: **20 files / 132 tests passed**; no unhandled-error report in either log.
+- From `src-tauri`, `cargo test engines::postgres::operation::tests`: **exit 0; 6 tests passed**. Log: `/tmp/review8-pg.log`. Existing tests cover annotation and cancellation helpers, not the new `pg_error_text` or its frontend integration.
+- From `src-tauri`, `cargo test csv_import`: **exit 0; 5 tests passed**. Log: `/tmp/review8-csv-rust.log`.
+- Full `cargo test`: **exit 101; 428 passed / 47 failed / 20 ignored** in the binary target. Failures are in AI/license local HTTP fixtures: loopback bind denied with `Operation not permitted`, plus native-server fixture unwrap/mandatory-bind failures. These are sandbox verification limits outside the touched paths; full Rust suite is not green. Log: `/tmp/review8-cargo.log`. No attempt to bypass sandbox restrictions.
+- New standalone dump tests mock the entire backup hook: they establish one-shot consumption, origin callback and live lock predicate, but do not exercise picker/confirmation/canRun ordering or zero SQL calls when blocked. Backup free-access tests cancel the picker. Cancellation, engine mismatch, confirmation rejection, connection/tab replacement while pending and actual SQL execution remain integration coverage gaps.
+- No live database writes, native picker/WebView inspection, real scrollbar/contrast/focus checks or full frontend-suite run. Source inspection and focused tests do not establish those behaviors end to end. No independent Claude security pass performed; workflow step 8 remains a separate handoff for destructive database scope.
+- Only this report edited. No source fixes, staging, commits, push or merge. No library-documentation lookup needed for this business-logic/code-review task.
