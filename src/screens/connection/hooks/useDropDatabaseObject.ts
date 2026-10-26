@@ -8,6 +8,8 @@ import { confirmDialog } from "src/lib/system-dialog";
 import { runSqlQuery } from "src/lib/tauri/query";
 import { useScreenStore } from "src/stores/screen";
 import { showToast } from "src/stores/toast";
+import { hasPendingWork, useObjectDraftStore } from "src/stores/objectDrafts";
+import { editDraftKey, windowIdForDraftKey } from "src/lib/objectDraftKey";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 
 /**
@@ -68,8 +70,16 @@ export function useDropDatabaseObject(profileId: string) {
     setDropping(key, true);
     const kind = objectKindSingular(item.kind);
     try {
+      const pending =
+        useObjectDraftStore.getState().drafts[profileId]?.[
+          editDraftKey(item.id)
+        ];
+      const loses =
+        pending && hasPendingWork(pending)
+          ? " Your unsaved edits to it will be discarded."
+          : "";
       const ok = await confirmDialog(
-        `Permanently drop the ${kind} "${item.schema}.${item.name}"? This cannot be undone.`,
+        `Permanently drop the ${kind} "${item.schema}.${item.name}"? This cannot be undone.${loses}`,
         {
           title: `Drop ${kind}`,
           kind: "warning",
@@ -81,6 +91,16 @@ export function useDropDatabaseObject(profileId: string) {
       if (!ok || isProfileLockedNow(profileId)) return;
       const sql = buildDropDatabaseObjectSql({ engine: rt.engine, item });
       await runSqlQuery(connectionId, sql);
+      // The object is gone: so are its editor and draft.
+      const draftKey = editDraftKey(item.id);
+      useObjectDraftStore.getState().remove(profileId, draftKey);
+      const windowId = windowIdForDraftKey(draftKey);
+      const screen = useScreenStore.getState();
+      if (
+        (screen.openWindows[profileId] ?? []).some((w) => w.id === windowId)
+      ) {
+        screen.removeWindows(profileId, [windowId]);
+      }
       await rt.refreshSchemaAndTables();
       showToast(`Dropped ${kind} “${item.name}”.`, { tone: "success" });
     } catch (err) {

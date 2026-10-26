@@ -10,6 +10,17 @@ import { objectKindLabel, objectKindSingular } from "src/lib/databaseObjects";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
 import { useConnectionWindows } from "../hooks/useConnectionWindows";
 import { useDropDatabaseObject } from "../hooks/useDropDatabaseObject";
+import { newObjectDraftInit } from "../lib/objectWindows";
+import {
+  draftKeyForWindow,
+  editDraftKey,
+  windowIdForDraftKey,
+} from "src/lib/objectDraftKey";
+import {
+  hasPendingWork,
+  useObjectDraftStore,
+  type ObjectDraft,
+} from "src/stores/objectDrafts";
 import {
   tableSidebarButtonClass,
   tableSidebarIconClass,
@@ -22,10 +33,11 @@ import { SidebarSectionHeader } from "./SidebarSectionHeader";
 
 const OBJECT_KINDS: DatabaseObjectKind[] = ["function", "procedure", "trigger"];
 const EMPTY_WINDOWS: import("src/types").OpenWindow[] = [];
+const EMPTY_DRAFTS: Record<string, ObjectDraft> = {};
 
-/** A new object's sidebar name: its title, else new_<kind>. */
-function draftDisplayName(draft: { title?: string; initialKind?: string }) {
-  return draft.title?.trim() || `new_${draft.initialKind ?? "function"}`;
+/** A draft's sidebar name: its name, else new_<kind>. */
+function draftDisplayName(draft: ObjectDraft) {
+  return draft.form.name.trim() || draft.item?.name || `new_${draft.kind}`;
 }
 
 type Props = {
@@ -41,7 +53,7 @@ export function LeftNavObjectsPane({
   onSchemaChange,
 }: Props) {
   const rt = useConnectionRuntimeCtx();
-  const { openDatabaseObjectsManager, openDatabaseCatalog, selectWindow } =
+  const { openDatabaseObjectsManager, openDatabaseCatalog, openObjectDraft } =
     useConnectionWindows(profileId);
   const openWindows = useScreenStore(
     (s) => s.openWindows[profileId] ?? EMPTY_WINDOWS
@@ -50,12 +62,18 @@ export function LeftNavObjectsPane({
     (s) => s.activeWindowId[profileId] ?? null
   );
 
-  const createDrafts = useMemo(() => {
-    return openWindows.filter(
-      (w): w is Extract<typeof w, { type: "db-object-manager" }> =>
-        w.type === "db-object-manager" && !(w.initialObjectId ?? "").trim()
-    );
-  }, [openWindows]);
+  // Every draft of the tab, open or closed (closing a window keeps it).
+  const drafts = useObjectDraftStore(
+    (s) => s.drafts[profileId] ?? EMPTY_DRAFTS
+  );
+  // New objects, and edits whose object is gone: both listed by draft.
+  const listedDrafts = useMemo(
+    () =>
+      Object.values(drafts).filter(
+        (d) => d.mode === "create" || (d.missing && hasPendingWork(d))
+      ),
+    [drafts]
+  );
 
   const activeObjectWindow = useMemo(() => {
     const w = openWindows.find((win) => win.id === activeWindowId);
@@ -126,16 +144,16 @@ export function LeftNavObjectsPane({
     objectsByKind.procedure.length +
     objectsByKind.trigger.length;
 
-  const createDraftKindsKey = createDrafts
-    .map((d) => `${d.id}:${d.initialKind ?? "function"}`)
-    .join("|");
+  const createDraftKindsKey = listedDrafts
+    .map((d) => `${d.key}|${d.kind}`)
+    .join(",");
 
   // When creating, land drafts in their matching sections (like new tables).
   useEffect(() => {
     if (!createDraftKindsKey) return;
     const kinds = createDraftKindsKey
-      .split("|")
-      .map((part) => part.split(":")[1] as DatabaseObjectKind);
+      .split(",")
+      .map((part) => part.split("|")[1] as DatabaseObjectKind);
     setExpanded((prev) => {
       let next = prev;
       for (const kind of kinds) {
@@ -165,7 +183,17 @@ export function LeftNavObjectsPane({
   };
 
   const openCreate = () => {
-    openDatabaseObjectsManager({ kind: "function" });
+    openDatabaseObjectsManager({
+      createInit: newObjectDraftInit({
+        tabId: profileId,
+        engine: rt.engine,
+        kind: "function",
+        schema:
+          schemaFilter || rt.activeSchema || availableSchemas[0] || "public",
+        tables: meta.tables ?? [],
+        existingNames: (meta.objects ?? []).map((item) => item.name),
+      }),
+    });
   };
 
   const openObject = (item: DatabaseObjectItem) => {
@@ -211,22 +239,35 @@ export function LeftNavObjectsPane({
       ]
     : [];
 
-  // Drafts of new objects, shown (and counted) in their kind's section.
+  // Drafts listed by themselves, shown (and counted) in their kind's
+  // section under the same search and schema filter as objects.
   const draftsByKind = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const grouped: Record<DatabaseObjectKind, typeof createDrafts> = {
+    const grouped: Record<DatabaseObjectKind, ObjectDraft[]> = {
       function: [],
       procedure: [],
       trigger: [],
     };
-    for (const draft of createDrafts) {
-      const kind = draft.initialKind ?? "function";
-      if (!q || draftDisplayName(draft).toLowerCase().includes(q)) {
-        grouped[kind].push(draft);
+    for (const draft of listedDrafts) {
+      const schema = draft.form.schema;
+      if (schemaFilter && schema && schema !== schemaFilter) continue;
+      const name = draftDisplayName(draft).toLowerCase();
+      if (
+        !q ||
+        name.includes(q) ||
+        schema.toLowerCase().includes(q) ||
+        `${schema}.${name}`.toLowerCase().includes(q)
+      ) {
+        grouped[draft.kind].push(draft);
       }
     }
     return grouped;
-  }, [createDrafts, query]);
+  }, [listedDrafts, query, schemaFilter]);
+
+  const totalDraftCount =
+    draftsByKind.function.length +
+    draftsByKind.procedure.length +
+    draftsByKind.trigger.length;
 
   return (
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -248,7 +289,7 @@ export function LeftNavObjectsPane({
               Connect to a profile to browse objects.
             </div>
           </div>
-        ) : totalCount === 0 && query.trim() ? (
+        ) : totalCount + totalDraftCount === 0 && query.trim() ? (
           <div class="rounded-xl border border-dashed border-neutral-200 bg-white/80 px-3 py-4 text-center shadow-sm">
             <div class="text-sm font-medium text-neutral-700">
               No matching objects
@@ -284,15 +325,21 @@ export function LeftNavObjectsPane({
                           <div class="space-y-1 pl-3">
                             {draftsForKind.map((draft) => {
                               const draftName = draftDisplayName(draft);
-                              const isActive = activeWindowId === draft.id;
+                              const isActive =
+                                activeWindowId ===
+                                windowIdForDraftKey(draft.key);
                               return (
                                 <Button
-                                  key={draft.id}
+                                  key={draft.key}
                                   data-density-item
                                   data-sidebar-item
                                   variant="ghost"
-                                  title={draftName}
-                                  onClick={() => selectWindow(draft.id)}
+                                  title={
+                                    draft.mode === "create"
+                                      ? draftName
+                                      : `${draftName} (no longer in the database)`
+                                  }
+                                  onClick={() => openObjectDraft(draft.key)}
                                   className={cn(
                                     tableSidebarButtonClass({
                                       isActive,
@@ -329,12 +376,11 @@ export function LeftNavObjectsPane({
                             {items.map((item) => {
                               const isActive =
                                 !!activeObjectWindow &&
-                                !!(
-                                  activeObjectWindow.initialObjectId ?? ""
-                                ).trim() &&
-                                activeObjectWindow.initialObjectId === item.id;
+                                draftKeyForWindow(activeObjectWindow) ===
+                                  editDraftKey(item.id);
+                              const itemDraft = drafts[editDraftKey(item.id)];
                               const hasChanges =
-                                isActive && !!activeObjectWindow?.dirty;
+                                !!itemDraft && hasPendingWork(itemDraft);
                               const useDefaultActive = isActive && !hasChanges;
                               return (
                                 <Button

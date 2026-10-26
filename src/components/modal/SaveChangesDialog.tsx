@@ -22,7 +22,10 @@ import { buildPatchDiffs } from "src/lib/patches/patchDiff";
 import { sqlForDisplay } from "src/lib/sql/sqlDialect";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { cn } from "src/utils/cn";
-import type { ObjectChangeSummary } from "src/lib/objectEditorDraftCache";
+import type {
+  ObjectChangeSummary,
+  ObjectSaveNotice,
+} from "src/lib/objectEditorDraftCache";
 import { emptyObjectChangeSummary } from "src/lib/objectEditorDraftCache";
 
 type ChangeSummary = {
@@ -194,6 +197,8 @@ interface Props {
   newTableSql?: string[];
   objectSql?: string[];
   objectChangeSummary?: ObjectChangeSummary;
+  /** Object drafts this save skips (and why) or runs over a newer definition. */
+  objectNotices?: ObjectSaveNotice[];
   activeScreen?: string;
   getRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
   getOriginalRowAt?: (key: string, rowIndex: number) => unknown[] | undefined;
@@ -209,6 +214,7 @@ export function SaveChangesDialog({
   newTableSql = [],
   objectSql = [],
   objectChangeSummary,
+  objectNotices = [],
   activeScreen,
   getRowAt,
   getOriginalRowAt,
@@ -232,6 +238,14 @@ export function SaveChangesDialog({
     const patchSql = summary.sqlStatements;
     return [...(newTableSql || []), ...(objectSql || []), ...patchSql];
   }, [summary.sqlStatements, newTableSql, objectSql]);
+
+  // Only notices (e.g. an empty new function): nothing would run.
+  const onlyNotices =
+    allSqlStatements.length === 0 &&
+    Object.keys(patchMap ?? {}).length === 0 &&
+    objectNotices.length > 0;
+  const skippedNotices = objectNotices.filter((n) => n.kind === "skipped");
+  const conflictNotices = objectNotices.filter((n) => n.kind === "conflict");
 
   const displaySqlStatements = useMemo(
     () => allSqlStatements.map((sql) => sqlForDisplay(sql, engine)),
@@ -327,7 +341,8 @@ export function SaveChangesDialog({
     summary.structureChanges > 0 ||
     summary.constraintChanges > 0 ||
     newTableSql?.length > 0 ||
-    objectSql?.length > 0;
+    objectSql?.length > 0 ||
+    objectNotices.length > 0;
 
   const onCopyStatement = useCallback(async (sql: string, index: number) => {
     setCopiedIndex(index);
@@ -458,6 +473,42 @@ export function SaveChangesDialog({
             </div>
           )}
 
+          {conflictNotices.length > 0 ? (
+            <div
+              role="alert"
+              class="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+            >
+              <div class="font-medium">
+                Changed in the database since you opened it:
+              </div>
+              <ul class="mt-1 list-disc pl-5">
+                {conflictNotices.map((n) => (
+                  <li key={n.key}>
+                    {n.name} — saving replaces that newer definition.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {skippedNotices.length > 0 ? (
+            <div
+              role="status"
+              class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+            >
+              <div class="font-medium">Not saved, kept as unsaved work:</div>
+              <ul class="mt-1 list-disc pl-5">
+                {skippedNotices.map((n) =>
+                  n.kind === "skipped" ? (
+                    <li key={n.key}>
+                      {n.name} — {n.reason}.
+                    </li>
+                  ) : null
+                )}
+              </ul>
+            </div>
+          ) : null}
+
           {/* SQL Statements Section */}
           <div class="mb-1 w-full rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
@@ -478,6 +529,8 @@ export function SaveChangesDialog({
                 >
                   These changes can't be saved: {summary.sqlError}
                 </div>
+              ) : onlyNotices ? (
+                <div class="text-sm text-neutral-600">Nothing to run yet.</div>
               ) : allSqlStatements.length === 0 ? (
                 <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                   {isMongo
@@ -536,7 +589,7 @@ export function SaveChangesDialog({
         <Button
           variant="default"
           onClick={onConfirm}
-          disabled={!!summary.sqlError}
+          disabled={!!summary.sqlError || onlyNotices}
         >
           Confirm & Apply
         </Button>

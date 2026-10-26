@@ -1,47 +1,16 @@
 import { useConnectionStore } from "src/stores/connection";
 import { useScreenStore } from "src/stores/screen";
+import {
+  anyTabHasPendingObjectWork,
+  useObjectDraftStore,
+} from "src/stores/objectDrafts";
+import { draftKeyForWindow, isCreateDraftKey } from "src/lib/objectDraftKey";
+import { isValidNewTableDraft, patchEntryHasChanges } from "./tabDirty";
 
 function patchMapHasAnyChanges(patchMap: unknown): boolean {
   if (!patchMap || typeof patchMap !== "object") return false;
-
-  for (const entry of Object.values(patchMap as Record<string, unknown>)) {
-    const patches = (entry as { patches?: unknown } | undefined)?.patches;
-    if (!patches || typeof patches !== "object") continue;
-
-    for (const actionPatches of Object.values(
-      patches as Record<string, unknown>
-    )) {
-      if (!actionPatches || typeof actionPatches !== "object") continue;
-
-      for (const rows of Object.values(
-        actionPatches as Record<string, unknown>
-      )) {
-        if (rows && typeof rows === "object" && Object.keys(rows).length > 0) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-function hasValidNewTableDraft(draft: unknown): boolean {
-  if (!draft || typeof draft !== "object") return false;
-  const data = draft as {
-    tableName?: unknown;
-    columns?: Array<{ column_name?: unknown }>;
-  };
-
-  return (
-    typeof data.tableName === "string" &&
-    data.tableName.trim().length > 0 &&
-    Array.isArray(data.columns) &&
-    data.columns.some(
-      (column) =>
-        typeof column?.column_name === "string" &&
-        column.column_name.trim().length > 0
-    )
+  return Object.values(patchMap as Record<string, unknown>).some(
+    patchEntryHasChanges
   );
 }
 
@@ -54,11 +23,11 @@ export function hasAnyUnsavedConnectionChanges(): boolean {
 
   for (const tabDrafts of Object.values(s.newTableData)) {
     for (const draft of Object.values(tabDrafts)) {
-      if (hasValidNewTableDraft(draft)) return true;
+      if (isValidNewTableDraft(draft)) return true;
     }
   }
 
-  return false;
+  return anyTabHasPendingObjectWork();
 }
 
 export function discardAllConnectionChanges() {
@@ -71,6 +40,8 @@ export function discardAllConnectionChanges() {
     ...Object.keys(s.tableConstraints),
     ...Object.keys(screen.openWindows),
   ]);
+  // Every object draft goes, closed ones too; create windows close below.
+  useObjectDraftStore.getState().clearAll();
 
   for (const tabId of tabIds) {
     const newTableWindowIds = new Set(Object.keys(s.newTableData[tabId] ?? {}));
@@ -81,11 +52,15 @@ export function discardAllConnectionChanges() {
     s.clearNewTableData(tabId);
 
     const windows = screen.openWindows[tabId] ?? [];
-    const withoutNewTableWindows = windows.filter(
-      (window) =>
+    const withoutNewTableWindows = windows.filter((window) => {
+      if (window.type === "db-object-manager") {
+        return !isCreateDraftKey(draftKeyForWindow(window));
+      }
+      return (
         window.type !== "table" ||
         (!window.table.new && !newTableWindowIds.has(window.id))
-    );
+      );
+    });
     if (withoutNewTableWindows.length !== windows.length) {
       screen.replaceWindows(tabId, withoutNewTableWindows);
     }

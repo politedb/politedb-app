@@ -11,7 +11,16 @@ import type {
   TableWindow,
 } from "src/types";
 import { nextUniqueObjectDraftName } from "src/lib/databaseObjects";
-import { clearObjectEditorDraft } from "src/lib/objectEditorDraftCache";
+import { newCreateDraftKey, windowIdForDraftKey } from "src/lib/objectDraftKey";
+import {
+  objectDraftsForTab,
+  type ObjectDraftForm,
+} from "src/stores/objectDrafts";
+import {
+  openNewObjectDraftInScreenTab,
+  openObjectDraftInScreenTab,
+  openObjectInScreenTab,
+} from "../lib/objectWindows";
 import { useScreenStore } from "src/stores/screen";
 import { useLoadTableData } from "src/hooks/useLoadTableData";
 import { useConnectionStore } from "src/stores/connection";
@@ -88,7 +97,7 @@ export function useConnectionWindows(
     openWindows,
     addWindow,
     updateWindow,
-    removeWindow,
+    removeWindows,
     activeWindowId,
     setActiveWindowId,
   } = useScreenStore();
@@ -211,64 +220,51 @@ export function useConnectionWindows(
   );
 
   const openDatabaseObjectsManager = useCallback(
-    (opts?: { kind?: DatabaseObjectKind; object?: DatabaseObjectItem }) => {
-      // Edit existing: one window per object id (reuse if already open).
+    (opts?: {
+      kind?: DatabaseObjectKind;
+      object?: DatabaseObjectItem;
+      /** A new object's draft (see newObjectDraftInit); seeded before it renders. */
+      createInit?: {
+        kind: DatabaseObjectKind;
+        form: ObjectDraftForm;
+        sql: string;
+      };
+    }) => {
+      // Existing object: one window and one draft per object id, from the
+      // live stores; focusing never changes its draft.
       if (opts?.object?.id) {
-        const id = `db-object-manager:obj:${opts.object.id}`;
-        const existing = windows.find(
-          (w) => w.type === "db-object-manager" && w.id === id
+        return openObjectInScreenTab(activeProfileScreen, opts.object);
+      }
+      if (opts?.createInit) {
+        return openNewObjectDraftInScreenTab(
+          activeProfileScreen,
+          opts.createInit
         );
-        const patch = {
-          initialKind: opts.object.kind,
-          initialObjectId: opts.object.id,
-          title: opts.object.name,
-          dirty: false,
-        } satisfies Partial<DatabaseObjectManagerWindow>;
-
-        if (existing && existing.type === "db-object-manager") {
-          updateWindow(activeProfileScreen, existing.id, patch);
-          setActiveWindowId(activeProfileScreen, existing.id);
-          return existing.id;
-        }
-
-        const win: DatabaseObjectManagerWindow = {
-          id,
-          type: "db-object-manager",
-          title: opts.object.name,
-          initialKind: opts.object.kind,
-          initialObjectId: opts.object.id,
-          dirty: false,
-        };
-        addWindow(activeProfileScreen, win);
-        setActiveWindowId(activeProfileScreen, win.id);
-        return win.id;
       }
 
-      // Create: always a new window so multiple drafts can exist at once.
+      // No template yet (caller without metadata): the pane seeds it.
       const kind = opts?.kind ?? "function";
-      const takenNames: string[] = [];
-      for (const w of windows) {
-        if (w.type !== "db-object-manager") continue;
-        if ((w.initialObjectId ?? "").trim()) continue;
-        if (w.title?.trim()) takenNames.push(w.title.trim());
-      }
-      // Also avoid colliding with existing DB object names (any schema).
-      // Metadata is not in this hook — callers pass titles; LeftNav/pane refine.
-      const createTitle = nextUniqueObjectDraftName(kind, takenNames);
-      const id = `db-object-manager:new:${kind}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 7)}`;
+      const takenNames = objectDraftsForTab(activeProfileScreen)
+        .filter((d) => d.mode === "create")
+        .map((d) => d.form.name);
       const win: DatabaseObjectManagerWindow = {
-        id,
+        id: windowIdForDraftKey(newCreateDraftKey(kind)),
         type: "db-object-manager",
-        title: createTitle,
+        title: nextUniqueObjectDraftName(kind, takenNames),
         initialKind: kind,
         initialObjectId: "",
-        dirty: false,
       };
       addWindow(activeProfileScreen, win);
       setActiveWindowId(activeProfileScreen, win.id);
       return win.id;
     },
-    [activeProfileScreen, windows, addWindow, updateWindow, setActiveWindowId]
+    [activeProfileScreen, addWindow, setActiveWindowId]
+  );
+
+  /** Reopen an object draft (a closed new object, or an edit) by its key. */
+  const openObjectDraft = useCallback(
+    (key: string) => openObjectDraftInScreenTab(activeProfileScreen, key),
+    [activeProfileScreen]
   );
 
   const openDatabaseCatalog = useCallback(
@@ -319,70 +315,66 @@ export function useConnectionWindows(
     [activeProfileScreen, windows, addWindow, updateWindow, setActiveWindowId]
   );
 
-  const closeWindow = useCallback(
-    async (windowId: string, e?: MouseEvent) => {
-      e?.stopPropagation?.();
+  /**
+   * Close windows in one step: per-window cleanup, then one removal that
+   * picks the next active window from the actual survivors. Object drafts
+   * are kept (reopening shows them), like table changes.
+   */
+  const closeWindows = useCallback(
+    async (windowIds: string[]) => {
+      const current =
+        useScreenStore.getState().openWindows[activeProfileScreen] ?? [];
+      const ids = windowIds.filter((id) => current.some((w) => w.id === id));
+      if (!ids.length) return;
+      for (const windowId of ids) {
+        const toClose = current.find((w) => w.id === windowId);
 
-      const toClose = windows.find((w) => w.id === windowId);
+        if (toClose?.type === "table") {
+          const { schema, name } = toClose.table;
 
-      if (toClose?.type === "table") {
-        const { schema, name } = toClose.table;
+          // remove cached UI data immediately
+          removeTableData(schema, name);
 
-        // remove cached UI data immediately
-        removeTableData(schema, name);
-
-        // NOTE - DO NOT close per-table runtime connection here anymore since we're using runtimeConnection for table/window
-        // drop per-table runtime connection if any
-        // const k = tableKey(activeProfileScreen, schema, name);
-        // const entry = useConnectionStore.getState().tableDataMap[k];
-        // const connectionId = entry?.connectionId ?? null;
-        // if (connectionId) {
-        //   try {
-        //     await connectionRemove(connectionId);
-        //   } catch (err) {
-        //     console.error("Error removing connection:", err);
-        //   }
-        // }
-      }
-
-      // If you still keep legacy sqlResults store, clear it here
-      if (toClose?.type === "sql") {
-        const liveContent = getLiveSqlEditorContent(windowId);
-        const pendingSql = consumeUndrainedSqlForLiveEditor(windowId);
-        let content = liveContent ?? toClose.content ?? "";
-        for (const sql of pendingSql) {
-          content = content.trim() ? `${content.trim()}\n\n${sql}` : sql;
+          // NOTE - DO NOT close per-table runtime connection here anymore since we're using runtimeConnection for table/window
+          // drop per-table runtime connection if any
+          // const k = tableKey(activeProfileScreen, schema, name);
+          // const entry = useConnectionStore.getState().tableDataMap[k];
+          // const connectionId = entry?.connectionId ?? null;
+          // if (connectionId) {
+          //   try {
+          //     await connectionRemove(connectionId);
+          //   } catch (err) {
+          //     console.error("Error removing connection:", err);
+          //   }
+          // }
         }
-        const lastClosed = {
-          content,
-          title: toClose.title ?? "SQL Query",
-        };
-        lastClosedSqlByTab.set(activeProfileScreen, lastClosed);
-        if (sqlScopeKey) {
-          lastClosedSqlByScope.set(sqlScopeKey, lastClosed);
+
+        // If you still keep legacy sqlResults store, clear it here
+        if (toClose?.type === "sql") {
+          const liveContent = getLiveSqlEditorContent(windowId);
+          const pendingSql = consumeUndrainedSqlForLiveEditor(windowId);
+          let content = liveContent ?? toClose.content ?? "";
+          for (const sql of pendingSql) {
+            content = content.trim() ? `${content.trim()}\n\n${sql}` : sql;
+          }
+          const lastClosed = {
+            content,
+            title: toClose.title ?? "SQL Query",
+          };
+          lastClosedSqlByTab.set(activeProfileScreen, lastClosed);
+          if (sqlScopeKey) {
+            lastClosedSqlByScope.set(sqlScopeKey, lastClosed);
+          }
+          if (activeTab?.profileId) {
+            lastClosedSqlByProfile.set(activeTab.profileId, lastClosed);
+          }
+          const clearSqlResult = useConnectionStore.getState().clearSqlResult;
+          clearSqlResult?.(windowId);
+          clearSqlRunnerWindowState(windowId);
         }
-        if (activeTab?.profileId) {
-          lastClosedSqlByProfile.set(activeTab.profileId, lastClosed);
-        }
-        const clearSqlResult = useConnectionStore.getState().clearSqlResult;
-        clearSqlResult?.(windowId);
-        clearSqlRunnerWindowState(windowId);
       }
 
-      if (toClose?.type === "db-object-manager") {
-        clearObjectEditorDraft(windowId);
-      }
-
-      removeWindow(activeProfileScreen, windowId);
-
-      const currActive = activeWindowId[activeProfileScreen];
-      if (currActive === windowId) {
-        const remaining = windows.filter((w) => w.id !== windowId);
-        setActiveWindowId(
-          activeProfileScreen,
-          remaining.length ? remaining[remaining.length - 1].id : null
-        );
-      }
+      removeWindows(activeProfileScreen, ids);
     },
     [
       windows,
@@ -390,10 +382,16 @@ export function useConnectionWindows(
       sqlScopeKey,
       activeTab?.profileId,
       removeTableData,
-      removeWindow,
-      activeWindowId,
-      setActiveWindowId,
+      removeWindows,
     ]
+  );
+
+  const closeWindow = useCallback(
+    async (windowId: string, e?: MouseEvent) => {
+      e?.stopPropagation?.();
+      await closeWindows([windowId]);
+    },
+    [closeWindows]
   );
 
   const windowHasPatchChanges = useCallback(
@@ -433,8 +431,10 @@ export function useConnectionWindows(
     openSqlEditor,
     openTable,
     openDatabaseObjectsManager,
+    openObjectDraft,
     openDatabaseCatalog,
     closeWindow,
+    closeWindows,
     makeTableWindowId,
     windowHasPatchChanges,
   };

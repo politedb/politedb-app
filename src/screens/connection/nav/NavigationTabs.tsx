@@ -10,12 +10,39 @@ import {
 } from "src/components/icons";
 import type { OpenWindow } from "src/types";
 import { cn } from "src/utils/cn";
+import { useScreenStore } from "src/stores/screen";
+import { useConnectionStore } from "src/stores/connection";
+import { hasPendingWork, useObjectDraftStore } from "src/stores/objectDrafts";
+import { draftKeyForWindow } from "src/lib/objectDraftKey";
+import { tableWindowHasChanges } from "../lib/tabDirty";
 import { useConnectionActionsCtx } from "../workspace/ConnectionActionsContext";
 import { ContextMenu, type MenuItem } from "src/components/common/ContextMenu";
 import {
   formatShortcutLabel,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
+
+/**
+ * Windows with unsaved work: a table with row changes or a new-table draft,
+ * a function/procedure/trigger draft. SQL and catalog windows never show it.
+ */
+function useUnsavedWindowIds(openWindows: OpenWindow[]): Set<string> {
+  const tabId = useScreenStore((s) => s.activeProfileScreen);
+  // Re-render on any change of the stores the markers read.
+  useConnectionStore((s) => s.dataPatchMap[tabId]);
+  useConnectionStore((s) => s.newTableData[tabId]);
+  const drafts = useObjectDraftStore((s) => s.drafts[tabId]);
+  const ids = new Set<string>();
+  for (const w of openWindows) {
+    if (w.type === "table") {
+      if (tableWindowHasChanges(tabId, w.id)) ids.add(w.id);
+    } else if (w.type === "db-object-manager") {
+      const draft = drafts?.[draftKeyForWindow(w)];
+      if (draft && hasPendingWork(draft)) ids.add(w.id);
+    }
+  }
+  return ids;
+}
 
 interface Props {
   openWindows: OpenWindow[];
@@ -97,6 +124,7 @@ export function NavigationTabs({
   const closeShortcut = useKeyboardShortcutsStore(
     (s) => s.shortcuts.closeCurrent
   );
+  const unsavedIds = useUnsavedWindowIds(openWindows);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
 
@@ -151,7 +179,10 @@ export function NavigationTabs({
   };
 
   const closeNow = (id: string) => {
-    actions.closeWindow(id, new MouseEvent("click"));
+    void actions.closeWindow(id, new MouseEvent("click"));
+  };
+  const closeMany = (ids: string[]) => {
+    if (ids.length) void actions.closeWindows(ids);
   };
 
   const menuItems: MenuItem[] = ctx
@@ -167,21 +198,23 @@ export function NavigationTabs({
           label: "Close Others",
           disabled: openWindows.length <= 1,
           onClick: () =>
-            openWindows.forEach((w) => w.id !== ctx.tabId && closeNow(w.id)),
+            closeMany(
+              openWindows.filter((w) => w.id !== ctx.tabId).map((w) => w.id)
+            ),
         },
         {
           type: "item",
           label: "Close to the Right",
           disabled: ctx.tabIndex >= openWindows.length - 1,
           onClick: () =>
-            openWindows.slice(ctx.tabIndex + 1).forEach((w) => closeNow(w.id)),
+            closeMany(openWindows.slice(ctx.tabIndex + 1).map((w) => w.id)),
         },
         { type: "sep" },
         {
           type: "item",
           label: "Close All",
           shortcut: "⌘⇧W",
-          onClick: () => openWindows.forEach((w) => closeNow(w.id)),
+          onClick: () => closeMany(openWindows.map((w) => w.id)),
         },
       ]
     : [];
@@ -209,6 +242,7 @@ export function NavigationTabs({
         >
           {openWindows.map((w, idx) => {
             const active = activeWindowId === w.id;
+            const unsaved = unsavedIds.has(w.id);
 
             return (
               <div
@@ -269,6 +303,15 @@ export function NavigationTabs({
                 >
                   {getWindowTitle(w)}
                 </span>
+                {unsaved ? (
+                  <span
+                    class="-ml-1 text-[10px] leading-none text-amber-600 dark:text-amber-400"
+                    title="Unsaved changes"
+                  >
+                    <span aria-hidden="true">●</span>
+                    <span class="sr-only">Unsaved changes</span>
+                  </span>
+                ) : null}
 
                 <Button
                   variant="ghost"

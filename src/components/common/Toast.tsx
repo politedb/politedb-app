@@ -1,4 +1,9 @@
-import { useToastStore, type ToastTone } from "src/stores/toast";
+import { useRef, useState } from "preact/hooks";
+import {
+  useToastStore,
+  type ToastItem,
+  type ToastTone,
+} from "src/stores/toast";
 import { CheckMarkIcon, XIcon } from "src/components/icons";
 import { cn } from "src/utils/cn";
 
@@ -15,6 +20,34 @@ const iconWrapClass: Record<ToastTone, string> = {
   error: "bg-red-600 text-white",
   info: "bg-neutral-700 text-white",
 };
+
+/** Runs the action once (repeat clicks ignored), then closes the toast. */
+function ToastActionButton({ toast }: { toast: ToastItem }) {
+  const [running, setRunning] = useState(false);
+  // A ref, so a second click before the re-render cannot run it again.
+  const ranRef = useRef(false);
+  const { holdToast, dismissToast } = useToastStore.getState();
+  return (
+    <button
+      type="button"
+      class="shrink-0 rounded px-1.5 py-0.5 text-sm font-semibold underline-offset-2 hover:underline disabled:opacity-60"
+      disabled={running}
+      onClick={async () => {
+        if (ranRef.current || !toast.action) return;
+        ranRef.current = true;
+        setRunning(true);
+        holdToast(toast.id);
+        try {
+          await toast.action.onClick();
+        } finally {
+          dismissToast(toast.id);
+        }
+      }}
+    >
+      {toast.action!.label}
+    </button>
+  );
+}
 
 export function Toast() {
   const toasts = useToastStore((s) => s.toasts);
@@ -54,6 +87,7 @@ export function Toast() {
           <p class="min-w-0 flex-1 text-sm leading-5 wrap-break-word">
             {toast.message}
           </p>
+          {toast.action ? <ToastActionButton toast={toast} /> : null}
           <button
             type="button"
             class="shrink-0 rounded p-0.5 text-current opacity-60 hover:opacity-100"

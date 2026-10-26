@@ -20,6 +20,9 @@ export default defineConfig(async () => ({
       "monaco-editor": resolve(__dirname, "src/test/mocks/monaco-editor.ts"),
     },
     exclude: ["**/node_modules/**", "**/dist/**", "**/.tmp/**", ".tmp/**"],
+    // Bundle zustand so its React hooks resolve to preact/compat in tests,
+    // as they do in the app, letting components use real stores.
+    server: { deps: { inline: ["zustand"] } },
   },
   resolve: {
     alias: {

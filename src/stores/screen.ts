@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useObjectDraftStore } from "./objectDrafts";
 import { DatabaseEngine, OpenWindow, SqlEditorWindow } from "../types";
 import {
   hasProductionTag,
@@ -64,6 +65,13 @@ type ScreenState = {
   openWindows: Record<string, OpenWindow[]>;
   activeWindowId: Record<string, string | null>;
 
+  /**
+   * Bumped whenever a connection screen tab is closed, reset or connects to
+   * a different runtime connection. Never reset, so work started in one
+   * lifetime of a tab id can tell it is no longer current.
+   */
+  tabEpoch: Record<string, number>;
+
   // Navigation
   setActiveProfileScreen: (tabId: string) => void;
 
@@ -78,6 +86,12 @@ type ScreenState = {
     patch: Partial<OpenWindow>
   ) => void;
   removeWindow: (tabId: string, windowId: string) => void;
+  /**
+   * Close several windows at once. A surviving active window stays active;
+   * otherwise the nearest survivor to its right (in the old order), else to
+   * its left, else none.
+   */
+  removeWindows: (tabId: string, windowIds: string[]) => void;
   replaceWindows: (tabId: string, windows: OpenWindow[]) => void;
   clearWindows: (tabId: string) => void;
   updateSqlWindowContent: (
@@ -93,6 +107,42 @@ type ScreenState = {
   resetTabs: (profileTabs: ProfileTab[]) => void;
 };
 
+/** Epochs only grow; a removed tab keeps its last value for a re-add. */
+function bumpEpochs(
+  epochs: Record<string, number>,
+  tabIds: string[]
+): Record<string, number> {
+  const next = { ...epochs };
+  for (const id of new Set(tabIds)) next[id] = (next[id] ?? 0) + 1;
+  return next;
+}
+
+/**
+ * The window to activate after closing `closing`: the current one if it
+ * survives, else the nearest survivor to its right, else to its left.
+ */
+export function activeAfterClose(
+  windows: OpenWindow[],
+  closing: Set<string>,
+  current: string | null | undefined
+): string | null {
+  if (current && !closing.has(current)) {
+    return windows.some((w) => w.id === current) ? current : null;
+  }
+  const index = windows.findIndex((w) => w.id === current);
+  if (index === -1) {
+    const survivors = windows.filter((w) => !closing.has(w.id));
+    return survivors.length ? survivors[survivors.length - 1]!.id : null;
+  }
+  for (let i = index + 1; i < windows.length; i++) {
+    if (!closing.has(windows[i]!.id)) return windows[i]!.id;
+  }
+  for (let i = index - 1; i >= 0; i--) {
+    if (!closing.has(windows[i]!.id)) return windows[i]!.id;
+  }
+  return null;
+}
+
 export const useScreenStore = create<ScreenState>((set) => ({
   activeProfileScreen: "main",
   profileTabs: [],
@@ -101,6 +151,7 @@ export const useScreenStore = create<ScreenState>((set) => ({
 
   openWindows: {},
   activeWindowId: {},
+  tabEpoch: {},
 
   /* -------------------------------------------------------------------------- */
   /* Navigation                                                                 */
@@ -175,16 +226,19 @@ export const useScreenStore = create<ScreenState>((set) => ({
     }),
 
   removeWindow: (tabId, windowId) =>
+    useScreenStore.getState().removeWindows(tabId, [windowId]),
+
+  removeWindows: (tabId, windowIds) =>
     set((s) => {
       const prev = s.openWindows[tabId] ?? [];
-      const next = prev.filter((w) => w.id !== windowId);
+      const closing = new Set(windowIds);
+      const next = prev.filter((w) => !closing.has(w.id));
+      if (next.length === prev.length) return s;
 
-      const currActive = s.activeWindowId[tabId];
-      const lastWindowId = next.length > 0 ? next[next.length - 1].id : null;
-      const activeWindowId =
-        currActive === windowId
-          ? { ...s.activeWindowId, [tabId]: lastWindowId }
-          : s.activeWindowId;
+      const activeWindowId = {
+        ...s.activeWindowId,
+        [tabId]: activeAfterClose(prev, closing, s.activeWindowId[tabId]),
+      };
 
       schedulePersistentSave();
 
@@ -197,12 +251,24 @@ export const useScreenStore = create<ScreenState>((set) => ({
   replaceWindows: (tabId, windows) =>
     set((s) => {
       schedulePersistentSave();
+      const prev = s.openWindows[tabId] ?? [];
+      const kept = new Set(windows.map((w) => w.id));
+      const removed = new Set(
+        prev.filter((w) => !kept.has(w.id)).map((w) => w.id)
+      );
+      const current = s.activeWindowId[tabId];
+      // Keep a surviving active window; else its nearest neighbor.
+      const active =
+        current && kept.has(current)
+          ? current
+          : current && removed.has(current)
+            ? activeAfterClose(prev, removed, current)
+            : windows.length > 0
+              ? windows[windows.length - 1].id
+              : null;
       return {
         openWindows: { ...s.openWindows, [tabId]: windows },
-        activeWindowId: {
-          ...s.activeWindowId,
-          [tabId]: windows.length > 0 ? windows[windows.length - 1].id : null,
-        },
+        activeWindowId: { ...s.activeWindowId, [tabId]: active },
       };
     }),
 
@@ -282,6 +348,9 @@ export const useScreenStore = create<ScreenState>((set) => ({
       if (!tab) return s;
 
       const updated: ProfileTab = { ...tab, ...patch };
+      const reconnected =
+        "runtimeConnectionId" in patch &&
+        patch.runtimeConnectionId !== tab.runtimeConnectionId;
 
       // Only persist if patch changes persisted fields (ignore runtimeConnectionId)
       const { runtimeConnectionId: _rt, ...persistedPatch } = patch as any;
@@ -308,6 +377,7 @@ export const useScreenStore = create<ScreenState>((set) => ({
       return {
         profileTabs,
         querySafetyByProfileId,
+        ...(reconnected ? { tabEpoch: bumpEpochs(s.tabEpoch, [id]) } : {}),
       };
     }),
 
@@ -336,7 +406,15 @@ export const useScreenStore = create<ScreenState>((set) => ({
       const { [id]: _aw, ...activeWindowId } = s.activeWindowId;
 
       schedulePersistentSave();
-      return { profileTabs, activeProfileScreen, openWindows, activeWindowId };
+      // The tab's object drafts end with it, closed and clean ones too.
+      useObjectDraftStore.getState().clearTab(id);
+      return {
+        profileTabs,
+        activeProfileScreen,
+        openWindows,
+        activeWindowId,
+        tabEpoch: bumpEpochs(s.tabEpoch, [id]),
+      };
     }),
 
   resetTabs: (profileTabs) =>
@@ -346,6 +424,18 @@ export const useScreenStore = create<ScreenState>((set) => ({
       for (const t of profileTabs) {
         querySafetyByProfileId[t.profileId] = tabSafetyMode(t);
       }
-      return { ...s, profileTabs, querySafetyByProfileId };
+      // A reset starts new tab lifetimes: no draft carries over, even to a
+      // tab that keeps its id.
+      const drafts = useObjectDraftStore.getState();
+      for (const t of [...s.profileTabs, ...profileTabs]) drafts.clearTab(t.id);
+      return {
+        ...s,
+        profileTabs,
+        querySafetyByProfileId,
+        tabEpoch: bumpEpochs(s.tabEpoch, [
+          ...s.profileTabs.map((t) => t.id),
+          ...profileTabs.map((t) => t.id),
+        ]),
+      };
     }),
 }));
