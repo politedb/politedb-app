@@ -34,7 +34,6 @@ Codex, 2026-10-26. Reviewed `main..HEAD` on `feat/save-review-polish`: aff00d3, 
 - Teardown history: `git show main:.agent/REVIEW.md` already records an EnvironmentTeardownError involving connectionLog imports during earlier screen.windows tests, followed by successful reruns. Thus a related teardown failure predates this branch. `src/stores/connectionLog.test.ts` is unchanged here, but that alone does not prove the exact reported test-origin variant predates the branch. Current full run did not reproduce it; no clean-main suite was run.
 - Rust unchanged; no Rust checks. This business-logic/code review required no library-documentation lookup. Workflow step 8 still calls for Claude's post-Codex security review of destructive DB paths after fixes. Automated checks passing does not resolve findings above.
 
-
 ## Re-review (round 2)
 
 Codex, 2026-10-26. **CHANGES REQUIRED**. Reviewed the complete committed branch `main..HEAD` (`aff00d3`, `45d648e`, `1ba495f`) plus task-owned `git diff HEAD` and untracked `src/screens/connection/lib/saveJobs.ts` / `saveJobs.test.ts`. Branch: `feat/save-review-polish`. Round 1 above remains history. Ignored and preserved `.claude/launch.json`. Only this report edited; no application/test edits, commits, database access or secret output.
@@ -61,7 +60,6 @@ Codex, 2026-10-26. **CHANGES REQUIRED**. Reviewed the complete committed branch 
 - Shared-caller audit: current production direct saveChanges invocation is the review wrapper. The ConnectionScreen shortcut adapter exposes saveChanges, but useConnectionShortcuts invokes beforeSaveChanges instead; its saveChanges field is not called. ConnectionActionsContext declares the method but no additional direct consumer was found. No caller was found relying on early Promise.all rejection or original rejection identity. Waiting for all started jobs preserves per-job success consumption, safety checks and pending-close exclusions. Nested refresh/metadata Promise.all calls can still leave read-only sibling loads running after one fails; allSettled here governs the top-level write jobs, not every loader callback.
 - No native WebView/Touch ID/clipboard/database verification, interactive visual inspection, or screen-reader/focus traversal. Real screen error-routing, mixed partial success, and refresh/open rejection coverage remain integration-test limitations; isolated helper/dialog tests pass. Inherited Dialog focus trapping/restoration gaps remain as recorded in round 1. No Rust changes, so no Rust checks. No library documentation needed for this business-logic review.
 - Workflow step 8 still requires Claude's post-Codex security review of destructive database paths. Passing checks do not resolve the remaining P2 classification finding.
-
 
 ## Re-review (round 3)
 

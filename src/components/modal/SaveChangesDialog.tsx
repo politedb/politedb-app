@@ -599,7 +599,7 @@ export function SaveChangesDialog({
                   ? "Your changes were saved, but a later step failed."
                   : "Not everything was saved."}
               </div>
-              <div class="mt-1 break-words">{saveError}</div>
+              <div class="mt-1 wrap-break-word">{saveError}</div>
               {writtenWithError ? null : (
                 <div class="mt-1">
                   What is listed below is still unsaved; fix it and try again.

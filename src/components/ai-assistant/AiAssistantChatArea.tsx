@@ -208,9 +208,8 @@ function AiModelPicker(props: {
         onClick={() => setOpen((next) => !next)}
         class={cn(
           "inline-flex max-w-50 items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-          open
-            ? "bg-neutral-200 text-neutral-900"
-            : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
+          "outline-none hover:bg-neutral-100 focus-visible:bg-neutral-100",
+          open && "bg-neutral-100"
         )}
       >
         <span class="truncate">{autoSelected ? "Auto" : activeModelLabel}</span>
@@ -369,6 +368,7 @@ export function AiAssistantChatArea(props: {
     ) {
       promptRef.current?.focus();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitting]);
   const handleRenameActiveChat = () => {
     if (!activeSessionId) return;

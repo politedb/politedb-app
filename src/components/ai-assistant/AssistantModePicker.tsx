@@ -118,7 +118,10 @@ export function AssistantModePicker() {
               type="button"
               role="menuitemradio"
               aria-checked={item.mode === active}
-              class="flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left outline-none hover:bg-neutral-100 focus-visible:bg-neutral-100"
+              class={cn(
+                "flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-left transition-colors",
+                "outline-none hover:bg-neutral-100 focus-visible:bg-neutral-100"
+              )}
               onClick={() => choose(item.mode)}
             >
               <span class="min-w-0 flex-1">
@@ -149,7 +152,8 @@ export function AssistantModePicker() {
         aria-expanded={open}
         aria-controls={open ? MENU_ID : undefined}
         class={cn(
-          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium text-neutral-600 hover:bg-neutral-100",
+          "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold",
+          "text-neutral-600 transition-colors hover:bg-neutral-100",
           open && "bg-neutral-100"
         )}
         onClick={() => setOpen((value) => !value)}
