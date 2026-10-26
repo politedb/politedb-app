@@ -6,8 +6,10 @@ import { isBlobColumnType, isJsonColumnType } from "../sql/sqlDialect";
 
 export type PatchCellDiff = {
   column: string;
-  oldValue: string;
-  newValue: string;
+  /** null: SQL NULL. undefined: no previous value (a new row, or unknown). */
+  oldValue: string | null | undefined;
+  /** null: SQL NULL; "" stays an empty string. */
+  newValue: string | null;
 };
 
 export type PatchRowDiff = {
@@ -22,8 +24,9 @@ function tableLabel(schema: string, tableName: string) {
   return schema ? `${schema}.${tableName}` : tableName;
 }
 
-function displayValue(value: unknown) {
-  return cellToString(value, true) ?? "";
+/** Text of a value, or null for SQL NULL (never confused with ""). */
+function displayValue(value: unknown): string | null {
+  return cellToString(value, true);
 }
 
 function virtualIdentityColumns(
@@ -105,7 +108,7 @@ export function buildPatchDiffs(
         identity: `New row #${rowKey}`,
         cells: patchFieldEntries(patch).map(([column, value]) => ({
           column,
-          oldValue: "",
+          oldValue: undefined,
           newValue: displayValue(value),
         })),
       });
@@ -129,7 +132,9 @@ export function buildPatchDiffs(
           return {
             column,
             oldValue:
-              columnIndex >= 0 ? displayValue(originalRow?.[columnIndex]) : "",
+              columnIndex >= 0 && originalRow
+                ? displayValue(originalRow[columnIndex])
+                : undefined,
             newValue: displayValue(value),
           };
         }),

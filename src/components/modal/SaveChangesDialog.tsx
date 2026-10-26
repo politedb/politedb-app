@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "preact/hooks";
+import { useCallback, useMemo, useRef, useState } from "preact/hooks";
 import { Button } from "../common/Button";
 import {
   Dialog,
@@ -27,6 +27,11 @@ import type {
   ObjectSaveNotice,
 } from "src/lib/objectEditorDraftCache";
 import { emptyObjectChangeSummary } from "src/lib/objectEditorDraftCache";
+import {
+  classifySaveStatement,
+  describeDestructiveChanges,
+  type SaveStatementKind,
+} from "./saveReviewSql";
 
 type ChangeSummary = {
   inserts: number;
@@ -134,7 +139,7 @@ function SummaryItem({ label, color, parts }: SummaryItemProps) {
   );
 }
 
-const SQL_BORDER_COLORS = {
+const SQL_BORDER_COLORS: Record<SaveStatementKind, string> = {
   // Prefer utilities that have html.dark remaps in styles.css (light text on tinted dark cards).
   create: "border-blue-300 bg-blue-100",
   insert: "border-green-200 bg-green-50",
@@ -142,57 +147,58 @@ const SQL_BORDER_COLORS = {
   delete: "border-rose-300 bg-red-50",
   structure: "border-blue-300 bg-blue-100",
   constraint: "border-indigo-200 bg-indigo-100",
+  destructive: "border-rose-300 bg-red-50 border-l-4 border-l-red-500",
 };
 
-function getSqlType(sql: string): keyof typeof SQL_BORDER_COLORS {
-  const upperSql = sql.trim().toUpperCase();
-  if (upperSql.startsWith("CREATE TABLE")) return "create";
-  if (
-    upperSql.startsWith("CREATE FUNCTION") ||
-    upperSql.startsWith("CREATE OR REPLACE FUNCTION") ||
-    upperSql.startsWith("CREATE PROCEDURE") ||
-    upperSql.startsWith("CREATE OR REPLACE PROCEDURE") ||
-    upperSql.startsWith("CREATE TRIGGER") ||
-    upperSql.startsWith("CREATE OR REPLACE TRIGGER") ||
-    upperSql.startsWith("CREATE CONSTRAINT TRIGGER")
-  ) {
-    return "create";
+/** A diff value: SQL NULL and an empty string never look alike. */
+function DiffValue(props: {
+  value: string | null | undefined;
+  tone: "old" | "new";
+}) {
+  const { value, tone } = props;
+  const base = cn(
+    "truncate rounded px-2 py-1 font-mono",
+    tone === "old" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"
+  );
+  if (value === undefined) {
+    return (
+      <span
+        class={cn(base, "bg-transparent text-neutral-400")}
+        title="No previous value"
+      >
+        —
+      </span>
+    );
   }
-  if (
-    upperSql.startsWith("DROP FUNCTION") ||
-    upperSql.startsWith("DROP PROCEDURE") ||
-    upperSql.startsWith("DROP TRIGGER")
-  ) {
-    return "delete";
+  if (value === null) {
+    return (
+      <span class={cn(base, "italic opacity-70")} title="NULL">
+        NULL
+      </span>
+    );
   }
-  if (upperSql.startsWith("INSERT")) return "insert";
-  if (upperSql.startsWith("UPDATE")) return "update";
-  if (upperSql.startsWith("DELETE")) return "delete";
-  if (upperSql.includes(".INSERTONE(") || upperSql.includes(".INSERTMANY("))
-    return "insert";
-  if (upperSql.includes(".UPDATEONE(") || upperSql.includes(".UPDATEMANY("))
-    return "update";
-  if (upperSql.includes(".DELETEONE(") || upperSql.includes(".DELETEMANY("))
-    return "delete";
-  if (upperSql.startsWith("ALTER TABLE")) {
-    // Check if it's a constraint change
-    if (
-      upperSql.includes("ADD CONSTRAINT") ||
-      upperSql.includes("DROP CONSTRAINT") ||
-      upperSql.includes("CONSTRAINT")
-    ) {
-      return "constraint";
-    }
-    return "structure";
+  if (value === "") {
+    return (
+      <span class={cn(base, "italic opacity-70")} title="Empty string">
+        (empty)
+      </span>
+    );
   }
-  return "create"; // default
+  return (
+    <span class={base} title={value}>
+      {value}
+    </span>
+  );
 }
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  /** Runs the save; a rejection keeps the dialog open with its message. */
+  onConfirm: () => void | Promise<void>;
   patchMap: PatchMap;
+  /** Where the changes go, e.g. "Production · shop" (shown, never logged). */
+  targetLabel?: string;
   engine: DatabaseEngine;
   newTableSql?: string[];
   objectSql?: string[];
@@ -210,6 +216,7 @@ export function SaveChangesDialog({
   onClose,
   onConfirm,
   patchMap,
+  targetLabel,
   engine,
   newTableSql = [],
   objectSql = [],
@@ -222,6 +229,10 @@ export function SaveChangesDialog({
 }: Props) {
   const isMongo = engine === "mongo";
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // A ref, so a second click before the re-render cannot start a 2nd save.
+  const savingRef = useRef(false);
 
   const summary = useMemo(
     () =>
@@ -264,6 +275,39 @@ export function SaveChangesDialog({
   );
 
   const objectSummary = objectChangeSummary ?? emptyObjectChangeSummary();
+
+  const destructiveParts = useMemo(
+    () =>
+      describeDestructiveChanges({
+        statements: allSqlStatements,
+        deletedRows: summary.deletes,
+        rowNoun: isMongo
+          ? { one: "document", many: "documents" }
+          : { one: "row", many: "rows" },
+      }),
+    [allSqlStatements, summary.deletes, isMongo]
+  );
+
+  const confirm = useCallback(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onConfirm();
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : String(error ?? "")
+      );
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [onConfirm]);
+
+  const close = useCallback(() => {
+    if (!savingRef.current) onClose();
+  }, [onClose]);
 
   const rowEntity = isMongo ? "document" : "row";
   const rowEntityPlural = isMongo ? "documents" : "rows";
@@ -360,7 +404,7 @@ export function SaveChangesDialog({
     <Dialog
       size="lg"
       open={open}
-      onClose={onClose}
+      onClose={close}
       closeOnOutsideClick={false}
       className="flex max-h-[min(90vh,50rem)] flex-col overflow-hidden"
     >
@@ -369,7 +413,13 @@ export function SaveChangesDialog({
           Review changes before saving
         </DialogTitle>
         <DialogDescription>
-          Review all changes before saving to the database.
+          {targetLabel ? (
+            <>
+              Saving to <span class="font-medium">{targetLabel}</span>
+            </>
+          ) : (
+            "Nothing is written until you confirm."
+          )}
         </DialogDescription>
       </DialogHeader>
 
@@ -378,6 +428,65 @@ export function SaveChangesDialog({
           className="h-full min-h-0"
           contentClassName="space-y-4"
         >
+          {saveError ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">Not everything was saved.</div>
+              <div class="mt-1 break-words">{saveError}</div>
+              <div class="mt-1">
+                What is listed below is still unsaved; fix it and try again.
+              </div>
+            </div>
+          ) : null}
+
+          {destructiveParts.length > 0 ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <span class="font-medium">Cannot be undone:</span> this save{" "}
+              {destructiveParts.join(", ")}.
+            </div>
+          ) : null}
+
+          {conflictNotices.length > 0 ? (
+            <div
+              role="alert"
+              class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+            >
+              <div class="font-medium">
+                Changed in the database since you opened it:
+              </div>
+              <ul class="mt-1 list-disc pl-5">
+                {conflictNotices.map((n) => (
+                  <li key={n.key}>
+                    {n.name} — saving replaces that newer definition.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {skippedNotices.length > 0 ? (
+            <div
+              role="status"
+              class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+            >
+              <div class="font-medium">Not saved, kept as unsaved work:</div>
+              <ul class="mt-1 list-disc pl-5">
+                {skippedNotices.map((n) =>
+                  n.kind === "skipped" ? (
+                    <li key={n.key}>
+                      {n.name} — {n.reason}.
+                    </li>
+                  ) : null
+                )}
+              </ul>
+            </div>
+          ) : null}
+
           {/* Summary Section */}
           <div class="w-full rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
@@ -457,12 +566,8 @@ export function SaveChangesDialog({
                             <span class="truncate font-medium text-neutral-700">
                               {cell.column}
                             </span>
-                            <span class="truncate rounded bg-red-50 px-2 py-1 font-mono text-red-700">
-                              {cell.oldValue || "NULL"}
-                            </span>
-                            <span class="truncate rounded bg-green-50 px-2 py-1 font-mono text-green-700">
-                              {cell.newValue || "NULL"}
-                            </span>
+                            <DiffValue value={cell.oldValue} tone="old" />
+                            <DiffValue value={cell.newValue} tone="new" />
                           </div>
                         ))}
                       </div>
@@ -472,42 +577,6 @@ export function SaveChangesDialog({
               </OverlayScrollArea>
             </div>
           )}
-
-          {conflictNotices.length > 0 ? (
-            <div
-              role="alert"
-              class="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
-            >
-              <div class="font-medium">
-                Changed in the database since you opened it:
-              </div>
-              <ul class="mt-1 list-disc pl-5">
-                {conflictNotices.map((n) => (
-                  <li key={n.key}>
-                    {n.name} — saving replaces that newer definition.
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {skippedNotices.length > 0 ? (
-            <div
-              role="status"
-              class="mb-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
-            >
-              <div class="font-medium">Not saved, kept as unsaved work:</div>
-              <ul class="mt-1 list-disc pl-5">
-                {skippedNotices.map((n) =>
-                  n.kind === "skipped" ? (
-                    <li key={n.key}>
-                      {n.name} — {n.reason}.
-                    </li>
-                  ) : null
-                )}
-              </ul>
-            </div>
-          ) : null}
 
           {/* SQL Statements Section */}
           <div class="mb-1 w-full rounded-lg border border-neutral-200">
@@ -540,7 +609,7 @@ export function SaveChangesDialog({
               ) : (
                 <div class="space-y-3">
                   {displaySqlStatements.map((sql, index) => {
-                    const sqlType = getSqlType(sql);
+                    const sqlType = classifySaveStatement(sql);
                     const borderColor = SQL_BORDER_COLORS[sqlType];
                     const copied = copiedIndex === index;
                     return (
@@ -583,15 +652,16 @@ export function SaveChangesDialog({
       </DialogContent>
 
       <DialogFooter className="shrink-0">
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="outline" onClick={close} disabled={saving}>
           Cancel
         </Button>
         <Button
-          variant="default"
-          onClick={onConfirm}
-          disabled={!!summary.sqlError || onlyNotices}
+          variant={destructiveParts.length > 0 ? "destructive" : "default"}
+          onClick={() => void confirm()}
+          disabled={!!summary.sqlError || onlyNotices || saving}
+          aria-busy={saving}
         >
-          Confirm & Apply
+          {saving ? "Saving…" : "Confirm & Apply"}
         </Button>
       </DialogFooter>
     </Dialog>

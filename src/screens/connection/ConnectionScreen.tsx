@@ -520,6 +520,20 @@ export function ConnectionScreen() {
     profileId: activeProfileScreen,
   });
 
+  // While the review dialog runs a save, errors go to that dialog (which
+  // stays open and shows them) instead of a separate error message.
+  const saveErrorsRef = useRef<string[] | null>(null);
+  const reportError = useCallback(
+    (message: string | null) => {
+      if (message && saveErrorsRef.current) {
+        saveErrorsRef.current.push(message);
+        return;
+      }
+      setError(message);
+    },
+    [setError]
+  );
+
   /* =============================================================================
    * Global actions (depends on everything above)
    * ============================================================================= */
@@ -538,7 +552,7 @@ export function ConnectionScreen() {
     setLimit,
     setOffset,
 
-    setError,
+    setError: reportError,
     setShowSaveDialog,
 
     loadTableData,
@@ -737,6 +751,13 @@ export function ConnectionScreen() {
       open: showSaveDialog,
     });
 
+  // "Connection · database" for the save review.
+  const saveTargetLabel = useMemo(
+    () =>
+      [activeTab?.label, currentDatabase].filter((part) => !!part).join(" · "),
+    [activeTab?.label, currentDatabase]
+  );
+
   const diagramDatabase = useMemo(() => {
     if (!profile) return "";
     return pickHostDbUser(profile).database || "";
@@ -931,9 +952,27 @@ export function ConnectionScreen() {
               open={showSaveDialog}
               onClose={() => setShowSaveDialog(false)}
               onConfirm={async () => {
-                await actions.saveChanges();
+                saveErrorsRef.current = [];
+                let thrown: unknown = null;
+                try {
+                  await actions.saveChanges();
+                } catch (error) {
+                  thrown = error;
+                }
+                const reported = saveErrorsRef.current ?? [];
+                saveErrorsRef.current = null;
+                const messages = [...new Set(reported)];
+                if (!messages.length && thrown) {
+                  messages.push(
+                    thrown instanceof Error ? thrown.message : String(thrown)
+                  );
+                }
+                // Keep the review open with what failed; it still lists
+                // whatever is unsaved.
+                if (messages.length) throw new Error(messages.join("\n"));
                 setShowSaveDialog(false);
               }}
+              targetLabel={saveTargetLabel}
               patchMap={patchMap}
               engine={engine ?? "postgres"}
               newTableSql={newTableSql}
