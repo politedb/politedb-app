@@ -97,9 +97,94 @@ export function serializeToCsv(
 }
 
 /**
- * Parse CSV text into rows (first row = headers, rest = data). Without a
- * delimiter it is detected (comma, semicolon, tab, pipe); the one used is
- * returned so the import splits the file the same way.
+ * Split CSV text into records with the import's own rules, so the preview
+ * shows exactly what the import inserts (src-tauri csv_import.rs
+ * `parse_csv_text`): a leading BOM is dropped; LF, CRLF and CR end a
+ * record; a quote only starts a quoted value at the start of a field
+ * (elsewhere it is an ordinary character); inside quotes a doubled quote is
+ * a quote; anything but a separator or line end after a closing quote is
+ * an error; a line with nothing on it is skipped (a quoted empty value
+ * `""` is a record); an unterminated quote is an error.
+ */
+export function parseCsvRecords(text: string, delimiter: string): string[][] {
+  const source = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  let fieldStart = true;
+  let afterClose = false;
+  let rowQuoted = false;
+
+  const endRecord = () => {
+    row.push(cell);
+    cell = "";
+    const blankLine = row.length === 1 && row[0] === "" && !rowQuoted;
+    if (!blankLine) rows.push(row);
+    row = [];
+    rowQuoted = false;
+  };
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+          afterClose = true;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"' && fieldStart) {
+      inQuotes = true;
+      rowQuoted = true;
+      fieldStart = false;
+    } else if (ch === delimiter) {
+      row.push(cell);
+      cell = "";
+      fieldStart = true;
+      afterClose = false;
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && source[i + 1] === "\n") i += 1;
+      endRecord();
+      fieldStart = true;
+      afterClose = false;
+    } else if (afterClose) {
+      throw new Error(
+        `Unexpected text after a closing quote in record ${rows.length + 1} of the CSV file.`
+      );
+    } else {
+      cell += ch;
+      fieldStart = false;
+    }
+  }
+
+  if (inQuotes) throw new Error("Unterminated quoted field in the CSV file.");
+  if (cell !== "" || row.length > 0 || rowQuoted) endRecord();
+  return rows;
+}
+
+/** The likely separator of a CSV text: comma, semicolon, tab or pipe. */
+export function guessCsvDelimiter(text: string): string {
+  const sample = text.slice(0, 64 * 1024);
+  const guess = Papa.parse<string[]>(sample, {
+    delimitersToGuess: [",", ";", "\t", "|"],
+    preview: 20,
+    skipEmptyLines: true,
+  }).meta.delimiter;
+  return [",", ";", "\t", "|"].includes(guess) ? guess : ",";
+}
+
+/**
+ * Parse CSV text into rows (first row = headers, rest = data), split the
+ * way the import will split it. Without a delimiter one is guessed; the
+ * one used is returned so the import receives the same.
  */
 export function parseCsv(
   csvText: string,
@@ -109,14 +194,8 @@ export function parseCsv(
   rows: string[][];
   delimiter: string;
 } {
-  const parse = Papa.parse<string[]>(csvText, {
-    delimiter: delimiter ?? "",
-    delimitersToGuess: [",", ";", "\t", "|"],
-  });
-  const rows = parse.data;
-  const used = parse.meta.delimiter || delimiter || ",";
-
+  const used = delimiter || guessCsvDelimiter(csvText);
+  const rows = parseCsvRecords(csvText, used);
   if (rows.length === 0) return { headers: [], rows: [], delimiter: used };
-  const headers = rows[0] as string[];
-  return { headers, rows: rows.slice(1) as string[][], delimiter: used };
+  return { headers: rows[0]!, rows: rows.slice(1), delimiter: used };
 }

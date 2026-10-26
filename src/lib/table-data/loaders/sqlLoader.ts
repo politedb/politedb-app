@@ -425,6 +425,7 @@ export async function loadMeta(params: {
     column_default: cellToString(row?.[11]),
     comment: cellToString(row?.[12]),
     is_identity: cellToString(row?.[13])?.toLowerCase() === "yes",
+    is_generated: cellToString(row?.[14])?.toUpperCase() === "ALWAYS",
   }));
 
   const constraints = (constraintsRes.rows as unknown[][]).map((row) => ({

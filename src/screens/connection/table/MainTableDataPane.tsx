@@ -41,6 +41,7 @@ import { useTableFilter } from "src/components/table/tableHooks";
 import {
   useImportTableData,
   requiredImportColumns,
+  importUsesTransaction,
 } from "src/hooks/useImportTableData";
 import {
   cloneTableQuery,
@@ -490,8 +491,8 @@ export function MainTableDataPane(props: {
   }, [engine, meta.columns, meta.structure]);
   // Known only once the table structure has loaded; otherwise none.
   const importRequiredColumns = useMemo(
-    () => requiredImportColumns(tableColumns, meta.structure),
-    [tableColumns, meta.structure]
+    () => requiredImportColumns(tableColumns, meta.structure, engine),
+    [tableColumns, meta.structure, engine]
   );
   const columnsKey = useMemo(
     () => tableColumns.map((col) => col.name).join("\0"),
@@ -1276,6 +1277,7 @@ export function MainTableDataPane(props: {
         dataImportPreview={dataImportPreview}
         importError={importError}
         importRequiredColumns={importRequiredColumns}
+        importUsesTransaction={importUsesTransaction(engine)}
         importDelimiter={importDelimiter}
         onImportDelimiterChange={setImportDelimiter}
         importBusy={importBusy}

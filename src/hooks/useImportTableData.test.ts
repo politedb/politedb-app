@@ -121,15 +121,31 @@ describe("import column helpers", () => {
       (name) => ({ name, db_type: "text" })
     );
     expect(
-      requiredImportColumns(columns, [
-        structure("id", { is_identity: true }),
-        structure("email"),
-        structure("note", { is_nullable: "YES" }),
-        structure("created", { column_default: "now()" }),
-        structure("code", { default_is_null: false, column_default: "" }),
-        structure("uuid", { extra: "auto_increment" }),
-      ])
+      requiredImportColumns(
+        columns,
+        [
+          structure("id", { is_identity: true }),
+          structure("email"),
+          structure("note", { is_nullable: "YES" }),
+          structure("created", { column_default: "now()" }),
+          structure("code", { default_is_null: false, column_default: "" }),
+          structure("uuid", { extra: "auto_increment" }),
+        ],
+        "postgres"
+      )
     ).toEqual(["email"]);
-    expect(requiredImportColumns(columns, null)).toEqual([]);
+    expect(requiredImportColumns(columns, null, "postgres")).toEqual([]);
+    // PostgreSQL GENERATED ALWAYS AS (...) columns are computed.
+    expect(
+      requiredImportColumns(
+        [{ name: "total", db_type: "numeric" }],
+        [structure("total", { is_generated: true })],
+        "postgres"
+      )
+    ).toEqual([]);
+    // SQL Server metadata cannot tell an IDENTITY column apart: no claims.
+    expect(
+      requiredImportColumns(columns, [structure("email")], "sqlserver")
+    ).toEqual([]);
   });
 });

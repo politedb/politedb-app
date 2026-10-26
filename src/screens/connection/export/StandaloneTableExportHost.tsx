@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +9,6 @@ import {
 import { Button } from "src/components/common/Button";
 import { Spinner } from "src/components/common/Spinner";
 import { ExportTableDialog } from "src/components/modal/ExportTableDialog";
-import { showMessage } from "src/lib/system-dialog";
 import type { DatabaseEngine } from "src/types";
 import { useStandaloneTableExport } from "../hooks/useStandaloneTableExport";
 import type { StandaloneExportTarget } from "./standalone-export/types";
@@ -21,12 +20,11 @@ export function StandaloneTableExportHost(props: {
   target: StandaloneExportTarget | null;
   onClearTarget: () => void;
 }) {
-  const { phase, close } = useStandaloneTableExport(props);
+  const { phase, close, retry } = useStandaloneTableExport(props);
 
   const ready = phase.status === "ready" ? phase : null;
   const loading = phase.status === "loading" ? phase : null;
   const errored = phase.status === "error" ? phase : null;
-  const shownErrorRef = useRef<string | null>(null);
 
   const identityLabel = useMemo(() => {
     const t = ready?.target ?? loading?.target ?? errored?.target;
@@ -34,24 +32,39 @@ export function StandaloneTableExportHost(props: {
     return t.schema ? `${t.schema}.${t.tableName}` : t.tableName;
   }, [ready, loading, errored]);
 
-  useEffect(() => {
-    if (!errored) {
-      shownErrorRef.current = null;
-      return;
-    }
-    const key = `${errored.target.requestId}:${errored.message}`;
-    if (shownErrorRef.current === key) return;
-    shownErrorRef.current = key;
-    void showMessage(errored.message, {
-      title: "Export error",
-      kind: "error",
-    }).then(() => {
-      close();
-    });
-  }, [errored, close]);
-
   return (
     <>
+      {/* Preparing failed: say why here and offer to try again. */}
+      {errored && (
+        <Dialog open onClose={close} size="sm" showCloseButton>
+          <DialogHeader>
+            <DialogTitle className="text-base dark:text-neutral-100">
+              Export data
+            </DialogTitle>
+          </DialogHeader>
+          <DialogContent className="space-y-2 py-2">
+            <div class="truncate font-mono text-sm text-neutral-800 dark:text-neutral-100">
+              {identityLabel}
+            </div>
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">The table could not be prepared.</div>
+              <div class="mt-1 wrap-break-word">{errored.message}</div>
+            </div>
+          </DialogContent>
+          <DialogFooter>
+            <Button variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button variant="default" onClick={retry}>
+              Try again
+            </Button>
+          </DialogFooter>
+        </Dialog>
+      )}
+
       {loading && (
         <Dialog
           open

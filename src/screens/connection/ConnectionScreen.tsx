@@ -69,6 +69,11 @@ import { useConnectionQuitGuard } from "./hooks/useConnectionQuitGuard";
 import { useConnectionScreenState } from "./hooks/useConnectionScreenState";
 import { useInsertSqlIntoActiveEditor } from "./hooks/useInsertSqlIntoActiveEditor";
 import { StandaloneTableExportHost } from "./export/StandaloneTableExportHost";
+import { StandaloneTableImportHost } from "./import/StandaloneTableImportHost";
+import {
+  forgetImportedTableRows,
+  importNeedsTableTab,
+} from "./import/standaloneImport";
 import type { StandaloneExportTarget } from "./export/standalone-export/types";
 import { canStandaloneExportTable } from "./export/standalone-export/support";
 import { useFloatingAssistantStore } from "src/stores/floatingAssistant";
@@ -180,6 +185,12 @@ export function ConnectionScreen() {
     useState<StandaloneExportTarget | null>(null);
   const clearStandaloneExportTarget = useCallback(() => {
     setStandaloneExportTarget(null);
+  }, []);
+  // CSV import started from the sidebar without opening the table.
+  const [standaloneImportTarget, setStandaloneImportTarget] =
+    useState<StandaloneExportTarget | null>(null);
+  const clearStandaloneImportTarget = useCallback(() => {
+    setStandaloneImportTarget(null);
   }, []);
   const snippetLibrary = useSnippetsStore((s) => s.library);
   const ensureSnippetsLoaded = useSnippetsStore((s) => s.ensureLoaded);
@@ -684,8 +695,28 @@ export function ConnectionScreen() {
       },
       importTableData: (table: TableItem) => {
         if (isProfileLocked) return;
-        void actionsRef.current.selectTable(table).then(() => {
-          setPendingTableAction("import");
+        const connectionId = runtimeConnectionId;
+        // Import without opening the table, unless its tab is open or holds
+        // unsaved row changes (then the tab handles it, as before).
+        if (
+          table.new ||
+          !connectionId ||
+          !engine ||
+          !canStandaloneExportTable(engine) ||
+          importNeedsTableTab(activeProfileScreen, table)
+        ) {
+          void actionsRef.current.selectTable(table).then(() => {
+            setPendingTableAction("import");
+          });
+          return;
+        }
+        setStandaloneImportTarget({
+          requestId: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          connectionId,
+          engine,
+          schema: table.schema,
+          tableName: table.name,
+          kind: table.kind,
         });
       },
       importTableSqlDump: (table: TableItem) => {
@@ -733,6 +764,7 @@ export function ConnectionScreen() {
     insertSnippetSql,
     engine,
     runtimeConnectionId,
+    activeProfileScreen,
   ]);
 
   const patchMap = useMemo(() => {
@@ -1051,6 +1083,21 @@ export function ConnectionScreen() {
           engine={engine}
           target={standaloneExportTarget}
           onClearTarget={clearStandaloneExportTarget}
+        />
+
+        <StandaloneTableImportHost
+          profileScreenId={activeProfileScreen}
+          runtimeConnectionId={runtimeConnectionId}
+          engine={engine}
+          target={standaloneImportTarget}
+          onClearTarget={clearStandaloneImportTarget}
+          onImported={(screenTabId, t) =>
+            // Only the originating tab's cached rows; no edits discarded.
+            forgetImportedTableRows(screenTabId, {
+              schema: t.schema,
+              name: t.tableName,
+            })
+          }
         />
 
         <DiagramGeneratorDialog

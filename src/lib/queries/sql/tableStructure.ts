@@ -141,7 +141,8 @@ export const tableStructuresQuery = (
       column_name AS check_constraint,
       column_default,
       pg_catalog.col_description (${oid}, ordinal_position) AS comment,
-      is_identity
+      is_identity,
+      is_generated
     FROM
       information_schema.columns
       JOIN pg_attribute pa ON attrelid = ${oid}

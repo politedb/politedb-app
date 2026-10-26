@@ -1,4 +1,4 @@
-import { useCallback, useState } from "preact/hooks";
+import { useCallback, useRef, useState } from "preact/hooks";
 import { openDialog } from "src/lib/system-dialog";
 import { readTextFile } from "src/lib/system-fs";
 import { parseCsv } from "src/utils/csv";
@@ -29,6 +29,11 @@ export type ImportOptions = {
   nullMode: ImportNullMode;
   fullValidation?: boolean;
 };
+
+export type ImportOutcome =
+  | { status: "not-started" }
+  | { status: "failed"; message: string }
+  | { status: "imported"; imported: number; reloadError?: string };
 
 export type ImportConfig = {
   connectionId: string | null;
@@ -137,22 +142,42 @@ export function validateImportPreview(
 }
 
 /**
+ * Engines whose structure metadata says which columns are generated
+ * (identity, auto-increment, computed). Elsewhere (SQL Server, Oracle, ...)
+ * an identity column looks like NOT NULL without a default, so no column
+ * is called required there.
+ */
+const REQUIRED_COLUMN_ENGINES = new Set<DatabaseEngine>([
+  "postgres",
+  "mysql",
+  "mariadb",
+  "sqlite",
+  "turso",
+  "d1",
+]);
+
+/**
  * Columns an import must fill: NOT NULL, without a default, not generated
- * (identity, auto-increment, computed). Unknown nullability or a table
- * structure that has not loaded never marks a column required.
+ * (identity, auto-increment, computed). Unknown nullability, an engine
+ * without generated-column metadata, or a table structure that has not
+ * loaded never marks a column required.
  */
 export function requiredImportColumns(
   columns: ColumnMeta[],
-  structure: TableStructure[] | null | undefined
+  structure: TableStructure[] | null | undefined,
+  engine?: DatabaseEngine
 ): string[] {
   if (!structure?.length) return [];
+  if (!engine || !REQUIRED_COLUMN_ENGINES.has(engine)) return [];
   const byName = new Map(structure.map((col) => [col.column_name, col]));
   return columns
     .filter((column) => {
       const info = byName.get(column.name);
       if (!info) return false;
       if (parseNullable(info.is_nullable) !== false) return false;
-      if (column.auto_generated || info.is_identity) return false;
+      if (column.auto_generated || info.is_identity || info.is_generated) {
+        return false;
+      }
       if (/auto_increment|generated|identity|serial/i.test(info.extra ?? "")) {
         return false;
       }
@@ -163,6 +188,28 @@ export function requiredImportColumns(
       return !hasDefault;
     })
     .map((column) => column.name);
+}
+
+/**
+ * Engines whose import runs in one transaction. Usually a failure leaves
+ * the table as it was, but that is not certain (MySQL MyISAM tables ignore
+ * ROLLBACK; a lost COMMIT reply may follow a successful commit), so the
+ * dialog never promises it. D1, Snowflake and ClickHouse run row by row:
+ * rows before the failing one may already be saved.
+ */
+const ATOMIC_IMPORT_ENGINES = new Set<DatabaseEngine>([
+  "postgres",
+  "mysql",
+  "mariadb",
+  "sqlite",
+  "turso",
+  "duckdb",
+  "sqlserver",
+  "oracle",
+]);
+
+export function importUsesTransaction(engine?: DatabaseEngine): boolean {
+  return !!engine && ATOMIC_IMPORT_ENGINES.has(engine);
 }
 
 function importIssueMessage(issue: ImportIssue): string {
@@ -188,6 +235,8 @@ export function useImportTableData() {
   const [delimiter, setDelimiterState] = useState(",");
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  // One import at a time, even for two clicks before a re-render.
+  const runningRef = useRef(false);
   const [importProgress, setImportProgress] = useState<{
     imported: number;
     total: number;
@@ -226,7 +275,12 @@ export function useImportTableData() {
   }, []);
 
   const runImport = useCallback(
-    async (config: ImportConfig) => {
+    /**
+     * How it ended: rows imported (and reloaded, or not), failed, or not
+     * started (nothing to do, or already running). Callers that may have
+     * gone away meanwhile use it to report the outcome elsewhere.
+     */
+    async (config: ImportConfig): Promise<ImportOutcome> => {
       const {
         connectionId,
         schema,
@@ -240,7 +294,8 @@ export function useImportTableData() {
         onSuccess,
       } = config;
 
-      if (!dataPreview || csvText == null) return;
+      if (runningRef.current) return { status: "not-started" };
+      if (!dataPreview || csvText == null) return { status: "not-started" };
 
       const mapping =
         columnMapping ??
@@ -251,7 +306,7 @@ export function useImportTableData() {
       let dataRows: string[][];
 
       if (firstIsHeaders) {
-        if (dataPreview.rows.length === 0) return;
+        if (dataPreview.rows.length === 0) return { status: "not-started" };
         dataRows = dataPreview.rows;
       } else {
         dataRows = [dataPreview.headers, ...dataPreview.rows];
@@ -263,12 +318,12 @@ export function useImportTableData() {
             ? "No CSV columns match table columns."
             : "Table has no columns or CSV has no columns."
         );
-        return;
+        return { status: "not-started" };
       }
 
       if (!connectionId) {
         setError("Not connected.");
-        return;
+        return { status: "not-started" };
       }
 
       const issues = validateImportPreview(dataPreview, columns, {
@@ -284,13 +339,15 @@ export function useImportTableData() {
             .map(importIssueMessage)
             .join("; ")}`
         );
-        return;
+        return { status: "not-started" };
       }
 
+      runningRef.current = true;
       setImporting(true);
       setError(null);
       setImportProgress({ imported: 0, total: dataRows.length });
 
+      let imported: number;
       try {
         const result = await operationImportCsvTransaction({
           connectionId,
@@ -305,20 +362,32 @@ export function useImportTableData() {
           csvText,
           delimiter,
         });
-        setImportProgress({
-          imported: result.imported,
-          total: dataRows.length,
-        });
-
-        setDataPreview(null);
-        setCsvText(null);
-        await onSuccess();
+        imported = result.imported;
       } catch (err) {
         // Back to the mapping, with the reason; the file and options stay.
         setImportProgress(null);
-        setError(importExecutionErrorMessage(err));
+        const message = importExecutionErrorMessage(err);
+        setError(message);
+        setImporting(false);
+        runningRef.current = false;
+        return { status: "failed", message };
+      }
+
+      // The rows are in: from here on a failure is not an import failure.
+      setImportProgress({ imported, total: dataRows.length });
+      setDataPreview(null);
+      setCsvText(null);
+      try {
+        await onSuccess();
+        return { status: "imported", imported };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err ?? "");
+        const message = `The table could not be reloaded: ${reason}`;
+        setError(message);
+        return { status: "imported", imported, reloadError: message };
       } finally {
         setImporting(false);
+        runningRef.current = false;
       }
     },
     [csvText, dataPreview, delimiter]
@@ -328,10 +397,14 @@ export function useImportTableData() {
   const setDelimiter = useCallback(
     (next: string) => {
       if (csvText == null) return;
-      const parsed = parseCsv(csvText, next);
-      setDelimiterState(parsed.delimiter);
-      setDataPreview({ headers: parsed.headers, rows: parsed.rows });
-      setError(null);
+      try {
+        const parsed = parseCsv(csvText, next);
+        setDelimiterState(parsed.delimiter);
+        setDataPreview({ headers: parsed.headers, rows: parsed.rows });
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err ?? ""));
+      }
     },
     [csvText]
   );

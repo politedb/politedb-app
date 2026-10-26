@@ -35,6 +35,7 @@ export function MainTableDialogs(props: {
   engine: DatabaseEngine;
   importError: string | null;
   importRequiredColumns: string[];
+  importUsesTransaction: boolean;
   importDelimiter: string;
   onImportDelimiterChange: (delimiter: string) => void;
   importBusy: boolean;
@@ -72,6 +73,7 @@ export function MainTableDialogs(props: {
     dataImportPreview,
     importError,
     importRequiredColumns,
+    importUsesTransaction,
     importDelimiter,
     onImportDelimiterChange,
     importBusy,
@@ -118,6 +120,7 @@ export function MainTableDialogs(props: {
           dataPreview={dataImportPreview}
           error={importError}
           requiredColumns={importRequiredColumns}
+          usesTransaction={importUsesTransaction}
           delimiter={importDelimiter}
           onDelimiterChange={onImportDelimiterChange}
           importing={importBusy}

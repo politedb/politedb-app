@@ -191,6 +191,8 @@ export type TableStructure = {
   /** MySQL/MariaDB column collation (to restate it in MODIFY COLUMN). */
   collation?: string;
   is_identity?: boolean;
+  /** PostgreSQL: a GENERATED ALWAYS AS (...) column (computed, not written). */
+  is_generated?: boolean;
   isNew?: boolean;
 };
 

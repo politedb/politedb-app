@@ -140,38 +140,85 @@ fn import_delimiter(delimiter: Option<&str>) -> char {
     }
 }
 
+/// Split CSV text into records. The import preview (`parseCsvRecords` in
+/// src/utils/csv.ts) follows the same rules, so preview and import agree:
+/// a leading BOM is dropped; LF, CRLF and CR end a record; a quote only
+/// starts a quoted value at the start of a field (elsewhere it is an
+/// ordinary character); inside quotes a doubled quote is a quote; anything
+/// but a separator or line end after a closing quote is an error; a line
+/// with nothing on it is skipped (a quoted empty value `""` is a record);
+/// an unterminated quote is an error.
 fn parse_csv_text(csv_text: &str, delimiter: char) -> Result<Vec<Vec<String>>, String> {
+    let text = csv_text.strip_prefix('\u{feff}').unwrap_or(csv_text);
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut cell = String::new();
-    let mut chars = csv_text.chars().peekable();
+    let mut chars = text.chars().peekable();
     let mut in_quotes = false;
+    let mut field_start = true;
+    let mut after_close = false;
+    let mut row_quoted = false;
+
+    fn end_record(
+        rows: &mut Vec<Vec<String>>,
+        row: &mut Vec<String>,
+        cell: &mut String,
+        row_quoted: &mut bool,
+    ) {
+        row.push(std::mem::take(cell));
+        let blank_line = row.len() == 1 && row[0].is_empty() && !*row_quoted;
+        if blank_line {
+            row.clear();
+        } else {
+            rows.push(std::mem::take(row));
+        }
+        *row_quoted = false;
+    }
 
     while let Some(ch) = chars.next() {
-        match ch {
-            '"' if in_quotes && matches!(chars.peek(), Some('"')) => {
-                chars.next();
-                cell.push('"');
-            }
-            '"' => in_quotes = !in_quotes,
-            c if c == delimiter && !in_quotes => {
-                row.push(std::mem::take(&mut cell));
-            }
-            '\n' if !in_quotes => {
-                row.push(std::mem::take(&mut cell));
-                if !(row.len() == 1 && row[0].is_empty() && rows.is_empty()) {
-                    rows.push(std::mem::take(&mut row));
+        if in_quotes {
+            if ch == '"' {
+                if matches!(chars.peek(), Some('"')) {
+                    chars.next();
+                    cell.push('"');
                 } else {
-                    row.clear();
+                    in_quotes = false;
+                    after_close = true;
                 }
+            } else {
+                cell.push(ch);
             }
-            '\r' if !in_quotes => {
-                if !matches!(chars.peek(), Some('\n')) {
-                    row.push(std::mem::take(&mut cell));
-                    rows.push(std::mem::take(&mut row));
+            continue;
+        }
+        match ch {
+            '"' if field_start => {
+                in_quotes = true;
+                row_quoted = true;
+                field_start = false;
+            }
+            c if c == delimiter => {
+                row.push(std::mem::take(&mut cell));
+                field_start = true;
+                after_close = false;
+            }
+            '\n' | '\r' => {
+                if ch == '\r' && matches!(chars.peek(), Some('\n')) {
+                    chars.next();
                 }
+                end_record(&mut rows, &mut row, &mut cell, &mut row_quoted);
+                field_start = true;
+                after_close = false;
             }
-            _ => cell.push(ch),
+            _ if after_close => {
+                return Err(format!(
+                    "CSV_PARSE_FAILED: unexpected text after a closing quote in record {}",
+                    rows.len() + 1
+                ));
+            }
+            _ => {
+                cell.push(ch);
+                field_start = false;
+            }
         }
     }
 
@@ -179,9 +226,8 @@ fn parse_csv_text(csv_text: &str, delimiter: char) -> Result<Vec<Vec<String>>, S
         return Err("CSV_PARSE_FAILED: unterminated quoted field".into());
     }
 
-    if !cell.is_empty() || !row.is_empty() {
-        row.push(cell);
-        rows.push(row);
+    if !cell.is_empty() || !row.is_empty() || row_quoted {
+        end_record(&mut rows, &mut row, &mut cell, &mut row_quoted);
     }
 
     Ok(rows)
@@ -367,5 +413,52 @@ mod tests {
         assert_eq!(import_delimiter(Some("")), ',');
         assert_eq!(import_delimiter(Some(";;")), ',');
         assert_eq!(import_delimiter(Some("\"")), ',');
+    }
+
+    /// Shared with src/utils/csv.parity.test.ts: keep both in step.
+    #[test]
+    fn records_match_the_preview_rules() {
+        let parse = |t: &str| parse_csv_text(t, ',').unwrap();
+        // BOM dropped; trailing newline adds nothing.
+        assert_eq!(
+            parse("\u{feff}id,name\n1,Ada\n"),
+            vec![vec!["id", "name"], vec!["1", "Ada"]]
+        );
+        // Blank lines anywhere are skipped; CRLF and CR end records.
+        assert_eq!(
+            parse("\n\nid\r\n\r\n1\r2\n\n"),
+            vec![vec!["id"], vec!["1"], vec!["2"]]
+        );
+        // A quoted empty value is a record.
+        assert_eq!(parse("name\n\"\"\n"), vec![vec!["name"], vec![""]]);
+        // Delimiters, quotes and newlines inside quotes stay in the value.
+        assert_eq!(
+            parse("a,b\n\"x,\"\"y\"\"\nz\",2"),
+            vec![vec!["a", "b"], vec!["x,\"y\"\nz", "2"]]
+        );
+        assert!(parse_csv_text("a\n\"open", ',').is_err());
+        // A quote inside an unquoted value is an ordinary character.
+        assert_eq!(
+            parse("name\na\"b\"c\n12\" widget\n"),
+            vec![vec!["name"], vec!["a\"b\"c"], vec!["12\" widget"]]
+        );
+        // Text after a closing quote is an error, not silently joined.
+        assert!(parse_csv_text("name\n\"a\"oops\n", ',').is_err());
+        // A closing quote may be followed by the separator or a line end.
+        assert_eq!(parse("\"a\",\"b\"\r\n"), vec![vec!["a", "b"]]);
+    }
+
+    #[test]
+    fn splits_every_separator_the_same_way() {
+        for d in [',', ';', '\t', '|'] {
+            let text = format!("a{d}\"b{d}c\"\n1{d}2");
+            assert_eq!(
+                parse_csv_text(&text, d).unwrap(),
+                vec![
+                    vec!["a".to_string(), format!("b{d}c")],
+                    vec!["1".into(), "2".into()]
+                ]
+            );
+        }
     }
 }
