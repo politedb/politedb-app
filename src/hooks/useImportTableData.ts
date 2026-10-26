@@ -184,6 +184,8 @@ export function useImportTableData() {
     null
   );
   const [csvText, setCsvText] = useState<string | null>(null);
+  /** The field separator in use: detected on load, or chosen. */
+  const [delimiter, setDelimiterState] = useState(",");
   const [error, setError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{
@@ -196,7 +198,7 @@ export function useImportTableData() {
       title: "Import table data",
       multiple: false,
       directory: false,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
+      filters: [{ name: "CSV / TSV", extensions: ["csv", "tsv", "txt"] }],
     });
 
     if (path == null || typeof path !== "string") {
@@ -206,9 +208,10 @@ export function useImportTableData() {
     setError(null);
     try {
       const text = await readTextFile(path);
-      const { headers, rows } = parseCsv(text);
+      const parsed = parseCsv(text, /\.tsv$/i.test(path) ? "\t" : undefined);
       setCsvText(text);
-      setDataPreview({ headers, rows });
+      setDelimiterState(parsed.delimiter);
+      setDataPreview({ headers: parsed.headers, rows: parsed.rows });
       return true;
     } catch {
       setDataPreview(null);
@@ -300,6 +303,7 @@ export function useImportTableData() {
           firstIsHeaders,
           fullValidation,
           csvText,
+          delimiter,
         });
         setImportProgress({
           imported: result.imported,
@@ -317,7 +321,19 @@ export function useImportTableData() {
         setImporting(false);
       }
     },
-    [csvText, dataPreview]
+    [csvText, dataPreview, delimiter]
+  );
+
+  /** Split the loaded file again with another separator. */
+  const setDelimiter = useCallback(
+    (next: string) => {
+      if (csvText == null) return;
+      const parsed = parseCsv(csvText, next);
+      setDelimiterState(parsed.delimiter);
+      setDataPreview({ headers: parsed.headers, rows: parsed.rows });
+      setError(null);
+    },
+    [csvText]
   );
 
   const reset = useCallback(() => {
@@ -329,6 +345,8 @@ export function useImportTableData() {
 
   return {
     dataPreview,
+    delimiter,
+    setDelimiter,
     error,
     importing,
     importProgress,

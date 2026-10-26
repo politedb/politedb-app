@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "src/components/common/Dialog";
-import { Input } from "src/components/common/Input";
 import { Select } from "src/components/common/Select";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { Button } from "src/components/common/Button";
@@ -68,11 +67,11 @@ export function ExportTableDialog({
 }: Props) {
   const {
     format,
+    savedPath,
     exporting,
     progress,
     exportOptions,
     setExportOptions,
-    setFileName,
     setProgress,
     handleChangeFormat,
     handleExport,
@@ -371,30 +370,8 @@ export function ExportTableDialog({
                 </div>
               ) : null}
               <div class="shrink-0 space-y-3">
+                {/* The file name is chosen in the save dialog. */}
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <div class="min-w-0 flex-1">
-                    <label class="mb-1 block text-sm font-medium text-neutral-600">
-                      File name
-                    </label>
-                    <div class="flex min-w-0 items-stretch justify-between overflow-hidden rounded-md border border-neutral-300">
-                      <Input
-                        value={suggestedName}
-                        onValueChange={(value) => setFileName(value, tableName)}
-                        placeholder={tableName}
-                        className="rounded-none border-0 px-2 py-1.75 font-mono text-sm focus:outline-none"
-                        disabled={exporting}
-                        aria-label="Export file name"
-                      />
-                      <span
-                        class={cn(
-                          "flex shrink-0 items-center border-l border-neutral-300 bg-neutral-50 px-2 font-mono",
-                          "text-xs text-neutral-500"
-                        )}
-                      >
-                        .{format}
-                      </span>
-                    </div>
-                  </div>
                   <div class="min-w-0 flex-1 shrink-0">
                     <label class="mb-1 block text-sm font-medium text-neutral-600 dark:text-neutral-300">
                       Format
@@ -474,10 +451,31 @@ export function ExportTableDialog({
                 </div>
 
                 {completed && !progress.error ? (
-                  <p class="text-right text-green-600">Completed!</p>
+                  <div class="space-y-1">
+                    <p class="text-green-700">Export complete.</p>
+                    {savedPath ? (
+                      <div class="flex min-w-0 items-center gap-2">
+                        <span
+                          class="min-w-0 flex-1 truncate font-mono text-xs text-neutral-600"
+                          title={savedPath}
+                        >
+                          {savedPath}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          class="h-6 shrink-0 px-2 text-xs"
+                          onClick={() =>
+                            void navigator.clipboard.writeText(savedPath)
+                          }
+                        >
+                          Copy path
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : (
                   <p class="shrink-0 text-right font-medium text-blue-600 tabular-nums">
-                    Processing...
+                    Exporting…
                   </p>
                 )}
                 {progress.warning && (

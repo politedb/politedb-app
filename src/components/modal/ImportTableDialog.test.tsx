@@ -103,3 +103,68 @@ describe("ImportTableDialog", () => {
     ).toBe(false);
   });
 });
+
+describe("ImportTableDialog readability", () => {
+  it("offers the detected separator and lets the user change it", () => {
+    const onDelimiterChange = vi.fn();
+    renderDialog({ delimiter: ";", onDelimiterChange });
+    const separator = screen.getByLabelText("Separator") as HTMLSelectElement;
+    expect(separator.value).toBe(";");
+    choose(separator, "\t");
+    expect(onDelimiterChange).toHaveBeenCalledWith("\t");
+  });
+
+  it("groups validation problems by column with example rows", () => {
+    renderDialog({
+      columns: [{ name: "age", db_type: "int" }],
+      dataPreview: {
+        headers: ["age"],
+        rows: Array.from({ length: 7 }, (_, i) => [`x${i}`]),
+      },
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("7 values need fixing");
+    expect(alert.textContent).toContain(
+      "age: Invalid number — rows 1, 2, 3, 4, 5 and 2 more"
+    );
+  });
+
+  it("says what is running instead of a progress bar it cannot fill", () => {
+    const { rerender } = render(
+      <ImportTableDialog
+        open
+        schema="public"
+        tableName="users"
+        columns={columns}
+        dataPreview={{ headers: ["id"], rows: [["1"], ["2"]] }}
+        error={null}
+        importing
+        progress={{ imported: 0, total: 2 }}
+        handleClose={vi.fn()}
+        onImport={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("status").textContent).toContain(
+      "Importing 2 rows into public.users…"
+    );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    rerender(
+      <ImportTableDialog
+        open
+        schema="public"
+        tableName="users"
+        columns={columns}
+        dataPreview={null}
+        error={null}
+        importing={false}
+        progress={{ imported: 2, total: 2 }}
+        handleClose={vi.fn()}
+        onImport={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("status").textContent).toContain(
+      "Imported 2 rows into public.users."
+    );
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+  });
+});

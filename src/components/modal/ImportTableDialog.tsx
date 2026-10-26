@@ -18,13 +18,14 @@ import {
   DataImportPreview,
   ImportColumnMapping,
   ImportNullMode,
+  type ImportIssue,
   validateImportPreview,
 } from "src/hooks/useImportTableData";
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
+import { Spinner } from "src/components/common/Spinner";
 import { RestoreIcon } from "../icons";
 
 interface Props {
@@ -34,6 +35,9 @@ interface Props {
   columns: ColumnMeta[];
   /** Columns the import must fill (NOT NULL, no default, not generated). */
   requiredColumns?: string[];
+  /** Field separator in use (detected on load) and how to change it. */
+  delimiter?: string;
+  onDelimiterChange?: (delimiter: string) => void;
   dataPreview: DataImportPreview | null;
   error: string | null;
   importing: boolean;
@@ -47,6 +51,35 @@ interface Props {
   }) => void;
 }
 
+const PREVIEW_ROWS = 10;
+const ISSUE_EXAMPLES = 5;
+
+const DELIMITERS: { value: string; label: string }[] = [
+  { value: ",", label: "Comma (,)" },
+  { value: ";", label: "Semicolon (;)" },
+  { value: "\t", label: "Tab" },
+  { value: "|", label: "Pipe (|)" },
+];
+
+/** Validation issues grouped by column and problem, with example rows. */
+function groupIssues(issues: ImportIssue[]) {
+  const groups = new Map<
+    string,
+    { column: string; message: string; rows: number[] }
+  >();
+  for (const issue of issues) {
+    const key = `${issue.column}\u0000${issue.message}`;
+    const group = groups.get(key) ?? {
+      column: issue.column,
+      message: issue.message,
+      rows: [],
+    };
+    group.rows.push(issue.row);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
 /**
  * The first rows as they will land in the table: one column per mapped
  * table column, each taking its value from the chosen CSV column.
@@ -58,8 +91,8 @@ function previewTableData(
   nullMode: ImportNullMode
 ) {
   const rows = firstIsHeaders
-    ? preview.rows.slice(0, 100)
-    : [preview.headers, ...preview.rows.slice(0, 100)];
+    ? preview.rows.slice(0, PREVIEW_ROWS)
+    : [preview.headers, ...preview.rows.slice(0, PREVIEW_ROWS - 1)];
   return rows.map((row) => {
     const obj: Record<string, string | null> = {};
     for (const { name, csvIndex } of mapped) {
@@ -76,6 +109,8 @@ export function ImportTableDialog({
   tableName,
   columns,
   requiredColumns = [],
+  delimiter = ",",
+  onDelimiterChange,
   dataPreview,
   error,
   importing,
@@ -187,10 +222,13 @@ export function ImportTableDialog({
     [columnMapping]
   );
 
-  const progressPct = useMemo(() => {
-    if (!progress || progress.total === 0) return 0;
-    return (progress.imported / progress.total) * 100;
-  }, [progress]);
+  const issueGroups = useMemo(
+    () => groupIssues(validationIssues),
+    [validationIssues]
+  );
+  // The import runs as one transaction: there is no row-by-row progress,
+  // only "running" and "done".
+  const done = !!progress && !importing && !dataPreview;
 
   return (
     <>
@@ -232,12 +270,26 @@ export function ImportTableDialog({
                     {schema}.{tableName}
                   </span>
                 </p>
-                <div class="flex items-center gap-6">
-                  <p class="text-xs text-neutral-600">
-                    {fullValidation
-                      ? "Validating all rows"
-                      : "First 100 rows of the CSV file"}
-                  </p>
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <label class="flex items-center gap-2 text-sm">
+                    Separator
+                    <select
+                      class="h-7 rounded border border-neutral-200 bg-white px-2 text-xs"
+                      value={delimiter}
+                      disabled={importing || !onDelimiterChange}
+                      onChange={(e) =>
+                        onDelimiterChange?.(
+                          (e.currentTarget as HTMLSelectElement).value
+                        )
+                      }
+                    >
+                      {DELIMITERS.map((d) => (
+                        <option key={d.value} value={d.value}>
+                          {d.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <Checkbox
                     checked={firstIsHeaders}
                     onChange={(e) =>
@@ -266,11 +318,8 @@ export function ImportTableDialog({
                 </div>
               </div>
 
-              <OverlayScrollArea
-                className="max-h-40 rounded-lg border border-neutral-200"
-                horizontal
-                vertical
-              >
+              {/* One scroll for the whole dialog: no inner scroll areas. */}
+              <div class="overflow-x-auto rounded-lg border border-neutral-200">
                 <table class="w-full">
                   <thead class="sticky top-0 bg-neutral-50 text-sm">
                     <tr>
@@ -334,10 +383,15 @@ export function ImportTableDialog({
                     ))}
                   </tbody>
                 </table>
-              </OverlayScrollArea>
+              </div>
 
-              <div class="mt-2 max-h-48 overflow-hidden rounded-lg">
-                <p class="mb-1 py-1 text-sm font-medium">Table preview</p>
+              <div class="mt-2 rounded-lg">
+                <p class="mb-1 py-1 text-sm font-medium">
+                  Table preview{" "}
+                  <span class="font-normal text-neutral-500">
+                    (first {PREVIEW_ROWS} rows)
+                  </span>
+                </p>
                 <Table
                   columns={tableColumns}
                   data={tableData}
@@ -351,53 +405,69 @@ export function ImportTableDialog({
                 {dataPreview.rows.length} rows, {mappedColumnCount} mapped
                 columns
               </p>
-              {validationIssues.length > 0 && (
-                <OverlayScrollArea
-                  className="max-h-28 rounded border border-red-200 bg-red-50"
-                  contentClassName="p-2 text-xs text-red-700"
-                  horizontal
-                  vertical
+              {issueGroups.length > 0 && (
+                <div
+                  role="alert"
+                  class="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700"
                 >
                   <p class="mb-1 font-medium">
-                    {validationIssues.length} validation issue(s)
+                    {validationIssues.length}{" "}
+                    {validationIssues.length === 1
+                      ? "value needs fixing"
+                      : "values need fixing"}
+                    {fullValidation ? "" : ` in the first 100 rows`}:
                   </p>
-                  {validationIssues.slice(0, 8).map((issue) => (
-                    <p key={`${issue.row}:${issue.column}:${issue.value}`}>
-                      Row {issue.row}, {issue.column}: {issue.message}
-                    </p>
-                  ))}
-                </OverlayScrollArea>
+                  <ul class="space-y-0.5">
+                    {issueGroups.map((group) => (
+                      <li key={`${group.column}:${group.message}`}>
+                        <span class="font-mono">{group.column}</span>:{" "}
+                        {group.message} — row
+                        {group.rows.length === 1 ? "" : "s"}{" "}
+                        {group.rows.slice(0, ISSUE_EXAMPLES).join(", ")}
+                        {group.rows.length > ISSUE_EXAMPLES
+                          ? ` and ${group.rows.length - ISSUE_EXAMPLES} more`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </>
           )}
 
           {progress && (
-            <div class="rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-xs">
-              <div class="space-y-2">
-                <div class="flex items-center justify-between gap-2">
-                  <p class="min-w-0 truncate font-medium text-neutral-800">
-                    {tableName}
-                  </p>
-                  <span class="shrink-0 text-neutral-500 tabular-nums">
-                    {progress.imported} / {progress.total} rows
+            <div
+              class="flex items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50/80 p-3 text-sm"
+              role="status"
+            >
+              {done ? (
+                <span class="text-green-700">
+                  Imported {progress.imported.toLocaleString()}{" "}
+                  {progress.imported === 1 ? "row" : "rows"} into{" "}
+                  <span class="font-mono">
+                    {schema}.{tableName}
                   </span>
-                </div>
-                <div class="h-2 w-full overflow-hidden rounded-full bg-neutral-200">
-                  <div
-                    class="h-full rounded-full bg-blue-500 transition-[width] duration-300 ease-out"
-                    style={{ width: `${Math.min(100, progressPct)}%` }}
-                  />
-                </div>
-                {progress.imported === progress.total && (
-                  <p class="text-right text-green-600">Completed!</p>
-                )}
-              </div>
+                  .
+                </span>
+              ) : (
+                <>
+                  <Spinner className="size-4 text-blue-600" />
+                  <span>
+                    Importing {progress.total.toLocaleString()}{" "}
+                    {progress.total === 1 ? "row" : "rows"} into{" "}
+                    <span class="font-mono">
+                      {schema}.{tableName}
+                    </span>
+                    …
+                  </span>
+                </>
+              )}
             </div>
           )}
         </DialogContent>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={importing}>
-            Cancel
+            {done ? "Close" : "Cancel"}
           </Button>
           {dataPreview && (dataPreview.rows.length > 0 || !firstIsHeaders) && (
             <Button
@@ -417,7 +487,7 @@ export function ImportTableDialog({
                 missingRequired.length > 0
               }
             >
-              {importing ? "Importing..." : "Import"}
+              {importing ? "Importing…" : "Import"}
             </Button>
           )}
         </DialogFooter>

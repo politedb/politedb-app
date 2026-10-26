@@ -107,6 +107,9 @@ pub struct SqlImportCsvInput {
     pub first_is_headers: bool,
     pub full_validation: bool,
     pub csv_text: String,
+    /// Field separator the preview used (",", ";", "\t", "|"); comma when absent.
+    #[serde(default)]
+    pub delimiter: Option<String>,
 }
 
 #[derive(Clone, serde::Serialize)]

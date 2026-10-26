@@ -45,6 +45,8 @@ export async function operationImportCsvTransaction(args: {
   firstIsHeaders: boolean;
   fullValidation: boolean;
   csvText: string;
+  /** Field separator the preview used; comma when omitted. */
+  delimiter?: string;
 }): Promise<{ imported: number }> {
   return invoke<{ imported: number }>(CMD.operationImportCsvTransaction, {
     input: {
@@ -58,6 +60,7 @@ export async function operationImportCsvTransaction(args: {
       first_is_headers: args.firstIsHeaders,
       full_validation: args.fullValidation,
       csv_text: args.csvText,
+      delimiter: args.delimiter ?? null,
     },
   });
 }

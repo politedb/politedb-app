@@ -96,15 +96,27 @@ export function serializeToCsv(
   return [header, ...lines].join("\n");
 }
 
-/** Parse CSV string into rows (first row = headers, rest = data). Returns { headers, rows } */
-export function parseCsv(csvText: string): {
+/**
+ * Parse CSV text into rows (first row = headers, rest = data). Without a
+ * delimiter it is detected (comma, semicolon, tab, pipe); the one used is
+ * returned so the import splits the file the same way.
+ */
+export function parseCsv(
+  csvText: string,
+  delimiter?: string
+): {
   headers: string[];
   rows: string[][];
+  delimiter: string;
 } {
-  const parse = Papa.parse(csvText);
+  const parse = Papa.parse<string[]>(csvText, {
+    delimiter: delimiter ?? "",
+    delimitersToGuess: [",", ";", "\t", "|"],
+  });
   const rows = parse.data;
+  const used = parse.meta.delimiter || delimiter || ",";
 
-  if (rows.length === 0) return { headers: [], rows: [] };
+  if (rows.length === 0) return { headers: [], rows: [], delimiter: used };
   const headers = rows[0] as string[];
-  return { headers, rows: rows.slice(1) as string[][] };
+  return { headers, rows: rows.slice(1) as string[][], delimiter: used };
 }

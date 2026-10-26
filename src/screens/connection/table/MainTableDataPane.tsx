@@ -146,6 +146,8 @@ export function MainTableDataPane(props: {
     runImport,
     reset: resetImport,
     loadDataImport,
+    delimiter: importDelimiter,
+    setDelimiter: setImportDelimiter,
   } = useImportTableData();
 
   const { onImportSqlDump: importSqlDumpFile } = useDatabaseBackup();
@@ -1274,6 +1276,8 @@ export function MainTableDataPane(props: {
         dataImportPreview={dataImportPreview}
         importError={importError}
         importRequiredColumns={importRequiredColumns}
+        importDelimiter={importDelimiter}
+        onImportDelimiterChange={setImportDelimiter}
         importBusy={importBusy}
         importProgressState={importProgressState}
         handleImport={handleImport}

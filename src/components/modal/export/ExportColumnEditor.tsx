@@ -134,7 +134,7 @@ export function ExportColumnEditor({
         </div>
 
         <OverlayScrollArea
-          className="h-96 flex-1"
+          className="max-h-96 min-h-0 flex-1"
           contentClassName="divide-y divide-neutral-100 dark:divide-neutral-800"
         >
           {filteredColumnNames.length === 0 ? (

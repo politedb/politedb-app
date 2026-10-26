@@ -125,7 +125,22 @@ fn format_import_value(value: Option<&str>, db_type: &str, engine: EngineKind) -
     sql_string_literal(raw, engine)
 }
 
-fn parse_csv_text(csv_text: &str) -> Result<Vec<Vec<String>>, String> {
+/// The single-character field separator, or comma when none (or an
+/// unusable one) is given.
+fn import_delimiter(delimiter: Option<&str>) -> char {
+    match delimiter {
+        Some(d) => {
+            let mut chars = d.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) if c != '"' && c != '\n' && c != '\r' => c,
+                _ => ',',
+            }
+        }
+        None => ',',
+    }
+}
+
+fn parse_csv_text(csv_text: &str, delimiter: char) -> Result<Vec<Vec<String>>, String> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut cell = String::new();
@@ -139,7 +154,7 @@ fn parse_csv_text(csv_text: &str) -> Result<Vec<Vec<String>>, String> {
                 cell.push('"');
             }
             '"' => in_quotes = !in_quotes,
-            ',' if !in_quotes => {
+            c if c == delimiter && !in_quotes => {
                 row.push(std::mem::take(&mut cell));
             }
             '\n' if !in_quotes => {
@@ -173,7 +188,10 @@ fn parse_csv_text(csv_text: &str) -> Result<Vec<Vec<String>>, String> {
 }
 
 pub fn build_csv_import_statements(input: &SqlImportCsvInput) -> Result<Vec<String>, String> {
-    let rows = parse_csv_text(&input.csv_text)?;
+    let rows = parse_csv_text(
+        &input.csv_text,
+        import_delimiter(input.delimiter.as_deref()),
+    )?;
     if rows.is_empty() {
         return Ok(Vec::new());
     }
@@ -290,7 +308,7 @@ mod tests {
     use crate::types::{EngineKind, ImportNullMode, SqlImportColumnInput, SqlImportCsvInput};
     use uuid::Uuid;
 
-    use super::build_csv_import_statements;
+    use super::{build_csv_import_statements, import_delimiter, parse_csv_text};
 
     #[test]
     fn validates_full_csv_import_rows() {
@@ -322,10 +340,32 @@ mod tests {
             first_is_headers: true,
             full_validation: true,
             csv_text,
+            delimiter: None,
         };
 
         let err = build_csv_import_statements(&input).expect_err("row 101 should fail");
         assert!(err.contains("row 101"));
         assert!(err.contains("Invalid number"));
+    }
+
+    #[test]
+    fn splits_on_the_chosen_delimiter() {
+        let rows = parse_csv_text("id;name\n1;\"a;b\"\n", ';').unwrap();
+        assert_eq!(rows, vec![vec!["id", "name"], vec!["1", "a;b"]]);
+        let rows = parse_csv_text("id\tname\n1\tAda", '\t').unwrap();
+        assert_eq!(rows[1], vec!["1", "Ada"]);
+        // Commas stay inside a semicolon file's values.
+        let rows = parse_csv_text("a;b\n1,5;2", ';').unwrap();
+        assert_eq!(rows[1], vec!["1,5", "2"]);
+    }
+
+    #[test]
+    fn falls_back_to_comma_for_unusable_delimiters() {
+        assert_eq!(import_delimiter(None), ',');
+        assert_eq!(import_delimiter(Some(";")), ';');
+        assert_eq!(import_delimiter(Some("\t")), '\t');
+        assert_eq!(import_delimiter(Some("")), ',');
+        assert_eq!(import_delimiter(Some(";;")), ',');
+        assert_eq!(import_delimiter(Some("\"")), ',');
     }
 }

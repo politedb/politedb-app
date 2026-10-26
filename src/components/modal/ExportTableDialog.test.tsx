@@ -11,6 +11,7 @@ import { useProUpgradeStore } from "src/stores/proUpgrade";
 
 const hookState = {
   format: "csv" as const,
+  savedPath: null as string | null,
   exporting: false,
   progress: null as null | {
     exported: number;
@@ -155,7 +156,7 @@ describe("ExportTableDialog UX", () => {
     expect(outer!.className).toMatch(/max-w-xl\b/);
   });
 
-  it("shows current page scope and format suffix", () => {
+  it("shows current page scope; the file name is chosen when saving", () => {
     const { container } = renderDialog({
       pagination: { limit: 50, offset: 0 },
     });
@@ -163,7 +164,8 @@ describe("ExportTableDialog UX", () => {
     expect(
       container.querySelector('[title="public.users · Current page · 10 rows"]')
     ).toBeTruthy();
-    expect(screen.getByText(".csv")).toBeTruthy();
+    expect(screen.queryByLabelText("Export file name")).toBeNull();
+    expect(screen.getByLabelText("Export format")).toBeTruthy();
   });
 
   it("is a plain column picker until masking is turned on", () => {
@@ -445,8 +447,12 @@ describe("ExportTableDialog UX", () => {
   it("marks unknown-total export completed by settlement not row math", () => {
     hookState.progress = { exported: 3 };
     hookState.exporting = false;
+    hookState.savedPath = "/Users/me/Exports/users.csv";
     renderDialog({ totalRows: null });
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
-    expect(screen.getByText("Completed!")).toBeTruthy();
+    expect(screen.getByText("Export complete.")).toBeTruthy();
+    expect(screen.getByTitle("/Users/me/Exports/users.csv")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy path" })).toBeTruthy();
+    hookState.savedPath = null;
   });
 });
