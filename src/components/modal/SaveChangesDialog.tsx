@@ -229,6 +229,8 @@ export function SaveChangesDialog({
 }: Props) {
   const isMongo = engine === "mongo";
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   // A ref, so a second click before the re-render cannot start a 2nd save.
@@ -388,6 +390,50 @@ export function SaveChangesDialog({
     objectSql?.length > 0 ||
     objectNotices.length > 0;
 
+  const onCopyAll = useCallback(async () => {
+    setCopiedAll(true);
+    await navigator.clipboard.writeText(displaySqlStatements.join("\n\n"));
+    setTimeout(() => setCopiedAll(false), 1000);
+  }, [displaySqlStatements]);
+
+  const toggleExpanded = useCallback((index: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  // Diffs grouped by table, so the table name shows once.
+  const diffsByTable = useMemo(() => {
+    const groups = new Map<string, typeof rowDiffs>();
+    for (const diff of rowDiffs) {
+      const list = groups.get(diff.table) ?? [];
+      list.push(diff);
+      groups.set(diff.table, list);
+    }
+    return [...groups.entries()];
+  }, [rowDiffs]);
+
+  const totalChanges =
+    summary.inserts +
+    summary.updates +
+    summary.deletes +
+    summary.structureChanges +
+    summary.constraintChanges +
+    (newTableSql?.length ?? 0) +
+    objectSummary.insertFunctions +
+    objectSummary.insertProcedures +
+    objectSummary.insertTriggers +
+    objectSummary.updateFunctions +
+    objectSummary.updateProcedures +
+    objectSummary.updateTriggers;
+  const confirmLabel =
+    totalChanges > 0
+      ? `Save ${totalChanges} ${totalChanges === 1 ? "change" : "changes"}`
+      : "Save changes";
+
   const onCopyStatement = useCallback(async (sql: string, index: number) => {
     setCopiedIndex(index);
     await navigator.clipboard.writeText(sql);
@@ -490,28 +536,26 @@ export function SaveChangesDialog({
           {/* Summary Section */}
           <div class="w-full rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-              <h3 class="text-sm font-semibold text-neutral-900">
-                Summary of Changes
-              </h3>
+              <h3 class="text-sm font-semibold text-neutral-900">Summary</h3>
             </div>
             <div class="grid grid-cols-1 gap-2 p-4 text-sm sm:grid-cols-2">
               <SummaryItem
-                label="INSERT"
+                label="Add"
                 color="bg-green-50 text-green-700"
                 parts={insertSummaryParts}
               />
               <SummaryItem
-                label="UPDATE"
+                label="Change"
                 color="bg-amber-100 text-amber-800"
                 parts={updateSummaryParts}
               />
               <SummaryItem
-                label="DELETE"
+                label="Delete"
                 color="bg-red-50 text-red-700"
                 parts={deleteSummaryParts}
               />
               <SummaryItem
-                label="STRUCTURE"
+                label="Structure"
                 color="bg-blue-100 text-blue-800"
                 parts={structureSummaryParts}
               />
@@ -522,57 +566,66 @@ export function SaveChangesDialog({
             <div class="w-full rounded-lg border border-neutral-200">
               <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
                 <h3 class="text-sm font-semibold text-neutral-900">
-                  Row & Column Diff ({rowDiffs.length})
+                  Changed {rowEntityPlural} ({rowDiffs.length})
                 </h3>
               </div>
               <OverlayScrollArea
                 className="max-h-45 w-full"
-                contentClassName="space-y-3 p-4"
+                contentClassName="space-y-4 p-4"
               >
-                {rowDiffs.map((diff, index) => (
-                  <div
-                    key={`${diff.table}:${diff.action}:${diff.rowKey}:${index}`}
-                    class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
-                  >
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="min-w-0">
-                        <p class="truncate font-mono text-xs text-neutral-600">
-                          Table: {diff.table}
-                        </p>
-                        <p class="truncate font-mono text-xs text-neutral-600">
-                          {diff.identity}
-                        </p>
-                      </div>
-                      <span
-                        class={cn(
-                          "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
-                          diff.action === "insert" &&
-                            "bg-green-50 text-green-700",
-                          diff.action === "update" &&
-                            "bg-amber-50 text-amber-700",
-                          diff.action === "delete" && "bg-red-50 text-red-700"
-                        )}
+                {diffsByTable.map(([table, diffs]) => (
+                  <section key={table} class="space-y-2">
+                    <h4 class="truncate font-mono text-xs font-semibold text-neutral-700">
+                      {table}
+                    </h4>
+                    {diffs.map((diff, index) => (
+                      <div
+                        key={`${diff.action}:${diff.rowKey}:${index}`}
+                        class="space-y-2 rounded-md border border-neutral-200 bg-white p-3"
                       >
-                        {diff.action}
-                      </span>
-                    </div>
-                    {diff.cells.length > 0 && (
-                      <div class="space-y-1">
-                        {diff.cells.map((cell) => (
-                          <div
-                            key={cell.column}
-                            class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
+                        <div class="flex items-center justify-between gap-2">
+                          <p
+                            class="min-w-0 truncate font-mono text-xs text-neutral-600"
+                            title={diff.identity}
                           >
-                            <span class="truncate font-medium text-neutral-700">
-                              {cell.column}
-                            </span>
-                            <DiffValue value={cell.oldValue} tone="old" />
-                            <DiffValue value={cell.newValue} tone="new" />
+                            {diff.identity}
+                          </p>
+                          <span
+                            class={cn(
+                              "rounded bg-neutral-100 px-2 py-0.5 text-xs font-semibold text-neutral-700 uppercase",
+                              diff.action === "insert" &&
+                                "bg-green-50 text-green-700",
+                              diff.action === "update" &&
+                                "bg-amber-50 text-amber-700",
+                              diff.action === "delete" &&
+                                "bg-red-50 text-red-700"
+                            )}
+                          >
+                            {diff.action}
+                          </span>
+                        </div>
+                        {diff.cells.length > 0 && (
+                          <div class="space-y-1">
+                            {diff.cells.map((cell) => (
+                              <div
+                                key={cell.column}
+                                class="grid grid-cols-[minmax(90px,140px)_1fr_1fr] gap-2 text-xs"
+                              >
+                                <span
+                                  class="truncate font-medium text-neutral-700"
+                                  title={cell.column}
+                                >
+                                  {cell.column}
+                                </span>
+                                <DiffValue value={cell.oldValue} tone="old" />
+                                <DiffValue value={cell.newValue} tone="new" />
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    )}
-                  </div>
+                    ))}
+                  </section>
                 ))}
               </OverlayScrollArea>
             </div>
@@ -581,11 +634,22 @@ export function SaveChangesDialog({
           {/* SQL Statements Section */}
           <div class="mb-1 w-full rounded-lg border border-neutral-200">
             <div class="rounded-t-lg border-b border-neutral-200 bg-neutral-50 px-4 py-2">
-              <h3 class="text-sm font-semibold text-neutral-900">
-                {isMongo
-                  ? `Mongo Operations to Execute (${allSqlStatements.length})`
-                  : `SQL Statements to Execute (${allSqlStatements.length})`}
-              </h3>
+              <div class="flex items-center justify-between gap-2">
+                <h3 class="text-sm font-semibold text-neutral-900">
+                  {isMongo
+                    ? `Mongo operations to run (${allSqlStatements.length})`
+                    : `SQL to run (${allSqlStatements.length})`}
+                </h3>
+                {allSqlStatements.length > 1 ? (
+                  <Button
+                    variant="ghost"
+                    class="h-6 px-2 text-xs text-neutral-600"
+                    onClick={() => void onCopyAll()}
+                  >
+                    {copiedAll ? "Copied" : "Copy all"}
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <OverlayScrollArea
               className="max-h-52 w-full"
@@ -623,13 +687,14 @@ export function SaveChangesDialog({
                             class={`h-6 px-2 text-xs text-neutral-600 hover:bg-white/60 hover:text-neutral-800 ${
                               copied
                                 ? "opacity-100"
-                                : "opacity-0 group-hover:opacity-100"
+                                : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
                             } transition-opacity`}
                             onClick={(e) => {
                               e.stopPropagation();
                               void onCopyStatement(sql, index);
                             }}
                             title={copied ? "Copied!" : "Copy statement"}
+                            aria-label="Copy statement"
                           >
                             {copied ? (
                               <CopyCheckIcon className="size-3.5 text-green-700" />
@@ -638,9 +703,24 @@ export function SaveChangesDialog({
                             )}
                           </Button>
                         </div>
-                        <div class="line-clamp-3 pr-8 font-mono text-xs wrap-break-word">
+                        <div
+                          class={cn(
+                            "pr-8 font-mono text-xs wrap-break-word",
+                            !expanded.has(index) && "line-clamp-3"
+                          )}
+                        >
                           {highlightSql(sql)}
                         </div>
+                        {sql.split("\n").length > 3 || sql.length > 240 ? (
+                          <button
+                            type="button"
+                            class="mt-1 text-xs font-medium text-neutral-600 underline-offset-2 hover:underline"
+                            aria-expanded={expanded.has(index)}
+                            onClick={() => toggleExpanded(index)}
+                          >
+                            {expanded.has(index) ? "Show less" : "Show all"}
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -661,7 +741,7 @@ export function SaveChangesDialog({
           disabled={!!summary.sqlError || onlyNotices || saving}
           aria-busy={saving}
         >
-          {saving ? "Saving…" : "Confirm & Apply"}
+          {saving ? "Saving…" : confirmLabel}
         </Button>
       </DialogFooter>
     </Dialog>

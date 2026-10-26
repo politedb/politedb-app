@@ -37,7 +37,7 @@ function Review() {
 }
 
 const confirm = () =>
-  screen.getByRole("button", { name: "Confirm & Apply" }) as HTMLButtonElement;
+  screen.getByRole("button", { name: /^Save / }) as HTMLButtonElement;
 
 beforeEach(() => drafts().clearAll());
 

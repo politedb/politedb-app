@@ -23,7 +23,7 @@ function renderDialog(
 
 const confirmButton = () =>
   screen.getByRole("button", {
-    name: /Confirm & Apply|Saving…/,
+    name: /^Save |Saving…/,
   }) as HTMLButtonElement;
 
 function deletePatchMap(): PatchMap {
@@ -69,7 +69,7 @@ describe("SaveChangesDialog saving", () => {
 
     finish();
     await waitFor(() =>
-      expect(confirmButton().textContent).toBe("Confirm & Apply")
+      expect(confirmButton().textContent).toBe("Save 1 change")
     );
   });
 
@@ -129,9 +129,57 @@ describe("SaveChangesDialog content", () => {
       objectNotices: [{ kind: "conflict", key: "obj:x", name: "calc" }],
     });
     const alert = screen.getByRole("alert");
-    const summary = screen.getByText("Summary of Changes");
+    const summary = screen.getByText("Summary");
     expect(
       alert.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+});
+
+describe("SaveChangesDialog readability", () => {
+  const longSql = `CREATE TABLE "public"."wide" (\n${Array.from(
+    { length: 8 },
+    (_, i) => `  c${i} int`
+  ).join(",\n")}\n);`;
+
+  it("expands a long statement and copies all statements", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderDialog({ newTableSql: [longSql, 'CREATE TABLE "b" (id int);'] });
+
+    const toggle = screen.getByRole("button", { name: "Show all" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(
+      screen
+        .getByRole("button", { name: "Show less" })
+        .getAttribute("aria-expanded")
+    ).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toContain('CREATE TABLE "b"');
+    expect(writeText.mock.calls[0]![0]).toContain('"wide"');
+  });
+
+  it("labels changes plainly and counts them on the save button", () => {
+    renderDialog({
+      newTableSql: [],
+      patchMap: deletePatchMap(),
+      activeScreen: "tab1",
+      getRowAt: (_key, index) => (index === 0 ? [1, null] : [2, "x"]),
+    });
+    expect(screen.getByText("Change")).toBeTruthy();
+    expect(screen.getByText("Delete")).toBeTruthy();
+    expect(confirmButton().textContent).toBe("Save 2 changes");
+    // The table name heads its rows once.
+    expect(screen.getAllByText("public.users")).toHaveLength(1);
+    expect(screen.getByText("Changed rows (2)")).toBeTruthy();
+  });
+
+  it("lets the keyboard reach each statement's copy button", () => {
+    renderDialog();
+    const copy = screen.getByRole("button", { name: "Copy statement" });
+    expect(copy.className).toContain("focus-visible:opacity-100");
   });
 });

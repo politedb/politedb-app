@@ -50,7 +50,7 @@ describe("SaveChangesDialog when SQL cannot be generated", () => {
     expect(screen.getByRole("alert").textContent).toMatch(
       /can't be saved: .*SQLite|can't be saved: .*sqlite/
     );
-    const confirm = screen.getByRole("button", { name: "Confirm & Apply" });
+    const confirm = screen.getByRole("button", { name: /^Save / });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
   });
 });
@@ -94,7 +94,7 @@ describe("SaveChangesDialog with a deleted empty index draft", () => {
       />
     );
     expect(screen.queryByRole("alert")).toBeNull();
-    const confirm = screen.getByRole("button", { name: "Confirm & Apply" });
+    const confirm = screen.getByRole("button", { name: /^Save / });
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
   });
 });

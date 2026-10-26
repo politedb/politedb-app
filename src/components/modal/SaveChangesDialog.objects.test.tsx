@@ -31,7 +31,7 @@ describe("SaveChangesDialog object notices", () => {
       "new_function — its SQL is empty."
     );
     expect(screen.getByText("Nothing to run yet.")).toBeTruthy();
-    const confirm = screen.getByRole("button", { name: "Confirm & Apply" });
+    const confirm = screen.getByRole("button", { name: /^Save / });
     expect((confirm as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -43,7 +43,7 @@ describe("SaveChangesDialog object notices", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "calc — saving replaces that newer definition."
     );
-    const confirm = screen.getByRole("button", { name: "Confirm & Apply" });
+    const confirm = screen.getByRole("button", { name: /^Save / });
     expect((confirm as HTMLButtonElement).disabled).toBe(false);
   });
 });
