@@ -50,6 +50,27 @@ export type ImportConfig = {
   onSuccess: () => Promise<void>;
 };
 
+const SQL_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2}`;
+const SQL_TIME = String.raw`\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d{1,9})?)?`;
+const SQL_ZONE = String.raw`(?:\s*(?:Z|z|UTC|GMT|[+-]\d{1,2}(?::?\d{2})?))?`;
+const SQL_DATE_TIME_RE = new RegExp(
+  `^(?:${SQL_DATE}(?:[ T]${SQL_TIME}${SQL_ZONE})?|${SQL_TIME}${SQL_ZONE})$`
+);
+
+/**
+ * Whether text reads as a date, time or timestamp the database can take:
+ * the SQL/ISO forms databases print (any fraction of a second, "+07",
+ * "+0700" or "+07:00" zones, a space or a "T"), PostgreSQL's infinity,
+ * or anything the WebView's own parser accepts. The database still has
+ * the last word; this only catches obvious mistakes in the preview.
+ */
+export function isDateTimeText(value: string): boolean {
+  const text = value.trim();
+  if (/^[+-]?infinity$/i.test(text)) return true;
+  if (SQL_DATE_TIME_RE.test(text)) return true;
+  return !Number.isNaN(Date.parse(text));
+}
+
 function typeIssue(value: string, dbType?: string): string | null {
   if (value === "") return null;
   const type = dbType?.toLowerCase() ?? "";
@@ -72,7 +93,7 @@ function typeIssue(value: string, dbType?: string): string | null {
     return /^(true|false|1|0)$/i.test(value) ? null : "Invalid boolean";
   }
   if (/\b(date|time|timestamp|datetime)\b/.test(type)) {
-    return Number.isNaN(Date.parse(value)) ? "Invalid date/time" : null;
+    return isDateTimeText(value) ? null : "Invalid date/time";
   }
   return null;
 }

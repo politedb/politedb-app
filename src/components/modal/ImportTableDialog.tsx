@@ -76,7 +76,7 @@ const DELIMITERS: { value: string; label: string }[] = [
 function groupIssues(issues: ImportIssue[]) {
   const groups = new Map<
     string,
-    { column: string; message: string; rows: number[] }
+    { column: string; message: string; rows: number[]; example: string }
   >();
   for (const issue of issues) {
     const key = `${issue.column}\u0000${issue.message}`;
@@ -84,6 +84,7 @@ function groupIssues(issues: ImportIssue[]) {
       column: issue.column,
       message: issue.message,
       rows: [],
+      example: issue.value,
     };
     group.rows.push(issue.row);
     groups.set(key, group);
@@ -471,6 +472,19 @@ export function ImportTableDialog({
                           {group.rows.length > ISSUE_EXAMPLES
                             ? ` and ${group.rows.length - ISSUE_EXAMPLES} more`
                             : ""}
+                          {/* The offending value, so the cause is visible. */}
+                          <span class="text-red-600/80">
+                            {" "}
+                            (e.g.{" "}
+                            <span class="font-mono" title={group.example}>
+                              {JSON.stringify(
+                                group.example.length > 40
+                                  ? `${group.example.slice(0, 40)}…`
+                                  : group.example
+                              )}
+                            </span>
+                            )
+                          </span>
                         </li>
                       ))}
                     </ul>

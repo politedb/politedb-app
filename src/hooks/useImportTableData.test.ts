@@ -149,3 +149,31 @@ describe("import column helpers", () => {
     ).toEqual([]);
   });
 });
+
+describe("isDateTimeText", () => {
+  it("accepts what databases print, whatever the WebView parser thinks", async () => {
+    const { isDateTimeText } = await import("./useImportTableData");
+    for (const value of [
+      "2026-03-07",
+      "2026-03-07 19:12:05",
+      "2026-03-07T19:12:05.123456+07:00",
+      "2026-03-07 19:12:05.1+07",
+      "2026-03-07 19:12:05+0700",
+      "2026-03-07T19:12:05Z",
+      "2026-03-07 19:12:05 UTC",
+      "19:12",
+      "19:12:05.999999",
+      "infinity",
+      "-infinity",
+    ]) {
+      expect(isDateTimeText(value)).toBe(true);
+    }
+  });
+
+  it("still flags text that is not a date", async () => {
+    const { isDateTimeText } = await import("./useImportTableData");
+    for (const value of ["yesterday-ish", "2026/xx/07", "12345abc"]) {
+      expect(isDateTimeText(value)).toBe(false);
+    }
+  });
+});
