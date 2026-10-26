@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "preact/hooks";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +23,6 @@ import {
 import { Button } from "src/components/common/Button";
 import { Checkbox } from "src/components/common/Checkbox";
 import { Table } from "src/components/common/Table";
-import { showMessage } from "src/lib/system-dialog";
 import type { ColumnMeta } from "src/lib/tauri/types";
 import { OverlayScrollArea } from "src/components/common/OverlayScrollArea";
 import { RestoreIcon } from "../icons";
@@ -27,6 +32,8 @@ interface Props {
   schema: string;
   tableName: string;
   columns: ColumnMeta[];
+  /** Columns the import must fill (NOT NULL, no default, not generated). */
+  requiredColumns?: string[];
   dataPreview: DataImportPreview | null;
   error: string | null;
   importing: boolean;
@@ -40,22 +47,27 @@ interface Props {
   }) => void;
 }
 
-/** Normalize rows to header length so every row has exactly one cell per column. */
-function previewTableData(preview: DataImportPreview, firstIsHeaders: boolean) {
-  const { headers, rows } = preview;
-
-  const displayedRows = firstIsHeaders
-    ? rows.slice(0, 100)
-    : [headers, ...rows.slice(0, 100)];
-
-  const data: Record<string, string>[] = displayedRows.map((row) => {
-    const obj: Record<string, string> = {};
-    for (let i = 0; i < headers.length; i++) {
-      obj[`col_${i}`] = row[i] ?? "";
+/**
+ * The first rows as they will land in the table: one column per mapped
+ * table column, each taking its value from the chosen CSV column.
+ */
+function previewTableData(
+  preview: DataImportPreview,
+  firstIsHeaders: boolean,
+  mapped: { name: string; csvIndex: number }[],
+  nullMode: ImportNullMode
+) {
+  const rows = firstIsHeaders
+    ? preview.rows.slice(0, 100)
+    : [preview.headers, ...preview.rows.slice(0, 100)];
+  return rows.map((row) => {
+    const obj: Record<string, string | null> = {};
+    for (const { name, csvIndex } of mapped) {
+      const raw = row[csvIndex] ?? "";
+      obj[name] = raw === "" && nullMode === "empty-as-null" ? null : raw;
     }
     return obj;
   });
-  return data;
 }
 
 export function ImportTableDialog({
@@ -63,6 +75,7 @@ export function ImportTableDialog({
   schema,
   tableName,
   columns,
+  requiredColumns = [],
   dataPreview,
   error,
   importing,
@@ -74,36 +87,80 @@ export function ImportTableDialog({
   const [nullMode, setNullMode] = useState<ImportNullMode>("empty-string");
   const [fullValidation, setFullValidation] = useState(false);
   const [columnMapping, setColumnMapping] = useState<ImportColumnMapping>({});
+  // Columns the user mapped by hand: re-guessing never overrides them.
+  const touchedRef = useRef(new Set<string>());
 
   const onClose = useCallback(() => {
     if (importing) return;
     handleClose();
   }, [importing, handleClose]);
 
-  const tableColumns = useMemo(() => {
-    return columns.map((col, i) => ({
-      key: `col_${i}`,
-      label: col.name,
-      className: "max-w-38 py-1.5 truncate font-mono text-xs",
-      render: (value: string) => (
-        <span class="block truncate" title={value ?? ""}>
-          {value ?? ""}
-        </span>
-      ),
-    }));
-  }, [columns]);
+  const mappedColumns = useMemo(
+    () =>
+      columns.flatMap((col) => {
+        const csvIndex = columnMapping[col.name];
+        return csvIndex != null && csvIndex >= 0
+          ? [{ name: col.name, csvIndex }]
+          : [];
+      }),
+    [columns, columnMapping]
+  );
+
+  const tableColumns = useMemo(
+    () =>
+      mappedColumns.map(({ name }) => ({
+        key: name,
+        label: name,
+        className: "max-w-38 py-1.5 truncate font-mono text-xs",
+        render: (value: string | null) =>
+          value === null ? (
+            <span class="block text-neutral-400 italic">NULL</span>
+          ) : (
+            <span class="block truncate" title={value}>
+              {value}
+            </span>
+          ),
+      })),
+    [mappedColumns]
+  );
 
   const tableData = useMemo(() => {
     if (!dataPreview) return [];
-    return previewTableData(dataPreview, firstIsHeaders);
-  }, [dataPreview, firstIsHeaders]);
+    return previewTableData(
+      dataPreview,
+      firstIsHeaders,
+      mappedColumns,
+      nullMode
+    );
+  }, [dataPreview, firstIsHeaders, mappedColumns, nullMode]);
 
   useEffect(() => {
     if (!dataPreview) return;
-    setColumnMapping(
-      buildDefaultImportMapping(dataPreview, columns, firstIsHeaders)
+    const guessed = buildDefaultImportMapping(
+      dataPreview,
+      columns,
+      firstIsHeaders
     );
+    setColumnMapping((prev) => {
+      const next = { ...guessed };
+      for (const name of touchedRef.current) {
+        const index = prev[name];
+        if (index == null || index < dataPreview.headers.length) {
+          next[name] = index ?? null;
+        }
+      }
+      return next;
+    });
   }, [dataPreview, columns, firstIsHeaders]);
+
+  const missingRequired = useMemo(
+    () =>
+      requiredColumns.filter((name) => {
+        const index = columnMapping[name];
+        return index == null || index < 0;
+      }),
+    [requiredColumns, columnMapping]
+  );
 
   const validationIssues = useMemo(() => {
     if (!dataPreview) return [];
@@ -135,15 +192,6 @@ export function ImportTableDialog({
     return (progress.imported / progress.total) * 100;
   }, [progress]);
 
-  useEffect(() => {
-    if (!error) return;
-    void showMessage(error, { title: "Import error", kind: "error" }).then(
-      () => {
-        handleClose();
-      }
-    );
-  }, [error, handleClose]);
-
   return (
     <>
       <Dialog open={open} onClose={onClose} size={progress ? "sm" : "xl"}>
@@ -157,6 +205,24 @@ export function ImportTableDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogContent className="gap-2">
+          {error ? (
+            <div
+              role="alert"
+              class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            >
+              <div class="font-medium">Nothing was imported.</div>
+              <div class="mt-1 wrap-break-word">{error}</div>
+            </div>
+          ) : null}
+          {missingRequired.length > 0 ? (
+            <div
+              role="alert"
+              class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+            >
+              Choose a CSV column for {missingRequired.join(", ")}: the table
+              requires a value and has no default.
+            </div>
+          ) : null}
           {dataPreview && (
             <>
               <div class="space-y-2">
@@ -216,7 +282,21 @@ export function ImportTableDialog({
                   <tbody class="text-xs">
                     {columns.map((column) => (
                       <tr key={column.name} class="border-t border-neutral-100">
-                        <td class="px-2 py-1 font-mono">{column.name}</td>
+                        <td class="px-2 py-1 font-mono">
+                          {column.name}
+                          {requiredColumns.includes(column.name) ? (
+                            <span
+                              class={
+                                missingRequired.includes(column.name)
+                                  ? "ml-1.5 font-sans text-red-600"
+                                  : "ml-1.5 font-sans text-neutral-400"
+                              }
+                              title="NOT NULL without a default: needs a CSV column"
+                            >
+                              required
+                            </span>
+                          ) : null}
+                        </td>
                         <td class="px-2 py-1 font-mono">
                           {column.db_type || "text"}
                         </td>
@@ -232,6 +312,7 @@ export function ImportTableDialog({
                               const value = (
                                 e.currentTarget as HTMLSelectElement
                               ).value;
+                              touchedRef.current.add(column.name);
                               setColumnMapping((prev) => ({
                                 ...prev,
                                 [column.name]:
@@ -332,7 +413,8 @@ export function ImportTableDialog({
               disabled={
                 importing ||
                 mappedColumnCount === 0 ||
-                validationIssues.length > 0
+                validationIssues.length > 0 ||
+                missingRequired.length > 0
               }
             >
               {importing ? "Importing..." : "Import"}

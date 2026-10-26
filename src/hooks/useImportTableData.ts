@@ -4,7 +4,9 @@ import { readTextFile } from "src/lib/system-fs";
 import { parseCsv } from "src/utils/csv";
 import { operationImportCsvTransaction } from "src/lib/tauri";
 import type { ColumnMeta } from "src/lib/tauri/types";
-import type { DatabaseEngine } from "src/types";
+import type { DatabaseEngine, TableStructure } from "src/types";
+import { parseNullable } from "src/lib/sql/columnFlags";
+import { showMessage } from "src/lib/system-dialog";
 
 export type DataImportPreview = {
   headers: string[];
@@ -78,9 +80,18 @@ export function buildDefaultImportMapping(
   const mapping: ImportColumnMapping = {};
   const tableCols = columns.map((c) => c.name);
   if (firstIsHeaders) {
-    const headerToIndex = new Map(preview.headers.map((h, i) => [h.trim(), i]));
+    // Exact header first, then the same name ignoring case and spaces.
+    const exact = new Map<string, number>();
+    const loose = new Map<string, number>();
+    preview.headers.forEach((h, i) => {
+      const trimmed = h.trim();
+      if (!exact.has(trimmed)) exact.set(trimmed, i);
+      const key = trimmed.toLowerCase();
+      if (!loose.has(key)) loose.set(key, i);
+    });
     for (const name of tableCols) {
-      mapping[name] = headerToIndex.has(name) ? headerToIndex.get(name)! : null;
+      const index = exact.get(name) ?? loose.get(name.trim().toLowerCase());
+      mapping[name] = index ?? null;
     }
     return mapping;
   }
@@ -125,6 +136,35 @@ export function validateImportPreview(
   return issues;
 }
 
+/**
+ * Columns an import must fill: NOT NULL, without a default, not generated
+ * (identity, auto-increment, computed). Unknown nullability or a table
+ * structure that has not loaded never marks a column required.
+ */
+export function requiredImportColumns(
+  columns: ColumnMeta[],
+  structure: TableStructure[] | null | undefined
+): string[] {
+  if (!structure?.length) return [];
+  const byName = new Map(structure.map((col) => [col.column_name, col]));
+  return columns
+    .filter((column) => {
+      const info = byName.get(column.name);
+      if (!info) return false;
+      if (parseNullable(info.is_nullable) !== false) return false;
+      if (column.auto_generated || info.is_identity) return false;
+      if (/auto_increment|generated|identity|serial/i.test(info.extra ?? "")) {
+        return false;
+      }
+      const hasDefault =
+        info.default_is_null === undefined
+          ? !!(info.column_default ?? column.column_default ?? "").trim()
+          : !info.default_is_null;
+      return !hasDefault;
+    })
+    .map((column) => column.name);
+}
+
 function importIssueMessage(issue: ImportIssue): string {
   const preview =
     issue.value.length > 32 ? `${issue.value.slice(0, 32)}...` : issue.value;
@@ -136,7 +176,7 @@ function importExecutionErrorMessage(error: unknown) {
   const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*(.*)/);
   if (!match) return raw || "Import failed.";
   const reason = match[2]?.trim() || "Database rejected the row.";
-  return `Import failed at row ${match[1]}, column unknown, value unavailable: ${reason}`;
+  return `Import failed at data row ${match[1]}: ${reason}`;
 }
 
 export function useImportTableData() {
@@ -173,7 +213,11 @@ export function useImportTableData() {
     } catch {
       setDataPreview(null);
       setCsvText(null);
-      setError("Failed to read or parse CSV file.");
+      // The import dialog is not open yet: say so here, not silently.
+      void showMessage("The CSV file could not be read or parsed.", {
+        title: "Import error",
+        kind: "error",
+      });
       return false;
     }
   }, []);
@@ -266,6 +310,8 @@ export function useImportTableData() {
         setCsvText(null);
         await onSuccess();
       } catch (err) {
+        // Back to the mapping, with the reason; the file and options stay.
+        setImportProgress(null);
         setError(importExecutionErrorMessage(err));
       } finally {
         setImporting(false);

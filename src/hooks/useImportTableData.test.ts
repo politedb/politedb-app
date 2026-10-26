@@ -86,3 +86,50 @@ describe("CSV import helpers", () => {
     ).toMatchObject([{ row: 101, column: "id", value: "bad" }]);
   });
 });
+
+describe("import column helpers", () => {
+  it("maps headers ignoring case and spaces, exact names first", async () => {
+    const { buildDefaultImportMapping } = await import("./useImportTableData");
+    const mapping = buildDefaultImportMapping(
+      { headers: [" Email ", "NAME", "name"], rows: [] },
+      [
+        { name: "email", db_type: "text" },
+        { name: "name", db_type: "text" },
+        { name: "age", db_type: "int" },
+      ],
+      true
+    );
+    expect(mapping).toEqual({ email: 0, name: 2, age: null });
+  });
+
+  it("lists columns that need a value: NOT NULL, no default, not generated", async () => {
+    const { requiredImportColumns } = await import("./useImportTableData");
+    const structure = (
+      name: string,
+      extra: Partial<import("src/types").TableStructure> = {}
+    ) => ({
+      column_name: name,
+      data_type: "text",
+      is_nullable: "NO",
+      check: "",
+      column_default: "",
+      foreign_key: "",
+      comment: "",
+      ...extra,
+    });
+    const columns = ["id", "email", "note", "created", "code", "uuid"].map(
+      (name) => ({ name, db_type: "text" })
+    );
+    expect(
+      requiredImportColumns(columns, [
+        structure("id", { is_identity: true }),
+        structure("email"),
+        structure("note", { is_nullable: "YES" }),
+        structure("created", { column_default: "now()" }),
+        structure("code", { default_is_null: false, column_default: "" }),
+        structure("uuid", { extra: "auto_increment" }),
+      ])
+    ).toEqual(["email"]);
+    expect(requiredImportColumns(columns, null)).toEqual([]);
+  });
+});

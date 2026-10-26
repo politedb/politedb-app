@@ -67,7 +67,13 @@ const columns = [
 function renderDialog(
   overrides: Partial<Parameters<typeof ExportTableDialog>[0]> = {}
 ) {
-  return render(
+  return render(dialogElement(overrides));
+}
+
+function dialogElement(
+  overrides: Partial<Parameters<typeof ExportTableDialog>[0]> = {}
+) {
+  return (
     <ExportTableDialog
       open
       handleClose={vi.fn()}
@@ -90,6 +96,7 @@ function enableMasking() {
 
 describe("ExportTableDialog UX", () => {
   beforeEach(() => {
+    showMessage.mockClear();
     useLicenseStore.setState({ state: { pro_access: true } as LicenseState });
     hookState.format = "csv";
     hookState.exporting = false;
@@ -134,11 +141,11 @@ describe("ExportTableDialog UX", () => {
     const { container } = renderDialog();
     expect(screen.getByText("Export data")).toBeTruthy();
     expect(screen.getByText("public.users")).toBeTruthy();
-    // Scope is conveyed via title tooltip, not as visible subtitle text
-    const identity = container.querySelector(
-      '[title="public.users · All rows"]'
-    );
-    expect(identity).toBeTruthy();
+    // The scope is visible, with the row count when known.
+    expect(
+      container.querySelector('[title="public.users · All rows · 10 rows"]')
+    ).toBeTruthy();
+    expect(screen.getByText("All rows · 10 rows")).toBeTruthy();
   });
 
   it("applies default Dialog max width (max-w-xl) on the outer wrapper", () => {
@@ -152,10 +159,10 @@ describe("ExportTableDialog UX", () => {
     const { container } = renderDialog({
       pagination: { limit: 50, offset: 0 },
     });
-    const identity = container.querySelector(
-      '[title="public.users · Current page"]'
-    );
-    expect(identity).toBeTruthy();
+    expect(screen.getByText("Current page · 10 rows")).toBeTruthy();
+    expect(
+      container.querySelector('[title="public.users · Current page · 10 rows"]')
+    ).toBeTruthy();
     expect(screen.getByText(".csv")).toBeTruthy();
   });
 
@@ -399,35 +406,40 @@ describe("ExportTableDialog UX", () => {
     expect(screen.getByText("7,200 / 18,000 rows")).toBeTruthy();
   });
 
-  it("shows an info window after export cancellation settles", async () => {
+  it("closes quietly once a cancelled export settles", async () => {
     const handleClose = vi.fn();
     hookState.progress = { exported: 12, error: "Export cancelled" };
     hookState.exporting = false;
     renderDialog({ handleClose, totalRows: null });
-    expect(screen.queryByText(/^Error$/)).toBeNull();
-    await waitFor(() =>
-      expect(showMessage).toHaveBeenCalledWith("Export is cancelled", {
-        title: "Aborted",
-        kind: "info",
-      })
-    );
+    await waitFor(() => expect(handleClose).toHaveBeenCalled());
+    expect(showMessage).not.toHaveBeenCalled();
     expect(hookState.setProgress).toHaveBeenCalledWith(null);
     expect(hookState.clearMaskState).toHaveBeenCalled();
-    expect(handleClose).toHaveBeenCalled();
   });
 
-  it("shows a native error dialog for hard export failures", async () => {
+  it("keeps the dialog open with the reason when an export fails", async () => {
     const handleClose = vi.fn();
     hookState.progress = { exported: 0, error: "Disk full" };
     hookState.exporting = false;
     renderDialog({ handleClose });
     await waitFor(() =>
-      expect(showMessage).toHaveBeenCalledWith("Disk full", {
-        title: "Export error",
-        kind: "error",
-      })
+      expect(hookState.setProgress).toHaveBeenCalledWith(null)
     );
-    expect(handleClose).toHaveBeenCalled();
+    expect(handleClose).not.toHaveBeenCalled();
+    expect(showMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows the failure above the settings, ready to retry", async () => {
+    const view = renderDialog();
+    hookState.progress = { exported: 0, error: "Disk full" };
+    hookState.exporting = false;
+    view.rerender(dialogElement());
+    hookState.progress = null;
+    view.rerender(dialogElement());
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Disk full")
+    );
+    expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
   });
 
   it("marks unknown-total export completed by settlement not row math", () => {
