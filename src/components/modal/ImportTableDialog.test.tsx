@@ -211,6 +211,7 @@ function renderFailedRun(extra: Record<string, unknown>) {
       {...props}
       error={"Import failed at data row 1: duplicate key"}
       importing={false}
+      {...extra}
     />
   );
   return view;
@@ -226,6 +227,23 @@ describe("ImportTableDialog failure wording", () => {
     expect(screen.getByText(/usually nothing was saved/)).toBeTruthy();
     expect(screen.queryByText("Nothing was imported.")).toBeNull();
     expect(screen.queryByText("Column mapping")).toBeNull();
+  });
+
+  it("keeps the database's detail and hint lines", async () => {
+    const view = renderFailedRun({
+      usesTransaction: true,
+      error:
+        "Import failed at data row 2: ERROR: duplicate key\nDETAIL: Key (email)=(a@example.test) already exists.\nHINT: Remove the duplicate.",
+    });
+    await waitFor(() =>
+      expect(screen.getByText("The import stopped.")).toBeTruthy()
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("DETAIL: Key (email)=(a@example.test)");
+    expect(alert.textContent).toContain("HINT: Remove the duplicate.");
+    expect(
+      view.container.querySelector(".whitespace-pre-line")?.textContent
+    ).toContain("\nDETAIL:");
   });
 
   it("warns that earlier rows may be saved where it runs row by row", async () => {

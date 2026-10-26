@@ -241,7 +241,7 @@ function importIssueMessage(issue: ImportIssue): string {
 
 function importExecutionErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error);
-  const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*(.*)/);
+  const match = raw.match(/SQL_TX_STATEMENT_(\d+)_FAILED:\s*([\s\S]*)/);
   if (!match) return raw || "Import failed.";
   const reason = match[2]?.trim() || "Database rejected the row.";
   return `Import failed at data row ${match[1]}: ${reason}`;

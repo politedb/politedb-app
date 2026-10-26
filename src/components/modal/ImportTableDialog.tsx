@@ -317,7 +317,9 @@ export function ImportTableDialog({
               class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
             >
               <div class="font-medium">The import stopped.</div>
-              <div class="mt-1 wrap-break-word">{error}</div>
+              <div class="mt-1 wrap-break-word whitespace-pre-line">
+                {error}
+              </div>
               <div class="mt-1">
                 {usesTransaction
                   ? "It ran in a transaction, so usually nothing was saved. Check the table before importing again."
