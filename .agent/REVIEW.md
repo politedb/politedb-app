@@ -4,7 +4,7 @@
 
 CHANGES REQUIRED
 
-Latest review: **round 3**, `b21d19f..95674cf`; see appended findings and verification.
+Latest review: **round 4**, `95674cf..daa4912`; round 3 named findings resolved, two new P2 read regressions require changes. See appended findings and verification.
 
 Reviewed `main..6f853c31b22f76672db0dace4a6d10adf8152533` on `fix/backup-restore-safety`, against the human-approved batch 1 requirements. No application source changed.
 
@@ -169,3 +169,63 @@ Both return `true` and are blocked in both restricted modes. These are valid unq
 - Ordinary tested XOR/JSON reads return false; the operator problem is hidden writes later on the same line. Unterminated quoted/comment tails containing write keywords return false without crashing; malformed SQL remains the backend validator's responsibility. No claim that malformed SQL is valid or that heuristic classification is a complete database write boundary (e.g. side effects in called functions).
 - Committed classifier tests cover the previous named failures but lack E escape strings, dollar-sign keyword substrings, PostgreSQL operator-before-write cases, MySQL non-comment dashes, and typed EXPLAIN ANALYZE. Restore refresh assertions address the requested partial-stop gap.
 - No live database execution, native Touch ID/dialog session, or desktop UI exercised. Dispatch tested with mocks; SQL semantics checked against official documentation. No Rust changes/checks. SQL editor's previously documented live-mode/authentication race remains outside this fix. Only `.agent/REVIEW.md` retained as a change; unrelated `.claude/launch.json` preserved. No source edits, commit, push or merge.
+
+
+## Re-review (round 4)
+
+**Status: CHANGES REQUIRED.** Reviewed `95674cf..daa4912` on `fix/backup-restore-safety` (2026-10-27). HEAD `fbbca6c` differs from `daa4912` only in this review document; tested application code matches the requested fix. Scope follows the human agreement: preexisting heuristic gaps belong to the separate SQL-editor server-side read-only enforcement task, not new blockers here.
+
+### Round 3 disposition
+
+- **P1 dialect-specific line comments — resolved for all four reported writes.** PostgreSQL XOR/JSON operators before INTO, XOR in a CTE before final DELETE, and MySQL non-comment `--1` before INTO OUTFILE now return true (`src/lib/sql/detect.ts:109`, `:113`, `:225`). Committed cases: `src/lib/sql/detect.test.ts:34`–`:38`.
+- **P2 explicit escape strings — resolved.** `SELECT E'it\'s INTO text';` now returns false, with PostgreSQL E-string escape handling at `src/lib/sql/detect.ts:137`; regression at `src/lib/sql/detect.test.ts:82`.
+- **P2 dollar-sign identifiers — resolved for reported cases.** `cost$into` and `cost$delete` remain whole tokens (`src/lib/sql/detect.ts:67`); both return false. A reviewer probe also checks a non-ASCII identifier prefix. Committed cases: `src/lib/sql/detect.test.ts:84`–`:85`.
+- **Additional preexisting EXPLAIN ANALYZE limitation — improved.** Keyword and parenthesized ANALYZE writes now return true (`src/lib/sql/detect.ts:178`, `:211`). Reviewer probes confirm OFF/0/FALSE remain non-executing, ON/1/TRUE execute classification, writable CTE and SELECT INTO explanations count as writes, and an analyzed ordinary SELECT remains a read. This does not establish a complete SQL write boundary.
+
+### P2 — MySQL reading exposes PostgreSQL dollar-string contents
+
+**Locations:** `src/lib/sql/detect.ts:162`, `:225`–`:228`; consumers `src/screens/connection/hooks/useSqlRunner.ts:651`, `:671`.
+
+These ordinary PostgreSQL reads returned false at `95674cf`, but return true at `daa4912`:
+
+```sql
+SELECT $$ put into box $$;
+SELECT $tag$ put INTO box $tag$;
+WITH t AS (SELECT $$ delete from a $$ AS txt) SELECT * FROM t;
+SELECT $$ /*! text */ $$;
+```
+
+Dollar quoting is now stripped only by the PostgreSQL reading. The MySQL reading sees standalone INTO/DELETE or an executable-comment opener inside the string; its true result overrides the correct PostgreSQL result. Lock/Production consequently reject these reads through the unchanged classifier gates. Preserve valid PostgreSQL dollar-string reads when combining readings, preferably by using the connection's dialect rather than letting an incompatible reading override it. Add classifier regressions for all examples and restricted-runner coverage.
+
+### P2 — Alternate line-comment readings block ordinary commented reads
+
+**Locations:** `src/lib/sql/detect.ts:109`, `:113`, `:225`–`:228`; consumers `src/screens/connection/hooks/useSqlRunner.ts:651`, `:671`.
+
+Both returned false at `95674cf`, but return true at `daa4912`:
+
+```sql
+-- Valid PostgreSQL read: no space is required after the dashes.
+SELECT 1 --note INTO backup
+;
+-- Valid MySQL read: hash starts a comment.
+SELECT 1 # note INTO backup
+;
+```
+
+The MySQL reading exposes INTO in the PostgreSQL comment; the PostgreSQL reading exposes INTO in the MySQL comment. Both valid reads are now blocked in restricted modes. Retain the round 3 operator/write fixes while applying the actual engine's line-comment rules (or otherwise excluding incompatible readings); add these commented-read cases beside operator-before-write regressions. These are new usability regressions, not requests to close preexisting heuristic safety gaps.
+
+### Test quality
+
+- New table-driven cases assert correct outcomes for every named round 3 reproduction, plus positive/negative EXPLAIN cases. Existing round 2 CTE, global SET, comment, transaction and DO cases remain passing.
+- Dollar-string coverage at `src/lib/sql/detect.test.ts:74`–`:75` misses the new defect: `$$into$$` has no keyword boundary in the MySQL reading, while the tagged DELETE example starts with SELECT, which scans only for INTO. Add spaced INTO inside a dollar string and DELETE inside a WITH string.
+- Comment read coverage at `src/lib/sql/detect.test.ts:90` uses a space after `--`, so both readings agree. Add PostgreSQL no-space comments and MySQL hash comments containing write keywords.
+- OFF/0 and ON/1 EXPLAIN options pass reviewer probes but lack committed coverage. Changed tests are classifier-only; no new Lock/Production runner assertions accompany the fix. Consumer effects above were traced statically, not newly reproduced through hook probes in this round.
+
+### Verification and limitations
+
+- `npm run build`: **passed** (TypeScript and production build). Warnings remain for browser externalization of `node:zlib`, ineffective dynamic imports and large chunks.
+- `npm run test:run -- --exclude '**/.claude/**' src/lib/sql src/lib/dump src/screens/connection/hooks/useDatabaseBackup.restore.test.ts src/screens/connection/hooks/useDatabaseBackup.free.test.ts src/screens/connection/hooks/useSqlRunner.sequential.test.ts src/screens/connection/hooks/useSqlRunner.explainAnalyze.test.ts src/screens/connection/hooks/useSqlHistoryRunner.test.ts src/lib/ai-assistant/agent.test.ts`: **16 files / 257 tests passed**.
+- Initial unexcluded run also discovered `.claude/worktrees/bold-wilbur-9b667c` and failed its 51 runner tests with a Preact hook-instance error (`__H`). Excluding that unrelated nested checkout produced the clean target-checkout result above; no configuration/source changed to do so.
+- Reviewer differential probes: **31 cases / 62 assertions passed**, loading the actual TypeScript classifier at `95674cf` and in the working tree through the installed TypeScript transpiler. Includes six newly regressed reads, all named round 3 cases, retained round 2 cases, and EXPLAIN option combinations. Assertions encode the observed before/after behavior; passing regression probes is evidence of the defects, not correctness. No probe files retained.
+- No new executable-write false negative found in the reviewed cases. Preexisting incompleteness remains a limitation for the separately tracked server-side SQL-editor read-only enforcement task; for example, `SELECT side_effect_function()` still returns false in both versions. Existing editor live-mode/authentication races remain outside this fix. Dump Lock/Production refusal remains independent of this heuristic.
+- No live database queries, native dialogs/Touch ID, desktop UI, or Rust checks performed; no Rust/source changes. Only this review document changed; unrelated `.claude/launch.json` preserved. No commit, push or merge.
