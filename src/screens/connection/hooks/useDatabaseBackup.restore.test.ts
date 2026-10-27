@@ -50,7 +50,7 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
   }),
 }));
 
-import { useDatabaseBackup } from "./useDatabaseBackup";
+import { canBackupDatabase, useDatabaseBackup } from "./useDatabaseBackup";
 
 const DUMP =
   "CREATE TABLE a (id int);\nINSERT INTO a VALUES (1);\nINSERT INTO a VALUES (2);";
@@ -158,7 +158,73 @@ describe("restoring a dump", () => {
   });
 });
 
+describe("the safety mode is read again while a dump runs", () => {
+  it.each([
+    ["locked", () => setMode("lock")],
+    ["switched to Production", () => setMode("production")],
+    ["closed", () => useScreenStore.setState({ profileTabs: [] })],
+  ])("runs nothing when the tab is %s during Touch ID", async (_c, change) => {
+    setMode("safe");
+    m.touchId.mockImplementation(async () => {
+      change();
+      return true;
+    });
+    await restore();
+    expect(m.touchId).toHaveBeenCalledTimes(1);
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the remaining statements when the tab is locked mid-run", async () => {
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("lock");
+      return {};
+    });
+    await restore();
+    expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
+    const [message] = m.showMessage.mock.calls[0]!;
+    expect(message).toContain("so nothing more was restored");
+    expect(message).toContain("Stopped before statement 2 of 3.");
+    expect(message).toContain(
+      "The statement before it already ran and stays in the database."
+    );
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
+  it("asks for Touch ID when the tab turns Safe mid-run", async () => {
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("safe");
+      return {};
+    });
+    await restore();
+    expect(m.touchId).toHaveBeenCalledTimes(1);
+    expect(m.runSqlQuery).toHaveBeenCalledTimes(3);
+  });
+
+  it("applies the same checks to a table-level SQL dump import", async () => {
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("production");
+      return {};
+    });
+    const { result } = renderHook(() => useDatabaseBackup());
+    await act(() => result.current.onImportSqlDump(undefined, { tabId: "t1" }));
+    expect(m.runSqlQuery).toHaveBeenCalledTimes(1);
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "so nothing more was imported"
+    );
+  });
+});
+
 describe("database backup", () => {
+  it("is offered only where it holds the table structure", () => {
+    expect(canBackupDatabase("postgres")).toBe(true);
+    expect(canBackupDatabase("mysql")).toBe(true);
+    expect(canBackupDatabase("mariadb")).toBe(true);
+    expect(canBackupDatabase("sqlite")).toBe(false);
+    expect(canBackupDatabase("sqlserver")).toBe(false);
+    expect(canBackupDatabase(undefined)).toBe(false);
+  });
+
   it("is not offered where it would hold rows only", async () => {
     m.rt.engine = "sqlite";
     const { result } = renderHook(() => useDatabaseBackup());

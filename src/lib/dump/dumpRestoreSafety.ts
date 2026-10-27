@@ -2,10 +2,8 @@ import {
   effectiveSafetyMode,
   normalizeQuerySafetyMode,
   readNeedsTouchId,
-  readTouchIdPrompt,
   type QuerySafetyMode,
 } from "src/lib/queries/querySafety";
-import { isMutatingStatement } from "src/lib/sql/detect";
 import { useScreenStore } from "src/stores/screen";
 
 /** The tab's safety mode right now (a locked tab is Lock), or null once closed. */
@@ -26,42 +24,40 @@ export type DumpRunGate =
   | { kind: "blocked"; message: string };
 
 /**
- * Whether a dump may run on a tab, by the rules the SQL editor applies to
- * the same statements: Lock and Production block anything that changes the
- * database, Safe (and Production, for reads) asks for Touch ID first.
- * Before the file is read (`statements` null) a dump is assumed to write.
+ * Whether a dump may run on a tab in its current safety mode. A dump exists
+ * to change the database, so Lock and Production refuse it outright rather
+ * than trust a per-statement guess at what is a read; Safe asks for Touch
+ * ID first.
  */
 export function dumpRunGate(
   mode: QuerySafetyMode | null,
-  statements: readonly string[] | null,
-  action: "restore" | "import"
+  action: "restore" | "import",
+  /** Some statements already ran: "nothing more" was done. */
+  started = false
 ): DumpRunGate {
-  const done = action === "restore" ? "restored" : "imported";
+  const done = `${started ? "nothing more" : "nothing"} was ${action === "restore" ? "restored" : "imported"}`;
   if (mode === null) {
     return {
       kind: "blocked",
-      message: `The connection tab was closed: nothing was ${done}.`,
+      message: `The connection tab was closed, so ${done}.`,
     };
   }
-  const writes = statements === null || statements.some(isMutatingStatement);
-  if (writes && mode === "lock") {
+  if (mode === "lock") {
     return {
       kind: "blocked",
-      message: `This tab is locked: nothing was ${done}. Unlock it to ${action} a dump.`,
+      message: `This tab is locked, so ${done}. Unlock it to ${action} a dump.`,
     };
   }
-  if (writes && mode === "production") {
+  if (mode === "production") {
     return {
       kind: "blocked",
-      message: `Production mode blocks SQL that changes the database, so nothing was ${done}. Choose another safety mode to ${action} a dump.`,
+      message: `Production mode blocks SQL that changes the database, so ${done}. Choose another safety mode to ${action} a dump.`,
     };
   }
   if (readNeedsTouchId(mode)) {
     return {
       kind: "touch-id",
-      prompt: writes
-        ? `Authenticate with Touch ID to ${action} a dump into this database.`
-        : readTouchIdPrompt(mode),
+      prompt: `Authenticate with Touch ID to ${action} a dump into this database.`,
     };
   }
   return { kind: "run" };

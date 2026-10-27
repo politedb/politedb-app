@@ -6,43 +6,38 @@ vi.mock("src/stores/persistentStore", () => ({
   usePersistentStore: { getState: () => ({ scheduleSave: () => {} }) },
 }));
 
-const writes = ["CREATE TABLE a (id int)", "INSERT INTO a VALUES (1)"];
-const reads = ["SELECT 1"];
-
 describe("dumpRunGate", () => {
-  it("blocks writes in Lock and Production, as the SQL editor does", () => {
-    expect(dumpRunGate("lock", writes, "restore")).toMatchObject({
+  it("refuses a whole dump in Lock and Production, whatever it holds", () => {
+    expect(dumpRunGate("lock", "restore")).toEqual({
       kind: "blocked",
-      message: expect.stringContaining("locked"),
+      message:
+        "This tab is locked, so nothing was restored. Unlock it to restore a dump.",
     });
-    expect(dumpRunGate("production", writes, "import")).toMatchObject({
+    expect(dumpRunGate("production", "import")).toMatchObject({
       kind: "blocked",
-      message: expect.stringContaining("nothing was imported"),
+      message: expect.stringContaining("so nothing was imported"),
     });
   });
 
-  it("assumes a dump writes before it is read", () => {
-    expect(dumpRunGate("production", null, "restore").kind).toBe("blocked");
-    expect(dumpRunGate("lock", null, "restore").kind).toBe("blocked");
-    expect(dumpRunGate("safe", null, "restore").kind).toBe("touch-id");
-    expect(dumpRunGate("default", null, "restore").kind).toBe("run");
+  it("says nothing more ran once statements already did", () => {
+    expect(dumpRunGate("lock", "restore", true)).toMatchObject({
+      message: expect.stringContaining("so nothing more was restored"),
+    });
   });
 
-  it("asks for Touch ID in Safe mode, and for reads in Production", () => {
-    expect(dumpRunGate("safe", writes, "restore")).toEqual({
+  it("asks for Touch ID in Safe mode and runs in Default", () => {
+    expect(dumpRunGate("safe", "restore")).toEqual({
       kind: "touch-id",
       prompt:
         "Authenticate with Touch ID to restore a dump into this database.",
     });
-    expect(dumpRunGate("production", reads, "restore").kind).toBe("touch-id");
-    expect(dumpRunGate("lock", reads, "restore").kind).toBe("run");
+    expect(dumpRunGate("default", "restore").kind).toBe("run");
   });
 
-  it("runs in Default mode and refuses once the tab is gone", () => {
-    expect(dumpRunGate("default", writes, "restore").kind).toBe("run");
-    expect(dumpRunGate(null, writes, "restore")).toMatchObject({
+  it("refuses once the tab is gone", () => {
+    expect(dumpRunGate(null, "restore")).toMatchObject({
       kind: "blocked",
-      message: "The connection tab was closed: nothing was restored.",
+      message: "The connection tab was closed, so nothing was restored.",
     });
   });
 });

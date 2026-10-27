@@ -790,7 +790,7 @@ export function useDatabaseBackup() {
         action === "restore" ? "Restore error" : "Import error";
 
       // Lock and Production refuse before a file is even chosen…
-      const early = dumpRunGate(tabSafetyModeNow(tabId), null, action);
+      const early = dumpRunGate(tabSafetyModeNow(tabId), action);
       if (early.kind === "blocked") {
         void showMessage(early.message, { title: errorTitle, kind: "warning" });
         return;
@@ -853,30 +853,43 @@ export function useDatabaseBackup() {
         );
         if (!ok) return;
 
-        // …and everything is checked again right before running, on the
-        // statements themselves (the mode may have changed meanwhile).
-        const gate = dumpRunGate(tabSafetyModeNow(tabId), statements, action);
-        if (gate.kind === "blocked") {
-          void showMessage(gate.message, {
-            title: errorTitle,
-            kind: "warning",
-          });
-          return;
-        }
-        if (gate.kind === "touch-id") {
-          try {
-            await securityTouchIdAuthenticate(gate.prompt);
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            void showMessage(
-              `Touch ID authentication failed, so nothing was run: ${reason}`,
-              { title: errorTitle, kind: "warning" }
+        // …and checked again before every statement, on the originating
+        // tab's live mode: it may change during the confirmation, Touch ID
+        // or the run itself. Touch ID is asked once, when first needed.
+        let authenticated = false;
+        const ensureAllowed = async (): Promise<string | null> => {
+          for (;;) {
+            const gate = dumpRunGate(
+              tabSafetyModeNow(tabId),
+              action,
+              applied > 0
             );
-            return;
+            if (gate.kind === "blocked") return gate.message;
+            if (gate.kind === "run" || authenticated) return null;
+            try {
+              await securityTouchIdAuthenticate(gate.prompt);
+              authenticated = true;
+            } catch (err) {
+              const reason = err instanceof Error ? err.message : String(err);
+              return `Touch ID authentication failed, so ${applied > 0 ? "nothing more" : "nothing"} was run: ${reason}`;
+            }
           }
+        };
+        const describeApplied = () =>
+          applied === 0
+            ? "Nothing before it had changed the database."
+            : applied === 1
+              ? "The statement before it already ran and stays in the database."
+              : `The ${applied} statements before it already ran and stay in the database.`;
+
+        const refused = await ensureAllowed();
+        if (refused) {
+          void showMessage(refused, { title: errorTitle, kind: "warning" });
+          return;
         }
 
         let skipped = 0;
+        let stopped: { message: string; index: number } | null = null;
         for (let i = 0; i < statements.length; i++) {
           const statementSql = statements[i]!;
 
@@ -895,6 +908,12 @@ export function useDatabaseBackup() {
                   continue;
                 }
               }
+            }
+
+            const blocked = await ensureAllowed();
+            if (blocked) {
+              stopped = { message: blocked, index: i };
+              break;
             }
 
             await runSqlQuery(rt.runtimeConnectionId, statementSql, {
@@ -919,16 +938,23 @@ export function useDatabaseBackup() {
 
             const reason =
               err instanceof Error ? err.message : "Unknown restore error";
-            const before =
-              applied === 0
-                ? "Nothing before it had changed the database."
-                : applied === 1
-                  ? "The statement before it already ran and stays in the database."
-                  : `The ${applied} statements before it already ran and stay in the database.`;
             throw new Error(
-              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n${before}\nSQL: ${shortSql(statementSql)}`
+              `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n${describeApplied()}\nSQL: ${shortSql(statementSql)}`
             );
           }
+        }
+
+        if (stopped) {
+          // What already ran is in the database: show it.
+          if (applied > 0) {
+            await rt.refreshSchemaAndTables();
+            onRefresh?.();
+          }
+          void showMessage(
+            `${stopped.message}\nStopped before statement ${stopped.index + 1} of ${statements.length}. ${describeApplied()}`,
+            { title: errorTitle, kind: "warning" }
+          );
+          return;
         }
 
         await rt.refreshSchemaAndTables();
