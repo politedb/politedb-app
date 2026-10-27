@@ -19,6 +19,7 @@ import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { openProfileTab } from "src/lib/tabs/openProfileTab";
 import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
@@ -239,19 +240,7 @@ export function MainScreen() {
 
   function openProfileInTab(profileId: string) {
     const found = profiles.find((p) => p.id === profileId);
-    if (!found) return;
-
-    const newTab: ProfileTab = {
-      id: `tab-${uuid()}`,
-      label: found.label || "Unnamed Connection",
-      profileId,
-      engine: found.engine,
-      runtimeConnectionId: undefined,
-      profileTags: found.input?.tags ?? [],
-    };
-
-    addTab(newTab);
-    setActiveProfileScreen(newTab.id);
+    if (found) openProfileTab(found);
   }
 
   async function finishExternalImport(path: string, password?: string) {

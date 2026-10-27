@@ -1,5 +1,5 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { XIcon, DatabaseIcon } from "./icons";
+import { XIcon, DatabaseIcon, PlusIcon } from "./icons";
 import { ReactNode } from "preact/compat";
 import {
   useMemo,
@@ -19,8 +19,16 @@ import { cn } from "../utils/cn";
 import { normalizeEngineName } from "../utils/convert";
 import {
   formatShortcutLabel,
+  isMacPlatform,
   useKeyboardShortcutsStore,
 } from "src/stores/keyboardShortcuts";
+import { useProfileStore } from "src/stores/profile";
+import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { connectionTabShortcutHint } from "src/lib/tabs/connectionTabShortcuts";
+import { openProfileTab } from "src/lib/tabs/openProfileTab";
+
+/** Saved connections listed in the new-tab menu; the rest are on Databases. */
+const NEW_TAB_MENU_LIMIT = 10;
 
 function isTauriRuntime() {
   return typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -66,6 +74,13 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
       return null;
     }
   }, []);
+
+  const profiles = useProfileStore((s) => s.profiles);
+  const pinnedIds = usePinnedConnectionsStore((s) => s.pinnedIds);
+  const isMac = useMemo(() => isMacPlatform(), []);
+  const [newTabMenu, setNewTabMenu] = useState<{ x: number; y: number } | null>(
+    null
+  );
 
   const lastClickAtRef = useRef<number>(0);
   const DOUBLE_CLICK_MS = 280;
@@ -164,6 +179,93 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
     [handleTabClose]
   );
 
+  // Roving focus: one tab stop for the strip, arrows move between tabs and
+  // Enter or Space switches (switching loads a whole connection screen).
+  const focusTab = (index: number) => {
+    const tabs =
+      stripRef.current?.querySelectorAll<HTMLElement>('[role="tab"]');
+    if (!tabs?.length) return;
+    const target = tabs[(index + tabs.length) % tabs.length];
+    target?.focus();
+    target?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
+
+  const openTabMenu = (tabId: string, tabIndex: number, el: HTMLElement) => {
+    const rect = el.getBoundingClientRect();
+    setCtx({ x: rect.left, y: rect.bottom, tabId, tabIndex });
+  };
+
+  const handleTabKeyDown = (
+    e: KeyboardEvent,
+    tab: ProfileTab,
+    tabIndex: number
+  ) => {
+    const el = e.currentTarget as HTMLElement;
+    switch (e.key) {
+      case "ArrowRight":
+        focusTab(tabIndex + 1);
+        break;
+      case "ArrowLeft":
+        focusTab(tabIndex - 1);
+        break;
+      case "Home":
+        focusTab(0);
+        break;
+      case "End":
+        focusTab(profileTabs.length - 1);
+        break;
+      case "Enter":
+      case " ":
+        handleTabSelect(tab.id);
+        break;
+      case "Delete":
+      case "Backspace":
+        handleTabClose(tab.id);
+        break;
+      case "ContextMenu":
+        openTabMenu(tab.id, tabIndex, el);
+        break;
+      case "F10":
+        if (!e.shiftKey) return;
+        openTabMenu(tab.id, tabIndex, el);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const newTabItems: MenuItem[] = useMemo(() => {
+    const pinned = new Set(pinnedIds);
+    const sorted = [...profiles].sort(
+      (a, b) =>
+        Number(pinned.has(b.id)) - Number(pinned.has(a.id)) ||
+        (a.label || "").localeCompare(b.label || "")
+    );
+    const listed = sorted.slice(0, NEW_TAB_MENU_LIMIT);
+    return [
+      ...listed.map(
+        (profile): MenuItem => ({
+          type: "item",
+          label: profile.label || "Unnamed Connection",
+          icon: <DbIcon engine={profile.engine} px={14} />,
+          onClick: () => void openProfileTab(profile),
+        })
+      ),
+      ...(listed.length ? [{ type: "sep" } as MenuItem] : []),
+      {
+        type: "item",
+        label:
+          sorted.length > listed.length
+            ? `All connections (${sorted.length})…`
+            : "All connections…",
+        icon: <DatabaseIcon className="size-3.5" />,
+        onClick: () => setActiveProfileScreen("main"),
+      },
+    ];
+  }, [profiles, pinnedIds, setActiveProfileScreen]);
+
   const menuItems: MenuItem[] = ctx
     ? [
         {
@@ -256,93 +358,154 @@ export function AppHeader({ activeNav = "main", onNavChange }: AppHeaderProps) {
           })}
         </div>
 
-        <div class="relative flex min-w-0 flex-1 items-center">
-          <div
-            ref={stripRef}
-            onScroll={updateHidden}
-            onWheel={handleStripWheel}
-            class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg py-1 pr-2 pl-0"
-          >
-            {profileTabs.map((tab, tabIndex) => {
-              const isActive = activeProfileScreen === tab.id;
+        <div class="flex min-w-0 flex-1 items-center gap-1 pr-2">
+          <div class="relative flex min-w-0 items-center">
+            <div
+              ref={stripRef}
+              role="tablist"
+              aria-label="Connections"
+              onScroll={updateHidden}
+              onWheel={handleStripWheel}
+              class="no-scrollbar flex items-center gap-1 overflow-x-auto rounded-lg px-0.5 py-1"
+            >
+              {profileTabs.map((tab, tabIndex) => {
+                const isActive = activeProfileScreen === tab.id;
+                const hint = connectionTabShortcutHint(
+                  tabIndex,
+                  profileTabs.length,
+                  isMac
+                );
+                // The strip's single tab stop: the active tab, else the first.
+                const isTabStop =
+                  isActive ||
+                  (tabIndex === 0 &&
+                    !profileTabs.some((t) => t.id === activeProfileScreen));
 
-              return (
-                <div
-                  key={tab.id}
-                  role="tab"
-                  aria-selected={isActive}
-                  title={`${tab.label} · ${normalizeEngineName(tab.engine)}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTabSelect(tab.id);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCtx({
-                      x: e.clientX,
-                      y: e.clientY,
-                      tabId: tab.id,
-                      tabIndex,
-                    });
-                  }}
-                  data-tauri-drag-region="false"
-                  class={cn(
-                    "group w-48 shadow-sm",
-                    "flex items-center justify-between gap-2",
-                    "rounded-md border px-2 py-1 transition-all",
-                    isActive
-                      ? "border-slate-300 bg-slate-100 text-slate-900"
-                      : "border-transparent bg-white text-slate-600 hover:bg-slate-50"
-                  )}
-                >
-                  <div class="flex min-w-0 items-center gap-2">
-                    <span class="flex size-5 items-center justify-center text-slate-600">
-                      <DbIcon engine={tab.engine} px={16} />
-                    </span>
-
-                    <span class="truncate text-sm font-medium">
-                      {tab.label}
-                    </span>
-                  </div>
-
-                  <Button
-                    variant="ghost"
-                    title="Close tab"
-                    data-tauri-drag-region="false"
+                return (
+                  <div
+                    key={tab.id}
+                    role="tab"
+                    aria-selected={isActive}
+                    tabIndex={isTabStop ? 0 : -1}
+                    title={[tab.label, normalizeEngineName(tab.engine), hint]
+                      .filter(Boolean)
+                      .join(" · ")}
                     onClick={(e) => {
+                      e.stopPropagation();
+                      handleTabSelect(tab.id);
+                    }}
+                    onKeyDown={(e) => handleTabKeyDown(e, tab, tabIndex)}
+                    onMouseDown={(e) => {
+                      // No autoscroll on a middle press; its release closes.
+                      if (e.button === 1) e.preventDefault();
+                    }}
+                    onMouseUp={(e) => {
+                      if (e.button !== 1) return;
+                      e.preventDefault();
                       e.stopPropagation();
                       handleTabClose(tab.id);
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCtx({
+                        x: e.clientX,
+                        y: e.clientY,
+                        tabId: tab.id,
+                        tabIndex,
+                      });
+                    }}
+                    data-tauri-drag-region="false"
                     class={cn(
-                      "rounded-full border-none p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
-                      !isActive &&
-                        "opacity-60 group-hover:opacity-100 hover:bg-transparent"
+                      "group w-48 shadow-sm",
+                      "flex items-center justify-between gap-2",
+                      "rounded-md border px-2 py-1 transition-all",
+                      "outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                      isActive
+                        ? "border-slate-300 bg-slate-100 text-slate-900"
+                        : "border-transparent bg-white text-slate-600 hover:bg-slate-50"
                     )}
                   >
-                    <XIcon className="size-3.5" />
-                  </Button>
-                </div>
-              );
-            })}
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class="flex size-5 items-center justify-center text-slate-600">
+                        <DbIcon engine={tab.engine} px={16} />
+                      </span>
+
+                      <span class="truncate text-sm font-medium">
+                        {tab.label}
+                      </span>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      title="Close tab"
+                      aria-label={`Close ${tab.label}`}
+                      // Delete closes the focused tab; one stop per tab strip.
+                      tabIndex={-1}
+                      data-tauri-drag-region="false"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTabClose(tab.id);
+                      }}
+                      class={cn(
+                        "rounded-full border-none p-0 text-slate-400 transition hover:bg-transparent hover:text-slate-700",
+                        !isActive &&
+                          "opacity-60 group-hover:opacity-100 hover:bg-transparent"
+                      )}
+                    >
+                      <XIcon className="size-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+            {hidden.left ? (
+              <div
+                aria-hidden="true"
+                data-testid="tabs-fade-left"
+                class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-linear-to-r from-white to-transparent dark:from-[#181818]"
+              />
+            ) : null}
+            {hidden.right ? (
+              <div
+                aria-hidden="true"
+                data-testid="tabs-fade-right"
+                class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-linear-to-l from-white to-transparent dark:from-[#181818]"
+              />
+            ) : null}
           </div>
-          {hidden.left ? (
-            <div
-              aria-hidden="true"
-              data-testid="tabs-fade-left"
-              class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-linear-to-r from-white to-transparent dark:from-[#181818]"
-            />
-          ) : null}
-          {hidden.right ? (
-            <div
-              aria-hidden="true"
-              data-testid="tabs-fade-right"
-              class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-linear-to-l from-white to-transparent dark:from-[#181818]"
-            />
-          ) : null}
+          <Button
+            variant="ghost"
+            title="Open a connection"
+            aria-label="Open a connection"
+            aria-haspopup="menu"
+            aria-expanded={!!newTabMenu}
+            data-tauri-drag-region="false"
+            class="size-7 shrink-0 justify-center rounded-md p-0 text-slate-500 hover:text-slate-800"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (profiles.length === 0) {
+                setActiveProfileScreen("main");
+                return;
+              }
+              const rect = (
+                e.currentTarget as HTMLElement
+              ).getBoundingClientRect();
+              setNewTabMenu({ x: rect.left, y: rect.bottom + 4 });
+            }}
+          >
+            <PlusIcon className="size-4" />
+          </Button>
         </div>
       </div>
 
+      <ContextMenu
+        open={!!newTabMenu}
+        x={newTabMenu?.x ?? 0}
+        y={newTabMenu?.y ?? 0}
+        items={newTabItems}
+        onClose={() => setNewTabMenu(null)}
+      />
       <ContextMenu
         open={!!ctx}
         x={ctx?.x ?? 0}

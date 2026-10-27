@@ -33,6 +33,16 @@ describe("reserved shortcuts", () => {
     expect(reservedShortcutOwner("Mod+K")).toBeUndefined();
   });
 
+  it("keeps the connection tab keys", () => {
+    expect(reservedShortcutOwner("Mod+1")).toBe("a connection tab");
+    expect(reservedShortcutOwner("Mod+9")).toBe("a connection tab");
+    expect(reservedShortcutOwner("Ctrl+Tab")).toBe("the next connection tab");
+    expect(reservedShortcutOwner("Shift+Ctrl+Tab")).toBe(
+      "the previous connection tab"
+    );
+    expect(reservedShortcutOwner("Mod+Shift+1")).toBeUndefined();
+  });
+
   it("refuses to assign a reserved binding", () => {
     const before = useKeyboardShortcutsStore.getState().shortcuts.closeCurrent;
     useKeyboardShortcutsStore.getState().setShortcut("closeCurrent", "Mod+,");

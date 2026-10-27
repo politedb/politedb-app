@@ -19,6 +19,7 @@ import {
   requestOpenSettings,
 } from "src/lib/settings/openSettings";
 import { isMacPlatform } from "src/stores/keyboardShortcuts";
+import { connectionTabShortcutTarget } from "src/lib/tabs/connectionTabShortcuts";
 
 const loadConnectionScreen = () =>
   import("src/screens/connection/ConnectionScreen").then((module) => ({
@@ -57,10 +58,25 @@ export function MainLayout() {
   }, [loadLicense]);
 
   // ⌘, (Ctrl+, elsewhere) opens Settings from any screen; Settings lives on the
-  // main screen, so switch there first.
+  // main screen, so switch there first. ⌘1…9 and Ctrl+Tab switch connection
+  // tabs.
   useEffect(() => {
     const isMac = isMacPlatform();
     const onKeyDown = (event: KeyboardEvent) => {
+      const { profileTabs, activeProfileScreen } = useScreenStore.getState();
+      const tabTarget = connectionTabShortcutTarget(
+        event,
+        isMac,
+        profileTabs.map((tab) => tab.id),
+        activeProfileScreen
+      );
+      if (tabTarget) {
+        event.preventDefault();
+        // Switching away would leave an open dialog or menu behind.
+        if (isModalDialogOpen()) return;
+        setActiveProfileScreen(tabTarget);
+        return;
+      }
       if (!isOpenSettingsShortcut(event, isMac)) return;
       event.preventDefault();
       // Another dialog is open (New Group, a form…): leave it alone rather than
