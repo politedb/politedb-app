@@ -912,6 +912,8 @@ export function MenuBar({
         open={dbDialogOpen}
         engine={connectionInfo?.engine}
         runtimeConnectionId={runtimeConnectionId}
+        tabId={activeTab?.id}
+        profileId={activeTab?.profileId}
         onOpenDatabase={onOpenDatabase}
         onClose={() => setDbDialogOpen(false)}
       />
