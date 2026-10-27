@@ -247,6 +247,13 @@ SELECT 2;`;
       "SELECT 1 -- note\rDELETE FROM t",
       "SELECT 2",
     ]);
+    // MySQL and SQLite end it only at a line feed: the DELETE stays in the
+    // comment's fragment there too, as the classifier reads it.
+    expect(
+      splitSqlStatements("SELECT 1 -- \r' \n; DELETE FROM t; -- '").map(
+        (s) => s.text
+      )
+    ).toEqual(["SELECT 1 -- \r'", "DELETE FROM t", "-- '"]);
     expect(pg("SELECT '`'; SELECT `; SELECT 2;")).toEqual([
       "SELECT '`'",
       "SELECT `",

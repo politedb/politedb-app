@@ -115,7 +115,9 @@ export function splitSqlStatements(
 
     // ---- In line comment
     if (inLineComment) {
-      if (ch === "\n" || ch === "\r") inLineComment = false;
+      // PostgreSQL also ends it at a carriage return; MySQL and SQLite
+      // only at a line feed.
+      if (ch === "\n" || (pg && ch === "\r")) inLineComment = false;
       i++;
       continue;
     }

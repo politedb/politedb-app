@@ -229,6 +229,7 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(message).not.toContain("Customer 1");
     expect(message).not.toContain("-- Data");
     expect(message).not.toContain("CONTEXT");
+    expect(message).toContain("HINT: check");
     expect(message.length).toBeLessThan(1_000);
   });
 
@@ -341,23 +342,54 @@ describe("a stop before anything ran", () => {
 });
 
 describe("stop message parts", () => {
-  it("labels a statement by its head", () => {
+  it("labels a statement by its head, never its rows", () => {
     expect(
-      restoreStatementLabel("-- Structure public.a\nCREATE TABLE a (id int)")
+      restoreStatementLabel(
+        "-- Structure public.a\r\n-- x\nCREATE TABLE a (id int)"
+      )
     ).toBe("CREATE TABLE a (id int)");
+    expect(
+      restoreStatementLabel(
+        "/* note */ -- x\nINSERT INTO t VALUES ('SECRET_ROW')"
+      )
+    ).toBe("INSERT INTO t VALUES …");
+    expect(
+      restoreStatementLabel(
+        "INSERT INTO `db`.`t` (`a`, `b`) VALUES ('SECRET_ROW', 1)"
+      )
+    ).toBe("INSERT INTO `db`.`t` (`a`, `b`) VALUES …");
     expect(restoreStatementLabel("x".repeat(500)).length).toBeLessThanOrEqual(
-      161
+      163
     );
-    expect(restoreStatementLabel("INSERT INTO t VALUES (1)")).toBe(
-      "INSERT INTO t VALUES (1)"
+    expect(restoreStatementLabel("-- Data public.t\n")).toBe("(comment only)");
+  });
+
+  it("keeps the message, DETAIL and HINT lines wherever they are", () => {
+    const summary = restoreErrorSummary(
+      new Error(
+        `syntax error at or near "x"\r\nCONTEXT: ${"c".repeat(500)}\nDETAIL: d\nWHERE: w\nHINT: add a cast`
+      )
+    );
+    expect(summary).toBe(
+      'syntax error at or near "x"\nDETAIL: d\nHINT: add a cast\n…'
+    );
+    expect(restoreErrorSummary("plain text failure")).toBe(
+      "plain text failure"
     );
   });
 
-  it("keeps an error's first three lines, each short", () => {
-    expect(restoreErrorSummary("a\nb\nc\nd")).toBe("a\nb\nc\n…");
-    expect(restoreErrorSummary("y".repeat(1_000)).length).toBeLessThanOrEqual(
-      241
+  it("cuts a long line in the middle, keeping its end", () => {
+    const summary = restoreErrorSummary(
+      new Error(`${"y".repeat(1_000)} the useful end`)
     );
-    expect(restoreErrorSummary("")).toBe("Unknown restore error");
+    expect(summary.length).toBeLessThanOrEqual(305);
+    expect(summary).toMatch(/^y+ … y+ the useful end$/);
   });
+
+  it.each([[null], [undefined], [{ code: 1 }], [""], [new Error("  ")]])(
+    "says the error is unknown for %o",
+    (error) => {
+      expect(restoreErrorSummary(error)).toBe("Unknown restore error");
+    }
+  );
 });

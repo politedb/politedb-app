@@ -134,37 +134,57 @@ function isIgnorableRestoreError(sql: string, err: unknown): boolean {
   );
 }
 
+/** Long text cut in the middle, keeping its start and its end. */
 function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
+  if (text.length <= max) return text;
+  const tail = Math.floor(max / 3);
+  return `${text.slice(0, max - tail).trimEnd()} … ${text.slice(-tail).trimStart()}`;
 }
 
 /**
- * A failed statement for the stop dialog: what it was, not its data. Leading
- * "-- …" section comments are dropped and INSERT values cut off, so a
- * statement of thousands of rows stays one line.
+ * A failed statement for the stop dialog: what it was, not its rows.
+ * Leading comments are dropped and an INSERT is cut after VALUES, so a
+ * statement of thousands of rows stays one line. DDL keeps its head (names,
+ * types, defaults) up to the limit.
  */
 export function restoreStatementLabel(sql: string, max = 160): string {
   const head = sql
-    .replace(/^(?:\s*--[^\n]*(?:\n|$))+/, "")
+    .replace(/^(?:\s*(?:--[^\n\r]*(?:\r\n?|\n|$)|\/\*[\s\S]*?\*\/))+/, "")
     .replace(/\s+/g, " ")
     .trim();
-  const values = /^INSERT\b.*?\)\s*VALUES\b/i.exec(head);
-  return clip(values ? `${values[0]} …` : head, max);
+  if (!head) return "(comment only)";
+  const values = /^INSERT\b.*?\bVALUES\b/i.exec(head);
+  if (values) return `${clip(values[0], max)} …`;
+  return clip(head, max);
 }
 
 /**
- * A server error for the stop dialog: its first lines (message, DETAIL,
- * HINT), each kept short, so a "Failing row contains (…)" detail or a long
- * message cannot push the dialog past the screen.
+ * A server error for the stop dialog, kept short so a "Failing row contains
+ * (…)" detail or a long message cannot push the dialog past the screen: the
+ * message line, then its DETAIL and HINT lines wherever they are (CONTEXT,
+ * WHERE and other lines are left out), each cut in the middle. Values the
+ * server echoes (a failing row, a duplicate key) stay, cut: they say which
+ * row failed. The dialog is local and nothing is logged.
  */
-export function restoreErrorSummary(message: string): string {
+export function restoreErrorSummary(error: unknown): string {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
   const lines = message
-    .split("\n")
+    .split(/\r\n?|\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const kept = lines.slice(0, 3).map((line) => clip(line, 240));
-  if (lines.length > kept.length) kept.push("…");
-  return kept.join("\n") || "Unknown restore error";
+  const [first, ...rest] = lines;
+  if (!first) return "Unknown restore error";
+  const kept = [clip(first, 300)];
+  for (const line of rest) {
+    if (/^(?:DETAIL|HINT):/i.test(line)) kept.push(clip(line, 300));
+  }
+  if (kept.length < lines.length) kept.push("…");
+  return kept.join("\n");
 }
 
 function parsePgAlterAddConstraint(sql: string): {
@@ -1339,9 +1359,7 @@ export function useDatabaseBackup() {
               continue;
             }
 
-            const reason = restoreErrorSummary(
-              err instanceof Error ? err.message : ""
-            );
+            const reason = restoreErrorSummary(err);
             throw new Error(
               `Stopped at statement ${i + 1} of ${statements.length}: ${reason}\n\n${describeApplied()}\n\nStatement: ${restoreStatementLabel(statementSql)}`
             );
