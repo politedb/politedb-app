@@ -30,6 +30,17 @@ describe("isMutatingStatement", () => {
     "SET /* comment */ GLOBAL read_only = OFF;",
     "SET @@global /* comment */ .read_only = OFF;",
     "SET SESSION sql_mode = '', GLOBAL read_only = OFF;",
+    // "#" is an operator in PostgreSQL, not a comment.
+    "SELECT 1 # 2 INTO backup_x;",
+    "SELECT '{\"a\":1}'::jsonb #>> '{a}' INTO backup_json;",
+    "WITH t AS (SELECT 1 # 2) DELETE FROM a;",
+    // "--" needs whitespace after it to be a MySQL comment.
+    "SELECT 1--1 INTO OUTFILE '/tmp/x';",
+    // EXPLAIN ANALYZE runs the statement it explains.
+    "EXPLAIN ANALYZE DELETE FROM a;",
+    "EXPLAIN ANALYSE VERBOSE UPDATE a SET x = 1;",
+    "EXPLAIN (ANALYZE, BUFFERS) DELETE FROM a;",
+    "EXPLAIN (ANALYZE TRUE) INSERT INTO a VALUES (1);",
     // A backslash-escaped quote (MySQL) does not end the string early.
     "SELECT 'a\\'' INTO OUTFILE '/tmp/x';",
   ])("treats %s as a write", (sql) => {
@@ -67,6 +78,21 @@ describe("isMutatingStatement", () => {
     "WITH t AS (SELECT 1 /* DELETE */) SELECT * FROM t;",
     'SELECT "into" FROM a;',
     "SELECT $1::int;",
+    // PostgreSQL E'…' strings escape quotes with a backslash.
+    "SELECT E'it\\'s INTO text';",
+    // "$" belongs to the identifier: no INTO/DELETE token here.
+    "SELECT cost$into FROM a;",
+    "WITH t AS (SELECT cost$delete FROM a) SELECT * FROM t;",
+    // Operators and comments that hide nothing.
+    "SELECT 1 # 2;",
+    "SELECT data #>> '{a}' FROM t;",
+    "SELECT 1--1;",
+    "SELECT 1 -- INTO later\n FROM a;",
+    // EXPLAIN without ANALYZE only plans.
+    "EXPLAIN DELETE FROM a;",
+    "EXPLAIN (ANALYZE FALSE) DELETE FROM a;",
+    "EXPLAIN (FORMAT JSON) UPDATE a SET x = 1;",
+    "EXPLAIN ANALYZE SELECT * FROM a;",
     "SHOW TABLES;",
     "EXPLAIN SELECT 1;",
     "",

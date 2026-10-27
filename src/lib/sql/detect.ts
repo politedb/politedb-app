@@ -58,37 +58,60 @@ export function isDDLStatement(sql: string) {
 
 /** Statements that change data, schema, permissions or server settings. */
 const OTHER_WRITE_RE =
-  /^(GRANT|REVOKE|COPY|LOAD|IMPORT|REFRESH|REINDEX|VACUUM|CLUSTER)\b/i;
+  /^(GRANT|REVOKE|COPY|LOAD|IMPORT|REFRESH|REINDEX|VACUUM|CLUSTER)(?![\p{L}\p{N}_$])/iu;
+
+/**
+ * A keyword as a whole token: SQL identifiers may hold letters, digits,
+ * "_" and "$" (cost$into is one identifier, not INTO).
+ */
+function keywordRe(words: string): RegExp {
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}_$])(?:${words})(?![\\p{L}\\p{N}_$])`,
+    "iu"
+  );
+}
 /**
  * Server-wide or persisted settings (MySQL/MariaDB), anywhere in a SET list;
  * a plain SET is a session read.
  */
-const GLOBAL_SETTING_RE = /\b(GLOBAL|PERSIST|PERSIST_ONLY)\b|@@\s*GLOBAL\b/i;
-const DML_KEYWORD_RE = /\b(INSERT|UPDATE|DELETE|MERGE)\b/i;
-const INTO_RE = /\bINTO\b/i;
+const GLOBAL_SETTING_RE = new RegExp(
+  `${keywordRe("GLOBAL|PERSIST|PERSIST_ONLY").source}|@@\\s*GLOBAL(?![\\p{L}\\p{N}_$])`,
+  "iu"
+);
+const DML_KEYWORD_RE = keywordRe("INSERT|UPDATE|DELETE|MERGE");
+const INTO_RE = keywordRe("INTO");
+
+type Dialect = "postgres" | "mysql";
 
 /**
- * The statement's executable text: quoted strings and identifiers ('…',
- * "…", `…`, PostgreSQL $tag$…$tag$) and comments (--, #, /* *\/) become
- * spaces, so only real tokens are matched. Null when a MySQL/MariaDB
- * executable comment (/*! … *\/, /*M! … *\/) runs code. Dialects differ:
- * block comments nest in PostgreSQL and not in MySQL, and a backslash
- * escapes a quote in MySQL strings and not in standard SQL. Callers check
- * every reading, so a write seen by any of them counts.
+ * The statement's executable text as one dialect reads it: quoted strings
+ * and identifiers and comments become spaces, so only real tokens are
+ * matched. Null when a MySQL/MariaDB executable comment (/*! … *\/,
+ * /*M! … *\/) runs code.
+ *
+ * - postgres (and standard SQL): block comments nest, "--" always starts a
+ *   comment, "#" is an operator, a backslash escapes only in E'…' strings,
+ *   $tag$…$tag$ quotes text.
+ * - mysql: block comments do not nest, "#" starts a comment, "--" only
+ *   when followed by whitespace, a backslash escapes in '…' and "…".
  */
-function executableText(
-  s: string,
-  nestedComments: boolean,
-  backslashEscapes: boolean
-): string | null {
+function executableText(s: string, dialect: Dialect): string | null {
+  const pg = dialect === "postgres";
   const len = s.length;
   let out = "";
   let i = 0;
+  const lineComment = () => {
+    while (i < len && s[i] !== "\n") i++;
+    out += " ";
+  };
   while (i < len) {
     const c = s[i]!;
-    if (s.startsWith("--", i) || c === "#") {
-      while (i < len && s[i] !== "\n") i++;
-      out += " ";
+    if (s.startsWith("--", i) && (pg || i + 2 >= len || /\s/.test(s[i + 2]!))) {
+      lineComment();
+      continue;
+    }
+    if (c === "#" && !pg) {
+      lineComment();
       continue;
     }
     if (s.startsWith("/*", i)) {
@@ -96,7 +119,7 @@ function executableText(
       i += 2;
       let depth = 1;
       while (i < len && depth > 0) {
-        if (nestedComments && s.startsWith("/*", i)) {
+        if (pg && s.startsWith("/*", i)) {
           depth++;
           i += 2;
         } else if (s.startsWith("*/", i)) {
@@ -110,9 +133,15 @@ function executableText(
       continue;
     }
     if (c === "'" || c === '"' || c === "`") {
+      // PostgreSQL E'…' (e'…') strings take backslash escapes.
+      const escapes = pg
+        ? c === "'" &&
+          /[eE]/.test(s[i - 1] ?? "") &&
+          !/[\p{L}\p{N}_$]/u.test(s[i - 2] ?? "")
+        : c !== "`";
       i++;
       while (i < len) {
-        if (backslashEscapes && s[i] === "\\") {
+        if (escapes && s[i] === "\\") {
           i += 2;
           continue;
         }
@@ -130,7 +159,7 @@ function executableText(
       out += " ";
       continue;
     }
-    if (c === "$" && !/[\w$]/.test(s[i - 1] ?? "")) {
+    if (pg && c === "$" && !/[\p{L}\p{N}_$]/u.test(s[i - 1] ?? "")) {
       const tag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(s.slice(i))?.[0];
       if (tag) {
         const end = s.indexOf(tag, i + tag.length);
@@ -143,6 +172,23 @@ function executableText(
     i++;
   }
   return out;
+}
+
+/** EXPLAIN runs its statement only with ANALYZE: then it is that statement. */
+function explainedStatement(code: string): string | null {
+  const parenthesized = /^EXPLAIN\s*\(([^)]*)\)\s*/i.exec(code);
+  if (parenthesized) {
+    const analyze =
+      /(?<![\w$])ANALY[SZ]E(?![\w$])(?!\s+(?:FALSE|OFF|0)(?![\w$]))/i;
+    return analyze.test(parenthesized[1]!)
+      ? code.slice(parenthesized[0].length)
+      : null;
+  }
+  const words = /^EXPLAIN((?:\s+(?:ANALY[SZ]E|VERBOSE))*)\s+/i.exec(code);
+  if (words && /ANALY[SZ]E/i.test(words[1]!)) {
+    return code.slice(words[0].length);
+  }
+  return null;
 }
 
 function codeIsWrite(code: string): boolean {
@@ -162,21 +208,24 @@ function codeIsWrite(code: string): boolean {
   }
   // SELECT … INTO creates a table (PostgreSQL) or writes a file/variable.
   if (/^SELECT\b/i.test(code)) return INTO_RE.test(code);
+  if (/^EXPLAIN\b/i.test(code)) {
+    const statement = explainedStatement(code);
+    return statement !== null && codeIsWrite(statement);
+  }
   return false;
 }
 
 /**
  * Whether a statement may change the database (best effort, erring towards
- * yes): Lock and Production block these.
+ * yes): Lock and Production block these. The statement is read as
+ * PostgreSQL and as MySQL would read it; a write seen by either counts.
  */
 export function isMutatingStatement(sql: string) {
   if (!sql) return false;
-  for (const nested of [true, false]) {
-    for (const backslash of [false, true]) {
-      const text = executableText(sql, nested, backslash);
-      if (text === null) return true;
-      if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
-    }
+  for (const dialect of ["postgres", "mysql"] as const) {
+    const text = executableText(sql, dialect);
+    if (text === null) return true;
+    if (codeIsWrite(text.replace(/\s+/g, " ").trim())) return true;
   }
   return false;
 }
