@@ -2,7 +2,7 @@
 
 ## Status
 
-CHANGES REQUIRED
+VERIFIED WITH LIMITATIONS
 
 Codex, 2026-10-27. Reviewed `main..HEAD` on `feat/header-tabs-polish`: `3e6ab94`, `04f4df6`, `9e60e14` (HEAD). Scope: all 20 changed files and adjacent tab closing, dirty state, safety mode, shortcut/snippet, Settings, editor and title-bar paths. Requirements: the three human-approved batches in the review request. Application source and repository tests unchanged.
 
@@ -29,3 +29,32 @@ Codex, 2026-10-27. Reviewed `main..HEAD` on `feat/header-tabs-polish`: `3e6ab94`
 - Adjacent behavior: all new single-tab close gestures delegate to requestCloseConnectionTab; dirty dots call the same connectionTabHasChanges predicate and subscribe to row patches, new-table drafts and object drafts. Existing bulk-close sequencing is unchanged. Settings chord and snippet reservation guards remain in place; shortcut helper/store tests do not establish delivery through a real Monaco editor or full dialog/menu integration. Close All hint removal affects both outer connection tabs and inner window tabs. Interactive tabs/close/+ controls retain drag-region exclusions; empty header space retains dragging by source inspection.
 - Existing tests miss the reported focus/resize/picker integration cases. Header closing tests mock requestCloseConnectionTab, so they prove delegation rather than confirmation/discard/cancel behavior end to end. Launcher tests cover the zero-size recovery and status-bar clearance regression.
 - Only `.agent/REVIEW.md` replaced. Existing untracked `.claude/launch.json` untouched. No source fixes, staging, commit, push or merge. No library documentation lookup needed for this code review.
+
+
+## Re-review (round 2)
+
+Codex, 2026-10-27. Reviewed fix commit `205f93e`, diff `9e60e14..205f93e`, on `feat/header-tabs-polish` (current HEAD `2f77f17`, subsequent review documentation). All six changed files reviewed, with adjacent ContextMenu, connection-close, safety setter, screen store and Settings paths. **VERIFIED WITH LIMITATIONS. All four round 1 findings resolved; no new actionable regression found.** Historical findings above describe round 1 only.
+
+### Finding resolution
+
+1. **Resolved — menu focus and surviving close target.** `src/components/AppHeader.tsx:591`, `src/components/AppHeader.tsx:599`: both menus enable existing ContextMenu autoFocus/navigation/restoration. `src/components/AppHeader.tsx:197`: closing awaits the existing close request and focuses the surviving strip tab stop only when focus originated in the header and no connected control now owns it. It does not steal focus from an open unsaved-changes dialog. Tests at `src/components/AppHeader.test.tsx:228`, `:242`, `:252` cover menu focus, arrow navigation, Escape restoration and removal of the opener; existing mouse menu/open-profile and close-gesture tests still pass.
+2. **Resolved — roving tab stop.** `src/components/AppHeader.tsx:92`, `:307`, `:452`: focus owns the single zero tabindex; selection changes reset it, missing focused IDs fall back to active/first tab, and Enter/Space remain manual activation. `src/components/AppHeader.test.tsx:203` checks arrow/Home/End tabindex updates, external switching and focused-tab removal. Actual browser Tab/Shift+Tab traversal is not simulated.
+3. **Resolved — safety picker shortcut guard and keyboard behavior.** `src/screens/connection/workspace/MenuBar.tsx:408`, `:421`, `:556`, `:585`: labelled menu, checked radio items, initial focus, arrows/Home/End, Escape return and outside-click dismissal. `src/lib/tabs/handleConnectionTabShortcut.ts:11` preserves target resolution, preventDefault and the shared menu/dialog guard; `src/layout/index.tsx:63` uses it before the unchanged Settings branch. Tests at `src/screens/connection/workspace/MenuBar.safetyPicker.test.tsx:60`, `:79` mount the real picker, open from both entry points and check blocking/resumption. Additional temporary probe dispatches Ctrl+Tab through a focused item to a window listener using the production handler; connection remains unchanged. The MenuBar/status-bar custom picker entry paths now share the registered menu; adjacent shared ContextMenu paths already expose role=menu, and DatabaseManagerDialog remains modal.
+4. **Resolved — active tab reveal on strip resize.** `src/components/AppHeader.tsx:153`, `:166`: changed viewport width reveals the selected tab and recalculates fades; unchanged-width notifications only update fades, preserving intentional wheel scrolling. `src/components/AppHeader.test.tsx:272` verifies callback behavior and selected target. Existing fade tests pass. Real bounding-box visibility after window resize remains unverified.
+
+### Regression assessment and tests
+
+- **Mouse menus/picker:** existing AppHeader mouse selection/open-profile/close tests pass. Shared ContextMenu click callbacks and outside dismissal remain unchanged. Temporary mounted MenuBar probe selects all four modes by click, verifies menu closes and trigger regains focus, and checks outside-mousedown dismissal.
+- **Persistence/lock:** `src/screens/connection/workspace/MenuBar.tsx:346` retains the existing setter: update the same active tab with `querySafetyMode` and `isLocked: mode === "lock"`, await the same `savePersistentNow`, then close. Temporary probe asserts those fields for every mode and exactly one persistence call per selection. Storage/backend I/O is mocked; no real settings or database writes performed. SQL safety/lock and Explain Analyze tests pass; execution code unchanged.
+- **Settings:** `src/layout/index.tsx:64` retains the existing Settings shortcut matcher, prevention, dialog/menu guard, main-screen switch and open request. Extraction introduces no competing shortcut mapping. Settings guard and keyboard reservation tests pass. Real Monaco/native chord delivery remains unverified.
+- **Unsaved tab closing:** `src/components/AppHeader.tsx:202` still delegates every close gesture to `requestCloseConnectionTab`; `src/screens/connection/lib/connectionTabClose.ts:93` retains bridge/dirty-dialog/force-close routing. No confirmation, save/discard/cancel, cleanup or lock authorization changes. Dirty-state and connection-store tests pass. Header tests mock close orchestration; actual unsaved-dialog save/discard/cancel plus post-dialog focus are not tested end to end.
+- **New tests checked:** assertions exercise real component focus/store updates and the actual extracted shortcut handler. Limits: + menu opening uses click rather than native keyboard activation; menu action uses click rather than native Enter synthesis; resize uses mocked scrollIntoView rather than browser layout; picker shortcut tests invoke the helper rather than mounting MainLayout. These are verification limits, not additional confirmed defects.
+
+### Verification evidence
+
+- `npm run build`: **exit 0**. Existing non-failing browser-externalization, ineffective dynamic-import, chunk-size and plugin-timing warnings. Log: `/tmp/header-round2-build.log`.
+- Focused/adjacent Vitest: **exit 0; 14 files / 126 tests passed**. AppHeader, ContextMenu keyboard, MenuBar safety picker/chrome, connection-tab shortcut resolver, Settings guard, shortcut store/settings UI, connection shortcuts, unsaved object changes, connection store, query safety, Explain Analyze and sequential SQL execution. Log: `/tmp/header-round2-tests.log`.
+- Temporary independent DOM probes: **exit 0; 1 file / 4 tests passed** (two existing picker tests plus mouse/persistence/lock/dismissal and bubbling Ctrl+Tab probes). Files/config: `/private/tmp/header-round2-probes/`. Log: `/tmp/header-round2-probes.log`. Optional esbuild resolution warnings from temporary config were non-failing. Repository tests unchanged.
+- `git diff 9e60e14..205f93e --check`: **exit 0**.
+- `npm run dev`: **blocked**, `listen EPERM: operation not permitted ::1:1420`. No live browser/native WebView inspection or geometry verification. No permission bypass attempted. Full frontend suite and Rust checks not run; Rust unchanged.
+- Only `.agent/REVIEW.md` changed. Existing untracked `.claude/launch.json` untouched. No source edits, staging, commit, push or merge. No library documentation lookup needed for this code review.
