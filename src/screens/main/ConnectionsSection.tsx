@@ -85,6 +85,7 @@ function ConnectionCards(props: {
   onEdit: (id: string) => void;
   onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
   onDuplicate?: (id: string) => void | Promise<void>;
+  onOpenNewTab?: (id: string) => void;
   onSelectProfile: (id: string) => void;
 }) {
   const {
@@ -97,6 +98,7 @@ function ConnectionCards(props: {
     onEdit,
     onAssignGroups,
     onDuplicate,
+    onOpenNewTab,
     onSelectProfile,
   } = props;
 
@@ -117,6 +119,7 @@ function ConnectionCards(props: {
               onOpen={() => onOpen(p.id)}
               onEdit={() => onEdit(p.id)}
               onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+              onOpenNewTab={onOpenNewTab ? () => onOpenNewTab(p.id) : undefined}
               onSelectProfile={() => onSelectProfile(p.id)}
             />
           </div>
@@ -138,6 +141,7 @@ function ConnectionCards(props: {
           onOpen={() => onOpen(p.id)}
           onEdit={() => onEdit(p.id)}
           onDuplicate={onDuplicate ? () => onDuplicate(p.id) : undefined}
+          onOpenNewTab={onOpenNewTab ? () => onOpenNewTab(p.id) : undefined}
           onSelectProfile={() => onSelectProfile(p.id)}
         />
       ))}
@@ -161,6 +165,7 @@ export function ConnectionsSection(props: {
   onEdit: (id: string) => void;
   onAssignGroups: (id: string, groupIds: string[]) => void | Promise<void>;
   onDuplicate?: (id: string) => void | Promise<void>;
+  onOpenNewTab?: (id: string) => void;
   onSelectProfile: (id: string) => void;
 }) {
   const {
@@ -179,6 +184,7 @@ export function ConnectionsSection(props: {
     onEdit,
     onAssignGroups,
     onDuplicate,
+    onOpenNewTab,
     onSelectProfile,
   } = props;
 
@@ -206,6 +212,7 @@ export function ConnectionsSection(props: {
     onEdit,
     onAssignGroups,
     onDuplicate,
+    onOpenNewTab,
     onSelectProfile,
   };
 

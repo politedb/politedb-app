@@ -19,9 +19,11 @@ import { ContextMenu } from "src/components/common/ContextMenu";
 import { useProfileStore } from "src/stores/profile";
 import { type ConnectionGroup } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
+import { useScreenStore } from "src/stores/screen";
+import { deleteConnectionProfile } from "./deleteConnection";
 import { cn } from "src/utils/cn";
 import { connectionProfileSummary } from "src/lib/connection/profileSummary";
-import { confirmDialog, saveDialog, showMessage } from "src/lib/system-dialog";
+import { saveDialog, showMessage } from "src/lib/system-dialog";
 import { writeTextFile } from "src/lib/system-fs";
 import { AssignConnectionGroupDialog } from "src/components/modal/AssignConnectionGroupDialog";
 import {
@@ -66,6 +68,8 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   onOpen: () => void;
   onEdit: () => void;
   onDuplicate?: () => void | Promise<void>;
+  /** Opens another tab even when one is already open. */
+  onOpenNewTab?: () => void;
   onSelectProfile: () => void;
 }) {
   const {
@@ -77,6 +81,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
     onOpen,
     onEdit,
     onDuplicate,
+    onOpenNewTab,
     onSelectProfile,
   } = props;
 
@@ -87,6 +92,10 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   const ensurePinnedLoaded = usePinnedConnectionsStore((s) => s.ensureLoaded);
   const isPinned = usePinnedConnectionsStore((s) => s.isPinned(profileId));
   const togglePin = usePinnedConnectionsStore((s) => s.togglePin);
+  // Open in a connection tab: Open then switches to it.
+  const isOpenInTab = useScreenStore((s) =>
+    s.profileTabs.some((tab) => tab.profileId === profileId)
+  );
   const selectedGroupIdSet = new Set(selectedGroupIds);
   const currentGroups = groups.filter((group) =>
     selectedGroupIdSet.has(group.id)
@@ -139,17 +148,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
   async function onDelete() {
     if (!profile) return;
     closeMenu();
-    const ok = await confirmDialog(
-      `Delete "${profile.label || "Unnamed"}"? This removes the saved connection and cannot be undone.`,
-      {
-        title: "Delete connection",
-        kind: "warning",
-        okLabel: "Delete",
-        cancelLabel: "Cancel",
-      }
-    );
-    if (!ok) return;
-    await removeProfile(profile.id);
+    await deleteConnectionProfile(profile, removeProfile);
   }
 
   function openExportDialog() {
@@ -292,6 +291,19 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               {label}
             </span>
 
+            {isOpenInTab ? (
+              <span
+                class="flex h-5 shrink-0 items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                title="Open in a connection tab"
+              >
+                <span
+                  aria-hidden="true"
+                  class="size-1.5 rounded-full bg-emerald-500"
+                />
+                Active
+              </span>
+            ) : null}
+
             {productionTag ? (
               <TagChips
                 className="shrink-0"
@@ -345,7 +357,7 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
       <div class="relative z-10 flex shrink-0 items-center gap-1">
         <button
           type="button"
-          title="Open in a new tab"
+          title={isOpenInTab ? "Switch to its tab" : "Open in a new tab"}
           aria-label={`Open ${label}`}
           class={cn(
             "flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition",
@@ -390,6 +402,19 @@ export const ConnectionCard = memo(function ConnectionCard(props: {
               togglePin(profileId);
             },
           },
+          ...(isOpenInTab && onOpenNewTab
+            ? [
+                {
+                  type: "item" as const,
+                  label: "Open in New Tab",
+                  icon: <ArrowRightIcon className="size-4" />,
+                  onClick: () => {
+                    closeMenu();
+                    onOpenNewTab();
+                  },
+                },
+              ]
+            : []),
           { type: "sep" },
           {
             type: "item",

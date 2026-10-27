@@ -19,6 +19,7 @@ export type ConnectionOpenLogEntry = {
 };
 export type ViewMode = "grid" | "list";
 export type ConnectionSortMode =
+  | "used-desc"
   | "label-asc"
   | "label-desc"
   | "created-desc"

@@ -1,7 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/preact";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionCard } from "./ConnectionCard";
 import { useProfileStore } from "src/stores/profile";
+import { useScreenStore } from "src/stores/screen";
 
 const dialogs = vi.hoisted(() => ({
   confirmDialog: vi.fn(),
@@ -17,6 +24,7 @@ const removeProfile = vi.fn();
 
 beforeEach(() => {
   removeProfile.mockReset();
+  useScreenStore.setState({ profileTabs: [] });
   useProfileStore.setState({
     removeProfile,
     profiles: [
@@ -36,6 +44,7 @@ beforeEach(() => {
 });
 
 const onOpen = vi.fn();
+const onOpenNewTab = vi.fn();
 
 function renderCard() {
   onOpen.mockReset();
@@ -47,6 +56,7 @@ function renderCard() {
       selectedGroupIds={[]}
       onAssignGroups={vi.fn()}
       onOpen={onOpen}
+      onOpenNewTab={onOpenNewTab}
       onEdit={vi.fn()}
       onSelectProfile={vi.fn()}
     />
@@ -146,5 +156,26 @@ describe("ConnectionCard", () => {
     // The card itself still opens with Enter.
     fireEvent.keyDown(card, { key: "Enter" });
     expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks a connection open in a tab, with Open in New Tab in its menu", () => {
+    const card = renderCard();
+    expect(screen.queryByText("Active")).toBeNull();
+    fireEvent.contextMenu(card);
+    expect(screen.queryByText("Open in New Tab")).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    act(() =>
+      useScreenStore.setState({
+        profileTabs: [{ id: "t1", profileId: "p1" }] as never,
+      })
+    );
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Open staging orders" }).title
+    ).toBe("Switch to its tab");
+    fireEvent.contextMenu(card);
+    fireEvent.click(screen.getByText("Open in New Tab"));
+    expect(onOpenNewTab).toHaveBeenCalledTimes(1);
   });
 });

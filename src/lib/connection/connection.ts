@@ -27,9 +27,16 @@ export function applyPinnedOrder(
 export function sortConnections(
   connections: ConnectionProfile[],
   mode: ConnectionSortMode = "created-desc",
-  pinnedIds: readonly string[] = []
+  pinnedIds: readonly string[] = [],
+  /** When each connection was last opened (ms), for "used-desc". */
+  lastOpenedById: Readonly<Record<string, number>> = {}
 ): ConnectionProfile[] {
   const sorted = connections.slice().sort((a, b) => {
+    if (mode === "used-desc") {
+      // Never opened ones go last, by name.
+      const byUsed = (lastOpenedById[b.id] ?? 0) - (lastOpenedById[a.id] ?? 0);
+      if (byUsed !== 0) return byUsed;
+    }
     if (mode === "label-asc") {
       const byLabel = safeLower(a.label).localeCompare(safeLower(b.label));
       if (byLabel !== 0) return byLabel;
@@ -246,10 +253,12 @@ export function filterConnections(
   connections: ConnectionProfile[],
   searchQuery: string,
   sortMode: ConnectionSortMode = "created-desc",
-  pinnedIds: readonly string[] = []
+  pinnedIds: readonly string[] = [],
+  lastOpenedById: Readonly<Record<string, number>> = {}
 ) {
   const q = safeLower(searchQuery.trim());
-  if (!q) return sortConnections(connections, sortMode, pinnedIds);
+  if (!q)
+    return sortConnections(connections, sortMode, pinnedIds, lastOpenedById);
 
   return sortConnections(
     connections.filter((conn) => {
@@ -274,7 +283,8 @@ export function filterConnections(
       );
     }),
     sortMode,
-    pinnedIds
+    pinnedIds,
+    lastOpenedById
   );
 }
 

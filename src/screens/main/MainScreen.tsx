@@ -19,7 +19,11 @@ import { ProfileTab, useScreenStore } from "src/stores/screen";
 import { useProfileStore } from "src/stores/profile";
 import { useConnectionGroupsStore } from "src/stores/connectionGroups";
 import { usePinnedConnectionsStore } from "src/stores/pinnedConnections";
-import { openProfileTab } from "src/lib/tabs/openProfileTab";
+import {
+  openProfileTab,
+  switchToProfileTab,
+} from "src/lib/tabs/openProfileTab";
+import { useConnectionLogStore } from "src/stores/connectionLog";
 import { normalizeGroupIds } from "src/stores/connectionGroups";
 import { useLicenseStore } from "src/stores/license";
 
@@ -176,12 +180,25 @@ export function MainScreen() {
     [groups, profiles, groupIdsByProfile]
   );
 
+  // When each connection was last opened, from the History log.
+  const logEntries = useConnectionLogStore((s) => s.entries);
+  const lastOpenedById = useMemo(() => {
+    const byId: Record<string, number> = {};
+    for (const entry of logEntries) {
+      if ((byId[entry.profileId] ?? 0) < entry.openedAt) {
+        byId[entry.profileId] = entry.openedAt;
+      }
+    }
+    return byId;
+  }, [logEntries]);
+
   const filteredProfiles = useMemo(() => {
     const searched = filterConnections(
       profiles,
       searchQuery,
       connectionSortMode,
-      pinnedIds
+      pinnedIds,
+      lastOpenedById
     );
     if (!selectedGroupId) return searched;
     return searched.filter((profile) =>
@@ -194,6 +211,7 @@ export function MainScreen() {
     groupIdsByProfile,
     connectionSortMode,
     pinnedIds,
+    lastOpenedById,
   ]);
 
   useEffect(() => {
@@ -241,6 +259,11 @@ export function MainScreen() {
   function openProfileInTab(profileId: string) {
     const found = profiles.find((p) => p.id === profileId);
     if (found) openProfileTab(found);
+  }
+
+  /** Switches to the connection's tab when one is open, else opens one. */
+  function openOrSwitchToProfile(profileId: string) {
+    if (!switchToProfileTab(profileId)) openProfileInTab(profileId);
   }
 
   async function finishExternalImport(path: string, password?: string) {
@@ -531,8 +554,10 @@ export function MainScreen() {
                     templateSaving={templateSaving}
                     onAssignGroups={assignGroups}
                     onOpen={(id) => {
-                      // optional: keep selection in sync when opening
-                      // selectProfile(id);
+                      openOrSwitchToProfile(id);
+                      closeEdit();
+                    }}
+                    onOpenNewTab={(id) => {
                       openProfileInTab(id);
                       closeEdit();
                     }}
