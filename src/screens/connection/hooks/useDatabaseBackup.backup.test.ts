@@ -63,6 +63,8 @@ vi.mock("src/stores/persistentStore", () => ({
 
 import { useDatabaseBackup } from "./useDatabaseBackup";
 
+const S = (v: string) => ({ t: "Str", v });
+
 type Handlers = { onChunk: (c: unknown) => void; onDone: () => void };
 
 function streamDelivers(drive: (h: Handlers) => void) {
@@ -78,8 +80,15 @@ beforeEach(() => {
   m.pack.mockImplementation(async ({ sql }: { sql: string }) =>
     new TextEncoder().encode(sql)
   );
-  // Catalog queries find nothing beyond the table itself.
-  m.runSqlQuery.mockResolvedValue({ rows: [] });
+  // The snapshot holds public.t (id, note); other catalog queries find
+  // nothing more.
+  m.runSqlQuery.mockImplementation(async (_c: string, sql = "") => {
+    if (sql.includes("SELECT n.nspname, c.relname"))
+      return { rows: [[S("public"), S("t")]] };
+    if (sql.includes("SELECT a.attname") && !sql.includes("walk"))
+      return { rows: [[S("id")], [S("note")]] };
+    return { rows: [] };
+  });
   m.startSqlQueryStream.mockResolvedValue("op1");
   m.cancel.mockResolvedValue(undefined);
   m.sessionBegin.mockResolvedValue({
@@ -144,8 +153,11 @@ describe("database backup file", () => {
   });
 
   it("is not written when a sequence cannot be read", async () => {
-    const S = (v: string) => ({ t: "Str", v });
     m.runSqlQuery.mockImplementation(async (_c: string, sql = "") => {
+      if (sql.includes("SELECT n.nspname, c.relname"))
+        return { rows: [[S("public"), S("t")]] };
+      if (sql.includes("SELECT a.attname") && !sql.includes("walk"))
+        return { rows: [[S("id")]] };
       if (sql.includes("SELECT c.oid")) return { rows: [[S("42")]] };
       if (sql.includes("format_type(a.atttypid"))
         return {
@@ -160,5 +172,31 @@ describe("database backup file", () => {
     await act(() => result.current.onBackupDatabase("db"));
     expect(m.writeFile).not.toHaveBeenCalled();
     expect(m.showMessage.mock.calls[0]![0]).toMatch(/could not be read/);
+  });
+
+  it("runs one backup of a connection at a time", async () => {
+    let finish: () => void = () => {};
+    m.subscribe.mockImplementation(async (_op: string, h: Handlers) => {
+      finish = () => h.onDone();
+      return () => {};
+    });
+    const { result } = renderHook(() => useDatabaseBackup());
+    let first: Promise<void> = Promise.resolve();
+    await act(async () => {
+      first = result.current.onBackupDatabase("db");
+      // Let the first reach its stream.
+      await vi.waitFor(() => expect(m.subscribe).toHaveBeenCalled());
+    });
+    await act(() => result.current.onBackupDatabase("db"));
+    expect(m.showMessage).toHaveBeenCalledWith(
+      "A backup of this connection is already running.",
+      expect.anything()
+    );
+    expect(m.sessionBegin).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish();
+      await first;
+    });
+    expect(m.writeFile).toHaveBeenCalledTimes(1);
   });
 });

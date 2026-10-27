@@ -66,6 +66,7 @@ vi.mock("../workspace/ConnectionRuntimeContext", () => ({
 
 import {
   canBackupDatabase,
+  isTransactionControl,
   restoreErrorSummary,
   restoreStatementLabel,
   useDatabaseBackup,
@@ -253,6 +254,37 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     expect(message.length).toBeLessThan(1_000);
   });
 
+  it("refuses a dump that controls transactions, running nothing", async () => {
+    m.unpack.mockResolvedValue({
+      sql: "INSERT INTO a VALUES (1);\n-- note\nCOMMIT;\nINSERT INTO a VALUES (2);",
+      engine: "postgres",
+    });
+    await restore();
+    expect(m.sessionBegin).not.toHaveBeenCalled();
+    expect(m.runSqlQuery).not.toHaveBeenCalled();
+    expect(m.showMessage.mock.calls[0]![0]).toMatch(
+      /^Statement 2 of 3 controls transactions .*nothing was run/
+    );
+  });
+
+  it("keeps nothing when the tab is locked during the last statement", async () => {
+    m.unpack.mockResolvedValue({
+      sql: "INSERT INTO a VALUES (1);",
+      engine: "postgres",
+    });
+    m.runSqlQuery.mockImplementationOnce(async () => {
+      setMode("lock");
+      return {};
+    });
+    await restore();
+    expect(m.sessionEnd).toHaveBeenCalledWith("s1", false);
+    expect(m.sessionEnd).not.toHaveBeenCalledWith("s1", true);
+    expect(m.showMessage.mock.calls[0]![0]).toContain(
+      "Stopped before committing."
+    );
+    expect(m.showToast).not.toHaveBeenCalled();
+  });
+
   it("rolls a PostgreSQL run back when it stops partway", async () => {
     m.runSqlQuery
       .mockResolvedValueOnce({})
@@ -285,7 +317,7 @@ INSERT INTO "public"."t" ("a","b") VALUES ('x', 'y');`,
     );
     await restore();
     expect(m.savepoints).toHaveBeenCalledWith(
-      "ROLLBACK TO SAVEPOINT politedb_restore; RELEASE SAVEPOINT politedb_restore"
+      "ROLLBACK TO SAVEPOINT politedb_restore"
     );
     expect(m.sessionEnd).toHaveBeenCalledWith("s1", true);
   });
@@ -504,4 +536,30 @@ describe("stop message parts", () => {
       expect(restoreErrorSummary(error)).toBe("Unknown restore error");
     }
   );
+});
+
+describe("isTransactionControl", () => {
+  it.each([
+    "COMMIT",
+    "commit prepared 'x'",
+    "END",
+    "BEGIN ISOLATION LEVEL SERIALIZABLE",
+    "START TRANSACTION",
+    "-- a\nROLLBACK",
+    "/* x */ SAVEPOINT s",
+    "RELEASE SAVEPOINT s",
+    "ABORT",
+    "PREPARE TRANSACTION 'x'",
+  ])("is true for %s", (sql) => {
+    expect(isTransactionControl(sql)).toBe(true);
+  });
+
+  it.each([
+    "INSERT INTO commits VALUES (1)",
+    "CREATE TABLE endings (x int)",
+    "SELECT 'COMMIT'",
+    "PREPARE q AS SELECT 1",
+  ])("is false for %s", (sql) => {
+    expect(isTransactionControl(sql)).toBe(false);
+  });
 });

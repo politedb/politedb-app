@@ -1,15 +1,25 @@
-//! A PostgreSQL session held on one pooled connection across calls, for
-//! work that must see or change the database as a whole: a restore that
-//! runs in one transaction (all or nothing), and a backup whose queries all
-//! read one exported snapshot.
+//! A PostgreSQL session held across calls, for work that must see or
+//! change the database as a whole: a restore that runs in one transaction
+//! (all or nothing), and a backup whose queries all read one exported
+//! snapshot.
+//!
+//! Each session has its own connection, opened from the runtime's settings
+//! and closed when the session ends: never a pooled one. A pool of one
+//! would otherwise deadlock (the session holding its only slot while the
+//! backup's queries wait for it), and a connection that ran arbitrary
+//! imported SQL (session settings, advisory locks) is never handed to
+//! another caller.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use dashmap::DashMap;
-use deadpool_postgres::{Object, Pool};
 use tokio::sync::Mutex;
+use tokio::time::Instant;
+use tokio_postgres::{CancelToken, Client, Config, NoTls};
 use uuid::Uuid;
 
+use super::explain_analyze::{connect_quiet, SessionTask};
 use super::operation::format_pg_error;
 
 /// What a session is opened for.
@@ -22,10 +32,46 @@ pub enum SqlSessionMode {
     Snapshot,
 }
 
+impl SqlSessionMode {
+    /// How long the session may sit unused before it is reclaimed (by the
+    /// server, and here). A snapshot session idles while the backup's
+    /// streams read through other connections.
+    fn idle_limit(self) -> Duration {
+        match self {
+            SqlSessionMode::Transaction => Duration::from_secs(15 * 60),
+            SqlSessionMode::Snapshot => Duration::from_secs(6 * 60 * 60),
+        }
+    }
+}
+
+/// One statement's limit, as the per-statement runs had.
+const STATEMENT_LIMIT: Duration = Duration::from_secs(120);
+const CONNECT_LIMIT: Duration = Duration::from_secs(30);
+const END_LIMIT: Duration = Duration::from_secs(30);
+
 struct PgSqlSession {
     connection_id: Uuid,
-    /// None once the session has ended.
-    client: Mutex<Option<Object>>,
+    mode: SqlSessionMode,
+    cancel: CancelToken,
+    /// None once ended. Dropping it closes the connection; the server then
+    /// rolls back anything still open.
+    client: Mutex<Option<(Client, SessionTask)>>,
+    last_used: std::sync::Mutex<Instant>,
+}
+
+impl PgSqlSession {
+    fn touch(&self) {
+        if let Ok(mut t) = self.last_used.lock() {
+            *t = Instant::now();
+        }
+    }
+
+    fn idle_for(&self) -> Duration {
+        self.last_used
+            .lock()
+            .map(|t| t.elapsed())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Default)]
@@ -33,87 +79,120 @@ pub struct SqlSessionRegistry {
     sessions: DashMap<Uuid, Arc<PgSqlSession>>,
 }
 
-/// Puts a connection whose transaction state is unknown out of the pool:
-/// it closes, and the server rolls back whatever it held.
-fn discard(client: Object) {
-    drop(Object::take(client));
-}
-
 impl SqlSessionRegistry {
-    /// Opens a session: its transaction, and for a snapshot session the
-    /// exported snapshot id.
+    /// Opens a session on its own connection: its transaction, and for a
+    /// snapshot session the exported snapshot id.
     pub async fn begin(
         &self,
         connection_id: Uuid,
-        pool: &Pool,
+        config: &Config,
         mode: SqlSessionMode,
     ) -> Result<(Uuid, Option<String>), String> {
-        let client = pool
-            .get()
+        self.reclaim_idle().await;
+
+        let (client, task) = tokio::time::timeout(CONNECT_LIMIT, connect_quiet(config))
             .await
-            .map_err(|e| format!("SQL_SESSION_GET_CONN_FAILED: {e}"))?;
-        let begin = match mode {
-            SqlSessionMode::Transaction => "BEGIN",
-            SqlSessionMode::Snapshot => "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
+            .map_err(|_| "SQL_SESSION_CONNECT_TIMEOUT".to_string())?
+            .map_err(|e| format!("SQL_SESSION_CONNECT_FAILED: {e}"))?;
+        let idle_ms = mode.idle_limit().as_millis();
+        let setup = match mode {
+            SqlSessionMode::Transaction => format!(
+                "SET statement_timeout = {}; \
+                 SET idle_in_transaction_session_timeout = {idle_ms}; BEGIN",
+                STATEMENT_LIMIT.as_millis()
+            ),
+            SqlSessionMode::Snapshot => format!(
+                "SET idle_in_transaction_session_timeout = {idle_ms}; \
+                 BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            ),
         };
-        if let Err(e) = client.batch_execute(begin).await {
-            discard(client);
-            return Err(format_pg_error(&e, begin));
+        if let Err(e) = client.batch_execute(&setup).await {
+            return Err(format_pg_error(&e, &setup));
         }
         let snapshot = match mode {
             SqlSessionMode::Transaction => None,
-            SqlSessionMode::Snapshot => {
-                match client.query_one("SELECT pg_export_snapshot()", &[]).await {
-                    Ok(row) => Some(row.get::<usize, String>(0)),
-                    Err(e) => {
-                        discard(client);
-                        return Err(format_pg_error(&e, "SELECT pg_export_snapshot()"));
-                    }
-                }
-            }
+            SqlSessionMode::Snapshot => Some(
+                client
+                    .query_one("SELECT pg_export_snapshot()", &[])
+                    .await
+                    .map_err(|e| format_pg_error(&e, "SELECT pg_export_snapshot()"))?
+                    .get::<usize, String>(0),
+            ),
         };
         let id = Uuid::new_v4();
         self.sessions.insert(
             id,
             Arc::new(PgSqlSession {
                 connection_id,
-                client: Mutex::new(Some(client)),
+                mode,
+                cancel: client.cancel_token(),
+                client: Mutex::new(Some((client, task))),
+                last_used: std::sync::Mutex::new(Instant::now()),
             }),
         );
         Ok((id, snapshot))
     }
 
-    /// Runs SQL in the session's transaction.
+    /// Runs one SQL statement in the session's transaction (the extended
+    /// protocol: a text holding several statements is refused). A statement
+    /// past its limit is cancelled and the session ends, rolled back.
     pub async fn execute(&self, session_id: Uuid, sql: &str) -> Result<(), String> {
         let session = self
             .sessions
             .get(&session_id)
             .map(|s| Arc::clone(&s))
             .ok_or("SQL_SESSION_NOT_FOUND")?;
-        let guard = session.client.lock().await;
-        let client = guard.as_ref().ok_or("SQL_SESSION_ENDED")?;
-        client
-            .batch_execute(sql)
+        session.touch();
+        let result = {
+            let guard = session.client.lock().await;
+            let (client, _) = guard.as_ref().ok_or("SQL_SESSION_ENDED")?;
+            tokio::time::timeout(
+                STATEMENT_LIMIT + Duration::from_secs(5),
+                client.execute(sql, &[]),
+            )
             .await
-            .map_err(|e| format_pg_error(&e, sql))
+        };
+        session.touch();
+        match result {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(format_pg_error(&e, sql)),
+            Err(_) => {
+                let _ = session.cancel.cancel_query(NoTls).await;
+                self.close(session_id).await;
+                Err("SQL_SESSION_TIMEOUT".into())
+            }
+        }
     }
 
-    /// Ends a session: commits or rolls back. The connection goes back to
-    /// the pool only when that succeeded.
+    /// Ends a session: commits or rolls back, then closes its connection.
     pub async fn end(&self, session_id: Uuid, commit: bool) -> Result<(), String> {
         let Some((_, session)) = self.sessions.remove(&session_id) else {
             return Err("SQL_SESSION_NOT_FOUND".into());
         };
-        let Some(client) = session.client.lock().await.take() else {
+        let Some((client, _task)) = session.client.lock().await.take() else {
             return Ok(());
         };
         let end = if commit { "COMMIT" } else { "ROLLBACK" };
-        match client.batch_execute(end).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                discard(client);
-                Err(format_pg_error(&e, end))
-            }
+        match tokio::time::timeout(END_LIMIT, client.batch_execute(end)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(format_pg_error(&e, end)),
+            // Closing the connection (on drop) rolls it back.
+            Err(_) => Err(if commit {
+                "SQL_SESSION_COMMIT_TIMEOUT".into()
+            } else {
+                "SQL_SESSION_ROLLBACK_TIMEOUT".into()
+            }),
+        }
+    }
+
+    /// Ends a session without waiting on a statement still running: it is
+    /// cancelled first, and the connection closes (rolling back).
+    async fn close(&self, session_id: Uuid) {
+        if let Some((_, session)) = self.sessions.remove(&session_id) {
+            let _ = session.cancel.cancel_query(NoTls).await;
+            let _ = tokio::time::timeout(END_LIMIT, session.client.lock())
+                .await
+                .map(|mut guard| guard.take());
         }
     }
 
@@ -126,7 +205,21 @@ impl SqlSessionRegistry {
             .map(|s| *s.key())
             .collect();
         for id in ids {
-            let _ = self.end(id, false).await;
+            self.close(id).await;
+        }
+    }
+
+    /// Closes sessions left unused past their limit (a frontend that never
+    /// ended them: a reload, a lost reply).
+    async fn reclaim_idle(&self) {
+        let stale: Vec<Uuid> = self
+            .sessions
+            .iter()
+            .filter(|s| s.value().idle_for() > s.value().mode.idle_limit())
+            .map(|s| *s.key())
+            .collect();
+        for id in stale {
+            self.close(id).await;
         }
     }
 }
@@ -149,7 +242,7 @@ mod tests {
         assert!(!is_snapshot_id(&"a".repeat(65)));
     }
 
-    async fn count_rows(c: &Object) -> i64 {
+    async fn count_rows(c: &deadpool_postgres::Object) -> i64 {
         c.query_one("SELECT count(*) FROM zz_session_t", &[])
             .await
             .unwrap()
@@ -170,10 +263,14 @@ mod tests {
             .expect("set HEALTH_PG_URL")
             .parse()
             .expect("valid HEALTH_PG_URL");
-        let pool = Pool::builder(Manager::from_config(cfg, NoTls, ManagerConfig::default()))
-            .max_size(4)
-            .build()
-            .unwrap();
+        let pool = deadpool_postgres::Pool::builder(Manager::from_config(
+            cfg.clone(),
+            NoTls,
+            ManagerConfig::default(),
+        ))
+        .max_size(4)
+        .build()
+        .unwrap();
         let other = pool.get().await.unwrap();
         other
             .batch_execute("DROP TABLE IF EXISTS zz_session_t; CREATE TABLE zz_session_t (v int)")
@@ -184,7 +281,7 @@ mod tests {
 
         // A transaction rolled back leaves nothing; savepoints undo alone.
         let (id, snap) = reg
-            .begin(conn, &pool, SqlSessionMode::Transaction)
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
             .unwrap();
         assert!(snap.is_none());
@@ -196,9 +293,13 @@ mod tests {
             .execute(id, "INSERT INTO zz_session_t VALUES ('x')")
             .await
             .is_err());
-        reg.execute(id, "ROLLBACK TO SAVEPOINT s; RELEASE SAVEPOINT s")
+        // One statement per call: a text holding two is refused.
+        assert!(reg
+            .execute(id, "ROLLBACK TO SAVEPOINT s; RELEASE SAVEPOINT s")
             .await
-            .unwrap();
+            .is_err());
+        reg.execute(id, "ROLLBACK TO SAVEPOINT s").await.unwrap();
+        reg.execute(id, "RELEASE SAVEPOINT s").await.unwrap();
         reg.execute(id, "INSERT INTO zz_session_t VALUES (2)")
             .await
             .unwrap();
@@ -208,7 +309,7 @@ mod tests {
 
         // Committed: both rows stay.
         let (id, _) = reg
-            .begin(conn, &pool, SqlSessionMode::Transaction)
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
             .await
             .unwrap();
         reg.execute(id, "INSERT INTO zz_session_t VALUES (1), (2)")
@@ -219,7 +320,7 @@ mod tests {
 
         // A snapshot read elsewhere does not see later writes.
         let (sid, snap) = reg
-            .begin(conn, &pool, SqlSessionMode::Snapshot)
+            .begin(conn, &cfg, SqlSessionMode::Snapshot)
             .await
             .unwrap();
         let snap = snap.expect("snapshot id");
@@ -245,6 +346,27 @@ mod tests {
         // A connection going away ends its sessions.
         reg.end_for_connection(conn).await;
         assert!(reg.execute(sid, "SELECT 1").await.is_err());
+
+        // Its own connection, closed at the end: a session lock taken by
+        // imported SQL does not outlive it, and it needs no pool slot.
+        let (id, _) = reg
+            .begin(conn, &cfg, SqlSessionMode::Transaction)
+            .await
+            .unwrap();
+        reg.execute(id, "SELECT pg_advisory_lock(424242)")
+            .await
+            .unwrap();
+        reg.end(id, false).await.unwrap();
+        let free: bool = other
+            .query_one("SELECT pg_try_advisory_lock(424242)", &[])
+            .await
+            .unwrap()
+            .get(0);
+        assert!(free, "the advisory lock ended with the session");
+        other
+            .batch_execute("SELECT pg_advisory_unlock(424242)")
+            .await
+            .unwrap();
 
         other
             .batch_execute("DROP TABLE zz_session_t")

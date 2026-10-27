@@ -238,6 +238,21 @@ function pgLiteral(value: string): string {
   return qLiteral(value, "postgres");
 }
 
+/**
+ * A statement that controls transactions (BEGIN, COMMIT, END, ROLLBACK,
+ * SAVEPOINT, PREPARE TRANSACTION…), after any leading comments. Inside a
+ * run that owns its transaction it would end it partway.
+ */
+export function isTransactionControl(sql: string): boolean {
+  const head = sql
+    .replace(/^(?:\s*(?:--[^\n\r]*(?:\r\n?|\n|$)|\/\*[\s\S]*?\*\/))+/, "")
+    .trimStart()
+    .toUpperCase();
+  return /^(?:BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT|SAVEPOINT|RELEASE|PREPARE\s+TRANSACTION)\b/.test(
+    head
+  );
+}
+
 function isPgAddForeignKeyStatement(sql: string): boolean {
   const s = sql.trim().toUpperCase();
   return (
@@ -331,6 +346,59 @@ async function pgTablesWithRows(
     }
   }
   return found;
+}
+
+/**
+ * The tables to back up as the backup's snapshot has them, in the schemas
+ * the workspace lists (a table created since its lists was loaded is
+ * included, a dropped one is not).
+ */
+async function postgresSnapshotTables(
+  connectionId: string,
+  schemas: ReadonlySet<string>
+): Promise<BackupTable[]> {
+  if (!schemas.size) return [];
+  const res = await backupQuery(
+    connectionId,
+    `
+      SELECT n.nspname, c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind IN ('r', 'p')
+        AND n.nspname IN (${[...schemas].map(pgLiteral).join(", ")})
+      ORDER BY n.nspname, c.relname;
+    `
+  );
+  return (res.rows ?? [])
+    .map((r: any) => ({
+      schema: cellToString(r?.[0]) ?? "",
+      name: cellToString(r?.[1]) ?? "",
+      kind: "table",
+    }))
+    .filter((t: BackupTable) => t.schema && t.name) as BackupTable[];
+}
+
+/** A table's columns, in order, as the backup's snapshot has them. */
+async function postgresSnapshotColumns(
+  connectionId: string,
+  schema: string,
+  tableName: string
+): Promise<string[]> {
+  const ident = `${qIdent(schema, "postgres")}.${qIdent(tableName, "postgres")}`;
+  const res = await backupQuery(
+    connectionId,
+    `
+      SELECT a.attname
+      FROM pg_attribute a
+      WHERE a.attrelid = ${pgLiteral(ident)}::regclass
+        AND a.attnum > 0
+        AND NOT a.attisdropped
+      ORDER BY a.attnum;
+    `
+  );
+  return (res.rows ?? [])
+    .map((r: any) => cellToString(r?.[0]) ?? "")
+    .filter(Boolean);
 }
 
 function tableNodeKey(t: { schema: string; name: string }) {
@@ -1419,9 +1487,20 @@ export function useDatabaseBackup() {
         return;
       }
 
+      // One PostgreSQL backup per connection at a time: each reads its own
+      // snapshot (backupSnapshots).
+      if (backupSnapshots.has(rt.runtimeConnectionId)) {
+        void showMessage("A backup of this connection is already running.", {
+          title: "Backup database",
+          kind: "info",
+        });
+        return;
+      }
+
       setDbBackupRunning(true);
 
       let snapshotSessionId: string | null = null;
+      let snapshotId: string | null = null;
       try {
         const meta = await rt.metadata.load({
           metaKey: rt.metaKey,
@@ -1429,15 +1508,12 @@ export function useDatabaseBackup() {
           connectionId: rt.runtimeConnectionId,
         });
 
-        const tables = (meta.tables ?? []).filter((t) => t.kind !== "view");
+        let tables: BackupTable[] = (meta.tables ?? []).filter(
+          (t) => t.kind !== "view"
+        );
         if (!tables.length) {
           throw new Error("No tables found to backup.");
         }
-        const orderedTables = await sortTablesByForeignKeys({
-          connectionId: rt.runtimeConnectionId,
-          engine: rt.engine,
-          tables,
-        });
 
         const stamp = new Date()
           .toISOString()
@@ -1453,16 +1529,30 @@ export function useDatabaseBackup() {
 
         // PostgreSQL: every query of the backup reads one snapshot, so the
         // tables, their rows and sequences agree even while others write.
+        // The tables and their columns are read again through it: the
+        // workspace's lists may predate it (a table or column added since).
         if (rt.engine === "postgres") {
           const session = await sqlSessionBegin(
             rt.runtimeConnectionId,
             "snapshot"
           );
           snapshotSessionId = session.sessionId;
-          if (session.snapshotId) {
-            backupSnapshots.set(rt.runtimeConnectionId, session.snapshotId);
+          snapshotId = session.snapshotId;
+          if (!snapshotId) throw new Error("No snapshot to back up from.");
+          backupSnapshots.set(rt.runtimeConnectionId, snapshotId);
+          tables = await postgresSnapshotTables(
+            rt.runtimeConnectionId,
+            new Set(tables.map((t) => t.schema))
+          );
+          if (!tables.length) {
+            throw new Error("No tables found to backup.");
           }
         }
+        const orderedTables = await sortTablesByForeignKeys({
+          connectionId: rt.runtimeConnectionId,
+          engine: rt.engine,
+          tables,
+        });
 
         const sqlParts: string[] = [];
         const appendSql = (content: string) => {
@@ -1530,7 +1620,14 @@ export function useDatabaseBackup() {
           }
 
           const key = `${table.schema}.${table.name}`;
-          let columns = meta.columnsByTable[key] ?? [];
+          let columns =
+            rt.engine === "postgres"
+              ? await postgresSnapshotColumns(
+                  rt.runtimeConnectionId,
+                  table.schema,
+                  table.name
+                )
+              : (meta.columnsByTable[key] ?? []);
 
           if (!columns.length) {
             const colRes = await backupQuery(
@@ -1621,7 +1718,13 @@ export function useDatabaseBackup() {
           err instanceof Error ? err.message : "Backup database failed.";
         void showMessage(message, { title: "Backup error", kind: "error" });
       } finally {
-        backupSnapshots.delete(rt.runtimeConnectionId);
+        // Only this run's own snapshot.
+        if (
+          snapshotId &&
+          backupSnapshots.get(rt.runtimeConnectionId) === snapshotId
+        ) {
+          backupSnapshots.delete(rt.runtimeConnectionId);
+        }
         if (snapshotSessionId) {
           // Read only: nothing to keep.
           void sqlSessionEnd(snapshotSessionId, false).catch(() => {});
@@ -1705,6 +1808,16 @@ export function useDatabaseBackup() {
 
         // PostgreSQL restores run in one transaction: all or nothing.
         const transactional = rt.engine === "postgres";
+        if (transactional) {
+          // The run owns its transaction: a statement that commits, rolls
+          // back or opens another would end it partway.
+          const control = statements.findIndex(isTransactionControl);
+          if (control >= 0) {
+            throw new Error(
+              `Statement ${control + 1} of ${statements.length} controls transactions (${restoreStatementLabel(statements[control]!)}). The ${action} runs in one transaction of its own, so nothing was run: remove such statements from the file.`
+            );
+          }
+        }
         const nonEmpty = transactional
           ? await pgTablesWithRows(rt.runtimeConnectionId, statements)
           : [];
@@ -1799,7 +1912,11 @@ export function useDatabaseBackup() {
           if (!session) return;
           await sqlSessionExecute(
             session,
-            "ROLLBACK TO SAVEPOINT politedb_restore; RELEASE SAVEPOINT politedb_restore"
+            "ROLLBACK TO SAVEPOINT politedb_restore"
+          );
+          await sqlSessionExecute(
+            session,
+            "RELEASE SAVEPOINT politedb_restore"
           );
         };
 
@@ -1877,8 +1994,19 @@ export function useDatabaseBackup() {
         }
 
         if (session) {
+          // The last statement may have run while the tab was locked,
+          // switched to Production or closed: nothing is kept then.
+          const refusedAtEnd = await ensureAllowed();
           const s = session;
           session = null;
+          if (refusedAtEnd) {
+            await sqlSessionEnd(s, false);
+            void showMessage(
+              `${refusedAtEnd}\nStopped before committing. ${describeApplied()}`,
+              { title: errorTitle, kind: "warning" }
+            );
+            return;
+          }
           await sqlSessionEnd(s, true);
         }
 
