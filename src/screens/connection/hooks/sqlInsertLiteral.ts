@@ -76,10 +76,14 @@ export function postgresMoneyValueSql(
   text: string,
   type: "numeric" | "numeric[]"
 ): string {
-  const places = Math.max(
-    0,
-    ...(text.match(/\.\d+/g) ?? []).map((frac) => frac.length - 1)
-  );
+  // The longest run of digits after a decimal point, scanned (a large
+  // array must not become one argument per element).
+  let places = 0;
+  for (let i = text.indexOf("."); i >= 0; i = text.indexOf(".", i + 1)) {
+    let end = i + 1;
+    while (end < text.length && text[end]! >= "0" && text[end]! <= "9") end++;
+    places = Math.max(places, end - i - 1);
+  }
   const here = "scale('0'::money::numeric)";
   if (places === 0) return `${sqlQuoteString(text, "postgres")}::${type}`;
   return (

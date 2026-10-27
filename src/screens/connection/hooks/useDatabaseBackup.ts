@@ -9,6 +9,7 @@ import { writeFile, readFile } from "src/lib/system-fs";
 
 import { startSqlQueryStream, runSqlQuery } from "src/lib/tauri/query";
 import { operationBus } from "src/lib/tauri/operationBus";
+import { operationCancel } from "src/lib/tauri/operation";
 import {
   tableColumnsQuery,
   tableExportQuery,
@@ -539,7 +540,7 @@ export async function postgresMoneyColumns(
   return { scalar, array };
 }
 
-async function exportTableToSqlParts(args: {
+export async function exportTableToSqlParts(args: {
   append: (content: string) => void;
   connectionId: string;
   engine: ConnectionCreateInput["engine"];
@@ -579,37 +580,52 @@ async function exportTableToSqlParts(args: {
       reject(err);
     };
 
+    const appendChunk = (chunk: {
+      rows?: unknown[][];
+      columns?: { name: string; db_type?: string | null }[];
+    }) => {
+      const rows = chunk.rows ?? [];
+      if (!rows.length) return;
+
+      if (chunk.columns?.length) {
+        columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
+        columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
+        // Money read as numeric is written as a typed numeric.
+        if (money) {
+          columnTypes = columnTypes.map((type, i) =>
+            money.scalar.has(columnNames[i]!)
+              ? POSTGRES_MONEY_AS_NUMERIC
+              : money.array.has(columnNames[i]!)
+                ? POSTGRES_MONEY_ARRAY_AS_NUMERIC
+                : type
+          );
+        }
+      }
+
+      const content = formatSqlInsertChunk({
+        engine,
+        schema,
+        tableName,
+        columnNames,
+        columnTypes,
+        rows,
+        qIdent: (name, eng) => qIdent(name, eng as any),
+      });
+      if (!content) return;
+      append(content);
+    };
+
     void operationBus.subscribe(opId, {
       onChunk: (chunk) => {
-        const rows = chunk.rows ?? [];
-        if (!rows.length) return;
-
-        if (chunk.columns?.length) {
-          columnNames = chunk.columns.map((c) => c.name).filter(Boolean);
-          columnTypes = chunk.columns.map((c) => String(c.db_type ?? ""));
-          // Money read as numeric is written as a typed numeric.
-          if (money) {
-            columnTypes = columnTypes.map((type, i) =>
-              money.scalar.has(columnNames[i]!)
-                ? POSTGRES_MONEY_AS_NUMERIC
-                : money.array.has(columnNames[i]!)
-                  ? POSTGRES_MONEY_ARRAY_AS_NUMERIC
-                  : type
-            );
-          }
+        // A chunk that cannot be written fails the backup: finishing
+        // without it would save a file missing those rows.
+        try {
+          appendChunk(chunk);
+        } catch (err) {
+          fail(err);
+          // Stop the stream too: it would wait for this chunk's ack.
+          void operationCancel(opId).catch(() => {});
         }
-
-        const content = formatSqlInsertChunk({
-          engine,
-          schema,
-          tableName,
-          columnNames,
-          columnTypes,
-          rows,
-          qIdent: (name, eng) => qIdent(name, eng as any),
-        });
-        if (!content) return;
-        append(content);
       },
       onDone: () => done(),
       onError: (err) => {
