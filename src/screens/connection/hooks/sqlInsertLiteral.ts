@@ -59,6 +59,36 @@ function asCellObj(cell: unknown): CellObj | null {
   return null;
 }
 
+/** Column types for money (money[]) read as numeric text by backups. */
+export const POSTGRES_MONEY_AS_NUMERIC = "politedb:money-as-numeric";
+export const POSTGRES_MONEY_ARRAY_AS_NUMERIC =
+  "politedb:money-array-as-numeric";
+
+/**
+ * A backed-up money amount (or money[]) as numeric text, written as a
+ * typed numeric that converts to money as a number in the restoring
+ * session. That conversion rounds to the session's lc_monetary decimal
+ * places, so the same expression first checks them against the amount's
+ * own decimal places and fails instead of rounding. Being one expression,
+ * the check and the conversion run in the same session.
+ */
+export function postgresMoneyValueSql(
+  text: string,
+  type: "numeric" | "numeric[]"
+): string {
+  const places = Math.max(
+    0,
+    ...(text.match(/\.\d+/g) ?? []).map((frac) => frac.length - 1)
+  );
+  const here = "scale('0'::money::numeric)";
+  if (places === 0) return `${sqlQuoteString(text, "postgres")}::${type}`;
+  return (
+    `CASE WHEN ${here} >= ${places} THEN ${sqlQuoteString(text, "postgres")}::${type} ` +
+    // Depends on the session (not folded early); fails with this text.
+    `ELSE ('money here keeps ' || ${here} || ' decimal places, the backup has ${places}: restore with a matching lc_monetary')::${type} END`
+  );
+}
+
 /**
  * Format one cell as an SQL literal for INSERT dumps.
  * Postgres arrays arrive as `{ t: "Json", v: "[...]" }` and must not be
@@ -94,16 +124,14 @@ export function formatSqlInsertValue(
   }
 
   if (obj?.t === "Str") {
-    const quoted = sqlQuoteString(String(obj.v ?? ""), engine);
-    // A typed numeric: assigned to a money column it converts as a number,
-    // not through money's locale-dependent text input.
-    if (
-      engine === "postgres" &&
-      (dbType === "numeric" || dbType === "numeric[]")
-    ) {
-      return `${quoted}::${dbType}`;
+    const text = String(obj.v ?? "");
+    if (engine === "postgres" && dbType === POSTGRES_MONEY_AS_NUMERIC) {
+      return postgresMoneyValueSql(text, "numeric");
     }
-    return quoted;
+    if (engine === "postgres" && dbType === POSTGRES_MONEY_ARRAY_AS_NUMERIC) {
+      return postgresMoneyValueSql(text, "numeric[]");
+    }
+    return sqlQuoteString(text, engine);
   }
 
   if (typeof cell === "boolean") return cell ? "TRUE" : "FALSE";

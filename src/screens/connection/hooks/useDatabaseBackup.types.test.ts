@@ -14,9 +14,12 @@ import {
   dumpCommentName,
   postgresBackupRowsQuery,
   postgresMoneyColumns,
-  postgresMoneyScaleGuard,
 } from "./useDatabaseBackup";
-import { formatSqlInsertChunk } from "./sqlInsertLiteral";
+import {
+  formatSqlInsertChunk,
+  POSTGRES_MONEY_ARRAY_AS_NUMERIC,
+  POSTGRES_MONEY_AS_NUMERIC,
+} from "./sqlInsertLiteral";
 import { splitSqlStatements } from "src/components/editor/splitSqlStatements";
 
 /** One catalog row, in the query's column order. */
@@ -359,25 +362,40 @@ describe("postgresBackupRowsQuery", () => {
     );
   });
 
-  it("writes money read as numeric as a typed numeric", () => {
+  it("writes money read as numeric as a typed numeric, checking decimal places", () => {
     const sql = formatSqlInsertChunk({
       engine: "postgres",
       schema: "s",
       tableName: "t",
-      columnNames: ["m", "ms", "x"],
-      columnTypes: ["numeric", "numeric[]", "text"],
+      columnNames: ["m", "ms", "z", "x"],
+      columnTypes: [
+        POSTGRES_MONEY_AS_NUMERIC,
+        POSTGRES_MONEY_ARRAY_AS_NUMERIC,
+        POSTGRES_MONEY_AS_NUMERIC,
+        "text",
+      ],
       rows: [
         [
           { t: "Str", v: "-1234.56" },
-          { t: "Str", v: "[0:1]={1.5,NULL}" },
+          { t: "Str", v: "[0:1]={1.500,NULL}" },
+          { t: "Str", v: "1235" },
           { t: "Str", v: "1234.56" },
         ],
       ],
       qIdent: (name) => `"${name}"`,
     });
+    const here = "scale('0'::money::numeric)";
     expect(sql).toContain(
-      "('-1234.56'::numeric, '[0:1]={1.5,NULL}'::numeric[], '1234.56')"
+      `CASE WHEN ${here} >= 2 THEN '-1234.56'::numeric ELSE ('money here keeps ' || ${here} || ' decimal places, the backup has 2: restore with a matching lc_monetary')::numeric END`
     );
+    expect(sql).toContain(
+      `CASE WHEN ${here} >= 3 THEN '[0:1]={1.500,NULL}'::numeric[] ELSE`
+    );
+    // No decimal places: nothing to round.
+    expect(sql).toContain(`, '1235'::numeric, '1234.56')`);
+    expect(
+      splitSqlStatements(`${sql}\nSELECT 2;`, { dialect: "postgres" })
+    ).toHaveLength(2);
   });
 
   it("stops at money inside another type, and reads where money is", async () => {
@@ -436,17 +454,6 @@ describe("postgresBackupRowsQuery", () => {
     await expect(postgresMoneyColumns("c1", "s", "t")).rejects.toThrow(
       /"deep" .* nested too deeply/
     );
-  });
-
-  it("guards money rows against a target keeping fewer decimal places", () => {
-    const guard = postgresMoneyScaleGuard(2);
-    expect(guard).toContain("IF scale('0'::money::numeric) < 2 THEN");
-    // One statement for the restore splitter.
-    expect(
-      splitSqlStatements(`${guard}INSERT INTO t VALUES (1);`, {
-        dialect: "postgres",
-      })
-    ).toHaveLength(2);
   });
 
   it("writes the text values as literals the column types", () => {

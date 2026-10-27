@@ -22,7 +22,12 @@ import {
 } from "src/components/editor/splitSqlStatements";
 import type { ConnectionCreateInput } from "src/lib/tauri";
 import { useConnectionRuntimeCtx } from "../workspace/ConnectionRuntimeContext";
-import { formatSqlInsertChunk, sqlQuoteString } from "./sqlInsertLiteral";
+import {
+  formatSqlInsertChunk,
+  POSTGRES_MONEY_ARRAY_AS_NUMERIC,
+  POSTGRES_MONEY_AS_NUMERIC,
+  sqlQuoteString,
+} from "./sqlInsertLiteral";
 import { showToast } from "src/stores/toast";
 import { useScreenStore } from "src/stores/screen";
 import { securityTouchIdAuthenticate } from "src/lib/tauri/security";
@@ -422,8 +427,9 @@ async function sortTablesByForeignKeys(args: {
  * - money follows the server's currency locale in text, and restoring
  *   money text reads it in the target's locale: money (and money[]) is
  *   read as numeric and written as a typed numeric, which converts to
- *   money as a number. Money inside a composite or range type cannot be
- *   written that way, so its backup stops (postgresMoneyColumns).
+ *   money as a number, checking the target keeps its decimal places
+ *   (postgresMoneyValueSql). Money inside a composite or range type
+ *   cannot be written that way, so its backup stops (postgresMoneyColumns).
  */
 export function postgresBackupRowsQuery(
   schema: string,
@@ -533,31 +539,6 @@ export async function postgresMoneyColumns(
   return { scalar, array };
 }
 
-/** Decimal places of money on this server (its lc_monetary). */
-async function postgresMoneyScale(connectionId: string): Promise<number> {
-  const res = await runSqlQuery(
-    connectionId,
-    "SELECT scale('0'::money::numeric);"
-  );
-  const scale = Number(cellToString(res.rows?.[0]?.[0], true));
-  return Number.isInteger(scale) && scale >= 0 ? scale : 2;
-}
-
-/**
- * A restore statement that stops before a table's money rows when the
- * target's currency locale keeps fewer decimal places than the backed-up
- * amounts have: converting them to money there would round them.
- */
-export function postgresMoneyScaleGuard(scale: number): string {
-  return (
-    "DO $politedb$ BEGIN\n" +
-    `  IF scale('0'::money::numeric) < ${scale} THEN\n` +
-    `    RAISE EXCEPTION 'This backup holds money amounts with ${scale} decimal places, but money on this server has %. Restore into a database whose lc_monetary keeps ${scale}.', scale('0'::money::numeric);\n` +
-    "  END IF;\n" +
-    "END $politedb$;\n"
-  );
-}
-
 async function exportTableToSqlParts(args: {
   append: (content: string) => void;
   connectionId: string;
@@ -575,9 +556,6 @@ async function exportTableToSqlParts(args: {
   const query = money
     ? postgresBackupRowsQuery(schema, tableName, columns, money)
     : tableExportQuery(schema, tableName, columns, undefined, "AND", engine);
-  if (money && (money.scalar.size > 0 || money.array.size > 0)) {
-    append(postgresMoneyScaleGuard(await postgresMoneyScale(connectionId)));
-  }
   const opId = await startSqlQueryStream(connectionId, query, {
     batchSize: 250,
     maxRows: 10_000_000,
@@ -613,9 +591,9 @@ async function exportTableToSqlParts(args: {
           if (money) {
             columnTypes = columnTypes.map((type, i) =>
               money.scalar.has(columnNames[i]!)
-                ? "numeric"
+                ? POSTGRES_MONEY_AS_NUMERIC
                 : money.array.has(columnNames[i]!)
-                  ? "numeric[]"
+                  ? POSTGRES_MONEY_ARRAY_AS_NUMERIC
                   : type
             );
           }
